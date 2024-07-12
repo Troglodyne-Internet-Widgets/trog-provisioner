@@ -9,7 +9,7 @@ Automatically build and host pretty much any website
     * How big the disk oughtta be
     * What base image to use
     * What packages to install
-2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](See https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
+2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
 2. Run `bin/provision $DOMAIN`
 3. It is the responsibility of data.tar.gz to have a Makefile in the TLD which sets up all relevant dependencies, loads up DBs, etc as the default target.
