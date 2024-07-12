@@ -1,0 +1,245 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use Cwd qw{abs_path};
+use FindBin;
+use Config::Simple();
+use File::Slurper();
+use File::Copy();
+use YAML::XS();
+use JSON::PP();
+use List::Util qw{any uniq};
+
+sub _coerce_array {
+    return \@_;
+}
+
+sub main {
+    my @args = @_;
+
+    my $domain = shift @args;
+    $domain =~ s/\///g;
+    my $cfile = "$domain/provision.conf";
+    die "No such file provision.conf in $domain/" unless -f $cfile;
+
+    my $udf = "$domain/users.yaml";
+    die "User definition file $udf not present!" unless -f $udf;
+
+    my $config = Config::Simple->new($cfile);
+
+    my $data = "$domain/data.tar.gz";
+    die "No data to host in $domain/" unless -f $data;
+    # Stash domain in config object for later use
+    $config->param('domain', $domain);
+
+    my $tf = mongle_terraform_template($config);
+    print "Wrote $tf\n";
+
+    my $nc = mongle_network_configuration($config);
+    print "Wrote $nc\n";
+
+    my $ss = mongle_setup_script($config);
+    print "Wrote $ss\n";
+
+    my $cc = mongle_cloud_init($config);
+    print "Wrote $cc\n";
+
+    chdir $domain;
+    # Figure out if we need to liquidate existing stuff
+    my @exempt = qw{libvirt_volume.image_base libvirt_pool.vms};
+    my $resources = qx{terraform state list};
+    chomp $resources;
+    foreach my $resource (split(/\n/, $resources)) {
+        #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
+        #XXX So we have to instead painstakingly kill everything that isn't.
+        #XXX they claim modules are the way to do this, but that appears to be false.
+        #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
+        system(qw{terraform destroy -target}, $resource) unless any { $_ eq $resource } @exempt;
+    }
+    system(qw{terraform init});
+    system(qw{terraform plan -out tf.plan});
+    system(qw{terraform apply tf.plan});
+}
+
+sub mongle_terraform_template {
+    my ($config) = @_;
+
+    my $domain = $config->param('domain');
+    my $image  = $config->param('image');
+    my $disk_size = $config->param('size');
+
+    my $bridge_device = qx/brctl show | grep -v vnet | tail -n1 | awk '{print \$1}'/;
+    die "Could not determine outbound bridge device!" unless $bridge_device;
+    chomp $bridge_device;
+    print "Using outbound bridge $bridge_device\n";
+
+    my $domain_mongled = $domain;
+    $domain_mongled =~ s/\./-/g;
+
+    my $tf_template = File::Slurper::read_text("$FindBin::Bin/../main.tmpl");
+    $tf_template =~ s/%BRIDGENAME%/$bridge_device/gmx;
+    $tf_template =~ s/%REPLACEME%/$domain/gmx;
+    $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
+    $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
+
+    my $mod_template = File::Slurper::read_text("$FindBin::Bin/../shared.tmpl");
+    $mod_template =~ s/%CLOUDIMG%/$image/gmx;
+
+    File::Slurper::write_text("$domain/main.tf", $tf_template);
+    File::Slurper::write_text("$domain/shared.tf", $mod_template);
+    return "$domain/main.tf";
+}
+
+# Slam in the IPs, gw, resolvers
+sub mongle_network_configuration {
+    my $config = shift;
+
+    my $domain = $config->param('domain');
+    my $ips  = _coerce_array($config->param('ips'));
+    my $gw   = $config->param('gateway');
+    my $res  = _coerce_array($config->param('resolvers'));
+
+    # We need two adapters, one on virbr0 and another on the bridge.
+    # So, we need to figure out:
+    # 1. IP of the virbr
+    # 2. name of the bridge device.
+    # 3. IP of bridge device.
+
+    my $virbr_device = qx/brctl show | grep vnet | tail -n1 | awk '{print \$1}'/;
+    die "Could not determine libvirt network device!" unless $virbr_device;
+    chomp $virbr_device;
+    print "Using libvirt network device $virbr_device\n";
+
+    my $virbr_ip = qx/ip addr show dev $virbr_device | grep inet | head -n1 | awk '{print \$2}'/;
+    die "Could not determine IP address for $virbr_device" unless $virbr_ip;
+    chomp $virbr_ip;
+    $virbr_ip =~ s/\/\d\d$//;
+    print "HV internal IP: $virbr_ip\n";
+
+    # Stash this in the config object for later use by the clown-config
+    $config->param('hv_internal_ip', $virbr_ip);
+
+    # Such an astonishingly tedious format
+    my @subnets = map {
+        {
+            type      => 'static',
+            address   => $_,
+            gateway   => $gw,
+            dns_nameservers => $res,
+            dns_search      => [$domain],
+        }
+    } @$ips;
+
+    my $netconf = {
+       network => {
+            version => 1,
+            config  => [
+                {
+                    type => 'physical',
+                    name => 'ens4',
+                    subnets => \@subnets,
+                },
+                {
+                    type => 'physical',
+                    name => 'ens3',
+                    subnets => [
+                        {
+                            type => 'dhcp',
+                        },
+                    ],
+                },
+            ],
+       },
+    };
+
+    my $cf = "$domain/network_config.cfg";
+    File::Slurper::write_text($cf, YAML::XS::Dump($netconf));
+    return $cf;
+}
+
+# Generate and store a new SSH key for the guest, which we will authorize on the HV to grab the data.tar.gz
+sub mongle_cloud_init {
+    my $config = shift;
+
+    my $domain = $config->param('domain');
+
+    # Generate a new key for the child
+    qx{yes | ssh-keygen -t rsa -f $domain/key.rsa -N ''};
+    die "No key generated!" unless -f "$domain/key.rsa";
+    die "No pubkey generated!" unless -f "$domain/key.rsa.pub";
+
+    # Authorize the key with the transfer user.
+    my $pubkey = File::Slurper::read_text("$domain/key.rsa.pub");
+    chomp $pubkey;
+    open(my $fh, '>>', "/home/transfer/.ssh/authorized_keys");
+    print $fh "$pubkey\n";
+    close($fh);
+
+    my $pkgs = _coerce_array($config->param('packages'));
+    # We absolutely must have atd, sendmail and make.
+    push(@$pkgs, qw{at make});
+    @$pkgs = uniq @$pkgs;
+
+    my $udf = "$domain/users.yaml";
+    my $userdefs = YAML::XS::Load(File::Slurper::read_text($udf));
+
+    $YAML::XS::Boolean = "JSON::PP";
+    my $clown_config = {
+        runcmd => [
+            "at now -f /root/setup.sh",
+        ],
+        packages => $pkgs,
+        users => $userdefs->{users},
+        fqdn => $domain,
+        final_message => "Boot configuration complete.",
+        # Make sure root can scp to/from the transfer user on the HV.
+        write_files => [
+            {
+                content     => File::Slurper::read_text("$domain/key.rsa"),
+                path        => "/root/.ssh/id_rsa",
+                owner       => "root:root",
+                permissions => '0600',
+                defer       => $JSON::PP::true,
+            },
+            {
+                content     => File::Slurper::read_text("$domain/key.rsa.pub"),
+                path        => "/root/.ssh/id_rsa.pub",
+                owner       => "root:root",
+                permissions => '0600',
+                defer       => $JSON::PP::true,
+            },
+            {
+                content     => File::Slurper::read_text("$domain/setup.sh"),
+                path        => "/root/setup.sh",
+                owner       => "root:root",
+                permissions => "0775",
+                defer       => $JSON::PP::true,
+            },
+        ],
+    };
+    my $cf = "$domain/cloud_init.cfg";
+    File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
+    return $cf;
+}
+
+sub mongle_setup_script {
+    my $config = shift;
+    my $domain = $config->param('domain');
+    my $hvip   = $config->param('hv_internal_ip');
+    my $here = abs_path("$FindBin::Bin/..");
+
+    my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
+    $script_template =~ s/%THISIP%/$hvip/gmx;
+    $script_template =~ s/%DOMAIN%/$domain/gmx;
+    $script_template =~ s/%THISDIR%/$here/gmx;
+
+    my $sf = "$domain/setup.sh";
+    File::Slurper::write_text($sf, $script_template);
+    return $sf;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

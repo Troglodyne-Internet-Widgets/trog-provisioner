@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# ATD script to actually do what we need to get set up
+
+# Wait until clown-init is done
+cloud-init status --wait
+
+# Transfer over the data
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null transfer\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
+cd /tmp
+mkdir %DOMAIN%
+tar -zxf data.tar.gz -C /tmp/%DOMAIN% --strip-components=1
+cd /tmp/%DOMAIN%
+make -j8
