@@ -5,10 +5,16 @@
 # Wait until clown-init is done
 cloud-init status --wait
 
+# Make sure mailing works
+#echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc
+#echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc
+newaliases
+
 # Transfer over the data
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null transfer\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
 cd /tmp
 mkdir %DOMAIN%
 tar -zxf data.tar.gz -C /tmp/%DOMAIN% --strip-components=1
 cd /tmp/%DOMAIN%
+
 make -j8

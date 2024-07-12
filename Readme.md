@@ -17,6 +17,7 @@ Even business units at giant corporations can do just fine with this approach.
     * How big the disk oughtta be
     * What base image to use
     * What packages to install
+    * Email address to send root's mail to
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
 2. Run `bin/provision $DOMAIN`

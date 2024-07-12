@@ -164,6 +164,7 @@ sub mongle_cloud_init {
     my $config = shift;
 
     my $domain = $config->param('domain');
+    my $contactemail = $config->param('contact_email');
 
     # Generate a new key for the child
     qx{yes | ssh-keygen -t rsa -f $domain/key.rsa -N ''};
@@ -179,7 +180,7 @@ sub mongle_cloud_init {
 
     my $pkgs = _coerce_array($config->param('packages'));
     # We absolutely must have atd, sendmail and make.
-    push(@$pkgs, qw{at make});
+    push(@$pkgs, qw{at make sendmail});
     @$pkgs = uniq @$pkgs;
 
     my $udf = "$domain/users.yaml";
@@ -188,6 +189,7 @@ sub mongle_cloud_init {
     $YAML::XS::Boolean = "JSON::PP";
     my $clown_config = {
         runcmd => [
+            qq{echo "root:$contactemail\n" > /etc/aliases },
             "at now -f /root/setup.sh",
         ],
         packages => $pkgs,
