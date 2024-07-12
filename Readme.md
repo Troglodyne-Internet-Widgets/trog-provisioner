@@ -2,6 +2,14 @@
 
 Automatically build and host pretty much any website
 
+## WHY
+
+Until your business is at the scale you need to distribute dynamic operations like statics with a CDN, stuff like openstack or kubernetes is overkill.
+
+This gives you similar ease of orchestration with the supposition you are working with one or a few Hypervisors.
+You'd be surprised how well this works for 99% of business purposes.
+Even business units at giant corporations can do just fine with this approach.
+
 ## How it works
 
 1. Write a configuration file (Config::Simple format) in $DOMAIN/provision.conf which tells us:
