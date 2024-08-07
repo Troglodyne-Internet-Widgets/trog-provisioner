@@ -132,6 +132,15 @@ sub mongle_network_configuration {
         }
     } @$ips;
 
+    # Do DHCP if no IP was supplied
+    if (!@subnets) {
+        @subnets = (
+            {
+                type => 'dhcp',
+            }
+        );
+    }
+
     my $netconf = {
        network => {
             version => 1,
