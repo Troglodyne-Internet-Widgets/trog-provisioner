@@ -11,6 +11,7 @@ use File::Copy();
 use YAML::XS();
 use JSON::PP();
 use List::Util qw{any uniq};
+use File::Which qw {which};
 
 sub _coerce_array {
     return \@_;
@@ -20,12 +21,16 @@ sub main {
     my @args = @_;
 
     my $domain = shift @args;
+    die "No domain passed" unless $domain;
+
     $domain =~ s/\///g;
     my $cfile = "$domain/provision.conf";
     die "No such file provision.conf in $domain/" unless -f $cfile;
 
     my $udf = "$domain/users.yaml";
     die "User definition file $udf not present!" unless -f $udf;
+
+    die "Terraform not installed" unless which('terraform');
 
     my $config = Config::Simple->new($cfile);
 
@@ -70,7 +75,7 @@ sub mongle_terraform_template {
     my $image  = $config->param('image');
     my $disk_size = $config->param('size');
 
-    my $bridge_device = qx/brctl show | grep -v vnet | tail -n1 | awk '{print \$1}'/;
+    my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
     die "Could not determine outbound bridge device!" unless $bridge_device;
     chomp $bridge_device;
     print "Using outbound bridge $bridge_device\n";
@@ -89,6 +94,7 @@ sub mongle_terraform_template {
 
     File::Slurper::write_text("$domain/main.tf", $tf_template);
     File::Slurper::write_text("$domain/shared.tf", $mod_template);
+    mkdir "$domain/shared";
     return "$domain/main.tf";
 }
 
@@ -107,7 +113,7 @@ sub mongle_network_configuration {
     # 2. name of the bridge device.
     # 3. IP of bridge device.
 
-    my $virbr_device = qx/brctl show | grep vnet | tail -n1 | awk '{print \$1}'/;
+    my $virbr_device = qx/brctl show | grep virbr | tail -n1 | awk '{print \$1}'/;
     die "Could not determine libvirt network device!" unless $virbr_device;
     chomp $virbr_device;
     print "Using libvirt network device $virbr_device\n";
