@@ -195,7 +195,8 @@ sub mongle_cloud_init {
 
     my $pkgs = _coerce_array($config->param('packages'));
     # We absolutely must have atd, sendmail and make.
-    push(@$pkgs, qw{at make sendmail});
+    push(@$pkgs, 'sendmail') unless any { $_ eq 'postfix' } @$pkgs;
+    push(@$pkgs, qw{at make});
     @$pkgs = uniq @$pkgs;
 
     my $udf = "$domain/users.yaml";
