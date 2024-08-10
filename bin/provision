@@ -12,6 +12,8 @@ use YAML::XS();
 use JSON::PP();
 use List::Util qw{any uniq};
 use File::Which qw {which};
+use Getopt::Long qw{GetOptionsFromArray};
+use Net::OpenSSH::More;
 
 sub _coerce_array {
     return \@_;
@@ -19,6 +21,12 @@ sub _coerce_array {
 
 sub main {
     my @args = @_;
+
+    my ($reuse,$reuser);
+    GetOptionsFromArray(\@args,
+        'existing=s' => \$reuse,
+        'user=s'     => \$reuser,
+    );
 
     my $domain = shift @args;
     die "No domain passed" unless $domain;
@@ -52,20 +60,35 @@ sub main {
     print "Wrote $cc\n";
 
     chdir $domain;
-    # Figure out if we need to liquidate existing stuff
-    my @exempt = qw{libvirt_volume.image_base libvirt_pool.vms};
-    my $resources = qx{terraform state list};
-    chomp $resources;
-    foreach my $resource (split(/\n/, $resources)) {
-        #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
-        #XXX So we have to instead painstakingly kill everything that isn't.
-        #XXX they claim modules are the way to do this, but that appears to be false.
-        #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
-        system(qw{terraform destroy -target}, $resource) unless any { $_ eq $resource } @exempt;
+    # Figure out if we need to liquidate/respawn/spawn existing stuff
+    if (!$reuse) {
+        my @exempt = qw{libvirt_volume.image_base libvirt_pool.vms};
+        my $resources = qx{terraform state list};
+        chomp $resources;
+        foreach my $resource (split(/\n/, $resources)) {
+            #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
+            #XXX So we have to instead painstakingly kill everything that isn't.
+            #XXX they claim modules are the way to do this, but that appears to be false.
+            #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
+            system(qw{terraform destroy -target}, $resource) unless any { $_ eq $resource } @exempt;
+        }
+        system(qw{terraform init});
+        system(qw{terraform plan -out tf.plan});
+        system(qw{terraform apply tf.plan});
+        return 0;
     }
-    system(qw{terraform init});
-    system(qw{terraform plan -out tf.plan});
-    system(qw{terraform apply tf.plan});
+
+    # Re-Use the existing VM, and just ship over what we got and run the makefile again.
+    my %opts = ( host => $reuse );
+    $opts{user} = $reuser if $reuser;
+    my $ssh = Net::OpenSSH::More->new(%opts);
+    # Swap out the remote user's keys for the most recent generation
+    $ssh->sftp->put( "key.rsa", ".ssh/id_rsa" );
+    $ssh->sftp->put( "key.rsa.pub", ".ssh/id_rsa.pub" );
+    $ssh->sftp->put( "setup.sh", "setup.sh" );
+    $ssh->cmd("chmod +x setup.sh");
+    $ssh->cmd("at now -f setup.sh");
+    return 0;
 }
 
 sub mongle_terraform_template {
@@ -180,6 +203,7 @@ sub mongle_cloud_init {
 
     my $domain = $config->param('domain');
     my $contactemail = $config->param('contact_email');
+    my $user = getpwuid($<);
 
     # Generate a new key for the child
     qx{yes | ssh-keygen -t rsa -f $domain/key.rsa -N ''};
@@ -189,7 +213,7 @@ sub mongle_cloud_init {
     # Authorize the key with the transfer user.
     my $pubkey = File::Slurper::read_text("$domain/key.rsa.pub");
     chomp $pubkey;
-    open(my $fh, '>>', "/home/transfer/.ssh/authorized_keys");
+    open(my $fh, '>>', "$ENV{HOME}/.ssh/authorized_keys");
     print $fh "$pubkey\n";
     close($fh);
 
@@ -248,10 +272,14 @@ sub mongle_setup_script {
     my $hvip   = $config->param('hv_internal_ip');
     my $here = abs_path("$FindBin::Bin/..");
 
+    use Data::Dumper;
+    my ($username) = getpwuid($<);
+
     my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
     $script_template =~ s/%THISIP%/$hvip/gmx;
     $script_template =~ s/%DOMAIN%/$domain/gmx;
     $script_template =~ s/%THISDIR%/$here/gmx;
+    $script_template =~ s/%USER%/$username/gmx;
 
     my $sf = "$domain/setup.sh";
     File::Slurper::write_text($sf, $script_template);

@@ -11,10 +11,11 @@ cloud-init status --wait
 newaliases
 
 # Transfer over the data
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null transfer\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
 cd /tmp
-mkdir %DOMAIN%
-tar -zxf data.tar.gz -C /tmp/%DOMAIN% --strip-components=1
-cd /tmp/%DOMAIN%
+mkdir domainsetup_%DOMAIN%
+tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
+cd /tmp/domainsetup_%DOMAIN%
 
 make -j8
+rm -rf /tmp/domainsetup_%DOMAIN%

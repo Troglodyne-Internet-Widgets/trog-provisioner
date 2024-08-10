@@ -29,8 +29,11 @@ This all works behind the scenes due to:
 2. libvirt's virtual networking allowing us to talk to this HV.
 3. Spinning off an atd job to actually do the setup when cloud-config is done.
 
-You'll need to have the 'transfer' user set up with at least one working authorized SSH key so we can add more.
-Aside from that, clone this in /opt where the 'transfer' user can see it.
+You'll need to have the user running this set up with at least one working authorized SSH key so we can add more.
+Aside from that, clone this in /opt where the user can see it.
+
+DO NOT USE ROOT TO RUN THIS!
+Make sure that the user is in the qemu/kvm group (depending on running env) so you can talk to libvirt instead.
 
 From there the host should "Just Work"TM.
 
