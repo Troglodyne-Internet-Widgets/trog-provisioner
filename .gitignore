@@ -2,3 +2,5 @@
 *.swo
 *.swn
 .terraform*
+MYMETA*
+Makefile
