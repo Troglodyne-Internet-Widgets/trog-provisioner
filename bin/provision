@@ -22,17 +22,20 @@ sub _coerce_array {
 sub main {
     my @args = @_;
 
-    my ($reuse,$reuser);
+    my ($reuse,$reuser, $domain_dir);
     GetOptionsFromArray(\@args,
-        'existing=s' => \$reuse,
-        'user=s'     => \$reuser,
+        'existing=s'  => \$reuse,
+        'user=s'      => \$reuser,
+        'domaindir=s' => \$domain_dir,
     );
 
     my $domain = shift @args;
     die "No domain passed" unless $domain;
 
+    $domain_dir //='/opt/domains';
+
     $domain =~ s/\///g;
-    my $cfile = "$domain/provision.conf";
+    my $cfile = "$domain_dir/$domain/provision.conf";
     die "No such file provision.conf in $domain/" unless -f $cfile;
 
     my $udf = "$domain/users.yaml";

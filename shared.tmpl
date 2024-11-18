@@ -14,7 +14,7 @@ provider "libvirt" {
 resource "libvirt_pool" "vms" {
     name = "vms"
     type = "dir"
-    path = "/vms"
+    path = "/vms/disks"
 }
 
 resource "libvirt_volume" "image_base" {
