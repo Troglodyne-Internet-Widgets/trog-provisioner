@@ -19,10 +19,11 @@ sub _coerce_array {
     return \@_;
 }
 
+our $domain_dir;
 sub main {
     my @args = @_;
 
-    my ($reuse,$reuser, $domain_dir);
+    my ($reuse,$reuser);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'user=s'      => \$reuser,
@@ -38,14 +39,14 @@ sub main {
     my $cfile = "$domain_dir/$domain/provision.conf";
     die "No such file provision.conf in $domain/" unless -f $cfile;
 
-    my $udf = "$domain/users.yaml";
+    my $udf = "$domain_dir/$domain/users.yaml";
     die "User definition file $udf not present!" unless -f $udf;
 
     die "Terraform not installed" unless which('terraform');
 
     my $config = Config::Simple->new($cfile);
 
-    my $data = "$domain/data.tar.gz";
+    my $data = "$domain_dir/$domain/data.tar.gz";
     die "No data to host in $domain/" unless -f $data;
     # Stash domain in config object for later use
     $config->param('domain', $domain);
@@ -62,7 +63,7 @@ sub main {
     my $cc = mongle_cloud_init($config);
     print "Wrote $cc\n";
 
-    chdir $domain;
+    chdir "$domain_dir/$domain";
     # Figure out if we need to liquidate/respawn/spawn existing stuff
     if (!$reuse) {
         my @exempt = qw{libvirt_volume.image_base libvirt_pool.vms};
@@ -120,8 +121,8 @@ sub mongle_terraform_template {
 
     File::Slurper::write_text("$domain/main.tf", $tf_template);
     File::Slurper::write_text("$domain/shared.tf", $mod_template);
-    mkdir "$domain/shared";
-    return "$domain/main.tf";
+    mkdir "$domain_dir/$domain/shared";
+    return "$domain_dir/$domain/main.tf";
 }
 
 # Slam in the IPs, gw, resolvers
@@ -195,7 +196,7 @@ sub mongle_network_configuration {
        },
     };
 
-    my $cf = "$domain/network_config.cfg";
+    my $cf = "$domain_dir/$domain/network_config.cfg";
     File::Slurper::write_text($cf, YAML::XS::Dump($netconf));
     return $cf;
 }
@@ -209,12 +210,12 @@ sub mongle_cloud_init {
     my $user = getpwuid($<);
 
     # Generate a new key for the child
-    qx{yes | ssh-keygen -t rsa -f $domain/key.rsa -N ''};
-    die "No key generated!" unless -f "$domain/key.rsa";
-    die "No pubkey generated!" unless -f "$domain/key.rsa.pub";
+    qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};
+    die "No key generated!" unless -f "$domain_dir/$domain/key.rsa";
+    die "No pubkey generated!" unless -f "$domain_dir/$domain/key.rsa.pub";
 
     # Authorize the key with the transfer user.
-    my $pubkey = File::Slurper::read_text("$domain/key.rsa.pub");
+    my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
     open(my $fh, '>>', "$ENV{HOME}/.ssh/authorized_keys");
     print $fh "$pubkey\n";
@@ -226,7 +227,7 @@ sub mongle_cloud_init {
     push(@$pkgs, qw{at make});
     @$pkgs = uniq @$pkgs;
 
-    my $udf = "$domain/users.yaml";
+    my $udf = "$domain_dir/$domain/users.yaml";
     my $userdefs = YAML::XS::Load(File::Slurper::read_text($udf));
 
     $YAML::XS::Boolean = "JSON::PP";
@@ -242,21 +243,21 @@ sub mongle_cloud_init {
         # Make sure root can scp to/from the transfer user on the HV.
         write_files => [
             {
-                content     => File::Slurper::read_text("$domain/key.rsa"),
+                content     => File::Slurper::read_text("$domain_dir/$domain/key.rsa"),
                 path        => "/root/.ssh/id_rsa",
                 owner       => "root:root",
                 permissions => '0600',
                 defer       => $JSON::PP::true,
             },
             {
-                content     => File::Slurper::read_text("$domain/key.rsa.pub"),
+                content     => File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub"),
                 path        => "/root/.ssh/id_rsa.pub",
                 owner       => "root:root",
                 permissions => '0600',
                 defer       => $JSON::PP::true,
             },
             {
-                content     => File::Slurper::read_text("$domain/setup.sh"),
+                content     => File::Slurper::read_text("$domain_dir/$domain/setup.sh"),
                 path        => "/root/setup.sh",
                 owner       => "root:root",
                 permissions => "0775",
@@ -264,7 +265,7 @@ sub mongle_cloud_init {
             },
         ],
     };
-    my $cf = "$domain/cloud_init.cfg";
+    my $cf = "$domain_dir/$domain/cloud_init.cfg";
     File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
     return $cf;
 }
@@ -284,7 +285,7 @@ sub mongle_setup_script {
     $script_template =~ s/%THISDIR%/$here/gmx;
     $script_template =~ s/%USER%/$username/gmx;
 
-    my $sf = "$domain/setup.sh";
+    my $sf = "$domain_dir/$domain/setup.sh";
     File::Slurper::write_text($sf, $script_template);
     return $sf;
 }
