@@ -5,7 +5,11 @@ package Trog::Bin::SetupProvisioner;
 use strict;
 use warnings;
 
+use File::Slurper;
+
 # Basically our 'install script'
+
+#TODO ideally, we just ship this all as a 'config rpm/deb'.
 
 sub main {
     my @args = @_;
@@ -14,60 +18,83 @@ sub main {
 #
 #    );
 
-    setup_kvm();
-    setup_public_bridge();
-    setup_terraform();
-    setup_rsyslog();
-    setup_auditd();
-    setup_management_interface();
-    setup_firewall();
-    setup_fail2ban();
-    setup_crons();
+    setup_kvm() or return 1;
+    setup_public_bridge() or return 2;
+    setup_terraform() or return 3;
+    setup_rsyslog() or return 4;
+    setup_auditd() or return 5;
+    setup_management_interface() or return 6;
+    setup_firewall() or return 7;
+    setup_fail2ban() or return 8;
+    setup_crons() or return 9;
+    return 0;
 }
 
 # TODO ensure kvm is installed/configured to provide DHCP internal IPs
 sub setup_kvm {
-
+1;
 }
 
 # TODO Setup a bridge device on a public IP
 sub setup_public_bridge {
-
+1;
 }
 
 # TODO ensure terraform is installed w/ relevant modules
 sub setup_terraform {
-
+1;
 }
 
 # TODO ensure rsyslog is configured to ingest logs & configured properly locally
 sub setup_rsyslog {
+    die "/etc/rsyslog.conf does not exist, unsupported configuration" unless -f '/etc/rsyslog.conf';
+    my $rs_conf = File::Slurper::read_text('/etc/rsyslog.conf');
 
+    my @must_have;
+    foreach my $type (qw{imudp imtcp}) {
+        push(@must_have, qq{module(load="$type")}, qq{input(type="$type" port="514")});
+    }
+
+    # Either we have the lines, or we get to EOF and have to add them.
+    my $changed;
+    foreach my $subj (@must_have) {
+        if (!$rs_conf =~ m/^\s*\Q$subj\E\s*$/gm) {
+            # Place at top of file.
+            $rs_conf = "$subj\n".$rs_conf;
+            $changed=1;
+        }
+    }
+    if ($changed) {
+        File::Slurper::write_text('/etc/rsyslog.conf', $rs_conf);
+        # TODO check this worked
+        system(qw{systemctl restart rsyslogd});
+    }
+    return 1;
 }
 
 # TODO: ensure auditd is configured to ingest logs & configured properly locally
 sub setup_auditd {
-
+1;
 }
 
 # TODO: setup tcms based virtual machine manager (qaportal3)
 sub setup_management_interface {
-
+1;
 }
 
 # TODO: Configure firewall for all the above services
 sub setup_firewall {
-
+1;
 }
 
 # TODO: setup relevant local fail2ban rules
 sub setup_fail2ban {
-
+1;
 }
 
 # TODO: setup local crond stuff, make sure it can send us mail
 sub setup_crons {
-
+1;
 }
 
 exit main(@ARGV) unless caller;

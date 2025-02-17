@@ -28,7 +28,6 @@ sub main {
     my ($reuse,$reuser);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
-        'user=s'      => \$reuser,
         'domaindir=s' => \$domain_dir,
     );
 
@@ -52,6 +51,18 @@ sub main {
     die "No data to host in $domain/" unless -f $data;
     # Stash domain in config object for later use
     $config->param('domain', $domain);
+
+    if ($reuse) {
+        # Re-Use the existing VM, and just ship over what we got and run the makefile again.
+        my %opts = ( host => $reuse );
+        $opts{user}     = 'root';
+        $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa");
+        my $ssh = Net::OpenSSH::More->new(%opts);
+        $ssh->sftp->put( "setup.sh", "setup.sh" );
+        $ssh->cmd("chmod +x setup.sh");
+        $ssh->cmd("at now -f setup.sh");
+        return 0;
+    }
 
     my $tf = mongle_terraform_template($config);
     print "Wrote $tf\n";
@@ -84,16 +95,6 @@ sub main {
         return 0;
     }
 
-    # Re-Use the existing VM, and just ship over what we got and run the makefile again.
-    my %opts = ( host => $reuse );
-    $opts{user} = $reuser if $reuser;
-    my $ssh = Net::OpenSSH::More->new(%opts);
-    # Swap out the remote user's keys for the most recent generation
-    $ssh->sftp->put( "key.rsa", ".ssh/id_rsa" );
-    $ssh->sftp->put( "key.rsa.pub", ".ssh/id_rsa.pub" );
-    $ssh->sftp->put( "setup.sh", "setup.sh" );
-    $ssh->cmd("chmod +x setup.sh");
-    $ssh->cmd("at now -f setup.sh");
     return 0;
 }
 
@@ -103,6 +104,10 @@ sub mongle_terraform_template {
     my $domain = $config->param('domain');
     my $image  = $config->param('image');
     my $disk_size = $config->param('size');
+    my $user      = $config->param('admin_user');
+    my $pkey_loc  = $config->param('pkey_loc');
+
+    die "Require admin_user & valid private key location (pkey_loc) to continue" unless $user && -f $pkey_loc;
 
     my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
     die "Could not determine outbound bridge device!" unless $bridge_device;
@@ -117,6 +122,8 @@ sub mongle_terraform_template {
     $tf_template =~ s/%REPLACEME%/$domain/gmx;
     $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
     $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
+    $tf_template =~ s/%USER%/$user/gmx;
+    $tf_template =~ s/%PKEY_LOC%/$pkey_loc/gmx;
 
     my $mod_template = File::Slurper::read_text("$FindBin::Bin/../shared.tmpl");
     $mod_template =~ s/%CLOUDIMG%/$image/gmx;
@@ -242,7 +249,7 @@ sub mongle_cloud_init {
         users => $userdefs->{users},
         fqdn => $domain,
         final_message => "Boot configuration complete.",
-        # Make sure root can scp to/from the transfer user on the HV.
+        # Make sure root can scp to/from the transfer user on the HV, and we start shipping logs.
         write_files => [
             {
                 content     => File::Slurper::read_text("$domain_dir/$domain/key.rsa"),
@@ -266,6 +273,14 @@ sub mongle_cloud_init {
                 defer       => $JSON::PP::true,
             },
         ],
+        rsyslog => {
+            install_rsyslog => $JSON::PP::true,
+            config_dir => '/etc/rsyslog.d',
+            configs => [{
+                filename => '10-ship_logs_to_hv.conf',
+                content  => File::Slurper::read_text("$domain_dir/$domain/rsyslog.conf"),
+             }]
+        }
     };
     my $cf = "$domain_dir/$domain/cloud_init.cfg";
     File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
@@ -296,10 +311,20 @@ sub mongle_setup_script {
 sub mongle_logging_config {
     my $config = shift;
     my $domain = $config->param('domain');
-    my $ship_to = $config->param('ship_to') || 'localhost';
-    $ship_to = $config->param('hv_internal_ip') if $ship_to eq 'localhost';
+    my $ship_to = $config->param('hv_internal_ip');
 
+    my $local_config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog.tmpl");
+    $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
+    my $lcf = "/etc/rsyslog.d/10-$domain.conf";
+    File::Slurper::write_text($lf, $config_template);
+
+    my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
+    $config_template =~ s/%LOGHOST%/$ship_to/gmx;
+
+    my $lf = "$domain_dir/$domain/rsyslog.conf";
+    File::Slurper::write_text($lf, $config_template);
+    return $lf;
 }
 
 exit main(@ARGV) unless caller;

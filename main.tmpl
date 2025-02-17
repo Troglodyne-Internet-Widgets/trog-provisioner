@@ -34,6 +34,7 @@ resource "libvirt_domain" "%MONGLED%" {
 
   network_interface {
     network_name = "default"
+    wait_for_lease = true
   }
   network_interface {
     bridge = "%BRIDGENAME%"
@@ -68,4 +69,17 @@ resource "libvirt_domain" "%MONGLED%" {
     type = "virtio"
   }
 
+#  provisioner "file" {
+#    source      = "${path.module}/rsyslog.conf"
+#    destination = "/etc/rsyslog/10-ship-logs-to-hv.conf"
+#  
+#    connection {
+#        type                = "ssh"
+#        user                = "root"
+#        host                = libvirt_domain.%MONGLED%.network_interface[0].addresses[0]
+#        private_key         = file("${path.module}/key.rsa")
+#        timeout             = "2m"
+#    }
+#
+#  }
 }
