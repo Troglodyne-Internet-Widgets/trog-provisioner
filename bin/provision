@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
 
+package Trog::Bin::Provisioner;
+
 use strict;
 use warnings;
 
@@ -288,6 +290,16 @@ sub mongle_setup_script {
     my $sf = "$domain_dir/$domain/setup.sh";
     File::Slurper::write_text($sf, $script_template);
     return $sf;
+}
+
+# Make this VM send its rsyslog to here, or wherever is setup correctly
+sub mongle_logging_config {
+    my $config = shift;
+    my $domain = $config->param('domain');
+    my $ship_to = $config->param('ship_to') || 'localhost';
+    $ship_to = $config->param('hv_internal_ip') if $ship_to eq 'localhost';
+
+
 }
 
 exit main(@ARGV) unless caller;

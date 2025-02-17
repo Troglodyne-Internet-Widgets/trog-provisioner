@@ -1,0 +1,74 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::SetupProvisioner;
+
+use strict;
+use warnings;
+
+# Basically our 'install script'
+
+sub main {
+    my @args = @_;
+
+#    GetOptionsFromArray(\@args,
+#
+#    );
+
+    setup_kvm();
+    setup_public_bridge();
+    setup_terraform();
+    setup_rsyslog();
+    setup_auditd();
+    setup_management_interface();
+    setup_firewall();
+    setup_fail2ban();
+    setup_crons();
+}
+
+# TODO ensure kvm is installed/configured to provide DHCP internal IPs
+sub setup_kvm {
+
+}
+
+# TODO Setup a bridge device on a public IP
+sub setup_public_bridge {
+
+}
+
+# TODO ensure terraform is installed w/ relevant modules
+sub setup_terraform {
+
+}
+
+# TODO ensure rsyslog is configured to ingest logs & configured properly locally
+sub setup_rsyslog {
+
+}
+
+# TODO: ensure auditd is configured to ingest logs & configured properly locally
+sub setup_auditd {
+
+}
+
+# TODO: setup tcms based virtual machine manager (qaportal3)
+sub setup_management_interface {
+
+}
+
+# TODO: Configure firewall for all the above services
+sub setup_firewall {
+
+}
+
+# TODO: setup relevant local fail2ban rules
+sub setup_fail2ban {
+
+}
+
+# TODO: setup local crond stuff, make sure it can send us mail
+sub setup_crons {
+
+}
+
+exit main(@ARGV) unless caller;
+1;
