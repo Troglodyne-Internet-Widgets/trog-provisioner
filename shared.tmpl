@@ -12,9 +12,9 @@ provider "libvirt" {
 }
 
 resource "libvirt_pool" "vms" {
-    name = "vms"
+    name = "tf_disks"
     type = "dir"
-    path = "/vms/disks"
+    path = "/opt/terraform/disks"
 }
 
 resource "libvirt_volume" "image_base" {

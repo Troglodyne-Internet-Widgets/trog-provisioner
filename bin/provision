@@ -119,8 +119,8 @@ sub mongle_terraform_template {
     my $mod_template = File::Slurper::read_text("$FindBin::Bin/../shared.tmpl");
     $mod_template =~ s/%CLOUDIMG%/$image/gmx;
 
-    File::Slurper::write_text("$domain/main.tf", $tf_template);
-    File::Slurper::write_text("$domain/shared.tf", $mod_template);
+    File::Slurper::write_text("$domain_dir/$domain/main.tf", $tf_template);
+    File::Slurper::write_text("$domain_dir/$domain/shared.tf", $mod_template);
     mkdir "$domain_dir/$domain/shared";
     return "$domain_dir/$domain/main.tf";
 }
