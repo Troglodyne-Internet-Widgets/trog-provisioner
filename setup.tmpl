@@ -12,9 +12,16 @@ newaliases
 
 # Transfer over the data
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
-cd /tmp
-mkdir domainsetup_%DOMAIN%
-tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
+
+# Support uncompressed data
+if [ ! -f "/tmp/data.tar.gz" ]; then
+        scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data /tmp/domainsetup_dev.holophrasticenterprises.com
+else
+        cd /tmp
+        mkdir domainsetup_dev.holophrasticenterprises.com
+        tar -zxf data.tar.gz -C /tmp/domainsetup_dev.holophrasticenterprises.com
+fi;
+
 cd /tmp/domainsetup_%DOMAIN%
 
 make -j8
