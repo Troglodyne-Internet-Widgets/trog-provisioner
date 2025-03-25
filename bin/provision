@@ -28,6 +28,7 @@ sub main {
     my ($reuse,$reuser);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
+        'existing-user=s' => \$reuser,
         'domaindir=s' => \$domain_dir,
     );
 
@@ -52,15 +53,21 @@ sub main {
     # Stash domain in config object for later use
     $config->param('domain', $domain);
 
+    my $ss = mongle_setup_script($config);
+    print "Wrote $ss\n";
+
     if ($reuse) {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         my %opts = ( host => $reuse );
-        $opts{user}     = 'root';
+        $opts{user}     = $reuser // 'root';
         $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa");
         my $ssh = Net::OpenSSH::More->new(%opts);
-        $ssh->sftp->put( "setup.sh", "setup.sh" );
+        print "Syncing setup script\n";
+        my $res = $ssh->sftp->put( "$domain_dir/$domain/setup.sh", "setup.sh" );
         $ssh->cmd("chmod +x setup.sh");
-        $ssh->cmd("at now -f setup.sh");
+        print "Scheduling job to run setup script\n";
+        $ssh->cmd("sudo at now -f setup.sh");
+        print "Done.\n";
         return 0;
     }
 
@@ -69,9 +76,6 @@ sub main {
 
     my $nc = mongle_network_configuration($config);
     print "Wrote $nc\n";
-
-    my $ss = mongle_setup_script($config);
-    print "Wrote $ss\n";
 
     my $cc = mongle_cloud_init($config);
     print "Wrote $cc\n";
@@ -317,7 +321,7 @@ sub mongle_logging_config {
     $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
-    File::Slurper::write_text($lf, $config_template);
+    File::Slurper::write_text($lcf, $local_config_template);
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;

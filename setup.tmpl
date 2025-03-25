@@ -15,11 +15,11 @@ scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%
 
 # Support uncompressed data
 if [ ! -f "/tmp/data.tar.gz" ]; then
-        scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data /tmp/domainsetup_dev.holophrasticenterprises.com
+        scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data /tmp/domainsetup_%DOMAIN%
 else
         cd /tmp
-        mkdir domainsetup_dev.holophrasticenterprises.com
-        tar -zxf data.tar.gz -C /tmp/domainsetup_dev.holophrasticenterprises.com
+        mkdir domainsetup_%DOMAIN%
+        tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
 fi;
 
 cd /tmp/domainsetup_%DOMAIN%
