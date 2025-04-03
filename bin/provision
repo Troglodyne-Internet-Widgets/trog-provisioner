@@ -105,8 +105,20 @@ sub main {
         system(qw{terraform init});
         system(qw{terraform plan -out tf.plan});
         system(qw{terraform apply tf.plan});
-        return 0;
     }
+
+    my $qdn = $domain;
+    $qdn =~ s/\.\S+$//;
+
+    print "Waiting for VM to come live...";
+    my $new_ip='';
+    for (1..30) {
+        $new_ip = qx#virsh net-dhcp-leases default | grep todaystomato | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
+        last if $new_ip;
+        print ".";
+    }
+    print "\nVM never came up!\n" unless $new_ip;
+    print "\nAll Done!  The server should be live at $new_ip\n";
 
     return 0;
 }
