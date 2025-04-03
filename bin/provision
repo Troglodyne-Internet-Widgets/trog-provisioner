@@ -66,9 +66,15 @@ sub main {
     my $lc = mongle_logging_config($config);
     print "Wrote $lc\n";
 
+    # If the domain is already up, let's find the IP
+    my $qdn = $domain;
+    $qdn =~ s/\.\S+$//;
+    my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
+    $old_ip = 'bogus' unless $old_ip;
+
     if ($reuse) {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
-        my %opts = ( host => $reuse );
+        my %opts = ( host => $old_ip );
         $opts{user}     = $reuser // 'root';
         $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa");
         my $ssh = Net::OpenSSH::More->new(%opts);
@@ -107,14 +113,11 @@ sub main {
         system(qw{terraform apply tf.plan});
     }
 
-    my $qdn = $domain;
-    $qdn =~ s/\.\S+$//;
-
     print "Waiting for VM to come live...";
     my $new_ip='';
     for (1..30) {
-        $new_ip = qx#virsh net-dhcp-leases default | grep todaystomato | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
-        last if $new_ip;
+        $new_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
+        last if $new_ip ne $old_ip;
         print ".";
     }
     print "\nVM never came up!\n" unless $new_ip;

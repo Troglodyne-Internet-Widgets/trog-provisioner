@@ -10,6 +10,19 @@ cloud-init status --wait
 #echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc
 newaliases
 
+# Make sure we can SSH into the HV ok
+cat > /root/.ssh/config << EOF
+Host *
+Compression yes
+ForwardAgent yes
+
+Host %THISIP%
+StrictHostKeyChecking no
+UserKnownHostsFile=/dev/null
+User root
+EOF
+chmod 0600 /root/.ssh/config
+
 # Transfer over the data
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
 
