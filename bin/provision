@@ -53,11 +53,18 @@ sub main {
     # Stash domain in config object for later use
     $config->param('domain', $domain);
 
+    mkdir '/opt/terraform';
+    mkdir '/opt/terraform/disks';
+    mkdir '/opt/terraform/config';
+
     my $nc = mongle_network_configuration($config);
     print "Wrote $nc\n";
 
     my $ss = mongle_setup_script($config);
     print "Wrote $ss\n";
+
+    my $lc = mongle_logging_config($config);
+    print "Wrote $lc\n";
 
     if ($reuse) {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
@@ -80,18 +87,20 @@ sub main {
     my $cc = mongle_cloud_init($config);
     print "Wrote $cc\n";
 
-    chdir "$domain_dir/$domain";
+    chdir "/opt/terraform/config";
     # Figure out if we need to liquidate/respawn/spawn existing stuff
     if (!$reuse) {
-        my @exempt = qw{libvirt_volume.image_base libvirt_pool.vms};
+        my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
         my $resources = qx{terraform state list};
         chomp $resources;
         foreach my $resource (split(/\n/, $resources)) {
+            next if any { $_ eq $resource } @exempt;
+            print "Terminating $resource\n";
             #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
             #XXX So we have to instead painstakingly kill everything that isn't.
             #XXX they claim modules are the way to do this, but that appears to be false.
             #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
-            system(qw{terraform destroy -target}, $resource) unless any { $_ eq $resource } @exempt;
+            system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
         }
         system(qw{terraform init});
         system(qw{terraform plan -out tf.plan});
@@ -108,34 +117,71 @@ sub mongle_terraform_template {
     my $domain = $config->param('domain');
     my $image  = $config->param('image');
     my $disk_size = $config->param('size');
-    my $user      = $config->param('admin_user');
-    my $pkey_loc  = $config->param('pkey_loc');
+    #my $user      = $config->param('admin_user');
+    #my $pkey_loc  = $config->param('pkey_loc');
 
-    die "Require admin_user & valid private key location (pkey_loc) to continue" unless $user && -f $pkey_loc;
+    #die "Require admin_user & valid private key location (pkey_loc) to continue" unless $user && -f $pkey_loc;
 
     my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
     die "Could not determine outbound bridge device!" unless $bridge_device;
     chomp $bridge_device;
     print "Using outbound bridge $bridge_device\n";
 
+    # OK, let's get the UUID of our storage pool IN CASE we are re-using it
+    my $pool_info = qx/virsh pool-list --uuid --name/;
+    my %pools;
+    open my $pd, '<', \$pool_info;
+    foreach my $line (<$pd>) {
+        my ($k,$v) = $line =~ m/^\s*(\S+)\s+(\S+)\s*$/;
+        $pools{$v} = $k if $v;
+    }
+    close $pd;
+
+    my $imagedir = "$domain_dir/$domain";
+    # TODO make this configurable so we can use lvm
+    my $libvirt_pool = $pools{tf_disks};
+    my ($import_block, $image_block) = ('','');
+    if ($libvirt_pool) {
+        print "Re-Using existing libvirt pool $libvirt_pool\n";
+        $import_block = qq|
+import {
+    to = libvirt_pool.tf_disks
+    id = "$libvirt_pool"
+}
+|;
+        #Like above, if the relevant baseimage exists, just import it
+        my $baseimage = '/opt/terraform/disks/baseimage-qcow2';
+        $image = $baseimage if -f $baseimage;
+    }
+
     my $domain_mongled = $domain;
     $domain_mongled =~ s/\./-/g;
 
-    my $tf_template = File::Slurper::read_text("$FindBin::Bin/../main.tmpl");
-    $tf_template =~ s/%BRIDGENAME%/$bridge_device/gmx;
-    $tf_template =~ s/%REPLACEME%/$domain/gmx;
-    $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
-    $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
-    $tf_template =~ s/%USER%/$user/gmx;
-    $tf_template =~ s/%PKEY_LOC%/$pkey_loc/gmx;
+    my %to_mongle = (
+        'main.tmpl'   => "config/main.tf",
+        'domain.tmpl' => "config/$domain.tf",
+    );
 
-    my $mod_template = File::Slurper::read_text("$FindBin::Bin/../shared.tmpl");
-    $mod_template =~ s/%CLOUDIMG%/$image/gmx;
+    foreach my $file (keys(%to_mongle)) {
+        my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
 
-    File::Slurper::write_text("$domain_dir/$domain/main.tf", $tf_template);
-    File::Slurper::write_text("$domain_dir/$domain/shared.tf", $mod_template);
-    mkdir "$domain_dir/$domain/shared";
-    return "$domain_dir/$domain/main.tf";
+        $tf_template =~ s/%BRIDGENAME%/$bridge_device/gmx;
+        $tf_template =~ s/%REPLACEME%/$domain/gmx;
+        $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
+        $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
+        #$tf_template =~ s/%USER%/$user/gmx;
+        #$tf_template =~ s/%PKEY_LOC%/$pkey_loc/gmx;
+        $tf_template =~ s/%CLOUDIMG%/$image/gmx;
+        $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
+        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
+
+        File::Slurper::write_text("/opt/terraform/$to_mongle{$file}", $tf_template);
+    }
+
+    #XXX tf plugin should do this automatically, but does not
+    unlink "/opt/terraform/disks/commoninit.iso";
+
+    return "/opt/terraform/config/main.tf";
 }
 
 # Slam in the IPs, gw, resolvers
@@ -209,7 +255,7 @@ sub mongle_network_configuration {
        },
     };
 
-    my $cf = "$domain_dir/$domain/network_config.cfg";
+    my $cf = "/opt/terraform/config/$domain.network_config.cfg";
     File::Slurper::write_text($cf, YAML::XS::Dump($netconf));
     return $cf;
 }
@@ -286,7 +332,7 @@ sub mongle_cloud_init {
              }]
         }
     };
-    my $cf = "$domain_dir/$domain/cloud_init.cfg";
+    my $cf = "/opt/terraform/config/$domain.cloud_init.cfg";
     File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
     return $cf;
 }

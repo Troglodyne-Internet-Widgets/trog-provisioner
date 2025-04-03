@@ -19,5 +19,5 @@ tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
 
 cd /tmp/domainsetup_%DOMAIN%
 
-make -j8 2>&1 | tee /var/log/%DOMAIN%.setup.log
+make 2>&1 | tee /var/log/%DOMAIN%.setup.log
 rm -rf /tmp/domainsetup_%DOMAIN%

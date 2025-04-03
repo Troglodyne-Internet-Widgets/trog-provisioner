@@ -1,85 +1,33 @@
-module "shared" {
-    source = "/opt/terraform/shared"
+terraform {
+  required_version = ">= 0.12"
+  required_providers {
+    libvirt = {
+      source = "dmacvicar/libvirt"
+    }
+  }
 }
 
-resource "libvirt_volume" "%MONGLED%-qcow2" {
-  name = "%REPLACEME%-qcow2"
-  pool = libvirt_pool.vms.name
-  base_volume_id = libvirt_volume.image_base.id
+provider "libvirt" {
+  uri = "qemu:///system"
+}
+
+%LIBVIRT_POOL_IMPORT%
+
+resource "libvirt_pool" "tf_disks" {
+    name = "tf_disks"
+    type = "dir"
+    target {
+        path = "/opt/terraform/disks"
+    }
+}
+
+resource "libvirt_volume" "image_base" {
+  name = "baseimage-qcow2"
+  pool = libvirt_pool.tf_disks.name
+  source = "%CLOUDIMG%"
   format = "qcow2"
-  size = %GIGGLEBYTES%
-}
-
-data "template_file" "user_data" {
-  template = file("${path.module}/cloud_init.cfg")
-}
-
-data "template_file" "network_config" {
-  template = file("${path.module}/network_config.cfg")
-}
-
-resource "libvirt_cloudinit_disk" "commoninit" {
-  name           = "commoninit.iso"
-  user_data      = data.template_file.user_data.rendered
-  network_config = data.template_file.network_config.rendered
-  pool           = libvirt_pool.vms.name
-}
-
-resource "libvirt_domain" "%MONGLED%" {
-  name   = "%REPLACEME%"
-  memory = "4092"
-  vcpu   = 2
-
-  cloudinit = libvirt_cloudinit_disk.commoninit.id
-
-  network_interface {
-    network_name = "default"
-    wait_for_lease = true
+  lifecycle {
+    prevent_destroy = true
   }
-  network_interface {
-    bridge = "%BRIDGENAME%"
-  }
-
-  disk {
-    volume_id = libvirt_volume.%MONGLED%-qcow2.id
-  }
-
-  # IMPORTANT: this is a known bug on cloud images, since they expect a console
-  # we need to pass it
-  # https://bugs.launchpad.net/cloud-images/+bug/1573095
-  console {
-    type        = "pty"
-    target_port = "0"
-    target_type = "serial"
-  }
-
-  console {
-    type        = "pty"
-    target_type = "virtio"
-    target_port = "1"
-  }
-
-  graphics {
-    type = "vnc"
-    listen_type = "address"
-    autoport = true
-  }
-
-  video {
-    type = "virtio"
-  }
-
-#  provisioner "file" {
-#    source      = "${path.module}/rsyslog.conf"
-#    destination = "/etc/rsyslog/10-ship-logs-to-hv.conf"
-#  
-#    connection {
-#        type                = "ssh"
-#        user                = "root"
-#        host                = libvirt_domain.%MONGLED%.network_interface[0].addresses[0]
-#        private_key         = file("${path.module}/key.rsa")
-#        timeout             = "2m"
-#    }
-#
-#  }
+  depends_on = [libvirt_pool.tf_disks]
 }
