@@ -71,6 +71,7 @@ sub main {
     $qdn =~ s/\.\S+$//;
     my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
     $old_ip = 'bogus' unless $old_ip;
+    chomp $old_ip;
 
     if ($reuse) {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
@@ -115,10 +116,14 @@ sub main {
 
     print "Waiting for VM to come live...";
     my $new_ip='';
+    my $oldip_grep = '';
+    $oldip_grep = "| grep -v $old_ip";
     for (1..30) {
-        $new_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
-        last if $new_ip ne $old_ip;
+        $new_ip = qx#virsh net-dhcp-leases default | grep $qdn $oldip_grep | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
+        chomp $new_ip;
+        last if $new_ip && ($new_ip ne $old_ip);
         print ".";
+        sleep 1;
     }
     print "\nVM never came up!\n" unless $new_ip;
     print "\nAll Done!  The server should be live at $new_ip\n";
