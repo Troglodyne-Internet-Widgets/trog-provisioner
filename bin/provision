@@ -318,6 +318,7 @@ sub mongle_cloud_init {
         packages => $pkgs,
         users => $userdefs->{users},
         fqdn => $domain,
+        manage_etc_hosts => 'localhost',
         final_message => "Boot configuration complete.",
         # Make sure root can scp to/from the transfer user on the HV, and we start shipping logs.
         write_files => [
