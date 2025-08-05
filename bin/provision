@@ -46,6 +46,9 @@ sub main {
 
     die "Terraform not installed" unless which('terraform');
 
+    my $domain_mongled = $domain;
+    $domain_mongled =~ s/\./-/g;
+
     my $config = Config::Simple->new($cfile);
 
     my $data = "$domain_dir/$domain/data.tar.gz";
@@ -96,11 +99,13 @@ sub main {
 
     chdir "/opt/terraform/config";
     # Figure out if we need to liquidate/respawn/spawn existing stuff
+    my $result = 0;
     if (!$reuse) {
         my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
         my $resources = qx{terraform state list};
         chomp $resources;
         foreach my $resource (split(/\n/, $resources)) {
+            next unless $resource =~ m/\Q$domain_mongled\E/;
             next if any { $_ eq $resource } @exempt;
             print "Terminating $resource\n";
             #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
@@ -112,7 +117,9 @@ sub main {
         system(qw{terraform init});
         system(qw{terraform plan -out tf.plan});
         system(qw{terraform apply tf.plan});
+        $result = $? >> 8;
     }
+    die "Terraform cried uncle" if $result;
 
     print "Waiting for VM to come live...";
     my $new_ip='';
