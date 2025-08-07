@@ -21,6 +21,9 @@ sub _coerce_array {
     return \@_;
 }
 
+#TODO: cpu/gpu passthru accel via techniques such as the following:
+# https://github.com/HarbourHeading/KVM-GPU-Passthrough
+
 our $domain_dir;
 sub main {
     my @args = @_;
@@ -369,6 +372,7 @@ sub mongle_setup_script {
     my $config = shift;
     my $domain = $config->param('domain');
     my $hvip   = $config->param('hv_internal_ip');
+    my $pre_make_script = $config->param('pre_make_script');
 
     use Data::Dumper;
     my ($username) = getpwuid($<);
@@ -378,6 +382,7 @@ sub mongle_setup_script {
     $script_template =~ s/%DOMAIN%/$domain/gmx;
     $script_template =~ s/%THISDIR%/$domain_dir/gmx;
     $script_template =~ s/%USER%/$username/gmx;
+    $script_template =~ s/%PRE_MAKE%/$pre_make_script/gmx if $pre_make_script;
 
     my $sf = "$domain_dir/$domain/setup.sh";
     File::Slurper::write_text($sf, $script_template);
