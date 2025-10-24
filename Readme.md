@@ -13,11 +13,13 @@ Even business units at giant corporations can do just fine with this approach.
 ## How it works
 
 1. Write a configuration file (Config::Simple format) in $DOMAIN/provision.conf which tells us:
-    * What IPs/Gw/Resolvers to use for said domain
-    * How big the disk oughtta be
-    * What base image to use
-    * What packages to install
-    * Email address to send root's mail to
+    * ips: What IPs/Gw/Resolvers to use for said domain
+    * size: How big the disk oughtta be
+    * image: What base image to use
+    * packages: What packages to install
+    * contact\_email: Email address to send root's mail to
+    * depends\_on: Whether this system is to be provisioned on something that may or may not already exist
+    * admin\_user: What the name of the admin user is in the event we want to provision on already existing systems.  This user needs passwordless sudo; when omitted we use root.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
 2. Run `bin/provision $DOMAIN`
@@ -31,6 +33,8 @@ This all works behind the scenes due to:
 
 You'll need to have the user running this set up with at least one working authorized SSH key so we can add more.
 Aside from that, clone this in /opt where the user can see it.
+
+It is not the responsibility of this tool to ensure inappropriate setup steps in the run makefile are skipped when applying to a dependent system, or deploying to an exisiting host.
 
 DO NOT USE ROOT TO RUN THIS!
 Make sure that the user is in the qemu/kvm group (depending on running env) so you can talk to libvirt instead.

@@ -16,6 +16,7 @@ use List::Util qw{any uniq};
 use File::Which qw {which};
 use Getopt::Long qw{GetOptionsFromArray};
 use Net::OpenSSH::More;
+use Net::EmptyPort;
 
 sub _coerce_array {
     return \@_;
@@ -28,10 +29,9 @@ our $domain_dir;
 sub main {
     my @args = @_;
 
-    my ($reuse,$reuser);
+    my ($reuse);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
-        'existing-user=s' => \$reuser,
         'domaindir=s' => \$domain_dir,
     );
 
@@ -49,19 +49,42 @@ sub main {
 
     die "Terraform not installed" unless which('terraform');
 
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
-
-    my $config = Config::Simple->new($cfile);
-
-    my $data = "$domain_dir/$domain/data.tar.gz";
-    die "No data to host in $domain/" unless -f $data;
-    # Stash domain in config object for later use
-    $config->param('domain', $domain);
-
+    # Basic setup
     mkdir '/opt/terraform';
     mkdir '/opt/terraform/disks';
     mkdir '/opt/terraform/config';
+
+    my $config = Config::Simple->new($cfile);
+    my $reuser = $config->param('admin_user') // 'root';
+
+    my $data = "$domain_dir/$domain/data.tar.gz";
+    die "No data to host in $domain/" unless -f $data;
+    # Stash domain dir in config object for later use
+    $config->param('domain_dir', $domain_dir);
+
+    # Now, let's figure out if this has a VM which needs to be built first.
+    # In the event reuse is passed, we are just layering configs really.
+    my $depends = $config->param('depends_on');
+    if ($depends) {
+        print "$domain depends on $depends, provisioning that first...\n";
+        ($reuse, $reuser) = provision_domain($config, $depends, $reuse, $reuser);
+        wait_for_ssh($reuser, $reuse) or die "$depends never came up";
+    }
+    my ($ip, $user) = provision_domain($config, $domain, $reuse, $reuser);
+    wait_for_ssh($ip, $user) or die "$domain never came up";
+
+    return 0;
+}
+
+sub provision_domain {
+    my ($config, $domain, $reuse, $reuser) = @_;
+
+    my $domain_mongled = $domain;
+    $domain_mongled =~ s/\./-/g;
+
+    # Set this to simplify calling conventions
+    $config->param('domain', $domain);
+    my $domain_dir = $config->param('domain_dir');
 
     my $nc = mongle_network_configuration($config);
     print "Wrote $nc\n";
@@ -72,7 +95,8 @@ sub main {
     my $lc = mongle_logging_config($config);
     print "Wrote $lc\n";
 
-    # If the domain is already up, let's find the IP
+    # If the domain is already up, let's find the IP.
+    # We can't guarantee we have a static IP, so use the internal.
     my $qdn = $domain;
     $qdn =~ s/\.\S+$//;
     my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
@@ -82,16 +106,18 @@ sub main {
     if ($reuse) {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         my %opts = ( host => $old_ip );
-        $opts{user}     = $reuser // 'root';
-        $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa");
+        $opts{user}     = $reuser;
+        # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
+        # Otherwise we'll use the agent.
+        $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa") if $reuser eq 'root';
         my $ssh = Net::OpenSSH::More->new(%opts);
         print "Syncing setup script\n";
-        my $res = $ssh->sftp->put( "$domain_dir/$domain/setup.sh", "setup.sh" );
+        my $res = $ssh->sftp->put( "setup.sh", "setup.sh" );
         $ssh->cmd("chmod +x setup.sh");
         print "Scheduling job to run setup script\n";
         $ssh->cmd("sudo at now -f setup.sh");
         print "Done.\n";
-        return 0;
+        return ($old_ip, $reuser);
     }
 
     my $tf = mongle_terraform_template($config);
@@ -138,7 +164,18 @@ sub main {
     print "\nVM never came up!\n" unless $new_ip;
     print "\nAll Done!  The server should be live at $new_ip\n";
 
-    return 0;
+    return ($config->param('admin_user'), $new_ip);
+}
+
+sub wait_for_ssh {
+    my ($user, $ip) = @_;
+    my $wait = 300;
+    my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
+    die "SSH port never came up after $wait seconds!" unless $ssh_up;
+
+    # Make sure we can *actually* SSH in
+    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user );
+    die "Could not establish SSH connection as $user!" unless $ssh;
 }
 
 sub mongle_terraform_template {
