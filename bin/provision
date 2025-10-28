@@ -64,20 +64,23 @@ sub main {
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
+    my $skey = "$domain_dir/$domain/key.rsa";
     my $depends = $config->param('depends_on');
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
-        ($reuse, $reuser) = provision_domain($config, $depends, $reuse, $reuser);
-        wait_for_ssh($reuser, $reuse) or die "$depends never came up";
+        $skey = "$domain_dir/$depends/key.rsa";
+        ($reuser, $reuse) = provision_domain($config, $depends, $reuse, $reuser);
+        wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
     }
-    my ($ip, $user) = provision_domain($config, $domain, $reuse, $reuser);
-    wait_for_ssh($ip, $user) or die "$domain never came up";
+    #TODO need to figure out how to apply the cloud-init for the second domain if deps are active
+    my ($user, $ip) = provision_domain($config, $domain, $reuse, $reuser, $depends);
+    wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
 
     return 0;
 }
 
 sub provision_domain {
-    my ($config, $domain, $reuse, $reuser) = @_;
+    my ($config, $domain, $reuse, $reuser, $depends) = @_;
 
     my $domain_mongled = $domain;
     $domain_mongled =~ s/\./-/g;
@@ -98,6 +101,7 @@ sub provision_domain {
     # If the domain is already up, let's find the IP.
     # We can't guarantee we have a static IP, so use the internal.
     my $qdn = $domain;
+    $qdn = $depends if $depends;
     $qdn =~ s/\.\S+$//;
     my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
     $old_ip = 'bogus' unless $old_ip;
@@ -109,7 +113,8 @@ sub provision_domain {
         $opts{user}     = $reuser;
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
         # Otherwise we'll use the agent.
-        $opts{key_path} = $config->param("$domain_dir/$domain/key.rsa") if $reuser eq 'root';
+        $opts{key_path} = "$domain_dir/$domain/key.rsa";
+        $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
         my $ssh = Net::OpenSSH::More->new(%opts);
         print "Syncing setup script\n";
         my $res = $ssh->sftp->put( "setup.sh", "setup.sh" );
@@ -117,7 +122,7 @@ sub provision_domain {
         print "Scheduling job to run setup script\n";
         $ssh->cmd("sudo at now -f setup.sh");
         print "Done.\n";
-        return ($old_ip, $reuser);
+        return ($reuser, $old_ip);
     }
 
     my $tf = mongle_terraform_template($config);
@@ -168,13 +173,14 @@ sub provision_domain {
 }
 
 sub wait_for_ssh {
-    my ($user, $ip) = @_;
+    my ($user, $key, $ip) = @_;
+    print "Waiting for $ip:22 to come live...\n";
     my $wait = 300;
     my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
     die "SSH port never came up after $wait seconds!" unless $ssh_up;
 
     # Make sure we can *actually* SSH in
-    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user );
+    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user, key_path => $key );
     die "Could not establish SSH connection as $user!" unless $ssh;
 }
 
@@ -327,6 +333,22 @@ sub mongle_network_configuration {
     return $cf;
 }
 
+sub inject_admin_key {
+    my ($admin_user, $domain, $config, $pubkey) = @_;
+    # Don't bother if we aren't setting this up.
+    return unless $admin_user;
+    return unless ref $config->{users} eq 'ARRAY';
+
+    foreach my $u (@{$config->{users}}) {
+        next unless exists $u->{name};
+        next unless $u->{name} eq $admin_user;
+        $u->{ssh_authorized_keys} //= [];
+        push(@{$u->{ssh_authorized_keys}}, $pubkey);
+        return;
+    }
+    return;
+}
+
 # Generate and store a new SSH key for the guest, which we will authorize on the HV to grab the data.tar.gz
 sub mongle_cloud_init {
     my $config = shift;
@@ -339,6 +361,8 @@ sub mongle_cloud_init {
     qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};
     die "No key generated!" unless -f "$domain_dir/$domain/key.rsa";
     die "No pubkey generated!" unless -f "$domain_dir/$domain/key.rsa.pub";
+    chmod 0600, "$domain_dir/$domain/key.rsa";
+    chmod 0600, "$domain_dir/$domain/key.rsa.pub";
 
     # Authorize the key with the transfer user.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
@@ -355,6 +379,9 @@ sub mongle_cloud_init {
 
     my $udf = "$domain_dir/$domain/users.yaml";
     my $userdefs = YAML::XS::Load(File::Slurper::read_text($udf));
+
+    # Inject the SSH key for access into the admin_user's SSH
+    inject_admin_key($config->param('admin_user'), $domain, $userdefs, $pubkey);
 
     $YAML::XS::Boolean = "JSON::PP";
     my $clown_config = {
@@ -411,7 +438,6 @@ sub mongle_setup_script {
     my $hvip   = $config->param('hv_internal_ip');
     my $pre_make_script = $config->param('pre_make_script');
 
-    use Data::Dumper;
     my ($username) = getpwuid($<);
 
     my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
