@@ -42,10 +42,10 @@ sub main {
 
     $domain =~ s/\///g;
     my $cfile = "$domain_dir/$domain/provision.conf";
-    die "No such file provision.conf in $domain/" unless -f $cfile;
+    die "No such file provision.conf in $domain_dir/$domain/" unless -f $cfile;
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    die "User definition file $udf not present!" unless -f $udf;
+    die "User definition file $domain_dir/$udf not present!" unless -f $udf;
 
     die "Terraform not installed" unless which('terraform');
 
@@ -68,15 +68,62 @@ sub main {
     my $depends = $config->param('depends_on');
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
+        my $dcfile = "$domain_dir/$depends/provision.conf";
+        die "No such file provision.conf in $domain_dir/$depends/" unless -f $cfile;
+        my $dconfig = Config::Simple->new($dcfile);
+
+        #XXX should probably die here if the admin_users differ!
+
         $skey = "$domain_dir/$depends/key.rsa";
-        ($reuser, $reuse) = provision_domain($config, $depends, $reuse, $reuser);
-        wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
+        ($reuser, $reuse) = provision_domain($dconfig, $depends, $reuse, $reuser);
+        my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
+        wait_for_cloud_init($ssh);
+        wait_for_makefile($ssh, $depends);
+
     }
     #TODO need to figure out how to apply the cloud-init for the second domain if deps are active
     my ($user, $ip) = provision_domain($config, $domain, $reuse, $reuser, $depends);
-    wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
+    my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
+    wait_for_cloud_init($ssh);
+    wait_for_makefile($ssh, $domain);
 
     return 0;
+}
+
+sub wait_for_cloud_init {
+    my ($ssh, $t) = @_;
+
+    # TODO make configurable
+    $t //= '30m';
+    print "Waiting up to $t for Cloud-init to finish...\n";
+    my $rc = $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
+    print "Done!\n";
+    die "Cloud init reported failure! Investigate machine." if $rc;
+}
+
+sub wait_for_makefile {
+    my ($ssh, $domain, $t) = @_;
+
+    # TODO make configurable
+    $t //= '30m';
+
+    print "Waiting up to $t for ATD queue to flush...\n";
+    my $out = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+
+    print "Waiting up to $t for Makefile payload to start...\n";
+    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until [ -f /var/log/$domain.setup.log ]; do sleep 1; done;'});
+
+
+    print "Waiting up to $t for Makefile payload to finish...\n";
+    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'while lsof | grep /var/log/$domain.setup.log; do sleep 1; done;'});
+
+    print "Waiting up to $t for any makefile queued ATD jobs to flush...\n";
+    $out = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+
+    print "Last log:\n";
+    print $ssh->cmd(qq{sudo tail /var/log/$domain.setup.log});
+
+    print "\nDone!\n";
 }
 
 sub provision_domain {
@@ -98,6 +145,9 @@ sub provision_domain {
     my $lc = mongle_logging_config($config);
     print "Wrote $lc\n";
 
+    my $cc = mongle_cloud_init($config);
+    print "Wrote $cc\n";
+
     # If the domain is already up, let's find the IP.
     # We can't guarantee we have a static IP, so use the internal.
     my $qdn = $domain;
@@ -111,48 +161,73 @@ sub provision_domain {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         my %opts = ( host => $old_ip );
         $opts{user}     = $reuser;
+
+        # Make sure any existing VMs don't have this domain
+        clean_domain_resources($domain_mongled);
+        unlink "/opt/terraform/config/$domain.tf";
+
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
         # Otherwise we'll use the agent.
         $opts{key_path} = "$domain_dir/$domain/key.rsa";
         $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
         my $ssh = Net::OpenSSH::More->new(%opts);
+
+        my $output = '';
+        print "Installing Updated cloud-init and forcing re-run...\n";
+        my $init = "/opt/terraform/config/$domain.cloud_init.cfg";
+        my $ci_dir = "/var/lib/cloud/instances/nocloud";
+        $ssh->sftp->put($init, 'cloud-config.txt');
+        # Remove the semaphore that says this was run, then run the needed targets
+        $ssh->cmd("rm $ci_dir/sem/cc_package_update_upgrade_install");
+        ($output) = $ssh->cmd("sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt");
+        print "$output\n";
+        $ssh->cmd("rm $ci_dir/sem/cc_users_groups");
+        ($output) = $ssh->cmd("sudo cloud-init single --name cc_users_groups -f cloud-config.txt");
+        print "$output\n";
+
+        my $ips  = _coerce_array($config->param('ips'));
+        my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
+        my $parsed = YAML::XS::Load($existing_nc);
+        my $num_ips = scalar(@{$parsed->{network}{ethernets}{ens4}{addresses}});
+        @{$parsed->{network}{ethernets}{ens4}{addresses}} = uniq(@{$parsed->{network}{ethernets}{ens4}{addresses}}, map { "$_/24"} @$ips);
+        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{ens4}{addresses}})) {
+            my $encoded = YAML::XS::Dump($parsed);
+            my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
+            File::Slurper::write_text($new_config, $encoded);
+            print "Setting up IP for $domain...\n";
+            $ssh->sftp->put($new_config, "network-config-merged.yaml");
+            $ssh->cmd("sudo mv network-config-merged.yaml /etc/netplan/50-cloud-init.yaml");
+            $ssh->cmd("sudo chmod 0600 /etc/netplan/50-cloud-init.yaml");
+            $ssh->cmd("sudo chown root:root /etc/netplan/50-cloud-init.yaml");
+            ($output) = $ssh->cmd("sudo netplan apply");
+            chomp $output;
+            print "$output\n" if $output;
+        }
+
         print "Syncing setup script\n";
-        my $res = $ssh->sftp->put( "setup.sh", "setup.sh" );
-        $ssh->cmd("chmod +x setup.sh");
+        my $res = $ssh->sftp->put( "$domain_dir/$domain/setup.sh", "setup-$domain.sh" );
+        $ssh->cmd("chmod +x setup-$domain.sh");
+        $ssh->cmd("sudo mv setup-$domain.sh /root");
         print "Scheduling job to run setup script\n";
-        $ssh->cmd("sudo at now -f setup.sh");
+        ($output) = $ssh->cmd("sudo at now -f /root/setup-$domain.sh");
+        print $output;
         print "Done.\n";
         return ($reuser, $old_ip);
     }
 
+    # TODO move the deletion of unneeded resources above the SSH reuse stuff, remove dependent VMs from conf.
     my $tf = mongle_terraform_template($config);
     print "Wrote $tf\n";
-
-    my $cc = mongle_cloud_init($config);
-    print "Wrote $cc\n";
 
     chdir "/opt/terraform/config";
     # Figure out if we need to liquidate/respawn/spawn existing stuff
     my $result = 0;
-    if (!$reuse) {
-        my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
-        my $resources = qx{terraform state list};
-        chomp $resources;
-        foreach my $resource (split(/\n/, $resources)) {
-            next unless $resource =~ m/\Q$domain_mongled\E/;
-            next if any { $_ eq $resource } @exempt;
-            print "Terminating $resource\n";
-            #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
-            #XXX So we have to instead painstakingly kill everything that isn't.
-            #XXX they claim modules are the way to do this, but that appears to be false.
-            #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
-            system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
-        }
-        system(qw{terraform init});
-        system(qw{terraform plan -out tf.plan});
-        system(qw{terraform apply tf.plan});
-        $result = $? >> 8;
-    }
+    # If something named this domain exists, but is supposed to depend on something else, destroy it.
+    clean_domain_resources($domain_mongled);
+    system(qw{terraform init});
+    system(qw{terraform plan -out tf.plan});
+    system(qw{terraform apply tf.plan});
+    $result = $? >> 8;
     die "Terraform cried uncle" if $result;
 
     print "Waiting for VM to come live...";
@@ -170,6 +245,23 @@ sub provision_domain {
     print "\nAll Done!  The server should be live at $new_ip\n";
 
     return ($config->param('admin_user'), $new_ip);
+}
+
+sub clean_domain_resources {
+    my ($domain_mongled) = @_;
+    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
+    my $resources = qx{terraform state list};
+    chomp $resources;
+    foreach my $resource (split(/\n/, $resources)) {
+        next unless $resource =~ m/\Q$domain_mongled\E/;
+        next if any { $_ eq $resource } @exempt;
+        print "Terminating $resource\n";
+        #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
+        #XXX So we have to instead painstakingly kill everything that isn't.
+        #XXX they claim modules are the way to do this, but that appears to be false.
+        #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
+        system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
+    }
 }
 
 sub wait_for_ssh {
