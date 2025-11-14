@@ -1,14 +1,15 @@
 terraform {
-  required_version = ">= 0.12"
-  required_providers {
-    libvirt = {
-      source = "dmacvicar/libvirt"
+    required_version = ">= 0.12"
+    required_providers {
+        libvirt = {
+            source = "dmacvicar/libvirt"
+            version = "0.9.0"
+        }
     }
-  }
 }
 
 provider "libvirt" {
-  uri = "qemu:///system"
+    uri = "qemu:///system"
 }
 
 %LIBVIRT_POOL_IMPORT%
@@ -16,18 +17,25 @@ provider "libvirt" {
 resource "libvirt_pool" "tf_disks" {
     name = "tf_disks"
     type = "dir"
-    target {
+    target = {
         path = "/opt/terraform/disks"
+    }
+    lifecycle {
+        prevent_destroy = true
     }
 }
 
 resource "libvirt_volume" "image_base" {
   name = "baseimage-qcow2"
   pool = libvirt_pool.tf_disks.name
-  source = "%CLOUDIMG%"
+  create = {
+      content = {
+          url = "%CLOUDIMG%"
+      }
+  }
   format = "qcow2"
   lifecycle {
-    prevent_destroy = true
+      prevent_destroy = true
   }
   depends_on = [libvirt_pool.tf_disks]
 }

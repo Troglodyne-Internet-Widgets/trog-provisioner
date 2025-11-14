@@ -1,9 +1,13 @@
 resource "libvirt_volume" "%MONGLED%-qcow2" {
-  name = "%REPLACEME%-qcow2"
-  pool = libvirt_pool.tf_disks.name
-  base_volume_id = libvirt_volume.image_base.id
-  format = "qcow2"
-  size = %GIGGLEBYTES%
+    name = "%REPLACEME%-qcow2"
+    pool = libvirt_pool.tf_disks.name
+    backing_store = {
+  	    path = libvirt_volume.image_base.path
+        format = "qcow2"
+    }
+    format   = "qcow2"
+    capacity = %GIGGLEBYTES%
+    depends_on = [libvirt_volume.image_base]
 }
 
 data "template_file" "user_data_%MONGLED%" {
@@ -18,64 +22,118 @@ resource "libvirt_cloudinit_disk" "commoninit_%MONGLED%" {
   name           = "%MONGLED%_commoninit.iso"
   user_data      = data.template_file.user_data_%MONGLED%.rendered
   network_config = data.template_file.network_config_%MONGLED%.rendered
-  pool           = libvirt_pool.tf_disks.name
+  meta_data      = yamlencode({
+    instance-id = "%REPLACEME%"
+    local-hostname = "%REPLACEME%"
+  })
+}
+
+resource "libvirt_volume" "cloudinit_%MONGLED%" {
+  name   = "cloudinit_%MONGLED%"
+  pool   = libvirt_pool.tf_disks.name
+  format = "iso"
+
+  create = {
+    content = {
+      url = libvirt_cloudinit_disk.commoninit_%MONGLED%.path
+    }
+  }
 }
 
 resource "libvirt_domain" "%MONGLED%" {
-  name   = "%REPLACEME%"
-  memory = "4092"
-  vcpu   = 2
+	name   = "%REPLACEME%"
+	memory = "4092"
+	unit   = "MiB"
+	vcpu   = 2
+	type   = "kvm"
+	running = true
+	autostart = true
 
-  cloudinit = libvirt_cloudinit_disk.commoninit_%MONGLED%.id
+	features = {
+		acpi = true
+		apic = true
+		ioapic_driver = "kvm"
+		hap = "on"
+		pae = true
+	}
 
-  network_interface {
-    network_name = "default"
-    wait_for_lease = true
-  }
-  network_interface {
-    bridge = "%BRIDGENAME%"
-  }
+	os = {
+		type = "hvm"
+		arch = "x86_64"
+		machine = "q35"
+		boot_devices = ["hd"]
+	}
 
-  disk {
-    volume_id = libvirt_volume.%MONGLED%-qcow2.id
-  }
+    devices = {
 
-  # IMPORTANT: this is a known bug on cloud images, since they expect a console
-  # we need to pass it
-  # https://bugs.launchpad.net/cloud-images/+bug/1573095
-  console {
-    type        = "pty"
-    target_port = "0"
-    target_type = "serial"
-  }
+		interfaces = [
+			{
+				type  = "network"
+				model = "virtio"
+				source = {
+					network = "default"
+				}
+				wait_for_ip = {
+					source  = "lease"
+					timeout = 300
+				}
+			},
+			{
+				type   = "bridge"
+				model  = "virtio"
+				source = {
+					bridge = "%BRIDGENAME%"
+				}
+			}
+		]
 
-  console {
-    type        = "pty"
-    target_type = "virtio"
-    target_port = "1"
-  }
+		disks = [
+		  {
+			source = {
+				pool = "tf_disks"
+				volume = libvirt_volume.%MONGLED%-qcow2.name
+			}
+			target = {
+				dev = "vda"
+				bus = "virtio"
+			}
+			device = "disk"
+		  },
+		  {
+			source = {
+				file = libvirt_cloudinit_disk.commoninit_%MONGLED%.path
+			}
+			target = {
+				#XXX THIS BLOWS UP IF YOU SPECIFY 'cdrom' PROPERLY!!!
+				dev = "sda"
+				bus = "sata"
+			}
+			device = "cdrom"
+		  }
+		]
 
-  graphics {
-    type = "vnc"
-    listen_type = "address"
-    autoport = true
-  }
-
-  video {
-    type = "virtio"
-  }
-
-#  provisioner "file" {
-#    source      = "${path.module}/rsyslog.conf"
-#    destination = "/etc/rsyslog/10-ship-logs-to-hv.conf"
-#  
-#    connection {
-#        type                = "ssh"
-#        user                = "root"
-#        host                = libvirt_domain.%MONGLED%.network_interface[0].addresses[0]
-#        private_key         = file("${path.module}/key.rsa")
-#        timeout             = "2m"
-#    }
-#
-#  }
+		# IMPORTANT: this is a known bug on cloud images, since they expect a console
+		# we need to pass it
+		# https://bugs.launchpad.net/cloud-images/+bug/1573095
+		consoles = [
+			{
+				type        = "pty"
+				target_port = "0"
+				target_type = "serial"
+			},
+			{
+				type        = "pty"
+				target_type = "virtio"
+				target_port = "1"
+			}
+		]
+		graphics = {
+		    vnc = {
+			    autoport = "yes"
+		    }
+		}
+		video = {
+			type = "virtio"
+		}
+	}
 }

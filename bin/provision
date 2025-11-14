@@ -293,7 +293,7 @@ sub mongle_terraform_template {
     print "Using outbound bridge $bridge_device\n";
 
     # OK, let's get the UUID of our storage pool IN CASE we are re-using it
-    my $pool_info = qx/virsh pool-list --uuid --name/;
+    my $pool_info = qx/virsh pool-list --uuid --name --all/;
     my %pools;
     open my $pd, '<', \$pool_info;
     foreach my $line (<$pd>) {
@@ -305,7 +305,7 @@ sub mongle_terraform_template {
     my $imagedir = "$domain_dir/$domain";
     # TODO make this configurable so we can use lvm
     my $libvirt_pool = $pools{tf_disks};
-    my ($import_block, $image_block) = ('','');
+    my ($import_block, $image_block) = ('', '');
     if ($libvirt_pool) {
         print "Re-Using existing libvirt pool $libvirt_pool\n";
         $import_block = qq|
@@ -314,9 +314,6 @@ import {
     id = "$libvirt_pool"
 }
 |;
-        #Like above, if the relevant baseimage exists, just import it
-        my $baseimage = '/opt/terraform/disks/baseimage-qcow2';
-        $image = $baseimage if -f $baseimage;
     }
 
     my $domain_mongled = $domain;
@@ -338,7 +335,7 @@ import {
         #$tf_template =~ s/%PKEY_LOC%/$pkey_loc/gmx;
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
-        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
+#        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
 
         File::Slurper::write_text("/opt/terraform/$to_mongle{$file}", $tf_template);
     }
@@ -404,12 +401,12 @@ sub mongle_network_configuration {
             config  => [
                 {
                     type => 'physical',
-                    name => 'ens4',
+                    name => 'enp1s1',
                     subnets => \@subnets,
                 },
                 {
                     type => 'physical',
-                    name => 'ens3',
+                    name => 'enp1s0',
                     subnets => [
                         {
                             type => 'dhcp',
