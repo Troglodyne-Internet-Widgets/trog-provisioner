@@ -153,11 +153,15 @@ sub provision_domain {
     my $qdn = $domain;
     $qdn = $depends if $depends;
     $qdn =~ s/\.\S+$//;
+
+    #XXX this can be fooled if you have two VMs, one a subdo of the other
     my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
     $old_ip = 'bogus' unless $old_ip;
     chomp $old_ip;
 
     if ($reuse) {
+        #$old_ip = $reuse;
+
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         my %opts = ( host => $old_ip );
         $opts{user}     = $reuser;
@@ -170,6 +174,9 @@ sub provision_domain {
         # Otherwise we'll use the agent.
         $opts{key_path} = "$domain_dir/$domain/key.rsa";
         $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
+        print "Attempting to access Machine\n";
+        use Data::Dumper;
+        print Dumper(\%opts);
         my $ssh = Net::OpenSSH::More->new(%opts);
 
         my $output = '';
@@ -188,9 +195,9 @@ sub provision_domain {
         my $ips  = _coerce_array($config->param('ips'));
         my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
         my $parsed = YAML::XS::Load($existing_nc);
-        my $num_ips = scalar(@{$parsed->{network}{ethernets}{ens4}{addresses}});
-        @{$parsed->{network}{ethernets}{ens4}{addresses}} = uniq(@{$parsed->{network}{ethernets}{ens4}{addresses}}, map { "$_/24"} @$ips);
-        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{ens4}{addresses}})) {
+        my $num_ips = scalar(@{$parsed->{network}{ethernets}{enp1s1}{addresses}});
+        @{$parsed->{network}{ethernets}{enp1s1}{addresses}} = uniq(@{$parsed->{network}{ethernets}{enp1s1}{addresses}}, map { "$_/24"} @$ips);
+        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{enp1s1}{addresses}})) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
             File::Slurper::write_text($new_config, $encoded);
@@ -224,18 +231,23 @@ sub provision_domain {
     my $result = 0;
     # If something named this domain exists, but is supposed to depend on something else, destroy it.
     clean_domain_resources($domain_mongled);
+
     system(qw{terraform init});
     system(qw{terraform plan -out tf.plan});
     system(qw{terraform apply tf.plan});
     $result = $? >> 8;
     die "Terraform cried uncle" if $result;
 
+    # If we're not re-using the VM, waste the old DHCP lease, so we don't fill up the table and gum everything up.
+    my $nuked = qx#VIR_BRIDGE_NAME=virbr0 /usr/libexec/libvirt_leaseshelper del ip $old_ip#;
+    print qq#VIR_BRIDGE_NAME=virbr0 /usr/libexec/libvirt_leaseshelper del ip $old_ip\n#;
+
     print "Waiting for VM to come live...";
     my $new_ip='';
-    my $oldip_grep = '';
-    $oldip_grep = "| grep -v $old_ip";
+    my $oldip_grep = "| grep -v $old_ip";
     for (1..30) {
         $new_ip = qx#virsh net-dhcp-leases default | grep $qdn $oldip_grep | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
+        print qq#virsh net-dhcp-leases default | grep $qdn $oldip_grep | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//\n#;
         chomp $new_ip;
         last if $new_ip && ($new_ip ne $old_ip);
         print ".";
