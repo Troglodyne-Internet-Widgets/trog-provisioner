@@ -195,9 +195,9 @@ sub provision_domain {
         my $ips  = _coerce_array($config->param('ips'));
         my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
         my $parsed = YAML::XS::Load($existing_nc);
-        my $num_ips = scalar(@{$parsed->{network}{ethernets}{enp1s1}{addresses}});
-        @{$parsed->{network}{ethernets}{enp1s1}{addresses}} = uniq(@{$parsed->{network}{ethernets}{enp1s1}{addresses}}, map { "$_/24"} @$ips);
-        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{enp1s1}{addresses}})) {
+        my $num_ips = scalar(@{$parsed->{network}{ethernets}{enp2s0}{addresses}});
+        @{$parsed->{network}{ethernets}{enp2s0}{addresses}} = uniq(@{$parsed->{network}{ethernets}{enp2s0}{addresses}}, map { "$_/24"} @$ips);
+        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{enp2s0}{addresses}})) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
             File::Slurper::write_text($new_config, $encoded);
@@ -413,8 +413,13 @@ sub mongle_network_configuration {
             config  => [
                 {
                     type => 'physical',
-                    name => 'enp1s1',
+                    name => 'enp2s0',
                     subnets => \@subnets,
+                    gateway4 => $gw,
+                    nameservers => {
+                        search => [$domain],
+                        addresses => $res,
+                    }
                 },
                 {
                     type => 'physical',
