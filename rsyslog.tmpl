@@ -1,7 +1,5 @@
 # Rsyslog ingest for %DOMAIN%
 
-$ModLoad imtcp
-$InputTCPServerRun 514
-
-if $hostname isequal '%DOMAIN%' then /var/log/hosts/%DOMAIN%.log
-& ~
+if $hostname == '%DOMAIN%' then {
+	action(type="omfile" file="/var/log/hosts/%DOMAIN%.log")
+}
