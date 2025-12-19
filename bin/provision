@@ -567,8 +567,16 @@ sub mongle_logging_config {
     my $local_config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog.tmpl");
     $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
+    # Write the local rsyslog conf
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
     File::Slurper::write_text($lcf, $local_config_template);
+
+    # Write the local rsyslog logrotate conf
+    File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
+
+    #TODO die if these fail
+    system(qw{systemctl reload logrotate});
+    system(qw{systemctl reload rsyslogd});
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;

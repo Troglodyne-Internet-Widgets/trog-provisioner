@@ -1,0 +1,10 @@
+/var/log/hosts/* {
+	rotate 12
+    weekly
+    compress
+    delaycompress
+    missingok
+    create 640  root adm
+    postrotate
+    endscript
+}
