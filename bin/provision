@@ -17,6 +17,8 @@ use File::Which qw {which};
 use Getopt::Long qw{GetOptionsFromArray};
 use Net::OpenSSH::More;
 use Net::EmptyPort;
+use XML::Twig;
+use JSON::MaybeXS;
 
 sub _coerce_array {
     return \@_;
@@ -26,6 +28,7 @@ sub _coerce_array {
 # https://github.com/HarbourHeading/KVM-GPU-Passthrough
 
 our $domain_dir;
+our $dryrun;
 sub main {
     my @args = @_;
 
@@ -33,6 +36,7 @@ sub main {
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'domaindir=s' => \$domain_dir,
+        'dryrun'      => \$dryrun,
     );
 
     my $domain = shift @args;
@@ -62,6 +66,14 @@ sub main {
     # Stash domain dir in config object for later use
     $config->param('domain_dir', $domain_dir);
 
+    # Fix the terraform state.
+    # We have to do this every time, for every single known domain.
+    # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
+    my $statefile  = "/opt/terraform/config/terraform.tfstate";
+    my $tf_domains = get_tf_managed_domains($statefile);
+    my %volatile   = extract_volatile_libvirt_info($tf_domains);
+    brainwash_tfstate($statefile, %volatile);
+
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
     my $skey = "$domain_dir/$domain/key.rsa";
@@ -76,13 +88,17 @@ sub main {
 
         $skey = "$domain_dir/$depends/key.rsa";
         ($reuser, $reuse) = provision_domain($dconfig, $depends, $reuse, $reuser);
-        my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
-        wait_for_cloud_init($ssh);
-        wait_for_makefile($ssh, $depends);
+        if (!$dryrun) {
+            my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
+            wait_for_cloud_init($ssh);
+            wait_for_makefile($ssh, $depends);
+        }
 
     }
     #TODO need to figure out how to apply the cloud-init for the second domain if deps are active
     my ($user, $ip) = provision_domain($config, $domain, $reuse, $reuser, $depends);
+    return 0 if $dryrun;
+
     my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
     wait_for_cloud_init($ssh);
     wait_for_makefile($ssh, $domain);
@@ -160,6 +176,7 @@ sub provision_domain {
     chomp $old_ip;
 
     if ($reuse) {
+        return ($reuser, $old_ip) if $dryrun;
         #$old_ip = $reuse;
 
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
@@ -175,8 +192,6 @@ sub provision_domain {
         $opts{key_path} = "$domain_dir/$domain/key.rsa";
         $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
         print "Attempting to access Machine\n";
-        use Data::Dumper;
-        print Dumper(\%opts);
         my $ssh = Net::OpenSSH::More->new(%opts);
 
         my $output = '';
@@ -225,6 +240,8 @@ sub provision_domain {
     # TODO move the deletion of unneeded resources above the SSH reuse stuff, remove dependent VMs from conf.
     my $tf = mongle_terraform_template($config);
     print "Wrote $tf\n";
+
+    return ($config->param('admin_user'), $old_ip) if $dryrun;
 
     chdir "/opt/terraform/config";
     # Figure out if we need to liquidate/respawn/spawn existing stuff
@@ -336,6 +353,7 @@ import {
         'domain.tmpl' => "config/$domain.tf",
     );
 
+    my @files_mongled;
     foreach my $file (keys(%to_mongle)) {
         my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
 
@@ -349,13 +367,15 @@ import {
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
 
-        File::Slurper::write_text("/opt/terraform/$to_mongle{$file}", $tf_template);
+        my $tfile = "/opt/terraform/$to_mongle{$file}";
+        File::Slurper::write_text($tfile, $tf_template);
+        push(@files_mongled, $tfile);
     }
 
     #XXX tf plugin should do this automatically, but does not
     unlink "/opt/terraform/disks/commoninit.iso";
 
-    return "/opt/terraform/config/main.tf";
+    return join(', ', @files_mongled);
 }
 
 # Slam in the IPs, gw, resolvers
@@ -575,7 +595,7 @@ sub mongle_logging_config {
     File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
 
     #TODO die if these fail
-    system(qw{systemctl reload rsyslogd});
+    system(qw{systemctl restart rsyslog});
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;
@@ -583,6 +603,98 @@ sub mongle_logging_config {
     my $lf = "$domain_dir/$domain/rsyslog.conf";
     File::Slurper::write_text($lf, $config_template);
     return $lf;
+}
+
+sub get_tf_managed_domains {
+    my ($statefile) = @_;
+    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
+
+    my $parsed = $json->decode(File::Slurper::read_text($statefile));
+
+    my @domains;
+    foreach my $res (@{$parsed->{resources}}) {
+        next unless $res->{type} eq 'libvirt_domain';
+        push(@domains, $res->{name});
+    }
+    return \@domains;
+}
+
+sub extract_volatile_libvirt_info {
+    my ($domains) = @_;
+
+    my %info;
+    my $domain;
+
+    my $extract_console = sub {
+        my ($t, $section) = @_;
+
+        my $source = $section->first_child('source');
+        my $target  = $section->first_child('target');
+        my $name  = $target ? $target->att('type') : '';
+        $info{$domain}{$name} = $source->att('path') if $source && $name;
+        $section->purge();
+    };
+
+    my $extract_graphics = sub {
+        my ($t, $section) = @_;
+        my $type = $section->att('type');
+        $info{$domain}{$type} = $section->att('port');
+        $section->purge();
+    };
+
+    my $xml = XML::Twig->new(
+        twig_roots => {
+            'console'  => $extract_console,
+            'graphics' => $extract_graphics,
+        },
+        twig_print_outside_roots => 0,
+    );
+
+    foreach my $mongled (@$domains) {
+        $domain = $mongled;
+        $domain =~ s/-/\./g;
+
+        # First, see if the domain is up.  If it's not, we don't care.
+        my $state = `virsh dominfo $domain | grep 'State'`;
+        next if $state !~ m/running/i;
+
+        my $raw = `virsh dumpxml $domain 2>&1`;
+        return () if $raw =~ m/failed to get domain/;
+        $domain = $mongled;
+        $xml->parse($raw);
+    }
+
+    return %info;
+}
+
+# I AM YURI. YOU WILL OBEY ME.
+sub brainwash_tfstate {
+    my ($statefile, %opts) = @_;
+
+    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
+
+    my $parsed = $json->decode(File::Slurper::read_text($statefile));
+
+    foreach my $mongled (keys %opts) {
+        foreach my $res (@{$parsed->{resources}}) {
+            next unless $res->{type} eq 'libvirt_domain';
+            next unless $res->{name} eq $mongled;
+            foreach my $instance (@{$res->{instances}}) {
+                if (exists $instance->{attributes}{devices}{consoles}) {
+                    foreach my $console (@{$instance->{attributes}{devices}{consoles}}) {
+                        $console->{source} = $opts{$mongled}{$console->{target_type}} if $opts{$mongled}{$console->{target_type}};
+                    }
+                }
+                $instance->{attributes}{devices}{graphics}{vnc}{port}   = $opts{$mongled}{vnc}   if $opts{$mongled}{vnc};
+                $instance->{attributes}{devices}{graphics}{spice}{port} = $opts{$mongled}{spice} if $opts{$mongled}{spice};
+            }
+        }
+    }
+    File::Copy::copy($statefile, "$statefile.bak");
+    my $encoded = $json->encode($parsed);
+    File::Slurper::write_text($statefile, $encoded);
+    print "Overwrote $statefile with current VM socket state, old saved as $statefile.bak\n";
+    return 1;
 }
 
 exit main(@ARGV) unless caller;
