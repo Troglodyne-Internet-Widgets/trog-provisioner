@@ -575,7 +575,6 @@ sub mongle_logging_config {
     File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
 
     #TODO die if these fail
-    system(qw{systemctl reload logrotate});
     system(qw{systemctl reload rsyslogd});
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
