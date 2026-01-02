@@ -69,10 +69,7 @@ sub main {
     # Fix the terraform state.
     # We have to do this every time, for every single known domain.
     # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
-    my $statefile  = "/opt/terraform/config/terraform.tfstate";
-    my $tf_domains = get_tf_managed_domains($statefile);
-    my %volatile   = extract_volatile_libvirt_info($tf_domains);
-    brainwash_tfstate($statefile, %volatile);
+    sync_tf_state_with_libvirt();
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
@@ -103,7 +100,17 @@ sub main {
     wait_for_cloud_init($ssh);
     wait_for_makefile($ssh, $domain);
 
+    # If we don't do this, any subsequent manual tf plan will explode violently
+    sync_tf_state_with_libvirt();
+
     return 0;
+}
+
+sub sync_tf_state_with_libvirt {
+    my $statefile  = "/opt/terraform/config/terraform.tfstate";
+    my $tf_domains = get_tf_managed_domains($statefile);
+    my %volatile   = extract_volatile_libvirt_info($tf_domains);
+    brainwash_tfstate($statefile, %volatile);
 }
 
 sub wait_for_cloud_init {
