@@ -97,6 +97,14 @@ sub main {
     return 0 if $dryrun;
 
     my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
+
+	if (-f "$domain_dir/$domain/devices.map") {
+		print "Syncing disk map\n";
+		my $r = $ssh->sftp->put( "$domain_dir/$domain/devices.map", "devices.map" );
+		die "could not sync devices map!" unless $r;
+		$ssh->cmd("sudo cp devices.map /root/devices.map");
+	}
+
     wait_for_cloud_init($ssh);
     wait_for_makefile($ssh, $domain);
 
@@ -340,7 +348,6 @@ sub mongle_terraform_template {
     }
     close $pd;
 
-    my $imagedir = "$domain_dir/$domain";
     # TODO make this configurable so we can use lvm
     my $libvirt_pool = $pools{tf_disks};
     my ($import_block, $image_block) = ('', '');
@@ -362,6 +369,59 @@ import {
         'domain.tmpl' => "config/$domain.tf",
     );
 
+	# If the user instructs us to attach other disks via disks.txt, we should obey
+	my $disks_config = "/opt/domains/$domain/mounts.txt";
+	my $attach = ',';
+	my $mapper = '';
+	if (-f $disks_config) {
+		my $disks = File::Slurper::read_text($disks_config);
+		my @devnames = 'vdb'..'vdz';
+		my @extra_disks;
+		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
+			my ($pool, $disk) = split(/=/, $diskspec);
+			# Attach to the guest IFF the thing exists
+			my $dev = shift @devnames;
+			die "Ran out of vdnames!" unless $dev;
+
+			# we have to build a mapping file which will end up in /root.
+			$mapper .= "$disk=/dev/$dev\n";
+
+			if ($pool ne 'file') {
+				push(@extra_disks,qq|
+		  {
+			source = {
+				pool = "tf_disks"
+				volume = "$disk"
+			}
+			target = {
+				dev = "$dev"
+				bus = "virtio"
+			}
+			device = "disk"
+		  }|);
+				next;
+			}
+			#XXX untested, may not work?
+			push(@extra_disks,qq|
+		  {
+			source = {
+				file = {
+					file = "$disk"
+				}
+			}
+			target = {
+				dev = "$dev"
+				bus = "virtio"
+			}
+			device = "disk"
+		  }|);
+		}
+		$attach .= join(',', @extra_disks).",";
+
+	}
+	# Write /root/devices.map
+	File::Slurper::write_text("/opt/domains/$domain/devices.map", $mapper);
+
     my @files_mongled;
     foreach my $file (keys(%to_mongle)) {
         my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
@@ -375,6 +435,7 @@ import {
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
+		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
 
         my $tfile = "/opt/terraform/$to_mongle{$file}";
         File::Slurper::write_text($tfile, $tf_template);

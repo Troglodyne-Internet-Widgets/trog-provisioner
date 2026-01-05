@@ -98,7 +98,7 @@ resource "libvirt_domain" "%MONGLED%" {
 				bus = "virtio"
 			}
 			device = "disk"
-		  },
+		  }%EXTRADISKS%
 		  {
 			source = {
 				file = libvirt_cloudinit_disk.commoninit_%MONGLED%.path
