@@ -116,9 +116,10 @@ sub main {
 
 sub sync_tf_state_with_libvirt {
     my $statefile  = "/opt/terraform/config/terraform.tfstate";
+    return unless -f $statefile;
     my $tf_domains = get_tf_managed_domains($statefile);
     my %volatile   = extract_volatile_libvirt_info($tf_domains);
-    brainwash_tfstate($statefile, %volatile);
+    #brainwash_tfstate($statefile, %volatile);
 }
 
 sub wait_for_cloud_init {
@@ -377,8 +378,19 @@ import {
 		my $disks = File::Slurper::read_text($disks_config);
 		my @devnames = 'vdb'..'vdz';
 		my @extra_disks;
+        my $order = 2;
 		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
 			my ($pool, $disk) = split(/=/, $diskspec);
+
+            #TODO should allow the user to pass this via diskspec
+            my $type = "qcow2";
+
+            # Don't do anything for fuse devices
+            next if $pool eq 'fuse';
+
+            # Proper boot order...
+            $order++;
+
 			# Attach to the guest IFF the thing exists
 			my $dev = shift @devnames;
 			die "Ran out of vdnames!" unless $dev;
@@ -386,23 +398,35 @@ import {
 			# we have to build a mapping file which will end up in /root.
 			$mapper .= "$disk=/dev/$dev\n";
 
-			if ($pool ne 'file') {
-				push(@extra_disks,qq|
+            if ($pool eq 'raw') {
+                # Just use a raw block device
+                push(@extra_disks,qq|
 		  {
 			source = {
-				pool = "tf_disks"
-				volume = "$disk"
+                block = {
+				    dev = "$disk"
+                }
 			}
+            driver = {
+                name = "qemu"
+                type = "raw"
+            }
 			target = {
 				dev = "$dev"
 				bus = "virtio"
 			}
+            boot = {
+                order = $order
+            }
 			device = "disk"
+            type = "block"
 		  }|);
-				next;
-			}
-			#XXX untested, may not work?
-			push(@extra_disks,qq|
+                next;
+            }
+
+            if ($pool eq 'file') {
+			    #XXX untested, may not work?
+			    push(@extra_disks,qq|
 		  {
 			source = {
 				file = {
@@ -413,6 +437,34 @@ import {
 				dev = "$dev"
 				bus = "virtio"
 			}
+            driver = {
+                name = "qemu"
+                type = "$type"
+            }
+            boot = {
+                order = $order
+            }
+			device = "disk"
+		  }|);
+            }
+            # Otherwise just assume we got a pool name
+	        push(@extra_disks,qq|
+		  {
+			source = {
+				pool = "$pool"
+				volume = "$disk"
+			}
+			target = {
+				dev = "$dev"
+				bus = "virtio"
+			}
+            driver = {
+                name = "qemu"
+                type = "$type"
+            }
+            boot = {
+                order = $order
+            }
 			device = "disk"
 		  }|);
 		}
@@ -456,6 +508,12 @@ sub mongle_network_configuration {
     my $ips  = _coerce_array($config->param('ips'));
     my $gw   = $config->param('gateway');
     my $res  = _coerce_array($config->param('resolvers'));
+
+    # XXX ugh there is no way to set consistent devnames, fml
+    my $dhcp_devname = $config->param('dhcp_devname');
+    die "MUST SET dhcp_devname in provision.conf" unless $dhcp_devname;
+    my $bridge_devname = $config->param('bridge_devname');
+    die "MUST SET bridge_devname in provision.conf" unless $dhcp_devname;
 
     # We need two adapters, one on virbr0 and another on the bridge.
     # So, we need to figure out:
@@ -503,7 +561,7 @@ sub mongle_network_configuration {
             config  => [
                 {
                     type => 'physical',
-                    name => 'enp2s0',
+                    name => $bridge_devname,
                     subnets => \@subnets,
                     gateway4 => $gw,
                     nameservers => {
@@ -513,7 +571,7 @@ sub mongle_network_configuration {
                 },
                 {
                     type => 'physical',
-                    name => 'enp1s0',
+                    name => $dhcp_devname,
                     subnets => [
                         {
                             type => 'dhcp',
@@ -752,11 +810,15 @@ sub brainwash_tfstate {
             foreach my $instance (@{$res->{instances}}) {
                 if (exists $instance->{attributes}{devices}{consoles}) {
                     foreach my $console (@{$instance->{attributes}{devices}{consoles}}) {
-                        $console->{source} = $opts{$mongled}{$console->{target_type}} if $opts{$mongled}{$console->{target_type}};
+                        $console->{source}{pty} = $opts{$mongled}{$console->{target}{type}} if $opts{$mongled}{$console->{target}{type}};
                     }
                 }
-                $instance->{attributes}{devices}{graphics}{vnc}{port}   = $opts{$mongled}{vnc}   if $opts{$mongled}{vnc};
-                $instance->{attributes}{devices}{graphics}{spice}{port} = $opts{$mongled}{spice} if $opts{$mongled}{spice};
+                if (exists $instance->{attributes}{devices}{graphics}) {
+                    foreach my $graphic (@{$instance->{attributes}{devices}{consoles}}) {
+                        $graphic->{vnc}{port}   = $opts{$mongled}{vnc}   if $opts{$mongled}{vnc}   && exists $graphic->{vnc};
+                        $graphic->{spice}{port} = $opts{$mongled}{spice} if $opts{$mongled}{spice} && exists $graphic->{spice};
+                    }
+                }
             }
         }
     }

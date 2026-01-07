@@ -24,6 +24,8 @@ WriteMakefile(
     'YAML::XS'       => 0,
     'JSON::PP'       => 0,
     'List::Util'     => 0,
+    'XML::Twig'      => 0,
+    'JSON::MaybeXS'  => 0,
   },
   test => {TESTS => 't/*.t'}
 );

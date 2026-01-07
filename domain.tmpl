@@ -3,11 +3,18 @@ resource "libvirt_volume" "%MONGLED%-qcow2" {
     pool = libvirt_pool.tf_disks.name
     backing_store = {
   	    path = libvirt_volume.image_base.path
-        format = "qcow2"
+        format = {
+            type = "qcow2"
+        }
     }
-    format   = "qcow2"
+    target = {
+        format = {
+            type = "qcow2"
+        }
+    }
     capacity = %GIGGLEBYTES%
     depends_on = [libvirt_volume.image_base]
+    type = "file"
 }
 
 data "template_file" "user_data_%MONGLED%" {
@@ -31,7 +38,11 @@ resource "libvirt_cloudinit_disk" "commoninit_%MONGLED%" {
 resource "libvirt_volume" "cloudinit_%MONGLED%" {
   name   = "cloudinit_%MONGLED%"
   pool   = libvirt_pool.tf_disks.name
-  format = "iso"
+  target = {
+      format = {
+        type = "iso"
+      }
+  }
 
   create = {
     content = {
@@ -43,7 +54,7 @@ resource "libvirt_volume" "cloudinit_%MONGLED%" {
 resource "libvirt_domain" "%MONGLED%" {
 	name   = "%REPLACEME%"
 	memory = "4092"
-	unit   = "MiB"
+	memory_unit   = "MiB"
 	vcpu   = 2
 	type   = "kvm"
 	running = true
@@ -51,9 +62,6 @@ resource "libvirt_domain" "%MONGLED%" {
 
 	features = {
 		acpi = true
-		apic = true
-		ioapic_driver = "kvm"
-		hap = "on"
 		pae = true
 	}
 
@@ -61,7 +69,6 @@ resource "libvirt_domain" "%MONGLED%" {
 		type = "hvm"
 		arch = "x86_64"
 		machine = "q35"
-		boot_devices = ["hd"]
 	}
 
     devices = {
@@ -69,9 +76,13 @@ resource "libvirt_domain" "%MONGLED%" {
 		interfaces = [
 			{
 				type  = "network"
-				model = "virtio"
+				model = {
+                    type = "virtio"
+                }
 				source = {
-					network = "default"
+					network = {
+                        network = "default"
+                    }
 				}
 				wait_for_ip = {
 					source  = "lease"
@@ -80,9 +91,13 @@ resource "libvirt_domain" "%MONGLED%" {
 			},
 			{
 				type   = "bridge"
-				model  = "virtio"
+				model  = {
+                    type = "virtio"
+                }
 				source = {
-					bridge = "%BRIDGENAME%"
+					bridge = {
+                        bridge = "%BRIDGENAME%"
+                    }
 				}
 			}
 		]
@@ -91,23 +106,42 @@ resource "libvirt_domain" "%MONGLED%" {
 		  {
 			source = {
 				pool = "tf_disks"
-				volume = libvirt_volume.%MONGLED%-qcow2.name
+				volume = {
+                    pool = "tf_disks"
+                    volume = libvirt_volume.%MONGLED%-qcow2.name
+                }
 			}
 			target = {
 				dev = "vda"
 				bus = "virtio"
 			}
+            driver = {
+                name = "qemu"
+                type = "qcow2"
+            }
+            boot = {
+                order = 1
+            }
 			device = "disk"
 		  }%EXTRADISKS%
 		  {
 			source = {
-				file = libvirt_cloudinit_disk.commoninit_%MONGLED%.path
+				file = {
+                    file = libvirt_cloudinit_disk.commoninit_%MONGLED%.path
+                }
 			}
 			target = {
 				#XXX THIS BLOWS UP IF YOU SPECIFY 'cdrom' PROPERLY!!!
 				dev = "sda"
 				bus = "sata"
 			}
+            driver = {
+                name = "qemu"
+                type = "raw"
+            }
+            boot = {
+                order = 2
+            }
 			device = "cdrom"
 		  }
 		]
@@ -117,21 +151,27 @@ resource "libvirt_domain" "%MONGLED%" {
 		# https://bugs.launchpad.net/cloud-images/+bug/1573095
 		consoles = [
 			{
-				type        = "pty"
-				target_port = "0"
-				target_type = "serial"
+				type   = "pty"
+				target = {
+                    port = "0"
+				    type = "serial"
+                }
 			},
 			{
-				type        = "pty"
-				target_type = "virtio"
-				target_port = "1"
+				type   = "pty"
+				target = {
+                    type = "virtio"
+				    port = "1"
+                }
 			}
 		]
-		graphics = {
-		    vnc = {
-			    autoport = "yes"
-		    }
-		}
+		graphics = [
+            {
+                vnc = {
+                    auto_port = true
+                }
+            }
+        ]
 		video = {
 			type = "virtio"
 		}
