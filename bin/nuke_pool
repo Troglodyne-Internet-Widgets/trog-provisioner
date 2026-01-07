@@ -1,0 +1,8 @@
+#!/bin/bash
+
+#nuke the storage pool because tf = braindead
+
+rm -rf /opt/terraform/disks
+virsh pool-destroy tf_disks
+virsh pool-delete tf_disks
+virsh pool-undefine tf_disks
