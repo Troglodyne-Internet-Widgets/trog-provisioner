@@ -5,9 +5,11 @@
 # Wait until clown-init is done
 cloud-init status --wait
 
-# Make sure mailing works
-#echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc
-#echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc
+# Make sure mailing works by forcing send-only lo and enabling starttls
+[[ ! grep starttls.m4 /etc/mail/sendmail.mc ]] && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc
+[[ ! grep starttls.m4 /etc/mail/submit.mc ]] && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc
+[[ -f /etc/mail/sendmail.conf ]] && sed -i -e "s/eth0/lo/g" /etc/mail/sendmail.conf
+[[ -f /etc/mail/sendmail.conf ]] && systemctl restart sendmail
 newaliases
 
 # Make sure we can SSH into the HV ok
