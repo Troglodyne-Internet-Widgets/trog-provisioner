@@ -200,7 +200,7 @@ sub provision_domain {
         $opts{user}     = $reuser;
 
         # Make sure any existing VMs don't have this domain
-        clean_domain_resources($domain_mongled);
+        clean_domain_resources($domain,$domain_mongled);
         unlink "/opt/terraform/config/$domain.tf";
 
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
@@ -226,9 +226,13 @@ sub provision_domain {
         my $ips  = _coerce_array($config->param('ips'));
         my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
         my $parsed = YAML::XS::Load($existing_nc);
-        my $num_ips = scalar(@{$parsed->{network}{ethernets}{enp2s0}{addresses}});
-        @{$parsed->{network}{ethernets}{enp2s0}{addresses}} = uniq(@{$parsed->{network}{ethernets}{enp2s0}{addresses}}, map { "$_/24"} @$ips);
-        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{enp2s0}{addresses}})) {
+
+        my $primary_adapter_name = $config->param('bridge_devname');
+        die "Could not find primary adapter '$primary_adapter_name' in netplan config!" unless ref $parsed->{network}{ethernets}{$primary_adapter_name} eq 'HASH';
+
+        my $num_ips = scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}});
+        @{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}} = uniq(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}}, map { "$_/24"} @$ips);
+        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}})) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
             File::Slurper::write_text($new_config, $encoded);
@@ -263,7 +267,7 @@ sub provision_domain {
     # Figure out if we need to liquidate/respawn/spawn existing stuff
     my $result = 0;
     # If something named this domain exists, but is supposed to depend on something else, destroy it.
-    clean_domain_resources($domain_mongled);
+    clean_domain_resources($domain,$domain_mongled);
 
     system(qw{terraform init});
     system(qw{terraform plan -out tf.plan});
@@ -295,7 +299,18 @@ sub provision_domain {
 }
 
 sub clean_domain_resources {
-    my ($domain_mongled) = @_;
+    my ($domain,$domain_mongled) = @_;
+
+    #XXX sigh sigh sigh
+    # We also have to whack any VM which exists with this name but is shutdown because TF is incapable of fixing this
+    my $vm_list = qx{virsh list --all};
+    if ($vm_list =~ m/\Q$domain\E/) {
+        # Kill it, how frigging hard can it be???
+        print "Terminating existing VM $domain via virsh...\n";
+        system(qw{virsh destroy}, $domain);
+        system(qw{virsh undefine}, $domain);
+    }
+
     my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
     my $resources = qx{terraform state list};
     chomp $resources;
@@ -309,6 +324,7 @@ sub clean_domain_resources {
         #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
         system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
     }
+
 }
 
 sub wait_for_ssh {
@@ -723,7 +739,7 @@ sub mongle_logging_config {
     File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
 
     #TODO die if these fail
-    system(qw{systemctl restart rsyslog});
+    system(qw{sudo systemctl restart rsyslog});
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;
