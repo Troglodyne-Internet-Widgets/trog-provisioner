@@ -5,13 +5,6 @@
 # Wait until clown-init is done
 cloud-init status --wait
 
-# Make sure mailing works by forcing send-only lo and enabling starttls
-[[ ! grep starttls.m4 /etc/mail/sendmail.mc ]] && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc
-[[ ! grep starttls.m4 /etc/mail/submit.mc ]] && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc
-[[ -f /etc/mail/sendmail.conf ]] && sed -i -e "s/eth0/lo/g" /etc/mail/sendmail.conf
-[[ -f /etc/mail/sendmail.conf ]] && systemctl restart sendmail
-newaliases
-
 # Make sure we can SSH into the HV ok
 cat > /root/.ssh/config << EOF
 Host *
@@ -34,5 +27,7 @@ tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
 
 cd /tmp/domainsetup_%DOMAIN%
 
+# Run the makefile
 make 2>&1 | tee /var/log/%DOMAIN%.setup.log
+
 rm -rf /tmp/domainsetup_%DOMAIN%
