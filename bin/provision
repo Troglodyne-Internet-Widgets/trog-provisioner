@@ -389,11 +389,12 @@ import {
 	# If the user instructs us to attach other disks via disks.txt, we should obey
 	my $disks_config = "/opt/domains/$domain/mounts.txt";
 	my $attach = ',';
+    my $fsmounts = '';
 	my $mapper = '';
 	if (-f $disks_config) {
 		my $disks = File::Slurper::read_text($disks_config);
 		my @devnames = 'vdb'..'vdz';
-		my @extra_disks;
+		my @extra_disks,@filesystems;
         my $order = 2;
 		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
 			my ($pool, $disk) = split(/=/, $diskspec);
@@ -436,6 +437,29 @@ import {
             }
 			device = "disk"
             type = "block"
+		  }|);
+                next;
+            }
+
+            # Just mount a dir on the HV
+            if ($pool eq 'dir') {
+                push(@filesystems,qq|
+		  {
+			source = {
+                bind = {
+				    dir = "$disk"
+                }
+			}
+            target = {
+                dir = "$disk"
+            }
+            driver = {
+                type = "virtiofs"
+            }
+            boot = {
+                order = $order
+            }
+            access_mode="passthrough"
 		  }|);
                 next;
             }
@@ -484,8 +508,8 @@ import {
 			device = "disk"
 		  }|);
 		}
-		$attach .= join(',', @extra_disks).",";
-
+		$attach   .= join(',', @extra_disks).",";
+        $fsmounts = "[".join(',', @filesystems)."]";
 	}
 	# Write /root/devices.map
 	File::Slurper::write_text("/opt/domains/$domain/devices.map", $mapper);
@@ -504,6 +528,7 @@ import {
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
 		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
+        $tf_template =~ s/%FILESYSTEMS%/$fsmounts/gmx;
 
         my $tfile = "/opt/terraform/$to_mongle{$file}";
         File::Slurper::write_text($tfile, $tf_template);

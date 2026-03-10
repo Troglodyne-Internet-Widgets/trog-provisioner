@@ -10,8 +10,8 @@ WriteMakefile(
     resources => {
       repository => {
           type => 'git',
-          url  => 'git@github.com:Troglodyne-Internet-Widgets/tCMS.git',
-          web  => 'https://github.com/Troglodyne-Internet-Widgets/tCMS',
+          url  => 'git@github.com:Troglodyne-Internet-Widgets/trog-provisioner.git',
+          web  => 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner',
       },
     },
   },
@@ -26,6 +26,8 @@ WriteMakefile(
     'List::Util'     => 0,
     'XML::Twig'      => 0,
     'JSON::MaybeXS'  => 0,
+    'Net::OpenSSH::More' => 0,
+    'Net::EmptyPort'     => 0,
   },
   test => {TESTS => 't/*.t'}
 );

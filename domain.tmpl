@@ -146,6 +146,8 @@ resource "libvirt_domain" "%MONGLED%" {
 		  }
 		]
 
+        %FILESYSTEMS%
+
 		# IMPORTANT: this is a known bug on cloud images, since they expect a console
 		# we need to pass it
 		# https://bugs.launchpad.net/cloud-images/+bug/1573095
