@@ -96,6 +96,7 @@ sub main {
     my ($user, $ip) = provision_domain($config, $domain, $reuse, $reuser, $depends);
     return 0 if $dryrun;
 
+    print "ssh -i $skey $user\@$ip\n";
     my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
 
 	if (-f "$domain_dir/$domain/devices.map") {
@@ -281,6 +282,7 @@ sub provision_domain {
     my $nuked = qx#VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip#;
     print qq#VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip\n#;
 
+
     print "Waiting for VM to come live...";
     my $new_ip='';
     my $oldip_grep = "| grep -v $old_ip";
@@ -292,7 +294,7 @@ sub provision_domain {
         print ".";
         sleep 1;
     }
-    print "\nVM never came up!\n" unless $new_ip;
+    die "\nVM never came up!\n" unless $new_ip;
     print "\nAll Done!  The server should be live at $new_ip\n";
 
     return ($config->param('admin_user'), $new_ip);
@@ -394,7 +396,7 @@ import {
 	if (-f $disks_config) {
 		my $disks = File::Slurper::read_text($disks_config);
 		my @devnames = 'vdb'..'vdz';
-		my @extra_disks,@filesystems;
+		my (@extra_disks,@filesystems);
         my $order = 2;
 		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
 			my ($pool, $disk) = split(/=/, $diskspec);
@@ -413,7 +415,8 @@ import {
 			die "Ran out of vdnames!" unless $dev;
 
 			# we have to build a mapping file which will end up in /root.
-			$mapper .= "$disk=/dev/$dev\n";
+			$mapper .= "$disk=/dev/$dev\n" unless $pool eq 'dir';
+            $mapper .= "$disk=$dev\n"      if     $pool eq 'dir';
 
             if ($pool eq 'raw') {
                 # Just use a raw block device
@@ -441,23 +444,27 @@ import {
                 next;
             }
 
+            #XXX we may have to set binary.path='some_script' which is `virtiofs --inode-file-handles=mandatory $@`
             # Just mount a dir on the HV
             if ($pool eq 'dir') {
                 push(@filesystems,qq|
 		  {
 			source = {
-                bind = {
+                mount = {
 				    dir = "$disk"
                 }
 			}
             target = {
-                dir = "$disk"
+                dir = "$dev"
             }
             driver = {
                 type = "virtiofs"
             }
             boot = {
                 order = $order
+            }
+            binary = {
+                open_files = 4092
             }
             access_mode="passthrough"
 		  }|);
@@ -508,8 +515,8 @@ import {
 			device = "disk"
 		  }|);
 		}
-		$attach   .= join(',', @extra_disks).",";
-        $fsmounts = "[".join(',', @filesystems)."]";
+		$attach   .= join(',', grep { $_ } @extra_disks);
+        $fsmounts = "filesystems = [".join(',', grep { $_ } @filesystems)."]";
 	}
 	# Write /root/devices.map
 	File::Slurper::write_text("/opt/domains/$domain/devices.map", $mapper);
@@ -575,6 +582,12 @@ sub mongle_network_configuration {
 
     # Stash this in the config object for later use by the clown-config
     $config->param('hv_internal_ip', $virbr_ip);
+    # Figure the same with the HV's SSH port
+    # XXX because there might be multiple SSH instances running on the machine, we have to check config instead of netstat
+    my $ssh_port = qx#grep '^Port' /etc/ssh/sshd_config | awk '{print \$2}'#;
+    chomp $ssh_port;
+    die "Could not determine SSH port for HV" unless $ssh_port;
+    $config->param('hv_ssh_port', $ssh_port);
 
     # Such an astonishingly tedious format
     my @subnets = map {
@@ -729,14 +742,16 @@ sub mongle_cloud_init {
 
 sub mongle_setup_script {
     my $config = shift;
-    my $domain = $config->param('domain');
-    my $hvip   = $config->param('hv_internal_ip');
+    my $domain          = $config->param('domain');
+    my $hvip            = $config->param('hv_internal_ip');
+    my $hv_ssh_port     = $config->param('hv_ssh_port');
     my $pre_make_script = $config->param('pre_make_script');
 
     my ($username) = getpwuid($<);
 
     my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
     $script_template =~ s/%THISIP%/$hvip/gmx;
+    $script_template =~ s/%PORT%/$hv_ssh_port/gmx;
     $script_template =~ s/%DOMAIN%/$domain/gmx;
     $script_template =~ s/%THISDIR%/$domain_dir/gmx;
     $script_template =~ s/%USER%/$username/gmx;

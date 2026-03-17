@@ -60,6 +60,15 @@ resource "libvirt_domain" "%MONGLED%" {
 	running = true
 	autostart = true
 
+    memory_backing = {
+        memory_access = {
+            mode = "shared"
+        }
+        memory_source = {
+            type = "memfd"
+        }
+    }
+
 	features = {
 		acpi = true
 		pae = true
@@ -177,5 +186,8 @@ resource "libvirt_domain" "%MONGLED%" {
 		video = {
 			type = "virtio"
 		}
+        mem_balloon = {
+            model = "virtio"
+        }
 	}
 }

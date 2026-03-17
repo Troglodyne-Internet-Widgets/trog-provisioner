@@ -19,7 +19,7 @@ EOF
 chmod 0600 /root/.ssh/config
 
 # Transfer over the data
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
+scp -P %PORT% -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
 
 cd /tmp
 mkdir domainsetup_%DOMAIN%
