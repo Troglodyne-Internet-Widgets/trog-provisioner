@@ -279,8 +279,8 @@ sub provision_domain {
 
     # If we're not re-using the VM, waste the old DHCP lease, so we don't fill up the table and gum everything up.
 	my $leasehelper = -f "/usr/lib/libvirt/libvirt_leaseshelper" ? "/usr/lib/libvirt/libvirt_leaseshelper" : "/usr/libexec/libvirt_leaseshelper";
-    my $nuked = qx#VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip#;
-    print qq#VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip\n#;
+    my $nuked = qx#VIR_BRIDGE_NAME=virbr0 sudo $leasehelper del ip $old_ip#;
+    print qq#VIR_BRIDGE_NAME=virbr0 sudo $leasehelper del ip $old_ip\n#;
 
 
     print "Waiting for VM to come live...";
