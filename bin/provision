@@ -586,7 +586,8 @@ sub mongle_network_configuration {
     # XXX because there might be multiple SSH instances running on the machine, we have to check config instead of netstat
     my $ssh_port = qx#grep '^Port' /etc/ssh/sshd_config | awk '{print \$2}'#;
     chomp $ssh_port;
-    die "Could not determine SSH port for HV" unless $ssh_port;
+    warn "Could not determine SSH port for HV, assuming 22" unless $ssh_port;
+    $ssh_port ||=22;
     $config->param('hv_ssh_port', $ssh_port);
 
     # Such an astonishingly tedious format
