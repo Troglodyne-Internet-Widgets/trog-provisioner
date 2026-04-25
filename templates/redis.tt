@@ -1,0 +1,10 @@
+mkdir -p /etc/redis
+mkdir -p /var/log/redis
+chown redis:redis /var/log/redis
+chmod 0750 /var/log/redis
+cp redis.conf /etc/redis/redis.conf
+chown root:redis /etc/redis/redis.conf
+chmod 0640 /etc/redis/redis.conf
+[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[% script_dir %]/queue_postrun_task systemctl enable redis-server
+[% script_dir %]/queue_postrun_task systemctl restart redis-server
