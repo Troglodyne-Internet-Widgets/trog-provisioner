@@ -66,6 +66,9 @@ sub main {
     # Stash domain dir in config object for later use
     $config->param('domain_dir', $domain_dir);
 
+    # Start off by fixing a sillyness in virtiofs
+    File::Copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not place /usr/libexec/virtiofs-better');
+
     # Fix the terraform state.
     # We have to do this every time, for every single known domain.
     # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
@@ -464,6 +467,7 @@ import {
                 order = $order
             }
             binary = {
+                path = "/usr/libexec/virtiofs-better"
                 open_files = {
                     max = 4092
                 }

@@ -1,0 +1,3 @@
+#!/bin/sh
+
+/usr/libexec/virtiofsd --inode-file-handles='mandatory' $@
