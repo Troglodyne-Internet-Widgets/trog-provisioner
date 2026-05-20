@@ -44,3 +44,11 @@ From there the host should "Just Work"TM.
 See example.test/ for example usage.
 
 All the relevant resources will be stored in /vms on the HV.
+
+## UBUNTU DEPS
+
+virt-manager bridge-utils
+
+## IF YOU ENCOUNTER MYSTERIOUS 'cannot access image' issues
+
+It's almost certainly that you need to add an override for those dirs in either an apparmor config for libvirt-qemu or selinux.

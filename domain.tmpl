@@ -53,9 +53,9 @@ resource "libvirt_volume" "cloudinit_%MONGLED%" {
 
 resource "libvirt_domain" "%MONGLED%" {
 	name   = "%REPLACEME%"
-	memory = "4092"
+	memory = "%MUGUBYTES%"
 	memory_unit   = "MiB"
-	vcpu   = 2
+	vcpu   = %NUMCPUS%
 	type   = "kvm"
 	running = true
 	autostart = true

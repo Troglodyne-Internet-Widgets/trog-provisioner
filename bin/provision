@@ -32,6 +32,8 @@ our $dryrun;
 sub main {
     my @args = @_;
 
+    umask 0022;
+
     my ($reuse);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
@@ -67,7 +69,9 @@ sub main {
     $config->param('domain_dir', $domain_dir);
 
     # Start off by fixing a sillyness in virtiofs
-    File::Copy::copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not place /usr/libexec/virtiofs-better');
+    if (!-f '/usr/libexec/virtiofs-better') {
+    	File::Copy::copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not copy virtiofs-better to  /usr/libexec/virtiofs-better, you may have to do this manually');
+    }
 
     # Fix the terraform state.
     # We have to do this every time, for every single known domain.
@@ -350,10 +354,8 @@ sub mongle_terraform_template {
     my $domain = $config->param('domain');
     my $image  = $config->param('image');
     my $disk_size = $config->param('size');
-    #my $user      = $config->param('admin_user');
-    #my $pkey_loc  = $config->param('pkey_loc');
-
-    #die "Require admin_user & valid private key location (pkey_loc) to continue" unless $user && -f $pkey_loc;
+    my $ram_bytes = $config->param('memory');
+    my $cpus      = $config->param('cpus');
 
     my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
     die "Could not determine outbound bridge device!" unless $bridge_device;
@@ -535,8 +537,8 @@ import {
         $tf_template =~ s/%REPLACEME%/$domain/gmx;
         $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
         $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
-        #$tf_template =~ s/%USER%/$user/gmx;
-        #$tf_template =~ s/%PKEY_LOC%/$pkey_loc/gmx;
+        $tf_template =~ s/%MUGUBYTES%/$mem/gmx;
+        $tf_template =~ s/%NUMCPUS%/$cpus/gmx;
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
