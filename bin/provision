@@ -67,7 +67,7 @@ sub main {
     $config->param('domain_dir', $domain_dir);
 
     # Start off by fixing a sillyness in virtiofs
-    File::Copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not place /usr/libexec/virtiofs-better');
+    File::Copy::copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not place /usr/libexec/virtiofs-better');
 
     # Fix the terraform state.
     # We have to do this every time, for every single known domain.
