@@ -354,7 +354,7 @@ sub mongle_terraform_template {
     my $domain = $config->param('domain');
     my $image  = $config->param('image');
     my $disk_size = $config->param('size');
-    my $ram_bytes = $config->param('memory');
+    my $ram_mb = $config->param('memory');
     my $cpus      = $config->param('cpus');
 
     my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
@@ -537,7 +537,7 @@ import {
         $tf_template =~ s/%REPLACEME%/$domain/gmx;
         $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
         $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
-        $tf_template =~ s/%MUGUBYTES%/$mem/gmx;
+        $tf_template =~ s/%MUGUBYTES%/$ram_mb/gmx;
         $tf_template =~ s/%NUMCPUS%/$cpus/gmx;
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
