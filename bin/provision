@@ -139,6 +139,10 @@ sub wait_for_cloud_init {
     my $rc = $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
     print "Done!\n";
     die "Cloud init reported failure! Investigate machine." if $rc;
+
+    # See if we got a lying exit code above
+    my $failures = $ssh->cmd("grep 'Fail' /var/log/cloud-init.log");
+    die $failures if $failures;
 }
 
 sub wait_for_makefile {
@@ -278,7 +282,15 @@ sub provision_domain {
     clean_domain_resources($domain,$domain_mongled);
 
     system(qw{terraform init});
-    system(qw{terraform plan -out tf.plan});
+    $result = $? >> 8;
+    die "Could not initialize terraform" if $result;
+
+    #XXX Terraform wants ot rebuild everything even if a trivial autoassigned pty port changes
+    # As such we need to tell it to only EVER change what we have requested
+    system(qw{terraform plan -out tf.plan},  "-target=libvirt_domain.$domain_mongled");
+    $result = $? >> 8;
+    die "Could not establish terraform execution plan" if $result;
+
     system(qw{terraform apply tf.plan});
     $result = $? >> 8;
 	#XXX the provider is buggy, so we just have to pray
@@ -707,6 +719,18 @@ sub mongle_cloud_init {
             "at now -f /root/setup.sh",
         ],
         packages => $pkgs,
+        apt => {
+            conf => qq|
+APT {
+    Acquire {
+        Retries "12";
+    }
+    Get {
+        Assume-Yes "true";
+        Fix-Broken "true";
+    }
+}|,
+        },
         users => $userdefs->{users},
         fqdn => $domain,
         manage_etc_hosts => 'localhost',
