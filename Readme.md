@@ -47,7 +47,9 @@ All the relevant resources will be stored in /vms on the HV.
 
 ## UBUNTU DEPS
 
-virt-manager bridge-utils
+virt-manager bridge-utils apt-mirror nginx
+
+Expects the HV to be an apt-mirror obviously.
 
 ## IF YOU ENCOUNTER MYSTERIOUS 'cannot access image' issues
 

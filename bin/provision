@@ -94,7 +94,7 @@ sub main {
         ($reuser, $reuse) = provision_domain($dconfig, $depends, $reuse, $reuser);
         if (!$dryrun) {
             my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
-            wait_for_cloud_init($ssh);
+            wait_for_cloud_init($ssh, $domain);
             wait_for_makefile($ssh, $depends);
         }
 
@@ -113,7 +113,7 @@ sub main {
 		$ssh->cmd("sudo cp devices.map /root/devices.map");
 	}
 
-    wait_for_cloud_init($ssh);
+    my $failed = wait_for_cloud_init($ssh, $domain);
     wait_for_makefile($ssh, $domain);
 
     # If we don't do this, any subsequent manual tf plan will explode violently
@@ -131,7 +131,7 @@ sub sync_tf_state_with_libvirt {
 }
 
 sub wait_for_cloud_init {
-    my ($ssh, $t) = @_;
+    my ($ssh, $domain, $t) = @_;
 
     # TODO make configurable
     $t //= '30m';
@@ -141,8 +141,10 @@ sub wait_for_cloud_init {
     die "Cloud init reported failure! Investigate machine." if $rc;
 
     # See if we got a lying exit code above
-    my $failures = $ssh->cmd("grep 'Fail' /var/log/cloud-init.log");
-    die $failures if $failures;
+    my ($failures) = $ssh->cmd("sudo grep 'Fail' /var/log/cloud-init.log");
+    warn $failures if $failures;
+
+    return $failures;
 }
 
 sub wait_for_makefile {
@@ -152,20 +154,20 @@ sub wait_for_makefile {
     $t //= '30m';
 
     print "Waiting up to $t for ATD queue to flush...\n";
-    my $out = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+    my ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
 
     print "Waiting up to $t for Makefile payload to start...\n";
     $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until [ -f /var/log/$domain.setup.log ]; do sleep 1; done;'});
-
 
     print "Waiting up to $t for Makefile payload to finish...\n";
     $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'while lsof | grep /var/log/$domain.setup.log; do sleep 1; done;'});
 
     print "Waiting up to $t for any makefile queued ATD jobs to flush...\n";
-    $out = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+    ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
 
     print "Last log:\n";
-    print $ssh->cmd(qq{sudo tail /var/log/$domain.setup.log});
+    my ($ll) = $ssh->cmd(qq{sudo tail /var/log/$domain.setup.log});
+    print "$ll\n";
 
     print "\nDone!\n";
 }
@@ -225,7 +227,7 @@ sub provision_domain {
         my $output = '';
         print "Installing Updated cloud-init and forcing re-run...\n";
         my $init = "/opt/terraform/config/$domain.cloud_init.cfg";
-        my $ci_dir = "/var/lib/cloud/instances/nocloud";
+        my $ci_dir = "/var/lib/cloud/instances/$domain";
         $ssh->sftp->put($init, 'cloud-config.txt');
         # Remove the semaphore that says this was run, then run the needed targets
         $ssh->cmd("rm $ci_dir/sem/cc_package_update_upgrade_install");
@@ -684,6 +686,7 @@ sub mongle_cloud_init {
 
     my $domain = $config->param('domain');
     my $contactemail = $config->param('contact_email');
+    my $hv_ip = $config->param('hv_internal_ip');
     my $user = getpwuid($<);
 
     # Generate a new key for the child
@@ -712,18 +715,27 @@ sub mongle_cloud_init {
     # Inject the SSH key for access into the admin_user's SSH
     inject_admin_key($config->param('admin_user'), $domain, $userdefs, $pubkey);
 
+    #TODO Figure out apt-secure with the mirror
     $YAML::XS::Boolean = "JSON::PP";
     my $clown_config = {
         runcmd => [
             qq{echo "root:$contactemail\n" > /etc/aliases },
             "at now -f /root/setup.sh",
         ],
+        package_update  => !!1,
+        package_upgrade => !!1,
         packages => $pkgs,
         apt => {
+            primary => [{
+                arches => [qw{default}],
+                uri => "http://$hv_ip/ubuntu/",
+            }],
             conf => qq|
 APT {
     Acquire {
         Retries "12";
+        Force-IPv4: true;
+        AllowInsecureRepositories: true;
     }
     Get {
         Assume-Yes "true";
