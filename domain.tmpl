@@ -80,6 +80,10 @@ resource "libvirt_domain" "%MONGLED%" {
 		machine = "q35"
 	}
 
+	cpu = {
+		mode = "%CPUMODE%"
+	}
+
     devices = {
 
 		interfaces = [

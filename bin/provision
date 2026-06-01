@@ -370,6 +370,12 @@ sub mongle_terraform_template {
     my $disk_size = $config->param('size');
     my $ram_mb = $config->param('memory');
     my $cpus      = $config->param('cpus');
+    # host-passthrough exposes the bare-metal CPU (incl. AVX/AVX2/etc.) to the
+    # guest — required by anything that probes cpuid for vector extensions
+    # (e.g. the `claude` CLI bundled v8 snapshot).  Override to host-model,
+    # custom, or a specific model name only if you need live migration to a
+    # differently-specced HV.
+    my $cpu_mode  = $config->param('cpu_mode') // 'host-passthrough';
 
     my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
     die "Could not determine outbound bridge device!" unless $bridge_device;
@@ -553,6 +559,7 @@ import {
         $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
         $tf_template =~ s/%MUGUBYTES%/$ram_mb/gmx;
         $tf_template =~ s/%NUMCPUS%/$cpus/gmx;
+        $tf_template =~ s/%CPUMODE%/$cpu_mode/gmx;
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
