@@ -24,8 +24,32 @@ sub _coerce_array {
     return \@_;
 }
 
-#TODO: cpu/gpu passthru accel via techniques such as the following:
-# https://github.com/HarbourHeading/KVM-GPU-Passthrough
+# Warn if PCI devices don't look ready for VFIO passthrough.
+# Prints actionable hints but does not die — the VM create may still
+# succeed if the operator set things up out-of-band.
+sub _check_vfio_ready {
+    my @pci_addrs = @_;
+    unless (-d '/sys/kernel/iommu_groups') {
+        warn "IOMMU does not appear to be enabled (no /sys/kernel/iommu_groups). "
+           . "GPU passthrough will not work — add intel_iommu=on (Intel) or "
+           . "amd_iommu=on (AMD) to your kernel command line and reboot.\n";
+    }
+    for my $addr (@pci_addrs) {
+        my $driver_link = "/sys/bus/pci/devices/$addr/driver";
+        my $driver = '';
+        if (-l $driver_link) {
+            $driver = readlink($driver_link) // '';
+            $driver =~ s|.*/||;
+        }
+        next if $driver eq 'vfio-pci';
+        my $cur = $driver ? "currently bound to '$driver'" : "not bound to any driver";
+        warn "PCI device $addr is $cur (need vfio-pci). "
+           . "To bind: echo $addr > /sys/bus/pci/devices/$addr/driver/unbind; "
+           . "echo vfio-pci > /sys/bus/pci/devices/$addr/driver_override; "
+           . "echo $addr > /sys/bus/pci/drivers/vfio-pci/bind\n";
+    }
+    return;
+}
 
 our $domain_dir;
 our $dryrun;
@@ -549,6 +573,33 @@ import {
 	# Write /root/devices.map
 	File::Slurper::write_text("/opt/domains/$domain/devices.map", $mapper);
 
+    # PCI passthrough for GPU / hw-accel devices (issue #3)
+    my $hostdevs = '';
+    my @gpu_pci = grep { $_ } split(/\s*,\s*/, $config->param('gpu_pci') // '');
+    if (@gpu_pci) {
+        my @hdev_blocks;
+        for my $addr (@gpu_pci) {
+            my ($dom, $bus, $slot, $func) = $addr =~ m/^([0-9a-fA-F]{4}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.([0-9a-fA-F]+)$/
+                or die "Invalid PCI address '$addr' — expected DDDD:BB:SS.F (e.g. 0000:01:00.0)\n";
+            push @hdev_blocks, qq|
+      {
+        mode    = "subsystem"
+        type    = "pci"
+        managed = "yes"
+        source = {
+          address = {
+            domain   = "0x$dom"
+            bus      = "0x$bus"
+            slot     = "0x$slot"
+            function = "0x$func"
+          }
+        }
+      }|;
+        }
+        $hostdevs = "hostdevs = [" . join(",", @hdev_blocks) . "\n      ]";
+        _check_vfio_ready(@gpu_pci);
+    }
+
     my @files_mongled;
     foreach my $file (keys(%to_mongle)) {
         my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
@@ -565,6 +616,7 @@ import {
 #        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
 		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
         $tf_template =~ s/%FILESYSTEMS%/$fsmounts/gmx;
+        $tf_template =~ s/%HOSTDEVS%/$hostdevs/gmx;
 
         my $tfile = "/opt/terraform/$to_mongle{$file}";
         File::Slurper::write_text($tfile, $tf_template);
