@@ -1,0 +1,18 @@
+## Baseline audit rules for %DOMAIN%
+-D
+-b 8192
+-f 1
+
+## Identity changes
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group  -p wa -k identity
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+
+## SSH configuration
+-w /etc/ssh/sshd_config -p wa -k sshd
+
+## Privileged command execution
+-a always,exit -F arch=b64 -S execve -F euid=0 -k root_exec
+-a always,exit -F arch=b32 -S execve -F euid=0 -k root_exec

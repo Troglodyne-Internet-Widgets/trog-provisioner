@@ -5,7 +5,8 @@ package Trog::Bin::SetupProvisioner;
 use strict;
 use warnings;
 
-use File::Slurper;
+use File::Slurper qw{read_text write_text};
+use File::Which qw{which};
 
 # Basically our 'install script'
 
@@ -45,36 +46,53 @@ sub setup_terraform {
 1;
 }
 
-# TODO ensure rsyslog is configured to ingest logs & configured properly locally
+# Ensure rsyslog is configured to ingest logs from VMs over TCP/UDP.
 sub setup_rsyslog {
     die "/etc/rsyslog.conf does not exist, unsupported configuration" unless -f '/etc/rsyslog.conf';
-    my $rs_conf = File::Slurper::read_text('/etc/rsyslog.conf');
+    my $rs_conf = read_text('/etc/rsyslog.conf');
 
     my @must_have;
     foreach my $type (qw{imudp imtcp}) {
         push(@must_have, qq{module(load="$type")}, qq{input(type="$type" port="514")});
     }
 
-    # Either we have the lines, or we get to EOF and have to add them.
     my $changed;
     foreach my $subj (@must_have) {
-        if (!$rs_conf =~ m/^\s*\Q$subj\E\s*$/gm) {
-            # Place at top of file.
-            $rs_conf = "$subj\n".$rs_conf;
-            $changed=1;
+        if ($rs_conf !~ m/^\s*\Q$subj\E\s*$/m) {
+            $rs_conf = "$subj\n" . $rs_conf;
+            $changed = 1;
         }
     }
     if ($changed) {
-        File::Slurper::write_text('/etc/rsyslog.conf', $rs_conf);
-        # TODO check this worked
-        system(qw{systemctl restart rsyslogd});
+        write_text('/etc/rsyslog.conf', $rs_conf);
+        system(qw{systemctl restart rsyslog});
     }
     return 1;
 }
 
-# TODO: ensure auditd is configured to ingest logs & configured properly locally
+# Enable auditd locally and configure it to receive remote audit logs from guests.
 sub setup_auditd {
-1;
+    _apt_install('auditd', 'audispd-plugins') or return 0;
+
+    my $auditd_conf = '/etc/audit/auditd.conf';
+    die "$auditd_conf does not exist" unless -f $auditd_conf;
+
+    my $conf = read_text($auditd_conf);
+    my $changed;
+    if ($conf !~ m/^\s*tcp_listen_port\s*=/m) {
+        $conf .= "\ntcp_listen_port = 60\n";
+        $changed = 1;
+    } elsif ($conf !~ m/^\s*tcp_listen_port\s*=\s*60\b/m) {
+        $conf =~ s/^(\s*tcp_listen_port\s*=\s*)\d+$/${1}60/m;
+        $changed = 1;
+    }
+    if ($changed) {
+        write_text($auditd_conf, $conf);
+    }
+
+    system(qw{systemctl enable --now auditd});
+    system(qw{systemctl restart auditd});
+    return 1;
 }
 
 # TODO: setup tcms based virtual machine manager (qaportal3)
@@ -82,9 +100,23 @@ sub setup_management_interface {
 1;
 }
 
-# TODO: Configure firewall for all the above services
+# Configure the firewall to allow rsyslog (514) and auditd-remote (60) only
+# from the internal VM subnet (virbr0), blocking access from external networks.
 sub setup_firewall {
-1;
+    _apt_install('ufw') or return 0;
+
+    my $subnet = _get_virbr0_subnet();
+
+    for my $port (514, 60) {
+        for my $proto (qw{tcp udp}) {
+            system("ufw allow from $subnet to any port $port proto $proto comment 'allow VM log ingest'");
+            system("ufw deny to any port $port proto $proto comment 'block external log ingest'");
+        }
+    }
+
+    local $ENV{DEBIAN_FRONTEND} = 'noninteractive';
+    system(qw{ufw --force enable});
+    return 1;
 }
 
 # TODO: setup relevant local fail2ban rules
@@ -95,6 +127,32 @@ sub setup_fail2ban {
 # TODO: setup local crond stuff, make sure it can send us mail
 sub setup_crons {
 1;
+}
+
+sub _apt_install {
+    my @pkgs    = @_;
+    my @missing = grep { !which($_) } @pkgs;
+    return 1 unless @missing;
+    print "Installing: @missing\n";
+    local $ENV{DEBIAN_FRONTEND} = 'noninteractive';
+    system('apt-get', 'install', '-y', @missing) == 0
+        or do { warn "apt-get install failed for @missing\n"; return 0 };
+    return 1;
+}
+
+# Returns the virbr0 subnet in CIDR notation (e.g. 192.168.122.0/24).
+sub _get_virbr0_subnet {
+    my $out = `ip -4 addr show virbr0 2>/dev/null`;
+    if ($out =~ /inet\s+(\d+\.\d+\.\d+)\.\d+\/(\d+)/) {
+        return "$1.0/$2";
+    }
+    return '192.168.122.0/24';
+}
+
+sub _get_virbr0_ip {
+    my $out = `ip -4 addr show virbr0 2>/dev/null`;
+    return $1 if $out =~ /inet\s+([\d.]+)/;
+    return '192.168.122.1';
 }
 
 exit main(@ARGV) unless caller;

@@ -1,0 +1,15 @@
+remote_server = %LOGHOST%
+port = 60
+local_port = 0
+transport = tcp
+queue_depth = 10240
+fail_action = SYSLOG
+network_failure_action = SYSLOG
+startup_failure_action = WARN_ONCE_CONT
+disk_low_action = IGNORE
+disk_full_action = WARN
+disk_error_action = WARN
+remote_ending_action = RECONNECT
+generic_error_action = SYSLOG
+generic_warning_action = SYSLOG
+format = managed

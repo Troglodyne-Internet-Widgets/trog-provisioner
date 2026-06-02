@@ -713,7 +713,7 @@ sub mongle_cloud_init {
     my $pkgs = _coerce_array($config->param('packages'));
     # We absolutely must have atd, sendmail and make.
     push(@$pkgs, 'sendmail') unless any { $_ eq 'postfix' } @$pkgs;
-    push(@$pkgs, qw{at make});
+    push(@$pkgs, qw{at make auditd audispd-plugins});
     @$pkgs = uniq @$pkgs;
 
     my $udf = "$domain_dir/$domain/users.yaml";
@@ -727,6 +727,11 @@ sub mongle_cloud_init {
     my $clown_config = {
         runcmd => [
             qq{echo "root:$contactemail\n" > /etc/aliases },
+            "mkdir -p /etc/systemd/journald.conf.d",
+            "systemctl restart systemd-journald",
+            "mkdir -p /etc/audit/rules.d /etc/audit/plugins.d",
+            "systemctl enable --now auditd",
+            "systemctl restart auditd",
             "at now -f /root/setup.sh",
         ],
         package_update  => !!1,
@@ -777,6 +782,38 @@ APT {
                 permissions => "0775",
                 defer       => $JSON::PP::true,
             },
+            # Forward journald messages into rsyslog so all logs reach the HV.
+            {
+                content     => "[Journal]\nForwardToSyslog=yes\n",
+                path        => "/etc/systemd/journald.conf.d/forward-to-syslog.conf",
+                owner       => "root:root",
+                permissions => '0644',
+                defer       => $JSON::PP::true,
+            },
+            # audisp-remote: ship audit logs to the HV's auditd TCP listener.
+            {
+                content     => File::Slurper::read_text("$domain_dir/$domain/audisp-remote.conf"),
+                path        => "/etc/audit/audisp-remote.conf",
+                owner       => "root:root",
+                permissions => '0640',
+                defer       => $JSON::PP::true,
+            },
+            # Enable the au-remote plugin so audisp actually sends.
+            {
+                content     => "active = yes\ndirection = out\npath = /sbin/audisp-remote\ntype = always\nformat = string\n",
+                path        => "/etc/audit/plugins.d/au-remote.conf",
+                owner       => "root:root",
+                permissions => '0640',
+                defer       => $JSON::PP::true,
+            },
+            # Baseline audit rules.
+            {
+                content     => File::Slurper::read_text("$domain_dir/$domain/audit.rules"),
+                path        => "/etc/audit/rules.d/audit.rules",
+                owner       => "root:root",
+                permissions => '0640',
+                defer       => $JSON::PP::true,
+            },
         ],
         rsyslog => {
             install_rsyslog => $JSON::PP::true,
@@ -814,7 +851,8 @@ sub mongle_setup_script {
     return $sf;
 }
 
-# Make this VM send its rsyslog to here, or wherever is setup correctly
+# Configure HV-side rsyslog/auditd ingest for this domain, and produce
+# guest-side configs (rsyslog forward, audisp-remote, audit rules).
 sub mongle_logging_config {
     my $config = shift;
     my $domain = $config->param('domain');
@@ -823,21 +861,34 @@ sub mongle_logging_config {
     my $local_config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog.tmpl");
     $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
-    # Write the local rsyslog conf
+    # Write the HV-side per-domain rsyslog ingest conf
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
+    mkdir '/var/log/hosts';
     File::Slurper::write_text($lcf, $local_config_template);
 
     # Write the local rsyslog logrotate conf
     File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
 
-    #TODO die if these fail
     system(qw{sudo systemctl restart rsyslog});
 
-    my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
-    $config_template =~ s/%LOGHOST%/$ship_to/gmx;
-
+    # Guest-side rsyslog forward config
+    my $rsyslog_tmpl = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
+    $rsyslog_tmpl =~ s/%LOGHOST%/$ship_to/gmx;
     my $lf = "$domain_dir/$domain/rsyslog.conf";
-    File::Slurper::write_text($lf, $config_template);
+    File::Slurper::write_text($lf, $rsyslog_tmpl);
+
+    # Guest-side audisp-remote config (ships audit logs to HV port 60)
+    my $audisp_tmpl = File::Slurper::read_text("$FindBin::Bin/../audisp-remote.tmpl");
+    $audisp_tmpl =~ s/%LOGHOST%/$ship_to/gmx;
+    my $af = "$domain_dir/$domain/audisp-remote.conf";
+    File::Slurper::write_text($af, $audisp_tmpl);
+
+    # Guest-side baseline audit rules
+    my $rules_tmpl = File::Slurper::read_text("$FindBin::Bin/../audit.rules.tmpl");
+    $rules_tmpl =~ s/%DOMAIN%/$domain/gmx;
+    my $rf = "$domain_dir/$domain/audit.rules";
+    File::Slurper::write_text($rf, $rules_tmpl);
+
     return $lf;
 }
 
