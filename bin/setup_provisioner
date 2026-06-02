@@ -58,7 +58,7 @@ sub setup_rsyslog {
     # Either we have the lines, or we get to EOF and have to add them.
     my $changed;
     foreach my $subj (@must_have) {
-        if (!$rs_conf =~ m/^\s*\Q$subj\E\s*$/gm) {
+        if ($rs_conf !~ m/^\s*\Q$subj\E\s*$/gm) {
             # Place at top of file.
             $rs_conf = "$subj\n".$rs_conf;
             $changed=1;

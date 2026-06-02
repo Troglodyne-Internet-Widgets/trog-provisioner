@@ -1,0 +1,182 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Destroy;
+
+use strict;
+use warnings;
+
+use Cwd qw{abs_path};
+use FindBin;
+use Config::Simple();
+use File::Slurper();
+use List::Util qw{any};
+use File::Which qw{which};
+use Getopt::Long qw{GetOptionsFromArray};
+
+our $domain_dir;
+
+sub main {
+    my @args = @_;
+
+    umask 0022;
+
+    my ($purge, $dryrun);
+    GetOptionsFromArray(\@args,
+        'domaindir=s' => \$domain_dir,
+        'purge'       => \$purge,
+        'dryrun'      => \$dryrun,
+    );
+
+    my $domain = shift @args;
+    die "Usage: destroy [--domaindir DIR] [--purge] [--dryrun] DOMAIN\n" unless $domain;
+
+    $domain_dir //= '/opt/domains';
+    $domain =~ s/\///g;
+
+    my $domain_mongled = $domain;
+    $domain_mongled =~ s/\./-/g;
+
+    print "Destroying domain: $domain\n";
+    print "[DRY RUN] No changes will be made.\n" if $dryrun;
+
+    # 1. Stop and undefine the VM via virsh
+    destroy_vm($domain, $dryrun);
+
+    # 2. Remove terraform-managed resources for this domain
+    destroy_tf_resources($domain, $domain_mongled, $dryrun);
+
+    # 3. Remove HV-side terraform config files
+    remove_tf_configs($domain, $dryrun);
+
+    # 4. Remove HV-side rsyslog config
+    remove_rsyslog_config($domain, $dryrun);
+
+    # 5. Remove the domain's SSH pubkey from the HV's authorized_keys
+    remove_authorized_key($domain, $dryrun);
+
+    # 6. Optionally purge the domain directory
+    if ($purge) {
+        purge_domain_dir($domain, $dryrun);
+    } else {
+        print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
+    }
+
+    print "Done.\n";
+    return 0;
+}
+
+sub destroy_vm {
+    my ($domain, $dryrun) = @_;
+
+    my $vm_list = qx{virsh list --all 2>/dev/null};
+    if ($vm_list =~ m/\Q$domain\E/) {
+        print "Stopping VM $domain...\n";
+        unless ($dryrun) {
+            system(qw{virsh destroy}, $domain);
+            system(qw{virsh undefine --nvram}, $domain);
+        }
+    } else {
+        print "VM $domain not found in virsh, skipping.\n";
+    }
+}
+
+sub destroy_tf_resources {
+    my ($domain, $domain_mongled, $dryrun) = @_;
+
+    my $tf_config_dir = '/opt/terraform/config';
+    return unless -d $tf_config_dir;
+
+    chdir $tf_config_dir or do {
+        warn "Cannot chdir to $tf_config_dir: $!\n";
+        return;
+    };
+
+    my $resources = qx{terraform state list 2>/dev/null};
+    chomp $resources;
+    return unless $resources;
+
+    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
+    foreach my $resource (split(/\n/, $resources)) {
+        next unless $resource =~ m/\Q$domain_mongled\E/;
+        next if any { $_ eq $resource } @exempt;
+        print "Destroying terraform resource $resource\n";
+        unless ($dryrun) {
+            system(qw{terraform destroy -auto-approve -target}, $resource);
+        }
+    }
+}
+
+sub remove_tf_configs {
+    my ($domain, $dryrun) = @_;
+
+    my @patterns = (
+        "/opt/terraform/config/$domain.tf",
+        "/opt/terraform/config/$domain.cloud_init.cfg",
+        "/opt/terraform/config/$domain.network_config.cfg",
+    );
+
+    foreach my $f (@patterns) {
+        if (-f $f) {
+            print "Removing $f\n";
+            unlink $f unless $dryrun;
+        }
+    }
+}
+
+sub remove_rsyslog_config {
+    my ($domain, $dryrun) = @_;
+
+    my $conf = "/etc/rsyslog.d/10-$domain.conf";
+    if (-f $conf) {
+        print "Removing rsyslog config $conf\n";
+        unless ($dryrun) {
+            unlink $conf;
+            system(qw{sudo systemctl restart rsyslog});
+        }
+    } else {
+        print "No rsyslog config found at $conf, skipping.\n";
+    }
+}
+
+sub remove_authorized_key {
+    my ($domain, $dryrun) = @_;
+
+    my $pubkey_file = "$domain_dir/$domain/key.rsa.pub";
+    return unless -f $pubkey_file;
+
+    my $pubkey = File::Slurper::read_text($pubkey_file);
+    chomp $pubkey;
+
+    my $ak = "$ENV{HOME}/.ssh/authorized_keys";
+    return unless -f $ak;
+
+    my $contents = File::Slurper::read_text($ak);
+    if ($contents =~ m/\Q$pubkey\E/) {
+        print "Removing domain SSH key from $ak\n";
+        unless ($dryrun) {
+            my @lines = grep { $_ !~ m/\Q$pubkey\E/ } split(/\n/, $contents);
+            File::Slurper::write_text($ak, join("\n", @lines) . "\n");
+        }
+    } else {
+        print "Domain SSH key not found in $ak, skipping.\n";
+    }
+}
+
+sub purge_domain_dir {
+    my ($domain, $dryrun) = @_;
+
+    my $dir = "$domain_dir/$domain";
+    unless (-d $dir) {
+        print "Domain directory $dir not found, skipping.\n";
+        return;
+    }
+
+    print "Purging domain directory $dir\n";
+    unless ($dryrun) {
+        system('rm', '-rf', $dir);
+    }
+}
+
+exit main(@ARGV) unless caller;
+
+1;
