@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use File::Slurper ();
+use IPC::Open3    ();
 use YAML::XS      ();
 
 =head1 DESCRIPTION
@@ -93,21 +94,23 @@ sub stream_provision {
     my @new_config = new_config_cmd( $domain, $provisioners_repo );
     my @provision  = provision_cmd( $domain, $domain_dir );
 
-    for my $cmd ( \@new_config, \@provision ) {
-        my $label = $cmd->[-1] eq $domain ? 'bin/provision' : 'bin/new_config';
+    for my $pair ( [ 'bin/new_config', \@new_config ], [ 'bin/provision', \@provision ] ) {
+        my ( $label, $cmd ) = @$pair;
         print $out_fh "=== Running $label ===\n";
 
-        my $cmdstr = join( ' ', map { _shell_quote($_) } @$cmd );
-        open( my $pipe, '-|', $cmdstr . ' 2>&1' )
-            or do {
-            print $out_fh "ERROR: could not exec $cmdstr: $!\n";
+        local $@;
+        my ( $pid, $out );
+        eval { $pid = IPC::Open3::open3( my $in, $out, undef, @$cmd ); close $in };
+        if ( $@ || !$pid ) {
+            ( my $err = $@ ) =~ s/\s+$//;
+            print $out_fh "ERROR: could not exec $label: $err\n";
             return 1;
-            };
+        }
 
-        while ( defined( my $line = <$pipe> ) ) {
+        while ( defined( my $line = <$out> ) ) {
             print $out_fh $line;
         }
-        close $pipe;
+        waitpid( $pid, 0 );
         my $rc = $? >> 8;
         if ($rc) {
             print $out_fh "=== $label exited with code $rc ===\n";
@@ -117,12 +120,6 @@ sub stream_provision {
 
     print $out_fh "=== Provisioning complete ===\n";
     return 0;
-}
-
-sub _shell_quote {
-    my ($s) = @_;
-    $s =~ s/'/'\\''/g;
-    return "'$s'";
 }
 
 =head2 index_html(\@recipes)

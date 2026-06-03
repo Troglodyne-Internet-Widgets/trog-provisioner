@@ -93,12 +93,8 @@ sub _make_fake_repo {
 # ---- stream_provision ----
 
 {
-    # Mock open() to avoid running real commands.
-    # We capture the commands actually invoked.
+    # Mock stream_provision to capture which commands it would invoke.
     my @invoked;
-
-    # Override the module's open behaviour by mocking _shell_quote and
-    # testing with a fake pipe that emits canned output.
 
     no warnings 'redefine';
     local *Trog::Provisioner::Web::stream_provision = sub {
