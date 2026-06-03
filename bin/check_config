@@ -1,0 +1,57 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::CheckConfig;
+
+# Pre-flight checker: validate provision.conf and system prerequisites
+# before running bin/provision.
+#
+# Usage: check_config [--domaindir DIR] DOMAIN
+#   Returns 0 on success, 1 if any problems found.
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Provisioner::Config;
+
+sub main {
+    my @args = @_;
+
+    my $domain_dir = '/opt/domains';
+    GetOptionsFromArray( \@args,
+        'domaindir=s' => \$domain_dir,
+    );
+
+    my $domain = shift @args;
+    die "Usage: check_config [--domaindir DIR] DOMAIN\n" unless $domain;
+
+    $domain =~ s/\///g;
+
+    my @all_errors;
+
+    # 1. Config file validation
+    my $cfile = "$domain_dir/$domain/provision.conf";
+    my ( $cfg, $cfg_errors ) = Trog::Provisioner::Config->load($cfile);
+    push @all_errors, @$cfg_errors;
+
+    # 2. Required domain files
+    push @all_errors, Trog::Provisioner::Config->check_domain_files( $domain_dir, $domain );
+
+    # 3. System tool availability
+    push @all_errors, Trog::Provisioner::Config->check_system_prereqs();
+
+    if (@all_errors) {
+        print STDERR "check_config: $domain — FAILED\n";
+        print STDERR "  * $_\n" for @all_errors;
+        return 1;
+    }
+
+    print "check_config: $domain — OK\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+1;

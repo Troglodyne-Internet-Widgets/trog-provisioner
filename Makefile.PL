@@ -28,6 +28,9 @@ WriteMakefile(
     'JSON::MaybeXS'  => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
+    'File::Which'        => 0,
+    'File::Temp'         => 0,
   },
-  test => {TESTS => 't/*.t'}
+  test => {TESTS => 't/*.t'},
+  INC  => '-Ilib'
 );
