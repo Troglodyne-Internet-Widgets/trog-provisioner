@@ -28,6 +28,9 @@ WriteMakefile(
     'JSON::MaybeXS'  => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
+    # Web UI
+    'TPSGI'          => 0,
+    'Plack::Runner'  => 0,
   },
   test => {TESTS => 't/*.t'}
 );
