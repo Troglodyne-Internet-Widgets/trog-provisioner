@@ -1,0 +1,19 @@
+# Apply kernel backlog settings — must happen before nginx starts
+mv nginx.sysctl.conf /etc/sysctl.d/60-nginx-backlog.conf
+chown root:root /etc/sysctl.d/60-nginx-backlog.conf
+chmod 0644 /etc/sysctl.d/60-nginx-backlog.conf
+sysctl -p /etc/sysctl.d/60-nginx-backlog.conf
+# Tune worker_connections in the events{} block to match backlog
+sed -i -E 's/worker_connections\s+[0-9]+/worker_connections [% backlog %]/' /etc/nginx/nginx.conf
+# Setup global nginx configuration
+mv nginx.global.conf /etc/nginx/conf.d/global.conf
+systemctl restart nginx
+# Setup the dirindex vhost
+mv nginxdirindex.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
+systemctl restart nginx
+# Ensure the root directory exists and is browsable by nginx
+mkdir -p [% install_dir %]/[% domain %]; /bin/true
+chown root:www-data [% install_dir %]/[% domain %]
+chmod 0755 [% install_dir %]/[% domain %]
+# Deal with other demented deps that want apache2
+[% packager_remove_invocation %] apache2
