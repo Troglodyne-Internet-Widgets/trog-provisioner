@@ -113,7 +113,7 @@ sub main {
 		$ssh->cmd("sudo cp devices.map /root/devices.map");
 	}
 
-    my $failed = wait_for_cloud_init($ssh, $domain);
+    wait_for_cloud_init($ssh, $domain);
     wait_for_makefile($ssh, $domain);
 
     # If we don't do this, any subsequent manual tf plan will explode violently
@@ -141,10 +141,25 @@ sub wait_for_cloud_init {
     die "Cloud init reported failure! Investigate machine." if $rc;
 
     # See if we got a lying exit code above
-    my ($failures) = $ssh->cmd("sudo grep 'Fail' /var/log/cloud-init.log");
-    warn $failures if $failures;
+    my ($raw) = $ssh->cmd("sudo cloud-init analyze dump");
+    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
 
-    return $failures;
+    my $parsed = eval {$json->decode($raw) };
+    die "cloud-init analyze dump failed to return JSON array!" unless ref $parsed eq 'ARRAY';
+
+    my @failures = grep { ($_->{result} // '') eq "FAIL" } @$parsed;
+    foreach my $fail (@failures) {
+        my ($module, $mtarget) = split('/', $fail->{name});
+        next unless $mtarget;
+        my ($stage, $target) = split('-', $mtarget);
+        next unless $target;
+        print "$target failed during $stage, re-running...\n";
+        my $ci_dir = "/var/lib/cloud/instances/$domain";
+        # Remove the semaphore that says this was run, then run the needed targets
+        $ssh->cmd_exit_code(qw{sudo rm}, "$ci_dir/sem/$stage\_$target");
+        my ($out) = $ssh->cmd({ use_persistent_shell => 0 }, qw{sudo cloud-init single --name}, $target);
+        print "$out\n\n";
+    }
 }
 
 sub wait_for_makefile {
@@ -230,10 +245,10 @@ sub provision_domain {
         my $ci_dir = "/var/lib/cloud/instances/$domain";
         $ssh->sftp->put($init, 'cloud-config.txt');
         # Remove the semaphore that says this was run, then run the needed targets
-        $ssh->cmd("rm $ci_dir/sem/cc_package_update_upgrade_install");
+        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
         ($output) = $ssh->cmd("sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt");
         print "$output\n";
-        $ssh->cmd("rm $ci_dir/sem/cc_users_groups");
+        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_users_groups");
         ($output) = $ssh->cmd("sudo cloud-init single --name cc_users_groups -f cloud-config.txt");
         print "$output\n";
 
