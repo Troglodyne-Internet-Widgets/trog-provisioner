@@ -1,0 +1,116 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Snapshot;
+
+use strict;
+use warnings;
+
+use File::Which qw{which};
+use Getopt::Long qw{GetOptionsFromArray};
+use POSIX qw{strftime};
+
+sub usage {
+    return "Usage: $0 [--create [--name NAME] [--description DESC]|--list|--restore SNAP|--delete SNAP] [--domaindir DIR] DOMAIN\n";
+}
+
+sub main {
+    my @args = @_;
+
+    my ($create, $list, $restore, $delete, $domain_dir, $name, $desc);
+    GetOptionsFromArray(\@args,
+        'create'        => \$create,
+        'list'          => \$list,
+        'restore=s'     => \$restore,
+        'delete=s'      => \$delete,
+        'domaindir=s'   => \$domain_dir,
+        'name=s'        => \$name,
+        'description=s' => \$desc,
+    );
+
+    $domain_dir //= '/opt/domains';
+
+    my $domain = shift @args;
+    die usage() unless $domain;
+    die "virsh not installed\n" unless which('virsh');
+
+    my $ops = grep { defined $_ } ($create, $list, $restore, $delete);
+    die usage() unless $ops == 1;
+
+    return snapshot_create($domain, $name, $desc) if $create;
+    return snapshot_list($domain)                  if $list;
+    return snapshot_restore($domain, $restore)     if defined $restore;
+    return snapshot_delete($domain, $delete)       if defined $delete;
+}
+
+sub _default_snap_name {
+    return strftime("%Y%m%d-%H%M%S", localtime);
+}
+
+sub _virsh_dominfo    { scalar qx{virsh dominfo $_[0] 2>&1} }
+sub _virsh_snap_create { system(qw{virsh snapshot-create-as}, @_) >> 8 }
+sub _virsh_snap_list   { system(qw{virsh snapshot-list --name}, @_) >> 8 }
+sub _virsh_snap_revert { system(qw{virsh snapshot-revert}, @_) >> 8 }
+sub _virsh_snap_delete { system(qw{virsh snapshot-delete}, @_) >> 8 }
+
+sub _domain_exists {
+    my ($domain) = @_;
+    my $info = _virsh_dominfo($domain);
+    return $info && $info !~ m/error/i;
+}
+
+sub snapshot_create {
+    my ($domain, $name, $desc) = @_;
+
+    die "Domain $domain not found in libvirt\n" unless _domain_exists($domain);
+
+    $name //= _default_snap_name();
+    $desc //= "Snapshot of $domain at $name";
+
+    print "Creating snapshot '$name' for $domain...\n";
+    my @cmd = ($domain, '--name', $name, '--description', $desc);
+    my $rc = _virsh_snap_create(@cmd);
+    die "Failed to create snapshot\n" if $rc;
+
+    print "Snapshot '$name' created.\n";
+    return 0;
+}
+
+sub snapshot_list {
+    my ($domain) = @_;
+
+    die "Domain $domain not found in libvirt\n" unless _domain_exists($domain);
+
+    print "Snapshots for $domain:\n";
+    return _virsh_snap_list($domain);
+}
+
+sub snapshot_restore {
+    my ($domain, $snapname) = @_;
+
+    die "Snapshot name required for --restore\n" unless $snapname && length $snapname;
+    die "Domain $domain not found in libvirt\n"  unless _domain_exists($domain);
+
+    print "Reverting $domain to snapshot '$snapname'...\n";
+    my $rc = _virsh_snap_revert($domain, $snapname);
+    die "Failed to revert to snapshot '$snapname'\n" if $rc;
+
+    print "Domain $domain reverted to '$snapname'.\n";
+    return 0;
+}
+
+sub snapshot_delete {
+    my ($domain, $snapname) = @_;
+
+    die "Snapshot name required for --delete\n" unless $snapname && length $snapname;
+    die "Domain $domain not found in libvirt\n" unless _domain_exists($domain);
+
+    print "Deleting snapshot '$snapname' from $domain...\n";
+    my $rc = _virsh_snap_delete($domain, $snapname);
+    die "Failed to delete snapshot '$snapname'\n" if $rc;
+
+    print "Snapshot '$snapname' deleted.\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+1;
