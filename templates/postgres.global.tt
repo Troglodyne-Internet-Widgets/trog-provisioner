@@ -1,2 +1,2 @@
 yes | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
-apt-get install postgresql-client-18 postgresql-18 postgresql-server-dev-18
+apt-get install postgresql-client-18 postgresql-18 postgresql-server-dev-18 postgresql-plperl-18
