@@ -29,12 +29,17 @@ use Hash::Merge();
 use File::Find();
 use FindBin::libs;
 
+# For secret getting/setting
+use Scalar::Util qw{looks_like_number};
+use File::KeePass::KDBX;
+use IO::Prompter;
+
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--recipes=file] [--skip_ssh] $domain $domain2 ...
+    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--skip_ssh] $domain $domain2 ...
 
 Builds a new configuration package for VM(s) to be provisioned by Troglodyne provisioner.
 
@@ -132,11 +137,27 @@ Reporter configuration as might be passed to L<prove> is accepted as a _global v
 
 The tests themselves are run on the remote host.
 
+=head2 SECRETS
+
+Rather than hardcoding various values into a recipe, you can instead store it in a keepass2 (kdbx) file.
+By default we look for secrets.kdbx, but like ipmap you can also pass it as an option.
+
+You will be asked for the unlock password for the DB in the event you use this feature.
+
+Example usage in a recipe:
+
+   	_base:
+		_global:
+			registrar:
+				type: "some_dns_provider_understood_by_dns-lexicon
+				user: "AzureDiamond"
+				key: "secret:Hosting/DNS/password"
+
+Where each path component past 'secret:' corresponds to group/key/parameter in a keepass KDBX.
+
 =cut
 
-#TODO chdir to bin loc/ ..
-
-my ($cfile, $pfile, $skip_ssh);
+my ($cfile, $sfile, $pfile, $skip_ssh);
 
 sub get_config {
     die "No ipmap available..." unless -f $cfile;
@@ -148,6 +169,92 @@ sub get_config {
     my $ns_conf     = $c->param( -block => 'nameservers' );
     my $addons      = $c->param( -block => 'addons' );
     return ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $addons );
+}
+
+# Basically build a pointer so we can modify the actual value, cuz the actual ref can't survive the iterator var :(
+sub gather_needed_secrets {
+    my $rconf = $_[0];
+
+    my %matches;
+    my @iterator = values(%$rconf);
+    my @pointers = keys(%$rconf);
+
+    for (my $i=0; $i < scalar(@iterator); $i++) {
+        my $type = ref $iterator[$i];
+        my $ptr = $pointers[$i];
+        if ($type eq 'HASH') {
+            push(@iterator, values(%{$iterator[$i]}));
+            push(@pointers, map { "$ptr/$_" } keys(%{$iterator[$i]}));
+        } elsif ($type eq 'ARRAY') {
+            if (@{$iterator[$i]}) {
+                push(@iterator, @{$iterator[$i]} );
+                push(@pointers, map { "$ptr/$_" } 0..(scalar(@{$iterator[$i]})-1));
+            }
+        } elsif (!$type) {
+            $matches{$ptr} = $iterator[$i] if $iterator[$i] && $iterator[$i] =~ m/^secret:/;
+        }
+        # If it's anything other than these 3 types it won't ever match. It's YAML.
+    }
+
+    return %matches;
+}
+
+sub get_secrets {
+    my %rmap = @_;
+
+    die "Must provide path to Keepass KDBX db" unless -f $sfile;
+    die "Must provide at least one key" unless %rmap;
+
+    # Get the password on STDIN
+    #XXX IO::Prompter is incompatible with IO::P unless u do this
+    *ARGV= join(' ', @ARGV);
+    my $pass = prompt('Enter password:', -echo=> '*');
+
+    # Transform keys into fully qualified hash of group to key
+    my %keymap;
+    foreach my $route (keys(%rmap)) {
+        my $kv = $rmap{$route};
+        $kv =~ s/^secret://;
+        my ($k, $v, $w) = split(/\//, $kv);
+        die "Malformed key passed '$kv', must be group/key/what" unless $k && $v && $w;
+        $keymap{$k} //= [];
+        push(@{$keymap{$k}}, { route => $route, key => $v, what => $w });
+    }
+
+    my $kdb = File::KeePass::KDBX->load_db($sfile, $pass) or die "Could not open provided kdbx";
+    $kdb->unlock() or die "Could not unlock provided kdbx";
+    my %response;
+    foreach my $group (keys(%keymap)) {
+        my $g = $kdb->find_group({ title => $group });
+        die "Invalid group '$group' provided" unless $g;
+        foreach my $key (@{$keymap{$group}}) {
+            my $k = $kdb->find_entry({ group => $g->{gid}, title => $key->{key} });
+            die "Invalid key '$key->{key}' provided" unless $k;
+            die "Provided what '$key->{what}' does not exist in $key->{key}" unless $k->{$key->{what}};
+            $response{$key->{route}} = $k->{$key->{what}};
+        }
+    }
+    $kdb->lock();
+    return %response;
+}
+
+# Resolve the JSON::Pointer style path to deep hash param
+# XXX Regrettably needs a touch() of eval()
+sub set_secrets {
+    my ($rconf, %to_set) = @_;
+    foreach my $path (keys(%to_set)) {
+        my $to_eval = '$rconf->';
+        my $replacement = $to_set{$path};
+        foreach my $component (split('/', $path)) {
+            if (looks_like_number($component)) {
+                $to_eval .= "[$component]";
+            } else {
+                $to_eval .= "{$component}";
+            }
+        }
+        $to_eval .= ' = $replacement;';
+        eval $to_eval or die "Could not replace secret!";
+    }
 }
 
 sub get_recipe_config {
@@ -196,11 +303,13 @@ sub main {
     GetOptionsFromArray(
         \@args,
         'ipmap=s'   => \$cfile,
+        'secrets=s' => \$sfile,
         'recipes=s' => \$pfile,
         'skip_ssh'  => \$skip_ssh,
     );
     $skip_ssh //= 0;
     $cfile //= 'ipmap.cfg';
+    $sfile //= 'secrets.kdbx';
     $pfile //= 'recipes.yaml';
 
     # Expand the domain list to also create those we depend upon.
@@ -284,10 +393,23 @@ sub handle_domain {
         }
     }
 
+    # Start parsing the recipe configuration
     my $cfg_dir = "$basedir/$fqdn";
     mkdir $cfg_dir;
 
     my $rconf = clone( get_recipe_config() );
+
+    # Figure out what secrets need to be replaced by gathering the refs to their strings
+    my %to_replace = gather_needed_secrets($rconf);
+
+    if (%to_replace) {
+        # Ingest and the secrets.
+        my %secrets = get_secrets(%to_replace);
+
+        # Replace the secrets
+        set_secrets($rconf, %secrets);
+        %secrets = ();
+    }
 
     # Allow a base recipe set
     my $base_recipe  = delete $rconf->{_base}         // {};
