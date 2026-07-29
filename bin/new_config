@@ -417,6 +417,10 @@ sub handle_domain {
 
     # Figure out if we need to make this recipe depend on another
     my $shared_hosts = delete $rconf->{_shared} // {};
+
+    die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
+        unless exists $rconf->{$domain};
+
     my ($dep_dom) = expand_dependent_domains($domain);
 
     my $depends_on;
