@@ -16,6 +16,7 @@ use YAML;
 use File::Slurper;
 use Config::Simple;
 use Cwd();
+use File::Basename();
 use Clone qw{clone};
 
 use Text::Xslate;
@@ -160,8 +161,9 @@ Where each path component past 'secret:' corresponds to group/key/parameter in a
 my ($cfile, $sfile, $pfile, $skip_ssh);
 
 sub get_config {
-    die "No ipmap available..." unless -f $cfile;
+    die "No ipmap available at $cfile" unless -f $cfile;
     my $c = Config::Simple->new($cfile);
+    die $Config::Simple::errstr unless $c;
 
     my $global_conf = $c->param( -block => 'global' );
     my $ip_conf     = $c->param( -block => 'ips' );
@@ -262,6 +264,8 @@ sub get_recipe_config {
     return $c if $c;
     return {} unless -f $pfile;
     $c = YAML::Load( File::Slurper::read_text($pfile) );
+    # Make sure we always look for recipes.d next to the recipes.yaml
+    my $loc = File::Basename::dirname(Cwd::abs_path($pfile));
 
     File::Find::find( {
         wanted => sub {
@@ -276,7 +280,7 @@ sub get_recipe_config {
         no_chdir => 1,
         bydepth => 1,
     },
-    "recipes.d/");
+    "$loc/recipes.d/");
 
     return $c;
 }
@@ -394,9 +398,6 @@ sub handle_domain {
     }
 
     # Start parsing the recipe configuration
-    my $cfg_dir = "$basedir/$fqdn";
-    mkdir $cfg_dir;
-
     my $rconf = clone( get_recipe_config() );
 
     # Figure out what secrets need to be replaced by gathering the refs to their strings
@@ -471,6 +472,9 @@ sub handle_domain {
             @data_users,
         ],
     };
+
+    my $cfg_dir = "$basedir/$fqdn";
+    mkdir $cfg_dir;
 
     File::Slurper::write_binary( "$cfg_dir/users.yaml", YAML::Dump($user_conf) );
 
