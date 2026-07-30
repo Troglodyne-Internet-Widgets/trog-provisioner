@@ -32,6 +32,8 @@ echo "$SQL" | sqlite3 /var/spool/powerdns/$1/zones.db
 
 systemctl restart pdns
 
+#TODO - this code should live in a different script, we need a separate 'do all my dns w/registrar recipe
+exit 0;
 # Optionally, update things with the registrar if we have the needed info.
 [ -x "/opt/lexicon/$1" ] || exit 0;
 
