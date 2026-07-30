@@ -228,3 +228,10 @@ It is straightforward to implement a backup strategy for your hosts using this m
 
 Feel free to make a vendor/ dir herein, it is gitignored.  Then use the 'libdir' parameter in your domain's configuration to search 'vendor'.
 See the documentation in bin/new\_config for more information.
+
+## Testing
+
+See [TESTING.md](t/TESTING.md).
+
+If there are tests you want run on guests after the provisioning process is complete,
+you can make templated tests in templates/tests which will be run subsequent to provisioning.

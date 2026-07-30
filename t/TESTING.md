@@ -60,7 +60,7 @@ Acceptance tests must skip unless  the `AUTHOR_TESTING` env var = 1
 
 Load the system under test with either `use_ok()` for modules, or require\_ok() for modulino binaries. Only use `ok do ...` when testing nonmodlino scripts.
 
-Make no assertions verifying that dependencies are present in tests, ensure they are in Makefile.PL instead.
+Make no assertions verifying that dependencies are present in tests, ensure they are in Makefile.PL (or dist.ini if using Dist::Zilla) instead.
 
 The only acceptable means of mocking subroutines is Test::MockModule in strict mode; use redefine() or define() as appropriate.
 
