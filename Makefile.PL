@@ -41,6 +41,7 @@ WriteMakefile(
     'Test::Fatal'      => 0,
     'Test::MockFile'   => 0,
     'Test::MockModule' => 0,
+    'Test::NoWarnings' => 0,
   },
   test => {TESTS => 't/*.t'}
 );

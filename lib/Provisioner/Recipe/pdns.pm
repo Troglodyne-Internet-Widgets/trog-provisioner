@@ -47,7 +47,7 @@ sub validate {
     my $key = $opts{api_key};
     die "Must define api_key in [pdns] section of recipes.yaml" unless $key;
 
-    my $extras = $opts{extra_records};
+    my $extras = $opts{extra_records} // '';
     my $is_abs_path = index('/', $extras) == 0;
     $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
 
