@@ -8,8 +8,9 @@ use FindBin::libs;
 
 use Config::Simple;
 use Getopt::Long;
-use Net::IP;
 use Cpanel::JSON::XS;
+
+use Provisioner::IPPool;
 
 =head1 USAGE
 
@@ -64,32 +65,7 @@ unless (keys %$pool) {
     exit 1;
 }
 
-# Collect pool IPs from explicit list and/or CIDR expansion
-my %seen_pool;
-my @pool_ips;
-
-if (my $addrs = $pool->{addresses}) {
-    for my $ip (split /\s+/, $addrs) {
-        next unless $ip =~ /\S/;
-        unless ($seen_pool{$ip}++) {
-            push @pool_ips, $ip;
-        }
-    }
-}
-
-if (my $cidrs = $pool->{cidr}) {
-    for my $cidr (split /\s+/, $cidrs) {
-        next unless $cidr =~ /\S/;
-        my $net = Net::IP->new($cidr)
-            or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
-        do {
-            my $ip = $net->ip();
-            unless ($seen_pool{$ip}++) {
-                push @pool_ips, $ip;
-            }
-        } while (++$net);
-    }
-}
+my @pool_ips = Provisioner::IPPool::pool_ips($pool);
 
 unless (@pool_ips) {
     print STDERR "ip_pool section found but no IPs could be parsed.\n";
