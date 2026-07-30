@@ -3,12 +3,13 @@ use strict;
 use warnings;
 
 use Test::More;
+use Test::Fatal;
 use File::Temp qw{tempfile};
 
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use FindBin::libs;
 
-use Provisioner::IPPool;
+use_ok( 'Provisioner::IPPool' );
 
 sub write_ipmap {
     my ($content) = @_;
@@ -94,8 +95,8 @@ END
     my $pool    = { addresses => '192.168.1.10 192.168.1.11' };
     my $ip_conf = { a => '192.168.1.10', b => '192.168.1.11' };
 
-    eval { Provisioner::IPPool::auto_assign($cfg, 'overflow', $pool, $ip_conf) };
-    like $@, qr/exhausted/i, 'dies with exhausted message';
+    my $out = exception { Provisioner::IPPool::auto_assign($cfg, 'overflow', $pool, $ip_conf) };
+    like $out, qr/exhausted/i, 'dies with exhausted message';
 };
 
 subtest 'auto_assign: dies when no pool configured' => sub {
@@ -108,8 +109,8 @@ END
     my $pool    = {};
     my $ip_conf = {};
 
-    eval { Provisioner::IPPool::auto_assign($cfg, 'nopool', $pool, $ip_conf) };
-    like $@, qr/ip_pool|pool/i, 'dies with no-pool message';
+    my $out = exception { Provisioner::IPPool::auto_assign($cfg, 'nopool', $pool, $ip_conf) };
+    like $out, qr/ip_pool|pool/i, 'dies with no-pool message';
 };
 
 done_testing;
