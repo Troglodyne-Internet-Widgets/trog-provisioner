@@ -42,6 +42,7 @@ WriteMakefile(
     'Test::MockFile'   => 0,
     'Test::MockModule' => 0,
     'Test::NoWarnings' => 0,
+    'File::Touch'      => 0,
   },
   test => {TESTS => 't/*.t'}
 );
