@@ -3,6 +3,7 @@ package Provisioner::IPPool;
 use strict;
 use warnings FATAL => 'all';
 
+use List::Util qw{first};
 use Net::IP;
 use Config::Simple;
 
@@ -63,7 +64,7 @@ sub auto_assign {
         $assigned{$ip} = $d;
     }
 
-    my ($chosen) = grep { !$assigned{$_} } @pool_ips;
+    my ($chosen) = first { !$assigned{$_} } @pool_ips;
     die "IP pool exhausted — no IPs available for $domain\n" unless $chosen;
 
     my $c = Config::Simple->new($cfile);
