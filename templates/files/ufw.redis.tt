@@ -1,0 +1,4 @@
+[redis]
+title=Redis
+description=Redis in-memory data store
+ports=6379/tcp
