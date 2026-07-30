@@ -56,7 +56,7 @@ All tests belong in `t/`
 Integration tests must skip unless the `RELEASE_TESTING` env var = 1
 Acceptance tests must skip unless  the `AUTHOR_TESTING` env var = 1
 
-## Approach
+## Approach to writing tests
 
 Load the system under test with either `use_ok()` for modules, or require\_ok() for modulino binaries. Only use `ok do ...` when testing nonmodlino scripts.
 
@@ -79,6 +79,10 @@ This may be omitted for scripts and modulinos, as it is expected that they may e
 It is acceptable for the system under test to `die()` during tests; in general we want negative results as fast as is possible.
 
 When you are specifically testing for a termination condition, use Test::Fatal or Test2::Tools::Exception as appropriate
+
+# Running tests
+
+Run tests with `prove -lm -j8`
 
 # Nature of fake data
 

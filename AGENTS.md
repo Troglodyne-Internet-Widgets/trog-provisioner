@@ -32,76 +32,10 @@ perldoc lib/Provisioner/Recipe/yourmodule.pm
 ```
 
 ### Testing
-Currently, no automated test suite exists. When implementing tests:
-- Place test files in a `t/` directory
-- Use Test::More or similar testing framework
-- Run tests with: `prove -l t/`
+See t/TESTING.md
 
 ## Code Style Guidelines
-
-### Perl Style
-
-Use perltidy, we have a .perltidyrc
-
-#### File Structure
-```perl
-package Provisioner::Recipe::example;
-
-use strict;
-use warnings FATAL => 'all';
-
-use parent qw{Provisioner::Recipe};
-
-# Other module imports
-use YAML;
-use File::Slurper;
-```
-
-#### Imports and Dependencies
-- Always use `strict` and `warnings FATAL => 'all'`
-- Use `parent` for inheritance, not `use base`
-- Group imports logically: core modules first, then CPAN modules
-- Avoid experimental features unless with proper warnings handling
-
-#### Naming Conventions
-- Package names: `Provisioner::Recipe::recipename` (lowercase recipe names)
-- Subroutines: lowercase with underscores (e.g., `remote_files`, `template_files`)
-- Variables: lowercase with underscores for locals
-- Constants: UPPERCASE with underscores
-
-#### Error Handling
-- Use `die` with descriptive messages for fatal errors
-- Include context in error messages: `die "Could not open $file: $!"`
-- Validate inputs early in subroutines
-
-#### POD Documentation
-```perl
-=head1 Provisioner::Recipe::example
-
-=head2 SYNOPSIS
-
-    somedomain:
-        example:
-            option: value
-
-=head2 DESCRIPTION
-
-Brief description of what this recipe does.
-
-=head3 subroutine_name
-
-What it does.
-
-=over 1
-
-=item INPUTS: parameter descriptions
-
-=item OUTPUTS: return value description
-
-=back
-
-=cut
-```
+See STYLE.md
 
 ### Recipe Development
 

@@ -207,17 +207,19 @@ When running trog-provisioner, it will then apply both configs, waiting until th
 
 # Writing Modules
 
+See [STYLE.md](STYLE.md) for how we prefer to see code written.
+
 ## scripts/
 
 To simplify matters, we SCP over the scripts/ directory, which you should shove any complicated scripting into.
 Be that used for recipes, or what have you.
 
-# Generated files
+## Generated files
 
 When your recipe generates things like configs, stick the templates in templates/files.
 Then identify them by name in the template\_files() method.
 
-# Salvaged files
+## Salvaged files
 
 If you want to grab something from a dir on an existing provisioned host, describe them in the remote\_files() method.
 This will stuff them in the specified location of the datadir.
