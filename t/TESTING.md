@@ -25,10 +25,11 @@ It is preferrable for data driven tests to accept input on STDIN, but fall back 
 
 In the perl context we are going to be testing 4 types of systems:
 
-1. Perl Modules - these generally live in lib/ and have a .pm file extension. They must exit 1.
-2. Modulinos    - these generally live in bin/ and are chmod +x,  declare a package and only execute `main()` when `caller()` is defined.
-3. Scripts      - these generally live in scripts/, and have a .pl extension.
-4. Applications - usually PSGI, these are intended to be run as a part or plugin of other perl applications.
+1. Modules      - these generally live in lib/ and have a .pm file extension. They must exit 1.
+2. Plugins      - these are modules, but that are not intended to be used directly. Instead they are included dynamically, and are a subclass of other modules.
+3. Modulinos    - these generally live in bin/ and are chmod +x,  declare a package and only execute `main()` when `caller()` is defined.
+4. Scripts      - these generally live in scripts/, and have a .pl extension.
+5. Applications - usually PSGI, these are intended to be run as a part or plugin of other perl applications.
 
 Going forward we will abbreviate "system under test" as SUT.
 
@@ -41,15 +42,21 @@ Code re-use (modularity) cuts down on unnecessary testing as it means less lines
 
 ## Structure
 
-Every test MUST be named in the following form:
+Every test of modules MUST be named in the following form:
 
+```
 My-Module.t
+```
 
 Where lib/My/Module.pm is the system under test.
 
 It is important to keep unit tests associated with the module that they test.
 
-Similarly, it is important to test each subroutine in its own subtest / closure,
+In the case of plugins (such as Provisioner::Recipe subclasses), it is better to iterate over these in one test file.
+Name said tests as seems appropriate.
+The idea is that we want to automatically get test coverage for most new plugins that we add.
+
+It is important to test each subroutine in its own subtest / closure,
 so as much local state and mocks as are possible can expire with the test of the particular sub.
 
 All tests belong in `t/`
