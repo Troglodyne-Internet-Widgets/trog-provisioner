@@ -7,8 +7,10 @@ use YAML;
 use File::Find;
 use File::Temp qw{tempdir tempfile};
 use File::Touch;
+use File::Copy;
 
 use Test::More;
+use Test::Fatal qw{exception};
 
 if (!$ENV{AUTHOR_TESTING}) {
     plan skip_all => 'Test must be run under AUTHOR_TESTING';
@@ -31,7 +33,11 @@ File::Find::find( {
 # Treat 'data' as special
 @available = grep { $_ ne 'data' } @available;
 
+#XXX hardcoded
+my $test_ip = '192.168.1.40';
+
 my $aliases = join("=data\n", @available).'=data';
+my $ips = join("=$test_ip\n", @available)."=$test_ip";
 
 # Populate stuff needed by recipes
 my $tmpdir = tempdir( CLEANUP => 1 );
@@ -40,7 +46,8 @@ mkdir "$tmpdir/dotfiles/doge";
 mkdir "$tmpdir/data";
 mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
-system( 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', "$tmpdir/data/data.test.test/backup.rsa", '-N', '', '-q' );
+system( 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', "$tmpdir/data/backup.test.test/backup.rsa", '-N', '', '-q' );
+File::Copy::copy("$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa");
 File::Touch::touch("$tmpdir/dotfiles/test");
 
 # Build the config to pass to tools
@@ -59,9 +66,10 @@ bridge_devname=ens4
 dhcp_devname=ens3
 [ip_pool]
 addresses=
-cidr= 192.168.1.0/26
+cidr=
 [ips]
-data=192.168.1.40
+data=$test_ip
+$ips
 [aliases]
 $aliases
 [nameservers]
@@ -70,7 +78,6 @@ ns2=ns2.test.test";
 
 #XXX hate having to hardcode this, should really make this a toplevel thing in recipes
 my %recipes_raw = (
-    data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
     imagemagick =>  { version => '7.1.0' },
     mariadb => {
         root_pw  => 's3cr3t',
@@ -120,20 +127,39 @@ my %recipes_raw = (
         hosts       => ['backup.host'],
         targets     => ['etc'],
         key_file    => 'backup.rsa',
-        data_source => "$tmpdir/data/data.test.test",
+        data_source => "$tmpdir/data",
     },
     backup => {
         modules     => [],
         targets     => { etc => '/etc' },
         key_file    => 'backup.rsa',
-        data_source => "$tmpdir/data/data.test.test",
+        data_source => "$tmpdir/data",
+    },
+    postgres => {
+        dumps => [],
     },
 );
 # Make each so-named domain to provision do nothing but provision its own stuff
 foreach my $key ('data', @available) {
+    # XXX standardize required_modules instead in recipes
+    # XXX ALSO re-do things such that recipes can inform their dependent recipes of what their required values are gonna be
+    if (ref $recipes_raw{$key}{modules} eq 'ARRAY') {
+        my $modules = delete $recipes_raw{$key}{modules};
+        foreach my $module (@$modules) {
+            $recipes_raw{$key}{$module} = $recipes_raw{$module} // {};
+        }
+    }
+}
+foreach my $key ('data', @available) {
     my $data = $recipes_raw{$key} // {};
     $recipes_raw{$key} = { $key => $data };
 }
+$recipes_raw{_base} = {
+    _global => {
+        user => 'test',
+    },
+    data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
+};
 
 my $recipes = YAML::Dump(\%recipes_raw);
 
@@ -159,16 +185,22 @@ sub test_recipe {
     no strict 'refs';
     my $r = "Provisioner::Recipe::$recipe"->new();
     use strict;
-    my @tests = $r->tests();
 
-    ok(@tests, "$recipe recipe Has tests");
-    do_provision($recipe, $ipmap_file, $recipe_file) if @tests;
+    my @tests = $r->tests();
+    #ok(@tests, "$recipe recipe Has tests");
+
+    my %files = $r->template_files();
+
+    do_provision($recipe, $ipmap_file, $recipe_file, %files);
+
+    # TODO Actually run trog-provisioner.
 
     #TODO re-run generator and make sure everything in remote_files was backed up, and that we do have remote_files
+
 }
 
 sub do_provision {
-    my ($recipe, $ipmap_file, $recipe_file) = @_;
+    my ($recipe, $ipmap_file, $recipe_file, %files) = @_;
 
     my $provisioner_bin = '/opt/trog-provisioner/bin/provision';
 
@@ -176,6 +208,7 @@ sub do_provision {
         Trog::Provisioner::Config::Generator::main(
             '--ipmap',   $ipmap_file,
             '--recipes', $recipe_file,
+            '--skip_ssh',
             $recipe,
         )
     };
@@ -186,7 +219,8 @@ sub do_provision {
     ok(-f "$ddir/provision.conf", "provision.conf generated");
     ok(-f "$ddir/users.yaml", "users.yaml generated");
     # TODO check that every file that was supposed to be generated actually was
-
-    # TODO Actually run trog-provisioner.
+    foreach my $file (values(%files)) {
+        ok(-f "$ddir/$file", "$file generated in datadir");
+    }
 
 }

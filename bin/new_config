@@ -283,7 +283,7 @@ sub get_recipe_config {
         no_chdir => 1,
         bydepth => 1,
     },
-    "$loc/recipes.d/");
+    "$loc/recipes.d/") if -d "$loc/recipes.d";
 
     return $c;
 }
@@ -545,7 +545,7 @@ sub handle_domain {
     $global_config->{transfer_user}   = $transfer_user;
     $global_config->{hv_ssh_port}     = $hv_ssh_port;
 
-    require Provisioner::Recipe::data;
+    require Provisioner::Recipe::data unless already_required('Provisioner/Recipe/data.pm');
     my $do            = Provisioner::Recipe::data->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
 
@@ -587,7 +587,9 @@ sub handle_domain {
     my @conflicts;
     my @modules_ordered;
     foreach my $module (@modules) {
-        require "Provisioner/Recipe/$module.pm" or die "Could not load provisioner recipe $module";
+        if (!already_required("Provisioner/Recipe/$module.pm")) {
+            require "Provisioner/Recipe/$module.pm" or die "Could not load provisioner recipe $module";
+        }
         my $builder      = "Provisioner::Recipe::$module"->new(%provisioner_opts);
         my $pconf        = $rconf->{$domain}{$module};
         my $aliases      = $alias_conf->{$domain};
@@ -797,6 +799,13 @@ sub resolve_template_loc {
         return $possibiru if -f $possibiru;
     }
     die "Could not find relevant template $template!";
+}
+
+sub already_required {
+    my $module = shift;
+    my @available = keys(%INC);
+    return 1 if any { m/\Q$module\E/ } @available;
+    return 0;
 }
 
 main(@ARGV) unless caller;
