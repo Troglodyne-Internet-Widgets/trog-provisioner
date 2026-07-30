@@ -12,7 +12,7 @@
 DKIM_KEY=$(openssl rsa -in /etc/opendkim/keys/$1/default.private -pubout 2>/dev/null | sed "1,1d;$ d;" | sed -z "s/\n//g")
 
 # If we can't extract the pubkey, something has gone wrong.
-if [ -z $DKIM_KEY ]
+if [ -z "$DKIM_KEY" ]
 then
 	echo "Can't extract public key from private dkim key for $1."
 	exit 1;
@@ -22,42 +22,30 @@ fi
 DKIM_RECORD="v=DKIM1; h=sha256; k=rsa; t=y; p=$DKIM_KEY"
 
 echo "Installing DKIM Key:"
-echo $DKIM_RECORD
+echo "$DKIM_RECORD"
 
-SQL="insert into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'default._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
-echo $SQL | sqlite3 /var/spool/powerdns/$1/zones.db
-SQL="insert into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'mail._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
-echo $SQL | sqlite3 /var/spool/powerdns/$1/zones.db
+# Insert or replace to avoid duplicates on redeploy.
+SQL="insert or replace into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'default._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
+echo "$SQL" | sqlite3 /var/spool/powerdns/$1/zones.db
+SQL="insert or replace into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'mail._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
+echo "$SQL" | sqlite3 /var/spool/powerdns/$1/zones.db
 
 systemctl restart pdns
 
 # Optionally, update things with the registrar if we have the needed info.
+[ -x "/opt/lexicon/$1" ] || exit 0;
+
 EXISTING_RECORDS=$(/opt/lexicon/$1 list TXT)
-if [ echo "$EXISTING_RECORDS" | grep "mail._domainkey.$1." ]
+if echo "$EXISTING_RECORDS" | grep -q "mail._domainkey.$1."
 then
-/opt/lexicon/$1 update TXT --name="mail._domainkey.$1." --content="$DKIM_RECORD"
-else
-/opt/lexicon/$1 create TXT --name="mail._domainkey.$1." --content="$DKIM_RECORD"
-fi
-
-#TODO disabling for now.
-exit 0;
-
-# Upload the DKIM 
-if [ echo "$EXISTING_RECORDS" | grep "mail._domainkey.$1." ]
-then
-	echo "Updating mail selector DKIM record for $1"
 	/opt/lexicon/$1 update TXT --name="mail._domainkey.$1." --content="$DKIM_RECORD"
 else
-	echo "Creating mail selector DKIM record for $1"
 	/opt/lexicon/$1 create TXT --name="mail._domainkey.$1." --content="$DKIM_RECORD"
 fi
 
-if [ echo "$EXISTING_RECORDS" | grep "default._domainkey.$1." ]
+if echo "$EXISTING_RECORDS" | grep -q "default._domainkey.$1."
 then
-	echo "Updating default selector DKIM record for $1"
 	/opt/lexicon/$1 update TXT --name="default._domainkey.$1." --content="$DKIM_RECORD"
 else
-	echo "Creating default selector DKIM record for $1"
 	/opt/lexicon/$1 create TXT --name="default._domainkey.$1." --content="$DKIM_RECORD"
 fi
