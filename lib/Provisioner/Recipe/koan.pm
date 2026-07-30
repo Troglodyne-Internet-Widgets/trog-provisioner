@@ -397,7 +397,11 @@ sub remote_files {
         "$install_dir/$domain/koan/instance/"     => 'koan/instance/',
         "$install_dir/$domain/koan/logs/"         => 'koan/logs/',
         "$install_dir/$domain/koan/workspace/"    => 'koan/workspace/',
-        "$install_dir/$doamin/koan/projects.yaml" => 'koan/projects.yaml',
+        "$install_dir/$domain/koan/projects.yaml" => 'koan/projects.yaml',
+        # Preserve Claude Code auth state across re-provisions.
+        # Claude writes account metadata and session state here on first use;
+        # losing it forces interactive re-auth on the next deploy.
+        "$install_dir/$domain/.claude.json"       => '.claude.json',
     );
 }
 

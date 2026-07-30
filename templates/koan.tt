@@ -59,6 +59,20 @@ runuser -u '[% user %]' -- '[% install_dir %]/[% domain %]/.venv/bin/pip' instal
 # Skip when already on PATH — `npm install -g` round-trips the registry every
 # call.  To force an upgrade, uninstall first or run npm update manually.
 command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code
+
+# Bootstrap ~/.claude.json so Claude Code skips interactive onboarding on
+# first run.  CLAUDE_CODE_OAUTH_TOKEN (in .env) handles the actual bearer
+# auth; Claude only needs hasCompletedOnboarding:true to not attempt a
+# browser login flow it can't complete in a headless service context.
+# Guard: preserve the file if it already exists — on re-provision it will
+# hold fuller account state (written by Claude after first successful call)
+# that restores intact via remote_files; only a genuinely fresh VM needs
+# this seed.
+if [ ! -f '[% install_dir %]/[% domain %]/.claude.json' ]; then \
+    printf '{"hasCompletedOnboarding":true}\n' > '[% install_dir %]/[% domain %]/.claude.json'; \
+    chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.claude.json'; \
+    chmod 0600 '[% install_dir %]/[% domain %]/.claude.json'; \
+fi
 [% END %]
 
 [% IF messaging_provider == 'matrix' && matrix_e2ee && matrix_password && !matrix_access_token %]
