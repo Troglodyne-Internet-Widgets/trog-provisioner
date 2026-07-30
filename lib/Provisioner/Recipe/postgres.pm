@@ -11,7 +11,8 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         postgres:
-            dump_file: path/to/dump/in/datadir
+            dumps:
+                - path/to/dump/in/datadir
 
 =head2 DESCRIPTION
 
@@ -32,7 +33,7 @@ sub validate {
     my ( $self, %opts ) = @_;
 
     my $dump = $opts{dumps};
-    die "Must define dumps in [postgres] section of recipes.yaml" if !$dump || ref $dump ne 'ARRAY';
+    die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump || ref $dump ne 'ARRAY';
 
     return %opts;
 }
