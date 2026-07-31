@@ -1,0 +1,39 @@
+# Create gogs system user
+id -u [% gogs_admin %] &>/dev/null || useradd -r -s /bin/bash -d [% install_dir %]/git.[% domain %] [% gogs_admin %]
+# Create data directories
+mkdir -p [% install_dir %]/git.[% domain %]/{repos,data,log,custom/conf}
+# Download and install gogs binary
+INSTALLED_VER=$$(/usr/local/bin/gogs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
+if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
+	ARCH=$$(dpkg --print-architecture); \
+	curl -fsSL "https://github.com/gogs/gogs/releases/download/v[% version %]/gogs_[% version %]_linux_$$ARCH.tar.gz" -o /tmp/gogs.tar.gz; \
+	tar -xzf /tmp/gogs.tar.gz -C /tmp; \
+	install -d /usr/local/lib/gogs; \
+	cp -a /tmp/gogs/. /usr/local/lib/gogs/; \
+	ln -sf /usr/local/lib/gogs/gogs /usr/local/bin/gogs; \
+	rm -rf /tmp/gogs /tmp/gogs.tar.gz; \
+fi
+# Deploy configuration
+install -m 0640 app.ini [% install_dir %]/git.[% domain %]/custom/conf/app.ini
+chown [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]/custom/conf/app.ini
+# Set ownership on data directories
+chown -R [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]
+chmod -R 0750 [% install_dir %]/git.[% domain %]
+# Deploy nginx vhost
+mkdir -p /etc/nginx/sites-enabled
+install -m 0644 gogs.nginx.conf /etc/nginx/sites-enabled/git.[% domain %].conf
+# Deploy systemd service
+install -m 0644 gogs.service /etc/systemd/system/gogs.service
+systemctl daemon-reload
+systemctl enable gogs
+# Install setup and mirror scripts
+install -m 0750 gogs_setup.sh [% script_dir %]/gogs_setup.sh
+install -m 0750 gogs.mirror.sh [% script_dir %]/gogs.mirror.sh
+[% IF github_users.size OR github_orgs.size -%]
+# Schedule periodic mirroring from GitHub
+echo "0 */[% mirror_interval %] * * * [% gogs_admin %] [% script_dir %]/gogs.mirror.sh" > /etc/cron.d/gogs-mirror
+[% END -%]
+# Queue service start, initial setup, and nginx reload for postrun
+[% script_dir %]/queue_postrun_task systemctl start gogs
+[% script_dir %]/queue_postrun_task [% script_dir %]/gogs_setup.sh
+[% script_dir %]/queue_postrun_task systemctl reload nginx

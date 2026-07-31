@@ -1,0 +1,28 @@
+server {
+    listen 443 ssl;
+[% IF ipv6 %]    listen [::]:443 ssl;
+[% END -%]
+    server_name git.[% domain %];
+    server_tokens off;
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+    client_max_body_size 64m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 80;
+[% IF ipv6 %]    listen [::]:80;
+[% END -%]
+    server_name git.[% domain %];
+    return 301 https://$host$request_uri;
+}

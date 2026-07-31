@@ -1,0 +1,78 @@
+#!/bin/bash
+# Mirror public GitHub repositories to this gogs instance.
+# Skips repos already present. Safe to re-run.
+
+set -uo pipefail
+
+GOGS_URL="https://git.[% domain %]"
+GOGS_ADMIN="[% gogs_admin %]"
+GOGS_PASS="[% admin_password %]"
+[% IF github_token -%]
+GITHUB_TOKEN="[% github_token %]"
+[% END -%]
+
+github_get() {
+    local url="$1"
+[% IF github_token -%]
+    curl -sf -H "Authorization: token $GITHUB_TOKEN" "$url"
+[% ELSE -%]
+    curl -sf "$url"
+[% END -%]
+}
+
+ADMIN_UID=""
+
+fetch_admin_uid() {
+    ADMIN_UID=$(curl -sf -u "$GOGS_ADMIN:$GOGS_PASS" \
+        "$GOGS_URL/api/v1/users/$GOGS_ADMIN" \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])' 2>/dev/null) || true
+}
+
+mirror_repo() {
+    local clone_addr="$1"
+    local repo_name
+    repo_name=$(basename "$clone_addr" .git)
+
+    if curl -sf -u "$GOGS_ADMIN:$GOGS_PASS" \
+            "$GOGS_URL/api/v1/repos/$GOGS_ADMIN/$repo_name" > /dev/null 2>&1; then
+        echo "Already mirrored: $repo_name"
+        return 0
+    fi
+
+    [ -z "$ADMIN_UID" ] && { echo "No admin UID available, skipping $repo_name"; return 0; }
+
+    echo "Mirroring: $repo_name"
+    curl -sf -X POST "$GOGS_URL/api/v1/repos/migrate" \
+        -u "$GOGS_ADMIN:$GOGS_PASS" \
+        -H "Content-Type: application/json" \
+        -d "{\"clone_addr\":\"$clone_addr\",\"uid\":$ADMIN_UID,\"repo_name\":\"$repo_name\",\"mirror\":true,\"private\":false}" \
+        > /dev/null || echo "Failed to mirror $repo_name"
+}
+
+mirror_github_source() {
+    local api_url="$1"
+    local page=1
+    while true; do
+        local repos
+        repos=$(github_get "$api_url?per_page=100&page=$page&type=public" \
+            | python3 -c 'import sys,json; [print(r["clone_url"]) for r in json.load(sys.stdin)]' 2>/dev/null) || true
+        [ -z "$repos" ] && break
+        while IFS= read -r repo; do
+            mirror_repo "$repo"
+        done <<< "$repos"
+        page=$((page + 1))
+    done
+}
+
+fetch_admin_uid
+if [ -z "$ADMIN_UID" ]; then
+    echo "Could not fetch gogs admin UID — is gogs running?" >&2
+    exit 1
+fi
+
+[% FOR user IN github_users -%]
+mirror_github_source "https://api.github.com/users/[% user %]/repos"
+[% END -%]
+[% FOR org IN github_orgs -%]
+mirror_github_source "https://api.github.com/orgs/[% org %]/repos"
+[% END -%]

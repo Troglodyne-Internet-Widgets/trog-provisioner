@@ -1,0 +1,38 @@
+RUN_USER = [% gogs_admin %]
+RUN_MODE = prod
+
+[database]
+DB_TYPE = sqlite3
+PATH    = [% install_dir %]/git.[% domain %]/data/gogs.db
+
+[repository]
+ROOT = [% install_dir %]/git.[% domain %]/repos
+
+[server]
+DOMAIN       = git.[% domain %]
+HTTP_PORT    = 3000
+HTTP_ADDR    = 127.0.0.1
+ROOT_URL     = https://git.[% domain %]/
+OFFLINE_MODE = true
+
+[mailer]
+ENABLED = false
+
+[service]
+REGISTER_EMAIL_CONFIRM = false
+ENABLE_NOTIFY_MAIL     = false
+DISABLE_REGISTRATION   = false
+ENABLE_CAPTCHA         = false
+REQUIRE_SIGNIN_VIEW    = false
+
+[session]
+PROVIDER_CONFIG = [% install_dir %]/git.[% domain %]/data/sessions
+
+[log]
+ROOT_PATH = [% install_dir %]/git.[% domain %]/log
+MODE      = file
+LEVEL     = Info
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY   = [% secret_key %]

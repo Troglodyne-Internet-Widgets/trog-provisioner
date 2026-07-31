@@ -1,0 +1,29 @@
+#!/bin/bash
+# Initial gogs setup: wait for service readiness, then create the admin user.
+# Safe to re-run — create-user exits non-zero if user already exists, which we ignore.
+
+set -euo pipefail
+
+gogs_ready=0
+for i in $(seq 1 30); do
+    if curl -sf http://127.0.0.1:3000 > /dev/null 2>&1; then
+        echo "Gogs is ready"
+        gogs_ready=1
+        break
+    fi
+    echo "Waiting for gogs to start... ($i/30)"
+    sleep 5
+done
+
+if [ "$gogs_ready" -eq 0 ]; then
+    echo "Gogs did not start within 150 seconds" >&2
+    exit 1
+fi
+
+output=$(runuser -u [% gogs_admin %] -- \
+    env GOGS_CUSTOM=[% install_dir %]/git.[% domain %]/custom \
+    /usr/local/lib/gogs/gogs admin create-user \
+    --name [% gogs_admin %] \
+    --password '[% admin_password %]' \
+    --email [% admin_email %] \
+    --admin 2>&1) || echo "$output" | grep -q "user already exists" || { echo "$output" >&2; exit 1; }
