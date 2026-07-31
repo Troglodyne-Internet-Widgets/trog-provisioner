@@ -22,7 +22,7 @@ Builds and installs ImageMagick from source with Perl bindings.
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{ghostscript libjpeg-dev libpng-dev libtiff-dev liblzma-dev libxml2-dev libdjvulibre-dev libfreetype-dev libperl-dev};
+        return qw{ghostscript libjpeg-dev libpng-dev libtiff-dev liblzma-dev libxml2-dev libdjvulibre-dev libfreetype-dev libperl-dev libjxl-dev libtcmalloc-minimal4t64 g++ pkg-config};
     }
     die "Unsupported packager";
 }

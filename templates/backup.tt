@@ -1,3 +1,3 @@
 rm [% install_dir %]/[% domain %]/[% key_file %]
-mv rsyncd.conf /root/rsyncd.conf
-echo "command=\"rsync --daemon --server --config=/root/rsyncd.conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
+mv rsyncd.conf /root/rsyncd.[% domain %].conf
+echo "command=\"rsync --daemon --server --config=/root/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys

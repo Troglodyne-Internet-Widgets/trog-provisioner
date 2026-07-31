@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+=head1 setup-masquerade
+
+=head2 SYNOPSIS
+
+    setup-masquerade 10.8.0.0/24=eth0 [10.9.0.0/24=eth1 ...]
+
+=head2 DESCRIPTION
+
+Idempotently edits C</etc/ufw/before.rules> to add C<*nat> POSTROUTING
+MASQUERADE rules for the given C<SUBNET=INTERFACE> pairs.
+
+ufw does not expose masquerade rules through its app rule mechanism, so this
+mirrors the C<setup-port-forwards> pattern: hand-edit C</etc/ufw/before.rules>
+to inject a C<*nat> table block above the existing C<*filter> block. Re-runs
+are safe — existing rules are detected and skipped, and the C<*nat> header is
+only written when no such block already exists.
+
+If the C<ufw> service is active, the rules are applied via C<ufw reload>.
+
+=cut
+
+exit 0 unless @ARGV;
+
+my $file = '/etc/ufw/before.rules';
+
+open( my $fh, '<', $file ) or die "Cannot read $file: $!";
+my $content = do { local $/; <$fh> };
+close $fh;
+
+my @rules;
+for my $arg (@ARGV) {
+    my ( $subnet, $iface ) = split /=/, $arg, 2;
+    die "Bad arg '$arg' (expected SUBNET/MASK=INTERFACE)\n"
+      unless defined $subnet && length $subnet
+          && defined $iface  && length $iface;
+    push @rules, "-A POSTROUTING -s $subnet -o $iface -j MASQUERADE";
+}
+
+# Drop rules already present so re-runs are no-ops.
+@rules = grep { $content !~ /^\Q$_\E$/m } @rules;
+exit 0 unless @rules;
+
+my $new;
+if ( $content =~ /^\*nat\b/m ) {
+    # *nat block exists; insert our rules just before its COMMIT.
+    $new = $content;
+    $new =~ s{(\*nat\b[^\*]*?)(^COMMIT$)}
+             { $1 . join("\n", @rules) . "\n" . $2 }sme
+        or die "Found *nat header but no matching COMMIT in $file\n";
+}
+else {
+    # No *nat block; create one immediately before the *filter block.
+    my $block = "*nat\n"
+              . ":POSTROUTING ACCEPT [0:0]\n"
+              . join( "\n", @rules ) . "\n"
+              . "COMMIT\n\n";
+    $new = $content;
+    if ( $new =~ /^\*filter\b/m ) {
+        $new =~ s/^(\*filter\b)/$block$1/m;
+    }
+    else {
+        $new .= "\n$block";
+    }
+}
+
+open( my $out, '>', $file ) or die "Cannot write $file: $!";
+print $out $new;
+close $out;
+
+print "Added " . scalar(@rules) . " masquerade rule(s) to $file\n";
+
+# Apply immediately if ufw is already active.
+my $status = qx{ufw status 2>/dev/null};
+system( 'ufw', 'reload' ) == 0 or warn "ufw reload failed: $?\n"
+  if $status =~ /Status:\s*active/;

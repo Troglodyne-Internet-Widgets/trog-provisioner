@@ -1,4 +1,2 @@
-mv backupdestination.cron /etc/cron.d/backups
-mv backupdestination.logrotate /etc/logrotate.d/backups
-mkdir -p /var/log/backups; /bin/true
+mv backupdestination.cron /etc/cron.d/[% domain %]-backups
 chmod 0600 "[% install_dir %]/[% domain %]/[% key_file %]"

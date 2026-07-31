@@ -3,6 +3,7 @@ package Provisioner::Recipe;
 use strict;
 use warnings FATAL => 'all';
 
+use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 
@@ -37,7 +38,8 @@ sub new {
     my ($tname) = $class =~ m/^Provisioner::Recipe::(\w+)$/;
     die "Could not extract recipe name.  Recipes must be of form Provisioner::Recipe::*" unless $tname;
 
-    $opts{template} = "$tname.tt";
+    $opts{template}        = "$tname.tt";
+    $opts{global_template} = "$tname.global.tt";
 
     $opts{tt} = Text::Xslate->new(
         {
@@ -180,6 +182,41 @@ Render recipe's makefile template.
 sub render {
     my ($self) = shift;
     return $self->render_file( $self->{template}, @_ );
+}
+
+=head3 $bool = $recipe->has_global_template()
+
+Returns true if a C<$recipe.global.tt> exists in any configured template directory.
+
+=cut
+
+sub has_global_template {
+    my ($self) = @_;
+    return !!any { -f "$_/$self->{global_template}" } @{ $self->{template_dirs} };
+}
+
+=head3 $bool = $recipe->has_template()
+
+Returns true if a C<$recipe.tt> exists in any configured template directory.
+
+=cut
+
+sub has_template {
+    my ($self) = @_;
+    return !!any { -f "$_/$self->{template}" } @{ $self->{template_dirs} };
+}
+
+
+=head3 $output = $recipe->render_global(%template_vars)
+
+Render the recipe's global makefile template (C<$recipe.global.tt>).
+Only call this after confirming C<has_global_template> returns true.
+
+=cut
+
+sub render_global {
+    my ($self) = shift;
+    return $self->render_file( $self->{global_template}, @_ );
 }
 
 =head3 $output = render_file($file, %template_vars)

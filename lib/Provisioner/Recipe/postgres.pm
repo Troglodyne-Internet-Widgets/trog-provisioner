@@ -11,7 +11,8 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         postgres:
-            dump_file: path/to/dump/in/datadir
+            dumps:
+                - path/to/dump/in/datadir
 
 =head2 DESCRIPTION
 
@@ -23,7 +24,7 @@ It is your responsibility to make sure the dump file has CREATE DATABSE statemen
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{postgresql-common};
+        return qw{postgresql-common postgresql-common-dev};
     }
     die "Unsupported packager";
 }
@@ -31,8 +32,8 @@ sub deps {
 sub validate {
     my ( $self, %opts ) = @_;
 
-    my $dump = $opts{dump_file};
-    die "Must define dump_file in [postgres] section of recipes.yaml" unless $dump;
+    my $dump = $opts{dumps};
+    die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump || ref $dump ne 'ARRAY';
 
     return %opts;
 }

@@ -1,9 +1,5 @@
 # Housekeeping
-mkdir -p /mail/scripts
 mkdir -p /mail/[% domain %]
-cp [% script_dir %]/dovecot_overquota /mail/scripts
-chown -R dovecot:dovecot /mail
-chmod -R 0775 /mail
 # opendkim
 mkdir -p /etc/opendkim/keys/[% domain %]
 mv TrustedHosts /etc/opendkim
@@ -179,8 +175,8 @@ mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
 [%- END %]
 # Setup mailboxes and sieve scripts for the various users
 [% FOR name IN names.keys() %]
-test -f "/mail/[% domain %]/[% name %]/[% name.sieve %]" && ln -s "/mail/[% domain %]/[% name %]/[% name.sieve %]" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
-test -f "/mail/[% domain %]/[% name %]/[% name.sieve %]" && sudo -u dovecot sievc "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && ln -s "/mail/[% domain %]/[% name %]/[% name %].sieve" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievc "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
 [% FOR box IN names.$name.mailboxes %]
 doveadm mailbox create -u [% name %] [% box %]
 [% END -%]

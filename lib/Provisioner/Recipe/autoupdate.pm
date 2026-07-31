@@ -33,7 +33,8 @@ sub deps {
 
 sub template_files {
     return (
-        'autoupdate.cron.tt' => 'autoupdate_cron',
+        'autoupdate.cron.tt'  => 'autoupdate_cron',
+        'autorestart.cron.tt' => 'autorestart_cron',
     );
 }
 

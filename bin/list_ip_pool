@@ -8,11 +8,13 @@ use FindBin::libs;
 
 use Config::Simple;
 use Getopt::Long;
-use Net::IP;
+use Cpanel::JSON::XS;
+
+use Provisioner::IPPool;
 
 =head1 USAGE
 
-    list_ip_pool [--ipmap=file]
+    list_ip_pool [--ipmap=file] [--available] [--assigned] [--json]
 
 Display static IP pool status: which IPs are assigned to VMs, which are available.
 
@@ -35,7 +37,16 @@ which pool IPs are still available for new VMs.
 =cut
 
 my $cfile = 'ipmap.cfg';
-GetOptions('ipmap=s' => \$cfile);
+my ($assigned, $available, $json);
+GetOptions(
+    'ipmap=s'   => \$cfile,
+    'assigned'  => \$assigned,
+    'available' => \$available,
+    'json'      => \$json,
+);
+
+# Just give us everything if nothing is passed
+($assigned, $available) = (1,1) if !$assigned && !$available;
 
 die "No ipmap file found at '$cfile'\nUsage: $0 [--ipmap=file]\n" unless -f $cfile;
 
@@ -54,32 +65,7 @@ unless (keys %$pool) {
     exit 1;
 }
 
-# Collect pool IPs from explicit list and/or CIDR expansion
-my %seen_pool;
-my @pool_ips;
-
-if (my $addrs = $pool->{addresses}) {
-    for my $ip (split /\s+/, $addrs) {
-        next unless $ip =~ /\S/;
-        unless ($seen_pool{$ip}++) {
-            push @pool_ips, $ip;
-        }
-    }
-}
-
-if (my $cidrs = $pool->{cidr}) {
-    for my $cidr (split /\s+/, $cidrs) {
-        next unless $cidr =~ /\S/;
-        my $net = Net::IP->new($cidr)
-            or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
-        do {
-            my $ip = $net->ip();
-            unless ($seen_pool{$ip}++) {
-                push @pool_ips, $ip;
-            }
-        } while (++$net);
-    }
-}
+my @pool_ips = Provisioner::IPPool::pool_ips($pool);
 
 unless (@pool_ips) {
     print STDERR "ip_pool section found but no IPs could be parsed.\n";
@@ -97,18 +83,28 @@ for my $domain (sort keys %$ips) {
 my @available = grep { !$assigned{$_} } @pool_ips;
 my @used      = grep {  $assigned{$_} } @pool_ips;
 
+if ($json) {
+    my $out = {};
+    $out->{available} = \@available if $available;
+    $out->{assigned}  = \%assigned  if $assigned;
+    print Cpanel::JSON::XS::encode_json($out);
+    exit 0;
+}
+
 printf "IP Pool — %d total, %d assigned, %d available\n\n",
     scalar(@pool_ips), scalar(@used), scalar(@available);
 
-if (@used) {
+if (@used && $assigned) {
     print "Assigned:\n";
     printf "  %-20s %s\n", $_, $assigned{$_} for @used;
     print "\n";
 }
 
 if (@available) {
-    print "Available:\n";
-    printf "  %s\n", $_ for @available;
+    if ($available) {
+        print "Available:\n";
+        printf "  %s\n", $_ for @available;
+    }
 } else {
     print "Pool exhausted — no IPs available.\n";
 }

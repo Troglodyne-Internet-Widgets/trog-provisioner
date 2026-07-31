@@ -2,19 +2,25 @@
 [% var %] := [% vars.$var | mark_raw %]
 [% END -%]
 
-[% global_targets = ['packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
+[% global_targets = ['sysctl', 'packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
 [% IF user -%]
 [% global_targets.unshift('service_user') -%]
 [% END -%]
 [% global_targets.unshift('state') -%]
 
 .PHONY: all
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% state_dir %]/[% module %][% END %] [% state_dir %]/test
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %] [% state_dir %]/test
 	[% script_dir %]/post_install
 	touch /root/install_complete
 
 [% state_dir %]/state:
 	mkdir -p [% state_dir %]
+	touch $@
+
+[% state_dir %]/sysctl:
+	echo "net.ipv4.conf.all.arp_announce=1" > /etc/sysctl.d/10-arp-flux.conf
+	echo "net.ipv4.conf.all.arp_ignore=2" >> /etc/sysctl.d/10-arp-flux.conf
+	sysctl -p
 	touch $@
 
 [% state_dir %]/packages:
@@ -79,6 +85,11 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 [% data_fragment | tabinate -%]
 	touch $@
 
+[% FOR module IN global_fragments.keys().sort() %]
+[% global_state_dir %]/global_[% module %]:
+[% global_fragments.$module | tabinate -%]
+	touch $@
+[% END -%]
 [% FOR module IN fragments.keys().sort() %]
 [% state_dir %]/[% module %]:
 [% fragments.$module | tabinate -%]

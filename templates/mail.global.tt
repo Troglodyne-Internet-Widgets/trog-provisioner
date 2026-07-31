@@ -1,0 +1,5 @@
+mkdir -p /mail/scripts
+cp [% script_dir %]/dovecot_overquota /mail/scripts
+chown -R dovecot:dovecot /mail
+chmod -R 0775 /mail
+

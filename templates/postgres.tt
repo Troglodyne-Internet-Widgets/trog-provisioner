@@ -1,3 +1,3 @@
-yes | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
-apt-get install postgresql-client-18 postgresql-18
+[% FOR dump_file IN dumps %]
 sudo -u postgres psql < [% install_dir %]/[% domain %]/[% dump_file %]
+[% END -%]

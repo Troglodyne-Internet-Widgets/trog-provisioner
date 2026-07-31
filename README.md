@@ -59,7 +59,7 @@ These will have sections describing user-configuration for the various recipes u
 This file is gitignored in this repo, as it is necessarily super-secret information.
 TODO: support fetching this via non plaintext means, e.g. vault or keepass.
 
-Here's an example setting up a tPSGI host:
+Here's an example:
 
 ```
 ---
@@ -119,6 +119,7 @@ tickle:
               to: "testy"
 ...
 ```
+See EXAMPLE.md for more.
 
 These are powered by subclasses of `Provisioner::Recipe`, say `Provisioner::Recipe::perl`.
 All these subclasses MUST be lowercase on their least component.
@@ -129,8 +130,17 @@ Feel free to check out their respective POD to understand how to configure them 
 These modules render the appropriately named template in templates, e.g. `templates/perl.tt`.
 These are makefile fragments with no leading tab (we add this for you).
 
-All recipe fragments must be re-entrant so we can run `make -j $whatever`.
+All recipe makefile fragments must be re-entrant so we can run `make -j $whatever`.
 This means you have to provide a list of deps up-front which can be run before everything else.
+
+Similarly, there is a distinction between "global" and "per-domain" parts of recipes.
+Global parts will only ever be run once on the host, no matter how many domains are provisioned
+into the guest (see the 'Shared Hosting' section below).
+
+Some recipes (like mail and a few others) aren't fully idempotent via the above mechanism.
+This is because the software they provision does not have a 'config.d' scheme
+which allows for providing shared configs without having to munge config files.
+TODO - make a config.d service which can automunge for services that don't support said schemes.
 
 ## Global Data
 
@@ -197,17 +207,19 @@ When running trog-provisioner, it will then apply both configs, waiting until th
 
 # Writing Modules
 
+See [STYLE.md](STYLE.md) for how we prefer to see code written.
+
 ## scripts/
 
 To simplify matters, we SCP over the scripts/ directory, which you should shove any complicated scripting into.
 Be that used for recipes, or what have you.
 
-# Generated files
+## Generated files
 
 When your recipe generates things like configs, stick the templates in templates/files.
 Then identify them by name in the template\_files() method.
 
-# Salvaged files
+## Salvaged files
 
 If you want to grab something from a dir on an existing provisioned host, describe them in the remote\_files() method.
 This will stuff them in the specified location of the datadir.
@@ -218,3 +230,10 @@ It is straightforward to implement a backup strategy for your hosts using this m
 
 Feel free to make a vendor/ dir herein, it is gitignored.  Then use the 'libdir' parameter in your domain's configuration to search 'vendor'.
 See the documentation in bin/new\_config for more information.
+
+## Testing
+
+See [TESTING.md](t/TESTING.md).
+
+If there are tests you want run on guests after the provisioning process is complete,
+you can make templated tests in templates/tests which will be run subsequent to provisioning.

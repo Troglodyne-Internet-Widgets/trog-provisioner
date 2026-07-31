@@ -35,5 +35,14 @@ WriteMakefile(
     'UUID'                      => 0,
     'Crypt::Digest::SHA512'     => 0,
   },
+  TEST_REQUIRES => {
+    'Test::More'       => 0,
+    'File::Temp'       => 0,
+    'Test::Fatal'      => 0,
+    'Test::MockFile'   => 0,
+    'Test::MockModule' => 0,
+    'Test::NoWarnings' => 0,
+    'File::Touch'      => 0,
+  },
   test => {TESTS => 't/*.t'}
 );

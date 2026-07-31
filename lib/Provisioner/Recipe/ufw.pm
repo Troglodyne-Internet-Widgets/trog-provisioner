@@ -52,6 +52,8 @@ my %template2rule = (
     'ufw.mail.tt'            => 'ufw/mail',
     'ufw.plexmediaserver.tt' => 'ufw/plexmediaserver',
     'ufw.garage.tt'          => 'ufw/garage',
+    'ufw.redis.tt'           => 'ufw/redis',
+    'ufw.openvpn.tt'         => 'ufw/openvpn',
 );
 
 sub template_files {

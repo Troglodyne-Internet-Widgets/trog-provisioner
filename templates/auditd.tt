@@ -1,3 +1,2 @@
-mv global.rules /etc/audit/rules.d/global.rules
 mv domain.rules /etc/audit/rules.d/[% domain %].rules
 [% script_dir %]/queue_postrun_task augenrules --load

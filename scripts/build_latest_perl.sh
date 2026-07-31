@@ -41,7 +41,9 @@ fi
 # Build some symlinks to the perl for use by other? setup scripts
 mkdir -p $CLIENT_HOMEDIR/bin
 mkdir -p /root/bin
-[ -L $CLIENT_HOMEDIR/bin/perl  ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  $CLIENT_HOMEDIR/bin/perl
-[ -L $CLIENT_HOMEDIR/bin/cpanm ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm $CLIENT_HOMEDIR/bin/cpanm
+[ -L $CLIENT_HOMEDIR/bin/perl  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  $CLIENT_HOMEDIR/bin/perl
+[ -L $CLIENT_HOMEDIR/bin/cpanm ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm $CLIENT_HOMEDIR/bin/cpanm
+[ -L $CLIENT_HOMEDIR/bin/starman ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/starman $CLIENT_HOMEDIR/bin/starman
 [ -L /root/bin/perl  ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  /root/bin/perl
 [ -L /root/bin/cpanm ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm /root/bin/cpanm
+

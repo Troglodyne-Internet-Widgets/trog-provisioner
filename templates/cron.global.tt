@@ -1,0 +1,15 @@
+mv root.crontab /etc/cron.d/default
+chown root:root /etc/cron.d/default
+chmod 0644 /etc/cron.d/default
+# initialize the various logfiles
+/root/bin/segfaults.sh; /bin/true
+/root/bin/escalations.sh [% admin_user %]; /bin/true
+/root/bin/oomdetect.sh; /bin/true
+/root/bin/newusers.sh; /bin/true
+/root/bin/logdrops.sh; /bin/true
+/root/bin/changes_in_packaged_files.sh; /bin/true
+# For cronie backups
+mkdir /root/.cache; /bin/true
+# Initialize rkhunter stuff
+mv rkhunter.conf /etc/rkhunter.conf
+[% script_dir %]/queue_postrun_task rkhunter --propupd

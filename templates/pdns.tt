@@ -1,50 +1,14 @@
-# Grab up to date pdns.  Regrettably key servers are flaky, gotta retry over n over
-retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys CBC8B383
-retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys FD380FBB
-retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.com:80
-apt-add-repository http://repo.powerdns.com/ubuntu -p auth-master
-apt-get update
-apt-get install -y pdns-server
-# Patch lexicon to work with unix sockets XXX it may have already been applied.
-cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-pdns-af-unix.patch; /bin/true
-cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-arbitrary-record-types.patch; /bin/true
-# Configure the zone to be loaded into pdns
-mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
-# Run on port 2500 so the recursor can run
-mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
-# Make sure additions to recursing actually work
-echo "forward-zones=test.test=192.168.1.1" >> /etc/powerdns/recursor.conf
 # Configure the recursor to answer for our domain
 mv pdns-recursor-domain.conf /etc/powerdns/recursor.d/[% domain %].conf
-# Set up the API so we can use lexicon
-mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
-mv synczones.conf /etc/synczones.conf
-chown root:root /etc/synczones.conf
-chmod 0600 /etc/synczones.conf
 # Build the zone database
 mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
-# Schema may already be applied
-sqlite3 /var/spool/powerdns/zones.db < /usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql; /bin/true
 # TODO do this via lexicon instead
 cp zonefile /var/spool/powerdns/[% domain %]/bind.zone
 zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdns/[% domain %]/zone.sql
 sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
 chown -R pdns:pdns /var/spool/powerdns
 chmod -R 0775 /var/spool/powerdns
-# Don't need no bind
-mkdir -p /etc/powerdns/config-available
-# May already be done
-mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf; /bin/true
-# Fix broken service configuration
-[% script_dir %]/configure_pdns
-mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
-chown -R pdns:pdns /var/spool/powerdns/run
-mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
-[% script_dir %]/queue_postrun_task systemctl daemon-reload
-[% script_dir %]/queue_postrun_task systemctl restart rsyslog
-[% script_dir %]/queue_postrun_task systemctl enable pdns
 [% script_dir %]/queue_postrun_task systemctl restart pdns
-[% script_dir %]/queue_postrun_task systemctl enable pdns-recursor
 [% script_dir %]/queue_postrun_task systemctl restart pdns-recursor
 # Setup lexicon shortcuts
 mkdir -p /opt/lexicon/[% domain %]; /bin/true

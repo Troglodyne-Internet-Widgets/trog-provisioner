@@ -1,27 +1,12 @@
-mv root.crontab /etc/cron.d/default
 mv root.domain.crontab /etc/cron.d/[% domain %]
-chown root:root /etc/cron.d/default
 chown root:root /etc/cron.d/[% domain %]
-chmod 0644 /etc/cron.d/default
 chmod 0644 /etc/cron.d/[% domain %]
 # Obviously, don't use the same service user for each domain!
 [% IF user %]
 crontab -u [% user %] user.crontab
 [% END -%]
-# initialize the various logfiles
-/root/bin/segfaults.sh; /bin/true
-/root/bin/escalations.sh [% admin_user %]; /bin/true
-/root/bin/oomdetect.sh; /bin/true
-/root/bin/newusers.sh; /bin/true
-/root/bin/logdrops.sh; /bin/true
-/root/bin/changes_in_packaged_files.sh; /bin/true
-# For cronie backups
-mkdir /root/.cache; /bin/true
 [% IF user %]
 mkdir [% install_dir %]/[% domain %]/.cache; /bin/true
 chown [% user %]:[% user %] [% install_dir %]/[% domain %]/.cache
 [% END -%]
-# Initialize rkhunter stuff
-mv rkhunter.conf /etc/rkhunter.conf
-[% script_dir %]/queue_postrun_task rkhunter --propupd
 [% script_dir %]/queue_postrun_task systemctl restart cronie

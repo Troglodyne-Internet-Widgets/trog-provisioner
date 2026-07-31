@@ -1,26 +1,13 @@
-# Configure dehydrated
-mkdir -p /etc/dehydrated/domains.d; /bin/true
-mkdir -p /etc/dehydrated/conf.d; /bin/true
-mkdir -p /etc/dehydrated/hooks; /bin/true
-# SAN = Subject Alternate Name
-mkdir -p /etc/dehydrated/sans; /bin/true
-mv dehydrated.conf /etc/dehydrated/config
 mv dehydrated.domain /etc/dehydrated/domains.d/[% domain %].conf
 mv domains.txt /etc/dehydrated/sans/[% domain %].txt
 mv domain.hook /etc/dehydrated/hooks/[% domain %].sh
-chown root:root /etc/dehydrated/config
 chown root:root /etc/dehydrated/domains.d/[% domain %].conf
-chown -R root:root /etc/dehydrated/sans
 chown root:root /etc/dehydrated/hooks/[% domain %].sh
+chown root:root: /etc/dehydrated/sans/[% domain %].txt
 # This contains actual secret information which will need to remain, so must be protected!
 # TODO: watch this file for all accesses via auditd
 chmod 0700 /etc/dehydrated/hooks/[% domain %].sh
 # IF we salvaged the certs from the last deploy, put them in the right place so we dont break TOS
-mkdir -p /var/lib/dehydrated/certs; /bin/true
-mkdir -p /etc/dehydrated/certs; /bin/true
-mkdir -p /etc/dehydrated/accounts; /bin/true
-rm -rf /var/lib/dehydrated/accounts
-ln -s /etc/dehydrated/accounts /var/lib/dehydrated/accounts
 # these might not be here
 cp -r [% install_dir %]/[% domain %]/.letsencrypt/var-certs/* /var/lib/dehydrated/certs/; /bin/true
 cp -r [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/* /etc/dehydrated/certs; /bin/true
@@ -31,14 +18,9 @@ mv lexicon.sh /opt/lexicon/[% domain %]/[% registrar.type %]
 chmod -R 0700 /opt/lexicon/[% domain %]
 chown -R root:root /opt/lexicon/[% domain %]
 # Place a script to actually get the cert, and then queue it to go post-run
-mkdir -p /etc/letsencrypt/fetchers/
 mv get_cert /etc/letsencrypt/fetchers/[% domain %]
 chown root:root /etc/letsencrypt/fetchers/[% domain %]
 chmod +x /etc/letsencrypt/fetchers/[% domain %]
-# Setup LE
-dehydrated --register --accept-terms; /bin/true
-# Setup dehydrated logrotate
-mv dehydrated.logrotate /etc/logrotate.d/dehydrated
 # Queue task to actually get certs
 [% script_dir %]/queue_postrun_task /etc/letsencrypt/fetchers/[% domain %]
 # Restart everything that needs restarting

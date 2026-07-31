@@ -11,7 +11,7 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         pdns:
-            extra_records: /opt/domains/dns/sub.somedomain/zonefile_fragment
+            extra_records: zonefile_fragment.txt
 
 =head2 DESCRIPTION
 
@@ -23,7 +23,7 @@ The idea here is to allow simple DNS delegation of subdomains to provisioned mac
 
 Uses the sqlite backend.
 
-Appends arbitrary records specified as extra_records.
+Appends arbitrary records (in plain text files, basically a zonefile fragment) specified as extra_records.  Relative to the datadir if not absolute path.
 
 Sets up the recursor in the event you want to point your resolver at it for fast resolves and to mitigate DNS rate-limiting by RBLs.
 
@@ -47,8 +47,11 @@ sub validate {
     my $key = $opts{api_key};
     die "Must define api_key in [pdns] section of recipes.yaml" unless $key;
 
-    my $extras = $opts{extra_records};
-    die "extra_records defined in [pdns] must be a readable text file" if $extras && !-f $extras;
+    my $extras = $opts{extra_records} // '';
+    my $is_abs_path = index('/', $extras) == 0;
+    $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
+
+    die "extra_records defined in [pdns] must be a readable text file (nothing at $extras)" if $extras && !-f $extras;
     $opts{extra_records} = File::Slurper::read_text($extras) if $extras;
 
     $opts{serial} = time;

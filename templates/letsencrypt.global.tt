@@ -1,0 +1,19 @@
+# Configure dehydrated
+mkdir -p /etc/dehydrated/domains.d
+mkdir -p /etc/dehydrated/conf.d
+mkdir -p /etc/dehydrated/hooks
+# SAN = Subject Alternate Name
+mkdir -p /etc/dehydrated/sans
+mv dehydrated.conf /etc/dehydrated/config
+chown root:root /etc/dehydrated/sans
+chown root:root /etc/dehydrated/config
+mkdir -p /var/lib/dehydrated/certs
+mkdir -p /etc/dehydrated/certs
+mkdir -p /etc/dehydrated/accounts
+rm -rf /var/lib/dehydrated/accounts
+ln -s /etc/dehydrated/accounts /var/lib/dehydrated/accounts
+mkdir -p /etc/letsencrypt/fetchers/
+# Setup dehydrated logrotate
+mv dehydrated.logrotate /etc/logrotate.d/dehydrated
+# Setup LE
+dehydrated --register --accept-terms; /bin/true
