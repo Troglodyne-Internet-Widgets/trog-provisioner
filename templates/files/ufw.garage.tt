@@ -1,0 +1,19 @@
+[garage-s3-api]
+title=Garage S3 API
+description=Garage S3-compatible object storage API
+ports=3900/tcp
+
+[garage-rpc]
+title=Garage RPC
+description=Garage inter-node RPC port
+ports=3901/tcp
+
+[garage-web]
+title=Garage Web
+description=Garage S3 static-web serving port
+ports=3902/tcp
+
+[garage-admin]
+title=Garage Admin
+description=Garage admin API port
+ports=3903/tcp

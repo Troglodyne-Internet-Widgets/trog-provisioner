@@ -1,0 +1,46 @@
+#!/bin/bash
+# Initialise a single-node Garage cluster layout and create configured buckets.
+# Idempotent — safe to run multiple times.
+
+set -euo pipefail
+
+GARAGE=/usr/local/bin/garage
+
+wait_for_garage() {
+    local retries=30
+    echo "Waiting for Garage to become ready..."
+    while ! $GARAGE node id -q 2>/dev/null; do
+        retries=$((retries - 1))
+        if [ "$retries" -le 0 ]; then
+            echo "ERROR: Garage failed to start within 60 seconds" >&2
+            exit 1
+        fi
+        sleep 2
+    done
+    echo "Garage is up."
+}
+
+wait_for_garage
+
+# Apply single-node layout if the zone is not yet configured
+if ! $GARAGE layout show 2>/dev/null | grep -qF '[% zone %]'; then
+    NODE_ID=$($GARAGE node id -q 2>/dev/null | head -n1)
+    echo "Assigning node $NODE_ID to zone [% zone %] with capacity [% capacity %]"
+    $GARAGE layout assign -z '[% zone %]' -c '[% capacity %]' "$NODE_ID"
+    $GARAGE layout apply --version 1
+    echo "Layout applied."
+else
+    echo "Layout already configured for zone [% zone %]."
+fi
+
+# Create any requested buckets
+[% FOR bucket IN buckets %]
+if $GARAGE bucket info '[% bucket %]' 2>/dev/null | grep -q 'Bucket:'; then
+    echo "Bucket [% bucket %] already exists."
+else
+    $GARAGE bucket create '[% bucket %]'
+    echo "Bucket [% bucket %] created."
+fi
+[% END %]
+
+echo "Garage initialisation complete."
