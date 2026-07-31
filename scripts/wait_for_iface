@@ -1,0 +1,5 @@
+#!/bin/bash
+# Usage: wait_for_iface <interface> <timeout_seconds>
+IFACE="${1:?Usage: wait_for_iface <interface> <timeout_seconds>}"
+TIMEOUT="${2:-30}"
+timeout "$TIMEOUT" bash -c 'until [ "$(ip link show $IFACE 2>/dev/null | grep -Po $IFACE)" = "$IFACE" ]; do sleep 1; done' IFACE="$IFACE"

@@ -1,0 +1,16 @@
+	# Sync client certificates from hypervisor
+	mkdir -p /etc/openvpn/client
+	rsync -av [% hv_ip %]:[% cert_dir %]/ /etc/openvpn/client/
+	chmod 0600 /etc/openvpn/client/client.key /etc/openvpn/client/ta.key
+	chown root:root /etc/openvpn/client/client.key /etc/openvpn/client/ta.key
+	# Deploy client configuration
+	cp client.conf /etc/openvpn/client/client.conf
+	chown root:root /etc/openvpn/client/client.conf
+	chmod 0640 /etc/openvpn/client/client.conf
+	# Enable and start the tunnel immediately so dependent recipes can use it
+	systemctl daemon-reload
+	systemctl enable openvpn-client@client
+	systemctl start openvpn-client@client
+	# Wait for the tunnel interface to come up (up to 30s)
+	[% script_dir %]/wait_for_iface tun0 30
+	touch $@
