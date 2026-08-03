@@ -145,29 +145,43 @@ TODO - make a config.d service which can automunge for services that don't suppo
 ## Recipes that depend on other recipes
 
 You can use recipes which require and (possibly) autoconfigure other recipes.
-Example:
+
+For Example, the tpsgi app that requires a reverse proxy on a nonstandard port:
 ```
-    tcms:
+    tpsgi:
         nginxproxy:
             vhosts:
-                80:
+                8080:
                     proxy_uri: /foo/whatever.sock
                     nocache_prefix: "/secure"
                     static_dir: "www/static"
                     auth_statics: "assets/private"
                     auth_uri: "/authenticated"
-            ...
+                    ssl: true
+        ...
 ```
 It's a common use case to proxy multiple applications on the same domain but on different ports.
 This allows us to do that, and keep things like port information in the relevant recipes.
 
 Recipes that you require must understand how to map multiple inputs into their output files;
-see above for an example of how to format configuration to do this.
+see the nginxproxy recipe for an example of how to format configuration to do this.
 
-TODO: support dependencies-of-dependencies.
-This requires a depsolver, e.g. (Algorithm::Dependency::Ordered)[https://metacpan.org/pod/Algorithm::Dependency].
-It makes sense that this is where we are going with this, as it will be required long term to have the dream of
-"config rpms per deployed host".  Now anyone can deploy software via PPA, etc hooray.
+### Automatic setup of dependencies
+
+It is the intended use case of most recipes that depend on others that they automatically setup a sensible default case.
+This can allow very succinct recipe configuration files; sometimes all that has to be done is state the end recipe you want.
+
+For example, if we omitted all the nginxproxy config from the tpsgi example above, it should still work.
+It would then setup the vhost on 80 & 443 as is the most common use case of proxied applications.
+
+If you *do* pass setup information as above, the default case will not be done for that recipe.
+
+Some recipes will 'layer' atop the same dependency.
+
+For example, the tcms recipe also depends on tpsgi,
+and therefore adds a few more features of its own to its default vhost config in the nginxproxy dep.
+
+Dependencies-of-dependencies are supported.
 
 ## Global Data
 

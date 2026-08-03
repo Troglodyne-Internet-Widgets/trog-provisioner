@@ -52,6 +52,10 @@ sub required_recipes {
                 },
             );
         },
+        tpsgi => sub {
+            routers => [qw{tCMS/lib/TCMS.pm}],
+            basedir => 'tCMS',
+        },
     );
 }
 

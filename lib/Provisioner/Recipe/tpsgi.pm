@@ -43,6 +43,7 @@ sub deps {
 
 sub required_recipes {
     return (
+        perl => sub { () },
         nginxproxy => sub {
             my (%opts) = @_;
             return (
