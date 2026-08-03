@@ -582,16 +582,40 @@ sub handle_domain {
 
     # Build a makefile based on our configured recipes
     my @modules = sort { ( $rconf->{$domain}{$a}{order} // 'ZZZ' ) cmp( $rconf->{$domain}{$b}{order} // 'ZZZ' ) } sort keys( %{ $rconf->{$domain} } );
+
     my %mf_vars;
     my @testdeps;
     my @conflicts;
     my @modules_ordered;
-    foreach my $module (@modules) {
+    my $depmod_conf = {};
+    for (my $i=0; $i < scalar(@modules); $i++) {
+        my $module = $modules[$i];
         if (!already_required("Provisioner/Recipe/$module.pm")) {
             require "Provisioner/Recipe/$module.pm" or die "Could not load provisioner recipe $module";
         }
         my $builder      = "Provisioner::Recipe::$module"->new(%provisioner_opts);
-        my $pconf        = $rconf->{$domain}{$module};
+
+        my $pconf        = $rconf->{$domain}{$module} // {};
+
+        # Check and see if this particular provisioner requires another recipe to work.
+        my %dep_recipes = $builder->required_recipes();
+        foreach my $required (keys(%dep_recipes)) {
+            my $manual_args = delete $pconf->{$required} // {};
+
+            # See about autocomputing the options if possible.
+            my %depargs = $dep_recipes{$required}->(%$global_config, %$pconf) if ref $dep_recipes{$required} eq 'CODE';
+            my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
+
+            # The big problem here is simple. Dep recipes can be rendered only once, but sometimes accomodate data from multiple requestors.
+            # As such we have to make sure they get rendered last, and progressively add to their data depth-first.
+            push(@modules, $required) unless any {$required eq $_ } @modules; # Prevent self-inclusion nonsense
+            $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
+        }
+
+        # NOTE: in the event we want recursive deps, this will have to move up to below $pconf's declaration.
+        # Of course, then we would have to reorder the modules we push with a depsolver!
+        $pconf = Hash::Merge::merge( $depmod_conf->{$module}, $pconf ) if $depmod_conf->{$module};
+
         my $aliases      = $alias_conf->{$domain};
         my $full_aliases = [ map { "$_.$tld" } @$aliases ];
         if ( $builder->has_global_template() ) {

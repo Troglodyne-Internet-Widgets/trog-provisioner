@@ -92,8 +92,12 @@ my %recipes_raw = (
         basedir    => 'Code',
     },
     nginxproxy => {
-        proxy_uri  => 'run/app.sock',
-        static_dir => 'www/static',
+        vhosts => {
+            8080 => {
+                proxy_uri  => 'run/app.sock',
+                static_dir => 'www/static',
+            }
+        }
     },
     letsencrypt => {
         registrar => { type => 'route53', user => 'foo', key => 'bar' },

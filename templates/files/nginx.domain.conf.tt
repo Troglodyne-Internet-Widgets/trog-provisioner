@@ -1,7 +1,15 @@
+[% FOR vhost in vhosts.keys() %]
+[% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
+[% auth_statics = vhosts.$vhost.auth_statics -%]
+[% auth_uri     = vhosts.$vhost.auth_uri -%]
+[% proxy_uri    = vhosts.$vhost.proxy_uri -%]
+[% static_dir   = vhosts.$vhost.static_dir -%]
+[% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
-    listen 443 ssl backlog=[% backlog %];
-[% IF ipv6 %]    listen [::]:443 ssl backlog=[% backlog %];
-[% END -%]
+    listen [% $vhost %] [% ssl %] backlog=[% backlog %];
+    [% IF ipv6 %]
+    listen [::]:[% vhost %] [% ssl %] backlog=[% backlog %];
+    [% END -%]
 
     server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
 
@@ -37,7 +45,7 @@ server {
         proxy_set_header        X-Original-URI  $request_uri;
         proxy_set_header        X-Forwarded-For $remote_addr;
     }
-    [% END %]
+    [% END -%]
 
     [% IF nocache_prefix %]
     location [% nocache_prefix %] {
@@ -47,7 +55,7 @@ server {
         root [% install_dir %]/[% domain %]/[% static_dir %];
         try_files $uri @default;
     }
-    [% END %]
+    [% END -%]
 
     location @default {
         proxy_pass http://unix:/[% install_dir %]/[% domain %]/[% proxy_uri %];
@@ -56,57 +64,4 @@ server {
         proxy_set_header X-Forwarded-For $remote_addr;
     }
 }
-
-server {
-    listen 80 backlog=[% backlog %];
-[% IF ipv6 %]    listen [::]:80 backlog=[% backlog %];
 [% END -%]
-
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
-
-    location / {
-        gzip on;
-        sendfile on;
-        tcp_nopush on;
-        sendfile_max_chunk 1m;
-        root [% install_dir %]/[% domain %]/[% static_dir %];
-        try_files $uri $uri.html $uri/index.html @default;
-    }
-
-    [% IF auth_statics AND auth_uri %]
-    location /[% auth_statics %] {
-        auth_request [% auth_uri %];
-        sendfile on;
-        tcp_nopush on;
-        sendfile_max_chunk 1m;
-        root [% install_dir %]/[% domain %]/[% static_dir %];
-    }
-    location = [% auth_uri %] {
-        internal;
-        proxy_pass              http://unix:/[% install_dir %]/[% domain %]/[% proxy_uri %];
-        proxy_pass_request_body off;
-        proxy_set_header        Content-Length "";
-        proxy_set_header        X-Original-URI  $request_uri;
-        proxy_set_header        X-Forwarded-For $remote_addr;
-    }
-    [% END %]
-
-    [% IF nocache_prefix %]
-    location [% nocache_prefix %] {
-        sendfile on;
-        sendfile_max_chunk 1m;
-        tcp_nopush on;
-        root [% install_dir %]/[% domain %]/[% static_dir %];
-        try_files $uri @default;
-    }
-    [% END %]
-
-
-    location @default {
-        proxy_pass http://unix:/[% install_dir %]/[% domain %]/[% proxy_uri %];
-        proxy_buffering off;
-        proxy_set_header Host            $host;
-        proxy_set_header X-Forwarded-For $remote_addr;
-    }
-
-}

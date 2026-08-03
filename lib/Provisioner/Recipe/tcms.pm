@@ -33,6 +33,29 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub required_recipes {
+    return (
+        nginxproxy => sub {
+            my (%opts) = @_;
+            return (
+                vhosts => {
+                    80 => {
+                        nocache_prefix => "/secure",
+                        auth_statics   => "assets/private",
+                        auth_uri       => "/authenticated",
+                    },
+                    443 => {
+                        nocache_prefix =>  "/secure",
+                        auth_statics   => "assets/private",
+                        auth_uri       => "/authenticated",                   
+                    },
+                },
+            );
+        },
+    );
+}
+
+
 # router is an absolute path
 sub validate {
     my ( $self, %params ) = @_;

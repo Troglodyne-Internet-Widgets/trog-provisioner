@@ -87,6 +87,36 @@ sub dep_conflicts {
     return ();
 }
 
+=head3 %required = $recipe->required_recipes(%opts)
+
+If a recipe depends on another recipe being present, we need to build it as a synthetic recipe and append it to the list of things to provision.
+
+Example output:
+
+    my %out = (
+        nginxproxy => sub { # returns hash, expects same %opts as validate() },
+    );
+
+The idea here is to omit having to configure dependent recipes outside of the thing depending on them.
+
+Example usage in a recipe conf:
+
+    tcms:
+        nginxproxy: ...
+        ...
+
+This also enables automatic figuring of what to do with a dependent recipe in the event we omit mandatory options.
+In some cases this will allow you to omit configuring it entirely.
+This is configured by setting the sub value.
+
+=cut
+
+sub required_recipes {
+    my ($self) = @_;
+
+    return ();
+}
+
 =head3 %opts = $recipe->validate(%opts)
 
 Validate recipe configuration, optionally enriching it.
@@ -94,8 +124,8 @@ Validate recipe configuration, optionally enriching it.
 =cut
 
 sub validate {
-    shift;
-    return @_;
+    my ($self, %opts) = @_;
+    return %opts;
 }
 
 =head3 @dirs = $recipe->datadirs()

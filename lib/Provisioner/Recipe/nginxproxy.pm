@@ -5,6 +5,8 @@ use warnings;
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util qw{any};
+
 =head1 Provisioner::Recipe::nginxproxy
 
 =head2 SYNOPSIS
@@ -36,6 +38,10 @@ still be served by nginx.
 
 It is up to your application to cull/regenerate/never generate .html versions of your routes when appropriate.
 
+=head2 USE AS DEPENDENCY
+
+In general it is best to use this as a dependency to other recipes.  See tpsgi & tcms recipes for examples.
+
 =cut
 
 sub deps {
@@ -48,11 +54,19 @@ sub deps {
 
 sub validate {
     my ( $self, %opts ) = @_;
-    my $uri = $opts{proxy_uri};
-    die "Must set proxy_uri in [nginxproxy] section of recipes.yaml" unless $uri;
-    my $sd = $opts{static_dir};
-    die "Must set static_dir in [nginxproxy] section of recipes.yaml" unless $sd;
 
+    #Per-domain stuff
+    die "nginxproxy.vhosts must be HASH" unless $opts{vhosts} && ref $opts{vhosts} eq 'HASH';
+    foreach my $key (keys(%{$opts{vhosts}})) {
+        next unless $key =~ m/\d+/; 
+        my $vopts = $opts{vhosts}{$key};
+        my $uri = $vopts->{proxy_uri};
+        die "Must set proxy_uri in [nginxproxy] section of recipes.yaml" unless $uri;
+        my $sd = $vopts->{static_dir};
+        die "Must set static_dir in [nginxproxy] section of recipes.yaml" unless $sd;
+    }
+
+    # Global options
     $opts{backlog} //= 32768;
     die "nginxproxy.backlog must be a positive integer"
         unless $opts{backlog} =~ /^\d+$/ && $opts{backlog} > 0;

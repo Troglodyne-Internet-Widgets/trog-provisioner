@@ -142,6 +142,33 @@ This is because the software they provision does not have a 'config.d' scheme
 which allows for providing shared configs without having to munge config files.
 TODO - make a config.d service which can automunge for services that don't support said schemes.
 
+## Recipes that depend on other recipes
+
+You can use recipes which require and (possibly) autoconfigure other recipes.
+Example:
+```
+    tcms:
+        nginxproxy:
+            vhosts:
+                80:
+                    proxy_uri: /foo/whatever.sock
+                    nocache_prefix: "/secure"
+                    static_dir: "www/static"
+                    auth_statics: "assets/private"
+                    auth_uri: "/authenticated"
+            ...
+```
+It's a common use case to proxy multiple applications on the same domain but on different ports.
+This allows us to do that, and keep things like port information in the relevant recipes.
+
+Recipes that you require must understand how to map multiple inputs into their output files;
+see above for an example of how to format configuration to do this.
+
+TODO: support dependencies-of-dependencies.
+This requires a depsolver, e.g. (Algorithm::Dependency::Ordered)[https://metacpan.org/pod/Algorithm::Dependency].
+It makes sense that this is where we are going with this, as it will be required long term to have the dream of
+"config rpms per deployed host".  Now anyone can deploy software via PPA, etc hooray.
+
 ## Global Data
 
 Variables in the \_global section for a domain are available to all modules' templates.
