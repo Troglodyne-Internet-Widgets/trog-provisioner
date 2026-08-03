@@ -64,6 +64,10 @@ Returns remote file mappings for backup/restore.
 
 =cut
 
+sub required_recipes {
+    return ( letsencrypt => sub { () } );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
@@ -74,9 +78,6 @@ sub deps {
 
 sub validate {
     my ( $self, %opts ) = @_;
-
-    die "This recipe requires the letsencrypt recipe to function"
-        unless any { $_ eq 'letsencrypt' } @{ $opts{modules} };
 
     die "Must set plex_login_name in [plexmediaserver] section of recipes.yaml"
         unless $opts{plex_login_name};

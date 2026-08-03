@@ -50,6 +50,11 @@ sub deps {
     };
 }
 
+# XXX this probably does not work in isolation!
+sub required_recipes {
+    return ( nginxproxy => sub { () } );
+}
+
 # NOTE: FPM php.ini: /etc/php/8.3/fpm/php.ini
 
 sub template_files {
@@ -69,9 +74,6 @@ sub makefile_vars {
 
 sub validate {
     my ( $self, %opts ) = @_;
-
-    die "This recipe requires the nginxproxy recipe to function"
-        unless any { $_ eq 'nginxproxy' } @{ $opts{modules} };
 
     $opts{'des_key'} = 'rcube-' . UUID::uuid();
 

@@ -33,6 +33,11 @@ so that C<files.[domain]> is covered by the SSL certificate.
 
 =cut
 
+#XXX probably won't work in isolation
+sub required_recipes {
+    return ( nginxproxy => sub { () } );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {

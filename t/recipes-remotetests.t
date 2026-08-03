@@ -46,7 +46,10 @@ mkdir "$tmpdir/dotfiles/doge";
 mkdir "$tmpdir/data";
 mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
+mkdir "$tmpdir/data/backup.test.test";
+mkdir "$tmpdir/data/backupdestination.test.test";
 system( 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', "$tmpdir/data/backup.test.test/backup.rsa", '-N', '', '-q' );
+die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
 File::Copy::copy("$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa");
 File::Touch::touch("$tmpdir/dotfiles/test");
 
@@ -86,7 +89,9 @@ my %recipes_raw = (
     },
     tpsgi => { routers => ['app.psgi'] },
     tcms =>  { tcms_dir => 'tcms' },
-    adminconfig => { skel => "/$tmpdir/dotfiles" },
+    adminconfig => {
+        skel => "/$tmpdir/dotfiles",
+    },
     admincode => {
         repos_from => [],
         basedir    => 'Code',
@@ -142,6 +147,36 @@ my %recipes_raw = (
     postgres => {
         dumps => [],
     },
+    plexmediaserver => {
+        plex_login_name => 'bogus',
+        admin_mail => 'bogus@test.test',
+    },
+    gogs => {
+        version => 'bogus',
+        admin_password => 'bogus',
+        nginxproxy => {
+            vhosts => {
+                8080 => {
+                    proxy_uri => '/bogus/bogus',
+                    static_dir => '/bogus/bogus',
+                },
+            },
+        },
+    },
+    deluged => {
+        nginxproxy => {
+            vhosts => {
+                8080 => {
+                    proxy_uri => '/bogus/bogus',
+                    static_dir => '/bogus/bogus',
+                },
+            },
+        },
+    },
+    openvpnclient => {
+        server => 'bogus.test',
+        cert_dir => '/bogus',
+    },
 );
 # Make each so-named domain to provision do nothing but provision its own stuff
 foreach my $key ('data', @available) {
@@ -161,6 +196,11 @@ foreach my $key ('data', @available) {
 $recipes_raw{_base} = {
     _global => {
         user => 'test',
+        registrar => {
+            type => "bogus",
+            user => "bogus",
+            key  => "bogus",
+        }
     },
     data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };

@@ -36,6 +36,7 @@ use File::KeePass::KDBX;
 use IO::Prompter;
 
 use Provisioner::IPPool;
+use Provisioner::Utils;
 
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 Hash::Merge::set_behavior('STORAGE_PRECEDENT');
@@ -545,7 +546,7 @@ sub handle_domain {
     $global_config->{transfer_user}   = $transfer_user;
     $global_config->{hv_ssh_port}     = $hv_ssh_port;
 
-    require Provisioner::Recipe::data unless already_required('Provisioner/Recipe/data.pm');
+    require Provisioner::Recipe::data unless Provisioner::Utils::already_required('Provisioner/Recipe/data.pm');
     my $do            = Provisioner::Recipe::data->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
 
@@ -595,7 +596,7 @@ sub handle_domain {
     # First, run thru the modules and depsolve. 
     for (my $i=0; $i < scalar(@modules); $i++) {
         my $module = $modules[$i];
-        if (!already_required("Provisioner/Recipe/$module.pm")) {
+        if (!Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm")) {
             require "Provisioner/Recipe/$module.pm" or die "Could not load provisioner recipe $module";
         }
         my $builder        = $builders{$module} // "Provisioner::Recipe::$module"->new(%provisioner_opts);
@@ -624,7 +625,7 @@ sub handle_domain {
 
     # Deps should be processed after the last thing that dragged them in, and not before.
     # This is sometimes the case when we have multiple recipes depending on the same thing!
-    @modules = lastuniq( @modules );
+    @modules = Provisioner::Utils::lastuniq( @modules );
 
     # Actually process the modules now that we have solved deps.
     foreach my $module (@modules) {
@@ -838,25 +839,6 @@ sub resolve_template_loc {
         return $possibiru if -f $possibiru;
     }
     die "Could not find relevant template $template!";
-}
-
-sub already_required {
-    my $module = shift;
-    my @available = keys(%INC);
-    return 1 if any { m/\Q$module\E/ } @available;
-    return 0;
-}
-
-# Unlike List::Util::uniq, we want the last occurrence's order preserved.
-sub lastuniq {
-    my @input = @_;
-    my %hashed;
-    @hashed{@input} = 0..@input;
-    my @out;
-    for my $idx (sort { $a <=> $b } values(%hashed)) {
-        push(@out, $input[$idx]);
-    }
-    return @out;
 }
 
 main(@ARGV) unless caller;

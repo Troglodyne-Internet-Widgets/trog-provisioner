@@ -32,6 +32,7 @@ sub deps {
     my ( $self, %opts ) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
         return @{ $opts{pkgs} } if ref $opts{pkgs} eq 'ARRAY';
+        return ();
     }
     die "Unsupported packager";
 }

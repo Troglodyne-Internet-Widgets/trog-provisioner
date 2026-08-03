@@ -33,7 +33,7 @@ sub validate {
     my ( $self, %opts ) = @_;
 
     my $dump = $opts{dumps};
-    die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump || ref $dump ne 'ARRAY';
+    die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump && ref $dump ne 'ARRAY';
 
     return %opts;
 }

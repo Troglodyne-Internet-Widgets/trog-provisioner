@@ -97,6 +97,13 @@ Returns remote file mappings for backup/restore.
 
 =cut
 
+#XXX probably won't work in isolation
+sub required_recipes {
+    return (
+        nginxproxy  => sub { () },
+    );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
@@ -107,9 +114,6 @@ sub deps {
 
 sub validate {
     my ( $self, %opts ) = @_;
-
-    die "This recipe requires the nginxproxy recipe to function"
-        unless any { $_ eq 'nginxproxy' } @{ $opts{modules} };
 
     my $version = $opts{version};
     die "Must set version in [gogs] section of recipes.yaml" unless $version;

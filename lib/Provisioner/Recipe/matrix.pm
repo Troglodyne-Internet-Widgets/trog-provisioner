@@ -91,6 +91,11 @@ Returns remote file mappings for backup/restore.
 
 =cut
 
+# XXX this probably does not work in isolation!
+sub required_recipes {
+    return ( nginxproxy => sub { () } );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
@@ -129,10 +134,6 @@ sub validate {
 
     my $server_name = $opts{server_name};
     die "Must set server_name in [matrix] section of recipes.yaml" unless $server_name;
-
-    # Check for required nginxproxy dependency
-    die "This recipe requires the nginxproxy recipe to function"
-        unless List::Util::any { $_ eq 'nginxproxy' } @{$opts{modules}};
 
     my $admin_user = $opts{admin_user} || 'admin';
     $opts{admin_user} = $admin_user;

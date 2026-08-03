@@ -79,7 +79,7 @@ sub validate {
     # Gather all the remote_files
     my @default_targets;
     foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm";
+        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
         my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{domain} );
         my @ts       = sort keys(%mtargets);
         foreach my $t ( 1 .. @ts ) {
