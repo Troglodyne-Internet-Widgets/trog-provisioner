@@ -75,6 +75,14 @@ sub template_files {
     );
 }
 
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        # SQLite database containing all DNS zone records
+        '/var/spool/powerdns/' => 'pdns/',
+    );
+}
+
 sub formatters {
     my ($class) = shift;
     return (

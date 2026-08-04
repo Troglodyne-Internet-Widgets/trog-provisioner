@@ -80,6 +80,14 @@ sub template_files {
     );
 }
 
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        # PKI (CA, server cert/key, DH params, TLS auth key, client certs)
+        '/etc/openvpn/easy-rsa/pki/' => 'openvpn/pki/',
+    );
+}
+
 sub tests {
     return qw{openvpn.tt};
 }

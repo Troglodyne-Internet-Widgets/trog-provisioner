@@ -24,7 +24,7 @@ It is your responsibility to make sure the dump file has CREATE DATABSE statemen
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{postgresql-common postgresql-common-dev};
+        return qw{postgresql-common postgresql-common-dev pigz};
     }
     die "Unsupported packager";
 }
@@ -36,6 +36,20 @@ sub validate {
     die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump && ref $dump ne 'ARRAY';
 
     return %opts;
+}
+
+sub template_files {
+    return (
+        'postgres.backup.sh.tt'   => 'postgres-backup.sh',
+        'postgres.backup.cron.tt' => 'postgres-backup.cron',
+    );
+}
+
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        '/var/backups/postgres/' => 'postgres/',
+    );
 }
 
 sub tests {

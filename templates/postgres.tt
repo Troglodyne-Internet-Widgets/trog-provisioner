@@ -1,3 +1,7 @@
 [% FOR dump_file IN dumps %]
 sudo -u postgres psql < [% install_dir %]/[% domain %]/[% dump_file %]
 [% END -%]
+# Install nightly logical backup script and cron job
+install -m 0750 postgres-backup.sh /usr/local/sbin/postgres-backup.sh
+install -m 0644 postgres-backup.cron /etc/cron.d/postgres-backup
+mkdir -p /var/backups/postgres

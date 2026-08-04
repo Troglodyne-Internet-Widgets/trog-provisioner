@@ -55,7 +55,7 @@ sub validate {
     my %default_targets;
     foreach my $module ( @{ $opts{modules} } ) {
         require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
-        my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{domain} );
+        my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
         my @ts       = sort keys(%mtargets);
         foreach my $t ( 1 .. @ts ) {
             $default_targets{"$module$t"} = $ts[ $t - 1 ];

@@ -1,0 +1,4 @@
+# PostgreSQL nightly backup — 3:00 AM daily
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 3 * * * root /usr/local/sbin/postgres-backup.sh >> /var/log/postgres-backup.log 2>&1
