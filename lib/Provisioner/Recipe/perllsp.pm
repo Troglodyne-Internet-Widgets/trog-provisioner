@@ -76,4 +76,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{perllsp.tt};
+}
+
 1;
