@@ -153,4 +153,16 @@ sub template_files {
     );
 }
 
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    # data_dir and metadata_dir are user-configurable; fall back to defaults.
+    # Operators using non-default paths must add them to backup targets manually.
+    my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
+    my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
+    return (
+        "$data_dir/"     => 'garage/data/',
+        "$metadata_dir/" => 'garage/meta/',
+    );
+}
+
 1;

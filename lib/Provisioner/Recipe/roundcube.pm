@@ -86,4 +86,12 @@ sub validate {
     return %opts;
 }
 
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        # SQLite database with user data (contacts, identities, preferences)
+        "$install_dir/webmail.${domain}_data/" => 'roundcube/',
+    );
+}
+
 1;

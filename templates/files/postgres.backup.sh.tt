@@ -1,0 +1,36 @@
+#!/bin/bash
+# PostgreSQL logical backup script — run nightly, keeps 7 days of dumps.
+# Dumps global objects (roles/tablespaces) once, then each database in parallel
+# using pg_dump --format=directory (which itself parallelises at table-level).
+set -euo pipefail
+
+DUMP_BASE=/var/backups/postgres
+DATE=$(date +%Y%m%d-%H%M%S)
+DEST="$DUMP_BASE/$DATE"
+JOBS=$(nproc)
+
+mkdir -p "$DEST"
+
+# Global objects: roles, tablespaces, passwords
+sudo -u postgres pg_dumpall --globals-only | pigz > "$DEST/globals.sql.gz"
+
+dump_db() {
+    local db="$1"
+    # directory format writes one file per table — allows pg_restore --table
+    sudo -u postgres pg_dump --format=directory --jobs="$JOBS" \
+        --file="$DEST/$db" "$db"
+}
+
+export -f dump_db
+export DEST JOBS
+
+# All user databases except template catalogs
+DBS=$(sudo -u postgres psql -tAc \
+    "SELECT datname FROM pg_database WHERE datistemplate=false AND datname NOT IN ('postgres')")
+
+echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'dump_db "$@"' _ {}
+
+# Prune: keep only the 7 most recent dated backup directories
+ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
+
+echo "PostgreSQL backup complete: $DEST"

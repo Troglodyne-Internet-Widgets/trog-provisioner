@@ -1,0 +1,64 @@
+#!/bin/bash
+# MariaDB logical backup script — run nightly, keeps 7 days of dumps.
+# Dumps each database per-table (data+schema), grants, views, and routines.
+# All dumps are pigz-compressed.  Per-table and per-database jobs run in parallel.
+set -euo pipefail
+
+SOCKET=/opt/mysql/mysql.sock
+MYSQL="mysql --socket=$SOCKET"
+MYSQLDUMP="mysqldump --socket=$SOCKET --single-transaction=true --lock-tables=false"
+DUMP_BASE=/var/backups/mysql
+DATE=$(date +%Y%m%d-%H%M%S)
+DEST="$DUMP_BASE/$DATE"
+JOBS=$(nproc)
+
+# System databases contain no user data and cannot be imported with plain mysqldump
+SKIP_RE='^(information_schema|performance_schema|sys)$'
+
+mkdir -p "$DEST"
+
+dump_db() {
+    local db="$1"
+    local dbdir="$DEST/$db"
+    mkdir -p "$dbdir"
+
+    # Per-table data + schema (excluding triggers/routines handled separately)
+    $MYSQL -sN -e "SHOW TABLES IN \`$db\`" | while read -r table; do
+        $MYSQLDUMP --skip-triggers --no-routines "$db" "$table" \
+            | pigz > "$dbdir/$table.sql.gz"
+    done
+
+    # Views only — dump structure, filter to view objects
+    $MYSQL -sN -e \
+        "SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$db'" \
+        | while read -r view; do
+            $MYSQLDUMP --no-data --skip-triggers "$db" "$view" \
+                | pigz >> "$dbdir/views.sql.gz"
+        done
+
+    # Stored procedures and functions
+    $MYSQLDUMP --no-data --no-create-info --no-create-db \
+        --skip-triggers --routines "$db" \
+        | pigz > "$dbdir/routines.sql.gz"
+
+    # Grants for users that have explicit privileges on this database
+    {
+        $MYSQL -sN -e \
+            "SELECT DISTINCT CONCAT('SHOW GRANTS FOR \\'', User, '\\'@\\'', Host, '\\';')
+             FROM mysql.db WHERE Db='$db'" \
+            | $MYSQL -sN \
+            | sed "s/$/ ;/"
+    } | pigz > "$dbdir/grants.sql.gz"
+}
+
+export -f dump_db
+export MYSQL MYSQLDUMP DEST
+
+DBS=$($MYSQL -sN -e "SHOW DATABASES" | grep -Evx "$SKIP_RE")
+
+echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'dump_db "$@"' _ {}
+
+# Prune: keep only the 7 most recent dated backup directories
+ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
+
+echo "MariaDB backup complete: $DEST"

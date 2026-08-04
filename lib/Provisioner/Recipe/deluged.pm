@@ -71,4 +71,11 @@ sub template_files {
     );
 }
 
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        '/var/lib/deluged/config/' => 'deluged/config/',
+    );
+}
+
 1;
