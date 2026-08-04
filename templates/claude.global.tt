@@ -1,0 +1,1 @@
+command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code

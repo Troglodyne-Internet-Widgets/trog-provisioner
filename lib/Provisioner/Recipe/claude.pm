@@ -1,0 +1,44 @@
+package Provisioner::Recipe::claude;
+
+use strict;
+use warnings FATAL => 'all';
+
+use parent qw{Provisioner::Recipe};
+
+use List::Util qw{any};
+
+=head1 Provisioner::Recipe::claude
+
+=head2 SYNOPSIS
+
+    somedomain:
+        claude:
+
+=head2 DESCRIPTION
+
+Install claude-code globally.
+
+SLOP in the ice machine.
+
+=cut
+
+sub deps {
+    my ($self) = @_;
+    if ( $self->{target_packager} eq 'deb' ) {
+        return qw{nodejs npm};
+    }
+    die "Unsupported packager";
+}
+
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        "$install_dir/$domain/.claude.json"       => '.claude.json',
+    );
+}
+
+sub tests {
+    return qw{claude.tt};
+}
+
+1;
