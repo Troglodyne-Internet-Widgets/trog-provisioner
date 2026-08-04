@@ -195,4 +195,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{matrix.tt};
+}
+
 1;

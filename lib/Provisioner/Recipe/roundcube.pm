@@ -86,4 +86,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{roundcube.tt};
+}
+
 1;

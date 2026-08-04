@@ -36,4 +36,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{imagemagick.tt};
+}
+
 1;

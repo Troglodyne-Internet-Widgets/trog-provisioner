@@ -90,4 +90,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{nginxproxy.tt};
+}
+
 1;

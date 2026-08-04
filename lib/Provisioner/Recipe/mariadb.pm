@@ -55,4 +55,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{mariadb.tt};
+}
+
 1;

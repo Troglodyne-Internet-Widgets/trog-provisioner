@@ -1,8 +1,9 @@
+#!/usr/bin/env perl
 use strict;
 use warnings;
-
 use Test::More;
 
-ok(-d "[% to %]/[% domain %]", "DATADIR created");
+ok(-d '[% to %]/[% domain %]', 'data directory exists');
+ok(-r '[% to %]/[% domain %]', 'data directory is readable');
 
 done_testing();

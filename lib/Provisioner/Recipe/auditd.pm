@@ -46,4 +46,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{auditd.tt};
+}
+
 1;

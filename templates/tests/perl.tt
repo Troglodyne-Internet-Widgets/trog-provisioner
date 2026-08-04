@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $perl = `[% install_dir %]/[% domain %]/bin/perl -e 'print 1' 2>/dev/null`;
+is($perl, '1', 'custom perl build is functional');
+
+done_testing();

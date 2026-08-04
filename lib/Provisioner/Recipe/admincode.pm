@@ -55,4 +55,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{admincode.tt};
+}
+
 1;

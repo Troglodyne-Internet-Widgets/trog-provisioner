@@ -71,4 +71,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{deluged.tt};
+}
+
 1;

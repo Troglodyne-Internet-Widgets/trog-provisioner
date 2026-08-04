@@ -28,4 +28,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{nosnap.tt};
+}
+
 1;

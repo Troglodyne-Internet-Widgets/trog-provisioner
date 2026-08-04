@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active auditd 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'auditd is running');
+ok(-f '/etc/audit/rules.d/[% domain %].rules', 'audit rules file exists');
+
+done_testing();

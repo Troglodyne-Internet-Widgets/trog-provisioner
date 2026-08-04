@@ -93,4 +93,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{letsencrypt.tt};
+}
+
 1;

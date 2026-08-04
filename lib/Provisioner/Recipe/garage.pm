@@ -153,4 +153,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{garage.tt};
+}
+
 1;

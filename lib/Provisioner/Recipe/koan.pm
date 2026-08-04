@@ -405,4 +405,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{koan.tt};
+}
+
 1;

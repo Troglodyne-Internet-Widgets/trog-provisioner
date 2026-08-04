@@ -76,4 +76,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{ntp.tt};
+}
+
 1;

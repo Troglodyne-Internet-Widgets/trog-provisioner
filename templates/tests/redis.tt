@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active redis-server 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'redis-server is running');
+ok(-f '/etc/redis/redis.conf', 'redis config exists');
+
+done_testing();
