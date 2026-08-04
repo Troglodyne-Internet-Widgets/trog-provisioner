@@ -87,21 +87,13 @@ test:
         size: 85899345920
         cpus: 4
         memory: 8092
-    perl:
     tcms:
         tcms_dir: 'tCMS'
         order: 1
-    tpsgi:
-        routers:
-            - 'tCMS/lib/TCMS.pm'
-        basedir: 'tCMS'
-    nginxproxy:
-        proxy_uri: "run/tpsgi.sock"
-        nocache_prefix: "/secure"
-        static_dir: "www/static"
-        auth_statics: "assets/private"
-        auth_uri: "/authenticated"
 ```
+
+Note that we didn' have to setup any of the things tCMS depends on in config.
+This is because it declares its dependencies, which then autoconfigure what is possible to autoconfigure.
 
 ## /opt/data/test.test.test
 
