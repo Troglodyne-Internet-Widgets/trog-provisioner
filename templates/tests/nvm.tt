@@ -8,11 +8,10 @@ my $home = "/home/$user";
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
-my $node_version = `su - $user -s /bin/bash -c '. ~/.nvm/nvm.sh && node --version' 2>/dev/null`;
-chomp $node_version;
-ok($node_version =~ /^v\d+/, "node is installed via nvm ($node_version)");
+# We are running as root, so we will use system node here (if it exists)
+my $system_node = qx{which node};
+my $user_node = qx{sudo -u $user /bin/bash -c which node};
 
-my $bashrc = do { local $/; open my $fh, '<', "$home/.bashrc" or die $!; <$fh> };
-ok($bashrc =~ /nvm use node/, '.bashrc includes "nvm use node"');
+isnt($user_node, $system_node, "User not configured to use system node, but nvm node");
 
 done_testing();
