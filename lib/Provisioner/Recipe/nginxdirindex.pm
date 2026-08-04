@@ -27,12 +27,10 @@ worker_connections, server_names_hash_bucket_size).
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{nginx-full};
-    }
-    die "Unsupported packager";
+sub required_recipes {
+    return (
+        nginx => sub { () },
+    );
 }
 
 sub validate {
@@ -52,10 +50,7 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.global.conf.tt'         => 'nginx.global.conf',
-        'nginx.sysctl.conf.tt'         => 'nginx.sysctl.conf',
         'nginxdirindex.domain.conf.tt' => 'nginxdirindex.domain.conf',
-        'openssl.tt'                   => 'openssl.conf',
     );
 }
 
