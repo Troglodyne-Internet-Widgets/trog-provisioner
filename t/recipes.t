@@ -242,6 +242,68 @@ renders_ok( 'mail', {
     ipv6 => 0,
 }, 'mail with ipv6 disabled' );
 
+# ----------------------------------------------------------------
+# matrix: homeserver.yaml.tt includes redis block when redis is loaded
+# ----------------------------------------------------------------
+subtest 'matrix homeserver.yaml includes redis section when redis recipe is loaded' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        modules        => ['nginxproxy', 'redis'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds with redis in modules' );
+    like( $out, qr/redis:/, 'homeserver.yaml contains redis block' );
+    like( $out, qr/enabled:\s*true/, 'redis block has enabled: true' );
+    like( $out, qr/host:\s*"127\.0\.0\.1"/, 'redis host defaults to 127.0.0.1' );
+    like( $out, qr/port:\s*6379/, 'redis port defaults to 6379' );
+    unlike( $out, qr/^\s+password: "/m, 'no redis password field when redis_password is not set' );
+};
+
+subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loaded' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        modules        => ['nginxproxy'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds without redis in modules' );
+    unlike( $out, qr/redis:/, 'homeserver.yaml has no redis block' );
+};
+
+subtest 'matrix homeserver.yaml includes redis password when redis_password is set' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        redis_password => 'supersecret',
+        modules        => ['nginxproxy', 'redis'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds with redis_password set' );
+    like( $out, qr/^\s+password:\s*"supersecret"/m, 'redis password appears in output' );
+};
+
 # TODO more stuff with optional fields - probably need to make Provisioner::Recipe insist you enumerate required/optional fields and validate automatically
 
 Test::NoWarnings::had_no_warnings();

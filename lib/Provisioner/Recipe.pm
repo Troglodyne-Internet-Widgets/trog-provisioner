@@ -177,16 +177,13 @@ my $validate = sub {
     return %params;
 };
 
-=head3 @tests = $recipe->tests(@modules)
+=head3 @tests = $recipe->tests()
 
 Array of (templated) tests to run on the remote when finished provisioning.
-
-The list of loaded recipes is passed so you might correctly select relevant component integration tests.
 
 =cut
 
 sub tests {
-    my @modules = @_;
     return ();
 }
 

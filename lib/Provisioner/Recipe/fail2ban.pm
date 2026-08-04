@@ -39,4 +39,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{fail2ban.tt};
+}
+
 1;

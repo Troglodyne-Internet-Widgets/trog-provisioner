@@ -74,4 +74,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{openvpnclient.tt};
+}
+
 1;

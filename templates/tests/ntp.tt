@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active chrony 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'chrony is running');
+ok(-f '/etc/chrony/chrony.conf', 'chrony config exists');
+
+done_testing();

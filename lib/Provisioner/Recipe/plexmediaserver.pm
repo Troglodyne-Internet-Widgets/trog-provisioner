@@ -100,4 +100,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{plexmediaserver.tt};
+}
+
 1;

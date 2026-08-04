@@ -73,4 +73,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{redis.tt};
+}
+
 1;

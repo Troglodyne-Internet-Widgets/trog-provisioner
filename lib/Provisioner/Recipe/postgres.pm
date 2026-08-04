@@ -52,4 +52,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{postgres.tt};
+}
+
 1;

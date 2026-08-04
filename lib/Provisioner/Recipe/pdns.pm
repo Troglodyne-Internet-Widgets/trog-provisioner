@@ -102,4 +102,8 @@ sub formatters {
     );
 }
 
+sub tests {
+    return qw{pdns.tt};
+}
+
 1;

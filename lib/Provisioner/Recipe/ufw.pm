@@ -81,4 +81,8 @@ sub template_files {
     return %ret;
 }
 
+sub tests {
+    return qw{ufw.tt};
+}
+
 1;

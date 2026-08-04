@@ -231,11 +231,11 @@ sub test_recipe {
     use strict;
 
     my @tests = $r->tests();
-    #ok(@tests, "$recipe recipe Has tests");
+    ok(@tests, "$recipe recipe Has tests");
 
     my %files = $r->template_files();
 
-    do_provision($recipe, $ipmap_file, $recipe_file, %files);
+    do_provision($recipe, $ipmap_file, $recipe_file, \@tests, %files);
 
     # TODO Actually run trog-provisioner.
 
@@ -244,7 +244,7 @@ sub test_recipe {
 }
 
 sub do_provision {
-    my ($recipe, $ipmap_file, $recipe_file, %files) = @_;
+    my ($recipe, $ipmap_file, $recipe_file, $tests, %files) = @_;
 
     my $provisioner_bin = '/opt/trog-provisioner/bin/provision';
 
@@ -262,9 +262,13 @@ sub do_provision {
     ok(-f "$ddir/data.tar.gz", "data.tar.gz generated");
     ok(-f "$ddir/provision.conf", "provision.conf generated");
     ok(-f "$ddir/users.yaml", "users.yaml generated");
-    # TODO check that every file that was supposed to be generated actually was
     foreach my $file (values(%files)) {
         ok(-f "$ddir/$file", "$file generated in datadir");
     }
 
+    foreach my $test (@$tests) {
+        my $tname = $test;
+        $tname =~ s/tt$/t/;
+        ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname") or die qx{ls $ddir};
+    }
 }

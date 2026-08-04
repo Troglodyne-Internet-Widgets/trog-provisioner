@@ -89,4 +89,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{backup.tt};
+}
+
 1;

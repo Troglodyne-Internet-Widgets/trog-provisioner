@@ -38,4 +38,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{autoupdate.tt};
+}
+
 1;

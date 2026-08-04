@@ -549,6 +549,16 @@ sub handle_domain {
     require Provisioner::Recipe::data unless Provisioner::Utils::already_required('Provisioner/Recipe/data.pm');
     my $do            = Provisioner::Recipe::data->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
+    my @tests = $do->tests();
+    mkdir "$cfg_dir/t";
+    foreach my $test (@tests) {
+        my $tname = $test;
+        $tname =~ s/tt$/t/;
+        my $rendered = $do->render_file("tests/$test", %$global_config, %$data_config );
+        print "Writing $test as $tname\n";
+        File::Slurper::write_binary( "$cfg_dir/t/$tname", $rendered);
+    }
+
 
     # set the install_dir for configs to use from here
     $global_config->{install_dir} = $data_config->{to};
@@ -705,8 +715,7 @@ sub handle_domain {
         }
 
         # Write tests if any exist
-        my @tests = $builder->tests(@modules);
-        mkdir "$cfg_dir/t";
+        my @tests = $builder->tests();
         foreach my $test (@tests) {
             my $tname = $test;
             $tname =~ s/tt$/t/;

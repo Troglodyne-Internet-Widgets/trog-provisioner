@@ -94,4 +94,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{roundcube.tt};
+}
+
 1;

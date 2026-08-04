@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active gogs 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'gogs is running');
+ok(-f '[% install_dir %]/git.[% domain %]/custom/conf/app.ini', 'gogs config exists');
+
+done_testing();

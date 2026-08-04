@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/root/.ssh/authorized_keys', 'authorized_keys exists');
+ok(-f '/root/rsyncd.[% domain %].conf', 'rsync daemon config exists');
+
+done_testing();

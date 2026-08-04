@@ -168,6 +168,11 @@ sub validate {
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
 
+    # Redis integration — optional; activated when redis recipe is co-loaded.
+    # Override these if your redis instance is non-default.
+    $opts{redis_host} //= '127.0.0.1';
+    $opts{redis_port} //= 6379;
+
     return %opts;
 }
 
@@ -193,6 +198,10 @@ sub remote_files {
         "$install_dir/matrix.$domain/"       => 'matrix/',
         "$install_dir/admin.matrix.$domain/" => 'admin.matrix/',
     );
+}
+
+sub tests {
+    return qw{matrix.tt};
 }
 
 1;
