@@ -1,0 +1,61 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Snapshot;
+
+use strict;
+use warnings;
+
+use File::Which qw{which};
+use Getopt::Long qw{GetOptionsFromArray};
+
+sub usage {
+    return "Usage: $0 [--name NAME] DOMAIN\n";
+}
+
+sub main {
+    my @args = @_;
+
+    my ($name);
+    GetOptionsFromArray(\@args, 'name=s' => \$name);
+
+    my $domain = shift @args;
+    die usage() unless $domain;
+    die "virsh not installed\n" unless which('virsh');
+
+    my $before = _virsh_snap_current($domain);
+    chomp $before if defined $before;
+
+    my @cmd = ('snapshot-create', '--atomic', '--live', $domain);
+    push @cmd, '--name', $name if defined $name;
+
+    print "Creating snapshot for $domain...\n";
+    my $rc = _virsh(@cmd);
+    die "Failed to create snapshot for $domain\n" if $rc;
+
+    my $after = _virsh_snap_current($domain);
+    chomp $after if defined $after;
+
+    die "No current snapshot found after create\n"
+        unless defined $after && length $after;
+
+    if (defined $before && $before eq $after) {
+        die "Current snapshot unchanged after create (still '$after') — snapshot may not have been created\n";
+    }
+
+    print "Snapshot '$after' created and verified as current.\n";
+    return 0;
+}
+
+sub _virsh {
+    system('virsh', @_) >> 8;
+}
+
+sub _virsh_snap_current {
+    my ($domain) = @_;
+    my $out = qx{virsh snapshot-current --name \Q$domain\E 2>/dev/null};
+    return undef if $?;
+    return $out;
+}
+
+main(@ARGV) unless caller;
+1;
