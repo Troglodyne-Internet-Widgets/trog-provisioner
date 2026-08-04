@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $convert = `which convert 2>/dev/null`;
+chomp $convert;
+ok($convert, 'convert command is available');
+
+done_testing();

@@ -80,4 +80,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{tpsgi.tt};
+}
+
 1;

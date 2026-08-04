@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/etc/cron.d/[% domain %]-backups', 'backup destination cron exists');
+ok(-f '[% install_dir %]/[% domain %]/[% key_file %]', 'backup ssh key is in place');
+
+done_testing();

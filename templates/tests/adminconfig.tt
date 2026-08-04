@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $user_entry = `getent passwd [% admin_user %] 2>/dev/null`;
+chomp $user_entry;
+ok($user_entry, 'admin user exists');
+ok(-d '/home/[% admin_user %]', 'admin user home directory exists');
+
+done_testing();

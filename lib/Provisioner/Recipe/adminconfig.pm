@@ -46,4 +46,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{adminconfig.tt};
+}
+
 1;

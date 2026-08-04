@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active fail2ban 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'fail2ban is running');
+ok(-f '/etc/fail2ban/jail.d/[% domain %].conf', 'fail2ban jail config exists');
+
+done_testing();

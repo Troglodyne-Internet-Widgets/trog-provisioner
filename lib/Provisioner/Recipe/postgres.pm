@@ -38,4 +38,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{postgres.tt};
+}
+
 1;

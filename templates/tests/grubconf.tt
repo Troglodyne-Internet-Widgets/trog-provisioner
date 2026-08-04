@@ -1,0 +1,8 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/etc/default/grub.d/00-grub.conf', 'grub config fragment exists');
+
+done_testing();

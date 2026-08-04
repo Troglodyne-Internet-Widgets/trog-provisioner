@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active openvpn-client\@client 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'openvpn client is running');
+ok(-f '/etc/openvpn/client/client.conf', 'openvpn client config exists');
+
+done_testing();

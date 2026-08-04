@@ -1,0 +1,16 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $deluged = `systemctl is-active deluged 2>/dev/null`;
+chomp $deluged;
+is($deluged, 'active', 'deluged is running');
+
+my $web = `systemctl is-active deluge-web 2>/dev/null`;
+chomp $web;
+is($web, 'active', 'deluge-web is running');
+
+ok(-d '[% install_dir %]/[% domain %]/torrents', 'torrent storage directory exists');
+
+done_testing();

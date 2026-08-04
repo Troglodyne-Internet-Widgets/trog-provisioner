@@ -109,4 +109,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{backupdestination.tt};
+}
+
 1;

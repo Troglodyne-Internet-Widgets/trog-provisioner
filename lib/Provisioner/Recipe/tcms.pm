@@ -82,4 +82,8 @@ sub remote_files {
 }
 
 
+sub tests {
+    return qw{tcms.tt};
+}
+
 1;

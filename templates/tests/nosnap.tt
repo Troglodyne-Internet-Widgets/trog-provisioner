@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $snapd = `dpkg -l snapd 2>/dev/null | grep '^ii'`;
+is($snapd, '', 'snapd is not installed');
+ok(-f '/etc/apt/preferences.d/nosnap.pref', 'nosnap apt preference exists');
+
+done_testing();

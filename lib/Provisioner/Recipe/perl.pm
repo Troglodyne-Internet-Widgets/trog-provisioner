@@ -40,4 +40,8 @@ sub validate {
     return %opts;
 }
 
+sub tests {
+    return qw{perl.tt};
+}
+
 1;

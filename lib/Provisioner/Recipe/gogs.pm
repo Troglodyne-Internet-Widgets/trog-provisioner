@@ -161,4 +161,8 @@ sub remote_files {
     );
 }
 
+sub tests {
+    return qw{gogs.tt};
+}
+
 1;

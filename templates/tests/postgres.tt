@@ -1,0 +1,19 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active postgresql 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'postgresql is running');
+
+my $pg_hba = `find /etc/postgresql -name pg_hba.conf 2>/dev/null | head -1`;
+chomp $pg_hba;
+ok($pg_hba && -f $pg_hba, 'pg_hba.conf exists');
+
+if ($pg_hba && -f $pg_hba) {
+    my $hba_content = do { local ( @ARGV, $/ ) = $pg_hba; <> };
+    like($hba_content, qr/host all all 127\.0\.0\.1\/32 md5/, 'local TCP md5 auth configured');
+}
+
+done_testing();
