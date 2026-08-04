@@ -1,0 +1,13 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active nginx 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'nginx is running');
+
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginx domain config exists');
+ok(-d '[% install_dir %]/[% domain %]', 'document root directory exists');
+
+done_testing();

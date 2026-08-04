@@ -1,0 +1,23 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $admin_user = '[% admin_user %]';
+my $home       = "/home/$admin_user";
+
+my $nav = `npm list -g perlnavigator-server 2>/dev/null`;
+like($nav, qr/perlnavigator-server/, 'perlnavigator-server installed globally via npm');
+
+ok(-d "$home/.vim/pack/lsp/start", 'vim-lsp pack directory exists');
+ok(-f "$home/.vim/perllsp.vim", 'perllsp.vim vimrc snippet installed');
+
+my $vimrc = "$home/.vimrc";
+if (-f $vimrc) {
+    my $content = do { open my $fh, '<', $vimrc or die; local $/; <$fh> };
+    like($content, qr{source ~/\.vim/perllsp\.vim}, 'perllsp.vim sourced from .vimrc');
+} else {
+    fail('.vimrc does not exist');
+}
+
+done_testing();

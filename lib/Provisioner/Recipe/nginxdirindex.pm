@@ -49,4 +49,8 @@ sub template_files {
     );
 }
 
+sub tests {
+    return qw{nginxdirindex.tt};
+}
+
 1;
