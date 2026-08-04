@@ -11,7 +11,6 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         nginxdirindex:
-            backlog: 32768
             ipv6: true
 
 =head2 DESCRIPTION
@@ -35,10 +34,6 @@ sub required_recipes {
 
 sub validate {
     my ( $self, %opts ) = @_;
-
-    $opts{backlog} //= 32768;
-    die "nginxdirindex.backlog must be a positive integer"
-        unless $opts{backlog} =~ /^\d+$/ && $opts{backlog} > 0;
 
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
