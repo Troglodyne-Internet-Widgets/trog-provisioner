@@ -13,7 +13,7 @@ use List::Util qw{any};
 
     somedomain:
         nginxproxy:
-            proxy_uri: path/to/socket/in/install_dir
+            proxy_uri: path/to/socket/in/install_dir, or an http://uri
             static_dir: www/static
             nocache_prefix: /secure
             backlog: 32768
@@ -60,6 +60,9 @@ sub validate {
         my $vopts = $opts{vhosts}{$key};
         my $uri = $vopts->{proxy_uri};
         die "Must set proxy_uri in [nginxproxy] section of recipes.yaml" unless $uri;
+        # let's make sure the proxy_uri accepts either a file or an actual uri
+        $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri" if $uri !~ m/^http/;
+
         my $sd = $vopts->{static_dir};
         die "Must set static_dir in [nginxproxy] section of recipes.yaml" unless $sd;
     }
