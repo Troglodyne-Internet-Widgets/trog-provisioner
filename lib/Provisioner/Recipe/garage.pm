@@ -162,6 +162,7 @@ sub remote_files {
     return (
         "$data_dir/"     => 'garage/data/',
         "$metadata_dir/" => 'garage/meta/',
+    );
 }
 
 sub tests {

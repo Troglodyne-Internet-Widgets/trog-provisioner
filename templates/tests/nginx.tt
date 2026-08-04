@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active nginx 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'nginx is running');
+
+done_testing();

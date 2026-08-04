@@ -44,12 +44,10 @@ In general it is best to use this as a dependency to other recipes.  See tpsgi &
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{nginx-full};
-    }
-    die "Unsupported packager";
+sub required_recipes {
+    return (
+        nginx => sub { () },
+    );
 }
 
 sub validate {
@@ -58,18 +56,13 @@ sub validate {
     #Per-domain stuff
     die "nginxproxy.vhosts must be HASH" unless $opts{vhosts} && ref $opts{vhosts} eq 'HASH';
     foreach my $key (keys(%{$opts{vhosts}})) {
-        next unless $key =~ m/\d+/; 
+        next unless $key =~ m/\d+/;
         my $vopts = $opts{vhosts}{$key};
         my $uri = $vopts->{proxy_uri};
         die "Must set proxy_uri in [nginxproxy] section of recipes.yaml" unless $uri;
         my $sd = $vopts->{static_dir};
         die "Must set static_dir in [nginxproxy] section of recipes.yaml" unless $sd;
     }
-
-    # Global options
-    $opts{backlog} //= 32768;
-    die "nginxproxy.backlog must be a positive integer"
-        unless $opts{backlog} =~ /^\d+$/ && $opts{backlog} > 0;
 
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
@@ -81,12 +74,7 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.global.conf.tt'  => 'nginx.global.conf',
         'nginx.domain.conf.tt'  => 'nginx.domain.conf',
-        'nginx.sysctl.conf.tt'  => 'nginx.sysctl.conf',
-
-        #XXX TODO this needs to be in the MAIN target, NOT here
-        'openssl.tt' => 'openssl.conf',
     );
 }
 

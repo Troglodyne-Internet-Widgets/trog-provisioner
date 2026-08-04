@@ -1,0 +1,61 @@
+package Provisioner::Recipe::nginx;
+
+use strict;
+use warnings;
+
+use parent qw{Provisioner::Recipe};
+
+use List::Util qw{any};
+
+=head1 Provisioner::Recipe::nginx
+
+=head2 SYNOPSIS
+
+    somedomain:
+        nginx:
+            backlog: 32768
+=head2 DESCRIPTION
+
+Setup nginx on the server.
+
+=head2 USE AS DEPENDENCY
+
+In general it is best to use this as a dependency to other nginx recipes.
+
+=cut
+
+sub deps {
+    my ($self) = @_;
+    if ( $self->{target_packager} eq 'deb' ) {
+        return qw{nginx-full};
+    }
+    die "Unsupported packager";
+}
+
+sub validate {
+    my ( $self, %opts ) = @_;
+
+    # Global options
+    $opts{backlog} //= 32768;
+    die "nginxproxy.backlog must be a positive integer"
+        unless $opts{backlog} =~ /^\d+$/ && $opts{backlog} > 0;
+
+    return %opts;
+}
+
+sub template_files {
+    my ($self) = @_;
+
+    return (
+        'nginx.global.conf.tt'  => 'nginx.global.conf',
+        'nginx.sysctl.conf.tt'  => 'nginx.sysctl.conf',
+        #XXX TODO this needs to be in the MAIN target, NOT here
+        'openssl.tt' => 'openssl.conf',
+    );
+}
+
+sub tests {
+    return qw{nginx.tt};
+}
+
+1;
