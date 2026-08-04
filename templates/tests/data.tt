@@ -1,0 +1,8 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+ok(-d "[% to %]/[% domain %]", "DATADIR created");
+
+done_testing();
