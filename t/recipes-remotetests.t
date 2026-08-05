@@ -161,7 +161,6 @@ my %recipes_raw = (
 );
 # Make each so-named domain to provision do nothing but provision its own stuff
 foreach my $key ('data', @available) {
-    # XXX standardize required_modules instead in recipes
     # XXX ALSO re-do things such that recipes can inform their dependent recipes of what their required values are gonna be
     if (ref $recipes_raw{$key}{modules} eq 'ARRAY') {
         my $modules = delete $recipes_raw{$key}{modules};
@@ -206,7 +205,7 @@ done_testing();
 
 sub test_recipe {
     my $recipe = shift;
-    require_ok( "$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm" );
+    require_ok( "$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm" ) unless Provisioner::Utils::already_required("Provisioner/Recipe/$recipe.pm");
     no strict 'refs';
     my $r = "Provisioner::Recipe::$recipe"->new();
     use strict;
