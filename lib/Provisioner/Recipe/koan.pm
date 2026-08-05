@@ -218,6 +218,10 @@ re-deploy.
 
 =cut
 
+sub required_recipes {
+    return ( claude => sub { () } );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {

@@ -55,11 +55,6 @@ runuser -u '[% user %]' -- '[% install_dir %]/[% domain %]/.venv/bin/pip' instal
 runuser -u '[% user %]' -- '[% install_dir %]/[% domain %]/.venv/bin/pip' install --quiet -r '[% install_dir %]/[% domain %]/koan/koan/requirements.txt'
 
 [% IF cli_provider == 'claude' %]
-# Install Claude Code CLI globally so the koan user can shell out to `claude`.
-# Skip when already on PATH — `npm install -g` round-trips the registry every
-# call.  To force an upgrade, uninstall first or run npm update manually.
-command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code
-
 # Bootstrap ~/.claude.json so Claude Code skips interactive onboarding on
 # first run.  CLAUDE_CODE_OAUTH_TOKEN (in .env) handles the actual bearer
 # auth; Claude only needs hasCompletedOnboarding:true to not attempt a
