@@ -154,14 +154,6 @@ my %recipes_raw = (
     gogs => {
         version => 'bogus',
         admin_password => 'bogus',
-        nginxproxy => {
-            vhosts => {
-                8080 => {
-                    proxy_uri => '/bogus/bogus',
-                    static_dir => '/bogus/bogus',
-                },
-            },
-        },
     },
     deluged => {
         nginxproxy => {

@@ -2,7 +2,9 @@ mkdir -p [% install_dir %]/[% domain %]/[% basedir %]
 mkdir -p /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/[% basedir %]
+[% IF admin_user != user %]
 sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
+[% END %]
 cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [% FOR repo in repos_from %]
 [% FOR entity in repo.repos_for %]

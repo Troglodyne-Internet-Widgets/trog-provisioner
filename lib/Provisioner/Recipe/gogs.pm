@@ -100,7 +100,18 @@ Returns remote file mappings for backup/restore.
 #XXX probably won't work in isolation
 sub required_recipes {
     return (
-        nginxproxy  => sub { () },
+        nginxproxy  => sub {
+            (
+                vhosts => {
+                    80  => { ssl_redirect => 1, ipv6 => 1 },
+                    443 => {
+                        ssl => 1,
+                        proxy_uri => 'http://127.0.0.1:3000',
+                        ipv6 => 1,
+                    },
+                },
+            )
+        },
     );
 }
 
@@ -142,7 +153,6 @@ sub validate {
 
 sub template_files {
     return (
-        'gogs.nginx.tt'     => 'gogs.nginx.conf',
         'gogs.service.tt'   => 'gogs.service',
         'gogs.app.ini.tt'   => 'app.ini',
         'gogs.setup.sh.tt'  => 'gogs_setup.sh',
