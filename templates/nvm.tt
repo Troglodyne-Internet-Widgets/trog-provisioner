@@ -7,5 +7,5 @@ su - [% user %] -s /bin/bash -c \
     ". ~/.nvm/nvm.sh && nvm install node && nvm alias default node"
 
 # Ensure 'nvm use node' appears in .bashrc after the nvm init block
-BASHRC=/home/[% user %]/.bashrc
-grep -qxF 'nvm use node' "$$BASHRC" || echo 'nvm use node' >> "$$BASHRC"
+# Don't forget that $user's homedir is the domain dir
+echo 'nvm use node' >> [% install_dir %]/[% domain %]/.bashrc

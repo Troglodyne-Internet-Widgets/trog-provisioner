@@ -3,28 +3,17 @@ npm install -g perlnavigator-server
 
 # Install vim-lsp plugin family into admin user's native vim pack directory.
 # vim 8+ loads packages from ~/.vim/pack/*/start/ automatically — no plugin manager needed.
-VIMPACK=/home/[% admin_user %]/.vim/pack/lsp/start
-mkdir -p $$VIMPACK
+mkdir -p /home/[% admin_user %]/.vim/pack/lsp/start
 
-for REPO in \
-    "https://github.com/prabirshrestha/async.vim" \
-    "https://github.com/prabirshrestha/vim-lsp" \
-    "https://github.com/prabirshrestha/asyncomplete.vim" \
-    "https://github.com/prabirshrestha/asyncomplete-lsp.vim"; do
-    DIR=$$VIMPACK/$$(basename $$REPO .git)
-    if [ -d $$DIR/.git ]; then
-        git -C $$DIR pull --quiet --ff-only
-    else
-        git clone --quiet --depth 1 $$REPO $$DIR
-    fi
-done
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/async.vim"            /home/[% admin_user %]/.vim/pack/lsp/start/async
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/vim-lsp"              /home/[% admin_user %]/.vim/pack/lsp/start/vim-lsp
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete.vim"     /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete.vim
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete-lsp.vim" /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete-lsp.vim
 
 chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vim
 
 # Drop the perllsp vimrc snippet into ~/.vim/ and source it from ~/.vimrc
 install -m 0644 -o [% admin_user %] -g [% admin_user %] perllsp.vim /home/[% admin_user %]/.vim/perllsp.vim
 
-VIMRC=/home/[% admin_user %]/.vimrc
-SOURCE_LINE="source ~/.vim/perllsp.vim"
-grep -qxF "$$SOURCE_LINE" $$VIMRC 2>/dev/null || echo "$$SOURCE_LINE" >> $$VIMRC
-chown [% admin_user %]:[% admin_user %] $$VIMRC
+echo "source ~/.vim/perllsp.vim" >> /home/[% admin_user %]/.vimrc
+chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vimrc

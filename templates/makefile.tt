@@ -4,7 +4,11 @@
 
 [% global_targets = ['sysctl', 'packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
 [% IF user -%]
+[% IF user == admin_user -%]
+[% global_targets.unshift('admin_user') -%]
+[% ELSE -%]
 [% global_targets.unshift('service_user') -%]
+[% END -%]
 [% END -%]
 [% global_targets.unshift('state') -%]
 
@@ -53,13 +57,17 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	newaliases
 	touch $@
 
-[% IF user %]
 [% state_dir %]/service_user:
 	useradd -s /usr/sbin/nologin -d [% install_dir %]/[% domain %] [% user %]
 	mkdir -p [% install_dir %]/[% domain %]; /bin/true
 	chown [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 	touch $@
-[% END -%]
+
+[% state_dir %]/admin_user:
+	 mkdir -p [% install_dir %]; /bin/true
+	 ln -s /home/[% admin_user %] [% install_dir %]/[% domain %]
+	 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]
+	 touch $@
 
 [% state_dir %]/scripts:
 	mkdir -p [% script_dir %]; rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% provisioner_dir %]/scripts/* [% script_dir %]

@@ -3,7 +3,7 @@ mv domains.txt /etc/dehydrated/sans/[% domain %].txt
 mv domain.hook /etc/dehydrated/hooks/[% domain %].sh
 chown root:root /etc/dehydrated/domains.d/[% domain %].conf
 chown root:root /etc/dehydrated/hooks/[% domain %].sh
-chown root:root: /etc/dehydrated/sans/[% domain %].txt
+chown root:root /etc/dehydrated/sans/[% domain %].txt
 # This contains actual secret information which will need to remain, so must be protected!
 # TODO: watch this file for all accesses via auditd
 chmod 0700 /etc/dehydrated/hooks/[% domain %].sh
