@@ -39,6 +39,10 @@ You can set the name of the 'uncached' route to your application (nocache_prefix
 which is useful if you have necessarily dynamic pages.
 Your application will have to strip that part of the route and then route as normal.
 
+Alternatively, you can use the nocache_prefix as a way to serve at multiple odd endpoints by providing an appropriate location directive nginx will understand.
+Example from the matrix recipe:
+    nocache_prefix => '~ (_matrix|_synapse)/client'
+
 In that case we still serve statics as exact matches, but not .html/.htm versions.
 This way all your routes (e.g. /foo) can be dynamic while static assets (e.g. styles/foo.css) will
 still be served by nginx.

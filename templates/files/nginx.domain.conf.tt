@@ -6,6 +6,7 @@ server {
     [% IF ipv6 %]
     listen [::]:[% vhost %] backlog=[% backlog %];
     [% END -%]
+    server_tokens off;
 
     server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
     return 301 https://$host$request_uri;

@@ -115,7 +115,6 @@ my %recipes_raw = (
         smtp_user      => 'notify@test.test',
         smtp_pass      => 'smtp-pass',
         smtp_domain    => 'test.test',
-        modules        => ['nginxproxy'],
     },
     roundcube => {
         version => '1.6.0',

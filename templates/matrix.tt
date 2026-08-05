@@ -33,6 +33,9 @@ cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].co
 chown root:root /etc/nginx/sites-enabled/matrix.[% domain %].conf
 chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
+# Slam in the chat index.html
+install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www; /bin/true
+install -m 0755 -o [% user %] -g www-data matrix.index.html [% install_dir %]/[% domain %]/www
 # Enable service (actual start will be queued)
 systemctl daemon-reload
 systemctl enable matrix-synapse

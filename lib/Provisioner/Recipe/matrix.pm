@@ -93,7 +93,21 @@ Returns remote file mappings for backup/restore.
 
 # XXX this probably does not work in isolation!
 sub required_recipes {
-    return ( nginxproxy => sub { () } );
+    return (
+        nginxproxy  => sub {
+            (
+                vhosts => {
+                    80  => { ssl_redirect => 1, ipv6 => 1 },
+                    443 => {
+                        ssl => 1,
+                        proxy_uri => 'http://127.0.0.1:8008',
+                        nocache_prefix => '^~ /(_matrix|_synapse/client)/',
+                        ipv6 => 1,
+                    },
+                },
+            )
+        },
+    );
 }
 
 sub deps {
@@ -182,9 +196,9 @@ sub template_files {
     return (
         'matrix.homeserver.yaml.tt' => 'homeserver.yaml',
         'matrix.log.yaml.tt'        => 'log.yaml',
-        'matrix.nginx.tt'           => 'matrix.nginx.conf',
         'matrix.admin.nginx.tt'     => 'matrix-admin.nginx.conf',
         'matrix.synapse.service.tt' => 'matrix-synapse.service',
+        'matrix.index.html.tt'      => 'matrix.index.html',
     );
 }
 
