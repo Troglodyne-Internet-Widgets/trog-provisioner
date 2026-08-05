@@ -8,4 +8,4 @@ su - [% user %] -s /bin/bash -c \
 
 # Ensure 'nvm use node' appears in .bashrc after the nvm init block
 # Don't forget that $user's homedir is the domain dir
-echo 'nvm use node' >> [% install_dir %]/[% domain %]/.bashrc
+echo 'nvm use node &>/dev/null' >> [% install_dir %]/[% domain %]/.bashrc
