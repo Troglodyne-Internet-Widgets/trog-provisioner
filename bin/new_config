@@ -615,7 +615,7 @@ sub handle_domain {
         my $pconf        = $rconf->{$domain}{$module} // {};
 
         # Check and see if this particular provisioner requires another recipe to work.
-        my %dep_recipes = $builder->required_recipes();
+        my %dep_recipes = $builder->required_recipes(%$global_config, %$pconf);
         foreach my $required (keys(%dep_recipes)) {
             my $manual_args = delete $pconf->{$required} // {};
 

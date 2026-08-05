@@ -33,9 +33,23 @@ so that C<files.[domain]> is covered by the SSL certificate.
 
 =cut
 
-#XXX probably won't work in isolation
 sub required_recipes {
-    return ( nginxproxy => sub { () } );
+    my ($self, %opts) = @_;
+    my $port = $opts{web_port} // 8112;
+    return (
+        nginxproxy  => sub {
+            (
+                vhosts => {
+                    80  => { ssl_redirect => 1, ipv6 => 1 },
+                    443 => {
+                        ssl => 1,
+                        proxy_uri => "http://127.0.0.1:$port",
+                        ipv6 => 1,
+                    },
+                },
+            )
+        },
+    );
 }
 
 sub deps {
@@ -65,7 +79,6 @@ sub validate {
 sub template_files {
     my ($self) = @_;
     return (
-        'deluged.nginx.tt'    => 'deluged_nginx.conf',
         'deluged.core.conf.tt' => 'deluged_core.conf',
         'deluged.ufw.conf.tt'  => 'deluged_ufw.conf',
     );

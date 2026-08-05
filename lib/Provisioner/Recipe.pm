@@ -112,7 +112,7 @@ This is configured by setting the sub value.
 =cut
 
 sub required_recipes {
-    my ($self) = @_;
+    my ($self, %opts) = @_;
 
     return ();
 }
