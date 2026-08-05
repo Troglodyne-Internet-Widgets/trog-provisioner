@@ -50,9 +50,8 @@ sub deps {
     };
 }
 
-# XXX this probably does not work in isolation!
 sub required_recipes {
-    return ( nginxproxy => sub { () } );
+    return ( nginx => sub { () } );
 }
 
 # NOTE: FPM php.ini: /etc/php/8.3/fpm/php.ini
