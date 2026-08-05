@@ -44,6 +44,7 @@ sub required_recipes {
                     443 => {
                         ssl => 1,
                         proxy_uri => "http://127.0.0.1:$port",
+                        public_dir => 'torrents',
                         ipv6 => 1,
                     },
                 },

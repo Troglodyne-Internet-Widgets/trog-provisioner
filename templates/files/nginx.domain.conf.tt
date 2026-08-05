@@ -15,6 +15,7 @@ server {
 [% auth_uri     = vhosts.$vhost.auth_uri -%]
 [% proxy_uri    = vhosts.$vhost.proxy_uri -%]
 [% static_dir   = vhosts.$vhost.static_dir || install_dir _ '/' _ domain _ '/www' -%]
+[% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
     listen [% $vhost %] [% ssl %] backlog=[% backlog %];
@@ -37,6 +38,18 @@ server {
         root [% install_dir %]/[% domain %]/[% static_dir %];
         try_files $uri $uri.html $uri/index.html @default;
     }
+
+    [% IF public_dir %]
+    location /[% public_dir %] {
+        alias [% install_dir %]/[% domain %]/[% public_dir %];
+        autoindex on;
+        autoindex_exact_size off;
+        autoindex_localtime on;
+        sendfile on;
+        sendfile_max_chunk 1m;
+        tcp_nopush on;
+    }
+    [% END -%]
 
     [% IF auth_statics AND auth_uri %]
     location /[% auth_statics %] {
@@ -72,6 +85,9 @@ server {
     location @default {
         proxy_pass [% proxy_uri %];
         proxy_buffering off;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host            $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;

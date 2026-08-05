@@ -17,6 +17,7 @@ use List::Util qw{any};
                 443:
                     proxy_uri: path/to/socket/in/install_dir, or an http://uri
                     static_dir: www/static
+                    public_dir: www/public
                     nocache_prefix: /secure
                     auth_statics: /seekrit
                     auth_uri: /ihazcookie
@@ -50,6 +51,10 @@ You can also guard a folder for statics behind auth via the auth_statics and aut
 The auth_uri should return 200 in the event the user is sufficiently authenticated (see nginx's L<auth_request|https://nginx.org/en/docs/http/ngx_http_auth_request_module.html>)
 
 You can do auto-redirects to HTTPS via the ssl_redirect flag for non-ssl ports.
+
+Supports connection upgrades to websocket, and does not use proxy buffering so comet requests & other streams are possible as well.
+
+The public_dir field is for providing the same functionality as the nginxdirindex recipe.
 
 =head2 USE AS DEPENDENCY
 

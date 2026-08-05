@@ -155,16 +155,6 @@ my %recipes_raw = (
         version => 'bogus',
         admin_password => 'bogus',
     },
-    deluged => {
-        nginxproxy => {
-            vhosts => {
-                8080 => {
-                    proxy_uri => '/bogus/bogus',
-                    static_dir => '/bogus/bogus',
-                },
-            },
-        },
-    },
     openvpnclient => {
         server => 'bogus.test',
         cert_dir => '/bogus',

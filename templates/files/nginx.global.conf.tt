@@ -1,2 +1,8 @@
 # Oh how we love packagers that ship things broken out of the box
 server_names_hash_bucket_size 64;
+
+# Allow doing ws upgrades rite
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
