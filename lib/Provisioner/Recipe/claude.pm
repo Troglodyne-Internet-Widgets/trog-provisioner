@@ -30,6 +30,12 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub template_files {
+    return (
+        'claude.settings.json.tt' => 'claude.settings.json',
+    );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

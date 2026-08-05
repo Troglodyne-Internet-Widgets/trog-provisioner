@@ -1,0 +1,33 @@
+{
+  "enabledPlugins": {
+    "perlnavigator@claude-code-perlnavigator": true,
+    "perl-development@perigrin-marketplace": true,
+    "perl-sloppin@Troglodyne-Internet-Widgets": true,
+  },
+  "extraKnownMarketplaces": {
+[% IF modules.grep('perllsp').size() %]
+    "claude-code-perlnavigator": {
+      "source": {
+        "source": "github",
+        "repo": "yuji-hatakeyama/claude-code-perlnavigator"
+      }
+    },
+[% END -%]
+[% IF modules.grep('perl').size() %]
+    "perigrin-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "perigrin/claude-plugins-marketplace"
+      }
+    },
+[% END %]
+    "troglodyne-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "Troglodyne-Internet-Widgets/claude-plugins-marketplace"
+      }
+    }
+  },
+  "tui": "fullscreen",
+  "theme": "dark"
+}
