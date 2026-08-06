@@ -2,7 +2,7 @@
   "enabledPlugins": {
     "perlnavigator@claude-code-perlnavigator": true,
     "perl-development@perigrin-marketplace": true,
-    "perl-sloppin@Troglodyne-Internet-Widgets": true,
+    "perl-sloppin@Troglodyne-Internet-Widgets": true
   },
   "extraKnownMarketplaces": {
 [% IF modules.grep('perllsp').size() %]
