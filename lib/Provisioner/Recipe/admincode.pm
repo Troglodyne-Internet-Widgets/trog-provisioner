@@ -52,6 +52,10 @@ sub validate {
     die "Must set repos in [admincode] section of recipes.yaml" unless $repos && ref $repos eq 'ARRAY';
     my $basedir = $opts{basedir};
     die "Must set basedir in [admincode] section of recipes.yaml" unless $basedir;
+
+    if ($opts{extra_pkgs} && ref $opts{extra_pkgs} ne 'ARRAY') {
+        die "admincode.extra_pkgs must be array";
+    }
     return %opts;
 }
 
