@@ -55,16 +55,29 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{base_dir hosts targets key_file}],
+        properties => {
+            base_dir => { type => 'string' },
+            hosts    => {
+                type  => 'array',
+                items => { type => 'string' },
+            },
+            targets  => {
+                type  => 'array',
+                items => { type => 'string' },
+            },
+            key_file => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $base_dir = $opts{base_dir};
-    die "Must define base_dir in [backupdestination] section of recipes.yaml" unless $base_dir;
-
     my $hosts = $opts{hosts};
-    die "Must define hosts in [backupdestination] section of recipes.yaml" unless $hosts;
-    die "hosts in [backupdestination] must be ARRAY" unless ref $hosts eq 'ARRAY';
-
     my %host_port_map;
     @$hosts = map {
         my $host = $_;
@@ -76,7 +89,6 @@ sub validate {
     } @$hosts;
     $opts{host_port_map} = \%host_port_map;
 
-    # Gather all the remote_files
     my @default_targets;
     foreach my $module ( @{ $opts{modules} } ) {
         require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
@@ -87,16 +99,9 @@ sub validate {
         }
     }
 
-    my $targets = $opts{targets};
-    die "Must define targets ns in [backupdestination] section of recipes.yaml" unless $targets;
-    die "targets in [backupdestination] must be ARRAY" unless ref $targets eq 'ARRAY';
+    $opts{targets} = [ uniq( @default_targets, @{ $opts{targets} } ) ];
 
-    # Merge the remote_files and specified backup stuff
-    $targets = [ uniq( @default_targets, @$targets ) ];
-
-    my $key_file = $opts{key_file};
-    die "Must define key_file in [backupdestination] section of recipes.yaml" unless $key_file;
-    my $kf = "$opts{data_source}/$opts{domain}/$key_file";
+    my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
     die "key_file defined in [backupdestination] must exist in $kf" unless -f $kf;
 
     return %opts;

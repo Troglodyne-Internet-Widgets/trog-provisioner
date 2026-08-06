@@ -60,7 +60,16 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        properties => {
+            user        => { type => 'string' },
+            nvm_version => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
     $opts{user}        //= $opts{admin_user};
     $opts{nvm_version} //= 'v0.40.3';

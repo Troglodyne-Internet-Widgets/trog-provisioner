@@ -28,6 +28,20 @@ Optionally add in packages for the administrator to use on the provisioned host.
 
 =cut
 
+sub args {
+    return (
+        type     => 'object',
+        required => [qw{skel}],
+        properties => {
+            skel => { type => 'string' },
+            pkgs => {
+                type  => 'array',
+                items => { type => 'string' },
+            },
+        },
+    );
+}
+
 sub deps {
     my ( $self, %opts ) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
@@ -35,15 +49,6 @@ sub deps {
         return ();
     }
     die "Unsupported packager";
-}
-
-sub validate {
-    my ( $self, %opts ) = @_;
-
-    my $soa = $opts{skel};
-    die "Must define skel ns in [adminconfig] section of recipes.yaml" unless $soa;
-
-    return %opts;
 }
 
 sub tests {

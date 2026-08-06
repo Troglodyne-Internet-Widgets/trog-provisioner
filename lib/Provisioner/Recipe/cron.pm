@@ -49,26 +49,34 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %vars ) = @_;
-
-    if ( $vars{user_scripts} ) {
-        die "user_scripts must be ARRAY" unless ref $vars{user_scripts} eq 'ARRAY';
-        foreach my $cron ( @{ $vars{user_scripts} } ) {
-            die "Each user script must be a HASH" unless ref $cron eq 'HASH';
-            die "user_scripts must have an interval & cmd" unless $cron->{interval} && $cron->{cmd};
-        }
-    }
-
-    if ( $vars{root_scripts} ) {
-        die "root_scripts must be ARRAY" unless ref $vars{root_scripts} eq 'ARRAY';
-        foreach my $cron ( @{ $vars{root_scripts} } ) {
-            die "Each user script must be a HASH" unless ref $cron eq 'HASH';
-            die "root_scripts must have an interval & cmd" unless $cron->{interval} && $cron->{cmd};
-        }
-    }
-
-    return %vars;
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            user_scripts => {
+                type  => 'array',
+                items => {
+                    type       => 'object',
+                    required   => [qw{interval cmd}],
+                    properties => {
+                        interval => { type => 'string' },
+                        cmd      => { type => 'string' },
+                    },
+                },
+            },
+            root_scripts => {
+                type  => 'array',
+                items => {
+                    type       => 'object',
+                    required   => [qw{interval cmd}],
+                    properties => {
+                        interval => { type => 'string' },
+                        cmd      => { type => 'string' },
+                    },
+                },
+            },
+        },
+    );
 }
 
 sub template_files {

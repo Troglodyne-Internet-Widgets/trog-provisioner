@@ -45,22 +45,31 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
+sub args {
+    return (
+        properties => {
+            port      => { type => 'integer' },
+            proto     => { type => 'string', enum => [qw{udp tcp}] },
+            subnet    => { type => 'string' },
+            netmask   => { type => 'string' },
+            cipher    => { type => 'string' },
+            dns       => { type => 'array', items => { type => 'string' } },
+            interface => { type => 'string' },
+        },
+    );
+}
 
+sub enrich {
+    my ( $self, %opts ) = @_;
     $opts{port}    //= 1194;
     $opts{proto}   //= 'udp';
     $opts{subnet}  //= '10.8.0.0';
     $opts{netmask} //= '255.255.255.0';
     $opts{cipher}  //= 'AES-256-GCM';
-
     die "proto must be 'udp' or 'tcp'" unless $opts{proto} =~ /^(udp|tcp)$/;
     die "port must be numeric"         unless $opts{port}  =~ /^\d+$/;
-    die "dns must be an ARRAY"         if $opts{dns} && ref $opts{dns} ne 'ARRAY';
     die "netmask must be dotted-quad"  unless $opts{netmask} =~ /^\d+\.\d+\.\d+\.\d+$/;
-
     $opts{cidr} = _netmask_to_cidr( $opts{netmask} );
-
     return %opts;
 }
 

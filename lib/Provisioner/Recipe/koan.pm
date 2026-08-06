@@ -195,7 +195,7 @@ advertises AVX, otherwise C<claude> will crash on first invocation.
 
 System packages required to build and run koan on a Debian guest.
 
-=head3 validate
+=head3 enrich
 
 Coerces defaults, validates that the messaging provider's credentials
 are present, and that a CLI provider token is supplied where required.
@@ -248,12 +248,52 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
+sub args {
+    return (
+        type     => 'object',
+        required => [qw{user koan_email github_user github_token}],
+        properties => {
+            user                    => { type => 'string' },
+            koan_email              => { type => 'string' },
+            repo_url                => { type => 'string' },
+            repo_branch             => { type => 'string' },
+            messaging_provider      => { type => 'string', enum => [qw{telegram slack matrix}] },
+            telegram_token          => { type => 'string' },
+            telegram_chat_id        => { type => 'string' },
+            slack_bot_token         => { type => 'string' },
+            slack_app_token         => { type => 'string' },
+            slack_channel_id        => { type => 'string' },
+            matrix_homeserver       => { type => 'string' },
+            matrix_user_id          => { type => 'string' },
+            matrix_room_id          => { type => 'string' },
+            matrix_e2ee             => { type => 'integer' },
+            matrix_access_token     => { type => 'string' },
+            matrix_device_id        => { type => 'string' },
+            matrix_password         => { type => 'string' },
+            matrix_pickle_key       => { type => 'string' },
+            cli_provider            => { type => 'string', enum => [qw{claude codex copilot local}] },
+            claude_oauth_token      => { type => 'string' },
+            github_user             => { type => 'string' },
+            github_token            => { type => 'string' },
+            github_nickname         => { type => 'string' },
+            github_authorized_users => { type => 'array',  items => { type => 'string' } },
+            github_ssh_privkey      => { type => 'string' },
+            max_runs_per_day        => { type => 'integer' },
+            interval_seconds        => { type => 'integer' },
+            start_on_pause          => { type => 'integer' },
+            focus                   => { type => 'integer' },
+            projects                => { type => 'object' },
+            smtp_host               => { type => 'string' },
+            smtp_port               => { type => 'integer' },
+            smtp_user               => { type => 'string' },
+            smtp_password           => { type => 'string' },
+            email_to                => { type => 'string' },
+        },
+    );
+}
 
-    my $user = $opts{user};
-    die "Must set user in _global (or [koan]) section — koan runs as a dedicated service user"
-        unless $user;
+sub enrich {
+    my ( $self, %opts ) = @_;
 
     # Default to the troglodyne fork — it carries the Megolm/Olm E2EE
     # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
@@ -261,9 +301,6 @@ sub validate {
     # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
     $opts{repo_url}    //= 'https://github.com/troglodyne/koan.git';
     $opts{repo_branch} //= 'add_matrix_e2ee';
-
-    my $email = $opts{koan_email};
-    die "Must set koan_email in [koan] section of recipes.yaml" unless $email;
 
     my $provider = $opts{messaging_provider} || 'telegram';
     die "messaging_provider must be one of: telegram, slack, matrix"
@@ -321,8 +358,6 @@ sub validate {
     die "Must set claude_oauth_token in [koan] section when cli_provider=claude"
         if $cli eq 'claude' && !$opts{claude_oauth_token};
 
-    die "Must set github_user in [koan] section"  unless $opts{github_user};
-    die "Must set github_token in [koan] section" unless $opts{github_token};
     $opts{github_nickname}         //= $opts{github_user};
     $opts{github_authorized_users} //= [];
 

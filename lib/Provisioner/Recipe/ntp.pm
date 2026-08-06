@@ -51,9 +51,22 @@ sub dep_conflicts {
     return qw{ntp ntpdate systemd-timesyncd};
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            servers => {
+                type     => 'array',
+                minItems => 1,
+                items    => { type => 'string' },
+            },
+            makestep => { type => 'string' },
+        },
+    );
+}
 
+sub enrich {
+    my ( $self, %opts ) = @_;
     $opts{servers} //= [
         'ntp.ubuntu.com',
         '0.pool.ntp.org',
@@ -61,12 +74,7 @@ sub validate {
         '2.pool.ntp.org',
         '3.pool.ntp.org',
     ];
-
-    die "ntp.servers must be an ARRAY" unless ref $opts{servers} eq 'ARRAY';
-    die "ntp.servers must not be empty" unless @{ $opts{servers} };
-
     $opts{makestep} //= '1.0 3';
-
     return %opts;
 }
 

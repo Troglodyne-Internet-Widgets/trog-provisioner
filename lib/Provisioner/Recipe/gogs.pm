@@ -47,18 +47,6 @@ Returns system package dependencies.
 
 =back
 
-=head3 validate
-
-Validates and processes configuration options.
-
-=over 1
-
-=item INPUTS: %opts hash with gogs configuration
-
-=item OUTPUTS: processed %opts hash
-
-=back
-
 =head3 template_files
 
 Returns template file mappings.
@@ -122,31 +110,35 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        required   => [qw{version admin_password}],
+        properties => {
+            version         => { type => 'string' },
+            admin_password  => { type => 'string' },
+            gogs_admin      => { type => 'string' },
+            github_users    => { type => 'array', items => { type => 'string' } },
+            github_orgs     => { type => 'array', items => { type => 'string' } },
+            github_token    => { type => 'string' },
+            mirror_interval => { type => 'integer', minimum => 1, maximum => 23 },
+            secret_key      => { type => 'string' },
+            ipv6            => { type => 'integer' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
-    my $version = $opts{version};
-    die "Must set version in [gogs] section of recipes.yaml" unless $version;
-
-    my $admin_password = $opts{admin_password};
-    die "Must set admin_password in [gogs] section of recipes.yaml" unless $admin_password;
-
-    $opts{gogs_admin} //= 'git';
-
+    $opts{gogs_admin}      //= 'git';
     $opts{github_users}    //= [];
     $opts{github_orgs}     //= [];
     $opts{github_token}    //= '';
     $opts{mirror_interval} //= 6;
-    die "mirror_interval in [gogs] section must be a positive integer between 1 and 23"
-        unless $opts{mirror_interval} =~ /^\d+$/ && $opts{mirror_interval} >= 1 && $opts{mirror_interval} <= 23;
-
     unless ( $opts{secret_key} ) {
         $opts{secret_key} = join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ rand 62 ] } 1 .. 64;
     }
-
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
-
     return %opts;
 }
 

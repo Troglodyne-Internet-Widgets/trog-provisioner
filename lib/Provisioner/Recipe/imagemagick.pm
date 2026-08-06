@@ -27,13 +27,14 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
-
-    my $ver = $opts{version};
-    die "Must define version in [imagemagick] section of recipes.yaml" unless $ver;
-
-    return %opts;
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{version}],
+        properties => {
+            version => { type => 'string' },
+        },
+    );
 }
 
 sub tests {

@@ -41,22 +41,31 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            bind   => { type => 'string' },
+            port   => { type => 'integer' },
+            save   => { type => 'integer' },
+            requirepass      => { type => 'string' },
+            maxmemory        => { type => 'string' },
+            maxmemory_policy => {
+                type => 'string',
+                enum => [qw{
+                    noeviction allkeys-lru volatile-lru allkeys-random
+                    volatile-random volatile-ttl allkeys-lfu volatile-lfu
+                }],
+            },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
-    $opts{bind}  //= '127.0.0.1';
-    $opts{port}  //= 6379;
-    $opts{save}  //= 1;
-
-    if ( defined $opts{maxmemory_policy} ) {
-        my %valid_policies = map { $_ => 1 } qw{
-            noeviction allkeys-lru volatile-lru allkeys-random
-            volatile-random volatile-ttl allkeys-lfu volatile-lfu
-        };
-        die "Invalid maxmemory_policy '$opts{maxmemory_policy}'"
-            unless $valid_policies{ $opts{maxmemory_policy} };
-    }
-
+    $opts{bind} //= '127.0.0.1';
+    $opts{port} //= 6379;
+    $opts{save} //= 1;
     return %opts;
 }
 

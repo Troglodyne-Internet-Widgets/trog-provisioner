@@ -55,7 +55,18 @@ sub datadirs {
     return ('.letsencrypt');
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            registrar              => { type => 'object' },
+            prefer_local_dns       => { type => 'boolean' },
+            local_dns_access_token => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %params ) = @_;
 
     # If the user instructs that we ought to use the local DNS server

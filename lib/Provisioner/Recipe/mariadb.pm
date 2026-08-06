@@ -30,19 +30,16 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
-
-    my $rpw = $opts{root_pw};
-    die "Must define root_pw ns in [mariadb] section of recipes.yaml" unless $rpw;
-
-    my $dump = $opts{dumpfile};
-    die "Must define dumpfile in [mariadb] section of recipes.yaml" unless $dump;
-
-    my $ver = $opts{version};
-    die "Must define version in [mariadb] section of recipes.yaml" unless $ver;
-
-    return %opts;
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{root_pw dumpfile version}],
+        properties => {
+            root_pw  => { type => 'string' },
+            dumpfile => { type => 'string' },
+            version  => { type => 'string' },
+        },
+    );
 }
 
 sub template_files {

@@ -66,28 +66,45 @@ sub dep_conflicts {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            names => {
+                type                 => 'object',
+                additionalProperties => {
+                    type       => 'object',
+                    required   => [qw{password gecos}],
+                    properties => {
+                        password => { type => 'string' },
+                        gecos    => { type => 'string' },
+                    },
+                },
+            },
+            mail_aliases => {
+                type  => 'array',
+                items => {
+                    type       => 'object',
+                    required   => [qw{from to}],
+                    properties => {
+                        from => { type => 'string' },
+                        to   => { type => 'string' },
+                    },
+                },
+            },
+            aliases => {
+                type  => 'array',
+                items => {},
+            },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %vars ) = @_;
 
     if ( $vars{forwarders} ) {
         die "aliases must be ARRAY" unless ref $vars{aliases} eq 'ARRAY';
-    }
-
-    if ( $vars{names} ) {
-        die "names must be HASH" unless ref $vars{names} eq 'HASH';
-        foreach my $name ( keys %{ $vars{names} } ) {
-            my $passwd = $vars{names}{$name};
-            die "Each name must be a HASH" unless ref $passwd eq 'HASH';
-            die "names must have a password & gecos" unless $passwd->{password} && $passwd->{gecos};
-        }
-    }
-
-    if ( $vars{mail_aliases} ) {
-        die "mail_aliases must be ARRAY" unless ref $vars{mail_aliases} eq 'ARRAY';
-        foreach my $alias ( @{ $vars{mail_aliases} } ) {
-            die "Each alias must be a HASH" unless ref $alias eq 'HASH';
-            die "mail_aliases must have a from & to" unless $alias->{from} && $alias->{to};
-        }
     }
 
     $vars{ipv6} //= 1;

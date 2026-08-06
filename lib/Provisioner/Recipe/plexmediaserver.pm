@@ -38,18 +38,6 @@ Returns system package dependencies needed before the recipe target runs.
 
 =back
 
-=head3 validate
-
-Validates and normalises configuration options.
-
-=over 1
-
-=item INPUTS: %opts hash with plexmediaserver configuration
-
-=item OUTPUTS: processed %opts hash
-
-=back
-
 =head3 remote_files
 
 Returns remote file mappings for backup/restore.
@@ -76,20 +64,20 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        required   => [qw{plex_login_name admin_mail}],
+        properties => {
+            plex_login_name => { type => 'string' },
+            admin_mail      => { type => 'string' },
+            media_dirs      => { type => 'array', items => { type => 'string' } },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
-    die "Must set plex_login_name in [plexmediaserver] section of recipes.yaml"
-        unless $opts{plex_login_name};
-
-    die "Must set admin_mail in [plexmediaserver] section of recipes.yaml"
-        unless $opts{admin_mail};
-
-    if ( $opts{media_dirs} ) {
-        die "media_dirs must be an ARRAY" unless ref $opts{media_dirs} eq 'ARRAY';
-    }
     $opts{media_dirs} //= [];
-
     return %opts;
 }
 
