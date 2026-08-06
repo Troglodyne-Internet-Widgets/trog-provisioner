@@ -6,6 +6,9 @@ use warnings FATAL => 'all';
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
+use Scalar::Util();
+
+use JSON::Validator;
 
 =head1 Provisioner::Recipe
 
@@ -17,6 +20,7 @@ use Text::Xslate::Bridge::TT2;
     sub deps { qw{nginx-full} }
     sub validate { my ($self, %opts) = @_; return %opts; }
     sub template_files { ('example.conf.tt' => 'example.conf') }
+    sub args { ( fooArg => { required => 1, default => 'bar', validator => sub {...} } }
 
 =head2 DESCRIPTION
 
@@ -54,6 +58,18 @@ sub new {
 }
 
 =head2 METHODS (you will possibly want to override)
+
+=head3 %args = $recipe->args()
+
+Define the args of a recipe in a hash suitable toe be fed into L<JSON::Validator>'s schema() method.
+Must be openapiv3.
+
+=cut
+
+sub args {
+    my ($self) = @_;
+    return ();
+}
 
 =head3 @fmts = $recipe->formatters()
 
@@ -119,12 +135,31 @@ sub required_recipes {
 
 =head3 %opts = $recipe->validate(%opts)
 
-Validate recipe configuration, optionally enriching it.
+Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
 
 =cut
 
 sub validate {
     my ($self, %opts) = @_;
+    my %args = $self->args();
+
+    my $classname = Scalar::Util::blessed($self);
+    my $validator = JSON::Validator->new();
+    my @errors = $validator->validate(\%opts, \%args);
+    die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
+
+    return $self->enrich(%opts);
+}
+
+=head3 %opts = $recipe->enrich(%opts)
+
+Additionally setup args based on other args passed.
+
+=cut
+
+sub enrich {
+    my ($self, %opts) = @_;
+
     return %opts;
 }
 

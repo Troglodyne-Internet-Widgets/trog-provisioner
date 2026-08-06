@@ -38,25 +38,41 @@ If your repos have binary deps, add them to the list of deps you can install in 
 
 =cut
 
+sub args {
+    return (
+        type => 'object',
+        required => [qw{repos_from basedir}],
+        properties => {
+            basedir    => { type => "string" },
+            repos_from => {
+                type => "array",
+                items => {
+                    type => "object",
+                    required => [qw{api_url token repos_for}],
+                    properties => {
+                        api_url   => { type => "string" },
+                        token     => { type => "string" },
+                        repos_for => {
+                            type => "array",
+                            items => { type => "string" },
+                        },
+                    },
+                },
+            },
+            extra_pkgs => {
+                type  => "array",
+                items => { type => "string" }
+            },
+        },
+    );
+}
+
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
         return qw{libpithub-perl git};
     }
     die "Unsupported packager";
-}
-
-sub validate {
-    my ( $self, %opts ) = @_;
-    my $repos = $opts{repos_from};
-    die "Must set repos in [admincode] section of recipes.yaml" unless $repos && ref $repos eq 'ARRAY';
-    my $basedir = $opts{basedir};
-    die "Must set basedir in [admincode] section of recipes.yaml" unless $basedir;
-
-    if ($opts{extra_pkgs} && ref $opts{extra_pkgs} ne 'ARRAY') {
-        die "admincode.extra_pkgs must be array";
-    }
-    return %opts;
 }
 
 sub tests {

@@ -36,12 +36,15 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
-    my $dir = $opts{from};
-    die "Must set from in [data] section of recipes.yaml" unless $dir;
-
-    return %opts;
+sub args {
+    return (
+        type => "object",
+        required => [qw{from to}],
+        parameters => {
+            from => { type => "string" },
+            to   => { type => "string" },
+        },
+    );    
 }
 
 sub tests {
