@@ -8,7 +8,7 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Scalar::Util();
 
-use JSON::Validator;
+use JSON::Validator::Schema::Troglodyne;
 
 =head1 Provisioner::Recipe
 
@@ -144,7 +144,7 @@ sub validate {
     my %args = $self->args();
 
     my $classname = Scalar::Util::blessed($self);
-    my $validator = JSON::Validator->new();
+    my $validator = JSON::Validator::Schema::Troglodyne->new();
     my @errors = $validator->validate(\%opts, \%args);
     die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
 

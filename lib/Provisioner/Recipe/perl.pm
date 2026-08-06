@@ -20,8 +20,6 @@ Sets up a .bashrc in the install_dir which includes that perl's bindir in $PATH.
 
 TODO: allow specification of version.
 
-TODO: allow list of cpan deps
-
 =cut
 
 sub deps {

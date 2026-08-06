@@ -5,6 +5,7 @@ use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
 
+use Crypt::PRNG();
 use List::Util qw{any};
 
 =head1 Provisioner::Recipe::koan
@@ -254,7 +255,7 @@ sub args {
         required => [qw{user koan_email github_user github_token}],
         properties => {
             user                    => { type => 'string' },
-            koan_email              => { type => 'string' },
+            koan_email              => { type => 'email' },
             repo_url                => { type => 'string' },
             repo_branch             => { type => 'string' },
             messaging_provider      => { type => 'string', enum => [qw{telegram slack matrix}] },
@@ -266,7 +267,7 @@ sub args {
             matrix_homeserver       => { type => 'string' },
             matrix_user_id          => { type => 'string' },
             matrix_room_id          => { type => 'string' },
-            matrix_e2ee             => { type => 'integer' },
+            matrix_e2ee             => { type => 'boolean' },
             matrix_access_token     => { type => 'string' },
             matrix_device_id        => { type => 'string' },
             matrix_password         => { type => 'string' },
@@ -282,7 +283,11 @@ sub args {
             interval_seconds        => { type => 'integer' },
             start_on_pause          => { type => 'integer' },
             focus                   => { type => 'integer' },
+            # TODO these have 'path' and 'cli_provider' as args, but I'm not sure how to specify that here.
+            # As such they're still validated in enrich();
             projects                => { type => 'object' },
+            # TODO: Don't know how to make these all require one another other than setting them behind an object.
+            # should probably rework to be such.
             smtp_host               => { type => 'string' },
             smtp_port               => { type => 'integer' },
             smtp_user               => { type => 'string' },
@@ -301,29 +306,39 @@ sub enrich {
     # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
     $opts{repo_url}    //= 'https://github.com/troglodyne/koan.git';
     $opts{repo_branch} //= 'add_matrix_e2ee';
+    $opts{messaging_provider} //= 'telegram';
+    $opts{cli_provider} //= 'claude';
+    $opts{github_nickname}         //= $opts{github_user};
+    $opts{github_authorized_users} //= [];
+    $opts{max_runs_per_day} //= 10;
+    $opts{interval_seconds} //= 60;
 
-    my $provider = $opts{messaging_provider} || 'telegram';
-    die "messaging_provider must be one of: telegram, slack, matrix"
-        unless any { $_ eq $provider } qw{telegram slack matrix};
-    $opts{messaging_provider} = $provider;
+    # Boot-time behaviour knobs — both coerced to strict booleans so the
+    # template can emit lowercase 'true'/'false' without surprises.
+    $opts{start_on_pause} //= 1;
+    $opts{start_on_pause} = $opts{start_on_pause} ? 1 : 0;
+    $opts{focus}          //= 0;
+    $opts{focus}          = $opts{focus} ? 1 : 0;
 
-    if ( $provider eq 'telegram' ) {
+    $opts{projects} //= {};
+
+    if ( $opts{cli_provider} eq 'telegram' ) {
         die "Must set telegram_token in [koan] section"   unless $opts{telegram_token};
         die "Must set telegram_chat_id in [koan] section" unless defined $opts{telegram_chat_id};
     }
-    elsif ( $provider eq 'slack' ) {
+    elsif ( $opts{cli_provider} eq 'slack' ) {
         die "Must set slack_bot_token in [koan] section"  unless $opts{slack_bot_token};
         die "Must set slack_app_token in [koan] section"  unless $opts{slack_app_token};
         die "Must set slack_channel_id in [koan] section" unless $opts{slack_channel_id};
     }
-    elsif ( $provider eq 'matrix' ) {
+    elsif ( $opts{cli_provider} eq 'matrix' ) {
         die "Must set matrix_homeserver in [koan] section" unless $opts{matrix_homeserver};
         die "Must set matrix_user_id in [koan] section"    unless $opts{matrix_user_id};
         die "Must set matrix_room_id in [koan] section"    unless $opts{matrix_room_id};
 
         # E2EE on by default — opt out with matrix_e2ee: 0.
         $opts{matrix_e2ee} //= 1;
-        $opts{matrix_e2ee} = $opts{matrix_e2ee} ? 1 : 0;
+        $opts{matrix_e2ee} = !!$opts{matrix_e2ee};
 
         # Credentials: exactly one of (access_token + device_id) or (password).
         # Pre-mint path: operator created a brand-new device in Element,
@@ -331,8 +346,8 @@ sub enrich {
         # Bootstrap path: provisioner runs app.matrix_login at first install
         # using a one-shot password; resulting credentials end up in
         # instance/matrix/credentials.env (loaded by systemd).
-        my $have_token = $opts{matrix_access_token} ? 1 : 0;
-        my $have_pw    = $opts{matrix_password}     ? 1 : 0;
+        my $have_token = !!$opts{matrix_access_token};
+        my $have_pw    = !!$opts{matrix_password};
         die "matrix needs exactly one of: matrix_access_token (+matrix_device_id), or matrix_password"
             unless $have_token xor $have_pw;
         if ($have_token) {
@@ -346,20 +361,12 @@ sub enrich {
         # own to keep it stable across re-deploys.
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {
             $opts{matrix_pickle_key} = join '',
-                map { ( 0 .. 9, 'a' .. 'f' )[ rand 16 ] } 1 .. 64;
+                map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand( 16 ) ] } 1 .. 64;
         }
     }
 
-    my $cli = $opts{cli_provider} || 'claude';
-    die "cli_provider must be one of: claude, codex, copilot, local"
-        unless any { $_ eq $cli } qw{claude codex copilot local};
-    $opts{cli_provider} = $cli;
-
     die "Must set claude_oauth_token in [koan] section when cli_provider=claude"
-        if $cli eq 'claude' && !$opts{claude_oauth_token};
-
-    $opts{github_nickname}         //= $opts{github_user};
-    $opts{github_authorized_users} //= [];
+        if $opts{cli_provider} eq 'claude' && !$opts{claude_oauth_token};
 
     # Optional ssh key for git push + commit signing.  Surface common
     # mistakes early (wrong format, accidentally pasted a pubkey, an
@@ -372,19 +379,6 @@ sub enrich {
             || $opts{github_ssh_privkey} =~ /DEK-Info:/m;
     }
 
-    $opts{max_runs_per_day} //= 10;
-    $opts{interval_seconds} //= 60;
-
-    # Boot-time behaviour knobs — both coerced to strict booleans so the
-    # template can emit lowercase 'true'/'false' without surprises.
-    $opts{start_on_pause} //= 1;
-    $opts{start_on_pause} = $opts{start_on_pause} ? 1 : 0;
-    $opts{focus}          //= 0;
-    $opts{focus}          = $opts{focus} ? 1 : 0;
-
-    $opts{projects} //= {};
-    die "projects must be a hash of name => { path => ... }"
-        unless ref $opts{projects} eq 'HASH';
     for my $pname ( keys %{ $opts{projects} } ) {
         my $p = $opts{projects}{$pname};
         die "projects.$pname must be a hash"

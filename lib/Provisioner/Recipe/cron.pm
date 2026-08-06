@@ -53,6 +53,7 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            from => { type => "email" },
             user_scripts => {
                 type  => 'array',
                 items => {

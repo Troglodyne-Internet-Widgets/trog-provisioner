@@ -69,7 +69,7 @@ sub args {
         required   => [qw{plex_login_name admin_mail}],
         properties => {
             plex_login_name => { type => 'string' },
-            admin_mail      => { type => 'string' },
+            admin_mail      => { type => 'email' },
             media_dirs      => { type => 'array', items => { type => 'string' } },
         },
     );

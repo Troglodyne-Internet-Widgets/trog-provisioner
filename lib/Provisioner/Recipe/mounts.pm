@@ -52,11 +52,27 @@ sub args {
         properties => {
             disks => {
                 type  => 'array',
-                items => { type => 'object' },
+                items => {
+                    type => 'object',
+                    parameters => {
+                        type       => { type => 'string' },
+                        options    => { type => 'string' },
+                        mountpoint => { type => 'string' },
+                        device     => { type => 'string' },
+                    },
+                 },
             },
             fuse => {
                 type  => 'array',
-                items => { type => 'object' },
+                items => {
+                    type => 'object',
+                    parameters => {
+                        type       => { type => 'string' },
+                        options    => { type => 'string' },
+                        mountpoint => { type => 'string' },
+                        device     => { type => 'string' },
+                    },
+                },
             },
         },
     );

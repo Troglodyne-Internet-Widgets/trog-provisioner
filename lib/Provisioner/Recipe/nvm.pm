@@ -72,6 +72,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
     $opts{user}        //= $opts{admin_user};
+    # TODO fetch latest version automatically
     $opts{nvm_version} //= 'v0.40.3';
     return %opts;
 }

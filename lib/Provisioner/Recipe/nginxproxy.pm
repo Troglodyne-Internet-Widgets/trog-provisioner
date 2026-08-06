@@ -86,11 +86,24 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            proxy_uri  => { type => 'string' },
-            static_dir => { type => 'string' },
-            vhosts     => { type => 'object' },
-            ipv6       => { type => 'integer' },
-            backlog    => { type => 'integer' },
+            vhosts     => {
+                type => 'object',
+                description => "vhost vars by port number",
+                additionalProperties => {
+                    type       => 'object',
+                    parameters => {
+                        proxy_uri      => { type => 'string' },
+                        static_dir     => { type => 'string' },
+                        auth_statics   => { type => 'string' },
+                        auth_uri       => { type => 'string' },
+                        public_dir     => { type => 'string' },
+                        nocache_prefix => { type => 'string' },
+                        ssl_redirect   => { type => 'boolean' },
+                        ssl            => { type => 'boolean' },
+                    },
+                },
+            },
+            ipv6       => { type => 'boolean' },
         },
     );
 }
@@ -110,26 +123,9 @@ sub enrich {
             $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri"
                 if $uri && $uri !~ m/^http/;
         }
-    } elsif ( $opts{proxy_uri} ) {
-        # Flat interface: auto-build vhosts from proxy_uri + static_dir.
-        die "Must set static_dir when using proxy_uri in [nginxproxy] configuration"
-            unless $opts{static_dir};
-        my $uri = $opts{proxy_uri};
-        $uri = "http://unix:/$opts{install_dir}/$opts{domain}/$uri" if $uri !~ m/^http/;
-        $opts{vhosts} = {
-            80  => { ssl_redirect => 1 },
-            443 => {
-                ssl        => 1,
-                proxy_uri  => $uri,
-                static_dir => $opts{static_dir},
-            },
-        };
-    } else {
-        die "Must set proxy_uri or vhosts in [nginxproxy] configuration";
     }
-
     $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
+    $opts{ipv6} = !!$opts{ipv6};
 
     return %opts;
 }

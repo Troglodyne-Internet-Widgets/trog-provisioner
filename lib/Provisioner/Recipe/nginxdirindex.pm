@@ -35,7 +35,7 @@ sub required_recipes {
 sub args {
     return (
         properties => {
-            ipv6 => { type => 'integer' },
+            ipv6 => { type => 'boolean' },
         },
     );
 }
@@ -43,7 +43,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
     $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
+    $opts{ipv6} = !!$opts{ipv6};
     return %opts;
 }
 

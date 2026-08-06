@@ -48,7 +48,7 @@ sub deps {
 sub args {
     return (
         properties => {
-            port      => { type => 'integer' },
+            port      => { type => 'integer', minimum => 1024 },
             proto     => { type => 'string', enum => [qw{udp tcp}] },
             subnet    => { type => 'string' },
             netmask   => { type => 'string' },

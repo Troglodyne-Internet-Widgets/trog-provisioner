@@ -76,7 +76,7 @@ sub args {
         required   => [qw{version}],
         properties => {
             version => { type => 'string' },
-            ipv6    => { type => 'integer' },
+            ipv6    => { type => 'boolean' },
         },
     );
 }
@@ -85,7 +85,7 @@ sub enrich {
     my ( $self, %opts ) = @_;
     $opts{'des_key'} = 'rcube-' . UUID::uuid();
     $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
+    $opts{ipv6} = !!$opts{ipv6};
     return %opts;
 }
 

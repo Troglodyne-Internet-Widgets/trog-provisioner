@@ -44,7 +44,7 @@ sub args {
             from => { type => "string" },
             to   => { type => "string" },
         },
-    );    
+    );
 }
 
 sub tests {

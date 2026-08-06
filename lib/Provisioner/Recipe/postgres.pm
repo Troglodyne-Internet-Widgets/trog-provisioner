@@ -33,7 +33,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            dumps => { type => 'array' },
+            dumps => {
+                type => 'array',
+                items => { type => "string" },
+            },
         },
     );
 }

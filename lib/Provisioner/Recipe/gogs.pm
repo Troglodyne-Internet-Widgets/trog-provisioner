@@ -86,6 +86,8 @@ Returns remote file mappings for backup/restore.
 =cut
 
 sub required_recipes {
+    my ($self, %opts) = @_;
+    my $ipv6 = $opts{ipv6} // 1;
     return (
         nginxproxy  => sub {
             (
@@ -94,7 +96,7 @@ sub required_recipes {
                     443 => {
                         ssl => 1,
                         proxy_uri => 'http://127.0.0.1:3000',
-                        ipv6 => 1,
+                        ipv6 => $ipv6,
                     },
                 },
             )
@@ -122,7 +124,7 @@ sub args {
             github_token    => { type => 'string' },
             mirror_interval => { type => 'integer', minimum => 1, maximum => 23 },
             secret_key      => { type => 'string' },
-            ipv6            => { type => 'integer' },
+            ipv6            => { type => 'boolean' },
         },
     );
 }

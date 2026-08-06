@@ -36,6 +36,7 @@ so that C<files.[domain]> is covered by the SSL certificate.
 sub required_recipes {
     my ($self, %opts) = @_;
     my $port = $opts{web_port} // 8112;
+    my $ipv6 = $opts{ipv6} // 1;
     return (
         nginxproxy  => sub {
             (
@@ -45,7 +46,7 @@ sub required_recipes {
                         ssl => 1,
                         proxy_uri => "http://127.0.0.1:$port",
                         public_dir => 'torrents',
-                        ipv6 => 1,
+                        ipv6 => $ipv6,
                     },
                 },
             )
@@ -65,8 +66,8 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            web_port => { type => 'integer', minimum => 1 },
-            ipv6     => { type => 'integer' },
+            web_port => { type => 'integer', minimum => 1024 },
+            ipv6     => { type => 'boolean' },
         },
     );
 }
@@ -79,7 +80,7 @@ sub enrich {
 
     $opts{web_port} //= 8112;
     $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
+    $opts{ipv6} = !!$opts{ipv6};
 
     return %opts;
 }

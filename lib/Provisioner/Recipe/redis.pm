@@ -46,8 +46,8 @@ sub args {
         type       => 'object',
         properties => {
             bind   => { type => 'string' },
-            port   => { type => 'integer' },
-            save   => { type => 'integer' },
+            port   => { type => 'integer', minimum => 1024 },
+            save   => { type => 'boolean' },
             requirepass      => { type => 'string' },
             maxmemory        => { type => 'string' },
             maxmemory_policy => {

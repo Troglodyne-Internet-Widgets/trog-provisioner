@@ -12,7 +12,7 @@ use parent qw{Provisioner::Recipe};
     somedomain:
         mariadb:
             dump: path/to/dump/in/datadir
-            version: 
+            version:
             root_pw: blahblah
 
 =head2 DESCRIPTION

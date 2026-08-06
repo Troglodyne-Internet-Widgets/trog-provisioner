@@ -93,6 +93,8 @@ Returns remote file mappings for backup/restore.
 
 # XXX this probably does not work in isolation!
 sub required_recipes {
+    my ($self, %opts) = @_;
+    my $ipv6 = $opts{ipv6} // 1;
     return (
         nginxproxy  => sub {
             (
@@ -102,7 +104,7 @@ sub required_recipes {
                         ssl => 1,
                         proxy_uri => 'http://127.0.0.1:8008',
                         nocache_prefix => '^~ /(_matrix|_synapse/client)/',
-                        ipv6 => 1,
+                        ipv6 => $ipv6,
                     },
                 },
             )
@@ -156,9 +158,9 @@ sub args {
             smtp_user                 => { type => 'string' },
             smtp_pass                 => { type => 'string' },
             smtp_domain               => { type => 'string' },
-            require_transport_security => { type => 'integer' },
+            require_transport_security => { type => 'boolean' },
             registration_shared_secret => { type => 'string' },
-            ipv6                      => { type => 'integer' },
+            ipv6                      => { type => 'boolean' },
             redis_host                => { type => 'string' },
             redis_port                => { type => 'integer' },
         },
@@ -178,7 +180,7 @@ sub enrich {
     }
 
     $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
+    $opts{ipv6} = !!$opts{ipv6};
 
     # Redis integration — optional; activated when redis recipe is co-loaded.
     # Override these if your redis instance is non-default.

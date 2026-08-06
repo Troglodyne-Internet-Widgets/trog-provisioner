@@ -13,7 +13,7 @@ use parent qw{Provisioner::Recipe};
         tpsgi:
             routers:
                 - my/lib/Router.pm
-	    basedir: "path/to/tcms/install"
+	        basedir: "path/to/tcms/install"
         # Example: running on other port than default 80/443
         nginxproxy:
             vhosts:
@@ -63,12 +63,12 @@ sub required_recipes {
     );
 }
 
-
 sub args {
     return (
         type       => 'object',
         required   => [qw{routers}],
         properties => {
+            basedir => { type => 'string' },
             routers => { type => 'array', items => { type => 'string' } },
         },
     );

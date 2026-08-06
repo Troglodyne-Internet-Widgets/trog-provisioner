@@ -92,10 +92,19 @@ sub args {
                     },
                 },
             },
-            aliases => {
-                type  => 'array',
-                items => {},
+            relay  => {
+                type       => "object",
+                parameters => {
+                    host => { type => "string" },
+                    port => { type => "integer", minimum => 0 },
+                },
             },
+            # Built for us by bin/new_config from the ipmap
+            full_aliases => {
+                type  => 'array',
+                items => { type => 'string' },
+            },
+            ipv6 => { type => 'boolean' },
         },
     );
 }
@@ -103,12 +112,8 @@ sub args {
 sub enrich {
     my ( $self, %vars ) = @_;
 
-    if ( $vars{forwarders} ) {
-        die "aliases must be ARRAY" unless ref $vars{aliases} eq 'ARRAY';
-    }
-
     $vars{ipv6} //= 1;
-    $vars{ipv6} = $vars{ipv6} ? 1 : 0;
+    $vars{ipv6} = !!$vars{ipv6};
 
     return %vars;
 }

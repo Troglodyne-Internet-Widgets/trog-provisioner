@@ -59,7 +59,16 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            registrar              => { type => 'object' },
+            registrar              => {
+                type => 'object',
+                parameters => {
+                    type => { type => "string" },
+                    user => { type => "string" },
+                    key  => { type => "string" },
+                },
+            },
+            #TODO If this isn't true, registrar is required.
+            # Not sure how to encode that in openapi spec here.
             prefer_local_dns       => { type => 'boolean' },
             local_dns_access_token => { type => 'string' },
         },

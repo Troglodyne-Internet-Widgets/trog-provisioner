@@ -34,6 +34,8 @@ sub deps {
 }
 
 sub required_recipes {
+    my ($self, %opts) = @_;
+    my $tcmsdir = $opts{tcms_dir} // 'tCMS';
     return (
         nginxproxy => sub {
             my (%opts) = @_;
@@ -47,14 +49,14 @@ sub required_recipes {
                     443 => {
                         nocache_prefix =>  "/secure",
                         auth_statics   => "assets/private",
-                        auth_uri       => "/authenticated",                   
+                        auth_uri       => "/authenticated",
                     },
                 },
             );
         },
         tpsgi => sub {
-            routers => [qw{tCMS/lib/TCMS.pm}],
-            basedir => 'tCMS',
+            routers => [qq{$tcmsdir/lib/TCMS.pm}],
+            basedir => $tcmsdir,
         },
     );
 }

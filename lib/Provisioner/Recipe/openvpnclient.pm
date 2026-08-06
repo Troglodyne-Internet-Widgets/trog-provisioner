@@ -50,7 +50,7 @@ sub args {
         properties => {
             server   => { type => 'string' },
             cert_dir => { type => 'string' },
-            port     => { type => 'integer' },
+            port     => { type => 'integer', minimum => 1024 },
             proto    => { type => 'string', enum => [qw{udp tcp}] },
             cipher   => { type => 'string' },
         },

@@ -14,6 +14,7 @@ use List::Util qw{any};
     somedomain:
         nginx:
             backlog: 32768
+
 =head2 DESCRIPTION
 
 Setup nginx on the server.
@@ -35,7 +36,7 @@ sub deps {
 sub args {
     return (
         properties => {
-            backlog => { type => 'integer', minimum => 1 },
+            backlog => { type => 'integer', minimum => 0 },
         },
     );
 }
