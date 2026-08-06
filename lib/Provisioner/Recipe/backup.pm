@@ -48,10 +48,20 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{targets key_file}],
+        properties => {
+            targets  => { type => 'object' },
+            key_file => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Gather all the remote_files
     my %default_targets;
     foreach my $module ( @{ $opts{modules} } ) {
         require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
@@ -63,19 +73,11 @@ sub validate {
     }
 
     my $targets = $opts{targets};
-    die "Must define targets ns in [backup] section of recipes.yaml" unless $targets;
-    die "targets in [backup] must be HASH" unless ref $targets eq 'HASH';
-
-    # Merge the remote_files and specified backup stuff
     %$targets = ( %default_targets, %$targets );
 
-    my $key_file = $opts{key_file};
-    die "Must define key_file in [backupdestination] section of recipes.yaml" unless $key_file;
-    my $kf = "$opts{data_source}/$opts{domain}/$key_file";
+    my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
     die "key_file defined in [backupdestination] must exist in $kf" unless -f $kf;
 
-    # Extract the pubkey so we don't have to schlep the pkey over to the host
-    # XXX support non rsa keys ig?
     $opts{pubkey} = `ssh-keygen -yf "$kf"`;
     chomp $opts{pubkey};
     die "Could not extract pubkey!" unless $opts{pubkey};

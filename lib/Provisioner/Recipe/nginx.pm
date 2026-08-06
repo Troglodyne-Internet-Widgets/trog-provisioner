@@ -32,14 +32,17 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        properties => {
+            backlog => { type => 'integer', minimum => 1 },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
-    # Global options
     $opts{backlog} //= 32768;
-    die "nginxproxy.backlog must be a positive integer"
-        unless $opts{backlog} =~ /^\d+$/ && $opts{backlog} > 0;
-
     return %opts;
 }
 

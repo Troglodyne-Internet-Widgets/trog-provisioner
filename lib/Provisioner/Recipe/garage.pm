@@ -121,7 +121,32 @@ sub _rpc_secret {
     return $secret;
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            rpc_secret         => { type => 'string' },
+            version            => { type => 'string' },
+            data_dir           => { type => 'string' },
+            metadata_dir       => { type => 'string' },
+            replication_factor => { type => 'integer' },
+            s3_region          => { type => 'string' },
+            api_port           => { type => 'integer' },
+            rpc_port           => { type => 'integer' },
+            web_port           => { type => 'integer' },
+            admin_port         => { type => 'integer' },
+            zone               => { type => 'string' },
+            capacity           => { type => 'string' },
+            nofile_limit       => { type => 'integer' },
+            buckets            => {
+                type  => 'array',
+                items => { type => 'string' },
+            },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
     $opts{rpc_secret}         //= $self->_rpc_secret();

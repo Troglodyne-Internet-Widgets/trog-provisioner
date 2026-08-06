@@ -41,18 +41,27 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{api_key}],
+        properties => {
+            api_key       => { type => 'string' },
+            extra_records => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $key = $opts{api_key};
-    die "Must define api_key in [pdns] section of recipes.yaml" unless $key;
-
     my $extras = $opts{extra_records} // '';
-    my $is_abs_path = index('/', $extras) == 0;
-    $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
-
-    die "extra_records defined in [pdns] must be a readable text file (nothing at $extras)" if $extras && !-f $extras;
-    $opts{extra_records} = File::Slurper::read_text($extras) if $extras;
+    if ($extras) {
+        my $is_abs_path = index($extras, '/') == 0;
+        $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
+        die "extra_records defined in [pdns] must be a readable text file (nothing at $extras)" unless -f $extras;
+        $opts{extra_records} = File::Slurper::read_text($extras);
+    }
 
     $opts{serial} = time;
     return %opts;

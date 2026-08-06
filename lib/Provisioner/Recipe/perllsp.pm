@@ -64,7 +64,15 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        properties => {
+            perl_path => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
     $opts{perl_path} //= '/usr/bin/perl';
     return %opts;

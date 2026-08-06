@@ -33,18 +33,23 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %vars ) = @_;
-
-    if ( $vars{port_forwards} ) {
-        die "port_forwards must be ARRAY" unless ref $vars{port_forwards} eq 'ARRAY';
-        foreach my $cron ( @{ $vars{port_forwards} } ) {
-            die "Each port forward must be a HASH" unless ref $cron eq 'HASH';
-            die "port forwards must have a from & to" unless $cron->{from} && $cron->{to};
-        }
-    }
-
-    return %vars;
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            port_forwards => {
+                type  => 'array',
+                items => {
+                    type       => 'object',
+                    required   => [qw{from to}],
+                    properties => {
+                        from => { type => 'integer' },
+                        to   => { type => 'integer' },
+                    },
+                },
+            },
+        },
+    );
 }
 
 my %template2rule = (

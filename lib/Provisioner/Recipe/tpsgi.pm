@@ -64,14 +64,14 @@ sub required_recipes {
 }
 
 
-# router is an absolute path
-sub validate {
-    my ( $self, %params ) = @_;
-
-    my $router = $params{routers};
-    die "Router file(s) must be set in [tpsgi] section as 'routers', no point using tpsgi without one" unless $router;
-
-    return %params;
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{routers}],
+        properties => {
+            routers => { type => 'array', items => { type => 'string' } },
+        },
+    );
 }
 
 sub template_files {

@@ -61,16 +61,23 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            web_port => { type => 'integer', minimum => 1 },
+            ipv6     => { type => 'integer' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
     die "This recipe requires the nginxproxy recipe to function"
         unless any { $_ eq 'nginxproxy' } @{ $opts{modules} };
 
     $opts{web_port} //= 8112;
-    die "deluged.web_port must be a positive integer"
-        unless $opts{web_port} =~ /^\d+$/ && $opts{web_port} > 0;
-
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
 

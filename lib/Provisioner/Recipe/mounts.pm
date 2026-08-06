@@ -46,12 +46,27 @@ Optionally, you can specify a partition number in a disk, we use 1 by default.
 
 use parent qw{Provisioner::Recipe};
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            disks => {
+                type  => 'array',
+                items => { type => 'object' },
+            },
+            fuse => {
+                type  => 'array',
+                items => { type => 'object' },
+            },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
     my $disks = $opts{disks};
     if ($disks) {
-        die "mounts must be HASH" unless ref $disks eq 'ARRAY';
         foreach my $disk (@$disks) {
             $disk->{servicename} = $disk->{mountpoint};
             $disk->{servicename} =~ s|/|_|g;
@@ -70,7 +85,6 @@ sub validate {
 
     my $fuse = $opts{fuse};
     if ($fuse) {
-        die "fuse must be HASH" unless ref $fuse eq 'ARRAY';
         foreach my $disk (@$fuse) {
             $disk->{servicename} = $disk->{mountpoint};
             $disk->{servicename} =~ s|/|_|g;

@@ -32,12 +32,14 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
-    my $user = $opts{user};
-    die "Must set user in [perl] section of recipes.yaml" unless $user;
-
-    return %opts;
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{user}],
+        properties => {
+            user => { type => 'string' },
+        },
+    );
 }
 
 sub tests {

@@ -5,11 +5,21 @@ use warnings;
 
 use parent qw{Provisioner::Recipe};
 
-use List::Util qw{any};
-
 =head1 Provisioner::Recipe::nginxproxy
 
 =head2 SYNOPSIS
+
+Flat (new) interface — proxy_uri and static_dir at top level:
+
+    somedomain:
+        nginxproxy:
+            proxy_uri:  run/app.sock
+            static_dir: www/static
+
+This automatically generates vhosts: port 80 redirects to HTTPS, port 443
+proxies to the given socket with statics served from static_dir.
+
+Nested (vhosts) interface — full control over per-port configuration:
 
     somedomain:
         nginxproxy:
@@ -72,20 +82,50 @@ sub required_recipes {
     );
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            proxy_uri  => { type => 'string' },
+            static_dir => { type => 'string' },
+            vhosts     => { type => 'object' },
+            ipv6       => { type => 'integer' },
+            backlog    => { type => 'integer' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
-    #Per-domain stuff
-    die "nginxproxy.vhosts must be HASH" unless $opts{vhosts} && ref $opts{vhosts} eq 'HASH';
-    foreach my $key (keys(%{$opts{vhosts}})) {
-        next unless $key =~ m/\d+/;
-        my $vopts = $opts{vhosts}{$key};
-        my $uri = $vopts->{proxy_uri};
-        my $do_redirect = $vopts->{ssl_redirect};
-        die "Must set proxy_uri in [nginxproxy] section of recipes.yaml" if !$uri && !$do_redirect;
-        next if $vopts->{ssl_redirect};
-        # let's make sure the proxy_uri accepts either a file or an actual uri
-        $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri" if $uri !~ m/^http/;
+    if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
+        # Nested vhosts interface: transform proxy_uri paths where needed.
+        foreach my $key ( keys %{ $opts{vhosts} } ) {
+            next unless $key =~ m/\d+/;
+            my $vopts = $opts{vhosts}{$key};
+            next if $vopts->{ssl_redirect};
+            my $uri = $vopts->{proxy_uri};
+            die "Must set proxy_uri in [nginxproxy] section" if !$uri;
+            # let's make sure the proxy_uri accepts either a file or an actual uri
+            $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri"
+                if $uri && $uri !~ m/^http/;
+        }
+    } elsif ( $opts{proxy_uri} ) {
+        # Flat interface: auto-build vhosts from proxy_uri + static_dir.
+        die "Must set static_dir when using proxy_uri in [nginxproxy] configuration"
+            unless $opts{static_dir};
+        my $uri = $opts{proxy_uri};
+        $uri = "http://unix:/$opts{install_dir}/$opts{domain}/$uri" if $uri !~ m/^http/;
+        $opts{vhosts} = {
+            80  => { ssl_redirect => 1 },
+            443 => {
+                ssl        => 1,
+                proxy_uri  => $uri,
+                static_dir => $opts{static_dir},
+            },
+        };
+    } else {
+        die "Must set proxy_uri or vhosts in [nginxproxy] configuration";
     }
 
     $opts{ipv6} //= 1;

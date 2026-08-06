@@ -71,17 +71,21 @@ sub makefile_vars {
     );
 }
 
-sub validate {
+sub args {
+    return (
+        required   => [qw{version}],
+        properties => {
+            version => { type => 'string' },
+            ipv6    => { type => 'integer' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
     $opts{'des_key'} = 'rcube-' . UUID::uuid();
-
-    my $ver = $opts{version};
-    die "Must set version in [roundcube] section of configuration" unless $ver;
-
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
-
     return %opts;
 }
 

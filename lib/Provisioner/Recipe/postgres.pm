@@ -29,13 +29,13 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
-
-    my $dump = $opts{dumps};
-    die "dumps in [postgres] section of recipes.yaml must be ARRAY" if $dump && ref $dump ne 'ARRAY';
-
-    return %opts;
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            dumps => { type => 'array' },
+        },
+    );
 }
 
 sub template_files {

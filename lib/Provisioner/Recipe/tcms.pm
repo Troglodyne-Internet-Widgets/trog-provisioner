@@ -60,14 +60,14 @@ sub required_recipes {
 }
 
 
-# router is an absolute path
-sub validate {
-    my ( $self, %params ) = @_;
-
-    my $path = $params{tcms_dir};
-    die "tcms_dir must be set in [tcms] section as relative path" unless $path;
-
-    return %params;
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{tcms_dir}],
+        properties => {
+            tcms_dir => { type => 'string' },
+        },
+    );
 }
 
 sub remote_files {

@@ -44,19 +44,24 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        required   => [qw{server cert_dir}],
+        properties => {
+            server   => { type => 'string' },
+            cert_dir => { type => 'string' },
+            port     => { type => 'integer' },
+            proto    => { type => 'string', enum => [qw{udp tcp}] },
+            cipher   => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
-
-    die "openvpnclient requires 'server'" unless $opts{server};
-    die "openvpnclient requires 'cert_dir'" unless $opts{cert_dir};
-
     $opts{port}   //= 1194;
     $opts{proto}  //= 'udp';
     $opts{cipher} //= 'AES-256-GCM';
-
-    die "proto must be 'udp' or 'tcp'" unless $opts{proto} =~ /^(udp|tcp)$/;
-    die "port must be numeric"         unless $opts{port}  =~ /^\d+$/;
-
     return %opts;
 }
 

@@ -32,12 +32,18 @@ sub required_recipes {
     );
 }
 
-sub validate {
-    my ( $self, %opts ) = @_;
+sub args {
+    return (
+        properties => {
+            ipv6 => { type => 'integer' },
+        },
+    );
+}
 
+sub enrich {
+    my ( $self, %opts ) = @_;
     $opts{ipv6} //= 1;
     $opts{ipv6} = $opts{ipv6} ? 1 : 0;
-
     return %opts;
 }
 

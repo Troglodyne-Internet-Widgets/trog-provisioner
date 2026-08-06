@@ -41,9 +41,9 @@ Returns system package dependencies for Matrix Synapse.
 
 =back
 
-=head3 validate
+=head3 enrich
 
-Validates and processes configuration options.
+Sets defaults and computes derived configuration options.
 
 =over 1
 
@@ -143,36 +143,34 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
+        properties => {
+            server_name               => { type => 'string' },
+            admin_user                => { type => 'string' },
+            admin_password            => { type => 'string' },
+            smtp_host                 => { type => 'string' },
+            smtp_port                 => { type => 'integer' },
+            smtp_user                 => { type => 'string' },
+            smtp_pass                 => { type => 'string' },
+            smtp_domain               => { type => 'string' },
+            require_transport_security => { type => 'integer' },
+            registration_shared_secret => { type => 'string' },
+            ipv6                      => { type => 'integer' },
+            redis_host                => { type => 'string' },
+            redis_port                => { type => 'integer' },
+        },
+    );
+}
+
+sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $server_name = $opts{server_name};
-    die "Must set server_name in [matrix] section of recipes.yaml" unless $server_name;
-
-    my $admin_user = $opts{admin_user} || 'admin';
-    $opts{admin_user} = $admin_user;
-
-    my $admin_password = $opts{admin_password};
-    die "Must set admin_password in [matrix] section of recipes.yaml" unless $admin_password;
-
-    # Email config
-    my $smtp_host = $opts{smtp_host};
-    die "Must set smtp_host in [matrix] section of recipes.yaml" unless $smtp_host;
-
-    my $smtp_port = $opts{smtp_port} || 465;
-    $opts{smtp_port} = $smtp_port;
-
-    my $smtp_user = $opts{smtp_user};
-    die "Must set smtp_user in [matrix] section of recipes.yaml" unless $smtp_user;
-
-    my $smtp_pass = $opts{smtp_pass};
-    die "Must set smtp_pass in [matrix] section of recipes.yaml" unless $smtp_pass;
-
-    my $smtp_domain = $opts{smtp_domain};
-    die "Must set smtp_domain in [matrix] section of recipes.yaml" unless $smtp_domain;
-
-    my $require_transport_security = $opts{require_transport_security} // 1;
-    $opts{require_transport_security} = $require_transport_security;
+    $opts{admin_user} ||= 'admin';
+    $opts{smtp_port}  ||= 465;
+    $opts{require_transport_security} //= 1;
 
     # Generate registration shared secret if not provided
     unless ( $opts{registration_shared_secret} ) {
