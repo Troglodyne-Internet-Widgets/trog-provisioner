@@ -748,17 +748,25 @@ sub mongle_cloud_init {
         package_upgrade => !!1,
         packages => $pkgs,
         apt => {
-            primary => [{
-                arches => [qw{default}],
-                uri => "http://$hv_ip/ubuntu/",
-            }],
+            primary => [
+                {
+                    arches => [qw{default}],
+                    uri    => "mirror+file:/etc/apt/mirrorlist",
+                },
+            ],
+            security => [
+                {
+                    arches => [qw{default}],
+                    uri    => "mirror+file:/etc/apt/mirrorlist",
+                },
+            ],
             conf => qq|
+Acquire {
+    Retries "12";
+    Force-IPv4: true;
+    AllowInsecureRepositories: true;
+}
 APT {
-    Acquire {
-        Retries "12";
-        Force-IPv4: true;
-        AllowInsecureRepositories: true;
-    }
     Get {
         Assume-Yes "true";
         Fix-Broken "true";
@@ -791,6 +799,13 @@ APT {
                 owner       => "root:root",
                 permissions => "0775",
                 defer       => $JSON::PP::true,
+            },
+            {
+                content     => "http://$hv_ip/ubuntu\tpriority:1\nhttp://archive.ubuntu.com/ubuntu\tpriority:2\nhttp://security.ubuntu.com/ubuntu\tpriority:3\n",
+                path        => "/etc/apt/mirrorlist",
+                permissions => "0644",
+                owner       => "root:root",
+                defer       => $JSON::PP::false,
             },
         ],
         rsyslog => {
