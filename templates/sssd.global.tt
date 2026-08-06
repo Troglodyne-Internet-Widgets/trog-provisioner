@@ -1,0 +1,13 @@
+# Install SSSD configuration
+install -m 0600 sssd.conf /etc/sssd/sssd.conf
+chown root:root /etc/sssd/sssd.conf
+
+# Wire NSS and PAM to use SSSD
+pam-auth-update --enable sss
+authselect select sssd --force; /bin/true
+
+# Enable automatic home directory creation on first login
+pam-auth-update --enable mkhomedir; /bin/true
+
+[% script_dir %]/queue_postrun_task systemctl enable sssd
+[% script_dir %]/queue_postrun_task systemctl restart sssd

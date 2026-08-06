@@ -1,0 +1,10 @@
+dn: cn=config
+changetype: modify
+replace: olcTLSCACertificateFile
+olcTLSCACertificateFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/chain.pem
+-
+replace: olcTLSCertificateFile
+olcTLSCertificateFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/fullchain.pem
+-
+replace: olcTLSCertificateKeyFile
+olcTLSCertificateKeyFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem

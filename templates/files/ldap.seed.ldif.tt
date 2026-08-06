@@ -1,0 +1,57 @@
+# Base organization entry
+dn: [% base_dn %]
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: [% domain %]
+dc: [% domain.split('.').first() %]
+
+# People container
+dn: ou=People,[% base_dn %]
+objectClass: top
+objectClass: organizationalUnit
+ou: People
+
+# Groups container
+dn: ou=Groups,[% base_dn %]
+objectClass: top
+objectClass: organizationalUnit
+ou: Groups
+
+# Base ldapusers group (GID 10000)
+dn: cn=ldapusers,ou=Groups,[% base_dn %]
+objectClass: top
+objectClass: posixGroup
+cn: ldapusers
+gidNumber: 10000
+
+[%- SET uid_offset = 0 -%]
+[%- FOR u IN users -%]
+[%- SET uid_num = 10000 + uid_offset -%]
+[%- SET uid_offset = uid_offset + 1 -%]
+[%- SET uname = u.name -%]
+[%- SET ushell = u.shell || '/bin/bash' -%]
+[%- SET ugecos = u.gecos || uname -%]
+[%- SET parts = ugecos.split(' ') -%]
+[%- SET ugiven = parts.first() -%]
+[%- SET usn = parts.last() -%]
+
+# User: [% uname %]
+dn: uid=[% uname %],ou=People,[% base_dn %]
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: [% uname %]
+cn: [% ugecos %]
+sn: [% usn %]
+givenName: [% ugiven %]
+displayName: [% ugecos %]
+uidNumber: [% uid_num %]
+gidNumber: 10000
+homeDirectory: /home/[% uname %]
+loginShell: [% ushell %]
+[%- IF u.mail %]
+mail: [% u.mail %]
+[%- END %]
+
+[%- END -%]

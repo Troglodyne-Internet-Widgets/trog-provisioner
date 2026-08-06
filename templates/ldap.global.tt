@@ -1,0 +1,26 @@
+# Preseed slapd debconf answers before dpkg-reconfigure
+DEBIAN_FRONTEND=noninteractive debconf-set-selections slapd.debconf
+rm -f slapd.debconf
+DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd
+
+# Enable LDAPS by configuring service URIs
+sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps:/// ldapi:///"|' /etc/default/slapd
+systemctl restart slapd
+
+# Configure TLS for LDAPS (uses letsencrypt cert)
+# Grant slapd read access to the private key
+chown root:openldap [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem; /bin/true
+chmod 0640 [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem; /bin/true
+ldapmodify -Y EXTERNAL -H ldapi:/// -f tls.ldif
+rm -f tls.ldif
+systemctl restart slapd
+
+# Open firewall for LDAPS
+ufw allow [% port %]/tcp comment 'LDAPS'
+
+# Seed base tree and users (idempotent — errors on existing entries are ignored)
+ldapadd -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif; /bin/true
+rm -f seed.ldif
+
+[% script_dir %]/queue_postrun_task systemctl enable slapd
+[% script_dir %]/queue_postrun_task systemctl restart slapd

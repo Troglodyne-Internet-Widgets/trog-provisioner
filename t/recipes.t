@@ -39,6 +39,10 @@ my %G = (
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',
     local_dns_access_token     => '',
+    users                      => [
+        { name => 'admin', gecos => 'Admin User', shell => '/bin/bash' },
+        { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
+    ],
 );
 
 my %PROV = (
@@ -154,6 +158,13 @@ my %required_config = (
         key_file    => 'key.rsa',
         data_source => $tmp,
     },
+    ldap => {
+        admin_password => 's3cr3t',
+    },
+    sssd => {
+        ldap_uri => 'ldaps://ldap.test.test.test',
+        base_dn  => 'dc=test,dc=test',
+    },
 );
 
 # test everything available.
@@ -210,6 +221,10 @@ rejects_missing( 'matrix', {
     smtp_domain => 'test.test',
     modules     => ['nginxproxy'],
 }, 'admin_password', 'matrix rejects missing admin_password' );
+
+rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
+rejects_missing( 'sssd', { base_dn => 'dc=test,dc=test' }, 'ldap_uri', 'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn', 'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints

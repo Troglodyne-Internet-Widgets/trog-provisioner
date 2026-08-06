@@ -485,6 +485,9 @@ sub handle_domain {
 
     File::Slurper::write_binary( "$cfg_dir/users.yaml", YAML::Dump($user_conf) );
 
+    # Expose user list to all templates (e.g. ldap seed LDIF)
+    $global_config->{users} = $user_conf->{users};
+
     my %fragments;
     my %global_fragments;
 
