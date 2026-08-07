@@ -83,6 +83,7 @@ sub args {
             },
             mail_aliases => {
                 type  => 'array',
+                default => [],
                 items => {
                     type       => 'object',
                     required   => [qw{from to}],
@@ -94,6 +95,7 @@ sub args {
             },
             relay  => {
                 type       => "object",
+                default => {},
                 parameters => {
                     host => { type => "string" },
                     port => { type => "integer", minimum => 0 },
@@ -102,20 +104,12 @@ sub args {
             # Built for us by bin/new_config from the ipmap
             full_aliases => {
                 type  => 'array',
+                default => [],
                 items => { type => 'string' },
             },
-            ipv6 => { type => 'boolean' },
+            ipv6 => { type => 'boolean', default => 1 },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %vars ) = @_;
-
-    $vars{ipv6} //= 1;
-    $vars{ipv6} = !!$vars{ipv6};
-
-    return %vars;
 }
 
 sub template_files {

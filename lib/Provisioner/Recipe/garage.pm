@@ -122,52 +122,30 @@ sub _rpc_secret {
 }
 
 sub args {
+    my $self = shift;
     return (
         type       => 'object',
         properties => {
-            rpc_secret         => { type => 'string' },
-            version            => { type => 'string' },
-            data_dir           => { type => 'string' },
-            metadata_dir       => { type => 'string' },
-            replication_factor => { type => 'integer' },
-            s3_region          => { type => 'string' },
-            api_port           => { type => 'integer', minimum => 1024 },
-            rpc_port           => { type => 'integer', minimum => 1024 },
-            web_port           => { type => 'integer', minimum => 1024 },
-            admin_port         => { type => 'integer', minimum => 1024 },
-            zone               => { type => 'string' },
-            capacity           => { type => 'string' },
-            nofile_limit       => { type => 'integer' },
+            rpc_secret         => { type => 'string',  default => $self->_rpc_secret(), },
+            version            => { type => 'string',  default => _latest_garage_version(), },
+            data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
+            metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },
+            replication_factor => { type => 'integer', default => 1 },
+            s3_region          => { type => 'string',  default => 'garage' },
+            api_port           => { type => 'integer', default => 3900, minimum => 1024 },
+            rpc_port           => { type => 'integer', default => 3901, minimum => 1024 },
+            web_port           => { type => 'integer', default => 3902, minimum => 1024 },
+            admin_port         => { type => 'integer', default => 3903, minimum => 1024 },
+            zone               => { type => 'string',  default => 'dc1' },
+            capacity           => { type => 'string',  default => '1G' },
+            nofile_limit       => { type => 'integer', default => '65536' },
             buckets            => {
                 type  => 'array',
+                default => [],
                 items => { type => 'string' },
             },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    $opts{rpc_secret}         //= $self->_rpc_secret();
-    $opts{version}            //= _latest_garage_version();
-    $opts{data_dir}           //= '/var/lib/garage/data';
-    $opts{metadata_dir}       //= '/var/lib/garage/meta';
-    $opts{replication_factor} //= 1;
-    $opts{s3_region}          //= 'garage';
-    $opts{api_port}           //= 3900;
-    $opts{rpc_port}           //= 3901;
-    $opts{web_port}           //= 3902;
-    $opts{admin_port}         //= 3903;
-    $opts{zone}               //= 'dc1';
-    $opts{capacity}           //= '1G';
-    $opts{nofile_limit}       //= 65536;
-    $opts{buckets}            //= [];
-
-    $opts{buckets} = [ $opts{buckets} ]
-        if $opts{buckets} && ref $opts{buckets} ne 'ARRAY';
-
-    return %opts;
 }
 
 sub template_files {

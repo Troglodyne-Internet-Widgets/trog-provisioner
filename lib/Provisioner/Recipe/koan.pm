@@ -254,11 +254,16 @@ sub args {
         type     => 'object',
         required => [qw{user koan_email github_user github_token}],
         properties => {
+            # Generally set in _base._global
             user                    => { type => 'string' },
             koan_email              => { type => 'email' },
-            repo_url                => { type => 'string' },
-            repo_branch             => { type => 'string' },
-            messaging_provider      => { type => 'string', enum => [qw{telegram slack matrix}] },
+            repo_url                => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
+            # Default to the troglodyne fork — it carries the Megolm/Olm E2EE
+            # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
+            # helper.  Upstream koan (sukria/koan) explicitly excludes E2EE.
+            # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
+            repo_branch             => { type => 'string', default => 'add_matrix_e2ee' },
+            messaging_provider      => { type => 'string', enum => [qw{telegram slack matrix}], default => 'telegram' },
             telegram_token          => { type => 'string' },
             telegram_chat_id        => { type => 'string' },
             slack_bot_token         => { type => 'string' },
@@ -272,20 +277,30 @@ sub args {
             matrix_device_id        => { type => 'string' },
             matrix_password         => { type => 'string' },
             matrix_pickle_key       => { type => 'string' },
-            cli_provider            => { type => 'string', enum => [qw{claude codex copilot local}] },
+            cli_provider            => { type => 'string', enum => [qw{claude codex copilot local}], default => 'claude' },
             claude_oauth_token      => { type => 'string' },
             github_user             => { type => 'string' },
             github_token            => { type => 'string' },
             github_nickname         => { type => 'string' },
-            github_authorized_users => { type => 'array',  items => { type => 'string' } },
+            github_authorized_users => { type => 'array',  items => { type => 'string' }, default => [] },
             github_ssh_privkey      => { type => 'string' },
-            max_runs_per_day        => { type => 'integer' },
-            interval_seconds        => { type => 'integer' },
-            start_on_pause          => { type => 'integer' },
-            focus                   => { type => 'integer' },
-            # TODO these have 'path' and 'cli_provider' as args, but I'm not sure how to specify that here.
-            # As such they're still validated in enrich();
-            projects                => { type => 'object' },
+            max_runs_per_day        => { type => 'integer', default => 10 },
+            interval_seconds        => { type => 'integer', default => 60 },
+            start_on_pause          => { type => 'integer', default => 1 },
+            focus                   => { type => 'integer', default => 0 },
+            projects                => {
+                type    => 'object',
+                default => {},
+                additionalProperties => {
+                    type => 'object',
+                    required => [qw{github_url}],
+                    parameters => {
+                        cli_provider => { type => 'string', enum => [qw{claude codex copilot local}], default => 'claude' },
+                        github_url   => { type => 'string' },
+                        base_branch  => { type => 'string', default => 'master' },
+                    }
+                },
+            },
             # TODO: Don't know how to make these all require one another other than setting them behind an object.
             # should probably rework to be such.
             smtp_host               => { type => 'string' },
@@ -300,27 +315,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Default to the troglodyne fork — it carries the Megolm/Olm E2EE
-    # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
-    # helper.  Upstream koan (sukria/koan) explicitly excludes E2EE.
-    # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
-    $opts{repo_url}    //= 'https://github.com/troglodyne/koan.git';
-    $opts{repo_branch} //= 'add_matrix_e2ee';
-    $opts{messaging_provider} //= 'telegram';
-    $opts{cli_provider} //= 'claude';
     $opts{github_nickname}         //= $opts{github_user};
-    $opts{github_authorized_users} //= [];
-    $opts{max_runs_per_day} //= 10;
-    $opts{interval_seconds} //= 60;
-
-    # Boot-time behaviour knobs — both coerced to strict booleans so the
-    # template can emit lowercase 'true'/'false' without surprises.
-    $opts{start_on_pause} //= 1;
-    $opts{start_on_pause} = $opts{start_on_pause} ? 1 : 0;
-    $opts{focus}          //= 0;
-    $opts{focus}          = $opts{focus} ? 1 : 0;
-
-    $opts{projects} //= {};
 
     if ( $opts{cli_provider} eq 'telegram' ) {
         die "Must set telegram_token in [koan] section"   unless $opts{telegram_token};
@@ -377,18 +372,6 @@ sub enrich {
         die "github_ssh_privkey is passphrase-encrypted; the bot runs unattended, supply a passphrase-less key"
             if $opts{github_ssh_privkey} =~ /^Proc-Type:.*ENCRYPTED/m
             || $opts{github_ssh_privkey} =~ /DEK-Info:/m;
-    }
-
-    for my $pname ( keys %{ $opts{projects} } ) {
-        my $p = $opts{projects}{$pname};
-        die "projects.$pname must be a hash"
-            unless ref $p eq 'HASH';
-        die "projects.$pname.path is required"
-            unless $p->{path};
-        if ( $p->{cli_provider} ) {
-            die "projects.$pname.cli_provider must be one of: claude, codex, copilot, local"
-                unless any { $_ eq $p->{cli_provider} } qw{claude codex copilot local};
-        }
     }
 
     # SMTP block is optional but must be all-or-nothing

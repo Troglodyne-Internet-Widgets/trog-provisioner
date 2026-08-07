@@ -69,7 +69,7 @@ sub args {
             },
             #TODO If this isn't true, registrar is required.
             # Not sure how to encode that in openapi spec here.
-            prefer_local_dns       => { type => 'boolean' },
+            prefer_local_dns       => { type => 'boolean', default => 0 },
             local_dns_access_token => { type => 'string' },
         },
     );

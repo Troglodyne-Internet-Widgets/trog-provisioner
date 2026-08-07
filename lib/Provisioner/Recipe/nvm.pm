@@ -64,7 +64,8 @@ sub args {
     return (
         properties => {
             user        => { type => 'string' },
-            nvm_version => { type => 'string' },
+            # TODO fetch latest version automatically
+            nvm_version => { type => 'string', default => 'v0.40.3' },
         },
     );
 }
@@ -72,8 +73,6 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
     $opts{user}        //= $opts{admin_user};
-    # TODO fetch latest version automatically
-    $opts{nvm_version} //= 'v0.40.3';
     return %opts;
 }
 

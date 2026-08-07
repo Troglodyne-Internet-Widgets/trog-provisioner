@@ -1,2 +1,2 @@
-HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% tcms_dir %]'
-[% script_dir %]/queue_postrun_task "[% install_dir %]/[% domain %]/bin/cpanm --installdeps [% install_dir %]/[% domain %]/[% tcms_dir %]"
+HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
+[% script_dir %]/queue_postrun_task "[% install_dir %]/[% domain %]/bin/cpanm --installdeps [% install_dir %]/[% domain %]/tCMS"

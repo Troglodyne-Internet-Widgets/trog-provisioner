@@ -4,7 +4,9 @@ use strict;
 use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
+
 use List::Util;
+use Crypt::PRNG();
 
 =head1 Provisioner::Recipe::matrix
 
@@ -151,43 +153,24 @@ sub args {
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
         properties => {
             server_name               => { type => 'string' },
-            admin_user                => { type => 'string' },
+            admin_user                => { type => 'string', default => 'admin' },
             admin_password            => { type => 'string' },
             smtp_host                 => { type => 'string' },
-            smtp_port                 => { type => 'integer' },
+            smtp_port                 => { type => 'integer', default => 465, minimum => 0 },
             smtp_user                 => { type => 'string' },
             smtp_pass                 => { type => 'string' },
             smtp_domain               => { type => 'string' },
-            require_transport_security => { type => 'boolean' },
-            registration_shared_secret => { type => 'string' },
-            ipv6                      => { type => 'boolean' },
-            redis_host                => { type => 'string' },
-            redis_port                => { type => 'integer' },
+            require_transport_security => { type => 'boolean', default => 1 },
+            registration_shared_secret => { type => 'string', default => _seekrit() },
+            ipv6                      => { type => 'boolean', default => 1 },
+            redis_host                => { type => 'string', default => '127.0.0.1' },
+            redis_port                => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
 }
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    $opts{admin_user} ||= 'admin';
-    $opts{smtp_port}  ||= 465;
-    $opts{require_transport_security} //= 1;
-
-    # Generate registration shared secret if not provided
-    unless ( $opts{registration_shared_secret} ) {
-        $opts{registration_shared_secret} = join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ rand 62 ] } 1 .. 32;
-    }
-
-    $opts{ipv6} //= 1;
-    $opts{ipv6} = !!$opts{ipv6};
-
-    # Redis integration — optional; activated when redis recipe is co-loaded.
-    # Override these if your redis instance is non-default.
-    $opts{redis_host} //= '127.0.0.1';
-    $opts{redis_port} //= 6379;
-
-    return %opts;
+sub _seekrit {
+    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 32;
 }
 
 sub template_files {

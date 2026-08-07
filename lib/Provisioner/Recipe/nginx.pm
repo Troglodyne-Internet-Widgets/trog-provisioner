@@ -36,15 +36,9 @@ sub deps {
 sub args {
     return (
         properties => {
-            backlog => { type => 'integer', minimum => 0 },
+            backlog => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{backlog} //= 32768;
-    return %opts;
 }
 
 sub template_files {

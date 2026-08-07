@@ -45,9 +45,9 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            bind   => { type => 'string' },
-            port   => { type => 'integer', minimum => 1024 },
-            save   => { type => 'boolean' },
+            bind   => { type => 'string', default => '127.0.0.1' },
+            port   => { type => 'integer', minimum => 1024, default => 6379 },
+            save   => { type => 'boolean', default => 1 },
             requirepass      => { type => 'string' },
             maxmemory        => { type => 'string' },
             maxmemory_policy => {
@@ -59,14 +59,6 @@ sub args {
             },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{bind} //= '127.0.0.1';
-    $opts{port} //= 6379;
-    $opts{save} //= 1;
-    return %opts;
 }
 
 sub template_files {

@@ -66,23 +66,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            web_port => { type => 'integer', minimum => 1024 },
-            ipv6     => { type => 'boolean' },
+            web_port => { type => 'integer', minimum => 1024, default => 8112 },
+            ipv6     => { type => 'boolean', default => 1 },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    die "This recipe requires the nginxproxy recipe to function"
-        unless any { $_ eq 'nginxproxy' } @{ $opts{modules} };
-
-    $opts{web_port} //= 8112;
-    $opts{ipv6} //= 1;
-    $opts{ipv6} = !!$opts{ipv6};
-
-    return %opts;
 }
 
 sub template_files {

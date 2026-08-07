@@ -98,12 +98,12 @@ sub args {
                         auth_uri       => { type => 'string' },
                         public_dir     => { type => 'string' },
                         nocache_prefix => { type => 'string' },
-                        ssl_redirect   => { type => 'boolean' },
-                        ssl            => { type => 'boolean' },
+                        ssl_redirect   => { type => 'boolean', default => 1 },
+                        ssl            => { type => 'boolean', default => 1 },
                     },
                 },
             },
-            ipv6       => { type => 'boolean' },
+            ipv6       => { type => 'boolean', default => 1 },
         },
     );
 }
@@ -124,8 +124,6 @@ sub enrich {
                 if $uri && $uri !~ m/^http/;
         }
     }
-    $opts{ipv6} //= 1;
-    $opts{ipv6} = !!$opts{ipv6};
 
     return %opts;
 }

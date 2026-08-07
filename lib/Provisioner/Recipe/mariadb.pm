@@ -37,6 +37,7 @@ sub args {
         properties => {
             root_pw  => { type => 'string' },
             dumpfile => { type => 'string' },
+            # TODO fetch latest mariadb version by default
             version  => { type => 'string' },
         },
     );

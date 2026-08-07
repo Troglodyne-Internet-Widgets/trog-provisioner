@@ -70,15 +70,9 @@ sub args {
         properties => {
             plex_login_name => { type => 'string' },
             admin_mail      => { type => 'email' },
-            media_dirs      => { type => 'array', items => { type => 'string' } },
+            media_dirs      => { type => 'array', items => { type => 'string' }, default => [] },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{media_dirs} //= [];
-    return %opts;
 }
 
 sub remote_files {

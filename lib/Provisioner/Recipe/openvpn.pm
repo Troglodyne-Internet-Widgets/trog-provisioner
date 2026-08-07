@@ -48,11 +48,11 @@ sub deps {
 sub args {
     return (
         properties => {
-            port      => { type => 'integer', minimum => 1024 },
-            proto     => { type => 'string', enum => [qw{udp tcp}] },
-            subnet    => { type => 'string' },
-            netmask   => { type => 'string' },
-            cipher    => { type => 'string' },
+            port      => { type => 'integer', minimum => 1024, default => 1194 },
+            proto     => { type => 'string', enum => [qw{udp tcp}], default => 'udp' },
+            subnet    => { type => 'ipv4', default => '10.8.0.0' },
+            netmask   => { type => 'ipv4', default => '255.255.255.0' },
+            cipher    => { type => 'string', default => 'AES-256-GCM' },
             dns       => { type => 'array', items => { type => 'string' } },
             interface => { type => 'string' },
         },
@@ -61,18 +61,11 @@ sub args {
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    $opts{port}    //= 1194;
-    $opts{proto}   //= 'udp';
-    $opts{subnet}  //= '10.8.0.0';
-    $opts{netmask} //= '255.255.255.0';
-    $opts{cipher}  //= 'AES-256-GCM';
-    die "proto must be 'udp' or 'tcp'" unless $opts{proto} =~ /^(udp|tcp)$/;
-    die "port must be numeric"         unless $opts{port}  =~ /^\d+$/;
-    die "netmask must be dotted-quad"  unless $opts{netmask} =~ /^\d+\.\d+\.\d+\.\d+$/;
     $opts{cidr} = _netmask_to_cidr( $opts{netmask} );
     return %opts;
 }
 
+# TODO use something from cpan for this, or ask for it directly
 # Convert a dotted-quad netmask (e.g. 255.255.255.0) into a CIDR prefix length
 # (e.g. 24). Used to render iptables/MASQUERADE source CIDRs.
 sub _netmask_to_cidr {

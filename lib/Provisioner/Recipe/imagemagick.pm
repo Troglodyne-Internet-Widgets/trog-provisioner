@@ -32,6 +32,7 @@ sub args {
         type       => 'object',
         required   => [qw{version}],
         properties => {
+            # TODO default to the latest imagemagick version available on github releases
             version => { type => 'string' },
         },
     );

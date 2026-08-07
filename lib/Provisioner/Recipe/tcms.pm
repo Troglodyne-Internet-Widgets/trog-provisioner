@@ -11,7 +11,6 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         tcms:
-	    install_dir: "path/to/tcms/install"
 
 =head2 DESCRIPTION
 
@@ -19,6 +18,8 @@ Runs the needed installation steps for a tCMS installation inside of the install
 The install dir is expected to be an existing tCMS installation inside of the data dir (can simply be a fresh clone).
 
 If you want the system to come up right away, it's a good idea to set the order of this higher than that of the tpsgi target.
+
+Your tCMS install MUST be in the tCMS/ directory in the DATA 'from' dir.
 
 TODO: allow specification of specific SHA to check out.
 
@@ -35,7 +36,6 @@ sub deps {
 
 sub required_recipes {
     my ($self, %opts) = @_;
-    my $tcmsdir = $opts{tcms_dir} // 'tCMS';
     return (
         nginxproxy => sub {
             my (%opts) = @_;
@@ -55,19 +55,8 @@ sub required_recipes {
             );
         },
         tpsgi => sub {
-            routers => [qq{$tcmsdir/lib/TCMS.pm}],
-            basedir => $tcmsdir,
-        },
-    );
-}
-
-
-sub args {
-    return (
-        type       => 'object',
-        required   => [qw{tcms_dir}],
-        properties => {
-            tcms_dir => { type => 'string' },
+            routers => [qq{tCMS/lib/TCMS.pm}],
+            basedir => 'tCMS',
         },
     );
 }
@@ -77,9 +66,9 @@ sub remote_files {
     return (
         # tCMS stores some persistent logs in the tpsgi log dir.
         "$install_dir/$domain/log"              => "log/",
-        "$install_dir/$domain/tCMS/www/assets/" => 'tCMS/www/assets/',
-        "$install_dir/$domain/tCMS/config/"     => 'tCMS/config/',
-        "$install_dir/$domain/tCMS/data/"       => 'tCMS/data',
+        "$install_dir/$domain/tCMS/www/assets/" => "tCMS/www/assets/",
+        "$install_dir/$domain/tCMS/config/"     => "tCMS/config/",
+        "$install_dir/$domain/tCMS/data/"       => "tCMS/data",
     );
 }
 

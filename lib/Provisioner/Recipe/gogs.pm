@@ -4,7 +4,9 @@ use strict;
 use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
+
 use List::Util qw{any};
+use Crypt::PRNG();
 
 =head1 Provisioner::Recipe::gogs
 
@@ -118,30 +120,19 @@ sub args {
         properties => {
             version         => { type => 'string' },
             admin_password  => { type => 'string' },
-            gogs_admin      => { type => 'string' },
-            github_users    => { type => 'array', items => { type => 'string' } },
-            github_orgs     => { type => 'array', items => { type => 'string' } },
+            gogs_admin      => { type => 'string', default => 'git' },
+            github_users    => { type => 'array',  default => [], items => { type => 'string' } },
+            github_orgs     => { type => 'array',  default => [], items => { type => 'string' } },
             github_token    => { type => 'string' },
-            mirror_interval => { type => 'integer', minimum => 1, maximum => 23 },
-            secret_key      => { type => 'string' },
-            ipv6            => { type => 'boolean' },
+            mirror_interval => { type => 'integer', minimum => 1, maximum => 23, default => 6 },
+            secret_key      => { type => 'string', default => _seekrit() },
+            ipv6            => { type => 'boolean', default => 1 },
         },
     );
 }
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{gogs_admin}      //= 'git';
-    $opts{github_users}    //= [];
-    $opts{github_orgs}     //= [];
-    $opts{github_token}    //= '';
-    $opts{mirror_interval} //= 6;
-    unless ( $opts{secret_key} ) {
-        $opts{secret_key} = join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ rand 62 ] } 1 .. 64;
-    }
-    $opts{ipv6} //= 1;
-    $opts{ipv6} = $opts{ipv6} ? 1 : 0;
-    return %opts;
+sub _seekrit {
+    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 64;
 }
 
 sub template_files {

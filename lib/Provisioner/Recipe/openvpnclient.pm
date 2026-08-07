@@ -50,19 +50,11 @@ sub args {
         properties => {
             server   => { type => 'string' },
             cert_dir => { type => 'string' },
-            port     => { type => 'integer', minimum => 1024 },
-            proto    => { type => 'string', enum => [qw{udp tcp}] },
-            cipher   => { type => 'string' },
+            port     => { type => 'integer', minimum => 1024, default => 1194 },
+            proto    => { type => 'string', enum => [qw{udp tcp}], default => 'udp' },
+            cipher   => { type => 'string', default => 'AES-256-GCM' },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{port}   //= 1194;
-    $opts{proto}  //= 'udp';
-    $opts{cipher} //= 'AES-256-GCM';
-    return %opts;
 }
 
 sub template_files {

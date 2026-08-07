@@ -67,15 +67,9 @@ sub deps {
 sub args {
     return (
         properties => {
-            perl_path => { type => 'string' },
+            perl_path => { type => 'string', default => '/usr/bin/perl' },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{perl_path} //= '/usr/bin/perl';
-    return %opts;
 }
 
 sub template_files {

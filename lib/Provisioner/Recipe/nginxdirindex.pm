@@ -35,16 +35,9 @@ sub required_recipes {
 sub args {
     return (
         properties => {
-            ipv6 => { type => 'boolean' },
+            ipv6 => { type => 'boolean', default => 1 },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{ipv6} //= 1;
-    $opts{ipv6} = !!$opts{ipv6};
-    return %opts;
 }
 
 sub template_files {

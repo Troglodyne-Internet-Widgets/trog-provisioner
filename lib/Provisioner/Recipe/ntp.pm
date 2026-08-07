@@ -59,23 +59,17 @@ sub args {
                 type     => 'array',
                 minItems => 1,
                 items    => { type => 'string' },
+                default  => [
+                    'ntp.ubuntu.com',
+                    '0.pool.ntp.org',
+                    '1.pool.ntp.org',
+                    '2.pool.ntp.org',
+                    '3.pool.ntp.org',
+                ],
             },
-            makestep => { type => 'string' },
+            makestep => { type => 'string', default => '1.0 3' },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{servers} //= [
-        'ntp.ubuntu.com',
-        '0.pool.ntp.org',
-        '1.pool.ntp.org',
-        '2.pool.ntp.org',
-        '3.pool.ntp.org',
-    ];
-    $opts{makestep} //= '1.0 3';
-    return %opts;
 }
 
 sub template_files {

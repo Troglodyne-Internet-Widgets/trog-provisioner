@@ -34,6 +34,9 @@ WriteMakefile(
     'Net::IP'                   => 0,
     'UUID'                      => 0,
     'Crypt::Digest::SHA512'     => 0,
+    'Crypt::PRNG'               => 0,
+    'JSON::Validate'            => 0,
+    'Data::Validate::Email'     => 0,
   },
   TEST_REQUIRES => {
     'Test::More'       => 0,
