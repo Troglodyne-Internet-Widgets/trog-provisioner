@@ -7,6 +7,22 @@ use List::Util qw{any};
 
 # Helpers used across various modules
 
+=head2 DESCRIPTION
+
+Provisioner::Recipe helpers.
+
+=cut
+
+=head2 SUBROUTINES
+
+=head3 already_required($module)
+
+Avoid double-require sub redefs.
+
+Returns BOOLEAN.
+
+=cut
+
 sub already_required {
     my $module = shift;
     my @available = keys(%INC);
@@ -14,7 +30,14 @@ sub already_required {
     return 0;
 }
 
-# Unlike List::Util::uniq, we want the last occurrence's order preserved.
+=head3 lastuniq(@array)
+
+List::Util::uniq, but with the last occurrence's order preserved instead of the first.
+
+Returns ARRAY.
+
+=cut
+
 sub lastuniq {
     my @input = @_;
     my %hashed;

@@ -57,34 +57,34 @@ Both of which will be in the Current working directory, unless you specify the -
 
 In the main recipes.yaml, most of what you will want will be in the _base section:
 
-	_base:
-		_global:
-			registrar:
-				type: "some_dns_provider_understood_by_dns-lexicon
-				user: "AzureDiamond"
-				key: "hunter2"
-			libdir:
-				- path/to/my/custom/libdir
-		adminconfig:
-			pkgs:
-				- vim
-				- tig
-				- tmux
-				- plocate
-				- traceroute
-			skel: "/opt/dotfiles/my_dude"
-		data:
-			from: "/opt/data"
-			to: "/opt/domains"
-		nosnap:
-		nostubresolver:
-			order: 0
-		auditd:
-		ufw:
-		fail2ban:
-		cron:
-		letsencrypt:
-		...
+    _base:
+        _global:
+            registrar:
+                type: "some_dns_provider_understood_by_dns-lexicon
+                user: "AzureDiamond"
+                key: "hunter2"
+            libdir:
+                - path/to/my/custom/libdir
+        adminconfig:
+            pkgs:
+                - vim
+                - tig
+                - tmux
+                - plocate
+                - traceroute
+            skel: "/opt/dotfiles/my_dude"
+        data:
+            from: "/opt/data"
+            to: "/opt/domains"
+        nosnap:
+        nostubresolver:
+            order: 0
+        auditd:
+        ufw:
+        fail2ban:
+        cron:
+        letsencrypt:
+        ...
 
 This sets up some basic things which all your provisioned hosts will need.
 You may specify any number of recipes here to cut down on the pasta in recipes.d/ .
@@ -100,11 +100,11 @@ These directories ought to have both a lib/ and templates/ dir therein, structur
 
 It's also useful to specify a list of what domains are shared on the same host via the _shared global section in recipes.yaml:
 
-	_shared:
-		shared.host.name:
-			- guy.hosted.here
-			- otherguy.hosted.here
-		...
+    _shared:
+        shared.host.name:
+            - guy.hosted.here
+            - otherguy.hosted.here
+        ...
 
 In this example you would run `bin/new_config shared.host.name`,
 and get out configs such that `bin/provision shared.host.name` in trog-provisioner can then use to provision all 3 domains on the same host.
@@ -150,12 +150,12 @@ You will be asked for the unlock password for the DB in the event you use this f
 
 Example usage in a recipe:
 
-   	_base:
-		_global:
-			registrar:
-				type: "some_dns_provider_understood_by_dns-lexicon
-				user: "AzureDiamond"
-				key: "secret:Hosting/DNS/password"
+    _base:
+        _global:
+            registrar:
+                type: "some_dns_provider_understood_by_dns-lexicon
+                user: "AzureDiamond"
+                key: "secret:Hosting/DNS/password"
 
 Where each path component past 'secret:' corresponds to group/key/parameter in a keepass KDBX.
 
@@ -275,11 +275,11 @@ sub get_recipe_config {
         wanted => sub {
             my $object = $_;
             return unless (-f $object && $object =~ m/\.yaml$/);
-			my $config = YAML::Load( File::Slurper::read_text($object) );
-			# You have to put global things in the base recipes.yaml
-			delete $config->{_base};
-			delete $config->{_shared};
-			$c = Hash::Merge::merge( $c, $config );
+            my $config = YAML::Load( File::Slurper::read_text($object) );
+            # You have to put global things in the base recipes.yaml
+            delete $config->{_base};
+            delete $config->{_shared};
+            $c = Hash::Merge::merge( $c, $config );
         },
         no_chdir => 1,
         bydepth => 1,
@@ -603,7 +603,7 @@ sub handle_domain {
     #Memoize
     my %builders;
 
-    # First, run thru the modules and depsolve. 
+    # First, run thru the modules and depsolve.
     for (my $i=0; $i < scalar(@modules); $i++) {
         my $module = $modules[$i];
         if (!Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm")) {
