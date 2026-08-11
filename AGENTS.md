@@ -24,10 +24,13 @@ bin/new_config --ipmap=path/to/ipmap.cfg --recipes=path/to/recipes.yaml domain.n
 # Install dependencies (if cpanfile exists)
 cpanm --installdeps .
 
-# Run perl syntax check
+# Run perl syntax check, should say OK
 perl -c lib/Provisioner/Recipe/yourmodule.pm
 
-# Check POD documentation
+# Run it thru perlcritic, should get no output
+perlcritic lib/Provisioner/Recipe/yourmodule.pm
+
+# Check POD documentation has no POD errors
 perldoc lib/Provisioner/Recipe/yourmodule.pm
 ```
 
