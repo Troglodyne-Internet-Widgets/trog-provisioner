@@ -1,5 +1,7 @@
 package Provisioner::Recipe;
 
+#ABSTRACT: Base class for provisioner recipes.
+
 use strict;
 use warnings FATAL => 'all';
 
@@ -9,8 +11,6 @@ use Text::Xslate::Bridge::TT2;
 use Scalar::Util();
 
 use JSON::Validator::Schema::Troglodyne;
-
-=head1 Provisioner::Recipe
 
 =head2 SYNOPSIS
 
@@ -24,7 +24,8 @@ use JSON::Validator::Schema::Troglodyne;
 
 =head2 DESCRIPTION
 
-Base class for provisioner recipes. Provides framework for building deployment makefiles via templated fragments.
+Provides a framework for building deployment makefiles via templated fragments.
+Supports recipes that depend on other recipes, autoconfiguration and more.
 
 =cut
 
