@@ -1,5 +1,7 @@
 package JSON::Validator::Schema::Troglodyne;
 
+use 5.041;
+
 use strict;
 use warnings;
 

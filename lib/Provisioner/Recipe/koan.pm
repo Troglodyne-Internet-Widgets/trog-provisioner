@@ -1,5 +1,7 @@
 package Provisioner::Recipe::koan;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
@@ -27,7 +29,7 @@ use List::Util qw{any};
             # CLI provider that drives the agent (claude|codex|copilot|local)
             cli_provider: "claude"
 
-            # Required when cli_provider=claude — the long-lived OAuth token
+            # Required when cli_provider=claude  the long-lived OAuth token
             # produced by `claude setup-token` on a workstation
             claude_oauth_token: "sk-ant-..."
 
@@ -46,7 +48,7 @@ use List::Util qw{any};
             # Register the matching pubkey under the bot's GitHub account
             # both as an "Authentication key" (for push) AND a "Signing
             # key" (so signed commits show as Verified in the UI).
-            # Must be passphrase-less — the bot runs unattended.
+            # Must be passphrase-less  the bot runs unattended.
             github_ssh_privkey: |
                 -----BEGIN OPENSSH PRIVATE KEY-----
                 ...
@@ -59,7 +61,7 @@ use List::Util qw{any};
             github_authorized_users:
                 - "yourname"
 
-            # Messaging — pick exactly one of telegram / slack / matrix
+            # Messaging  pick exactly one of telegram / slack / matrix
             messaging_provider: "telegram"
             telegram_token:   "123456789:ABC-..."
             telegram_chat_id: "987654321"
@@ -72,11 +74,11 @@ use List::Util qw{any};
             # matrix_user_id:    "@koan:matrix.org"
             # matrix_room_id:    "!abcdef:matrix.org"
             # matrix_e2ee:       1                   # default; set 0 for plaintext
-            # Credentials — supply EITHER:
+            # Credentials  supply EITHER:
             #   matrix_access_token: "syt_..."       # pre-minted token
             #   matrix_device_id:    "BRAND_NEW"     # required when e2ee=1
             # OR (mutually exclusive):
-            #   matrix_password:     "hunter2"       # one-shot — bootstrap mints fresh device
+            #   matrix_password:     "hunter2"       # one-shot  bootstrap mints fresh device
             # matrix_pickle_key: "<64-hex>"          # optional; auto-gen if absent
 
             # Behaviour knobs (all optional)
@@ -108,11 +110,11 @@ use List::Util qw{any};
                     github_url: "https://github.com/myorg/api.git"
                     cli_provider: "copilot"
                 bind_mounted_thing:
-                    path: "/opt/projects/legacy"        # no github_url — must already exist
+                    path: "/opt/projects/legacy"        # no github_url  must already exist
 
 =head2 DESCRIPTION
 
-Installs and runs the Kōan autonomous coding bot
+Installs and runs the Kan autonomous coding bot
 (L<https://github.com/troglodyne/koan>, our fork with Megolm/Olm
 end-to-end-encrypted Matrix support; upstream is at
 L<https://github.com/sukria/koan>) as a pair of systemd services
@@ -138,7 +140,7 @@ brand-new device must be acquired.  The recipe handles this two ways:
 Filesystem layout on the guest:
 
     [install_dir]/[domain]/           koan user $HOME (.ssh, .gitconfig, .venv)
-    [install_dir]/[domain]/koan/      repo checkout — KOAN_ROOT
+    [install_dir]/[domain]/koan/      repo checkout  KOAN_ROOT
     [install_dir]/[domain]/koan/koan/ python package (PYTHONPATH, WorkingDir)
     [install_dir]/[domain]/koan/.env  secrets
     [install_dir]/[domain]/koan/instance/  bot state (preserved)
@@ -240,7 +242,7 @@ sub deps {
           build-essential
         };
         # libolm is only strictly required when messaging_provider=matrix
-        # with E2EE on, but it's small and the host is single-purpose —
+        # with E2EE on, but it's small and the host is single-purpose 
         # always include so the pip install of matrix-nio[e2e] never
         # fails for want of a header.
         push @pkgs, qw{libolm-dev libffi-dev};
@@ -258,7 +260,7 @@ sub args {
             user                    => { type => 'string' },
             koan_email              => { type => 'email' },
             repo_url                => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
-            # Default to the troglodyne fork — it carries the Megolm/Olm E2EE
+            # Default to the troglodyne fork  it carries the Megolm/Olm E2EE
             # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
             # helper.  Upstream koan (sukria/koan) explicitly excludes E2EE.
             # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
@@ -331,7 +333,7 @@ sub enrich {
         die "Must set matrix_user_id in [koan] section"    unless $opts{matrix_user_id};
         die "Must set matrix_room_id in [koan] section"    unless $opts{matrix_room_id};
 
-        # E2EE on by default — opt out with matrix_e2ee: 0.
+        # E2EE on by default  opt out with matrix_e2ee: 0.
         $opts{matrix_e2ee} //= 1;
         $opts{matrix_e2ee} = !!$opts{matrix_e2ee};
 
@@ -351,7 +353,7 @@ sub enrich {
         }
 
         # Auto-generate a pickle key if E2EE is on and none supplied.  This
-        # encrypts the local olm store on disk — losing it means losing the
+        # encrypts the local olm store on disk  losing it means losing the
         # ability to decrypt past sessions, so the user can supply their
         # own to keep it stable across re-deploys.
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {

@@ -1,7 +1,9 @@
 package Provisioner::Recipe::nginxproxy;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
 
@@ -9,7 +11,7 @@ use parent qw{Provisioner::Recipe};
 
 =head2 SYNOPSIS
 
-Flat (new) interface — proxy_uri and static_dir at top level:
+Flat (new) interface  proxy_uri and static_dir at top level:
 
     somedomain:
         nginxproxy:
@@ -19,7 +21,7 @@ Flat (new) interface — proxy_uri and static_dir at top level:
 This automatically generates vhosts: port 80 redirects to HTTPS, port 443
 proxies to the given socket with statics served from static_dir.
 
-Nested (vhosts) interface — full control over per-port configuration:
+Nested (vhosts) interface  full control over per-port configuration:
 
     somedomain:
         nginxproxy:

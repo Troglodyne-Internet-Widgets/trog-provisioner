@@ -1,5 +1,7 @@
 package Provisioner::Recipe::plexmediaserver;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 

@@ -1,7 +1,9 @@
 package Provisioner::Recipe::backup;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use Provisioner::Utils;
 

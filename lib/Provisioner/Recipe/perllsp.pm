@@ -1,7 +1,9 @@
 package Provisioner::Recipe::perllsp;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
 
@@ -29,7 +31,7 @@ PerlNavigator so it analyses code with the custom perl build rather
 than the system default.
 
 Vim plugins are installed into C<~admin_user/.vim/pack/> using vim 8+
-native package loading — no plugin manager required.
+native package loading  no plugin manager required.
 
 =head3 deps
 

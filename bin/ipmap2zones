@@ -4,6 +4,8 @@
 
 package Trog::Provisioner::IPMap2Zones;
 
+use 5.0041;
+
 use strict;
 use warnings FATAL => 'all';
 

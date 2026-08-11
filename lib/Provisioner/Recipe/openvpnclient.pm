@@ -1,7 +1,9 @@
 package Provisioner::Recipe::openvpnclient;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
 
@@ -30,7 +32,7 @@ hypervisor.  The recipe rsyncs them to the provisioned host.
 
 Because the VPN tunnel is brought up during provisioning (not deferred to
 postrun), any recipe that needs connectivity through the tunnel must run after
-this one.  Recipe execution order is determined by the C<order:> key — set
+this one.  Recipe execution order is determined by the C<order:> key  set
 this recipe's order to a value that sorts before any recipe depending on the
 tunnel (e.g. C<order: A>).
 

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::garage;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
@@ -48,35 +50,35 @@ Validates the recipe configuration:
 
 =over 4
 
-=item C<rpc_secret> (optional) — 64-character hex string used as the shared
+=item C<rpc_secret> (optional)  64-character hex string used as the shared
 RPC secret between cluster nodes.  Auto-generated with C<openssl rand -hex 32>
 on first run and persisted to C<rpc_secret.txt> in the domain output directory.
 
-=item C<version> (optional, default: latest GitHub release) — Garage release tag to download.
+=item C<version> (optional, default: latest GitHub release)  Garage release tag to download.
 
 =item C<data_dir> (optional, default C</var/lib/garage/data>)
 
 =item C<metadata_dir> (optional, default C</var/lib/garage/meta>)
 
-=item C<replication_factor> (optional, default C<1>) — 1 for single-node.
+=item C<replication_factor> (optional, default C<1>)  1 for single-node.
 
 =item C<s3_region> (optional, default C<garage>)
 
-=item C<api_port> (optional, default C<3900>) — S3 API listen port.
+=item C<api_port> (optional, default C<3900>)  S3 API listen port.
 
-=item C<rpc_port> (optional, default C<3901>) — Inter-node RPC port.
+=item C<rpc_port> (optional, default C<3901>)  Inter-node RPC port.
 
-=item C<web_port> (optional, default C<3902>) — S3 static-web serve port.
+=item C<web_port> (optional, default C<3902>)  S3 static-web serve port.
 
-=item C<admin_port> (optional, default C<3903>) — Admin API port.
+=item C<admin_port> (optional, default C<3903>)  Admin API port.
 
-=item C<zone> (optional, default C<dc1>) — Zone name for the layout assignment.
+=item C<zone> (optional, default C<dc1>)  Zone name for the layout assignment.
 
-=item C<capacity> (optional, default C<1G>) — Storage capacity hint for layout.
+=item C<capacity> (optional, default C<1G>)  Storage capacity hint for layout.
 
-=item C<nofile_limit> (optional, default C<65536>) — C<LimitNOFILE> value for the systemd unit.
+=item C<nofile_limit> (optional, default C<65536>)  C<LimitNOFILE> value for the systemd unit.
 
-=item C<buckets> (optional) — List of bucket names to create after startup.
+=item C<buckets> (optional)  List of bucket names to create after startup.
 
 =back
 

@@ -4,6 +4,8 @@ package Provisioner::Bin::list_ip_pool;
 
 #ABSTRACT: Display static IP pool status.
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 

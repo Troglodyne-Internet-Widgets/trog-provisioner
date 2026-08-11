@@ -2,6 +2,8 @@
 
 package Trog::Provisioner::Config::Generator;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 

@@ -2,6 +2,8 @@ package Provisioner::Recipe;
 
 #ABSTRACT: Base class for provisioner recipes.
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 

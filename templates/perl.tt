@@ -1,1 +1,1 @@
-[% script_dir %]/build_latest_perl.sh [% domain %] [% user %]
+[% script_dir %]/build_latest_perl.sh [% user %]

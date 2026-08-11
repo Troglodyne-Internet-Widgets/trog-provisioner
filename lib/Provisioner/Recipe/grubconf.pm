@@ -1,7 +1,9 @@
 package Provisioner::Recipe::grubconf;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 =head1 Provisioner::Recipe::grubconf
 

@@ -1,7 +1,9 @@
+package Provisioner::Utils;
+
+use 5.041;
+
 use strict;
 use warnings;
-
-package Provisioner::Utils;
 
 use List::Util qw{any};
 

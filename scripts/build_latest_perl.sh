@@ -1,7 +1,6 @@
 #!/bin/bash
 
-DOMAIN=$1
-CLIENT=$2
+CLIENT=$1
 
 #XXX perlbrew = spooped when you run via clown-init
 export SHELL='/bin/bash';
@@ -19,8 +18,6 @@ perlbrew download stable
 LATEST_TARBALL=$(ls -1 /root/perl5/perlbrew/dists/ | tail -n1)
 NICE_PERL_NAME=$(echo $LATEST_TARBALL | sed 's/\.tar\.gz$//' | sed 's/-//g')
 
-mkdir -p /root/setup/$DOMAIN
-
 if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     rm -rf src
     tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$LATEST_TARBALL
@@ -28,7 +25,7 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     ./Configure -des -Dprefix=/opt/perl5/$NICE_PERL_NAME -Duseshrplib
     make -j8
     make -j8 install
-    yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus
+    yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy
 fi
 
 CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
@@ -42,8 +39,15 @@ fi
 mkdir -p $CLIENT_HOMEDIR/bin
 mkdir -p /root/bin
 [ -L $CLIENT_HOMEDIR/bin/perl  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  $CLIENT_HOMEDIR/bin/perl
+[ -L $CLIENT_HOMEDIR/bin/prove  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/prove  $CLIENT_HOMEDIR/bin/prove
+[ -L $CLIENT_HOMEDIR/bin/yath  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/yath  $CLIENT_HOMEDIR/bin/yath
+[ -L $CLIENT_HOMEDIR/bin/dzil  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/dzil  $CLIENT_HOMEDIR/bin/dzil
 [ -L $CLIENT_HOMEDIR/bin/cpanm ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm $CLIENT_HOMEDIR/bin/cpanm
 [ -L $CLIENT_HOMEDIR/bin/starman ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/starman $CLIENT_HOMEDIR/bin/starman
+[ -L $CLIENT_HOMEDIR/bin/perlcritic ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perlcritic $CLIENT_HOMEDIR/bin/perlcritic
+[ -L $CLIENT_HOMEDIR/bin/perltidy ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perltidy $CLIENT_HOMEDIR/bin/perltidy
+[ -L $CLIENT_HOMEDIR/bin/nytprofmerge ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/nytprofmerge $CLIENT_HOMEDIR/bin/nytprofmerge
+[ -L $CLIENT_HOMEDIR/bin/nytprofhtml ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/nytprofhtml $CLIENT_HOMEDIR/bin/nytprofhtml
 [ -L /root/bin/perl  ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  /root/bin/perl
 [ -L /root/bin/cpanm ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm /root/bin/cpanm
 

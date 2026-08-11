@@ -1,7 +1,9 @@
 package Provisioner::Recipe::nvm;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use parent qw{Provisioner::Recipe};
 
@@ -25,7 +27,7 @@ installs the latest LTS Node.js via C<nvm install node>, and appends
 C<nvm use node> to the user's C<~/.bashrc> so that node is active in every
 login shell.
 
-Installation is idempotent — re-provisioning a host with nvm already installed
+Installation is idempotent  re-provisioning a host with nvm already installed
 will update the nvm installation in place and leave the node version unchanged.
 
 =head3 deps
