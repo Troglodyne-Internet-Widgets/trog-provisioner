@@ -45,6 +45,20 @@ sub args {
             admin_password => { type => 'string' },
             base_dn        => { type => 'string' },
             port           => { type => 'integer', default => 636 },
+            users          => {
+                type => 'array',
+                default => [],
+                items => {
+                    type => 'object',
+                    parameters => {
+                        gecos         => { type => 'string' },
+                        name          => { type => 'string' },
+                        shell         => { type => 'string' },
+                        ssh_import_id => { type => 'array', items => { type => 'string' } },
+                        sudo          => { type => 'string' },
+                    },
+                },
+            },
         },
     );
 }
@@ -58,10 +72,6 @@ sub enrich {
         my @parts = split /\./, $domain;
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
-
-    $opts{port} //= 636;
-    $opts{users} //= [];
-
     return %opts;
 }
 

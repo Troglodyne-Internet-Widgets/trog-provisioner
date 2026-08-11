@@ -48,11 +48,6 @@ sub args {
     );
 }
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-    return %opts;
-}
-
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {

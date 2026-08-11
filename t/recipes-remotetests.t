@@ -158,6 +158,13 @@ my %recipes_raw = (
         server => 'bogus.test',
         cert_dir => '/bogus',
     },
+    ldap => {
+        admin_password => 'bogus',
+    },
+    sssd => {
+        base_dn  => 'bogus',
+        ldap_uri => 'ldap://test.test',
+    },
 );
 # Make each so-named domain to provision do nothing but provision its own stuff
 foreach my $key ('data', @available) {
