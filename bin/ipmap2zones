@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
 
+#ABSTRACT: generate a zonefile for the configured guests
+
 package Trog::Provisioner::IPMap2Zones;
 
 use strict;

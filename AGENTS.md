@@ -32,6 +32,9 @@ perlcritic lib/Provisioner/Recipe/yourmodule.pm
 
 # Check POD documentation has no POD errors
 perldoc lib/Provisioner/Recipe/yourmodule.pm
+
+# Check that module is ready to release to CPAN
+dzil test && dzil clean
 ```
 
 ### Testing

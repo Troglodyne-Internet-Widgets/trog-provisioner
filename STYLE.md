@@ -75,4 +75,10 @@ What it does.
 
 =cut
 ```
+## Scripts in bin/
 
+Leverage `Pod::Usage::usage()` to produce `--help` output.
+
+Use `Getopt::Long::GetOptionsFromArray()` to parse args.
+
+Always follow the modulino pattern (script has a package declaration, and executes `main(@ARGV) unless caller;` at the end of the script to run.
