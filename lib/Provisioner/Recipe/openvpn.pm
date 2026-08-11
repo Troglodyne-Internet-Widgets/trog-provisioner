@@ -70,6 +70,7 @@ sub enrich {
 # (e.g. 24). Used to render iptables/MASQUERADE source CIDRs.
 sub _netmask_to_cidr {
     my ($mask) = @_;
+    $mask //='';
     my $bin = unpack 'B32', pack 'C4', split /\./, $mask;
     return ( $bin =~ tr/1// );
 }

@@ -111,8 +111,12 @@ my %required_config = (
         basedir    => 'Code',
     },
     nginxproxy => {
-        proxy_uri  => 'run/app.sock',
-        static_dir => 'www/static',
+        vhosts => {
+            8080 => {
+                proxy_uri  => 'run/app.sock',
+                static_dir => 'www/static',
+            },
+        },
     },
     letsencrypt => {
         registrar => { type => 'route53', user => 'foo', key => 'bar' },
@@ -184,11 +188,7 @@ rejects_missing( 'mariadb', { dumpfile => 'd.sql', version => '10' }, 'root_pw' 
 rejects_missing( 'mariadb', { root_pw => 'x', version => '10'     }, 'dumpfile' );
 rejects_missing( 'mariadb', { root_pw => 'x', dumpfile => 'd.sql' }, 'version'  );
 
-rejects_missing( 'nginxproxy', { static_dir => 'www/static' }, 'proxy_uri' );
-rejects_missing( 'nginxproxy', { proxy_uri  => 'run/app.sock' }, 'static_dir' );
-
 rejects_missing( 'adminconfig', {},                              'skel'    );
-rejects_missing( 'tcms',        {},                              'tcms_dir' );
 rejects_missing( 'imagemagick', {},                              'version'  );
 rejects_missing( 'pdns',        {},                              'api_key'  );
 
@@ -255,6 +255,8 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
         smtp_user      => 'notify@test.test',
         smtp_pass      => 'smtp-pass',
         smtp_domain    => 'test.test',
+        redis_host     => '127.0.0.1',
+        redis_port     => 6379,
         modules        => ['nginxproxy', 'redis'],
     );
     my $out;
