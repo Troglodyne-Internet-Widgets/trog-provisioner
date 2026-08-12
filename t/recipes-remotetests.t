@@ -187,7 +187,7 @@ $recipes_raw{_base} = {
             type => "bogus",
             user => "bogus",
             key  => "bogus",
-        }
+        },
     },
     data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };
@@ -213,8 +213,14 @@ done_testing();
 sub test_recipe {
     my $recipe = shift;
     require_ok( "$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm" ) unless Provisioner::Utils::already_required("Provisioner/Recipe/$recipe.pm");
+
+    my %opt = (
+        # Some recipes like ufw use this
+        output_dir => $tmpdir,
+    );
+
     no strict 'refs';
-    my $r = "Provisioner::Recipe::$recipe"->new();
+    my $r = "Provisioner::Recipe::$recipe"->new(%opt);
     use strict;
 
     my @tests = $r->tests();
