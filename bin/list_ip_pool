@@ -102,7 +102,7 @@ sub main {
         return 0;
     }
 
-    printf "IP Pool — %d total, %d assigned, %d available\n\n",
+    printf "IP Pool:  %d total, %d assigned, %d available\n\n",
       scalar(@pool_ips), scalar(@used), scalar(@available);
 
     if ( @used && $assigned ) {
@@ -118,7 +118,7 @@ sub main {
         }
     }
     else {
-        print "Pool exhausted — no IPs available.\n";
+        print "Pool exhausted:  no IPs available.\n";
     }
 
 }
