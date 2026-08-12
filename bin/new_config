@@ -10,6 +10,7 @@ use warnings FATAL => 'all';
 no warnings qw{experimental};
 use feature qw{state};
 use warnings;
+use re '/aa';
 
 use FindBin;
 use FindBin::libs;

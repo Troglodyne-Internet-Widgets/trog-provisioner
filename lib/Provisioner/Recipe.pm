@@ -6,6 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
+use re '/aa';
 
 use List::Util qw{any};
 use Text::Xslate;

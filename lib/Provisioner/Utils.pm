@@ -3,7 +3,8 @@ package Provisioner::Utils;
 use 5.041;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
+use re '/aa';
 
 use List::Util qw{any};
 

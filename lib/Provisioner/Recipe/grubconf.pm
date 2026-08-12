@@ -4,6 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
+use re '/aa';
 
 =head1 Provisioner::Recipe::grubconf
 

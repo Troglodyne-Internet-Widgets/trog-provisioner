@@ -4,6 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
+use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
@@ -45,7 +46,7 @@ Touches the file '/root/backup_in_progress' while running in case you want to us
 
 Logs backup output to /var/log/backups/$HOST.log, and rotates the logs.
 
-You'll probably want to use a separate disk mounted as the base_dir via L<Provisioner::Recipe::extradisk> to persist backups between deploys.
+You'll probably want to use a separate disk mounted as the base_dir via L<Provisioner::Recipe::mounts> to persist backups between deploys.
 
 =cut
 

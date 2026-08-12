@@ -4,6 +4,7 @@ use 5.041;
 
 use strict;
 use warnings;
+use re '/aa';
 
 use parent qw{JSON::Validator::Schema::OpenAPIv3};
 

@@ -16,6 +16,7 @@ allow-unsafe = 1
 [ValuesAndExpressions::PreventSQLInjection]
 [CodeLayout::RequireASCII]
 [RegularExpressions::RequireDefault]
+strict = 1
 # PEBCAK catches
 [BuiltinFunctions::ProhibitDeleteOnArrays]
 [Subroutines::ProhibitAmbiguousFunctionCalls]

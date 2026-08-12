@@ -4,6 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
+use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
@@ -242,7 +243,7 @@ sub deps {
           build-essential
         };
         # libolm is only strictly required when messaging_provider=matrix
-        # with E2EE on, but it's small and the host is single-purpose 
+        # with E2EE on, but it's small and the host is single-purpose
         # always include so the pip install of matrix-nio[e2e] never
         # fails for want of a header.
         push @pkgs, qw{libolm-dev libffi-dev};
