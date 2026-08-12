@@ -66,7 +66,7 @@ mirror_github_source() {
 
 fetch_admin_uid
 if [ -z "$ADMIN_UID" ]; then
-    echo "Could not fetch gogs admin UID — is gogs running?" >&2
+    echo "Could not fetch gogs admin UID - is gogs running?" >&2
     exit 1
 fi
 

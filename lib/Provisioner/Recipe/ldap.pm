@@ -72,7 +72,7 @@ sub enrich {
     # Derive base_dn from domain: example.com -> dc=example,dc=com
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
-        my @parts = split /\./, $domain;
+        my @parts = split( '.', $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
     return %opts;

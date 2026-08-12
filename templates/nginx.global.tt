@@ -1,4 +1,4 @@
-# Apply kernel backlog settings — must happen before nginx starts
+# Apply kernel backlog settings - must happen before nginx starts
 mv nginx.sysctl.conf /etc/sysctl.d/60-nginx-backlog.conf
 chown root:root /etc/sysctl.d/60-nginx-backlog.conf
 chmod 0644 /etc/sysctl.d/60-nginx-backlog.conf

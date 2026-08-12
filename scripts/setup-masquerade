@@ -17,7 +17,7 @@ MASQUERADE rules for the given C<SUBNET=INTERFACE> pairs.
 ufw does not expose masquerade rules through its app rule mechanism, so this
 mirrors the C<setup-port-forwards> pattern: hand-edit C</etc/ufw/before.rules>
 to inject a C<*nat> table block above the existing C<*filter> block. Re-runs
-are safe — existing rules are detected and skipped, and the C<*nat> header is
+are safe. Existing rules are detected and skipped, and the C<*nat> header is
 only written when no such block already exists.
 
 If the C<ufw> service is active, the rules are applied via C<ufw reload>.

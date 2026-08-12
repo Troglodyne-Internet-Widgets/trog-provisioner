@@ -1,4 +1,4 @@
-# Kernel backlog tuning for nginx — managed by provisioner
+# Kernel backlog tuning for nginx - managed by provisioner
 # See: https://docs.nginx.com/nginx/admin-guide/web-server/serving-static-content/#optimize-the-backlog-queue
 
 # Maximum socket listen backlog; must be >= nginx listen backlog value

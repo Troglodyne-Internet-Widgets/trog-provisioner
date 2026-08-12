@@ -1,6 +1,6 @@
 #!/bin/bash
 # Initialise a single-node Garage cluster layout and create configured buckets.
-# Idempotent — safe to run multiple times.
+# Idempotent - safe to run multiple times.
 
 set -euo pipefail
 

@@ -85,7 +85,7 @@ email:
   notif_from: "%(app)s chat server <[% smtp_user %]@[% smtp_domain %]>"
 [% IF modules.grep('redis').size() %]
 
-# Redis pub/sub — enabled because redis recipe is co-loaded on this host
+# Redis pub/sub - enabled because redis recipe is co-loaded on this host
 redis:
   enabled: true
   host: "[% redis_host %]"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# PostgreSQL logical backup script — run nightly, keeps 7 days of dumps.
+# PostgreSQL logical backup script - run nightly, keeps 7 days of dumps.
 # Dumps global objects (roles/tablespaces) once, then each database in parallel
 # using pg_dump --format=directory (which itself parallelises at table-level).
 set -euo pipefail
@@ -16,7 +16,7 @@ sudo -u postgres pg_dumpall --globals-only | pigz > "$DEST/globals.sql.gz"
 
 dump_db() {
     local db="$1"
-    # directory format writes one file per table — allows pg_restore --table
+    # directory format writes one file per table - allows pg_restore --table
     sudo -u postgres pg_dump --format=directory --jobs="$JOBS" \
         --file="$DEST/$db" "$db"
 }

@@ -4,7 +4,7 @@ Use `perltidy` on your perl code when done editing, we have a .perltidyrc
 
 ## Characters and UTF-8
 
-Never use any kind of character but ASCII in perl source files.
+Never use any kind of character but ASCII in perl source files, nor in templates.
 Never `use utf8`.
 Never `use feature 'unicode_strings'.
 

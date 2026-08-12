@@ -1,4 +1,4 @@
-# chrony.conf — managed by provisioner, do not edit by hand
+# chrony.conf - managed by provisioner, do not edit by hand
 [% FOR server IN servers %]
 pool [% server %] iburst
 [% END -%]

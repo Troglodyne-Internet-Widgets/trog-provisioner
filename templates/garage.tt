@@ -4,7 +4,7 @@ id garage 2>/dev/null || useradd -r -d [% data_dir %] -s /usr/sbin/nologin garag
 mkdir -p '[% data_dir %]' '[% metadata_dir %]'
 chown -R garage:garage '[% data_dir %]' '[% metadata_dir %]'
 chmod 0750 '[% data_dir %]' '[% metadata_dir %]'
-# Download garage binary (idempotent — skipped if same version already installed)
+# Download garage binary (idempotent - skipped if same version already installed)
 if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/null | grep -qF '[% version %]'; then \
     curl -fsSL \
         -o /usr/local/bin/garage.tmp \
@@ -12,7 +12,7 @@ if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/nu
     chmod +x /usr/local/bin/garage.tmp && \
     mv /usr/local/bin/garage.tmp /usr/local/bin/garage; \
 fi
-# Install config (mode 0600 — contains rpc_secret)
+# Install config (mode 0600 - contains rpc_secret)
 install -m 0600 -o garage -g garage garage.toml /etc/garage.toml
 # Install systemd service and init script
 install -m 0644 garage.service /etc/systemd/system/garage.service

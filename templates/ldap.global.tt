@@ -18,7 +18,7 @@ systemctl restart slapd
 # Open firewall for LDAPS
 ufw allow [% port %]/tcp comment 'LDAPS'
 
-# Seed base tree and users (idempotent — errors on existing entries are ignored)
+# Seed base tree and users (idempotent - errors on existing entries are ignored)
 ldapadd -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif; /bin/true
 rm -f seed.ldif
 

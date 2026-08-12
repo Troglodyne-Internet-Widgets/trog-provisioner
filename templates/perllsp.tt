@@ -2,7 +2,7 @@
 npm install -g perlnavigator-server
 
 # Install vim-lsp plugin family into admin user's native vim pack directory.
-# vim 8+ loads packages from ~/.vim/pack/*/start/ automatically — no plugin manager needed.
+# vim 8+ loads packages from ~/.vim/pack/*/start/ automatically - no plugin manager needed.
 mkdir -p /home/[% admin_user %]/.vim/pack/lsp/start
 
 git clone --quiet --depth 1 "https://github.com/prabirshrestha/async.vim"            /home/[% admin_user %]/.vim/pack/lsp/start/async

@@ -1,4 +1,4 @@
-# Create torrent storage directory — readable by nginx (www-data)
+# Create torrent storage directory - readable by nginx (www-data)
 mkdir -p [% install_dir %]/[% domain %]/torrents
 chown debian-deluged:www-data [% install_dir %]/[% domain %]/torrents
 chmod 0750 [% install_dir %]/[% domain %]/torrents

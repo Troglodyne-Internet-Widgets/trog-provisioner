@@ -1,12 +1,12 @@
-# Kōan — autonomous coding bot
+# Kōan - autonomous coding bot
 #
 # Layout (KOAN_ROOT is a subdir of the koan user's home so we can clone
 # into a fresh dir; the parent already exists from the service_user
 # target which would otherwise break `git clone`):
 #
 #   [% install_dir %]/[% domain %]/             koan user $HOME (.ssh, .gitconfig, .venv)
-#   [% install_dir %]/[% domain %]/koan/        repo checkout — KOAN_ROOT
-#   [% install_dir %]/[% domain %]/koan/koan/   python package — PYTHONPATH/WorkingDir
+#   [% install_dir %]/[% domain %]/koan/        repo checkout - KOAN_ROOT
+#   [% install_dir %]/[% domain %]/koan/koan/   python package - PYTHONPATH/WorkingDir
 #   [% install_dir %]/[% domain %]/koan/.env    secrets (0640 root:[% user %])
 #   [% install_dir %]/[% domain %]/koan/instance/  bot memory/journal/missions (persisted)
 #   [% install_dir %]/[% domain %]/koan/logs/      service log files (persisted)
@@ -15,11 +15,11 @@
 #   /etc/systemd/system/koan-awake.service      messaging bridge
 
 # Clone (or refresh) the koan repo into KOAN_ROOT.  Target dir must NOT
-# exist for `git clone`, hence the subdir — service_user already created
+# exist for `git clone`, hence the subdir - service_user already created
 # the parent, which would block a top-level clone.
 # Explicit per-command HOME= prefix because setup.tmpl runs us out of
 # atd which doesn't seed $HOME; git/npm/gh as root crash without it.
-# Convention matches tcms.tt — HOME points at the service user's dir
+# Convention matches tcms.tt - HOME points at the service user's dir
 # so any global config written here ends up where the bot will read it.
 if [ ! -d '[% install_dir %]/[% domain %]/koan/.git' ]; then \
     HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/koan'; \
@@ -59,7 +59,7 @@ runuser -u '[% user %]' -- '[% install_dir %]/[% domain %]/.venv/bin/pip' instal
 # first run.  CLAUDE_CODE_OAUTH_TOKEN (in .env) handles the actual bearer
 # auth; Claude only needs hasCompletedOnboarding:true to not attempt a
 # browser login flow it can't complete in a headless service context.
-# Guard: preserve the file if it already exists — on re-provision it will
+# Guard: preserve the file if it already exists - on re-provision it will
 # hold fuller account state (written by Claude after first successful call)
 # that restores intact via remote_files; only a genuinely fresh VM needs
 # this seed.
@@ -71,7 +71,7 @@ fi
 [% END %]
 
 [% IF messaging_provider == 'matrix' && matrix_e2ee && matrix_password && !matrix_access_token %]
-# Matrix E2EE bootstrap — runs once.  Mints a brand-new device for the bot
+# Matrix E2EE bootstrap - runs once.  Mints a brand-new device for the bot
 # (reusing a device_id silently breaks Megolm), captures the access token,
 # writes everything to instance/matrix/credentials.env (0600).  The systemd
 # units load that file via a second EnvironmentFile=.
@@ -90,7 +90,7 @@ fi
 [% END %]
 
 [% IF github_ssh_privkey %]
-# Bot SSH identity — paired pubkey is registered on the bot's GitHub
+# Bot SSH identity - paired pubkey is registered on the bot's GitHub
 # account both as an Auth key (push) and Signing key (commit verify).
 # Lives under ~[% user %]/.ssh (the user $HOME, NOT KOAN_ROOT) so it
 # survives re-clones of the repo.
@@ -127,7 +127,7 @@ chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.config/git/allowe
 runuser -u '[% user %]' -- git config --global gpg.ssh.allowedSignersFile '[% install_dir %]/[% domain %]/.config/git/allowed_signers'
 [% END %]
 
-# gh CLI auth — pre-seed hosts.yml so the bot sees itself as already
+# gh CLI auth - pre-seed hosts.yml so the bot sees itself as already
 # logged in (no interactive `gh auth login` required, no gh subcommands
 # failing with "not logged into github.com").  git_protocol is baked
 # into the file based on whether an ssh key is configured, so subsequent
@@ -136,11 +136,11 @@ runuser -u '[% user %]' -- git config --global gpg.ssh.allowedSignersFile '[% in
 install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.config/gh'
 install -o '[% user %]' -g '[% user %]' -m 0600 koan-gh-hosts.yml '[% install_dir %]/[% domain %]/.config/gh/hosts.yml'
 
-# gh HTTPS credential helper — harmless when SSH is set up (the SSH
+# gh HTTPS credential helper - harmless when SSH is set up (the SSH
 # remote URLs take precedence), genuinely needed when it isn't.
 sudo -u [% user %] GH_TOKEN='[% github_token %]' gh auth setup-git -h github.com
 
-# Project repos — clone any project with a github_url to its declared
+# Project repos - clone any project with a github_url to its declared
 # path.  Idempotent: `if [ ! -d .git ]` skips on re-provision.  Runs as
 # [% user %] so the SSH key + ssh-protocol gh config above take effect;
 # parent dir is pre-created koan-owned so the runuser-ed clone can write.
@@ -170,7 +170,7 @@ systemctl enable koan-awake.service
 systemctl enable koan.service
 
 [% IF messaging_provider == 'matrix' %]
-# Matrix federation/homeserver port — `default deny outgoing` from the
+# Matrix federation/homeserver port - `default deny outgoing` from the
 # ufw recipe blocks 8448 by default.  Queued post-run so it survives
 # `ufw reset` in the ufw recipe (which runs alphabetically after koan).
 [% script_dir %]/queue_postrun_task ufw allow out 8448

@@ -1,6 +1,6 @@
-" PerlNavigator LSP configuration — managed by provisioner, do not edit by hand.
+" PerlNavigator LSP configuration,  managed by provisioner, do not edit by hand.
 [% IF modules.grep('perl').size() -%]
-" perl recipe is active — use the custom perlbrew perl when available.
+" perl recipe is active, use the custom perlbrew perl when available.
 let s:perl_path = glob('/opt/perl5/*/bin/perl')
 let s:perl_path = !empty(s:perl_path) ? split(s:perl_path, "\n")[0] : '[% perl_path %]'
 [% ELSE -%]

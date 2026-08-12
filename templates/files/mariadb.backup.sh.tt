@@ -1,5 +1,5 @@
 #!/bin/bash
-# MariaDB logical backup script — run nightly, keeps 7 days of dumps.
+# MariaDB logical backup script - run nightly, keeps 7 days of dumps.
 # Dumps each database per-table (data+schema), grants, views, and routines.
 # All dumps are pigz-compressed.  Per-table and per-database jobs run in parallel.
 set -euo pipefail
@@ -27,7 +27,7 @@ dump_db() {
             | pigz > "$dbdir/$table.sql.gz"
     done
 
-    # Views only — dump structure, filter to view objects
+    # Views only - dump structure, filter to view objects
     $MYSQL -sN -e \
         "SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$db'" \
         | while read -r view; do

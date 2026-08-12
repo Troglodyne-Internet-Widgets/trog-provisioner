@@ -11,7 +11,7 @@ User=[% user %]
 Group=[% user %]
 WorkingDirectory=[% install_dir %]/[% domain %]/koan/koan
 EnvironmentFile=[% install_dir %]/[% domain %]/koan/.env
-# Loaded if present — written by `app.matrix_login` on first provision when
+# Loaded if present - written by `app.matrix_login` on first provision when
 # the bootstrap (matrix_password) path is in use.  The leading `-` makes
 # systemd tolerate the file's absence on first boot.
 EnvironmentFile=-[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env

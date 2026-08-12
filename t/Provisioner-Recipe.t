@@ -26,7 +26,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
         template_dirs   => [$tdir],
     }, 'Provisioner::Recipe';
 
-    # has_global_template — no .global.tt yet
+    # has_global_template - no .global.tt yet
     ok( !$with_global->has_global_template(),    'has_global_template false when file absent' );
     ok( !$without_global->has_global_template(), 'has_global_template false for noglobal recipe' );
 
@@ -38,7 +38,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     ok( $with_global->has_global_template(),     'has_global_template true after file created' );
     ok( !$without_global->has_global_template(), 'has_global_template still false for noglobal recipe' );
 
-    # Multiple template dirs — found in second dir
+    # Multiple template dirs - found in second dir
     my $tdir2 = tempdir( CLEANUP => 1 );
     open my $fh2, '>', "$tdir2/other.global.tt" or die $!;
     print $fh2 "other\n";
@@ -51,7 +51,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     }, 'Provisioner::Recipe';
     ok( $multi_dir->has_global_template(), 'has_global_template searches all template_dirs' );
 
-    # Rendering tests — need a full recipe object via new()
+    # Rendering tests - need a full recipe object via new()
     open my $tt_fh, '>', "$tdir/widget.tt" or die $!;
     print $tt_fh "domain=[% domain %]\n";
     close $tt_fh;
