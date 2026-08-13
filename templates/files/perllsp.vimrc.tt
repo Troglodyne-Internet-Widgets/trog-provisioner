@@ -17,7 +17,8 @@ if executable('perlnavigator')
         \     'perlPath': s:perl_path,
         \     'enableWarnings': v:true,
         \     'perlcriticProfile': '/etc/perlcriticrc',
-        \     'perltidyProfile':   '/etc/perltidyrc'
+        \     'perltidyProfile':   '/etc/perltidyrc',
+        \     "perlcriticMessageFormat": "%m [Policy: %p] - %a | Docs: https://metacpan.org/pod/Perl::Critic::Policy::%p"
         \   },
         \ },
         \ })
