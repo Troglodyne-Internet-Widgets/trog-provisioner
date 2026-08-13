@@ -16,6 +16,8 @@ if executable('perlnavigator')
         \   'perlnavigator': {
         \     'perlPath': s:perl_path,
         \     'enableWarnings': v:true,
+        \     'perlcriticProfile': '/etc/perlcriticrc',
+        \     'perltidyProfile':   '/etc/perltidyrc'
         \   },
         \ },
         \ })

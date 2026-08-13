@@ -43,6 +43,13 @@ sub args {
     );
 }
 
+sub template_files {
+    return (
+        'perl.critic.rc.tt' => 'perl.critic.rc',
+        'perl.tidy.rc.tt'   => 'perl.tidy.rc',
+    );
+}
+
 sub tests {
     return qw{perl.tt};
 }
