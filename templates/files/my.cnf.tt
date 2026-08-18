@@ -23,12 +23,12 @@ long_query_time = 30
 [client]
 socket=/opt/mysql/mysql.sock
 user=root
-password=Descent666!
+password=[% root_pw %]
 
 [mysqlcheck]
 socket=/opt/mysql/mysql.sock
 user=root
-password=Descent666!
+password=[% root_pw %]
 
 [mariabackup]
 socket=/opt/mysql/mysql.sock
