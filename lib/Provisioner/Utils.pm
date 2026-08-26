@@ -1,5 +1,7 @@
 package Provisioner::Utils;
 
+#ABSTRACT: Assorted helpers shared across Provisioner modules.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::mariadb;
 
+#ABSTRACT: Set up MariaDB and load the provided dump.
+
 use 5.041;
 
 use strict;

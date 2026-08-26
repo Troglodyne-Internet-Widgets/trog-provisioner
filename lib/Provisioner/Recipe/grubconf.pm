@@ -1,5 +1,7 @@
 package Provisioner::Recipe::grubconf;
 
+#ABSTRACT: Configure the grub kernel command line.
+
 use 5.041;
 
 use strict;

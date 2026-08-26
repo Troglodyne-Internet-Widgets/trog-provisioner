@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nosnap;
 
+#ABSTRACT: Rip snap out of the system root and branch.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::garage;
 
+#ABSTRACT: Install and configure the Garage S3-compatible object store.
+
 use 5.041;
 
 use strict;

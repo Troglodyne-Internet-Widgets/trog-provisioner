@@ -1,5 +1,7 @@
 package JSON::Validator::Schema::Troglodyne;
 
+#ABSTRACT: Troglodyne extensions to the OpenAPIv3 schema validator.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::claude;
 
+#ABSTRACT: Install claude-code globally.
+
 use 5.041;
 
 use strict;

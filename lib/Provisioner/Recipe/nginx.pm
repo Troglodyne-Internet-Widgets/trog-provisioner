@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nginx;
 
+#ABSTRACT: Set up nginx on the server.
+
 use 5.041;
 
 use strict;

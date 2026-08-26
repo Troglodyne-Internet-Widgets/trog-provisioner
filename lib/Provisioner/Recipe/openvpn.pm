@@ -1,5 +1,7 @@
 package Provisioner::Recipe::openvpn;
 
+#ABSTRACT: Set up an OpenVPN server with an easy-rsa PKI.
+
 use 5.041;
 
 use strict;

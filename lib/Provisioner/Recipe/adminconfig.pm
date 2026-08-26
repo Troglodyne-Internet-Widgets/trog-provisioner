@@ -1,5 +1,7 @@
 package Provisioner::Recipe::adminconfig;
 
+#ABSTRACT: Set up the admin user's skel and packages.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::admincode;
 
+#ABSTRACT: Clone the admin user's git repositories onto the host.
+
 use 5.041;
 
 use strict;

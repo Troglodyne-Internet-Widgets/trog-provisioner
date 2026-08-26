@@ -1,5 +1,7 @@
 package Provisioner::Recipe::koan;
 
+#ABSTRACT: Install and run the Koan autonomous coding bot.
+
 use 5.041;
 
 use strict;

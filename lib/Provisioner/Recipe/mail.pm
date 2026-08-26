@@ -1,5 +1,7 @@
 package Provisioner::Recipe::mail;
 
+#ABSTRACT: Set up and configure a full mailserver stack.
+
 use 5.041;
 
 use strict;

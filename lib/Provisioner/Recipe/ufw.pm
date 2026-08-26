@@ -1,5 +1,7 @@
 package Provisioner::Recipe::ufw;
 
+#ABSTRACT: Set up firewall rules for the enabled recipes.
+
 use 5.041;
 
 use strict;

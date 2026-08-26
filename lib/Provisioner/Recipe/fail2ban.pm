@@ -1,5 +1,7 @@
 package Provisioner::Recipe::fail2ban;
 
+#ABSTRACT: Set up fail2ban rules for the configured recipes.
+
 use 5.041;
 
 use strict;

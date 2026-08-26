@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nvm;
 
+#ABSTRACT: Install nvm and the latest LTS node for the configured user.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::letsencrypt;
 
+#ABSTRACT: Issue and install TLS certificates via dehydrated and DNS DCV.
+
 use 5.041;
 
 use strict;

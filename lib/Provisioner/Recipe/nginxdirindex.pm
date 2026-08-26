@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nginxdirindex;
 
+#ABSTRACT: Serve browsable directory listings over nginx.
+
 use 5.041;
 
 use strict;

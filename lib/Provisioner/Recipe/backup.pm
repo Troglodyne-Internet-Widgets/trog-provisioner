@@ -1,5 +1,7 @@
 package Provisioner::Recipe::backup;
 
+#ABSTRACT: Back up host files offsite to a backup destination.
+
 use 5.041;
 
 use strict;

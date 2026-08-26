@@ -1,5 +1,7 @@
 package Provisioner::Recipe::postgres;
 
+#ABSTRACT: Set up PostgreSQL and load the provided dump.
+
 use 5.041;
 
 use strict;

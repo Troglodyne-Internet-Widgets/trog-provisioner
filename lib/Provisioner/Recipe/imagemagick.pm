@@ -1,5 +1,7 @@
 package Provisioner::Recipe::imagemagick;
 
+#ABSTRACT: Build and install ImageMagick with perl bindings from source.
+
 use 5.041;
 
 use strict;

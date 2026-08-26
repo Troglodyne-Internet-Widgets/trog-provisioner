@@ -1,5 +1,7 @@
 package Provisioner::Recipe::perllsp;
 
+#ABSTRACT: Install PerlNavigator and configure vim to use it.
+
 use 5.041;
 
 use strict;

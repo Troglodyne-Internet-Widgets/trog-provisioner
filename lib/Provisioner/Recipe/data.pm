@@ -1,5 +1,7 @@
 package Provisioner::Recipe::data;
 
+#ABSTRACT: Schlep data from the hypervisor onto the guest.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::cron;
 
+#ABSTRACT: Set up the root and service user crontabs.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::roundcube;
 
+#ABSTRACT: Install and configure the Roundcube webmail client.
+
 use 5.041;
 
 use strict;
@@ -19,13 +21,30 @@ In recipes.yaml:
 
     somedomain:
         roundcube:
-            version:
+            version: "1.6.9"
+            ipv6: true
 
 =head2 DESCRIPTION
 
-Set up the skel for the admin user specified in ipmap.cfg.
+Downloads the 'complete' Roundcube webmail tarball for the specified version from
+GitHub releases and installs it into $install_dir/webmail.$domain, served over
+php-fpm behind an nginx vhost at webmail.[domain] (port 80 redirects to 443).
 
-Optionally add in packages for the administrator to use on the provisioned host.
+Each domain gets its own php-fpm pool listening on a dedicated unix socket, so
+multiple roundcube installs can coexist on the same host.
+
+User data (contacts, identities, preferences) lives in a SQLite database in
+$install_dir/webmail.$domain_data, which is initialized from Roundcube's
+sqlite.initial.sql as it will not autocreate. That directory is registered in
+remote_files, so it is preserved across provisions and picked up by the
+'backup' recipe.
+
+Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, i.e. a
+host running L<Provisioner::Recipe::mail>. TLS uses the certificate provided by
+the 'letsencrypt' recipe, so ensure 'webmail' is in the aliases section of
+ipmap.cfg for your domain.
+
+Requires the nginx recipe.
 
 =cut
 

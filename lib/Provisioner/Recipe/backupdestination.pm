@@ -1,5 +1,7 @@
 package Provisioner::Recipe::backupdestination;
 
+#ABSTRACT: Act as the offsite rsync destination for host backups.
+
 use 5.041;
 
 use strict;

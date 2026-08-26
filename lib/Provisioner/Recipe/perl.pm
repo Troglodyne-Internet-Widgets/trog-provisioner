@@ -1,5 +1,7 @@
 package Provisioner::Recipe::perl;
 
+#ABSTRACT: Build and install the latest perl into /opt/perl5.
+
 use 5.041;
 
 use strict;

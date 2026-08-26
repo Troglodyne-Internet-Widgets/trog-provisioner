@@ -1,5 +1,7 @@
 package Provisioner::Recipe::pdns;
 
+#ABSTRACT: Set up the PowerDNS resolver and install DNS records.
+
 use 5.041;
 
 use strict;

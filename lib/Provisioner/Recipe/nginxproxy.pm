@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nginxproxy;
 
+#ABSTRACT: Set up caching nginx reverse proxy rules for the application.
+
 use 5.041;
 
 use strict;

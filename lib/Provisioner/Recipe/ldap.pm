@@ -1,5 +1,7 @@
 package Provisioner::Recipe::ldap;
 
+#ABSTRACT: Install and configure OpenLDAP as a domain identity server.
+
 use 5.041;
 
 use strict;

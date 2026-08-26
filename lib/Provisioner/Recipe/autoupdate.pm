@@ -1,5 +1,7 @@
 package Provisioner::Recipe::autoupdate;
 
+#ABSTRACT: Automatically install updates from the package manager.
+
 use 5.041;
 
 use strict;

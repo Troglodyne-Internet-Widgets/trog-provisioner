@@ -1,5 +1,7 @@
 package Provisioner::Recipe::ntp;
 
+#ABSTRACT: Install and configure chrony for NTP time synchronisation.
+
 use 5.041;
 
 use strict;

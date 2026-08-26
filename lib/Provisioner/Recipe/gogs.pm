@@ -1,5 +1,7 @@
 package Provisioner::Recipe::gogs;
 
+#ABSTRACT: Install and configure the Gogs self-hosted git service.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::Recipe::deluged;
 
+#ABSTRACT: Set up a Deluge seedbox with public HTTP downloads.
+
 use 5.041;
 
 use strict;

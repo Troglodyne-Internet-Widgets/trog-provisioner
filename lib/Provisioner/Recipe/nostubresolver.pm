@@ -1,5 +1,7 @@
 package Provisioner::Recipe::nostubresolver;
 
+#ABSTRACT: Remove systemd's stub resolver.
+
 use 5.041;
 
 use strict;

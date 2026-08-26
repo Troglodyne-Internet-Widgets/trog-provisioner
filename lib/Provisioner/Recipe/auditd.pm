@@ -1,5 +1,7 @@
 package Provisioner::Recipe::auditd;
 
+#ABSTRACT: Configure auditd rules to monitor the system.
+
 use 5.041;
 
 use strict;

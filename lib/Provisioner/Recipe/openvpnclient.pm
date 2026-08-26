@@ -1,5 +1,7 @@
 package Provisioner::Recipe::openvpnclient;
 
+#ABSTRACT: Connect the host to an OpenVPN server as a client.
+
 use 5.041;
 
 use strict;

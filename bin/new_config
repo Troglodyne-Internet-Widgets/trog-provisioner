@@ -2,6 +2,8 @@
 
 package Trog::Provisioner::Config::Generator;
 
+#ABSTRACT: Build provisioning configuration packages for VMs.
+
 use 5.041;
 
 use strict;

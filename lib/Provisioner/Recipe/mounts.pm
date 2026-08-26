@@ -1,5 +1,7 @@
 package Provisioner::Recipe::mounts;
 
+#ABSTRACT: Attach disks and fusemounts to the provisioned VM.
+
 use 5.041;
 
 use strict;

@@ -1,5 +1,7 @@
 package Provisioner::IPPool;
 
+#ABSTRACT: Shared static IP pool helpers for new_config and list_ip_pool.
+
 use 5.041;
 
 use strict;

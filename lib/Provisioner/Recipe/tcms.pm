@@ -1,5 +1,7 @@
 package Provisioner::Recipe::tcms;
 
+#ABSTRACT: Install and configure tCMS in the install dir.
+
 use 5.041;
 
 use strict;

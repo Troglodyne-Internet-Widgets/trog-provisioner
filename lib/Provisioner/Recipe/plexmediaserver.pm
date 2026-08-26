@@ -1,5 +1,7 @@
 package Provisioner::Recipe::plexmediaserver;
 
+#ABSTRACT: Install and configure Plex Media Server.
+
 use 5.041;
 
 use strict;

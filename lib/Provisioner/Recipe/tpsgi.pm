@@ -1,5 +1,7 @@
 package Provisioner::Recipe::tpsgi;
 
+#ABSTRACT: Set up TPSGI to run the deployed application.
+
 use 5.041;
 
 use strict;

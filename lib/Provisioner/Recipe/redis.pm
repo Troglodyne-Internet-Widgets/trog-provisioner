@@ -1,5 +1,7 @@
 package Provisioner::Recipe::redis;
 
+#ABSTRACT: Install and configure Redis.
+
 use 5.041;
 
 use strict;

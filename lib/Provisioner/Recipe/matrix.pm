@@ -1,5 +1,7 @@
 package Provisioner::Recipe::matrix;
 
+#ABSTRACT: Install and configure a Matrix Synapse homeserver.
+
 use 5.041;
 
 use strict;

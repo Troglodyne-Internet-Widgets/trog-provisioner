@@ -1,5 +1,7 @@
 package Provisioner::Recipe::sssd;
 
+#ABSTRACT: Configure SSSD so LDAP users can authenticate on the host.
+
 use 5.041;
 
 use strict;
