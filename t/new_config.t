@@ -12,6 +12,9 @@ use Test::Fatal qw{exception};
 # Because Config::Simple is incompatible with Test::MockFile
 use File::Temp;
 
+# Because this slurps in schema defs
+use JSON::Validator::Schema::Troglodyne;
+
 # We have to use any deps of the SUT that actually touch files in BEGIN
 use Text::Xslate;
 use Config::Simple;
