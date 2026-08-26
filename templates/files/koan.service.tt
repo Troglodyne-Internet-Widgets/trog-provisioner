@@ -1,5 +1,5 @@
 [Unit]
-Description=Kōan agent loop ([% domain %])
+Description=Koan agent loop ([% domain %])
 After=network-online.target koan-awake.service
 Wants=network-online.target
 Requires=koan-awake.service

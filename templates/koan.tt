@@ -1,4 +1,4 @@
-# Kōan - autonomous coding bot
+# Koan - autonomous coding bot
 #
 # Layout (KOAN_ROOT is a subdir of the koan user's home so we can clone
 # into a fresh dir; the parent already exists from the service_user

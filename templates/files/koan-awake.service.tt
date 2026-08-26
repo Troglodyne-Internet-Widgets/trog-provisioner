@@ -1,5 +1,5 @@
 [Unit]
-Description=Kōan messaging bridge ([% domain %])
+Description=Koan messaging bridge ([% domain %])
 After=network-online.target
 Wants=network-online.target
 PartOf=koan.service

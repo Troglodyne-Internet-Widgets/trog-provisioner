@@ -35,8 +35,8 @@ strict = 1
 [ValuesAndExpressions::ProhibitFiletest_rwxRWX]
 # Bikeshed
 [CognitiveComplexity::ProhibitExcessCognitiveComplexity]
-warn_level = 4
-info_level = 3
+warn_level = 40
+info_level = 30
 [Variables::ProhibitUselessInitialization]
 [PreferredModules]
 config = .preferred_modules.ini
