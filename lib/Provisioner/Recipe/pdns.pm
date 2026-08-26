@@ -64,7 +64,6 @@ sub enrich {
     if ($extras) {
         my $is_abs_path = index($extras, '/') == 0;
         $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
-        die "extra_records defined in [pdns] must be a readable text file (nothing at $extras)" unless -f $extras;
         $opts{extra_records} = File::Slurper::read_text($extras);
     }
 

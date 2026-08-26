@@ -107,6 +107,7 @@ sub enrich {
     $opts{targets} = [ uniq( @default_targets, @{ $opts{targets} } ) ];
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     die "key_file defined in [backupdestination] must exist in $kf" unless -f $kf;
 
     return %opts;

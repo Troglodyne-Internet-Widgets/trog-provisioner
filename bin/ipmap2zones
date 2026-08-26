@@ -70,10 +70,10 @@ sub main {
     $cfile      //= 'ipmap.cfg';
     $output_dir //= '.';
 
-    die "No ipmap available at $cfile\n"     unless -f $cfile;
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;
 
     my $c           = Config::Simple->new($cfile);
+    die "$Config::Simple::errstr\n" unless $c;
     my $global_conf = $c->param( -block => 'global' );
     my $ip_conf     = $c->param( -block => 'ips' );
     my $alias_conf  = $c->param( -block => 'aliases' ) // {};

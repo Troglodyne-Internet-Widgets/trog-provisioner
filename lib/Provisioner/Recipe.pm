@@ -258,6 +258,7 @@ Returns true if a C<$recipe.global.tt> exists in any configured template directo
 
 sub has_global_template {
     my ($self) = @_;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return !!any { -f "$_/$self->{global_template}" } @{ $self->{template_dirs} };
 }
 
@@ -269,6 +270,7 @@ Returns true if a C<$recipe.tt> exists in any configured template directory.
 
 sub has_template {
     my ($self) = @_;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return !!any { -f "$_/$self->{template}" } @{ $self->{template_dirs} };
 }
 

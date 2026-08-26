@@ -170,7 +170,6 @@ Where each path component past 'secret:' corresponds to group/key/parameter in a
 my ($cfile, $sfile, $pfile, $skip_ssh);
 
 sub get_config {
-    die "No ipmap available at $cfile" unless -f $cfile;
     my $c = Config::Simple->new($cfile);
     die $Config::Simple::errstr unless $c;
 
@@ -214,7 +213,6 @@ sub gather_needed_secrets {
 sub get_secrets {
     my %rmap = @_;
 
-    die "Must provide path to Keepass KDBX db" unless -f $sfile;
     die "Must provide at least one key" unless %rmap;
 
     # Get the password on STDIN
@@ -233,7 +231,7 @@ sub get_secrets {
         push(@{$keymap{$k}}, { route => $route, key => $v, what => $w });
     }
 
-    my $kdb = File::KeePass::KDBX->load_db($sfile, $pass) or die "Could not open provided kdbx";
+    my $kdb = File::KeePass::KDBX->load_db($sfile, $pass) or die "Could not open provided kdbx: got ($sfile)";
     $kdb->unlock() or die "Could not unlock provided kdbx";
     my %response;
     foreach my $group (keys(%keymap)) {
@@ -272,6 +270,7 @@ sub set_secrets {
 sub get_recipe_config {
     state $c;
     return $c if $c;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return {} unless -f $pfile;
     $c = YAML::XS::Load( File::Slurper::read_binary($pfile) );
     # Make sure we always look for recipes.d next to the recipes.yaml
@@ -280,6 +279,7 @@ sub get_recipe_config {
     File::Find::find( {
         wanted => sub {
             my $object = $_;
+            ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
             return unless (-f $object && $object =~ m/\.yaml$/);
             my $config = YAML::XS::Load( File::Slurper::read_binary($object) );
             # You have to put global things in the base recipes.yaml
@@ -467,6 +467,7 @@ sub handle_domain {
 
     my @data_users;
     my $data_users_f = "$data_config->{from}/$fqdn/users.yaml";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     if ( -f $data_users_f ) {
         my $data_users_yaml = YAML::XS::Load( File::Slurper::read_binary($data_users_f) );
         @data_users = @{ $data_users_yaml->{users} };
@@ -817,6 +818,7 @@ sub _get_sftp {
 
     my $key2use = "$cfg_dir/key.rsa";
     # Key may not be here yet
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     $key2use = undef unless -f $key2use;
 
     my $ssh          = Net::SFTP::Foreign->new(
@@ -854,6 +856,7 @@ sub resolve_template_loc {
     my ($libdirs, $template) = @_;
     foreach my $libdir ('.',@$libdirs) {
         my $possibiru = "$libdir/templates/$template";
+        ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
         return $possibiru if -f $possibiru;
     }
     die "Could not find relevant template $template!";

@@ -81,11 +81,10 @@ sub enrich {
     %$targets = ( %default_targets, %$targets );
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
-    die "key_file defined in [backupdestination] must exist in $kf" unless -f $kf;
 
     $opts{pubkey} = `ssh-keygen -yf "$kf"`;
     chomp $opts{pubkey};
-    die "Could not extract pubkey!" unless $opts{pubkey};
+    die "Could not extract pubkey from $kf!" unless $opts{pubkey};
 
     return %opts;
 }

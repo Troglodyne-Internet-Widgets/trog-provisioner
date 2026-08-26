@@ -111,6 +111,7 @@ sub _latest_garage_version {
 sub _rpc_secret {
     my ($self) = @_;
     my $secret_file = "$self->{output_dir}/rpc_secret.txt";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     if ( -f $secret_file ) {
         open( my $fh, '<', $secret_file ) or die "Cannot read $secret_file: $!";
         chomp( my $secret = <$fh> );
