@@ -339,6 +339,7 @@ sub main {
     return 0;
 }
 
+## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 sub handle_domain {
     my $domain = shift;
 
