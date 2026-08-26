@@ -19,7 +19,7 @@ use Text::Xslate::Bridge::TT2;
 use Net::IP;
 use List::Util qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
-use File::Slurper;
+use File::Slurper::Temp;
 
 =head1 ipmap2zones
 
@@ -116,7 +116,7 @@ sub main {
 
         my $zone    = $tt->render( 'files/pdns.zone.tt', \%vars );
         my $outfile = "$output_dir/$domain.zone";
-        File::Slurper::write_text( $outfile, $zone );
+        File::Slurper::Temp::write_binary( $outfile, $zone );
         print "Wrote $outfile\n";
     }
 

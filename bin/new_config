@@ -29,6 +29,8 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use List::Util qw{uniq any};
 use Net::SFTP::Foreign;
+use IO::Interface::Simple();
+use Archive::Tar();
 use File::Path qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
 use File::Copy qw{copy};
@@ -43,6 +45,7 @@ use IO::Prompter;
 
 use Provisioner::IPPool;
 use Provisioner::Utils;
+use Provisioner::Recipe::data;
 
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 Hash::Merge::set_behavior('STORAGE_PRECEDENT');
@@ -225,7 +228,7 @@ sub get_secrets {
     foreach my $route (keys(%rmap)) {
         die "Malformed key passed, must start with secret:" unless index($rmap{$route}, 'secret:') == 0;
         my $kv = substr($rmap{$route}, 7); #secret: is 7 chars
-        my ($k, $v, $w) = split(/\//, $kv);
+        my ( $k, $v, $w ) = split( '/', $kv );
         die "Malformed key passed '$kv', must be group/key/what" unless $k && $v && $w;
         $keymap{$k} //= [];
         push(@{$keymap{$k}}, { route => $route, key => $v, what => $w });
@@ -387,8 +390,12 @@ sub handle_domain {
     my $transfer_user = $global_conf->{transfer_user};
     die "Must set transfer_user in global section of ipmap.cfg.  This is the user which runs trog-provisioner on the HV." unless $transfer_user;
 
-    my $hv_ssh_port = qx#grep '^Port' /etc/ssh/sshd_config | awk '{print \$2}'#;
-    chomp $hv_ssh_port;
+    my $hv_ssh_port;
+    foreach my $line ( eval { File::Slurper::read_lines('/etc/ssh/sshd_config') } ) {
+        next unless $line =~ m{^\s*Port\s+(\d+)};
+        $hv_ssh_port = $1;
+        last;
+    }
     warn "Could not determine HV ssh port, assuming 22" unless $hv_ssh_port;
 
     $hv_ssh_port ||= 22;
@@ -556,7 +563,7 @@ sub handle_domain {
     $global_config->{transfer_user}   = $transfer_user;
     $global_config->{hv_ssh_port}     = $hv_ssh_port;
 
-    require Provisioner::Recipe::data unless Provisioner::Utils::already_required('Provisioner/Recipe/data.pm');
+    ## no critic(Subroutines::ProhibitAmbiguousFunctionCalls)
     my $do            = Provisioner::Recipe::data->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
     my @tests = $do->tests();
@@ -805,7 +812,28 @@ sub handle_domain {
     # Gzip the Makefile & generated configs
     print "Tarring up Makefile and generated configuration\n";
     unlink "$cfg_dir/data.tar.gz";
-    system( qw{tar -cz -C}, $cfg_dir, '-f', "$cfg_dir/data.tar.gz", "./Makefile", @generated, 'openssl.conf', 't/' );
+
+    my @members = ( 'Makefile', @generated, 'openssl.conf' );
+    File::Find::find(
+        sub {
+            my $rel = $File::Find::name;
+            $rel =~ s{^\Q$cfg_dir\E/}{};
+            push( @members, $rel );
+        },
+        "$cfg_dir/t"
+    );
+
+    my $tar = Archive::Tar->new();
+    $tar->add_files( map { "$cfg_dir/$_" } @members ) or die "Could not add files to $cfg_dir/data.tar.gz: " . Archive::Tar->error();
+
+    # add_files stores each path as given, so re-point the stored names at $cfg_dir
+    foreach my $member ( $tar->get_files() ) {
+        my $stored = $member->full_path();
+        $stored =~ s{^\Q$cfg_dir\E/}{};
+        $member->rename($stored);
+    }
+
+    $tar->write( "$cfg_dir/data.tar.gz", Archive::Tar::COMPRESS_GZIP() ) or die "Could not write $cfg_dir/data.tar.gz: " . Archive::Tar->error();
     print "Done.\n";
     return 0;
 }
@@ -832,9 +860,8 @@ sub _get_sftp {
 }
 
 sub get_hv_internal_ip {
-    my $ip = qx{ip addr show dev virbr0 | grep inet | head -n1 | awk '{print \$2}' | sed -E 's#/[0-9]+\$##'};
-    chomp $ip;
-    return $ip;
+    my $if = IO::Interface::Simple->new('virbr0') or return '';
+    return $if->address() // '';
 }
 
 sub _coerce_arrayref {

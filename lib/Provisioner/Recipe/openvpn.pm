@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use Socket qw{inet_aton};
+
 use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::openvpn
@@ -70,14 +72,16 @@ sub enrich {
     return %opts;
 }
 
-# TODO use something from cpan for this, or ask for it directly
 # Convert a dotted-quad netmask (e.g. 255.255.255.0) into a CIDR prefix length
 # (e.g. 24). Used to render iptables/MASQUERADE source CIDRs.
 sub _netmask_to_cidr {
     my ($mask) = @_;
-    $mask //='';
-    my $bin = unpack 'B32', pack 'C4', split /\./, $mask;
-    return ( $bin =~ tr/1// );
+
+    # Guard the shape before inet_aton(), which would otherwise resolve a
+    # non-dotted-quad as a hostname.
+    return 0 unless $mask && $mask =~ m{^\d{1,3}(?:\.\d{1,3}){3}$};
+    my $packed = inet_aton($mask) or return 0;
+    return unpack( '%32b*', $packed );
 }
 
 sub template_files {

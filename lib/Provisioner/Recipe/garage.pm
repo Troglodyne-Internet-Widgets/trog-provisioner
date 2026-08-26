@@ -10,6 +10,7 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Crypt::PRNG();
 use HTTP::Tiny;
 use JSON::PP;
 
@@ -117,9 +118,10 @@ sub _rpc_secret {
         chomp( my $secret = <$fh> );
         return $secret;
     }
-    my $secret = qx{openssl rand -hex 32};
-    chomp $secret;
-    die "openssl rand failed" unless $secret =~ /^[0-9a-f]{64}$/;
+
+    # 32 bytes -> the 64 hex chars garage expects for rpc_secret
+    my $secret = Crypt::PRNG::random_bytes_hex(32);
+    die "Could not generate rpc_secret" unless $secret =~ /^[0-9a-f]{64}$/;
     open( my $fh, '>', $secret_file ) or die "Cannot write $secret_file: $!";
     print $fh "$secret\n";
     close $fh;

@@ -82,8 +82,7 @@ sub enrich {
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
 
-    $opts{pubkey} = `ssh-keygen -yf "$kf"`;
-    chomp $opts{pubkey};
+    $opts{pubkey} = Provisioner::Utils::ssh_pubkey_from_private($kf);
     die "Could not extract pubkey from $kf!" unless $opts{pubkey};
 
     return %opts;
