@@ -331,6 +331,12 @@ sub provision_domain {
         sleep 1;
     }
     die "\nVM never came up!\n" unless $new_ip;
+
+    # Eject the CDROM we used for cloud-init
+    my $out = print qx{virsh attach-disk '$domain' '' sda --driver qemu --type cdrom --mode readonly};
+    chomp $out;
+    warn "Could not eject cdrom: $out" unless $out eq 'Disk attached successfully';
+
     print "\nAll Done!  The server should be live at $new_ip\n";
 
     return ($config->param('admin_user'), $new_ip);
