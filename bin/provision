@@ -611,7 +611,7 @@ sub mongle_network_configuration {
     my $dhcp_devname = $config->param('dhcp_devname');
     die "MUST SET dhcp_devname in provision.conf" unless $dhcp_devname;
     my $bridge_devname = $config->param('bridge_devname');
-    die "MUST SET bridge_devname in provision.conf" unless $dhcp_devname;
+    die "MUST SET bridge_devname in provision.conf" unless $bridge_devname;
 
     # We need two adapters, one on virbr0 and another on the bridge.
     # So, we need to figure out:
