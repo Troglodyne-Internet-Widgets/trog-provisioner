@@ -1,0 +1,240 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::SetupHV;
+
+use strict;
+use warnings;
+
+use File::Slurper qw{read_text write_text};
+use File::Copy qw{copy};
+use File::Path qw{make_path};
+use File::Which qw{which};
+use FindBin;
+
+# Sets up the hypervisor host environment.
+# Run as root. Safe to re-run (idempotent).
+
+my $TROG_PROVISIONER_REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
+my $PROVISIONERS_REPO     = 'https://github.com/Troglodyne-Internet-Widgets/provisioners.git';
+
+sub main {
+    clone_repos()          or return 1;
+    install_perl_deps()    or return 2;
+    setup_rsyslog_d()      or return 3;
+    setup_virtiofs()       or return 4;
+    setup_libvirt_apparmor() or return 5;
+    setup_apt_mirror()     or return 6;
+    setup_apt_mirror_cron() or return 7;
+    setup_nginx()          or return 8;
+    return 0;
+}
+
+sub clone_repos {
+    make_path('/opt');
+    for my $spec (
+        [ $TROG_PROVISIONER_REPO, '/opt/trog-provisioner' ],
+        [ $PROVISIONERS_REPO,     '/opt/provisioners'     ],
+    ) {
+        my ($url, $dest) = @$spec;
+        if (-d "$dest/.git") {
+            print "Repo already cloned at $dest, pulling latest...\n";
+            system('git', '-C', $dest, 'pull', '--ff-only') == 0
+                or do { warn "git pull failed for $dest\n"; return 0 };
+        } else {
+            print "Cloning $url -> $dest\n";
+            system('git', 'clone', $url, $dest) == 0
+                or do { warn "git clone failed for $url\n"; return 0 };
+        }
+    }
+    return 1;
+}
+
+sub install_perl_deps {
+    _apt_install('perl', 'cpanminus') or return 0;
+    for my $dir (qw{/opt/trog-provisioner /opt/provisioners}) {
+        next unless -d $dir;
+        print "Installing Perl deps in $dir...\n";
+        system('cpanm', '--installdeps', $dir) == 0
+            or do { warn "cpanm --installdeps failed for $dir\n"; return 0 };
+    }
+    return 1;
+}
+
+sub setup_rsyslog_d {
+    my $dir = '/etc/rsyslog.d';
+    unless (-d $dir) {
+        warn "$dir does not exist\n";
+        return 0;
+    }
+    # Ensure wheel group owns the dir and can write to it
+    my @wheel = getgrnam('wheel');
+    unless (@wheel) {
+        warn "wheel group does not exist\n";
+        return 0;
+    }
+    chown(0, $wheel[2], $dir) or do { warn "chown $dir failed: $!\n"; return 0 };
+    chmod(0775, $dir)         or do { warn "chmod $dir failed: $!\n"; return 0 };
+    print "rsyslog.d: wheel group can now write configs\n";
+    return 1;
+}
+
+sub setup_virtiofs {
+    my $dest    = '/usr/libexec/virtiofs-better';
+    my $source  = "$FindBin::Bin/../virtiofs-better";
+
+    # Fall back to the cloned repo location
+    $source = '/opt/trog-provisioner/virtiofs-better' unless -f $source;
+
+    unless (-f $source) {
+        warn "virtiofs-better source not found\n";
+        return 0;
+    }
+
+    copy($source, $dest) or do { warn "copy virtiofs-better failed: $!\n"; return 0 };
+    chmod(0755, $dest)   or do { warn "chmod virtiofs-better failed: $!\n"; return 0 };
+    print "virtiofs-better installed to $dest\n";
+
+    my $apparmor_profile = <<'END_APPARMOR';
+# This profile allows everything and only exists to give the
+# application a name instead of having the label "unconfined"
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile virtiofs-better /usr/libexec/virtiofs-better flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/virtiofs-better>
+}
+END_APPARMOR
+
+    write_text('/etc/apparmor.d/virtiofs-better', $apparmor_profile);
+    system(qw{apparmor_parser -r /etc/apparmor.d/virtiofs-better}) == 0
+        or warn "apparmor_parser reload failed (non-fatal)\n";
+    print "apparmor profile for virtiofs-better installed\n";
+    return 1;
+}
+
+sub setup_libvirt_apparmor {
+    my $override_dir  = '/etc/apparmor.d/abstractions/libvirt-qemu.d';
+    my $override_file = "$override_dir/override";
+
+    make_path($override_dir);
+
+    my $content = <<'END_OVERRIDE';
+/var/lib/libvirt/images** rwk,
+/opt/terraform/disks** rwk,
+END_OVERRIDE
+
+    write_text($override_file, $content);
+    print "libvirt-qemu apparmor override written to $override_file\n";
+
+    # Reload libvirt-qemu apparmor profile if it exists
+    my $qemu_profile = '/etc/apparmor.d/abstractions/libvirt-qemu';
+    if (-f $qemu_profile) {
+        system(qw{apparmor_parser -r}, $qemu_profile) == 0
+            or warn "apparmor_parser reload failed for libvirt-qemu (non-fatal)\n";
+    }
+    return 1;
+}
+
+sub setup_apt_mirror {
+    _apt_install('apt-mirror') or return 0;
+
+    my $mirror_list = '/etc/apt/mirror.list';
+    unless (-f $mirror_list) {
+        warn "$mirror_list not found after apt-mirror install\n";
+        return 0;
+    }
+
+    my $content = read_text($mirror_list);
+    if ($content !~ /noble/) {
+        # Replace the distro codename with noble (Ubuntu 24.04)
+        # apt-mirror ships with a default that references whatever release apt-mirror was built for
+        my $orig = $content;
+        $content =~ s/\b(?:kinetic|jammy|focal|bionic|xenial|lunar|mantic|impish|hirsute|groovy)\b/noble/g;
+        if ($content ne $orig) {
+            write_text($mirror_list, $content);
+            print "apt-mirror configured for noble\n";
+        }
+    } else {
+        print "apt-mirror already configured for noble\n";
+    }
+    return 1;
+}
+
+sub setup_apt_mirror_cron {
+    my $cron_file = '/etc/cron.daily/apt-mirror';
+    write_text($cron_file, "#!/bin/sh\napt-mirror\n");
+    chmod(0755, $cron_file) or do { warn "chmod $cron_file failed: $!\n"; return 0 };
+    print "apt-mirror daily cron installed\n";
+    return 1;
+}
+
+sub setup_nginx {
+    _apt_install('nginx') or return 0;
+
+    my $hv_ip = _get_virbr0_ip();
+    unless ($hv_ip) {
+        warn "Could not determine virbr0 IP; skipping nginx config\n";
+        return 0;
+    }
+
+    my $hostname = _hostname();
+    my $site_file = "/etc/nginx/sites-enabled/$hostname";
+
+    my $nginx_conf = <<"END_NGINX";
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $hv_ip;
+
+    location / {
+        gzip on;
+        sendfile on;
+        tcp_nopush on;
+        sendfile_max_chunk 1m;
+        autoindex on;
+        root /var/spool/apt-mirror/mirror/archive.ubuntu.com;
+    }
+}
+END_NGINX
+
+    write_text($site_file, $nginx_conf);
+    system(qw{nginx -t}) == 0
+        or do { warn "nginx config test failed\n"; return 0 };
+    system(qw{systemctl reload nginx}) == 0
+        or warn "nginx reload failed (non-fatal)\n";
+    print "nginx configured to serve apt mirror at http://$hv_ip/\n";
+    return 1;
+}
+
+# --- helpers ---
+
+sub _apt_install {
+    my @pkgs = @_;
+    my @missing = grep { !which($_) } @pkgs;
+    return 1 unless @missing;
+    print "Installing: @missing\n";
+    local $ENV{DEBIAN_FRONTEND} = 'noninteractive';
+    system('apt-get', 'install', '-y', @missing) == 0
+        or do { warn "apt-get install failed for @missing\n"; return 0 };
+    return 1;
+}
+
+sub _get_virbr0_ip {
+    my $out = `ip -4 addr show virbr0 2>/dev/null`;
+    return $1 if $out =~ /inet\s+([\d.]+)/;
+    # libvirt default
+    return '192.168.122.1';
+}
+
+sub _hostname {
+    chomp(my $h = `hostname`);
+    return $h || 'hv';
+}
+
+exit main(@ARGV) unless caller;
+1;
