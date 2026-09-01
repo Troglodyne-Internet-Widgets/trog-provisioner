@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "libvirt" {
-    uri = "qemu:///system"
+    uri = "%LIBVIRT_URI%"
 }
 
 %LIBVIRT_POOL_IMPORT%
@@ -18,7 +18,7 @@ resource "libvirt_pool" "tf_disks" {
     name = "tf_disks"
     type = "dir"
     target = {
-        path = "/opt/terraform/disks"
+        path = "%POOLPATH%"
     }
     lifecycle {
         prevent_destroy = true

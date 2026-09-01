@@ -7,7 +7,9 @@ use warnings;
 
 use Cwd qw{abs_path};
 use FindBin;
+use lib "$FindBin::Bin/../lib";
 use Config::Simple();
+use Trog::HV();
 use File::Slurper();
 use List::Util qw{any};
 use File::Which qw{which};
@@ -15,20 +17,54 @@ use Getopt::Long qw{GetOptionsFromArray};
 
 our $domain_dir;
 
+# The hypervisor we're destroying on.  Defaults to this machine.
+our $hv;
+
+# Where terraform's config + state live on this machine.
+our $tf_dir;
+
+sub hv {
+    $hv //= Trog::HV->new();
+    return $hv;
+}
+
+sub tf_dir {
+    my $dir = $tf_dir;
+    $dir //= hv()->uri eq $Trog::HV::DEFAULT_URI ? '/opt/terraform' : '/opt/terraform/hv/' . hv()->slug;
+    return $dir;
+}
+
+sub usage {
+    return "Usage: destroy [--domaindir DIR] [--connect URI] [--tfdir DIR] [--purge] [--dryrun] DOMAIN\n";
+}
+
 sub main {
     my @args = @_;
 
     umask 0022;
 
-    my ($purge, $dryrun);
+    my ($purge, $dryrun, $uri, $hv_ssh_host, $hv_ssh_user, $hv_ssh_port);
     GetOptionsFromArray(\@args,
-        'domaindir=s' => \$domain_dir,
-        'purge'       => \$purge,
-        'dryrun'      => \$dryrun,
+        'domaindir=s'   => \$domain_dir,
+        'purge'         => \$purge,
+        'dryrun'        => \$dryrun,
+        'connect=s'     => \$uri,
+        'hv-ssh-host=s' => \$hv_ssh_host,
+        'hv-ssh-user=s' => \$hv_ssh_user,
+        'hv-ssh-port=i' => \$hv_ssh_port,
+        'tfdir=s'       => \$tf_dir,
     );
 
     my $domain = shift @args;
-    die "Usage: destroy [--domaindir DIR] [--purge] [--dryrun] DOMAIN\n" unless $domain;
+    die usage() unless $domain;
+
+    $hv = Trog::HV->new(
+        uri      => $uri,
+        ssh_host => $hv_ssh_host,
+        ssh_user => $hv_ssh_user,
+        ssh_port => $hv_ssh_port,
+    );
+    print "Destroying on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     $domain_dir //= '/opt/domains';
     $domain =~ s/\///g;
@@ -68,12 +104,12 @@ sub main {
 sub destroy_vm {
     my ($domain, $dryrun) = @_;
 
-    my $vm_list = qx{virsh list --all 2>/dev/null};
+    my $vm_list = hv()->virsh_pipe([qw{list --all}], '2>/dev/null');
     if ($vm_list =~ m/\Q$domain\E/) {
         print "Stopping VM $domain...\n";
         unless ($dryrun) {
-            system(qw{virsh destroy}, $domain);
-            system(qw{virsh undefine --nvram}, $domain);
+            hv()->virsh_system('destroy', $domain);
+            hv()->virsh_system('undefine', '--nvram', $domain);
         }
     } else {
         print "VM $domain not found in virsh, skipping.\n";
@@ -83,7 +119,7 @@ sub destroy_vm {
 sub destroy_tf_resources {
     my ($domain, $domain_mongled, $dryrun) = @_;
 
-    my $tf_config_dir = '/opt/terraform/config';
+    my $tf_config_dir = tf_dir() . '/config';
     return unless -d $tf_config_dir;
 
     chdir $tf_config_dir or do {
@@ -109,10 +145,11 @@ sub destroy_tf_resources {
 sub remove_tf_configs {
     my ($domain, $dryrun) = @_;
 
+    my $cfgdir = tf_dir() . '/config';
     my @patterns = (
-        "/opt/terraform/config/$domain.tf",
-        "/opt/terraform/config/$domain.cloud_init.cfg",
-        "/opt/terraform/config/$domain.network_config.cfg",
+        "$cfgdir/$domain.tf",
+        "$cfgdir/$domain.cloud_init.cfg",
+        "$cfgdir/$domain.network_config.cfg",
     );
 
     foreach my $f (@patterns) {
@@ -127,11 +164,11 @@ sub remove_rsyslog_config {
     my ($domain, $dryrun) = @_;
 
     my $conf = "/etc/rsyslog.d/10-$domain.conf";
-    if (-f $conf) {
+    if (hv()->file_exists_hv($conf)) {
         print "Removing rsyslog config $conf\n";
         unless ($dryrun) {
-            unlink $conf;
-            system(qw{sudo systemctl restart rsyslog});
+            hv()->is_local ? unlink($conf) : hv()->system_hv('sudo', 'rm', '-f', $conf);
+            hv()->system_hv(qw{sudo systemctl restart rsyslog});
         }
     } else {
         print "No rsyslog config found at $conf, skipping.\n";
@@ -147,19 +184,28 @@ sub remove_authorized_key {
     my $pubkey = File::Slurper::read_text($pubkey_file);
     chomp $pubkey;
 
-    my $ak = "$ENV{HOME}/.ssh/authorized_keys";
-    return unless -f $ak;
+    my $ak = hv_authorized_keys();
+    return unless hv()->file_exists_hv($ak);
 
-    my $contents = File::Slurper::read_text($ak);
+    my $contents = hv()->read_text_hv($ak);
     if ($contents =~ m/\Q$pubkey\E/) {
         print "Removing domain SSH key from $ak\n";
         unless ($dryrun) {
             my @lines = grep { $_ !~ m/\Q$pubkey\E/ } split(/\n/, $contents);
-            File::Slurper::write_text($ak, join("\n", @lines) . "\n");
+            hv()->write_text_hv($ak, join("\n", @lines) . "\n");
         }
     } else {
         print "Domain SSH key not found in $ak, skipping.\n";
     }
+}
+
+sub hv_authorized_keys {
+    return "$ENV{HOME}/.ssh/authorized_keys" if hv()->is_local;
+    my $home = hv()->qx_hv('echo $HOME');
+    chomp $home if defined $home;
+    die "Could not determine the home directory of the transfer user on the hypervisor"
+      unless defined $home && length $home;
+    return "$home/.ssh/authorized_keys";
 }
 
 sub purge_domain_dir {
@@ -174,6 +220,8 @@ sub purge_domain_dir {
     print "Purging domain directory $dir\n";
     unless ($dryrun) {
         system('rm', '-rf', $dir);
+        # A remote HV holds a copy of the payload for the guest to pull.
+        hv()->system_hv('rm', '-rf', $dir) unless hv()->is_local;
     }
 }
 

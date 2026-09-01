@@ -2,7 +2,23 @@
 
 #nuke the storage pool because tf = braindead
 
-rm -rf /opt/terraform/disks
-virsh pool-destroy tf_disks
-virsh pool-delete tf_disks
-virsh pool-undefine tf_disks
+# Usage: nuke_pool [LIBVIRT_URI]
+# Pass a libvirt connection string to nuke the pool on another hypervisor,
+# e.g. nuke_pool qemu+ssh://root@hv1.example.net/system
+
+URI="${1:-}"
+POOL_PATH="${POOL_PATH:-/opt/terraform/disks}"
+
+if [ -n "$URI" ]; then
+    VIRSH=(virsh -c "$URI")
+    # The pool dir lives on the hypervisor, so it has to be removed there.
+    RM=(ssh "$(printf '%s' "$URI" | sed -E 's#^[^:]+://##; s#/.*$##')" sudo rm -rf "$POOL_PATH")
+else
+    VIRSH=(virsh)
+    RM=(rm -rf "$POOL_PATH")
+fi
+
+"${RM[@]}"
+"${VIRSH[@]}" pool-destroy tf_disks
+"${VIRSH[@]}" pool-delete tf_disks
+"${VIRSH[@]}" pool-undefine tf_disks

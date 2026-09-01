@@ -5,22 +5,38 @@ package Trog::Bin::Snapshot;
 use strict;
 use warnings;
 
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 use File::Which qw{which};
 use Getopt::Long qw{GetOptionsFromArray};
+use Trog::HV();
+
+# The hypervisor holding the domain.  Defaults to this machine.
+our $hv;
+
+sub hv {
+    $hv //= Trog::HV->new();
+    return $hv;
+}
 
 sub usage {
-    return "Usage: $0 [--name NAME] DOMAIN\n";
+    return "Usage: $0 [--name NAME] [--connect URI] DOMAIN\n";
 }
 
 sub main {
     my @args = @_;
 
-    my ($name);
-    GetOptionsFromArray(\@args, 'name=s' => \$name);
+    my ($name, $uri);
+    GetOptionsFromArray(\@args,
+        'name=s'    => \$name,
+        'connect=s' => \$uri,
+    );
 
     my $domain = shift @args;
     die usage() unless $domain;
     die "virsh not installed\n" unless which('virsh');
+
+    $hv = Trog::HV->new(uri => $uri);
 
     my $before = _virsh_snap_current($domain);
     chomp $before if defined $before;
@@ -47,12 +63,12 @@ sub main {
 }
 
 sub _virsh {
-    system('virsh', @_) >> 8;
+    return hv()->virsh_system(@_);
 }
 
 sub _virsh_snap_current {
     my ($domain) = @_;
-    my $out = qx{virsh snapshot-current --name \Q$domain\E 2>/dev/null};
+    my $out = hv()->virsh_pipe(['snapshot-current', '--name', $domain], '2>/dev/null');
     return undef if $?;
     return $out;
 }

@@ -5,25 +5,37 @@ package Trog::Bin::Restore;
 use strict;
 use warnings;
 
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 use Config::Simple;
 use File::Which qw{which};
 use Getopt::Long qw{GetOptionsFromArray};
 use Net::EmptyPort;
 use Net::OpenSSH::More;
+use Trog::HV();
+
+# The hypervisor holding the domain.  Defaults to this machine.
+our $hv;
+
+sub hv {
+    $hv //= Trog::HV->new();
+    return $hv;
+}
 
 sub usage {
-    return "Usage: $0 [--latest|--oldest|--name SNAP] [--domaindir DIR] DOMAIN\n";
+    return "Usage: $0 [--latest|--oldest|--name SNAP] [--domaindir DIR] [--connect URI] DOMAIN\n";
 }
 
 sub main {
     my @args = @_;
 
-    my ($latest, $oldest, $name, $domain_dir);
+    my ($latest, $oldest, $name, $domain_dir, $uri);
     GetOptionsFromArray(\@args,
         'latest'      => \$latest,
         'oldest'      => \$oldest,
         'name=s'      => \$name,
         'domaindir=s' => \$domain_dir,
+        'connect=s'   => \$uri,
     );
     $domain_dir //= '/opt/domains';
 
@@ -33,6 +45,13 @@ sub main {
 
     my $modes = grep { defined $_ } ($latest, $oldest, $name);
     die usage() unless $modes == 1;
+
+    # We need to know which hypervisor to ask about snapshots before we ask, so
+    # peek at provision.conf now.  An explicit --connect wins over what it says.
+    # The file being mandatory is enforced further down, where it always was.
+    my $cfile = "$domain_dir/$domain/provision.conf";
+    $hv = Trog::HV->from_config((-f $cfile ? Config::Simple->new($cfile) : undef), uri => $uri);
+    print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     my @snaps = _virsh_snap_list($domain);
     die "No snapshots found for $domain\n" unless @snaps;
@@ -54,9 +73,7 @@ sub main {
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
-    my $cfile = "$domain_dir/$domain/provision.conf";
     die "No provision.conf found at $cfile\n" unless -f $cfile;
-
     my $config = Config::Simple->new($cfile);
     my $user   = $config->param('admin_user') // 'root';
     my $ips    = $config->param('ips');
@@ -70,14 +87,14 @@ sub main {
 
 sub _virsh_snap_list {
     my ($domain) = @_;
-    my @names = qx{virsh snapshot-list --name \Q$domain\E 2>/dev/null};
+    my @names = split(/\n/, hv()->virsh_pipe(['snapshot-list', '--name', $domain], '2>/dev/null') // '');
     chomp @names;
     return grep { length $_ } @names;
 }
 
 sub _virsh_snap_revert {
     my ($domain, $snapname) = @_;
-    system('virsh', 'snapshot-revert', '--snapshotname', $snapname, '--running', $domain) >> 8;
+    return hv()->virsh_system('snapshot-revert', '--snapshotname', $snapname, '--running', $domain);
 }
 
 sub wait_for_ssh {
