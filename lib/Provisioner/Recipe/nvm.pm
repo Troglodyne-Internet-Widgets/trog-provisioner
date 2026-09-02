@@ -30,6 +30,11 @@ installs the latest LTS Node.js via C<nvm install node>, and appends
 C<nvm use node> to the user's C<~/.bashrc> so that node is active in every
 login shell.
 
+Also exports C<NODE_PATH> in that same C<~/.bashrc>, pointing at the active
+node version's global C<node_modules> directory (derived from C<NVM_BIN>, so it
+follows version switches).  Without this, C<require()> of anything installed
+with C<npm -g> fails to resolve.
+
 Installation is idempotent  re-provisioning a host with nvm already installed
 will update the nvm installation in place and leave the node version unchanged.
 
