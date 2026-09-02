@@ -47,6 +47,9 @@ use Provisioner::IPPool;
 use Provisioner::Utils;
 use Provisioner::Recipe::data;
 
+# Better stack traces
+use Carp::Always;
+
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
@@ -496,7 +499,9 @@ sub handle_domain {
     };
 
     my $cfg_dir = "$basedir/$fqdn";
-    mkdir $cfg_dir;
+    if (!-d $cfg_dir) {
+        mkdir $cfg_dir or die "could not create $cfg_dir";
+    }
 
     File::Slurper::Temp::write_binary( "$cfg_dir/users.yaml", YAML::XS::Dump($user_conf) );
 
