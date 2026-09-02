@@ -49,6 +49,9 @@ formats = #!/usr/bin/env perl
 [ProhibitUseLib]
 [ProhibitUsageSubs]
 [RequireQwForLiteralLists]
+[ProhibitNoWarningsRedefine]
+[RequireFatalWarnings]
+[ProhibitUnusedImports]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork

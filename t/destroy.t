@@ -1,16 +1,20 @@
 #!/usr/bin/env perl
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Path qw{make_path};
 use File::Slurper qw{write_text read_text};
+use Pod::Usage();
 
-use FindBin();
+use FindBin;
 use FindBin::libs;
-require "$FindBin::Bin/../bin/destroy";
+use Trog::HV();
+
+require_ok("$FindBin::Bin/../bin/destroy")
+  or BAIL_OUT('bin/destroy does not load; the install is incomplete');
 
 # Point the hypervisor's domain dir at a temp tree.  Everything else in the
 # script picks this same object back up with Trog::HV->new().
@@ -131,7 +135,6 @@ subtest 'main exits with the usage when given no domain' => sub {
 };
 
 subtest 'the POD documents the interface' => sub {
-    require Pod::Usage;
     open(my $fh, '>', \my $text) or die $!;
     Pod::Usage::pod2usage(
         -input    => "$FindBin::Bin/../bin/destroy",

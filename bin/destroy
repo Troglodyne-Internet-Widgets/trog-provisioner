@@ -3,11 +3,9 @@
 package Trog::Bin::Destroy;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
-use FindBin();
 use FindBin::libs;
-use Config::Simple();
 use Trog::HV();
 use File::Slurper();
 use List::Util qw{any};

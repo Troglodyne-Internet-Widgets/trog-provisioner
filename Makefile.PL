@@ -18,10 +18,12 @@ WriteMakefile(
   },
   PREREQ_PM => {
     'Cwd'            => 0,
+    'Fcntl'          => 0,
     'FindBin'        => 0,
     'FindBin::libs'  => 0,
     'File::Path'     => 0,
     'File::Temp'     => 0,
+    'URI'            => 0,
     'Config::Simple' => 0,
     'File::Slurper'  => 0,
     'File::Copy'     => 0,
@@ -37,10 +39,15 @@ WriteMakefile(
   },
   # Only needed to lint this repo, not to run it.
   TEST_REQUIRES => {
+    'Test::More'        => 0,
+    'Test::MockModule'  => 0,
     'Perl::Critic' => 0,
     'Perl::Critic::Policy::ProhibitUseLib'              => 0,
     'Perl::Critic::Policy::ProhibitUsageSubs'           => 0,
     'Perl::Critic::Policy::RequireQwForLiteralLists'    => 0,
+    'Perl::Critic::Policy::ProhibitNoWarningsRedefine'  => 0,
+    'Perl::Critic::Policy::RequireFatalWarnings'        => 0,
+    'Perl::Critic::Policy::ProhibitUnusedImports'       => 0,
   },
   test => {TESTS => 't/*.t'}
 );

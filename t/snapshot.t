@@ -1,12 +1,16 @@
 #!/usr/bin/env perl
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use Test::More;
-use FindBin();
+use Test::MockModule qw{strict};
+use Pod::Usage();
+
+use FindBin;
 use FindBin::libs;
 
-require './bin/snapshot';
+require_ok("$FindBin::Bin/../bin/snapshot")
+  or BAIL_OUT('bin/snapshot does not load; the install is incomplete');
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section("$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS');
@@ -23,9 +27,9 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # libvirt refuses to snapshot -> dies
 {
-    no warnings 'redefine';
-    local *Trog::HV::create_snapshot        = sub { 0 };
-    local *Trog::HV::snapshot_current_name  = sub { undef };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot        => sub { 0 });
+    $hv_mock->redefine(snapshot_current_name  => sub { undef });
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
     like($@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails');
@@ -33,9 +37,9 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # No current snapshot after create -> dies
 {
-    no warnings 'redefine';
-    local *Trog::HV::create_snapshot       = sub { 1 };
-    local *Trog::HV::snapshot_current_name = sub { undef };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { undef });
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
     like($@, qr/No current snapshot/, 'main() dies when no snapshot is current after create');
@@ -43,9 +47,9 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # Current snapshot unchanged -> dies
 {
-    no warnings 'redefine';
-    local *Trog::HV::create_snapshot       = sub { 1 };
-    local *Trog::HV::snapshot_current_name = sub { 'same-snap' };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { 'same-snap' });
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
     like($@, qr/unchanged after create/, 'main() dies when the current snapshot does not change');
@@ -53,10 +57,10 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # Happy path -- nothing was current before
 {
-    no warnings 'redefine';
     my $call = 0;
-    local *Trog::HV::create_snapshot       = sub { 1 };
-    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? undef : 'new-snap' };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' });
 
     my $rc;
     eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
@@ -66,10 +70,10 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # Happy path -- before differs from after
 {
-    no warnings 'redefine';
     my $call = 0;
-    local *Trog::HV::create_snapshot       = sub { 1 };
-    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? 'old-snap' : 'new-snap' };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' });
 
     my $rc;
     eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
@@ -79,11 +83,11 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 # --name reaches libvirt
 {
-    no warnings 'redefine';
     my @captured;
     my $call = 0;
-    local *Trog::HV::create_snapshot       = sub { @captured = @_; return 1 };
-    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? undef : 'mysnap' };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { @captured = @_; return 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' });
 
     Trog::Bin::Snapshot::main(qw{myvm.lan --name mysnap});
     is($captured[1], 'myvm.lan', 'domain forwarded');
@@ -98,7 +102,6 @@ sub _run {
 
 sub _pod_section {
     my ($file, $sections) = @_;
-    require Pod::Usage;
     open(my $fh, '>', \my $text) or die $!;
     Pod::Usage::pod2usage(
         -input    => $file,

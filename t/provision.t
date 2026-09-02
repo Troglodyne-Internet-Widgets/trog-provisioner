@@ -1,22 +1,23 @@
 #!/usr/bin/env perl
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{write_text};
+use Test::MockModule qw{strict};
+use Pod::Usage();
 
-use FindBin();
+use FindBin;
 use FindBin::libs;
+use Trog::HV();
 
-BEGIN {
-    eval { require XML::Twig; require Net::OpenSSH::More; require Net::EmptyPort; 1 }
-      or plan skip_all => "provisioner prereqs not installed: $@";
-}
-
+# No skip_all if the prereqs are missing: a suite that passes because it never
+# ran is worse than one that fails.  bin/provision uses XML::Twig,
+# Net::OpenSSH::More and Net::EmptyPort itself, so this explodes and tells you
+# the kit is wrong rather than quietly reporting success.
 my $script = "$FindBin::Bin/../bin/provision";
-require $script;
-require Trog::HV;
+require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
 # --- The interface lives in POD, and pod2usage prints it ----------------------
 subtest 'the POD documents the interface' => sub {
@@ -56,10 +57,14 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     my $tfdir = tempdir(CLEANUP => 1);
 
-    no warnings 'redefine', 'once';
-    local *Trog::HV::mkpath_hv      = sub { 1 };
-    local *Trog::HV::file_exists_hv = sub { 1 };
-    local *Trog::Bin::Provisioner::sync_tf_state_with_libvirt = sub { die "far enough\n" };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(mkpath_hv      => sub { 1 });
+    $hv_mock->redefine(file_exists_hv => sub { 1 });
+
+    # no_auto: the modulino is already loaded from bin/provision, and there is
+    # no Trog/Bin/Provisioner.pm for MockModule to go looking for.
+    my $bin_mock = Test::MockModule->new('Trog::Bin::Provisioner', no_auto => 1);
+    $bin_mock->redefine(sync_tf_state_with_libvirt => sub { die "far enough\n" });
 
     my $run = sub {
         Trog::HV->forget();
@@ -82,7 +87,6 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
 sub _pod_section {
     my ($file, $sections) = @_;
-    require Pod::Usage;
     open(my $fh, '>', \my $text) or die $!;
     Pod::Usage::pod2usage(
         -input    => $file,

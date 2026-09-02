@@ -3,7 +3,7 @@
 package Trog::Bin::Provisioner;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use FindBin();
 use FindBin::libs;
@@ -454,6 +454,18 @@ sub mongle_terraform_template {
     my $disk_size = $config->param('size');
     my $ram_mb = $config->param('memory');
     my $cpus      = $config->param('cpus');
+
+    # These have no sane default, and every one of them goes straight into the
+    # terraform template.  Say which one is missing rather than letting the
+    # substitution produce a config file that won't parse.
+    foreach my $required (
+        [image  => $image], [size => $disk_size],
+        [memory => $ram_mb], [cpus => $cpus],
+    ) {
+        my ($key, $value) = @$required;
+        die "MUST SET $key in provision.conf for $domain\n"
+          unless defined $value && length $value;
+    }
     # host-passthrough exposes the bare-metal CPU (incl. AVX/AVX2/etc.) to the
     # guest — required by anything that probes cpuid for vector extensions
     # (e.g. the `claude` CLI bundled v8 snapshot).  Override to host-model,
@@ -669,6 +681,8 @@ sub mongle_network_configuration {
     my $ips  = _coerce_array($config->param('ips'));
     my $gw   = $config->param('gateway');
     my $res  = _coerce_array($config->param('resolvers'));
+    die "MUST SET gateway in provision.conf when ips are set\n"
+      if @$ips && !(defined $gw && length $gw);
 
     # XXX ugh there is no way to set consistent devnames, fml
     my $dhcp_devname = $config->param('dhcp_devname');
@@ -767,6 +781,8 @@ sub mongle_cloud_init {
     my $domain = $config->param('domain');
     my $contactemail = $config->param('contact_email');
     my $hv_ip = $config->param('hv_internal_ip');
+    die "MUST SET contact_email in provision.conf for $domain\n"
+      unless defined $contactemail && length $contactemail;
 
     # Generate a new key for the child
     qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};

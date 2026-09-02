@@ -1,13 +1,16 @@
 package Trog::HV;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
+use Fcntl();
 use File::Path();
 use File::Copy();
-use File::Temp();
 use File::Slurper();
 use Sys::Virt();
+use URI();
+use URI::Split();
+use Net::OpenSSH::More();
 
 =head1 NAME
 
@@ -161,36 +164,30 @@ sub forget {
     return 1;
 }
 
-# driver[+transport]://[user@][host][:port]/[path][?extraparams]
+# A libvirt connection URI is a URI: driver[+transport]://[user@][host][:port]/path
+#
+# L<URI> knows nothing about the driver+transport scheme, so it hands back a
+# URI::_foreign with no authority accessors.  Split it generically instead and
+# re-parse the authority under a scheme URI does understand, which gets us
+# userinfo, bracketed IPv6 and ports without a regex of our own.
 sub _parse_uri {
     my ($uri) = @_;
 
-    my ($driver, $transport, $authority, $rest) = $uri =~ m{
-        \A
-        ([A-Za-z0-9]+)              # driver
-        (?: \+ ([A-Za-z0-9]+) )?    # +transport
-        ://
-        ([^/?]*)                    # [user@]host[:port]
-        (.*)                        # /path[?params]
-        \z
-    }x or return undef;
+    my ($scheme, $authority, $path) = URI::Split::uri_split($uri);
+    return undef unless defined $scheme && length $scheme;
 
-    my ($user, $hostport) = $authority =~ m/\A(?:([^\@]*)\@)?(.*)\z/;
-    my ($host, $port);
-    if ($hostport =~ m/\A\[([^\]]*)\](?::(\d+))?\z/) {    # bracketed IPv6
-        ($host, $port) = ($1, $2);
-    }
-    else {
-        ($host, $port) = $hostport =~ m/\A([^:]*)(?::(\d+))?\z/;
-    }
+    my ($driver, $transport) = split(/\+/, $scheme, 2);
+    return undef unless defined $driver && length $driver;
+
+    my $server = (defined $authority && length $authority) ? URI->new("ssh://$authority") : undef;
 
     return {
         driver    => $driver,
         transport => $transport,
-        user      => (defined $user && length $user) ? $user : undef,
-        host      => (defined $host && length $host) ? $host : undef,
-        port      => $port,
-        path      => $rest,
+        user      => $server ? $server->user : undef,
+        host      => ($server && defined $server->host && length $server->host) ? $server->host : undef,
+        port      => $server ? $server->port : undef,
+        path      => $path,
     };
 }
 
@@ -237,7 +234,8 @@ sub slug {
 
 Where to ssh to in order to run something on the hypervisor, all inferred from
 the connection URI.  C<ssh_host> is undef when the transport can't give us a
-shell, which C<new> refuses to build in the first place.
+shell, which C<new> refuses to build in the first place.  C<ssh_port> falls back
+to 22, the way any other ssh client would.
 
 =cut
 
@@ -333,51 +331,70 @@ sub hv_user {
 
 =head1 RUNNING THINGS ON THE HYPERVISOR
 
+=head2 ssh
+
+The L<Net::OpenSSH::More> connection to the hypervisor, opened on first use and
+kept, or undef when the hypervisor is this machine and there is nothing to
+connect to.
+
+Everything that has to reach the far side goes through this rather than through
+a command line we built ourselves: it does the quoting, it reports the errors,
+and it gives us sftp on the same connection for free.
+
 =head2 qx_hv($shell_command)
 
-C<qx()> equivalent.  Takes a shell string, returns its stdout.
+C<qx()> equivalent.  Takes a shell string -- pipelines and all -- and returns
+its stdout with the trailing newline already off.
 
 =head2 system_hv(@argv)
 
-C<system()> equivalent.  Takes an argv list, returns the exit code.
+C<system()> equivalent.  Takes an argv list, returns the exit code.  The
+arguments are escaped for you, so they may contain anything.
 
 =cut
 
+sub ssh {
+    my ($self) = @_;
+    return undef if $self->is_local;
+    return $self->{ssh} if $self->{ssh};
+
+    my $target = $self->ssh_target;
+    $self->{ssh} = eval {
+        Net::OpenSSH::More->new(
+            host => $self->ssh_host,
+            port => $self->ssh_port,
+            (defined $self->ssh_user ? (user => $self->ssh_user) : ()),
+
+            # Our commands are one-shot, and some of them are pipelines the
+            # persistent Expect shell would rather we didn't send it.
+            use_persistent_shell => 0,
+        );
+    } or die "Could not ssh to the hypervisor at $target: $@\n";
+
+    return $self->{ssh};
+}
+
 sub qx_hv {
     my ($self, $cmd) = @_;
-    my $wrapped = $self->_wrap($cmd);
-    return qx{$wrapped};
+    return qx{$cmd} if $self->is_local;
+
+    my ($out, undef, undef) = $self->ssh->cmd($cmd);
+    return $out;
 }
 
 sub system_hv {
     my ($self, @argv) = @_;
     return system(@argv) >> 8 if $self->is_local;
-    return system($self->_wrap(join(' ', map { _shq($_) } @argv))) >> 8;
-}
-
-sub _shq {
-    my ($str) = @_;
-    $str = '' unless defined $str;
-    $str =~ s/'/'\\''/g;
-    return "'$str'";
-}
-
-# Wrap a shell snippet so it runs on the HV.
-sub _wrap {
-    my ($self, $cmd) = @_;
-    return $cmd if $self->is_local;
-
-    my @ssh = qw{ssh -o BatchMode=yes};
-    push @ssh, ('-p', $self->ssh_port) if $self->ssh_port;
-    push @ssh, $self->ssh_target, _shq($cmd);
-    return join(' ', @ssh);
+    return $self->ssh->cmd_exit_code(@argv);
 }
 
 =head1 FILES ON THE HYPERVISOR
 
 Each of these is the obvious local filesystem call when the hypervisor is us,
-and the same thing over ssh when it isn't.  The C<sudo> option on the writers
-is for destinations under C</etc> and C</usr>.
+and the same thing over sftp on the L</ssh> connection when it isn't.  The
+C<sudo> option on the writers is for destinations under C</etc> and C</usr>:
+sftp writes as whoever we logged in as, so those go to a staging path and get
+moved into place afterwards.
 
 =over 4
 
@@ -408,7 +425,11 @@ Copy a whole directory tree across, contents and all.
 sub file_exists_hv {
     my ($self, $path) = @_;
     return -f $path ? 1 : 0 if $self->is_local;
-    return $self->system_hv(qw{test -f}, $path) == 0 ? 1 : 0;
+
+    # -f, not -e: every caller wants a regular file, and a directory sitting
+    # where one of these belongs is not the same answer.
+    my $attrs = $self->ssh->sftp->stat($path) or return 0;
+    return Fcntl::S_ISREG($attrs->perm) ? 1 : 0;
 }
 
 sub mkpath_hv {
@@ -417,7 +438,13 @@ sub mkpath_hv {
         File::Path::make_path(@paths);
         return 1;
     }
-    return $self->system_hv(qw{mkdir -p}, @paths) == 0;
+
+    my $sftp = $self->ssh->sftp;
+    foreach my $path (@paths) {
+        next if $sftp->stat($path);
+        $sftp->mkpath($path) or return 0;
+    }
+    return 1;
 }
 
 sub unlink_hv {
@@ -432,47 +459,42 @@ sub unlink_hv {
 sub read_text_hv {
     my ($self, $path) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
-    return scalar $self->qx_hv('cat ' . _shq($path));
+    return $self->ssh->sftp->get_content($path);
 }
 
 sub write_text_hv {
     my ($self, $path, $content, %opts) = @_;
 
-    if ($self->is_local && !$opts{sudo}) {
-        File::Slurper::write_text($path, $content);
-        return 1;
+    if ($self->is_local) {
+        return $self->_write_local($path, $content, %opts);
     }
 
-    my $tmp = File::Temp->new(UNLINK => 1);
-    print {$tmp} $content;
-    close $tmp;
-    chmod 0644, "$tmp";
-    return $self->put_file("$tmp", $path, %opts);
+    # sftp can only write as the user we logged in as, so anything under /etc
+    # or /usr goes to a staging path first and gets moved into place with sudo.
+    my $staged = $opts{sudo} ? _staging_path() : $path;
+    $self->ssh->write($staged, $content, '0644') or return 0;
+
+    return 1 unless $opts{sudo};
+    return $self->_sudo_install($staged, $path);
 }
 
 sub append_line_hv {
     my ($self, $path, $line) = @_;
     chomp $line;
 
+    my $existing = '';
     if ($self->is_local) {
-        if (-f $path) {
-            my $existing = File::Slurper::read_text($path);
-            return 1 if grep { $_ eq $line } split(/\n/, $existing);
-        }
-        else {
-            File::Path::make_path(_parent_dir($path));
-        }
-        open(my $fh, '>>', $path) or die "Could not open $path: $!";
-        print {$fh} "$line\n";
-        close($fh);
-        return 1;
+        $existing = File::Slurper::read_text($path) if -f $path;
+    }
+    elsif ($self->file_exists_hv($path)) {
+        $existing = $self->read_text_hv($path) // '';
     }
 
-    my $cmd = sprintf(
-        'mkdir -p %s; touch %s; grep -qxF -- %s %s || printf \'%%s\\n\' %s >> %s',
-        _shq(_parent_dir($path)), _shq($path), _shq($line), _shq($path), _shq($line), _shq($path),
-    );
-    return $self->system_hv(qw{sh -c}, $cmd) == 0;
+    return 1 if grep { $_ eq $line } split(/\n/, $existing);
+
+    $existing .= "\n" if length $existing && $existing !~ m/\n\z/;
+    $self->mkpath_hv(_parent_dir($path));
+    return $self->write_text_hv($path, $existing . "$line\n");
 }
 
 sub put_file {
@@ -484,34 +506,46 @@ sub put_file {
         return File::Copy::copy($local, $remote) ? 1 : 0;
     }
 
-    my $staged = $opts{sudo} ? '/tmp/.trog-hv-' . $$ . '-' . time() : $remote;
-
-    my @scp = (qw{scp -q -o BatchMode=yes});
-    push @scp, ('-P', $self->ssh_port) if $self->ssh_port;
-    push @scp, $local, $self->ssh_target . ":$staged";
-    return 0 if system(@scp) >> 8;
+    my $staged = $opts{sudo} ? _staging_path() : $remote;
+    $self->ssh->sftp->put($local, $staged) or return 0;
 
     return 1 unless $opts{sudo};
-    return 0 if $self->system_hv(qw{sudo mv}, $staged, $remote);
-
-    # mv keeps the staging user's ownership, which isn't what anything under
-    # /etc or /usr/libexec wants.
-    $self->system_hv(qw{sudo chown root:root}, $remote);
-    return 1;
+    return $self->_sudo_install($staged, $remote);
 }
 
 sub put_dir {
     my ($self, $local, $remote) = @_;
     return 1 if $self->is_local;
-    $self->mkpath_hv($remote) or return 0;
 
-    # tar down the pipe: one round trip, modes preserved, no rsync to install.
-    my $cmd = sprintf(
-        'tar -C %s -czf - . | %s',
-        _shq($local), $self->_wrap('tar -C ' . _shq($remote) . ' -xzf -'),
-    );
-    return system($cmd) == 0 ? 1 : 0;
+    $self->mkpath_hv($remote) or return 0;
+    return $self->ssh->sftp->rput($local, $remote) ? 1 : 0;
 }
+
+sub _write_local {
+    my ($self, $path, $content, %opts) = @_;
+
+    if ($opts{sudo} && !-w _parent_dir($path)) {
+        my $tmp = _staging_path();
+        File::Slurper::write_text($tmp, $content);
+        my $ok = $self->_sudo_install($tmp, $path);
+        unlink $tmp;
+        return $ok;
+    }
+
+    File::Slurper::write_text($path, $content);
+    return 1;
+}
+
+# Move a staged file into a root-owned destination.  mv keeps the staging
+# user's ownership, which isn't what anything under /etc or /usr wants.
+sub _sudo_install {
+    my ($self, $staged, $path) = @_;
+    return 0 if $self->system_hv(qw{sudo mv}, $staged, $path);
+    $self->system_hv(qw{sudo chown root:root}, $path);
+    return 1;
+}
+
+sub _staging_path { return '/tmp/.trog-hv-' . $$ . '-' . time() }
 
 sub _parent_dir {
     my ($path) = @_;

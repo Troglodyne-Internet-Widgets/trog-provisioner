@@ -1,12 +1,15 @@
 #!/usr/bin/env perl
 use strict;
-use warnings;
+use warnings FATAL => 'all';
+
+use warnings FATAL => 'all';
 
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{read_text write_text};
+use Test::MockModule qw{strict};
+use Config::Simple();
 
-use FindBin();
 use FindBin::libs;
 use Trog::HV();
 
@@ -23,8 +26,8 @@ subtest 'default connection is local' => sub {
     is($hv->uri, 'qemu:///system', 'defaults to qemu:///system');
     ok($hv->is_local,  'is_local');
     ok(!$hv->explicit, 'not explicit, so libvirt resolves its own default');
-    is($hv->_wrap('brctl show'), 'brctl show', 'local commands run unwrapped');
     is($hv->ssh_target, undef, 'no ssh target');
+    is($hv->ssh,        undef, 'and nothing to connect to');
 };
 
 subtest 'new() is a singleton' => sub {
@@ -51,17 +54,13 @@ subtest 'qemu+ssh URI' => sub {
     ok(!$hv->is_local, 'remote');
     is($hv->ssh_target, 'root@hv1.example.net', 'ssh target');
     is($hv->ssh_user,   'root',                 'ssh user');
-    is($hv->ssh_port,   undef,                  'no explicit port');
-    is($hv->_wrap(q{brctl show | grep foo}),
-        q{ssh -o BatchMode=yes root@hv1.example.net 'brctl show | grep foo'},
-        'shell commands are wrapped in ssh');
+    is($hv->ssh_port,   22,                     'port falls back to 22');
 };
 
 subtest 'qemu+ssh URI with a port' => sub {
     my $hv = fresh(uri => 'qemu+ssh://admin@10.0.0.5:2222/system');
     is($hv->ssh_target, 'admin@10.0.0.5', 'ssh target');
     is($hv->ssh_port,   2222,             'port from URI');
-    like($hv->_wrap('id -un'), qr/-p 2222/, 'port forwarded to ssh');
 };
 
 subtest 'bracketed IPv6 host' => sub {
@@ -83,25 +82,6 @@ subtest 'a remote transport with no shell is refused up front' => sub {
     like($@, qr/gives us no shell/,  'tcp:// is rejected rather than half-working');
     like($@, qr/qemu\+ssh:\/\/root/, 'and names the transport to use instead');
 };
-
-# --- Quoting ------------------------------------------------------------------
-subtest 'shell metacharacters survive the round trip' => sub {
-    my $hv = fresh(uri => 'qemu+ssh://hv/system');
-    my $nasty = q{echo 'it'\''s fine'; rm -rf /};
-    my $wrapped = $hv->_wrap($nasty);
-    like($wrapped, qr/\Assh /, 'wrapped');
-    # Everything after the target is one single-quoted argument.
-    my ($payload) = $wrapped =~ m/hv (.*)\z/;
-    is(_unshq($payload), $nasty, 'payload survives quoting intact');
-};
-
-sub _unshq {
-    my ($str) = @_;
-    $str =~ s/\A'//;
-    $str =~ s/'\z//;
-    $str =~ s/'\\''/'/g;
-    return $str;
-}
 
 # --- Slug ---------------------------------------------------------------------
 subtest 'slug is filesystem safe and stable' => sub {
@@ -143,7 +123,6 @@ subtest 'pool and domain paths default the way they always did' => sub {
 
 # --- Which address we SSH to on the guest ------------------------------------
 subtest 'guest_ssh_ip' => sub {
-    require Config::Simple;
     my $dir = tempdir(CLEANUP => 1);
 
     write_text("$dir/with.conf", "ips=203.0.113.10\n");
@@ -215,7 +194,6 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
         bridge_device=br7
     }) . "\n");
 
-    require Config::Simple;
     my $config = Config::Simple->new($file);
 
     Trog::HV->forget();
@@ -233,84 +211,117 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     ok(Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor');
 };
 
-# --- Remote path, exercised against a stand-in for ssh ------------------------
+# --- Remote path, exercised against a mocked connection -----------------------
 #
-# The fake ssh drops the flags and hands the command to /bin/sh exactly the way
-# a real one does, so this proves the two levels of quoting actually survive.
-subtest 'remote commands round-trip through ssh' => sub {
-    my $bin = tempdir(CLEANUP => 1);
-    write_text("$bin/ssh", <<'SH');
-#!/bin/bash
-args=()
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o|-p) shift 2;;
-    *) args+=("$1"); shift;;
-  esac
-done
-unset 'args[0]'
-exec /bin/sh -c "${args[*]}"
-SH
-    chmod 0755, "$bin/ssh";
+# Net::OpenSSH::More connects in its constructor, so there is no way to build a
+# real one without a real hypervisor.  Mock it, and assert on what we ask it to
+# do: that is the whole of our side of the contract now that it does the
+# quoting and the transfers.
+subtest 'remote work goes through Net::OpenSSH::More' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@fakehv:2222/system');
 
-    # ...and a stand-in for scp, which just strips the host: prefix.
-    write_text("$bin/scp", <<'SH');
-#!/bin/bash
-args=()
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -q) shift;;
-    -o|-P) shift 2;;
-    *) args+=("$1"); shift;;
-  esac
-done
-src="${args[0]}"
-dest="${args[1]#*:}"
-exec cp "$src" "$dest"
-SH
-    chmod 0755, "$bin/scp";
-    local $ENV{PATH} = "$bin:$ENV{PATH}";
+    my (@connected, @commands);
+    my $fake_sftp = FakeSFTP->new();
 
-    my $hv  = fresh(uri => 'qemu+ssh://root@fakehv/system');
-    my $dir = tempdir(CLEANUP => 1);
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine(new => sub {
+        my ($class, %opts) = @_;
+        @connected = %opts;
+        return bless {}, $class;
+    });
+    $mock->redefine(cmd => sub {
+        my ($self, @cmd) = @_;
+        push @commands, [@cmd];
+        return ("output of @cmd", '', 0);
+    });
+    $mock->redefine(cmd_exit_code => sub {
+        my ($self, @cmd) = @_;
+        push @commands, [@cmd];
+        return 0;
+    });
+    $mock->redefine(sftp  => sub { $fake_sftp });
+    $mock->redefine(write => sub {
+        my ($self, $file, $content, $mode) = @_;
+        return $fake_sftp->put_content($content, $file);
+    });
 
-    is($hv->qx_hv(q{echo 'one two' | tr a-z A-Z}), "ONE TWO\n",
-        'a shell pipeline survives intact');
+    # The connection is built from the URI, and only once.
+    is($hv->qx_hv('id -un'), 'output of id -un', 'qx_hv returns stdout');
+    my %opts = @connected;
+    is($opts{host}, 'fakehv', 'host from the URI');
+    is($opts{user}, 'root',   'user from the URI');
+    is($opts{port}, 2222,     'port from the URI');
+    ok(!$opts{use_persistent_shell}, 'the persistent shell is off, our commands are one-shot');
 
-    is($hv->system_hv(qw{test -d}, $dir), 0, 'system_hv argv reaches the far side');
-    isnt($hv->system_hv(qw{test -d}, "$dir/nope"), 0, 'and its exit code comes back');
+    my $conn = $hv->ssh;
+    is($hv->ssh, $conn, 'the connection is opened once and kept');
 
-    ok(!$hv->file_exists_hv("$dir/f"), 'file_exists_hv false for missing');
-    $hv->write_text_hv("$dir/f", "written remotely\n");
-    ok($hv->file_exists_hv("$dir/f"), 'file_exists_hv true after write');
-    is($hv->read_text_hv("$dir/f"), "written remotely\n", 'read_text_hv');
+    # A pipeline goes over as one string; an argv list goes over as a list, and
+    # Net::OpenSSH does the escaping we used to do by hand.
+    $hv->qx_hv(q{brctl show | grep -v virbr});
+    is_deeply($commands[-1], [q{brctl show | grep -v virbr}], 'a pipeline is passed through whole');
 
-    ok($hv->mkpath_hv("$dir/x/y"), 'mkpath_hv');
-    ok(-d "$dir/x/y", 'nested dir made');
-
-    $hv->unlink_hv("$dir/f");
-    ok(!-f "$dir/f", 'unlink_hv');
-
-    write_text("$dir/src", "payload\n");
-    ok($hv->put_file("$dir/src", "$dir/dst"), 'put_file');
-    is(read_text("$dir/dst"), "payload\n", 'the file landed on the far side');
-
-    # The whole domain directory has to make it across, not just the tarball.
-    my $tree = tempdir(CLEANUP => 1);
-    mkdir "$tree/src";
-    write_text("$tree/src/data.tar.gz", "tarball\n");
-    write_text("$tree/src/users.yaml",  "users: []\n");
-    ok($hv->put_dir("$tree/src", "$tree/dst"), 'put_dir');
-    is(read_text("$tree/dst/data.tar.gz"), "tarball\n",   'payload landed');
-    is(read_text("$tree/dst/users.yaml"),  "users: []\n", 'and so did everything beside it');
-
-    # Quoting hazards: spaces, single quotes, globs, and shell metacharacters
-    # all have to arrive verbatim.
     my $nasty = "a b\tc 'quoted' \$HOME * ; rm -rf /";
-    my $ak    = "$dir/keys/authorized_keys";
-    $hv->append_line_hv($ak, $nasty);
-    $hv->append_line_hv($ak, $nasty);
-    is(read_text($ak), "$nasty\n", 'nasty line written once, verbatim');
+    is($hv->system_hv('touch', $nasty), 0, 'system_hv returns the exit code');
+    is_deeply($commands[-1], ['touch', $nasty], 'arguments are handed over unmangled, not pre-quoted');
+
+    # Files go over sftp on that same connection.
+    $hv->write_text_hv('/tmp/plain', "hello\n");
+    is($fake_sftp->{content}{'/tmp/plain'}, "hello\n", 'write_text_hv writes through sftp');
+    ok($hv->file_exists_hv('/tmp/plain'), 'file_exists_hv sees it');
+    is($hv->read_text_hv('/tmp/plain'), "hello\n", 'read_text_hv reads it back');
+
+    ok(!$hv->file_exists_hv('/tmp/nope'), 'file_exists_hv false for missing');
+
+    # A root-owned destination stages, then moves with sudo.
+    ok($hv->write_text_hv('/etc/rsyslog.d/10-vm.conf', "conf\n", sudo => 1), 'sudo write');
+    my ($mv) = grep { $_->[0] eq 'sudo' && $_->[1] eq 'mv' } @commands;
+    ok($mv, 'the staged file is moved into place with sudo');
+    is($mv->[3], '/etc/rsyslog.d/10-vm.conf', 'to the right destination');
+    ok((grep { $_->[0] eq 'sudo' && $_->[1] eq 'chown' } @commands),
+        'and chowned, since mv keeps the staging user');
+
+    # The whole domain directory goes, not just the tarball.
+    ok($hv->put_dir('/opt/domains/vm', '/opt/domains/vm'), 'put_dir');
+    is_deeply($fake_sftp->{rput}[-1], ['/opt/domains/vm', '/opt/domains/vm'], 'recursively');
+
+    # append_line_hv reads what is there and does not duplicate.
+    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
+    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa BBBB two');
+    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
+    is($fake_sftp->{content}{'/root/.ssh/authorized_keys'},
+        "ssh-rsa AAAA one\nssh-rsa BBBB two\n", 'the repeated key was only written once');
 };
+
+# A stand-in for Net::SFTP::Foreign holding files in a hash.
+{
+    package FakeSFTP;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { return bless { content => {}, rput => [] }, shift }
+
+    sub stat {
+        my ($self, $path) = @_;
+        return undef unless exists $self->{content}{$path};
+        return FakeSFTP::Attrs->new();
+    }
+
+    sub get_content { return $_[0]->{content}{ $_[1] } }
+    sub put_content { $_[0]->{content}{ $_[2] } = $_[1]; return 1 }
+    sub put         { $_[0]->{content}{ $_[2] } = 'copied'; return 1 }
+    sub mkpath      { return 1 }
+    sub rput        { my ($s, @a) = @_; push @{ $s->{rput} }, [@a]; return 1 }
+}
+
+{
+    package FakeSFTP::Attrs;
+    use strict;
+    use warnings FATAL => 'all';
+    use Fcntl();
+
+    sub new  { return bless {}, shift }
+    sub perm { return Fcntl::S_IFREG() | 0644 }
+}
 
 done_testing;
