@@ -6,69 +6,93 @@ use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{write_text};
 
-use FindBin;
-use lib "$FindBin::Bin/../lib";
+use FindBin();
+use FindBin::libs;
 
 BEGIN {
     eval { require XML::Twig; require Net::OpenSSH::More; require Net::EmptyPort; 1 }
       or plan skip_all => "provisioner prereqs not installed: $@";
 }
 
-require "$FindBin::Bin/../bin/provision";
-require Config::Simple;
+my $script = "$FindBin::Bin/../bin/provision";
+require $script;
 require Trog::HV;
 
-# --- terraform state is kept per-hypervisor ----------------------------------
-subtest 'tf_dir_for' => sub {
-    my $local = Trog::HV->new();
-    is(Trog::Bin::Provisioner::tf_dir_for($local), '/opt/terraform',
-        'the default HV keeps using the historical path');
-
-    is(Trog::Bin::Provisioner::tf_dir_for(Trog::HV->new(uri => 'qemu:///system')),
-        '/opt/terraform', 'so does an explicit qemu:///system');
-
-    my $remote = Trog::HV->new(uri => 'qemu+ssh://root@hv1.example.net/system');
-    is(Trog::Bin::Provisioner::tf_dir_for($remote),
-        '/opt/terraform/hv/qemu_ssh_root_hv1_example_net_system',
-        'a remote HV gets its own state tree so the two never cross-destroy');
-
-    isnt(Trog::Bin::Provisioner::tf_dir_for($remote),
-         Trog::Bin::Provisioner::tf_dir_for(Trog::HV->new(uri => 'qemu+ssh://root@hv2.example.net/system')),
-         'two remote HVs do not share state');
-
-    is(Trog::Bin::Provisioner::tf_dir_for($remote, '/somewhere/else'), '/somewhere/else',
-        '--tfdir wins');
+# --- The interface lives in POD, and pod2usage prints it ----------------------
+subtest 'the POD documents the interface' => sub {
+    my $synopsis = _pod_section($script, 'SYNOPSIS|OPTIONS');
+    like($synopsis, qr/--connect/,   'POD documents --connect');
+    like($synopsis, qr/--domaindir/, 'POD documents --domaindir');
+    like($synopsis, qr/--tfdir/,     'POD documents --tfdir');
+    like($synopsis, qr/--existing/,  'POD documents --existing');
+    like($synopsis, qr/--dryrun/,    'POD documents --dryrun');
+    like($synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument');
 };
 
-# --- which address we SSH to on the guest ------------------------------------
-subtest 'guest_ssh_ip' => sub {
+# pod2usage exits rather than dying, so this has to be a real run.
+subtest 'no domain exits with the usage' => sub {
+    my $out = qx{$^X $script 2>&1};
+    isnt($?, 0, 'exits non-zero');
+    like($out, qr/No domain passed/, 'saying what was missing');
+    like($out, qr/Usage:/,           'and printing the usage out of the POD');
+};
+
+# --- The hypervisor comes off the config, and --connect beats it -------------
+#
+# Run main() as far as the hypervisor being built and then stop it, so we can
+# see what it decided without letting it near a real libvirt or a real ssh.
+subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/vm.example.com";
+    write_text("$dir/vm.example.com/provision.conf",
+        "libvirt_uri=qemu+ssh://root\@confhv/system\nips=203.0.113.10\n");
+    write_text("$dir/vm.example.com/users.yaml",  "users: []\n");
+    write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
 
-    my $with_ip = "$dir/with.conf";
-    write_text($with_ip, "ips=203.0.113.10\n");
-    my $conf_with = Config::Simple->new($with_ip);
+    my $fakebin = tempdir(CLEANUP => 1);
+    write_text("$fakebin/terraform", "#!/bin/sh\nexit 0\n");
+    chmod 0755, "$fakebin/terraform";
+    local $ENV{PATH} = "$fakebin:$ENV{PATH}";
 
-    my $without = "$dir/without.conf";
-    write_text($without, "size=42949672960\n");
-    my $conf_without = Config::Simple->new($without);
+    my $tfdir = tempdir(CLEANUP => 1);
 
-    {
-        local $Trog::Bin::Provisioner::hv = Trog::HV->new();
-        is(Trog::Bin::Provisioner::guest_ssh_ip($conf_with, '192.168.122.50'), '192.168.122.50',
-            'a local HV uses the NAT lease, as it always did');
-        is(Trog::Bin::Provisioner::guest_ssh_ip($conf_without, '192.168.122.50'), '192.168.122.50',
-            'even with no static IP configured');
-    }
+    no warnings 'redefine', 'once';
+    local *Trog::HV::mkpath_hv      = sub { 1 };
+    local *Trog::HV::file_exists_hv = sub { 1 };
+    local *Trog::Bin::Provisioner::sync_tf_state_with_libvirt = sub { die "far enough\n" };
 
-    {
-        local $Trog::Bin::Provisioner::hv = Trog::HV->new(uri => 'qemu+ssh://hv1/system');
-        is(Trog::Bin::Provisioner::guest_ssh_ip($conf_with, '192.168.122.50'), '203.0.113.10',
-            'a remote HV uses the bridged static IP, which we can actually route to');
+    my $run = sub {
+        Trog::HV->forget();
+        eval { Trog::Bin::Provisioner::main(@_) };
+        is($@, "far enough\n", 'got as far as the hypervisor being built');
+        return Trog::HV->new();
+    };
 
-        eval { Trog::Bin::Provisioner::guest_ssh_ip($conf_without, '192.168.122.50') };
-        like($@, qr/requires the guest to have a/, 'and says so when there is none');
-        like($@, qr/\bips\b/, 'naming the config key to set');
-    }
+    my $hv = $run->('--domaindir', $dir, '--tfdir', $tfdir, 'vm.example.com');
+    is($hv->uri, 'qemu+ssh://root@confhv/system',
+        'libvirt_uri from provision.conf reaches the hypervisor object');
+    is($hv->domain_dir, $dir,   '--domaindir does too');
+    is($hv->tf_dir,     $tfdir, 'and so does --tfdir');
+    ok(-d "$tfdir/config", 'the terraform config dir got made under it');
+
+    $hv = $run->('--domaindir', $dir, '--tfdir', $tfdir,
+        qw{--connect qemu+ssh://root@clihv/system vm.example.com});
+    is($hv->uri, 'qemu+ssh://root@clihv/system', '--connect wins over the config');
 };
+
+sub _pod_section {
+    my ($file, $sections) = @_;
+    require Pod::Usage;
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $file,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => $sections,
+    );
+    close $fh;
+    return $text // '';
+}
 
 done_testing;

@@ -19,18 +19,23 @@ WriteMakefile(
   PREREQ_PM => {
     'Cwd'            => 0,
     'FindBin'        => 0,
+    'FindBin::libs'  => 0,
     'File::Path'     => 0,
     'File::Temp'     => 0,
     'Config::Simple' => 0,
     'File::Slurper'  => 0,
     'File::Copy'     => 0,
+    'Pod::Usage'     => 0,
     'YAML::XS'       => 0,
     'JSON::PP'       => 0,
     'List::Util'     => 0,
     'XML::Twig'      => 0,
     'JSON::MaybeXS'  => 0,
+    'Sys::Virt'      => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
+    # Only needed to run the house perlcritic policies in lib/Perl/Critic.
+    'Perl::Critic'   => 0,
   },
   test => {TESTS => 't/*.t'}
 );

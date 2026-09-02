@@ -1,24 +1,70 @@
-#!/bin/bash
+#!/usr/bin/env perl
 
-#nuke the storage pool because tf = braindead
+package Trog::Bin::NukePool;
 
-# Usage: nuke_pool [LIBVIRT_URI]
-# Pass a libvirt connection string to nuke the pool on another hypervisor,
-# e.g. nuke_pool qemu+ssh://root@hv1.example.net/system
+use strict;
+use warnings;
 
-URI="${1:-}"
-POOL_PATH="${POOL_PATH:-/opt/terraform/disks}"
+use FindBin();
+use FindBin::libs;
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+use Trog::HV();
 
-if [ -n "$URI" ]; then
-    VIRSH=(virsh -c "$URI")
-    # The pool dir lives on the hypervisor, so it has to be removed there.
-    RM=(ssh "$(printf '%s' "$URI" | sed -E 's#^[^:]+://##; s#/.*$##')" sudo rm -rf "$POOL_PATH")
-else
-    VIRSH=(virsh)
-    RM=(rm -rf "$POOL_PATH")
-fi
+=head1 NAME
 
-"${RM[@]}"
-"${VIRSH[@]}" pool-destroy tf_disks
-"${VIRSH[@]}" pool-delete tf_disks
-"${VIRSH[@]}" pool-undefine tf_disks
+nuke_pool - tear down the tf_disks storage pool because terraform is braindead
+
+=head1 SYNOPSIS
+
+    nuke_pool [OPTIONS]
+
+    nuke_pool
+    nuke_pool --connect qemu+ssh://root@hv1.example.net/system
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the pool.  Defaults to
+whatever libvirt itself would pick, i.e. this machine.
+
+=item B<--pool> NAME
+
+Which pool to nuke.  Defaults to C<tf_disks>.
+
+=item B<--poolpath> DIR
+
+Where that pool's backing store lives on the hypervisor.  Defaults to
+F</opt/terraform/disks>.
+
+=back
+
+=head1 DESCRIPTION
+
+Removes the pool's directory from the hypervisor and then stops, deletes and
+undefines the pool itself.  Terraform gets itself into states nothing else will
+get it out of; this is that.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($uri, $pool, $pool_path);
+    GetOptionsFromArray(\@args,
+        'connect=s'  => \$uri,
+        'pool=s'     => \$pool,
+        'poolpath=s' => \$pool_path,
+    ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
+
+    my $hv = Trog::HV->new(uri => $uri, pool_path => $pool_path);
+    $hv->nuke_pool($pool // 'tf_disks');
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

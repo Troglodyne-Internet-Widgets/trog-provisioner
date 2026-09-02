@@ -20,9 +20,13 @@ Even business units at giant corporations can do just fine with this approach.
     * contact\_email: Email address to send root's mail to
     * depends\_on: Whether this system is to be provisioned on something that may or may not already exist
     * admin\_user: What the name of the admin user is in the event we want to provision on already existing systems.  This user needs passwordless sudo; when omitted we use root.
-    * libvirt\_uri: Connection string for the hypervisor to build on.  Defaults to `qemu:///system`, i.e. this machine.  See "PROVISIONING A REMOTE HYPERVISOR" below.
+    * libvirt\_uri: Connection string for the hypervisor to build on.  Defaults to `qemu:///system`, i.e. this machine.  Anything but the local machine has to use an ssh transport, e.g. `qemu+ssh://root@hv1.example.net/system`.  See "PROVISIONING A REMOTE HYPERVISOR" below.
     * bridge\_device / virbr\_device: Skip autodetection and name the outbound bridge / libvirt NAT bridge outright.  Handy when the HV has several and `brctl show | tail -n1` guesses wrong.
     * pool\_path: Where the `tf_disks` storage pool lives on the HV.  Defaults to `/opt/terraform/disks`.
+    * domain\_dir: Where the per-domain directories live, on both this machine and the HV.  Defaults to `/opt/domains`; `--domaindir` overrides it.
+    * tf\_dir: Where terraform's config and state live.  Defaults to `/opt/terraform` for the local HV and `/opt/terraform/hv/<mangled uri>` for any other; `--tfdir` overrides it.
+
+    The last five describe the *hypervisor*, not the domain, so they're read from the provision.conf of the domain you invoked.  A `depends_on` domain's copy of them is ignored -- both domains land on the same hypervisor by definition.
     * cpu\_mode: libvirt `<cpu mode="...">` value.  Defaults to `host-passthrough` so the guest sees the HV's real CPU (incl. AVX/AVX2 — required by anything that probes cpuid for vector extensions, e.g. the v8 snapshot bundled with the `claude` CLI).  Set to `host-model` or a specific qemu CPU model if you need to migrate the guest to a differently-specced HV.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
@@ -71,26 +75,32 @@ libvirt_uri=qemu+ssh://root@hv1.example.net/system
 
 ### What that actually does
 
-The URI is handed to terraform's libvirt provider and to every `virsh` call.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, writing the rsyslog collector config, authorizing the guest's key so it can fetch `data.tar.gz` -- and all of it has to happen *on the hypervisor*.  So for a remote URI we also get a shell there over SSH and do it remotely.
+The URI is handed to terraform's libvirt provider and used for every libvirt call we make, which all go through `Sys::Virt` -- no `virsh`, so libvirt's own transports do the work.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, writing the rsyslog collector config, putting the domain directory somewhere the guest can fetch it from -- and all of it has to happen *on the hypervisor*.  So for a remote URI we also get a shell there over SSH and do it remotely.
 
 That means:
 
-1. **You need passwordless SSH to the HV** as a user with passwordless `sudo`, for whatever host the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.  `qemu+ssh://` URIs give us the login for free; `qemu+tcp://` and `qemu+tls://` don't, so name it explicitly:
+1. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
 
-    ```
-    libvirt_uri=qemu+tcp://hv2.example.net/system
-    hv_ssh_host=hv2.mgmt.example.net
-    hv_ssh_user=ops
-    hv_ssh_port=2200
-    ```
+2. **You need passwordless SSH to the HV** as the user the URI names, with passwordless `sudo`.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
 
-2. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
+3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
-3. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<mangled uri>`.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `--tfdir` if you want it somewhere specific.
+4. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<mangled uri>`.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `--tfdir` if you want it somewhere specific.
 
-4. **`data.tar.gz` is copied to the HV** at the same `$DOMAIN` path, since the guest scp's it back over the NAT network.  Nothing else from the domain directory goes over -- in particular the guest's private key stays here and reaches the VM through cloud-init.
+5. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
 
-5. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+    Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
+
+6. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+
+### Nuking a wedged storage pool
+
+Terraform gets the `tf_disks` pool into states nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:
+
+```
+bin/nuke_pool
+bin/nuke_pool --connect qemu+ssh://root@hv1.example.net/system
+```
 
 ## UBUNTU DEPS
 

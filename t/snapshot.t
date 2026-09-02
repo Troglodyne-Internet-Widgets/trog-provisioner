@@ -2,115 +2,113 @@
 use strict;
 use warnings;
 
-BEGIN {
-    $INC{'File/Which.pm'} = 1;
-    package File::Which;
-    use Exporter 'import';
-    our @EXPORT_OK = qw{which};
-    sub which { return '/usr/bin/virsh' }
-}
-
-use Test::More tests => 15;
+use Test::More;
+use FindBin();
+use FindBin::libs;
 
 require './bin/snapshot';
 
-# usage() lists expected options
-my $usage = Trog::Bin::Snapshot::usage();
-like($usage, qr/--name/,   'usage mentions --name');
-like($usage, qr/DOMAIN/,   'usage mentions DOMAIN');
+# The interface is documented in POD now, and pod2usage prints that.
+my $synopsis = _pod_section("$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS');
+like($synopsis, qr/--name/,   'POD documents --name');
+like($synopsis, qr/--connect/,'POD documents --connect');
+like($synopsis, qr/DOMAIN/,   'POD documents the DOMAIN argument');
 
-# No domain → dies with usage
-eval { Trog::Bin::Snapshot::main() };
-like($@, qr/Usage:/, 'main() with no args dies with usage');
+# No domain -> usage, non-zero exit.  This one has to be a real run, since
+# pod2usage exits rather than dying.
+my ($out, $rc) = _run("$FindBin::Bin/../bin/snapshot");
+isnt($rc, 0, 'no arguments exits non-zero');
+like($out, qr/No domain passed/, 'saying what was missing');
+like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
-# virsh create fails → dies
+# libvirt refuses to snapshot -> dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 1 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { undef };
+    local *Trog::HV::create_snapshot        = sub { 0 };
+    local *Trog::HV::snapshot_current_name  = sub { undef };
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
-    like($@, qr/Failed to create snapshot/, 'main() dies when virsh create fails');
+    like($@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails');
 }
 
-# No current snapshot after create → dies
+# No current snapshot after create -> dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { undef };
+    local *Trog::HV::create_snapshot       = sub { 1 };
+    local *Trog::HV::snapshot_current_name = sub { undef };
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
     like($@, qr/No current snapshot/, 'main() dies when no snapshot is current after create');
 }
 
-# Current snapshot unchanged → dies
+# Current snapshot unchanged -> dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { "same-snap\n" };
+    local *Trog::HV::create_snapshot       = sub { 1 };
+    local *Trog::HV::snapshot_current_name = sub { 'same-snap' };
 
     eval { Trog::Bin::Snapshot::main('myvm.lan') };
-    like($@, qr/unchanged after create/, 'main() dies when current snapshot does not change');
+    like($@, qr/unchanged after create/, 'main() dies when the current snapshot does not change');
 }
 
-# Happy path — before is undef (no prior snapshot), after is new name
+# Happy path -- nothing was current before
 {
     no warnings 'redefine';
     my $call = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        $call++;
-        return $call == 1 ? undef : "new-snap\n";
-    };
+    local *Trog::HV::create_snapshot       = sub { 1 };
+    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? undef : 'new-snap' };
 
     my $rc;
     eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
-    is($@,  '',  'main() no exception on success when before was undef');
-    is($rc, 0,   'main() returns 0 on success');
+    is($@,  '', 'no exception on success when nothing was current before');
+    is($rc, 0,  'main() returns 0 on success');
 }
 
-# Happy path — before differs from after
+# Happy path -- before differs from after
 {
     no warnings 'redefine';
     my $call = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        $call++;
-        return $call == 1 ? "old-snap\n" : "new-snap\n";
-    };
+    local *Trog::HV::create_snapshot       = sub { 1 };
+    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? 'old-snap' : 'new-snap' };
 
     my $rc;
     eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
-    is($@,  '', 'main() no exception when before differs from after');
+    is($@,  '', 'no exception when before differs from after');
     is($rc, 0,  'main() returns 0');
 }
 
-# --name is forwarded to virsh
+# --name reaches libvirt
 {
     no warnings 'redefine';
     my @captured;
-    my $ncall = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { @captured = @_; return 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        return ++$ncall == 1 ? undef : "mysnap\n";
-    };
+    my $call = 0;
+    local *Trog::HV::create_snapshot       = sub { @captured = @_; return 1 };
+    local *Trog::HV::snapshot_current_name = sub { ++$call == 1 ? undef : 'mysnap' };
 
-    Trog::Bin::Snapshot::main('myvm.lan', '--name', 'mysnap');
-    ok((grep { $_ eq 'mysnap' } @captured), '--name value forwarded to virsh');
-    ok((grep { $_ eq '--atomic' } @captured), '--atomic flag present');
-    ok((grep { $_ eq '--live' } @captured),   '--live flag present');
+    Trog::Bin::Snapshot::main(qw{myvm.lan --name mysnap});
+    is($captured[1], 'myvm.lan', 'domain forwarded');
+    is($captured[2], 'mysnap',   '--name value forwarded');
 }
 
-# _virsh_snap_current returns undef when virsh exits non-zero
-{
-    no warnings 'redefine';
-    # We just test that the sub doesn't die; actual virsh call not run in tests
-    # because qx{} is called inline. Just verify the code path is accessible.
-    can_ok('Trog::Bin::Snapshot', '_virsh_snap_current');
+sub _run {
+    my (@cmd) = @_;
+    my $out = qx{$^X @cmd 2>&1};
+    return ($out, $?);
 }
 
-# _virsh wraps system() correctly (call count / args)
-{
-    no warnings 'redefine';
-    can_ok('Trog::Bin::Snapshot', '_virsh');
+sub _pod_section {
+    my ($file, $sections) = @_;
+    require Pod::Usage;
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $file,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => $sections,
+    );
+    close $fh;
+    return $text // '';
 }
+
+done_testing;

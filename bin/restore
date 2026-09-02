@@ -5,26 +5,63 @@ package Trog::Bin::Restore;
 use strict;
 use warnings;
 
-use FindBin;
-use lib "$FindBin::Bin/../lib";
+use FindBin();
+use FindBin::libs;
 use Config::Simple;
-use File::Which qw{which};
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
 use Net::EmptyPort;
 use Net::OpenSSH::More;
 use Trog::HV();
 
-# The hypervisor holding the domain.  Defaults to this machine.
-our $hv;
+=head1 NAME
 
-sub hv {
-    $hv //= Trog::HV->new();
-    return $hv;
-}
+restore - revert a provisioned VM to one of its snapshots
 
-sub usage {
-    return "Usage: $0 [--latest|--oldest|--name SNAP] [--domaindir DIR] [--connect URI] DOMAIN\n";
-}
+=head1 SYNOPSIS
+
+    restore [--latest|--oldest|--name SNAP] [OPTIONS] DOMAIN
+
+    restore --latest vm.example.com
+    restore --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+
+=head1 OPTIONS
+
+Exactly one of B<--latest>, B<--oldest> or B<--name> is required.
+
+=over 4
+
+=item B<--latest>
+
+Revert to the newest snapshot.
+
+=item B<--oldest>
+
+Revert to the oldest snapshot.
+
+=item B<--name> SNAP
+
+Revert to the named snapshot.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the domain.  Defaults to
+whatever libvirt itself would pick, i.e. this machine.  Overrides C<libvirt_uri>
+in F<provision.conf>.
+
+=back
+
+=head1 DESCRIPTION
+
+Reverts the domain and leaves it running, then waits until it can actually SSH
+in at the address F<provision.conf> gives for it, so a revert that produced an
+unreachable VM is reported as a failure rather than a success.
+
+=cut
 
 sub main {
     my @args = @_;
@@ -37,23 +74,29 @@ sub main {
         'domaindir=s' => \$domain_dir,
         'connect=s'   => \$uri,
     );
-    $domain_dir //= '/opt/domains';
 
     my $domain = shift @args;
-    die usage() unless $domain;
-    die "virsh not installed\n" unless which('virsh');
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
 
     my $modes = grep { defined $_ } ($latest, $oldest, $name);
-    die usage() unless $modes == 1;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass exactly one of --latest, --oldest or --name')
+      unless $modes == 1;
 
     # We need to know which hypervisor to ask about snapshots before we ask, so
     # peek at provision.conf now.  An explicit --connect wins over what it says.
     # The file being mandatory is enforced further down, where it always was.
+    $domain_dir //= '/opt/domains';
     my $cfile = "$domain_dir/$domain/provision.conf";
-    $hv = Trog::HV->from_config((-f $cfile ? Config::Simple->new($cfile) : undef), uri => $uri);
+    my $hv = Trog::HV->from_config(
+        (-f $cfile ? Config::Simple->new($cfile) : undef),
+        uri        => $uri,
+        domain_dir => $domain_dir,
+    );
     print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
-    my @snaps = _virsh_snap_list($domain);
+    my @snaps = $hv->snapshot_names($domain);
     die "No snapshots found for $domain\n" unless @snaps;
 
     my $snapname;
@@ -68,8 +111,7 @@ sub main {
     }
 
     print "Reverting $domain to snapshot '$snapname'...\n";
-    my $rc = _virsh_snap_revert($domain, $snapname);
-    die "Failed to revert $domain to '$snapname'\n" if $rc;
+    die "Failed to revert $domain to '$snapname'\n" unless $hv->revert_snapshot($domain, $snapname);
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
@@ -83,18 +125,6 @@ sub main {
     wait_for_ssh($user, "$domain_dir/$domain/key.rsa", $ip);
     print "SSH verified. $domain is up at $ip.\n";
     return 0;
-}
-
-sub _virsh_snap_list {
-    my ($domain) = @_;
-    my @names = split(/\n/, hv()->virsh_pipe(['snapshot-list', '--name', $domain], '2>/dev/null') // '');
-    chomp @names;
-    return grep { length $_ } @names;
-}
-
-sub _virsh_snap_revert {
-    my ($domain, $snapname) = @_;
-    return hv()->virsh_system('snapshot-revert', '--snapshotname', $snapname, '--running', $domain);
 }
 
 sub wait_for_ssh {

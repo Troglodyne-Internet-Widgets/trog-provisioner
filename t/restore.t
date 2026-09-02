@@ -3,15 +3,6 @@ use strict;
 use warnings;
 
 BEGIN {
-    # Stub File::Which
-    $INC{'File/Which.pm'} = 1;
-    package File::Which;
-    use Exporter 'import';
-    our @EXPORT_OK = qw{which};
-    sub which { return '/usr/bin/virsh' }
-}
-
-BEGIN {
     # Stub Net::EmptyPort so tests don't do real network waits
     $INC{'Net/EmptyPort.pm'} = 1;
     package Net::EmptyPort;
@@ -25,34 +16,45 @@ BEGIN {
     sub new { bless {}, shift }
 }
 
-use Test::More tests => 19;
+use Test::More;
 use File::Temp qw{tempdir};
+use FindBin();
+use FindBin::libs;
 
 require './bin/restore';
 
-# usage() mentions expected flags
-my $usage = Trog::Bin::Restore::usage();
-like($usage, qr/--latest/,  'usage mentions --latest');
-like($usage, qr/--oldest/,  'usage mentions --oldest');
-like($usage, qr/--name/,    'usage mentions --name');
-like($usage, qr/DOMAIN/,    'usage mentions DOMAIN');
+# The interface is documented in POD now, and pod2usage prints that.
+my $synopsis = _pod_section("$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS');
+like($synopsis, qr/--latest/,  'POD documents --latest');
+like($synopsis, qr/--oldest/,  'POD documents --oldest');
+like($synopsis, qr/--name/,    'POD documents --name');
+like($synopsis, qr/--connect/, 'POD documents --connect');
+like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
 
-# No domain → dies with usage
-eval { Trog::Bin::Restore::main() };
-like($@, qr/Usage:/, 'main() with no args dies with usage');
+# No domain, and no mode, both exit non-zero with the usage.  These have to be
+# real runs, since pod2usage exits rather than dying.
+{
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore");
+    isnt($rc, 0, 'no arguments exits non-zero');
+    like($out, qr/No domain passed/, 'saying what was missing');
+    like($out, qr/Usage:/,           'and printing the usage out of the POD');
+}
 
-# No mode → dies with usage
-eval { Trog::Bin::Restore::main('myvm.lan') };
-like($@, qr/Usage:/, 'main() with domain but no mode dies with usage');
+{
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore", 'myvm.lan');
+    isnt($rc, 0, 'a domain with no mode exits non-zero');
+    like($out, qr/exactly one of --latest/, 'saying which flags to pick between');
+}
 
-# Multiple modes → dies with usage
-eval { Trog::Bin::Restore::main('--latest', '--oldest', 'myvm.lan') };
-like($@, qr/Usage:/, 'main() with multiple mode flags dies with usage');
+{
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan});
+    isnt($rc, 0, 'two modes at once exits non-zero');
+}
 
 # No snapshots → dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list = sub { () };
+    local *Trog::HV::snapshot_names = sub { () };
 
     eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
     like($@, qr/No snapshots found/, 'main() dies when no snapshots exist');
@@ -61,30 +63,30 @@ like($@, qr/Usage:/, 'main() with multiple mode flags dies with usage');
 # --name for nonexistent snapshot → dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list = sub { ('snap-a', 'snap-b') };
+    local *Trog::HV::snapshot_names = sub { ('snap-a', 'snap-b') };
 
-    eval { Trog::Bin::Restore::main('--name', 'snap-z', 'myvm.lan') };
-    like($@, qr/not found for myvm.lan/, 'main() dies when named snapshot not found');
+    eval { Trog::Bin::Restore::main(qw{--name snap-z myvm.lan}) };
+    like($@, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there');
 }
 
-# virsh revert fails → dies
+# Revert fails → dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 1 };
+    local *Trog::HV::snapshot_names   = sub { ('snap-a') };
+    local *Trog::HV::revert_snapshot  = sub { 0 };
 
     eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
-    like($@, qr/Failed to revert/, 'main() dies when virsh revert fails');
+    like($@, qr/Failed to revert/, 'main() dies when the revert fails');
 }
 
 # Missing provision.conf → dies
 {
     no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 0 };
+    local *Trog::HV::snapshot_names  = sub { ('snap-a') };
+    local *Trog::HV::revert_snapshot = sub { 1 };
 
-    eval { Trog::Bin::Restore::main('--latest', '--domaindir', '/tmp/nonexistent_xyz', 'myvm.lan') };
-    like($@, qr/No provision\.conf found/, 'main() dies when provision.conf missing');
+    eval { Trog::Bin::Restore::main(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
+    like($@, qr/No provision\.conf found/, 'main() dies when provision.conf is missing');
 }
 
 # Helper: build a minimal provision.conf in a temp dir
@@ -110,12 +112,12 @@ sub _make_conf {
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    local *Trog::HV::snapshot_names  = sub { qw{snap-a snap-b snap-c} };
+    local *Trog::HV::revert_snapshot = sub { @reverted = @_; return 1 };
+    local *Trog::Bin::Restore::wait_for_ssh = sub { 1 };
 
     Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-c', '--latest picks the last snapshot');
+    is($reverted[2], 'snap-c', '--latest picks the last snapshot');
 }
 
 # --oldest picks first snapshot
@@ -125,12 +127,12 @@ sub _make_conf {
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    local *Trog::HV::snapshot_names  = sub { qw{snap-a snap-b snap-c} };
+    local *Trog::HV::revert_snapshot = sub { @reverted = @_; return 1 };
+    local *Trog::Bin::Restore::wait_for_ssh = sub { 1 };
 
     Trog::Bin::Restore::main('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-a', '--oldest picks the first snapshot');
+    is($reverted[2], 'snap-a', '--oldest picks the first snapshot');
 }
 
 # --name picks the specified snapshot
@@ -140,12 +142,13 @@ sub _make_conf {
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    local *Trog::HV::snapshot_names  = sub { qw{snap-a snap-b snap-c} };
+    local *Trog::HV::revert_snapshot = sub { @reverted = @_; return 1 };
+    local *Trog::Bin::Restore::wait_for_ssh = sub { 1 };
 
-    Trog::Bin::Restore::main('--name', 'snap-b', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-b', '--name picks the specified snapshot');
+    Trog::Bin::Restore::main(qw{--name snap-b --domaindir}, $tmpdir, 'myvm.lan');
+    is($reverted[1], 'myvm.lan', 'the domain is passed along');
+    is($reverted[2], 'snap-b',   '--name picks the specified snapshot');
 }
 
 # wait_for_ssh called with correct user, key, ip
@@ -155,28 +158,51 @@ sub _make_conf {
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42');
 
     my @ssh_args;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { @ssh_args = @_; return 1 };
+    local *Trog::HV::snapshot_names  = sub { ('snap-a') };
+    local *Trog::HV::revert_snapshot = sub { 1 };
+    local *Trog::Bin::Restore::wait_for_ssh = sub { @ssh_args = @_; return 1 };
 
     Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($ssh_args[0], 'ubuntu',                       'wait_for_ssh called with admin_user');
-    is($ssh_args[2], '10.0.0.42',                    'wait_for_ssh called with IP from provision.conf');
-    like($ssh_args[1], qr{myvm\.lan/key\.rsa},       'wait_for_ssh called with domain key path');
+    is($ssh_args[0], 'ubuntu',                 'wait_for_ssh called with admin_user');
+    is($ssh_args[2], '10.0.0.42',              'wait_for_ssh called with IP from provision.conf');
+    like($ssh_args[1], qr{myvm\.lan/key\.rsa}, 'wait_for_ssh called with domain key path');
 }
 
-# virsh revert receives correct --snapshotname and --running flags
+# --connect reaches the hypervisor object
 {
     no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
-    my @cmd_args;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-x') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @cmd_args = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    my $seen;
+    local *Trog::HV::snapshot_names  = sub { $seen = $_[0]->uri; return ('snap-a') };
+    local *Trog::HV::revert_snapshot = sub { 1 };
+    local *Trog::Bin::Restore::wait_for_ssh = sub { 1 };
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($cmd_args[0], 'myvm.lan',  '_virsh_snap_revert receives domain');
-    is($cmd_args[1], 'snap-x',    '_virsh_snap_revert receives snapshot name');
+    Trog::Bin::Restore::main(qw{--latest --connect qemu+ssh://hv1/system --domaindir},
+        $tmpdir, 'myvm.lan');
+    is($seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we asked for');
 }
+
+sub _run {
+    my (@cmd) = @_;
+    my $out = qx{$^X @cmd 2>&1};
+    return ($out, $?);
+}
+
+sub _pod_section {
+    my ($file, $sections) = @_;
+    require Pod::Usage;
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $file,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => $sections,
+    );
+    close $fh;
+    return $text // '';
+}
+
+done_testing;

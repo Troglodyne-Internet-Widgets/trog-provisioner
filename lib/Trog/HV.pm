@@ -1,17 +1,5 @@
 package Trog::HV;
 
-# Represents the hypervisor we are provisioning against.
-#
-# Everything in this toolkit that used to assume "the HV is this machine"
-# goes through here instead:
-#   * the URI handed to terraform's libvirt provider and to virsh
-#   * shell commands that have to run *on* the HV (brctl, ip, sshd_config, ...)
-#   * files that have to live *on* the HV (the storage pool dir, virtiofs-better,
-#     rsyslog drop-ins, the data.tar.gz the guest scp's back)
-#
-# When no URI is configured we are the HV, and every one of those degrades to
-# exactly what the code did before: plain qx/system/File::* against the local FS.
-
 use strict;
 use warnings;
 
@@ -19,36 +7,158 @@ use File::Path();
 use File::Copy();
 use File::Temp();
 use File::Slurper();
+use Sys::Virt();
+
+=head1 NAME
+
+Trog::HV - the hypervisor we are provisioning against
+
+=head1 SYNOPSIS
+
+    use Trog::HV();
+
+    # Once, wherever the config and command line are read:
+    my $hv = Trog::HV->from_config($config, uri => $connect_option);
+
+    # Everywhere else, in any package, without threading it through:
+    my $hv = Trog::HV->new();
+
+    $hv->annihilate_domain('vm.example.com');
+    $hv->write_text_hv('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
+    print $hv->tf_config_dir, "\n";
+
+=head1 DESCRIPTION
+
+Everything in this toolkit that used to assume "the hypervisor is this machine"
+goes through here instead:
+
+=over 4
+
+=item * libvirt itself, via L<Sys::Virt>, which speaks every transport a
+connection URI can name and needs no shell to do it.
+
+=item * shell commands that have to run I<on> the HV (brctl, ip, sshd_config,
+the libvirt lease helper).
+
+=item * files that have to live I<on> the HV (the storage pool dir,
+virtiofs-better, rsyslog drop-ins, the domain directory the guest pulls its
+payload from).
+
+=item * the paths those things live at, and the HV-derived facts (bridge
+device, internal IP, sshd port) the templates need.
+
+=back
+
+When no URI is configured we are the hypervisor, and every one of those degrades
+to exactly what the code did before: libvirt's own default connection and plain
+C<system>/C<File::*> against the local filesystem.
+
+The object is a singleton.  C<< Trog::HV->new() >> with no arguments hands back
+whichever hypervisor was configured earlier in the process, so callers do not
+have to pass it around or keep their own copy.
+
+=head1 CLASS METHODS
+
+=cut
 
 our $DEFAULT_URI = 'qemu:///system';
 
 # Transports over which we can also get a shell on the HV.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
+# The one hypervisor this process is talking to.
+my $INSTANCE;
+
+=head2 new(%opts)
+
+Build (or return) the hypervisor.
+
+Called with no meaningful options it returns the instance built earlier in the
+process, or a fresh local one if there wasn't any.  Called with options it
+builds a new hypervisor and makes I<that> the instance from then on, so the
+configuration only has to be read once.
+
+Options: C<uri>, C<tf_dir>, C<pool_path>, C<domain_dir>, C<bridge_device>,
+C<virbr_device>.  Undefined and empty values are ignored, which lets callers
+pass unset command line options straight through.
+
+=cut
+
 sub new {
     my ($class, %opts) = @_;
 
-    my $uri      = $opts{uri};
-    my $explicit = (defined($uri) && length($uri)) ? 1 : 0;
+    # Drop the options that weren't actually given, so an unset --connect
+    # doesn't look like a request for a different hypervisor.
+    my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
+    return $INSTANCE if $INSTANCE && !%given;
+
+    my $uri      = $given{uri};
+    my $explicit = defined($uri) ? 1 : 0;
     $uri = $DEFAULT_URI unless $explicit;
 
     my $parsed = _parse_uri($uri)
       or die "Could not parse libvirt connection URI '$uri'\n";
 
     my $self = bless {
+        %given,
         uri      => $uri,
         explicit => $explicit,
         %$parsed,
     }, $class;
 
-    # A tcp:// or tls:// URI tells us nothing about how to get a shell, and
-    # even for qemu+ssh:// the user may want to reach the box differently
-    # (jump host, alternate login).  Let the config say so explicitly.
-    $self->{ssh_host} = $opts{ssh_host} if defined $opts{ssh_host} && length $opts{ssh_host};
-    $self->{ssh_user} = $opts{ssh_user} if defined $opts{ssh_user} && length $opts{ssh_user};
-    $self->{ssh_port} = $opts{ssh_port} if defined $opts{ssh_port} && length $opts{ssh_port};
+    # A remote hypervisor we can't get a shell on is only half usable, and the
+    # half that's missing (files, bridge detection) isn't optional.  Say so now
+    # rather than three minutes into a provision run.
+    die "The hypervisor at $uri is remote, but its transport gives us no shell.\n"
+      . "Use an ssh transport instead, e.g. qemu+ssh://root\@"
+      . ($self->{host} // 'hypervisor')
+      . "/system, so we can reach its filesystem.\n"
+      if !$self->is_local && !defined $self->ssh_host;
 
+    $INSTANCE = $self;
     return $self;
+}
+
+=head2 from_config($config, %override)
+
+Build the hypervisor from a L<Config::Simple> object, with anything passed in
+C<%override> (i.e. from the command line) winning over what the file says.  A
+false C<$config> is fine and means "everything is defaulted".
+
+Reads C<libvirt_uri> for the URI, and C<tf_dir>, C<pool_path>, C<domain_dir>,
+C<bridge_device> and C<virbr_device> under their own names.
+
+=cut
+
+# Constructor option => the provision.conf key it reads.
+my %CONFIG_KEY = (
+    uri => 'libvirt_uri',
+    map { $_ => $_ } qw{tf_dir pool_path domain_dir bridge_device virbr_device},
+);
+
+sub from_config {
+    my ($class, $config, %override) = @_;
+
+    my $param = sub {
+        my ($key) = @_;
+        return undef unless $config;
+        my $val = $config->param($key);
+        $val = $val->[0] if ref $val eq 'ARRAY';
+        return (defined $val && length $val) ? $val : undef;
+    };
+
+    return $class->new(map { $_ => $override{$_} // $param->($CONFIG_KEY{$_}) } keys %CONFIG_KEY);
+}
+
+=head2 forget()
+
+Drop the memoized instance.  Only tests should need this.
+
+=cut
+
+sub forget {
+    undef $INSTANCE;
+    return 1;
 }
 
 # driver[+transport]://[user@][host][:port]/[path][?extraparams]
@@ -77,45 +187,44 @@ sub _parse_uri {
     return {
         driver    => $driver,
         transport => $transport,
-        user      => (defined $user  && length $user)  ? $user  : undef,
-        host      => (defined $host  && length $host)  ? $host  : undef,
+        user      => (defined $user && length $user) ? $user : undef,
+        host      => (defined $host && length $host) ? $host : undef,
         port      => $port,
         path      => $rest,
     };
 }
 
-sub uri      { $_[0]->{uri} }
-sub explicit { $_[0]->{explicit} }
+=head1 IDENTITY
 
-# True when the hypervisor is this very machine, i.e. the historical behavior.
+=head2 uri
+
+The libvirt connection URI, defaulted to C<qemu:///system>.
+
+=head2 explicit
+
+Whether the URI was actually asked for, as opposed to defaulted.  When it
+wasn't, we let libvirt resolve its own default connection exactly as C<virsh>
+with no C<-c> would.
+
+=head2 is_local
+
+True when the hypervisor is this very machine, i.e. the historical behavior.
+
+=head2 slug
+
+A filesystem-safe token identifying this hypervisor, used to keep terraform
+state for different hypervisors from stomping on each other.
+
+=cut
+
+sub uri      { return $_[0]->{uri} }
+sub explicit { return $_[0]->{explicit} }
+
 sub is_local {
     my ($self) = @_;
-    return !defined $self->{host} && !defined $self->{ssh_host};
+    return !defined $self->{host};
 }
 
-# Where to ssh to in order to run something on the HV, or undef if we can't.
-sub ssh_host {
-    my ($self) = @_;
-    return $self->{ssh_host} if defined $self->{ssh_host};
-    return undef unless defined $self->{host};
-    # A bare qemu://host/system speaks libvirt's native remote transport, but
-    # that still tunnels over ssh by default, so treat it as ssh-able too.
-    return $self->{host} if !defined $self->{transport} || $SSH_TRANSPORT{ $self->{transport} };
-    return undef;
-}
-
-sub ssh_user { $_[0]->{ssh_user} // $_[0]->{user} }
-sub ssh_port { $_[0]->{ssh_port} // $_[0]->{port} }
-
-sub ssh_target {
-    my ($self) = @_;
-    my $host = $self->ssh_host or return undef;
-    my $user = $self->ssh_user;
-    return defined $user ? "$user\@$host" : $host;
-}
-
-# A filesystem-safe token identifying this HV, used to keep terraform state
-# for different hypervisors from stomping on each other.
 sub slug {
     my ($self) = @_;
     my $slug = $self->{uri};
@@ -124,14 +233,126 @@ sub slug {
     return $slug;
 }
 
-sub _require_shell {
+=head2 ssh_host, ssh_user, ssh_port, ssh_target
+
+Where to ssh to in order to run something on the hypervisor, all inferred from
+the connection URI.  C<ssh_host> is undef when the transport can't give us a
+shell, which C<new> refuses to build in the first place.
+
+=cut
+
+sub ssh_host {
     my ($self) = @_;
-    return if $self->is_local;
-    return if defined $self->ssh_host;
-    die "Cannot run commands on the hypervisor at "
-      . $self->uri
-      . ": that transport gives us no shell.\n"
-      . "Set hv_ssh_host (and optionally hv_ssh_user/hv_ssh_port) in provision.conf so we can reach it.\n";
+    return undef unless defined $self->{host};
+
+    # A bare qemu://host/system speaks libvirt's native remote transport, but
+    # that still tunnels over ssh by default, so treat it as ssh-able too.
+    return $self->{host} if !defined $self->{transport} || $SSH_TRANSPORT{ $self->{transport} };
+    return undef;
+}
+
+sub ssh_user { return $_[0]->{user} }
+sub ssh_port { return $_[0]->{port} }
+
+sub ssh_target {
+    my ($self) = @_;
+    my $host = $self->ssh_host or return undef;
+    my $user = $self->ssh_user;
+    return defined $user ? "$user\@$host" : $host;
+}
+
+=head1 PATHS
+
+=head2 tf_dir
+
+Where terraform's config and state live, I<on this machine>.
+
+Terraform state is per-hypervisor: one state dir shared between several would
+have terraform believe resources on HV A live on HV B and destroy accordingly.
+So anything but the default connection gets its own tree.
+
+=head2 tf_config_dir
+
+C<tf_dir> plus the C<config/> terraform actually runs in.
+
+=head2 pool_path
+
+Where the C<tf_disks> storage pool lives, I<on the hypervisor>.
+
+=head2 domain_dir
+
+Where the per-domain directories live.  This path has to mean the same thing on
+both ends: the guest pulls its payload from the hypervisor's copy.
+
+=cut
+
+sub tf_dir {
+    my ($self) = @_;
+    return $self->{tf_dir} if defined $self->{tf_dir};
+    return '/opt/terraform' if $self->uri eq $DEFAULT_URI;
+    return '/opt/terraform/hv/' . $self->slug;
+}
+
+sub tf_config_dir { return $_[0]->tf_dir . '/config' }
+sub pool_path     { return $_[0]->{pool_path} // '/opt/terraform/disks' }
+sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
+
+=head2 authorized_keys
+
+The C<authorized_keys> file of the hypervisor-side transfer user, which is the
+account the guest scp's its payload out of.
+
+=cut
+
+sub authorized_keys {
+    my ($self) = @_;
+    return "$ENV{HOME}/.ssh/authorized_keys" if $self->is_local;
+
+    my $home = $self->qx_hv('echo $HOME');
+    chomp $home if defined $home;
+    die "Could not determine the home directory of the transfer user on the hypervisor\n"
+      unless defined $home && length $home;
+    return "$home/.ssh/authorized_keys";
+}
+
+=head2 hv_user
+
+The unprivileged user the guest will scp its payload back from.
+
+=cut
+
+sub hv_user {
+    my ($self) = @_;
+    return scalar getpwuid($<) if $self->is_local;
+    return $self->ssh_user if defined $self->ssh_user;
+
+    my $who = $self->qx_hv('id -un');
+    chomp $who if defined $who;
+    return $who;
+}
+
+=head1 RUNNING THINGS ON THE HYPERVISOR
+
+=head2 qx_hv($shell_command)
+
+C<qx()> equivalent.  Takes a shell string, returns its stdout.
+
+=head2 system_hv(@argv)
+
+C<system()> equivalent.  Takes an argv list, returns the exit code.
+
+=cut
+
+sub qx_hv {
+    my ($self, $cmd) = @_;
+    my $wrapped = $self->_wrap($cmd);
+    return qx{$wrapped};
+}
+
+sub system_hv {
+    my ($self, @argv) = @_;
+    return system(@argv) >> 8 if $self->is_local;
+    return system($self->_wrap(join(' ', map { _shq($_) } @argv))) >> 8;
 }
 
 sub _shq {
@@ -145,63 +366,49 @@ sub _shq {
 sub _wrap {
     my ($self, $cmd) = @_;
     return $cmd if $self->is_local;
-    $self->_require_shell();
-    my @ssh = ('ssh', '-o', 'BatchMode=yes');
+
+    my @ssh = qw{ssh -o BatchMode=yes};
     push @ssh, ('-p', $self->ssh_port) if $self->ssh_port;
     push @ssh, $self->ssh_target, _shq($cmd);
     return join(' ', @ssh);
 }
 
-#### Running things on the HV ##################################################
+=head1 FILES ON THE HYPERVISOR
 
-# qx() equivalent.  Takes a shell string, returns its stdout.
-sub qx_hv {
-    my ($self, $cmd) = @_;
-    my $wrapped = $self->_wrap($cmd);
-    return qx{$wrapped};
-}
+Each of these is the obvious local filesystem call when the hypervisor is us,
+and the same thing over ssh when it isn't.  The C<sudo> option on the writers
+is for destinations under C</etc> and C</usr>.
 
-# system() equivalent.  Takes an argv list, returns the exit code.
-sub system_hv {
-    my ($self, @argv) = @_;
-    return system(@argv) >> 8 if $self->is_local;
-    return system($self->_wrap(join(' ', map { _shq($_) } @argv))) >> 8;
-}
+=over 4
 
-#### Running virsh #############################################################
+=item C<file_exists_hv($path)>
 
-sub virsh_argv {
-    my ($self, @args) = @_;
-    # Only pass -c when the user actually asked for a specific HV, so an
-    # unconfigured run keeps whatever URI virsh resolves on its own.
-    return ('virsh', ($self->explicit ? ('-c', $self->uri) : ()), @args);
-}
+=item C<mkpath_hv(@paths)>
 
-sub virsh_qx {
-    my ($self, @args) = @_;
-    my $cmd = join(' ', map { _shq($_) } $self->virsh_argv(@args));
-    return qx{$cmd};
-}
+=item C<unlink_hv(@paths)>
 
-# As above, but lets the caller keep a shell pipeline on the end.
-sub virsh_pipe {
-    my ($self, $args, $suffix) = @_;
-    my $cmd = join(' ', map { _shq($_) } $self->virsh_argv(@$args));
-    $cmd .= " $suffix" if defined $suffix && length $suffix;
-    return qx{$cmd};
-}
+=item C<read_text_hv($path)>
 
-sub virsh_system {
-    my ($self, @args) = @_;
-    return system($self->virsh_argv(@args)) >> 8;
-}
+=item C<write_text_hv($path, $content, %opts)>
 
-#### Files on the HV ###########################################################
+=item C<append_line_hv($path, $line)>
+
+Append a line, but only if it isn't already there.
+
+=item C<put_file($local, $remote, %opts)>
+
+=item C<put_dir($local, $remote)>
+
+Copy a whole directory tree across, contents and all.
+
+=back
+
+=cut
 
 sub file_exists_hv {
     my ($self, $path) = @_;
     return -f $path ? 1 : 0 if $self->is_local;
-    return $self->system_hv('test', '-f', $path) == 0 ? 1 : 0;
+    return $self->system_hv(qw{test -f}, $path) == 0 ? 1 : 0;
 }
 
 sub mkpath_hv {
@@ -210,7 +417,7 @@ sub mkpath_hv {
         File::Path::make_path(@paths);
         return 1;
     }
-    return $self->system_hv('mkdir', '-p', @paths) == 0;
+    return $self->system_hv(qw{mkdir -p}, @paths) == 0;
 }
 
 sub unlink_hv {
@@ -219,39 +426,13 @@ sub unlink_hv {
         unlink @paths;
         return 1;
     }
-    return $self->system_hv('rm', '-f', @paths) == 0;
+    return $self->system_hv(qw{rm -f}, @paths) == 0;
 }
 
 sub read_text_hv {
     my ($self, $path) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
     return scalar $self->qx_hv('cat ' . _shq($path));
-}
-
-# Copy a local file onto the HV.  Set sudo => 1 for root-owned destinations.
-sub put_file {
-    my ($self, $local, $remote, %opts) = @_;
-
-    if ($self->is_local) {
-        if ($opts{sudo} && !-w _parent_dir($remote)) {
-            return $self->system_hv('sudo', 'cp', $local, $remote) == 0;
-        }
-        return File::Copy::copy($local, $remote) ? 1 : 0;
-    }
-
-    my $staged = $opts{sudo} ? '/tmp/.trog-hv-' . $$ . '-' . time() : $remote;
-
-    my @scp = ('scp', '-q', '-o', 'BatchMode=yes');
-    push @scp, ('-P', $self->ssh_port) if $self->ssh_port;
-    push @scp, $local, $self->ssh_target . ":$staged";
-    return 0 if system(@scp) >> 8;
-
-    return 1 unless $opts{sudo};
-    return 0 if $self->system_hv('sudo', 'mv', $staged, $remote);
-    # mv keeps the staging user's ownership, which isn't what anything under
-    # /etc or /usr/libexec wants.
-    $self->system_hv('sudo', 'chown', 'root:root', $remote);
-    return 1;
 }
 
 sub write_text_hv {
@@ -269,7 +450,6 @@ sub write_text_hv {
     return $self->put_file("$tmp", $path, %opts);
 }
 
-# Append a line to a file on the HV, but only if it isn't already there.
 sub append_line_hv {
     my ($self, $path, $line) = @_;
     chomp $line;
@@ -288,12 +468,49 @@ sub append_line_hv {
         return 1;
     }
 
-    my $dir = _parent_dir($path);
     my $cmd = sprintf(
         'mkdir -p %s; touch %s; grep -qxF -- %s %s || printf \'%%s\\n\' %s >> %s',
-        _shq($dir), _shq($path), _shq($line), _shq($path), _shq($line), _shq($path),
+        _shq(_parent_dir($path)), _shq($path), _shq($line), _shq($path), _shq($line), _shq($path),
     );
-    return $self->system_hv('sh', '-c', $cmd) == 0;
+    return $self->system_hv(qw{sh -c}, $cmd) == 0;
+}
+
+sub put_file {
+    my ($self, $local, $remote, %opts) = @_;
+
+    if ($self->is_local) {
+        return $self->system_hv(qw{sudo cp}, $local, $remote) == 0
+          if $opts{sudo} && !-w _parent_dir($remote);
+        return File::Copy::copy($local, $remote) ? 1 : 0;
+    }
+
+    my $staged = $opts{sudo} ? '/tmp/.trog-hv-' . $$ . '-' . time() : $remote;
+
+    my @scp = (qw{scp -q -o BatchMode=yes});
+    push @scp, ('-P', $self->ssh_port) if $self->ssh_port;
+    push @scp, $local, $self->ssh_target . ":$staged";
+    return 0 if system(@scp) >> 8;
+
+    return 1 unless $opts{sudo};
+    return 0 if $self->system_hv(qw{sudo mv}, $staged, $remote);
+
+    # mv keeps the staging user's ownership, which isn't what anything under
+    # /etc or /usr/libexec wants.
+    $self->system_hv(qw{sudo chown root:root}, $remote);
+    return 1;
+}
+
+sub put_dir {
+    my ($self, $local, $remote) = @_;
+    return 1 if $self->is_local;
+    $self->mkpath_hv($remote) or return 0;
+
+    # tar down the pipe: one round trip, modes preserved, no rsync to install.
+    my $cmd = sprintf(
+        'tar -C %s -czf - . | %s',
+        _shq($local), $self->_wrap('tar -C ' . _shq($remote) . ' -xzf -'),
+    );
+    return system($cmd) == 0 ? 1 : 0;
 }
 
 sub _parent_dir {
@@ -302,34 +519,424 @@ sub _parent_dir {
     return length($path) ? $path : '/';
 }
 
-# The unprivileged user the guest will scp its payload back from.
-sub hv_user {
+=head1 LIBVIRT
+
+All of this goes through L<Sys::Virt>, which talks the connection URI's
+transport itself.  There is no shelling out to C<virsh> and no assumption that
+the hypervisor's libvirt is reachable any way other than the URI we were given.
+
+=head2 vmm
+
+The L<Sys::Virt> connection, opened on first use and kept.
+
+=cut
+
+sub vmm {
     my ($self) = @_;
-    return scalar getpwuid($<) if $self->is_local;
-    return $self->ssh_user if defined $self->ssh_user;
-    my $who = $self->qx_hv('id -un');
-    chomp $who if defined $who;
-    return $who;
+    return $self->{vmm} if $self->{vmm};
+
+    # An unasked-for URI means "whatever libvirt would pick", which is what
+    # virsh with no -c did before any of this was configurable.
+    my $uri = $self->explicit ? $self->uri : '';
+    $self->{vmm} = eval { Sys::Virt->new(uri => $uri, readonly => 0) }
+      or die "Could not connect to libvirt at " . $self->uri . ": $@\n";
+    return $self->{vmm};
 }
 
-# Build an HV from a provision.conf plus whatever the CLI overrode.
-sub from_config {
-    my ($class, $config, %override) = @_;
+# Domain lookups throw when the domain is simply absent, which is not an error
+# anywhere we ask.  Opening the connection happens outside the eval, so a
+# hypervisor we can't reach at all doesn't get reported as "no such domain".
+sub _domain {
+    my ($self, $name) = @_;
+    my $vmm = $self->vmm;
+    return eval { $vmm->get_domain_by_name($name) };
+}
 
-    my $param = sub {
-        my ($key) = @_;
-        return undef unless $config;
-        my $val = $config->param($key);
-        $val = $val->[0] if ref $val eq 'ARRAY';
-        return (defined $val && length $val) ? $val : undef;
+=over 4
+
+=item C<domain_exists($name)>
+
+=item C<domain_is_running($name)>
+
+=item C<domain_xml($name)>
+
+The domain's XML description, or undef if there is no such domain.
+
+=back
+
+=cut
+
+sub domain_exists     { return defined $_[0]->_domain($_[1]) ? 1 : 0 }
+sub domain_is_running { my $d = $_[0]->_domain($_[1]); return $d && $d->is_active ? 1 : 0 }
+
+sub domain_xml {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return undef;
+    return $domain->get_xml_description();
+}
+
+=head2 annihilate_domain($name)
+
+Stop and undefine a domain, nvram and all, and don't complain if it was already
+gone or already off.  Terraform is not reliably able to do this itself, which is
+the only reason we do.
+
+Returns true if there was something there to remove.
+
+=cut
+
+sub annihilate_domain {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return 0;
+
+    # A domain that is already shut off can't be destroyed, and that's the
+    # normal case here rather than a problem.
+    eval { $domain->destroy() };
+    eval {
+        $domain->undefine(Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA());
+        1;
+    } or do {
+        # Older libvirt without nvram support for this domain type.
+        eval { $domain->undefine() };
     };
-
-    return $class->new(
-        uri      => $override{uri}      // $param->('libvirt_uri'),
-        ssh_host => $override{ssh_host} // $param->('hv_ssh_host'),
-        ssh_user => $override{ssh_user} // $param->('hv_ssh_user'),
-        ssh_port => $override{ssh_port} // $param->('hv_ssh_port'),
-    );
+    return 1;
 }
+
+=head2 lease_ip($network, $hostname, %opts)
+
+The address libvirt has leased on C<$network> (usually C<default>) to the guest
+calling itself C<$hostname>.  Pass C<exclude> to ignore a known-stale address,
+which is how we tell a new lease from the one the old VM had.
+
+=cut
+
+sub lease_ip {
+    my ($self, $network, $hostname, %opts) = @_;
+
+    my $vmm = $self->vmm;
+    my $net = eval { $vmm->get_network_by_name($network) } or return undef;
+    my @leases = eval { $net->get_dhcp_leases() };
+    return undef unless @leases;
+
+    foreach my $lease (@leases) {
+        next unless defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$hostname\E/;
+        next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
+        next if defined $opts{exclude} && $lease->{ipaddr} eq $opts{exclude};
+        return $lease->{ipaddr};
+    }
+    return undef;
+}
+
+=head2 release_dhcp_lease($ip, $bridge)
+
+Drop a stale lease so the table doesn't fill up and gum everything else.
+
+This is the one libvirt operation we still shell out for: libvirt exposes DHCP
+leases read-only (C<virNetworkGetDHCPLeases> has no counterpart that deletes
+one), so releasing a lease means poking dnsmasq through libvirt's own lease
+helper on the hypervisor.
+
+=cut
+
+sub release_dhcp_lease {
+    my ($self, $ip, $bridge) = @_;
+    return 0 unless defined $ip && length $ip;
+    $bridge //= $self->virbr_device;
+
+    my ($helper) = grep { $self->file_exists_hv($_) }
+      qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
+    unless ($helper) {
+        warn "No libvirt lease helper found on the hypervisor, leaving the lease for $ip alone\n";
+        return 0;
+    }
+
+    return $self->system_hv('sudo', "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
+}
+
+=head2 eject_cdrom($domain, $target)
+
+Yank the cloud-init ISO back out, so the guest doesn't try to boot it again on
+its next start.  C<$target> defaults to C<sda>, which is where the terraform
+provider insists on putting it.
+
+=cut
+
+sub eject_cdrom {
+    my ($self, $name, $target) = @_;
+    $target //= 'sda';
+
+    my $domain = $self->_domain($name) or return 0;
+    my $xml    = qq{<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><target dev='$target' bus='sata'/><readonly/></disk>};
+
+    my $flags = Sys::Virt::Domain::DEVICE_MODIFY_LIVE() | Sys::Virt::Domain::DEVICE_MODIFY_CONFIG();
+    my $ok    = eval { $domain->update_device($xml, $flags); 1 };
+    warn "Could not eject the cloud-init cdrom from $name: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+=head2 pool_uuid($name)
+
+The UUID of a storage pool, or undef if it doesn't exist yet.  Terraform needs
+this to adopt a pool it didn't create rather than fighting over it.
+
+=head2 nuke_pool($name)
+
+Tear a storage pool down completely -- stop it, delete its contents, forget it
+-- and remove its directory from the hypervisor.  Terraform gets itself into
+states only this can get it out of.
+
+=cut
+
+sub pool_uuid {
+    my ($self, $name) = @_;
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return undef;
+    return $pool->get_uuid_string();
+}
+
+sub nuke_pool {
+    my ($self, $name) = @_;
+
+    # The directory goes first: pool-delete on a pool whose backing store is
+    # already gone is a no-op, but the reverse leaves files libvirt still owns.
+    $self->system_hv(qw{sudo rm -rf}, $self->pool_path);
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
+    unless ($pool) {
+        print "No storage pool named $name on " . $self->uri . ", nothing to nuke.\n";
+        return 0;
+    }
+
+    foreach my $step (qw{destroy delete undefine}) {
+        eval { $pool->$step(); 1 } or warn "pool $step failed for $name: $@";
+    }
+    return 1;
+}
+
+=head1 SNAPSHOTS
+
+=head2 snapshot_names($domain)
+
+Every snapshot the domain has, oldest first.  libvirt hands them back in no
+particular order, so they get sorted by creation time here -- C<restore
+--latest> and C<--oldest> mean nothing otherwise.
+
+=head2 snapshot_current_name($domain)
+
+The name of the domain's current snapshot, or undef if it has none.
+
+=head2 create_snapshot($domain, $name)
+
+Take a live atomic snapshot.  C<$name> may be undef, in which case libvirt names
+it after the current time.  Returns true on success.
+
+=head2 revert_snapshot($domain, $name)
+
+Revert to a named snapshot and leave the domain running.  Returns true on
+success.
+
+=cut
+
+sub snapshot_names {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return ();
+
+    my @snaps = eval { $domain->list_all_snapshots() };
+    return () unless @snaps;
+
+    my @dated = map { { name => $_->get_name(), created => _snapshot_created($_) } } @snaps;
+    return map  { $_->{name} }
+           sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
+           grep { defined $_->{name} && length $_->{name} } @dated;
+}
+
+# <creationTime> is seconds since the epoch.  A snapshot without one sorts to
+# the front, which is where an unknown age belongs.
+sub _snapshot_created {
+    my ($snap) = @_;
+    my $xml = eval { $snap->get_xml_description() } // '';
+    my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
+    return $created // 0;
+}
+
+sub snapshot_current_name {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return undef;
+    my $snap   = eval { $domain->current_snapshot() } or return undef;
+    return $snap->get_name();
+}
+
+sub create_snapshot {
+    my ($self, $name, $snapname) = @_;
+    my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
+
+    my $xml = '<domainsnapshot>';
+    $xml .= '<name>' . _xml_escape($snapname) . '</name>' if defined $snapname && length $snapname;
+    $xml .= '</domainsnapshot>';
+
+    my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
+
+    # LIVE only means anything for a running domain, and libvirt rejects it for
+    # one that isn't.
+    $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
+
+    my $ok = eval { $domain->create_snapshot($xml, $flags); 1 };
+    warn "Snapshot of $name failed: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+sub revert_snapshot {
+    my ($self, $name, $snapname) = @_;
+    my $domain = $self->_domain($name) or return 0;
+    my $snap   = eval { $domain->get_snapshot_by_name($snapname) } or return 0;
+
+    my $ok = eval { $snap->revert_to(Sys::Virt::DomainSnapshot::REVERT_RUNNING()); 1 };
+    warn "Revert of $name to $snapname failed: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+sub _xml_escape {
+    my ($str) = @_;
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    return $str;
+}
+
+=head1 HYPERVISOR FACTS
+
+The network layout the guest templates need.  Each is autodetected on the
+hypervisor unless the config pinned it, because C<brctl show | tail -n1> guesses
+wrong often enough to be worth overriding.
+
+=head2 bridge_device
+
+The outbound bridge the guest's public interface attaches to.
+
+=head2 virbr_device
+
+The libvirt NAT bridge.
+
+=head2 virbr_ip
+
+The hypervisor's address on that NAT bridge, which is what the guest scp's from
+and ships its logs to.
+
+=head2 sshd_port
+
+The port the hypervisor's sshd listens on.  Read out of C<sshd_config> rather
+than off the wire, since there may be several sshd instances running.
+
+=cut
+
+sub bridge_device {
+    my ($self) = @_;
+    return $self->{bridge_device} if defined $self->{bridge_device};
+
+    my $device = $self->qx_hv(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
+    chomp $device if defined $device;
+    die "Could not determine outbound bridge device on " . $self->uri . "!\n"
+      . "Set bridge_device in provision.conf if autodetection can't find it.\n"
+      unless $device;
+
+    return $self->{bridge_device} = $device;
+}
+
+sub virbr_device {
+    my ($self) = @_;
+    return $self->{virbr_device} if defined $self->{virbr_device};
+
+    my $device = $self->qx_hv(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
+    chomp $device if defined $device;
+    die "Could not determine libvirt network device on " . $self->uri . "!\n"
+      . "Set virbr_device in provision.conf if autodetection can't find it.\n"
+      unless $device;
+
+    return $self->{virbr_device} = $device;
+}
+
+sub virbr_ip {
+    my ($self) = @_;
+    return $self->{virbr_ip} if defined $self->{virbr_ip};
+
+    my $device = $self->virbr_device;
+    my $ip     = $self->qx_hv("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
+    die "Could not determine IP address for $device\n" unless $ip;
+    chomp $ip;
+    $ip =~ s{/\d+\z}{};
+
+    return $self->{virbr_ip} = $ip;
+}
+
+sub sshd_port {
+    my ($self) = @_;
+    return $self->{sshd_port} if defined $self->{sshd_port};
+
+    my $port = $self->qx_hv(q{grep '^Port' /etc/ssh/sshd_config | awk '{print $2}'});
+    chomp $port if defined $port;
+    warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
+
+    return $self->{sshd_port} = ($port || 22);
+}
+
+=head1 PROVISIONING
+
+=head2 sync_domain_dir($domain)
+
+Put the domain's directory on the hypervisor.
+
+The guest pulls its payload off the hypervisor over the NAT network, so when the
+hypervisor isn't us, C<domain_dir> has to exist on both ends.  The whole
+directory goes, not just the tarball: what else lives in there is decided by
+whatever provisions these domains, not by this repository, so we are in no
+position to guess which parts the guest will reach for.
+
+Note that this puts the guest's private key on the hypervisor too.  That is the
+cost of the hypervisor being the machine the guest fetches from.
+
+=cut
+
+sub sync_domain_dir {
+    my ($self, $domain) = @_;
+    return 1 if $self->is_local;
+
+    my $local = $self->domain_dir . "/$domain";
+    return 1 unless -d $local;
+
+    print "Shipping $local to the hypervisor...\n";
+    $self->put_dir($local, $local)
+      or die "Could not copy $local to the hypervisor\n";
+    return 1;
+}
+
+=head2 guest_ssh_ip($config, $lease_ip)
+
+Which address I<we> use to SSH into a guest.
+
+On a local hypervisor the libvirt NAT lease is reachable and always was.  On a
+remote one it isn't -- it only routes from the hypervisor itself -- so we need
+the guest's bridged static address instead, and there is no way to guess it.
+
+=cut
+
+sub guest_ssh_ip {
+    my ($self, $config, $lease_ip) = @_;
+    return $lease_ip if $self->is_local;
+
+    my ($ip) = grep { defined $_ && length $_ } $config->param('ips');
+    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n"
+      . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease ("
+      . ($lease_ip // 'none')
+      . ") is only\nreachable from the hypervisor itself.\n"
+      unless $ip;
+    return $ip;
+}
+
+=head1 SEE ALSO
+
+L<Sys::Virt>
+
+=cut
 
 1;
