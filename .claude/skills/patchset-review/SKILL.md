@@ -49,14 +49,14 @@ to justify.
 ## Perl style
 
 - **`use FindBin::libs`, never `use lib`.** Enforced by
-  `Perl::Critic::Policy::Trog::ProhibitUseLib`.
+  `Perl::Critic::Policy::ProhibitUseLib`.
 - **POD and `Pod::Usage`, never a `usage()` sub.** Document the synopsis and
   options in POD and print them with `pod2usage`; a hand-rolled `usage()` is a
   second copy of the interface that goes stale. Enforced by
-  `Perl::Critic::Policy::Trog::ProhibitUsageSubs`.
+  `Perl::Critic::Policy::ProhibitUsageSubs`.
 - **`qw{}` for runs of literals.** `system_hv(qw{sudo rm -f}, $conf)`, not
   `system_hv('sudo', 'rm', '-f', $conf)`. Enforced by
-  `Perl::Critic::Policy::Trog::RequireQwForLiteralLists`.
+  `Perl::Critic::Policy::RequireQwForLiteralLists`.
 - **No ternaries that pick between two spellings of the same call.**
   `$hv->is_local ? unlink($f) : $hv->system_hv(qw{rm -f}, $f)` means the
   abstraction is leaking; make the one call do both.
@@ -65,8 +65,10 @@ Run the house policies over the diff:
 
     perlcritic --profile .perlcriticrc bin/ lib/ t/
 
-(`lib/Perl/Critic/Policy/Trog/` has to be in `@INC`, so run it as
-`perl -Ilib $(which perlcritic) ...` from a checkout.)
+Those three live in their own distributions, alongside
+`Perl::Critic::Policy::ProhibitPipeOpen`, under
+https://github.com/Troglodyne-Internet-Widgets/ -- install them if perlcritic
+says it has no such policy.
 
 ## Unstated dependencies
 

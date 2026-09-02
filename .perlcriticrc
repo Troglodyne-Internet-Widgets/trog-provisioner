@@ -46,10 +46,9 @@ formats = #!/usr/bin/env perl
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
 [Performance::ProhibitRegexForSimpleSubstring]
-# Troglodyne house style (lib/Perl/Critic/Policy/Trog/)
-[Trog::ProhibitUseLib]
-[Trog::ProhibitUsageSubs]
-[Trog::RequireQwForLiteralLists]
+[ProhibitUseLib]
+[ProhibitUsageSubs]
+[RequireQwForLiteralLists]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork

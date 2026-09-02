@@ -34,8 +34,13 @@ WriteMakefile(
     'Sys::Virt'      => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
-    # Only needed to run the house perlcritic policies in lib/Perl/Critic.
-    'Perl::Critic'   => 0,
+  },
+  # Only needed to lint this repo, not to run it.
+  TEST_REQUIRES => {
+    'Perl::Critic' => 0,
+    'Perl::Critic::Policy::ProhibitUseLib'              => 0,
+    'Perl::Critic::Policy::ProhibitUsageSubs'           => 0,
+    'Perl::Critic::Policy::RequireQwForLiteralLists'    => 0,
   },
   test => {TESTS => 't/*.t'}
 );
