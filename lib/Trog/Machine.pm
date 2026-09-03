@@ -367,9 +367,15 @@ sub read_text {
 
     # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
     # of the file.
+    #
+    # The exit status decides, not $ssh->error.  That is sticky -- it holds the
+    # last error from anything on this connection -- so a command that failed
+    # earlier on purpose, like the sudo -n probe, would make a cat that worked
+    # perfectly well look like a failure.
     my $content = $self->_unhang("cat $path",
         sub { $self->ssh->capture({ timeout => $TIMEOUT }, 'cat', $path) });
-    return $self->ssh->error ? undef : $content;
+
+    return $? >> 8 ? undef : $content;
 }
 
 sub write_text {
@@ -409,19 +415,31 @@ sub append_line {
     my ($self, $path, $line) = @_;
     chomp $line;
 
-    my $existing = '';
-    if ($self->is_local) {
-        $existing = File::Slurper::read_text($path) if -f $path;
-    }
-    elsif ($self->file_exists($path)) {
-        $existing = $self->read_text($path) // '';
-    }
-
-    return 1 if grep { $_ eq $line } split(/\n/, $existing);
-
-    $existing .= "\n" if length $existing && $existing !~ m/\n\z/;
+    # Append.  Never read-modify-write.
+    #
+    # This is somebody's authorized_keys, and the old version of this pulled the
+    # file across, added a line and pushed the whole thing back -- so any read
+    # that came back empty, for any reason at all, rewrote the file with one key
+    # in it and locked its owner out of their own machine.  There is no version
+    # of that which is worth the tidier code.
     $self->mkpath(_parent_dir($path));
-    return $self->write_text($path, $existing . "$line\n");
+
+    if ($self->is_local) {
+        if (-f $path) {
+            my $existing = File::Slurper::read_text($path);
+            return 1 if grep { $_ eq $line } split(/\n/, $existing);
+        }
+        open(my $fh, '>>', $path) or die "Could not open $path: $!";
+        print {$fh} "$line\n";
+        close($fh);
+        return 1;
+    }
+
+    # grep decides whether it is already there, on the far side, so the file
+    # never has to make the trip.
+    return 1 if $self->run(qw{grep -qxF --}, $line, $path) == 0;
+
+    return $self->_pour({ stdin_data => "$line\n" }, $path, append => 1);
 }
 
 # Write a stream to a path on the far side.  See "Why none of this uses sftp"
@@ -430,9 +448,13 @@ sub append_line {
 sub _pour {
     my ($self, $stdin, $path, %opts) = @_;
 
+    my @tee = $opts{append} ? (qw{tee -a}) : ('tee');
+
     unless ($opts{sudo}) {
-        return $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $path);
+        return $self->_run({ %$stdin, stdout_discard => 1 }, @tee, $path);
     }
+
+    return $self->_sudo_append($stdin, $path) if $opts{append};
 
     my $staged = $self->_staging_path or return 0;
     $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $staged) or do {
@@ -447,6 +469,27 @@ sub _pour {
 
     $self->remove($staged) unless $ok;
     return $ok ? 1 : 0;
+}
+
+# A privileged append.  It cannot be staged and moved -- that would replace the
+# file rather than add to it -- and the content cannot ride on stdin beside a
+# sudo password, so it is staged and then concatenated on.
+sub _sudo_append {
+    my ($self, $stdin, $path) = @_;
+
+    my $staged = $self->_staging_path or return 0;
+    my $ok = $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $staged)
+      && !$self->run_sudo(qw{sh -c}, sprintf('cat %s >> %s', _shq($staged), _shq($path)));
+
+    $self->remove($staged);
+    return $ok ? 1 : 0;
+}
+
+# The one place left that builds a shell command: >> has no argv spelling.
+sub _shq {
+    my ($str) = @_;
+    $str =~ s/'/'\\''/g;
+    return "'$str'";
 }
 
 # Somewhere we can definitely write, made by the far side rather than guessed

@@ -215,16 +215,28 @@ sub remove_authorized_key {
     my $ak = $hv->authorized_keys;
     return unless $hv->file_exists($ak);
 
+    # Taking a line out means rewriting the file, so this is the one place that
+    # has to read it first -- and the one place that can lock somebody out of
+    # their own machine by getting it wrong.  Refuse on anything unexpected.
     my $contents = $hv->read_text($ak);
-    if ($contents =~ m/\Q$pubkey\E/) {
-        print "Removing domain SSH key from $ak\n";
-        unless ($dryrun) {
-            my @lines = grep { $_ !~ m/\Q$pubkey\E/ } split(/\n/, $contents);
-            $hv->write_text($ak, join("\n", @lines) . "\n");
-        }
-    } else {
+    die "Could not read $ak on " . $hv->describe . "; refusing to rewrite it blind\n"
+      unless defined $contents && length $contents;
+
+    unless ($contents =~ m/\Q$pubkey\E/) {
         print "Domain SSH key not found in $ak, skipping.\n";
+        return;
     }
+
+    print "Removing domain SSH key from $ak\n";
+    return if $dryrun;
+
+    my @before = split(/\n/, $contents);
+    my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
+    die "Removing the key for $domain from $ak would drop "
+      . (scalar(@before) - scalar(@after)) . " lines, not 1; refusing\n"
+      unless scalar(@after) == scalar(@before) - 1;
+
+    $hv->write_text($ak, join("\n", @after) . "\n");
     return;
 }
 

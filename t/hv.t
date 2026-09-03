@@ -290,13 +290,17 @@ subtest 'remote work goes through commands with an exit status' => sub {
         shift @argv if $argv[0] eq 'sudo';
 
         if ($argv[0] eq 'tee') {
+            my $append = $argv[1] eq '-a';
+            shift @argv if $append;
+
             my $content = $opts->{stdin_data};
             $content = do {
                 open(my $fh, '<', $opts->{stdin_file}) or return 0;
                 local $/;
                 <$fh>;
             } if defined $opts->{stdin_file};
-            $files{ $argv[1] } = $content;
+
+            $append ? ($files{ $argv[1] } .= $content) : ($files{ $argv[1] } = $content);
             return 1;
         }
         return exists $files{ $argv[2] } ? 1 : 0 if $argv[0] eq 'test';
@@ -339,7 +343,14 @@ subtest 'remote work goes through commands with an exit status' => sub {
         push @commands, { cmd => [@cmd] };
         my @argv = @cmd;
         shift @argv if $argv[0] eq 'sudo';
-        return $argv[0] eq 'test' ? (exists $files{ $argv[2] } ? 0 : 1) : 0;
+
+        return exists $files{ $argv[2] } ? 0 : 1 if $argv[0] eq 'test';
+        if ($argv[0] eq 'grep') {
+            my ($line, $file) = @argv[-2, -1];
+            return 1 unless defined $files{$file};
+            return (grep { $_ eq $line } split(/\n/, $files{$file})) ? 0 : 1;
+        }
+        return 0;
     });
     $mock->redefine(sftp => sub { die "nothing should be reaching sftp any more\n" });
 
@@ -386,12 +397,21 @@ subtest 'remote work goes through commands with an exit status' => sub {
     ok($hv->put_file("$dir/src", '/usr/libexec/thing', sudo => 1), 'put_file');
     is($files{'/usr/libexec/thing'}, "payload\n", 'the bytes arrived');
 
-    # append_line reads what is there and does not duplicate.
-    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
-    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa BBBB two');
-    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
-    is($files{'/root/.ssh/authorized_keys'}, "ssh-rsa AAAA one\nssh-rsa BBBB two\n",
-        'the repeated key was only written once');
+    # append_line adds to what is there.  It used to pull the file across, add
+    # a line and push the whole thing back, so a read that came back empty
+    # rewrote somebody's authorized_keys with one key in it.
+    my $ak = '/root/.ssh/authorized_keys';
+    $files{$ak} = "ssh-rsa THEIRS somebody\n";
+
+    $hv->append_line($ak, 'ssh-rsa AAAA one');
+    $hv->append_line($ak, 'ssh-rsa BBBB two');
+    $hv->append_line($ak, 'ssh-rsa AAAA one');
+
+    is($files{$ak}, "ssh-rsa THEIRS somebody\nssh-rsa AAAA one\nssh-rsa BBBB two\n",
+        'the keys already there survive, and the repeat was written once');
+    ok((grep { "@{$_->{cmd}}" =~ m/\Atee -a / } @commands), 'because it appends');
+    ok(!(grep { "@{$_->{cmd}}" eq "tee $ak" } @commands),
+        'and never rewrites the whole file, which is how you lock somebody out');
 };
 
 # --- The backstop -------------------------------------------------------------
