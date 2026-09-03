@@ -9,8 +9,7 @@ use FindBin::libs;
 use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
-use Net::EmptyPort;
-use Net::OpenSSH::More;
+use Trog::Guest();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -129,23 +128,11 @@ sub main {
     my ($ip)   = ref $ips ? @$ips : split /[\s,]+/, ($ips // '');
     die "Could not determine IP for $domain from provision.conf\n" unless $ip;
 
-    wait_for_ssh($user, "$domain_dir/$domain/key.rsa", $ip);
+    Trog::Guest->new(name => $domain, host => $ip, user => $user,
+        key_path => "$domain_dir/$domain/key.rsa")->wait_for_ssh();
+
     print "SSH verified. $domain is up at $ip.\n";
     return 0;
-}
-
-sub wait_for_ssh {
-    my ($user, $key, $ip) = @_;
-    print "Waiting for $ip:22 to come live...\n";
-    my $wait   = 300;
-    my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
-    die "SSH port never came up after $wait seconds!" unless $ssh_up;
-    # use_persistent_shell => 0 for the same reason Trog::HV::ssh sets it: the
-    # persistent Expect shell hangs on things a one-shot connection does not.
-    my $ssh = Net::OpenSSH::More->new(
-        host => $ip, user => $user, key_path => $key, use_persistent_shell => 0);
-    die "Could not establish SSH connection as $user!" unless $ssh;
-    return $ssh;
 }
 
 main(@ARGV) unless caller;

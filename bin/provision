@@ -11,6 +11,7 @@ use Config::Simple();
 use File::Path();
 use Trog::HV();
 use Trog::Hypervisors();
+use Trog::Guest();
 use File::Slurper();
 use File::Copy();
 use YAML::XS();
@@ -19,8 +20,6 @@ use List::Util qw{any uniq};
 use File::Which qw {which};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
-use Net::OpenSSH::More;
-use Net::EmptyPort;
 use XML::Twig;
 use JSON::MaybeXS;
 
@@ -141,7 +140,7 @@ sub main {
 
     # Basic setup.  The config/state dir is ours; the disk pool is the HV's.
     File::Path::make_path($hv->tf_config_dir);
-    $hv->mkpath_hv($hv->pool_path)
+    $hv->mkpath($hv->pool_path)
       or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
 
     $domain_dir = $hv->domain_dir;
@@ -150,10 +149,10 @@ sub main {
 
     # Start off by fixing a sillyness in virtiofs.  This runs as part of the
     # qemu process, so it has to land on the hypervisor, not on us.
-    if (!$hv->file_exists_hv('/usr/libexec/virtiofs-better')) {
+    if (!$hv->file_exists('/usr/libexec/virtiofs-better')) {
         $hv->put_file("$FindBin::Bin/../virtiofs-better", '/usr/libexec/virtiofs-better', sudo => 1)
           or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
-        $hv->system_hv(qw{sudo chmod 0755 /usr/libexec/virtiofs-better});
+        $hv->run(qw{sudo chmod 0755 /usr/libexec/virtiofs-better});
     }
 
     # Fix the terraform state.
@@ -176,9 +175,10 @@ sub main {
         $skey = "$domain_dir/$depends/key.rsa";
         ($reuser, $reuse) = provision_domain($dconfig, $depends, $reuse, $reuser);
         if (!$dryrun) {
-            my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
-            wait_for_cloud_init($ssh, $domain);
-            wait_for_makefile($ssh, $depends);
+            my $guest = Trog::Guest->new(name => $depends, host => $reuse, user => $reuser, key_path => $skey);
+            $guest->wait_for_ssh();
+            $guest->wait_for_cloud_init($domain);
+            $guest->wait_for_makefile($depends);
         }
 
     }
@@ -187,17 +187,18 @@ sub main {
     return 0 if $dryrun;
 
     print "ssh -i $skey $user\@$ip\n";
-    my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
+    my $guest = Trog::Guest->new(name => $domain, host => $ip, user => $user, key_path => $skey);
+    $guest->wait_for_ssh();
 
-	if (-f "$domain_dir/$domain/devices.map") {
-		print "Syncing disk map\n";
-		my $r = $ssh->sftp->put( "$domain_dir/$domain/devices.map", "devices.map" );
-		die "could not sync devices map!" unless $r;
-		$ssh->cmd("sudo cp devices.map /root/devices.map");
-	}
+    my $map = "$domain_dir/$domain/devices.map";
+    if (-f $map) {
+        print "Syncing disk map\n";
+        $guest->put_file($map, '/root/devices.map', sudo => 1)
+          or die "could not sync devices map!";
+    }
 
-    wait_for_cloud_init($ssh, $domain);
-    wait_for_makefile($ssh, $domain);
+    $guest->wait_for_cloud_init($domain);
+    $guest->wait_for_makefile($domain);
 
     # If we don't do this, any subsequent manual tf plan will explode violently
     sync_tf_state_with_libvirt();
@@ -240,63 +241,6 @@ sub sync_tf_state_with_libvirt {
     my $tf_domains = get_tf_managed_domains($statefile);
     my %volatile   = extract_volatile_libvirt_info($tf_domains);
     #brainwash_tfstate($statefile, %volatile);
-}
-
-sub wait_for_cloud_init {
-    my ($ssh, $domain, $t) = @_;
-
-    # TODO make configurable
-    $t //= '30m';
-    print "Waiting up to $t for Cloud-init to finish...\n";
-    my $rc = $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
-    print "Done!\n";
-    die "Cloud init reported failure! Investigate machine." if $rc;
-
-    # See if we got a lying exit code above
-    my ($raw) = $ssh->cmd("sudo cloud-init analyze dump");
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = eval {$json->decode($raw) };
-    die "cloud-init analyze dump failed to return JSON array!" unless ref $parsed eq 'ARRAY';
-
-    my @failures = grep { ($_->{result} // '') eq "FAIL" } @$parsed;
-    foreach my $fail (@failures) {
-        my ($module, $mtarget) = split('/', $fail->{name});
-        next unless $mtarget;
-        my ($stage, $target) = split('-', $mtarget);
-        next unless $target;
-        print "$target failed during $stage, re-running...\n";
-        my $ci_dir = "/var/lib/cloud/instances/$domain";
-        # Remove the semaphore that says this was run, then run the needed targets
-        $ssh->cmd_exit_code(qw{sudo rm}, "$ci_dir/sem/$stage\_$target");
-        my ($out) = $ssh->cmd({ use_persistent_shell => 0 }, qw{sudo cloud-init single --name}, $target);
-        print "$out\n\n";
-    }
-}
-
-sub wait_for_makefile {
-    my ($ssh, $domain, $t) = @_;
-
-    # TODO make configurable
-    $t //= '30m';
-
-    print "Waiting up to $t for ATD queue to flush...\n";
-    my ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
-
-    print "Waiting up to $t for Makefile payload to start...\n";
-    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until [ -f /var/log/$domain.setup.log ]; do sleep 1; done;'});
-
-    print "Waiting up to $t for Makefile payload to finish...\n";
-    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'while lsof | grep /var/log/$domain.setup.log; do sleep 1; done;'});
-
-    print "Waiting up to $t for any makefile queued ATD jobs to flush...\n";
-    ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
-
-    print "Last log:\n";
-    my ($ll) = $ssh->cmd(qq{sudo tail /var/log/$domain.setup.log});
-    print "$ll\n";
-
-    print "\nDone!\n";
 }
 
 sub provision_domain {
@@ -342,35 +286,31 @@ sub provision_domain {
         #$old_ip = $reuse;
 
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
-        my %opts = ( host => $old_ssh_ip );
-        $opts{user}     = $reuser;
+        # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
+        # Otherwise we'll use the agent.
+        my $key = "$domain_dir/$domain/key.rsa";
+        $key = "$domain_dir/$depends/key.rsa" if $depends;
 
         # Make sure any existing VMs don't have this domain
         clean_domain_resources($domain,$domain_mongled);
         unlink $hv->tf_config_dir . "/$domain.tf";
 
-        # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
-        # Otherwise we'll use the agent.
-        $opts{key_path} = "$domain_dir/$domain/key.rsa";
-        $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
         print "Attempting to access Machine\n";
-        my $ssh = Net::OpenSSH::More->new(%opts);
+        my $guest = Trog::Guest->new(name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key);
 
         my $output = '';
         print "Installing Updated cloud-init and forcing re-run...\n";
         my $init = $hv->tf_config_dir . "/$domain.cloud_init.cfg";
         my $ci_dir = "/var/lib/cloud/instances/$domain";
-        $ssh->sftp->put($init, 'cloud-config.txt');
+        $guest->put_file($init, 'cloud-config.txt') or die "Could not ship the cloud-init config to $domain";
         # Remove the semaphore that says this was run, then run the needed targets
-        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
-        ($output) = $ssh->cmd("sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt");
-        print "$output\n";
-        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_users_groups");
-        ($output) = $ssh->cmd("sudo cloud-init single --name cc_users_groups -f cloud-config.txt");
-        print "$output\n";
+        $guest->run(qw{sudo rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
+        print $guest->capture('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
+        $guest->run(qw{sudo rm}, "$ci_dir/sem/cc_users_groups");
+        print $guest->capture('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
 
         my $ips  = _coerce_array($config->param('ips'));
-        my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
+        my $existing_nc = $guest->capture('sudo cat /etc/netplan/50-cloud-init.yaml');
         my $parsed = YAML::XS::Load($existing_nc);
 
         my $primary_adapter_name = $config->param('bridge_devname');
@@ -383,22 +323,20 @@ sub provision_domain {
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
             File::Slurper::write_text($new_config, $encoded);
             print "Setting up IP for $domain...\n";
-            $ssh->sftp->put($new_config, "network-config-merged.yaml");
-            $ssh->cmd("sudo mv network-config-merged.yaml /etc/netplan/50-cloud-init.yaml");
-            $ssh->cmd("sudo chmod 0600 /etc/netplan/50-cloud-init.yaml");
-            $ssh->cmd("sudo chown root:root /etc/netplan/50-cloud-init.yaml");
-            ($output) = $ssh->cmd("sudo netplan apply");
+            # Straight to where it belongs, as root, rather than landing in the
+            # home directory and being moved and chmodded afterwards.
+            $guest->put_file($new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600')
+              or die "Could not install the netplan config on $domain";
+            $output = $guest->capture('sudo netplan apply');
             chomp $output;
             print "$output\n" if $output;
         }
 
         print "Syncing setup script\n";
-        my $res = $ssh->sftp->put( "$domain_dir/$domain/setup.sh", "setup-$domain.sh" );
-        $ssh->cmd("chmod +x setup-$domain.sh");
-        $ssh->cmd("sudo mv setup-$domain.sh /root");
+        $guest->put_file("$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755')
+          or die "Could not ship the setup script to $domain";
         print "Scheduling job to run setup script\n";
-        ($output) = $ssh->cmd("sudo at now -f /root/setup-$domain.sh");
-        print $output;
+        print $guest->capture("sudo at now -f /root/setup-$domain.sh");
         print "Done.\n";
         return ($reuser, $old_ssh_ip);
     }
@@ -477,20 +415,6 @@ sub clean_domain_resources {
         system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
     }
 
-}
-
-sub wait_for_ssh {
-    my ($user, $key, $ip) = @_;
-    print "Waiting for $ip:22 to come live...\n";
-    my $wait = 300;
-    my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
-    die "SSH port never came up after $wait seconds!" unless $ssh_up;
-
-    # Make sure we can *actually* SSH in
-    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user, key_path => $key, use_persistent_shell => 0 );
-    die "Could not establish SSH connection as $user!" unless $ssh;
-
-    return $ssh;
 }
 
 sub mongle_terraform_template {
@@ -713,7 +637,7 @@ import {
     }
 
     #XXX tf plugin should do this automatically, but does not
-    $hv->unlink_hv("$pool_path/commoninit.iso");
+    $hv->remove("$pool_path/commoninit.iso");
 
     return join(', ', @files_mongled);
 }
@@ -842,7 +766,7 @@ sub mongle_cloud_init {
     # box the guest will scp its payload back from.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
-    $hv->append_line_hv($hv->authorized_keys, $pubkey)
+    $hv->append_line($hv->authorized_keys, $pubkey)
       or die "Could not authorize the key for $domain on the hypervisor";
 
     my $pkgs = _coerce_array($config->param('packages'));
@@ -987,14 +911,14 @@ sub mongle_logging_config {
 
     # The guest ships its logs at the HV, so the collector config goes there too.
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
-    $hv->write_text_hv($lcf, $local_config_template, sudo => 1);
+    $hv->write_text($lcf, $local_config_template, sudo => 1);
     print "Wrote $lcf\n";
 
     $hv->put_file("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => 1);
     print "Wrote /etc/logrotate.d/vms.conf\n";
 
     #TODO die if these fail
-    $hv->system_hv(qw{sudo systemctl restart rsyslog});
+    $hv->run(qw{sudo systemctl restart rsyslog});
     print "Restarted rsyslogd\n";
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");

@@ -60,8 +60,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $no_fleet = tempdir(CLEANUP => 1) . '/hypervisors.conf';
 
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(mkpath_hv      => sub { 1 });
-    $hv_mock->redefine(file_exists_hv => sub { 1 });
+    $hv_mock->redefine(mkpath      => sub { 1 });
+    $hv_mock->redefine(file_exists => sub { 1 });
 
     # no_auto: the modulino is already loaded from bin/provision, and there is
     # no Trog/Bin/Provisioner.pm for MockModule to go looking for.

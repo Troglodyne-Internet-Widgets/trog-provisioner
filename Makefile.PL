@@ -37,6 +37,7 @@ WriteMakefile(
     'Sys::Virt'      => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
+    'parent'             => 0,
   },
   # Only needed to lint this repo, not to run it.
   TEST_REQUIRES => {

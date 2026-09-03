@@ -3,14 +3,11 @@ package Trog::HV;
 use strict;
 use warnings FATAL => 'all';
 
-use File::Path();
-use File::Copy();
-use File::Temp();
-use File::Slurper();
+use parent 'Trog::Machine';
+
 use Sys::Virt();
 use URI();
 use URI::Split();
-use Net::OpenSSH::More();
 
 =head1 NAME
 
@@ -27,7 +24,7 @@ Trog::HV - the hypervisor we are provisioning against
     my $hv = Trog::HV->new();
 
     $hv->annihilate_domain('vm.example.com');
-    $hv->write_text_hv('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
+    $hv->write_text('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
     print $hv->tf_config_dir, "\n";
 
 =head1 DESCRIPTION
@@ -65,18 +62,6 @@ have to pass it around or keep their own copy.
 =cut
 
 our $DEFAULT_URI = 'qemu:///system';
-
-# Seconds of network silence before a remote command is called wedged.  This is
-# the one that catches a stall promptly: it is inactivity, not elapsed time, so
-# a slow transfer that keeps moving is never touched by it.
-our $TIMEOUT = 120;
-
-# Wall-clock seconds before SIGALRM takes the decision out of the library's
-# hands.  A backstop, not the mechanism: it has to be generous enough to let a
-# domain tarball across a slow link finish, so it will not save you from a
-# quick hang the way $TIMEOUT does.  Both are package variables so a caller who
-# knows their fleet can tighten them.
-our $HANG_TIMEOUT = 600;
 
 # Transports over which we can also get a shell on the HV.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
@@ -298,15 +283,7 @@ sub ssh_host {
     return undef;
 }
 
-sub ssh_user { return $_[0]->{user} }
-sub ssh_port { return $_[0]->{port} }
-
-sub ssh_target {
-    my ($self) = @_;
-    my $host = $self->ssh_host or return undef;
-    my $user = $self->ssh_user;
-    return defined $user ? "$user\@$host" : $host;
-}
+sub describe { return 'the hypervisor at ' . $_[0]->uri }
 
 =head1 PATHS
 
@@ -357,7 +334,7 @@ sub authorized_keys {
     my ($self) = @_;
     return "$ENV{HOME}/.ssh/authorized_keys" if $self->is_local;
 
-    my $home = $self->qx_hv('echo $HOME');
+    my $home = $self->capture('echo $HOME');
     chomp $home if defined $home;
     die "Could not determine the home directory of the transfer user on the hypervisor\n"
       unless defined $home && length $home;
@@ -375,295 +352,9 @@ sub hv_user {
     return scalar getpwuid($<) if $self->is_local;
     return $self->ssh_user if defined $self->ssh_user;
 
-    my $who = $self->qx_hv('id -un');
+    my $who = $self->capture('id -un');
     chomp $who if defined $who;
     return $who;
-}
-
-=head1 RUNNING THINGS ON THE HYPERVISOR
-
-=head2 ssh
-
-The L<Net::OpenSSH::More> connection to the hypervisor, opened on first use and
-kept, or undef when the hypervisor is this machine and there is nothing to
-connect to.
-
-Everything that has to reach the far side goes through this rather than through
-a command line we built ourselves: it does the quoting and it reports the
-errors.
-
-What it does I<not> get used for is sftp.  Net::SFTP::Foreign hangs rather than
-failing when the far side will not let it write -- a root-owned directory wedges
-the run instead of reporting EPERM -- so files go over as the stdin of a command
-whose exit status we can actually read.  The writers below all go through one place that does it.
-
-=head2 qx_hv($shell_command)
-
-C<qx()> equivalent.  Takes a shell string -- pipelines and all -- and returns
-its stdout with the trailing newline already off.
-
-=head2 system_hv(@argv)
-
-C<system()> equivalent.  Takes an argv list, returns the exit code.  The
-arguments are escaped for you, so they may contain anything.
-
-=cut
-
-sub ssh {
-    my ($self) = @_;
-    return undef if $self->is_local;
-    return $self->{ssh} if $self->{ssh};
-
-    my $target = $self->ssh_target;
-    $self->{ssh} = eval {
-        Net::OpenSSH::More->new(
-            host => $self->ssh_host,
-            port => $self->ssh_port,
-            (defined $self->ssh_user ? (user => $self->ssh_user) : ()),
-
-            # Our commands are one-shot, and some of them are pipelines the
-            # persistent Expect shell would rather we didn't send it.
-            use_persistent_shell => 0,
-        );
-    } or die "Could not ssh to the hypervisor at $target: $@\n";
-
-    return $self->{ssh};
-}
-
-sub qx_hv {
-    my ($self, $cmd) = @_;
-    return qx{$cmd} if $self->is_local;
-
-    return $self->_unhang($cmd, sub { ($self->ssh->cmd($cmd))[0] });
-}
-
-sub system_hv {
-    my ($self, @argv) = @_;
-    return system(@argv) >> 8 if $self->is_local;
-
-    return $self->_unhang(join(' ', @argv), sub { $self->ssh->cmd_exit_code(@argv) });
-}
-
-=head1 FILES ON THE HYPERVISOR
-
-Each of these is the obvious local filesystem call when the hypervisor is us,
-and a command over the L</ssh> connection when it isn't.  The C<sudo> option on
-the writers is for destinations under C</etc> and C</usr>; it puts C<sudo> in
-front of the write itself, so there is no staging file in between whose
-ownership or location could be wrong.
-
-=over 4
-
-=item C<file_exists_hv($path)>
-
-=item C<mkpath_hv(@paths)>
-
-=item C<unlink_hv(@paths)>
-
-=item C<read_text_hv($path)>
-
-=item C<write_text_hv($path, $content, %opts)>
-
-=item C<append_line_hv($path, $line)>
-
-Append a line, but only if it isn't already there.
-
-=item C<put_file($local, $remote, %opts)>
-
-=item C<put_dir($local, $remote)>
-
-Copy a whole directory tree across, contents and all.
-
-=back
-
-=cut
-
-sub file_exists_hv {
-    my ($self, $path) = @_;
-    return -f $path ? 1 : 0 if $self->is_local;
-    return $self->system_hv(qw{test -f}, $path) == 0 ? 1 : 0;
-}
-
-sub mkpath_hv {
-    my ($self, @paths) = @_;
-    if ($self->is_local) {
-        File::Path::make_path(@paths);
-        return 1;
-    }
-
-    foreach my $path (@paths) {
-        next if $self->system_hv(qw{mkdir -p}, $path) == 0;
-
-        # Somewhere above it belongs to root.  Make it anyway, then hand it to
-        # the login user: the guest fetches its payload from here as that user,
-        # so a root-owned tree would only move the problem downstream.
-        my $user = $self->ssh_user // $self->hv_user;
-        return 0 if $self->system_hv(qw{sudo mkdir -p}, $path);
-        $self->system_hv('sudo', 'chown', "$user:", $path);
-    }
-    return 1;
-}
-
-sub unlink_hv {
-    my ($self, @paths) = @_;
-    if ($self->is_local) {
-        unlink @paths;
-        return 1;
-    }
-    return $self->system_hv(qw{rm -f}, @paths) == 0;
-}
-
-sub read_text_hv {
-    my ($self, $path) = @_;
-    return File::Slurper::read_text($path) if $self->is_local;
-
-    # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
-    # of the file.
-    my $content = $self->_unhang("cat $path",
-        sub { $self->ssh->capture({ timeout => $TIMEOUT }, 'cat', $path) });
-    return $self->ssh->error ? undef : $content;
-}
-
-sub write_text_hv {
-    my ($self, $path, $content, %opts) = @_;
-    return $self->_write_local($path, $content, %opts) if $self->is_local;
-    return $self->_pour({ stdin_data => $content }, $path, %opts);
-}
-
-sub put_file {
-    my ($self, $local, $remote, %opts) = @_;
-
-    if ($self->is_local) {
-        return $self->system_hv(qw{sudo cp}, $local, $remote) == 0
-          if $opts{sudo} && !-w _parent_dir($remote);
-        return File::Copy::copy($local, $remote) ? 1 : 0;
-    }
-
-    return $self->_pour({ stdin_file => $local }, $remote, %opts);
-}
-
-sub put_dir {
-    my ($self, $local, $remote) = @_;
-    return 1 if $self->is_local;
-    $self->mkpath_hv($remote) or return 0;
-
-    # Pack locally, then unpack on the far side out of the same stdin stream
-    # everything else here uses.  One round trip, modes preserved, and a real
-    # exit status at the end of it.
-    my $tarball = File::Temp->new(SUFFIX => '.tar.gz', UNLINK => 1);
-    close $tarball;
-    return 0 if system('tar', '-C', $local, '-czf', "$tarball", '.');
-
-    return $self->_run({ stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-');
-}
-
-# Write a stream to a path on the hypervisor.
-#
-# Everything goes through a command with an exit status rather than through
-# sftp.  Net::SFTP::Foreign hangs rather than failing when the far side will
-# not let it write -- a root-owned directory wedges the run instead of
-# reporting EPERM -- and a provisioner that stops dead with no message is worse
-# than one that says "permission denied".  `tee` cannot do that to us, and
-# `sudo tee` writes as root without any staging file to get wrong.
-sub _pour {
-    my ($self, $stdin, $path, %opts) = @_;
-
-    my @cmd = ($opts{sudo} ? (qw{sudo tee}) : ('tee'), $path);
-    $self->_run({ %$stdin, stdout_discard => 1 }, @cmd) or return 0;
-
-    # tee makes the file with our umask, which is nobody's idea of what belongs
-    # under /etc.
-    $self->system_hv('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $opts{sudo};
-    return 1;
-}
-
-sub _run {
-    my ($self, $opts, @cmd) = @_;
-
-    my $ok = $self->_unhang(join(' ', @cmd),
-        sub { $self->ssh->system({ timeout => $TIMEOUT, %$opts }, @cmd) });
-
-    warn 'Remote ' . join(' ', @cmd) . ' failed: ' . ($self->ssh->error // 'unknown') . "\n" unless $ok;
-    return $ok ? 1 : 0;
-}
-
-=head2 _unhang($what, $code)
-
-Run something that talks to the hypervisor under a SIGALRM, so a wedge is an
-error with a name on it rather than a provisioner that sits there.
-
-The library's own C<timeout> should get there first, and does for anything that
-merely stalls.  This is for the case it cannot see: a call that has stopped
-making progress without the connection noticing, which is exactly how
-Net::SFTP::Foreign used to behave when the far side refused a write.  Nothing
-should ever reach it.
-
-=cut
-
-sub _unhang {
-    my ($self, $what, $code) = @_;
-    return $code->() if $self->is_local;
-
-    my @result = eval {
-        local $SIG{ALRM} = sub { die "__TROG_HV_HUNG__\n" };
-        alarm $HANG_TIMEOUT;
-        my @r = $code->();
-        alarm 0;
-        @r;
-    };
-    my $error = $@;
-    alarm 0;
-
-    die 'Gave up on the hypervisor at ' . $self->uri . " after ${HANG_TIMEOUT}s: $what\n"
-      . "Nothing came back and nothing failed, which usually means a permission\n"
-      . "problem the far side declined to report.  Check that "
-      . ($self->ssh_user // 'the login user')
-      . " can write where this was going.\n"
-      if $error eq "__TROG_HV_HUNG__\n";
-
-    die $error if $error;
-    return wantarray ? @result : $result[0];
-}
-
-sub append_line_hv {
-    my ($self, $path, $line) = @_;
-    chomp $line;
-
-    my $existing = '';
-    if ($self->is_local) {
-        $existing = File::Slurper::read_text($path) if -f $path;
-    }
-    elsif ($self->file_exists_hv($path)) {
-        $existing = $self->read_text_hv($path) // '';
-    }
-
-    return 1 if grep { $_ eq $line } split(/\n/, $existing);
-
-    $existing .= "\n" if length $existing && $existing !~ m/\n\z/;
-    $self->mkpath_hv(_parent_dir($path));
-    return $self->write_text_hv($path, $existing . "$line\n");
-}
-
-sub _write_local {
-    my ($self, $path, $content, %opts) = @_;
-
-    if ($opts{sudo} && !-w _parent_dir($path)) {
-        my $tmp = File::Temp->new(UNLINK => 1);
-        print {$tmp} $content;
-        close $tmp;
-        my $ok = $self->system_hv(qw{sudo cp}, "$tmp", $path) == 0;
-        $self->system_hv('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $ok;
-        return $ok ? 1 : 0;
-    }
-
-    File::Slurper::write_text($path, $content);
-    return 1;
-}
-
-sub _parent_dir {
-    my ($path) = @_;
-    $path =~ s{/[^/]*\z}{};
-    return length($path) ? $path : '/';
 }
 
 =head1 LIBVIRT
@@ -790,14 +481,14 @@ sub release_dhcp_lease {
     return 0 unless defined $ip && length $ip;
     $bridge //= $self->virbr_device;
 
-    my ($helper) = grep { $self->file_exists_hv($_) }
+    my ($helper) = grep { $self->file_exists($_) }
       qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
     unless ($helper) {
         warn "No libvirt lease helper found on the hypervisor, leaving the lease for $ip alone\n";
         return 0;
     }
 
-    return $self->system_hv('sudo', "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
+    return $self->run('sudo', "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
 }
 
 =head2 eject_cdrom($domain, $target)
@@ -846,7 +537,7 @@ sub nuke_pool {
 
     # The directory goes first: pool-delete on a pool whose backing store is
     # already gone is a no-op, but the reverse leaves files libvirt still owns.
-    $self->system_hv(qw{sudo rm -rf}, $self->pool_path);
+    $self->run(qw{sudo rm -rf}, $self->pool_path);
 
     my $vmm  = $self->vmm;
     my $pool = eval { $vmm->get_storage_pool_by_name($name) };
@@ -981,7 +672,7 @@ sub bridge_device {
     my ($self) = @_;
     return $self->{bridge_device} if defined $self->{bridge_device};
 
-    my $device = $self->qx_hv(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
+    my $device = $self->capture(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
     die "Could not determine outbound bridge device on " . $self->uri . "!\n"
       . "Set bridge_device in provision.conf if autodetection can't find it.\n"
@@ -994,7 +685,7 @@ sub virbr_device {
     my ($self) = @_;
     return $self->{virbr_device} if defined $self->{virbr_device};
 
-    my $device = $self->qx_hv(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
+    my $device = $self->capture(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
     die "Could not determine libvirt network device on " . $self->uri . "!\n"
       . "Set virbr_device in provision.conf if autodetection can't find it.\n"
@@ -1008,7 +699,7 @@ sub virbr_ip {
     return $self->{virbr_ip} if defined $self->{virbr_ip};
 
     my $device = $self->virbr_device;
-    my $ip     = $self->qx_hv("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
+    my $ip     = $self->capture("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
     die "Could not determine IP address for $device\n" unless $ip;
     chomp $ip;
     $ip =~ s{/\d+\z}{};
@@ -1020,7 +711,7 @@ sub sshd_port {
     my ($self) = @_;
     return $self->{sshd_port} if defined $self->{sshd_port};
 
-    my $port = $self->qx_hv(q{grep '^Port' /etc/ssh/sshd_config | awk '{print $2}'});
+    my $port = $self->capture(q{grep '^Port' /etc/ssh/sshd_config | awk '{print $2}'});
     chomp $port if defined $port;
     warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
 

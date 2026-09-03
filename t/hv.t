@@ -151,26 +151,26 @@ subtest 'local file helpers' => sub {
     my $hv  = fresh();
     my $dir = tempdir(CLEANUP => 1);
 
-    ok(!$hv->file_exists_hv("$dir/nope"), 'file_exists_hv false for missing');
-    ok($hv->mkpath_hv("$dir/a/b/c"),      'mkpath_hv');
+    ok(!$hv->file_exists("$dir/nope"), 'file_exists false for missing');
+    ok($hv->mkpath("$dir/a/b/c"),      'mkpath');
     ok(-d "$dir/a/b/c",                   'directory made');
 
-    $hv->write_text_hv("$dir/f", "hello\n");
-    ok($hv->file_exists_hv("$dir/f"), 'file_exists_hv true after write');
-    is($hv->read_text_hv("$dir/f"), "hello\n", 'read_text_hv');
+    $hv->write_text("$dir/f", "hello\n");
+    ok($hv->file_exists("$dir/f"), 'file_exists true after write');
+    is($hv->read_text("$dir/f"), "hello\n", 'read_text');
 
-    $hv->unlink_hv("$dir/f");
-    ok(!-f "$dir/f", 'unlink_hv');
+    $hv->remove("$dir/f");
+    ok(!-f "$dir/f", 'remove');
 };
 
-subtest 'append_line_hv does not duplicate' => sub {
+subtest 'append_line does not duplicate' => sub {
     my $hv  = fresh();
     my $dir = tempdir(CLEANUP => 1);
     my $ak  = "$dir/.ssh/authorized_keys";
 
-    $hv->append_line_hv($ak, 'ssh-rsa AAAA one');
-    $hv->append_line_hv($ak, 'ssh-rsa BBBB two');
-    $hv->append_line_hv($ak, 'ssh-rsa AAAA one');
+    $hv->append_line($ak, 'ssh-rsa AAAA one');
+    $hv->append_line($ak, 'ssh-rsa BBBB two');
+    $hv->append_line($ak, 'ssh-rsa AAAA one');
 
     my @lines = split(/\n/, read_text($ak));
     is(scalar(@lines), 2, 'the repeated key was only written once');
@@ -273,7 +273,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
     $mock->redefine(sftp => sub { die "nothing should be reaching sftp any more\n" });
 
     # The connection is built from the URI, and only once.
-    is($hv->qx_hv('id -un'), 'output of id -un', 'qx_hv returns stdout');
+    is($hv->capture('id -un'), 'output of id -un', 'capture returns stdout');
     my %opts = @connected;
     is($opts{host}, 'fakehv', 'host from the URI');
     is($opts{user}, 'root',   'user from the URI');
@@ -283,21 +283,21 @@ subtest 'remote work goes through commands with an exit status' => sub {
 
     # Arguments go over as a list; Net::OpenSSH does the escaping we used to.
     my $nasty = "a b\tc 'quoted' \$HOME * ; rm -rf /";
-    is($hv->system_hv('touch', $nasty), 0, 'system_hv returns the exit code');
+    is($hv->run('touch', $nasty), 0, 'run returns the exit code');
     is_deeply($commands[-1]{cmd}, ['touch', $nasty], 'unmangled, not pre-quoted');
 
     # Content is poured down a command's stdin rather than put over sftp.
-    $hv->write_text_hv('/tmp/plain', "hello\n");
-    is_deeply($commands[-1]{cmd}, ['tee', '/tmp/plain'], 'write_text_hv tees it');
+    $hv->write_text('/tmp/plain', "hello\n");
+    is_deeply($commands[-1]{cmd}, ['tee', '/tmp/plain'], 'write_text tees it');
     is($commands[-1]{opts}{stdin_data}, "hello\n", 'with the content on stdin');
     ok($commands[-1]{opts}{timeout}, 'and a timeout, so a stall is an error');
-    is($hv->read_text_hv('/tmp/plain'), "hello\n", 'read_text_hv cats it back');
-    ok($hv->file_exists_hv('/tmp/plain'), 'file_exists_hv tests for it');
-    ok(!$hv->file_exists_hv('/tmp/nope'), 'and is false for one that is not there');
+    is($hv->read_text('/tmp/plain'), "hello\n", 'read_text cats it back');
+    ok($hv->file_exists('/tmp/plain'), 'file_exists tests for it');
+    ok(!$hv->file_exists('/tmp/nope'), 'and is false for one that is not there');
 
     # A root-owned destination is written by sudo directly, with no staging
     # file in between to get the permissions of wrong.
-    ok($hv->write_text_hv('/etc/rsyslog.d/10-vm.conf', "conf\n", sudo => 1), 'sudo write');
+    ok($hv->write_text('/etc/rsyslog.d/10-vm.conf', "conf\n", sudo => 1), 'sudo write');
     my ($tee) = grep { $_->{cmd}[0] eq 'sudo' && $_->{cmd}[1] eq 'tee' } @commands;
     is_deeply($tee->{cmd}, [qw{sudo tee /etc/rsyslog.d/10-vm.conf}], 'sudo tee, straight to the destination');
     ok((grep { "@{$_->{cmd}}" eq 'sudo chmod 0644 /etc/rsyslog.d/10-vm.conf' } @commands),
@@ -310,10 +310,10 @@ subtest 'remote work goes through commands with an exit status' => sub {
     ok($hv->put_file("$dir/src", '/usr/libexec/thing', sudo => 1), 'put_file');
     is($files{'/usr/libexec/thing'}, "payload\n", 'the bytes arrived');
 
-    # append_line_hv reads what is there and does not duplicate.
-    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
-    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa BBBB two');
-    $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
+    # append_line reads what is there and does not duplicate.
+    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
+    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa BBBB two');
+    $hv->append_line('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
     is($files{'/root/.ssh/authorized_keys'}, "ssh-rsa AAAA one\nssh-rsa BBBB two\n",
         'the repeated key was only written once');
 };
@@ -326,10 +326,10 @@ subtest 'a hang is an error with a name on it' => sub {
     $mock->redefine(new    => sub { bless {}, shift });
     $mock->redefine(system => sub { sleep 30; return 1 });
 
-    local $Trog::HV::HANG_TIMEOUT = 1;
+    local $Trog::Machine::HANG_TIMEOUT = 1;
 
     my $started = time;
-    eval { $hv->write_text_hv('/etc/somewhere', "x\n", sudo => 1) };
+    eval { $hv->write_text('/etc/somewhere', "x\n", sudo => 1) };
     my $took = time - $started;
 
     like($@, qr/Gave up on the hypervisor/, 'we stop waiting');

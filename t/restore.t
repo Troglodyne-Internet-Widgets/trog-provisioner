@@ -121,10 +121,10 @@ sub _make_conf {
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    my $bin_mock = Test::MockModule->new('Trog::Bin::Restore', no_auto => 1);
     $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
-    $bin_mock->redefine(wait_for_ssh => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
     main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
     is($reverted[2], 'snap-c', '--latest picks the last snapshot');
@@ -137,10 +137,10 @@ sub _make_conf {
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    my $bin_mock = Test::MockModule->new('Trog::Bin::Restore', no_auto => 1);
     $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
-    $bin_mock->redefine(wait_for_ssh => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
     main_restore('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
     is($reverted[2], 'snap-a', '--oldest picks the first snapshot');
@@ -153,10 +153,10 @@ sub _make_conf {
 
     my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    my $bin_mock = Test::MockModule->new('Trog::Bin::Restore', no_auto => 1);
     $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
-    $bin_mock->redefine(wait_for_ssh => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
     main_restore(qw{--name snap-b --domaindir}, $tmpdir, 'myvm.lan');
     is($reverted[1], 'myvm.lan', 'the domain is passed along');
@@ -168,17 +168,18 @@ sub _make_conf {
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42');
 
-    my @ssh_args;
+    my $connected;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    my $bin_mock = Test::MockModule->new('Trog::Bin::Restore', no_auto => 1);
     $hv_mock->redefine(snapshot_names  => sub { ('snap-a') });
     $hv_mock->redefine(revert_snapshot => sub { 1 });
-    $bin_mock->redefine(wait_for_ssh => sub { @ssh_args = @_; return 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { $connected = $_[0]; return $_[0] });
 
     main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($ssh_args[0], 'ubuntu',                 'wait_for_ssh called with admin_user');
-    is($ssh_args[2], '10.0.0.42',              'wait_for_ssh called with IP from provision.conf');
-    like($ssh_args[1], qr{myvm\.lan/key\.rsa}, 'wait_for_ssh called with domain key path');
+    is($connected->ssh_user, 'ubuntu',    'the guest is reached as admin_user');
+    is($connected->ssh_host, '10.0.0.42',  'at the IP from provision.conf');
+    is($connected->name,     'myvm.lan',   'and knows what it is called');
+    like($connected->ssh_key, qr{myvm\.lan/key\.rsa}, 'with the domain key');
 }
 
 # --connect reaches the hypervisor object
@@ -188,10 +189,10 @@ sub _make_conf {
 
     my $seen;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    my $bin_mock = Test::MockModule->new('Trog::Bin::Restore', no_auto => 1);
     $hv_mock->redefine(snapshot_names  => sub { $seen = $_[0]->uri; return ('snap-a') });
     $hv_mock->redefine(revert_snapshot => sub { 1 });
-    $bin_mock->redefine(wait_for_ssh => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
     main_restore(qw{--latest --connect qemu+ssh://hv1/system --domaindir},
         $tmpdir, 'myvm.lan');
