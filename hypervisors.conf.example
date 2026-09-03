@@ -18,6 +18,17 @@
 ; because we need its filesystem as well as its libvirt.
 libvirt_uri    = qemu+ssh://root@hv1.example.net/system
 
+; How terraform's libvirt provider should authenticate.  libvirt's own client
+; shells out to ssh and so gets your agent, ~/.ssh/config and known_hosts for
+; free; the terraform provider dials SSH itself in Go and gets none of that.
+; It is told what we can work out -- the agent if SSH_AUTH_SOCK is set, a key
+; if one is findable, and where known_hosts lives -- and these override that.
+;ssh_key            = /home/you/.ssh/id_ed25519
+;known_hosts        = /home/you/.ssh/known_hosts
+;known_hosts_verify = ignore
+; ...or bypass the lot and hand terraform this verbatim:
+;provider_uri       = qemu+ssh://root@hv1.example.net/system?sshauth=agent
+
 ; Skip autodetection when `brctl show | tail -n1` guesses wrong.
 bridge_device  = br0
 virbr_device   = virbr0

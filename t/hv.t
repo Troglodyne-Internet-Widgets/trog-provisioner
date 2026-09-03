@@ -146,6 +146,64 @@ subtest 'guest_ssh_ip' => sub {
     like($@, qr/\bips\b/, 'naming the config key to set');
 };
 
+# --- The URI terraform gets is not always the one Sys::Virt gets -------------
+subtest 'provider_uri tells terraform what libvirt works out for itself' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/.ssh";
+    write_text("$dir/.ssh/known_hosts", "hashed nonsense\n");
+    local $ENV{HOME} = $dir;
+
+    # A local connection has no SSH for any of this to be about.
+    is(fresh()->provider_uri, 'qemu:///system', 'left alone when there is no ssh');
+
+    # The key in an agent and none on disk is what breaks the provider: it
+    # defaults to privkey, finds no keyfile, and reports an empty path.
+    {
+        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
+        my $hv = fresh(uri => 'qemu+ssh://root@hv1/system');
+        my $uri = $hv->provider_uri;
+        like($uri, qr/\Aqemu\+ssh:\/\/root\@hv1\/system\?/, 'the URI itself is untouched');
+        like($uri, qr/sshauth=agent/,      'told to use the agent');
+        unlike($uri, qr/privkey/,          'and not offered privkey with no key to back it');
+        like($uri, qr{known_hosts=\Q$dir\E/\.ssh/known_hosts}, 'and where known_hosts is');
+    }
+
+    # A key on disk gets named, and offered alongside the agent.
+    {
+        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
+        write_text("$dir/.ssh/id_ed25519", "not really a key\n");
+        my $uri = fresh(uri => 'qemu+ssh://root@hv1/system')->provider_uri;
+        like($uri, qr/sshauth=agent,privkey/, 'both methods, agent first');
+        like($uri, qr{keyfile=\Q$dir\E/\.ssh/id_ed25519}, 'and the key named');
+        unlink "$dir/.ssh/id_ed25519";
+    }
+
+    # No agent and no key: say nothing rather than assert something false.
+    {
+        local $ENV{SSH_AUTH_SOCK};
+        delete $ENV{SSH_AUTH_SOCK};
+        unlike(fresh(uri => 'qemu+ssh://root@hv1/system')->provider_uri, qr/sshauth/,
+            'no auth method claimed when we have none to offer');
+    }
+
+    # What the config says wins, and so does anything already in the URI.
+    {
+        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
+        my $pinned = fresh(uri => 'qemu+ssh://root@hv1/system?sshauth=password&no_verify=1');
+        my $uri = $pinned->provider_uri;
+        like($uri, qr/sshauth=password/, 'a method spelled out in the URI is left alone');
+        like($uri, qr/no_verify=1/,      'and so is anything else in there');
+
+        is(fresh(uri => 'qemu+ssh://root@hv1/system', provider_uri => 'qemu+ssh://elsewhere/system')->provider_uri,
+            'qemu+ssh://elsewhere/system', 'provider_uri overrides the lot');
+
+        like(fresh(uri => 'qemu+ssh://root@hv1/system', key_path => '/keys/hv1')->provider_uri,
+            qr{keyfile=/keys/hv1}, 'ssh_key from the config is used');
+        like(fresh(uri => 'qemu+ssh://root@hv1/system', known_hosts_verify => 'ignore')->provider_uri,
+            qr/known_hosts_verify=ignore/, 'and so is known_hosts_verify');
+    }
+};
+
 # --- Local file operations degrade to plain filesystem calls ------------------
 subtest 'local file helpers' => sub {
     my $hv  = fresh();

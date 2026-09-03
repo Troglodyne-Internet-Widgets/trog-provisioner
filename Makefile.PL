@@ -25,6 +25,7 @@ WriteMakefile(
     'File::Path'     => 0,
     'File::Temp'     => 0,
     'URI'            => 0,
+    'URI::Escape'    => 0,
     'Config::Simple' => 0,
     'File::Slurper'  => 0,
     'File::Copy'     => 0,

@@ -180,11 +180,13 @@ sub hypervisor {
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join(', ', $self->names) . "\n";
 
     return $self->{built}{$name} //= Trog::HV->candidate(
-        name => $name,
-        uri  => $block->{libvirt_uri},
+        name     => $name,
+        uri      => $block->{libvirt_uri},
+        key_path => $block->{ssh_key},
         map { $_ => $block->{$_} }
           grep { defined $block->{$_} }
           qw{tf_dir pool_path domain_dir bridge_device virbr_device
+             provider_uri known_hosts known_hosts_verify
              reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
     );
 }

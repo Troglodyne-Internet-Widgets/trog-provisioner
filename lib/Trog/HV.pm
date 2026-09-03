@@ -8,6 +8,7 @@ use parent 'Trog::Machine';
 use Sys::Virt();
 use URI();
 use URI::Split();
+use URI::Escape();
 
 =head1 NAME
 
@@ -160,8 +161,10 @@ C<bridge_device> and C<virbr_device> under their own names.
 
 # Constructor option => the provision.conf key it reads.
 my %CONFIG_KEY = (
-    uri => 'libvirt_uri',
-    map { $_ => $_ } qw{tf_dir pool_path domain_dir bridge_device virbr_device},
+    uri      => 'libvirt_uri',
+    key_path => 'ssh_key',
+    map { $_ => $_ } qw{tf_dir pool_path domain_dir bridge_device virbr_device
+                        provider_uri known_hosts known_hosts_verify},
 );
 
 sub from_config {
@@ -284,6 +287,86 @@ sub ssh_host {
 }
 
 sub describe { return 'the hypervisor at ' . $_[0]->uri }
+
+=head2 provider_uri
+
+The connection string for terraform's libvirt provider, which is not always the
+same string L</uri> hands to L<Sys::Virt>.
+
+libvirt's own client shells out to C<ssh>, so it gets F<~/.ssh/config>, your
+agent, C<ProxyJump> and everything else you have configured, for free.  The
+terraform provider does not: it dials SSH itself in Go, reads none of that, and
+its idea of a default is to look for a private key file and give up.  If your
+key lives in an agent -- which it does, if you have ever run C<ssh-add> and
+have no F<id_rsa> on disk -- it fails with:
+
+    failed to read ssh key : open : no such file or directory
+    no ssh password set
+
+So the URI it gets is told, explicitly, what libvirt was able to work out for
+itself: use the agent when there is one, use a key file when we can name one,
+and where to find F<known_hosts>.
+
+Everything is overridable from F<hypervisors.conf>, and anything you put in the
+query string of C<libvirt_uri> yourself is left alone:
+
+    ssh_key            = /home/you/.ssh/id_ed25519
+    known_hosts        = /home/you/.ssh/known_hosts
+    known_hosts_verify = ignore
+    provider_uri       = qemu+ssh://...    ; bypass all of the above
+
+=cut
+
+sub provider_uri {
+    my ($self) = @_;
+    return $self->{provider_uri} if defined $self->{provider_uri};
+
+    # A local connection has no SSH for any of this to be about.
+    return $self->uri if $self->is_local || !defined $self->ssh_host;
+
+    my ($scheme, $authority, $path, $query, $fragment) = URI::Split::uri_split($self->uri);
+
+    # Whatever the URI already says wins; we are filling gaps, not overruling.
+    my @given = defined $query ? split(/[&;]/, $query) : ();
+    my %params = map { my ($k, $v) = split(/=/, $_, 2); ($k => $v) } @given;
+
+    my @methods;
+    push @methods, 'agent'   if $ENV{SSH_AUTH_SOCK};
+    my $key = $self->ssh_key;
+    push @methods, 'privkey' if $key;
+
+    # privkey with no keyfile is what produces "failed to read ssh key : open :",
+    # so only offer what we can actually back up.
+    $params{sshauth} //= join(',', @methods) if @methods;
+    $params{keyfile} //= $key if $key;
+
+    my $known_hosts = $self->{known_hosts} // "$ENV{HOME}/.ssh/known_hosts";
+    $params{known_hosts} //= $known_hosts if -f $known_hosts;
+    $params{known_hosts_verify} //= $self->{known_hosts_verify} if $self->{known_hosts_verify};
+
+    my $rebuilt = join('&', map { $_ . '=' . _escape($params{$_}) } sort grep { defined $params{$_} } keys %params);
+    return URI::Split::uri_join($scheme, $authority, $path, ($rebuilt || undef), $fragment);
+}
+
+=head2 ssh_key
+
+The private key file to hand terraform, from C<ssh_key> in F<hypervisors.conf>
+or an obvious one in F<~/.ssh>.  Undef when the only key is in an agent, which
+is fine -- that is what C<sshauth=agent> is for.
+
+=cut
+
+sub ssh_key {
+    my ($self) = @_;
+    return $self->{key_path} if defined $self->{key_path};
+
+    my ($found) = grep { -f $_ } map { "$ENV{HOME}/.ssh/$_" } qw{id_ed25519 id_rsa id_ecdsa};
+    return $found;
+}
+
+# Commas and colons are legal in a query string and appear in sshauth lists and
+# paths; escaping them only makes the URI harder to read back in an error.
+sub _escape { return URI::Escape::uri_escape($_[0], q{^A-Za-z0-9\-._~/,:}) }
 
 =head1 PATHS
 

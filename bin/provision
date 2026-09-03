@@ -467,8 +467,10 @@ import {
     my $domain_mongled = $domain;
     $domain_mongled =~ s/\./-/g;
 
-    # The provider needs a real URI even when we let libvirt pick our own.
-    my $libvirt_uri = $hv->uri;
+    # The provider needs a real URI even when we let libvirt pick our own, and
+    # it needs to be told about SSH in a way libvirt's own client works out.
+    my $libvirt_uri = $hv->provider_uri;
+    print "Terraform will reach libvirt at $libvirt_uri\n" unless $hv->is_local;
     my $pool_path   = $hv->pool_path;
 
     my %to_mongle = (

@@ -123,21 +123,23 @@ The hypervisor and the guest are reached the same way, so both are subclasses of
 
 That means:
 
-1. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
+1. **Terraform's libvirt provider is told about SSH explicitly.**  libvirt's own client shells out to `ssh`, so it gets `~/.ssh/config`, your agent and `ProxyJump` for free.  The terraform provider dials SSH itself in Go and reads none of that -- if your key is in an agent and there's no `id_rsa` on disk, it fails with `failed to read ssh key : open : no such file or directory`.  So the URI it gets has `sshauth`, `keyfile` and `known_hosts` filled in from what we can work out.  Override any of them in hypervisors.conf; see `hypervisors.conf.example`.
 
-2. **You need passwordless SSH to the HV** as the user the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
+2. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
+
+3. **You need passwordless SSH to the HV** as the user the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
 
     Passwordless `sudo` there is strongly preferred but no longer required: `sudo` runs with `-n`, and if the far side asks for a password you get prompted once and it's remembered for the rest of the run.  Run non-interactively -- from cron, or with stdin redirected -- and there's nobody to ask, so you get an error naming the user and the `NOPASSWD` line to add instead of a hang.
 
-3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
+4. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
-4. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<name>`, or `/opt/terraform/hv/<mangled uri>` for a hypervisor that came from `--connect` and so has no name.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `tf_dir` in hypervisors.conf, or `--tfdir`.
+5. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<name>`, or `/opt/terraform/hv/<mangled uri>` for a hypervisor that came from `--connect` and so has no name.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `tf_dir` in hypervisors.conf, or `--tfdir`.
 
-5. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
+6. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
 
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
 
-6. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+7. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
 ### Nuking a wedged storage pool
 
