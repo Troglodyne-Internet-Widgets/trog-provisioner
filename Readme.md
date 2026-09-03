@@ -156,6 +156,8 @@ Storage pools cannot be updated. All changes require replacement.
 
 `ignore_changes = [ target ]` on the pool ends it.  `target` is only read when the pool is created, so there's nothing there worth diffing.
 
+The same two mechanisms cover the volumes.  `bin/provision` emits an import for `baseimage-qcow2` and for the guest's own disk whenever libvirt already has them -- otherwise terraform tries to create them and libvirt refuses with `storage volume 'baseimage-qcow2' exists already`, which you can't re-run your way out of, because the resource isn't in state to destroy either.  `create`, `backing_store` and `target` are ignored on those for the same reason as the pool's: they're read once at creation and never reported back.
+
 Where the pool actually lives is read back from libvirt rather than assumed, so `pool_path` is right even when somebody made the pool somewhere other than `/opt/terraform/disks`.  Set `pool_path` in hypervisors.conf to override.
 
 ### Nuking a wedged storage pool

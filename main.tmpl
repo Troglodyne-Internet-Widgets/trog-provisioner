@@ -33,6 +33,8 @@ resource "libvirt_pool" "tf_disks" {
     }
 }
 
+%BASE_IMAGE_IMPORT%
+
 resource "libvirt_volume" "image_base" {
   name = "baseimage-qcow2"
   pool = libvirt_pool.tf_disks.name
@@ -48,6 +50,12 @@ resource "libvirt_volume" "image_base" {
   }
   lifecycle {
       prevent_destroy = true
+
+      # create says where to fetch the image from, and is read once, when the
+      # volume is made.  An imported volume reports neither it nor target back,
+      # so leaving them in the diff plans a replacement of the base image every
+      # single run -- which prevent_destroy then refuses.
+      ignore_changes = [ create, target ]
   }
   depends_on = [libvirt_pool.tf_disks]
 }

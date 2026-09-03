@@ -87,6 +87,31 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     is($hv->uri, 'qemu+ssh://root@clihv/system', '--connect wins over the config');
 };
 
+# --- Adopting what libvirt already has ---------------------------------------
+subtest 'import blocks are emitted only for things that exist' => sub {
+    is(Trog::Bin::Provisioner::_import_block('libvirt_volume.image_base', undef, 'base image'), '',
+        'nothing to import means no block, so terraform creates it');
+    is(Trog::Bin::Provisioner::_import_block('libvirt_volume.image_base', '', 'base image'), '',
+        'and an empty id is the same as none');
+
+    my $block = quietly(sub {
+        Trog::Bin::Provisioner::_import_block('libvirt_volume.image_base',
+            '/opt/terraform/disks/baseimage-qcow2', 'base image');
+    });
+
+    like($block, qr/\bimport \{/,                             'an existing one gets an import block');
+    like($block, qr/to = libvirt_volume\.image_base/,         'addressed to the right resource');
+    like($block, qr{id = "/opt/terraform/disks/baseimage-qcow2"}, 'with the volume key as the id');
+};
+
+sub quietly {
+    my ($code) = @_;
+    open(my $capture, '>', \my $out) or die $!;
+    my $result = do { local *STDOUT = $capture; $code->() };
+    close $capture;
+    return $result;
+}
+
 sub _pod_section {
     my ($file, $sections) = @_;
     open(my $fh, '>', \my $text) or die $!;

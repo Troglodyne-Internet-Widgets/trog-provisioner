@@ -389,6 +389,21 @@ sub provision_domain {
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
 }
 
+# An import block for something libvirt already has, or nothing at all when it
+# does not: terraform can only adopt what exists.
+sub _import_block {
+    my ($address, $id, $what) = @_;
+    return '' unless defined $id && length $id;
+
+    print "Re-Using the existing $what ($id)\n";
+    return qq|
+import {
+    to = $address
+    id = "$id"
+}
+|;
+}
+
 sub clean_domain_resources {
     my ($domain,$domain_mongled) = @_;
 
@@ -452,21 +467,21 @@ sub mongle_terraform_template {
 
     # OK, let's get the UUID of our storage pool IN CASE we are re-using it
     # TODO make this configurable so we can use lvm
-    my $libvirt_pool = $hv->pool_uuid('tf_disks');
-    my $pool_path    = $hv->pool_path;
-    my ($import_block, $image_block) = ('', '');
-    if ($libvirt_pool) {
-        print "Re-Using existing libvirt pool $libvirt_pool at $pool_path\n";
-        $import_block = qq|
-import {
-    to = libvirt_pool.tf_disks
-    id = "$libvirt_pool"
-}
-|;
-    }
-
     my $domain_mongled = $domain;
     $domain_mongled =~ s/\./-/g;
+
+    my $libvirt_pool = $hv->pool_uuid('tf_disks');
+    my $pool_path    = $hv->pool_path;
+
+    # Anything libvirt already has, terraform is told to adopt rather than
+    # create.  Without this it tries to make them again and libvirt refuses --
+    # "storage volume 'baseimage-qcow2' exists already" -- which no amount of
+    # re-running gets past, because the resource is not in state to destroy.
+    my $import_block = _import_block('libvirt_pool.tf_disks', $libvirt_pool, "storage pool at $pool_path");
+    my $image_block  = _import_block('libvirt_volume.image_base',
+        $hv->volume_key('tf_disks', 'baseimage-qcow2'), 'base image');
+    my $volume_block = _import_block("libvirt_volume.$domain_mongled-qcow2",
+        $hv->volume_key('tf_disks', "$domain-qcow2"), "disk for $domain");
 
     # The provider needs a real URI even when we let libvirt pick our own, and
     # it needs to be told about SSH in a way libvirt's own client works out.
@@ -627,7 +642,8 @@ import {
         $tf_template =~ s/%CPUMODE%/$cpu_mode/gmx;
         $tf_template =~ s/%CLOUDIMG%/$image/gmx;
         $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
-#        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
+        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
+        $tf_template =~ s/%VOLUME_IMPORT%/$volume_block/gmx;
 		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
         $tf_template =~ s/%FILESYSTEMS%/$fsmounts/gmx;
         $tf_template =~ s/%LIBVIRT_URI%/$libvirt_uri/gmx;

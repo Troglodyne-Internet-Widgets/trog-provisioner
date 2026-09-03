@@ -415,6 +415,25 @@ sub pool_path {
     return $self->{_pool_path} //= ($self->pool_target('tf_disks') // '/opt/terraform/disks');
 }
 
+=head2 volume_key($pool, $name)
+
+The key of a volume that already exists -- for a directory pool, its path --
+which is the id terraform wants in an C<import> block.  Undef when there is no
+such volume, which is how the caller knows to let terraform create it.
+
+=cut
+
+sub volume_key {
+    my ($self, $pool_name, $name) = @_;
+
+    return eval {
+        my $vmm    = $self->vmm;
+        my $pool   = $vmm->get_storage_pool_by_name($pool_name // 'tf_disks');
+        my $volume = $pool->get_volume_by_name($name);
+        $volume->get_key();
+    };
+}
+
 =head2 pool_target($name)
 
 Where an existing storage pool keeps its volumes, straight out of libvirt, or
