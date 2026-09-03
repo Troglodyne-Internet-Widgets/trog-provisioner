@@ -7,6 +7,7 @@ use warnings FATAL => 'all';
 
 use FindBin::libs;
 use Trog::HV();
+use Trog::Hypervisors();
 use File::Slurper();
 use List::Util qw{any};
 use Getopt::Long qw{GetOptionsFromArray};
@@ -29,9 +30,16 @@ destroy - tear a provisioned VM back down
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Defaults to
-whatever libvirt itself would pick, i.e. this machine.  A remote hypervisor has
-to be named with an ssh transport (C<qemu+ssh://user@host/system>).
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.  A remote
+hypervisor has to be named with an ssh transport
+(C<qemu+ssh://user@host/system>).
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we destroy on.
 
 =item B<--domaindir> DIR
 
@@ -66,24 +74,27 @@ sub main {
 
     umask 0022;
 
-    my ($purge, $dryrun, $uri, $tf_dir, $domain_dir);
+    my ($purge, $dryrun, $uri, $tf_dir, $domain_dir, $hvconf);
     GetOptionsFromArray(\@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'tfdir=s'     => \$tf_dir,
+        'hvconf=s'    => \$hvconf,
     );
 
     my $domain = shift @args;
     pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
       unless $domain;
 
-    my $hv = Trog::HV->new(uri => $uri, tf_dir => $tf_dir, domain_dir => $domain_dir);
+    $domain =~ s/\///g;
+
+    my $hv = Trog::Hypervisors->find($domain,
+        uri => $uri, hvconf => $hvconf, tf_dir => $tf_dir, domain_dir => $domain_dir);
     print "Destroying on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     $domain_dir = $hv->domain_dir;
-    $domain =~ s/\///g;
 
 
     my $domain_mongled = $domain;

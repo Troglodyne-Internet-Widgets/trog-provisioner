@@ -9,6 +9,7 @@ use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
 use Trog::HV();
+use Trog::Hypervisors();
 
 =head1 NAME
 
@@ -29,6 +30,16 @@ nuke_pool - tear down the tf_disks storage pool because terraform is braindead
 
 The libvirt connection string of the hypervisor holding the pool.  Defaults to
 whatever libvirt itself would pick, i.e. this machine.
+
+=item B<--hypervisor> NAME
+
+A hypervisor out of F<hypervisors.conf>, by name, instead of a connection
+string.  This one takes a name rather than searching for a guest, because a
+storage pool belongs to a machine and not to any one guest.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</opt/domains/hypervisors.conf>.
 
 =item B<--pool> NAME
 
@@ -52,14 +63,31 @@ get it out of; this is that.
 sub main {
     my @args = @_;
 
-    my ($uri, $pool, $pool_path);
+    my ($uri, $pool, $pool_path, $name, $hvconf, $domain_dir);
     GetOptionsFromArray(\@args,
-        'connect=s'  => \$uri,
-        'pool=s'     => \$pool,
-        'poolpath=s' => \$pool_path,
+        'connect=s'    => \$uri,
+        'pool=s'       => \$pool,
+        'poolpath=s'   => \$pool_path,
+        'hypervisor=s' => \$name,
+        'hvconf=s'     => \$hvconf,
+        'domaindir=s'  => \$domain_dir,
     ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
 
-    my $hv = Trog::HV->new(uri => $uri, pool_path => $pool_path);
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass --connect or --hypervisor, not both')
+      if $uri && $name;
+
+    my $hv;
+    if ($name) {
+        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path($domain_dir));
+        die "No hypervisors are configured, so --hypervisor has nothing to name\n"
+          unless $fleet->configured;
+        $hv = $fleet->hypervisor($name)->activate();
+    }
+    else {
+        $hv = Trog::HV->new(uri => $uri, pool_path => $pool_path);
+    }
+    $hv->{pool_path} = $pool_path if defined $pool_path;
     $hv->nuke_pool($pool // 'tf_disks');
     return 0;
 }

@@ -10,6 +10,7 @@ use FindBin::libs;
 use Config::Simple();
 use File::Path();
 use Trog::HV();
+use Trog::Hypervisors();
 use File::Slurper();
 use File::Copy();
 use YAML::XS();
@@ -40,11 +41,18 @@ provision - build a VM from a domain directory
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor to build on.  Defaults to
-whatever libvirt itself would pick, i.e. this machine.  A remote hypervisor has
-to be named with an ssh transport (C<qemu+ssh://user@host/system>), since we
-need its filesystem as well as its libvirt.  Overrides C<libvirt_uri> in
-F<provision.conf>.
+The libvirt connection string of the hypervisor to build on.  Bypasses
+F<hypervisors.conf> entirely: no placement, no capacity check, build it there.
+A remote hypervisor has to be named with an ssh transport
+(C<qemu+ssh://user@host/system>), since we need its filesystem as well as its
+libvirt.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+When it exists, the hypervisor is chosen from it -- see L<Trog::Hypervisors>.
+When it doesn't, the hypervisor is whatever F<provision.conf> and C<--connect>
+say, which for most people is still this machine.
 
 =item B<--domaindir> DIR
 
@@ -90,13 +98,14 @@ sub main {
 
     umask 0022;
 
-    my ($reuse, $uri, $domain_dir, $tf_dir);
+    my ($reuse, $uri, $domain_dir, $tf_dir, $hvconf);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'domaindir=s' => \$domain_dir,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'tfdir=s'     => \$tf_dir,
+        'hvconf=s'    => \$hvconf,
     );
 
     my $domain = shift @args;
@@ -120,7 +129,12 @@ sub main {
 
     # Figure out which hypervisor we're talking to before we touch anything.
     # Every other sub picks this same object back up with Trog::HV->new().
-    my $hv = Trog::HV->from_config($config, uri => $uri, domain_dir => $domain_dir, tf_dir => $tf_dir);
+    my $hv = choose_hypervisor($config, $domain, {
+        uri        => $uri,
+        domain_dir => $domain_dir,
+        tf_dir     => $tf_dir,
+        hvconf     => $hvconf,
+    });
     print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     # Basic setup.  The config/state dir is ours; the disk pool is the HV's.
@@ -187,6 +201,35 @@ sub main {
     sync_tf_state_with_libvirt();
 
     return 0;
+}
+
+# Which hypervisor does this guest belong on?
+#
+# --connect is the manual override and skips every question below.  Otherwise,
+# if there is a hypervisors.conf, it decides: the guest goes where it already
+# lives, or where it fits.  With no fleet configured we are back to the old
+# behaviour, where provision.conf carried the connection details itself.
+sub choose_hypervisor {
+    my ($config, $domain, $opts) = @_;
+
+    my %paths = (domain_dir => $opts->{domain_dir}, tf_dir => $opts->{tf_dir});
+
+    return Trog::HV->new(uri => $opts->{uri}, %paths) if $opts->{uri};
+
+    my $fleet = Trog::Hypervisors->load(
+        $opts->{hvconf} // Trog::Hypervisors->default_path($opts->{domain_dir}));
+    return Trog::HV->from_config($config, %paths) unless $fleet->configured;
+
+    warn "hypervisors.conf decides which hypervisor $domain lands on; the "
+      . "libvirt_uri in its provision.conf is ignored\n"
+      if $config->param('libvirt_uri');
+
+    my $hv = $fleet->select_for($domain, $config);
+
+    # The command line still outranks the fleet on where *our* files go.
+    $hv->{domain_dir} = $opts->{domain_dir} if defined $opts->{domain_dir};
+    $hv->{tf_dir}     = $opts->{tf_dir}     if defined $opts->{tf_dir};
+    return $hv;
 }
 
 sub sync_tf_state_with_libvirt {

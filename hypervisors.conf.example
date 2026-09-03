@@ -1,0 +1,47 @@
+; hypervisors.conf -- the machines we can build guests on.
+;
+; Copy this to the parent of your domain directories (so /opt/domains by
+; default, beside example.test/) and edit.  While it does not exist there is no
+; fleet: the hypervisor is this machine, or whatever --connect names, exactly as
+; it was before.
+;
+; One [block] per hypervisor.  The name is yours to pick; it shows up in
+; placement messages and in the terraform state path, so make it one you would
+; recognise at 3am.  A block header is required -- keys outside one are an
+; error rather than a hypervisor called "default".
+;
+; Nothing here is per-guest.  A guest's provision.conf says how much memory and
+; disk it wants; this file says which machines have any to give.
+
+[hv1]
+; The only required key.  A remote hypervisor has to use an ssh transport,
+; because we need its filesystem as well as its libvirt.
+libvirt_uri    = qemu+ssh://root@hv1.example.net/system
+
+; Skip autodetection when `brctl show | tail -n1` guesses wrong.
+bridge_device  = br0
+virbr_device   = virbr0
+
+; Where the tf_disks pool lives on that machine.  Default /opt/terraform/disks.
+pool_path      = /opt/terraform/disks
+
+; Where terraform's config and state live *here*, for this hypervisor.
+; Defaults to /opt/terraform/hv/<block name>.
+;tf_dir        = /opt/terraform/hv/hv1
+
+; What to keep back from guests.  Memory in MB, disk in bytes.  Memory is
+; counted as committed rather than used: a guest promised 8G is holding 8G
+; against this machine even while it idles.
+reserve_memory = 4096
+reserve_cpus   = 2
+reserve_disk   = 53687091200
+
+; vCPUs per physical CPU that is considered acceptable.  Default 4.
+cpu_overcommit = 4
+
+; Refuse to place beyond this many guests.  0, the default, means no cap.
+max_guests     = 20
+
+[hv2]
+libvirt_uri    = qemu+ssh://root@hv2.example.net/system
+reserve_memory = 8192

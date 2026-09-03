@@ -8,7 +8,7 @@ use warnings FATAL => 'all';
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
-use Trog::HV();
+use Trog::Hypervisors();
 
 =head1 NAME
 
@@ -32,8 +32,19 @@ time, if you don't say.
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Defaults to
-whatever libvirt itself would pick, i.e. this machine.
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.  Only used
+to find F<hypervisors.conf>.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we snapshot.
 
 =back
 
@@ -48,17 +59,20 @@ snapshot command that quietly did nothing is worse than one that failed.
 sub main {
     my @args = @_;
 
-    my ($name, $uri);
+    my ($name, $uri, $domain_dir, $hvconf);
     GetOptionsFromArray(\@args,
-        'name=s'    => \$name,
-        'connect=s' => \$uri,
+        'name=s'      => \$name,
+        'connect=s'   => \$uri,
+        'domaindir=s' => \$domain_dir,
+        'hvconf=s'    => \$hvconf,
     );
 
     my $domain = shift @args;
     pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
       unless $domain;
 
-    my $hv = Trog::HV->new(uri => $uri);
+    my $hv = Trog::Hypervisors->find($domain,
+        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir);
 
     my $before = $hv->snapshot_current_name($domain);
 

@@ -20,13 +20,9 @@ Even business units at giant corporations can do just fine with this approach.
     * contact\_email: Email address to send root's mail to
     * depends\_on: Whether this system is to be provisioned on something that may or may not already exist
     * admin\_user: What the name of the admin user is in the event we want to provision on already existing systems.  This user needs passwordless sudo; when omitted we use root.
-    * libvirt\_uri: Connection string for the hypervisor to build on.  Defaults to `qemu:///system`, i.e. this machine.  Anything but the local machine has to use an ssh transport, e.g. `qemu+ssh://root@hv1.example.net/system`.  See "PROVISIONING A REMOTE HYPERVISOR" below.
-    * bridge\_device / virbr\_device: Skip autodetection and name the outbound bridge / libvirt NAT bridge outright.  Handy when the HV has several and `brctl show | tail -n1` guesses wrong.
-    * pool\_path: Where the `tf_disks` storage pool lives on the HV.  Defaults to `/opt/terraform/disks`.
-    * domain\_dir: Where the per-domain directories live, on both this machine and the HV.  Defaults to `/opt/domains`; `--domaindir` overrides it.
-    * tf\_dir: Where terraform's config and state live.  Defaults to `/opt/terraform` for the local HV and `/opt/terraform/hv/<mangled uri>` for any other; `--tfdir` overrides it.
+    * hypervisor: Pin this guest to a named hypervisor out of hypervisors.conf, when it genuinely has to live on a particular machine.  Normally you leave this out and let it be placed.  See "PROVISIONING A REMOTE HYPERVISOR" below.
 
-    The last five describe the *hypervisor*, not the domain, so they're read from the provision.conf of the domain you invoked.  A `depends_on` domain's copy of them is ignored -- both domains land on the same hypervisor by definition.
+    Nothing else here says anything about *where* the guest runs; that's what hypervisors.conf is for.  A guest definition that names a machine is a guest definition you can't move.
     * cpu\_mode: libvirt `<cpu mode="...">` value.  Defaults to `host-passthrough` so the guest sees the HV's real CPU (incl. AVX/AVX2 — required by anything that probes cpuid for vector extensions, e.g. the v8 snapshot bundled with the `claude` CLI).  Set to `host-model` or a specific qemu CPU model if you need to migrate the guest to a differently-specced HV.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
@@ -56,7 +52,57 @@ All the relevant resources will be stored in /vms on the HV.
 
 ## PROVISIONING A REMOTE HYPERVISOR
 
-By default the hypervisor is the machine you run `bin/provision` on.  To build somewhere else, hand it any connection string libvirt understands, either on the command line:
+By default the hypervisor is the machine you run `bin/provision` on.  There are two ways to build somewhere else.
+
+### A fleet, in hypervisors.conf
+
+Describe the machines once, in `hypervisors.conf` beside your domain directories (so `/opt/domains/hypervisors.conf` by default).  See `hypervisors.conf.example`; the short version is one `[block]` per machine:
+
+```
+[hv1]
+libvirt_uri    = qemu+ssh://root@hv1.example.net/system
+reserve_memory = 4096
+max_guests     = 20
+
+[hv2]
+libvirt_uri    = qemu+ssh://root@hv2.example.net/system
+```
+
+From then on every tool works out which machine it wants on its own, and you go on running them exactly as you did:
+
+```
+bin/provision mysite.test
+bin/destroy   mysite.test
+bin/snapshot  mysite.test
+bin/restore   --latest mysite.test
+```
+
+`bin/provision` **places** the guest: whichever hypervisor already has it keeps it, otherwise the roomiest one that can actually hold it wins.  Everything else **finds** it, by asking each hypervisor in turn whether it has a guest by that name.  Nothing is written down, because a file recording where a guest lives goes stale the moment somebody migrates one by hand, and libvirt never does.
+
+Placement compares what the guest asks for -- `memory`, `cpus` and `size` from its `provision.conf` -- against what each machine has left, and refuses if none of them can take it:
+
+```
+$ bin/provision hungry.test
+Nowhere to put hungry.test: it wants 65536MB of memory, 16 CPUs and 500GB of disk,
+and no hypervisor in /opt/domains/hypervisors.conf can spare that.
+  hv1: needs 65536MB of memory, 24576MB free (65536MB physical, 36864MB committed, 4096MB reserved)
+  hv2: needs 500GB of disk, 210GB free in the pool after a 50GB reserve
+  hv2: already has 20 guests, and max_guests is 20
+```
+
+Memory is counted as *committed* rather than *used*: a guest that was promised 8G is holding 8G against the machine even while it idles at 400M, and overcommitting memory is how you get the OOM killer picking one of your VMs.  CPUs are the opposite -- overcommitting cores is normal -- so those are measured against `cpu_overcommit` times the physical count.  Of the machines that fit, the one chosen is the one whose *tightest* resource is least tight afterwards, which is what stops one machine filling its disk while the fleet still has plenty of RAM.
+
+A guest that genuinely has to live on a particular machine can say so in its own `provision.conf`:
+
+```
+hypervisor=hv1
+```
+
+It still has to fit; a pin to a machine with no room is an error rather than a quiet reassignment.
+
+### One machine, on the command line
+
+Skip all of the above and say where to build:
 
 ```
 bin/provision --connect qemu+ssh://root@hv1.example.net/system mysite.test
@@ -65,13 +111,9 @@ bin/snapshot  --connect qemu+ssh://root@hv1.example.net/system mysite.test
 bin/restore   --connect qemu+ssh://root@hv1.example.net/system --latest mysite.test
 ```
 
-...or per-domain in `$DOMAIN/provision.conf`, which every tool will pick up on its own:
+`--connect` bypasses `hypervisors.conf` entirely: no search, no capacity check, build it there.
 
-```
-libvirt_uri=qemu+ssh://root@hv1.example.net/system
-```
-
-`--connect` beats the config file when both are set.
+Without a `hypervisors.conf`, `libvirt_uri` in a guest's `provision.conf` still works the way it used to.  It's deprecated -- it's a property of the machine, not the guest -- and it's ignored, with a warning, once a fleet exists.
 
 ### What that actually does
 
@@ -85,7 +127,7 @@ That means:
 
 3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
-4. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<mangled uri>`.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `--tfdir` if you want it somewhere specific.
+4. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<name>`, or `/opt/terraform/hv/<mangled uri>` for a hypervisor that came from `--connect` and so has no name.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `tf_dir` in hypervisors.conf, or `--tfdir`.
 
 5. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
 

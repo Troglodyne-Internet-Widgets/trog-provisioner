@@ -11,7 +11,7 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
 use Net::EmptyPort;
 use Net::OpenSSH::More;
-use Trog::HV();
+use Trog::Hypervisors();
 
 =head1 NAME
 
@@ -48,9 +48,14 @@ Where the per-domain directories live.  Defaults to F</opt/domains>.
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Defaults to
-whatever libvirt itself would pick, i.e. this machine.  Overrides C<libvirt_uri>
-in F<provision.conf>.
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we revert.
 
 =back
 
@@ -65,13 +70,14 @@ unreachable VM is reported as a failure rather than a success.
 sub main {
     my @args = @_;
 
-    my ($latest, $oldest, $name, $domain_dir, $uri);
+    my ($latest, $oldest, $name, $domain_dir, $uri, $hvconf);
     GetOptionsFromArray(\@args,
         'latest'      => \$latest,
         'oldest'      => \$oldest,
         'name=s'      => \$name,
         'domaindir=s' => \$domain_dir,
         'connect=s'   => \$uri,
+        'hvconf=s'    => \$hvconf,
     );
 
     my $domain = shift @args;
@@ -83,15 +89,17 @@ sub main {
         -message => 'Pass exactly one of --latest, --oldest or --name')
       unless $modes == 1;
 
-    # We need to know which hypervisor to ask about snapshots before we ask, so
-    # peek at provision.conf now.  An explicit --connect wins over what it says.
-    # The file being mandatory is enforced further down, where it always was.
+    # We need to know which hypervisor to ask about snapshots before we ask.
+    # With a fleet configured that is whichever one has the guest; without one
+    # it is whatever provision.conf says, so peek at that now.  The file being
+    # mandatory is enforced further down, where it always was.
     $domain_dir //= '/opt/domains';
     my $cfile = "$domain_dir/$domain/provision.conf";
-    my $hv = Trog::HV->from_config(
-        (-f $cfile ? Config::Simple->new($cfile) : undef),
+    my $hv = Trog::Hypervisors->find($domain,
         uri        => $uri,
+        hvconf     => $hvconf,
         domain_dir => $domain_dir,
+        config     => (-f $cfile ? Config::Simple->new($cfile) : undef),
     );
     print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 

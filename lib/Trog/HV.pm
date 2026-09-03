@@ -95,7 +95,36 @@ sub new {
     my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
     return $INSTANCE if $INSTANCE && !%given;
 
-    my $uri      = $given{uri};
+    return $class->candidate(%given)->activate();
+}
+
+=head2 candidate(%opts)
+
+Build a hypervisor without making it the current one.
+
+C<new> is a singleton because almost everything wants "the hypervisor we are
+working with".  Choosing between several is the exception: L<Trog::Hypervisors>
+has to hold them all at once to compare them, and only the winner becomes
+current.  Same options as C<new>, plus C<name>.
+
+=head2 activate
+
+Make this hypervisor the one C<new> hands back from here on.  Returns itself,
+so it chains.
+
+=cut
+
+sub activate {
+    my ($self) = @_;
+    $INSTANCE = $self;
+    return $self;
+}
+
+sub candidate {
+    my ($class, %opts) = @_;
+
+    my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
+    my $uri = $given{uri};
     my $explicit = defined($uri) ? 1 : 0;
     $uri = $DEFAULT_URI unless $explicit;
 
@@ -118,7 +147,6 @@ sub new {
       . "/system, so we can reach its filesystem.\n"
       if !$self->is_local && !defined $self->ssh_host;
 
-    $INSTANCE = $self;
     return $self;
 }
 
@@ -217,6 +245,15 @@ state for different hypervisors from stomping on each other.
 sub uri      { return $_[0]->{uri} }
 sub explicit { return $_[0]->{explicit} }
 
+=head2 name
+
+What F<hypervisors.conf> calls this hypervisor, or undef when it didn't come
+from there.
+
+=cut
+
+sub name { return $_[0]->{name} }
+
 sub is_local {
     my ($self) = @_;
     return !defined $self->{host};
@@ -288,7 +325,9 @@ sub tf_dir {
     my ($self) = @_;
     return $self->{tf_dir} if defined $self->{tf_dir};
     return '/opt/terraform' if $self->uri eq $DEFAULT_URI;
-    return '/opt/terraform/hv/' . $self->slug;
+
+    # A hypervisor out of hypervisors.conf has a name worth reading in a path.
+    return '/opt/terraform/hv/' . ($self->name // $self->slug);
 }
 
 sub tf_config_dir { return $_[0]->tf_dir . '/config' }
@@ -912,6 +951,169 @@ sub sshd_port {
     warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
 
     return $self->{sshd_port} = ($port || 22);
+}
+
+=head1 CAPACITY
+
+What the hypervisor has, what its guests have already been promised, and
+whether one more will fit.  All of it comes from libvirt, so it is what the
+hypervisor actually believes rather than what a config file claimed a year ago.
+
+Memory is counted as I<committed> rather than I<used>: a guest that has been
+promised 8G is holding 8G against us even while it idles at 400M.  Overcommit
+memory and the OOM killer eventually picks one of your VMs.  CPUs are the other
+way round -- overcommitting cores is normal and expected -- so those are
+measured against C<cpu_overcommit> times the physical count.
+
+=head2 reserve_memory, reserve_cpus, reserve_disk, max_guests, cpu_overcommit
+
+The limits from F<hypervisors.conf>.  C<reserve_memory> is MB to leave for the
+host itself, C<reserve_disk> is bytes to leave in the pool, C<max_guests> caps
+the domain count (0 means no cap), and C<cpu_overcommit> is how many vCPUs per
+physical CPU is considered acceptable.  They default to 2048MB, 1 CPU, 10GB, no
+cap, and 4.
+
+=cut
+
+sub reserve_memory  { return $_[0]->{reserve_memory}  // 2048 }
+sub reserve_cpus    { return $_[0]->{reserve_cpus}    // 1 }
+sub reserve_disk    { return $_[0]->{reserve_disk}    // 10 * 1024 * 1024 * 1024 }
+sub max_guests      { return $_[0]->{max_guests}      // 0 }
+sub cpu_overcommit  { return $_[0]->{cpu_overcommit}  // 4 }
+
+=head2 capacity
+
+A snapshot of the hypervisor, cached for the life of the object:
+
+    memory_mb        physical memory
+    memory_committed committed to guests, running or not
+    memory_free      what is left after the reserve
+    cpus             physical CPUs
+    cpus_allocatable cpus * cpu_overcommit
+    cpus_committed   vCPUs handed to running guests
+    cpus_free        what is left after the reserve
+    disk_free        free bytes in the storage pool, after the reserve
+    guests           how many domains it knows about
+
+Dies if libvirt cannot be reached, since a hypervisor we cannot ask about is
+not one we should be placing guests on.
+
+=cut
+
+sub capacity {
+    my ($self) = @_;
+    return $self->{capacity} if $self->{capacity};
+
+    my $node = $self->vmm->get_node_info();
+    my @domains = $self->vmm->list_all_domains();
+
+    my ($memory_committed, $cpus_committed) = (0, 0);
+    foreach my $domain (@domains) {
+        my $info = eval { $domain->get_info() } or next;
+
+        # maxMem is what the guest may grow into, and is what we have to hold
+        # against the host whether or not it is using it yet.
+        $memory_committed += ($info->{maxMem} // 0) / 1024;
+        $cpus_committed   += ($info->{nrVirtCpu} // 0) if eval { $domain->is_active() };
+    }
+
+    my $memory_mb        = ($node->{memory} // 0) / 1024;
+    my $cpus             = $node->{cpus} // 0;
+    my $cpus_allocatable = $cpus * $self->cpu_overcommit;
+
+    return $self->{capacity} = {
+        memory_mb        => $memory_mb,
+        memory_committed => $memory_committed,
+        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
+        cpus             => $cpus,
+        cpus_allocatable => $cpus_allocatable,
+        cpus_committed   => $cpus_committed,
+        cpus_free        => $cpus_allocatable - $cpus_committed - $self->reserve_cpus,
+        disk_free        => $self->pool_free() - $self->reserve_disk,
+        guests           => scalar @domains,
+    };
+}
+
+=head2 pool_free($name)
+
+Free bytes in the storage pool, or 0 when there isn't one yet -- a pool
+terraform has not built has no space in it, which is the honest answer.
+
+=cut
+
+sub pool_free {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return 0;
+    my $info = eval { $pool->get_info() } or return 0;
+    return $info->{available} // 0;
+}
+
+=head2 shortfalls(%needs)
+
+Every reason this hypervisor cannot take a guest wanting C<memory_mb>, C<cpus>
+and C<disk_bytes>, in words a person can act on.  An empty list means it fits.
+
+=cut
+
+sub shortfalls {
+    my ($self, %needs) = @_;
+
+    my $have = $self->capacity;
+    my @reasons;
+
+    push @reasons, sprintf('needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
+        $needs{memory_mb}, $have->{memory_free},
+        $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory)
+      if ($needs{memory_mb} // 0) > $have->{memory_free};
+
+    push @reasons, sprintf('needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
+        $needs{cpus}, $have->{cpus_free},
+        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus)
+      if ($needs{cpus} // 0) > $have->{cpus_free};
+
+    push @reasons, sprintf('needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
+        _gb($needs{disk_bytes}), _gb($have->{disk_free}), _gb($self->reserve_disk))
+      if ($needs{disk_bytes} // 0) > $have->{disk_free};
+
+    push @reasons, sprintf('already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests)
+      if $self->max_guests && $have->{guests} >= $self->max_guests;
+
+    return @reasons;
+}
+
+sub _gb { return int(($_[0] // 0) / (1024 * 1024 * 1024)) }
+
+=head2 headroom(%needs)
+
+How comfortably this hypervisor would hold the guest, from 0 (exactly full) to
+1 (empty), taken as the tightest of the three resources once the guest is on
+it.  Placing by the tightest resource is what keeps one hypervisor from filling
+its disk while the fleet still has plenty of RAM.
+
+=cut
+
+sub headroom {
+    my ($self, %needs) = @_;
+
+    my $have = $self->capacity;
+    my @fractions;
+
+    push @fractions, _fraction($have->{memory_free} - ($needs{memory_mb}  // 0), $have->{memory_mb});
+    push @fractions, _fraction($have->{cpus_free}   - ($needs{cpus}       // 0), $have->{cpus_allocatable});
+    push @fractions, _fraction($have->{disk_free}   - ($needs{disk_bytes} // 0), $have->{disk_free} + ($needs{disk_bytes} // 0));
+
+    my ($tightest) = sort { $a <=> $b } @fractions;
+    return $tightest;
+}
+
+sub _fraction {
+    my ($left, $total) = @_;
+    return 0 if !$total;
+    my $fraction = $left / $total;
+    return $fraction < 0 ? 0 : $fraction;
 }
 
 =head1 PROVISIONING
