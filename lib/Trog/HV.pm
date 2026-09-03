@@ -3,7 +3,6 @@ package Trog::HV;
 use strict;
 use warnings FATAL => 'all';
 
-use Fcntl();
 use File::Path();
 use File::Copy();
 use File::Temp();
@@ -66,6 +65,18 @@ have to pass it around or keep their own copy.
 =cut
 
 our $DEFAULT_URI = 'qemu:///system';
+
+# Seconds of network silence before a remote command is called wedged.  This is
+# the one that catches a stall promptly: it is inactivity, not elapsed time, so
+# a slow transfer that keeps moving is never touched by it.
+our $TIMEOUT = 120;
+
+# Wall-clock seconds before SIGALRM takes the decision out of the library's
+# hands.  A backstop, not the mechanism: it has to be generous enough to let a
+# domain tarball across a slow link finish, so it will not save you from a
+# quick hang the way $TIMEOUT does.  Both are package variables so a caller who
+# knows their fleet can tighten them.
+our $HANG_TIMEOUT = 600;
 
 # Transports over which we can also get a shell on the HV.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
@@ -378,8 +389,13 @@ kept, or undef when the hypervisor is this machine and there is nothing to
 connect to.
 
 Everything that has to reach the far side goes through this rather than through
-a command line we built ourselves: it does the quoting, it reports the errors,
-and it gives us sftp on the same connection for free.
+a command line we built ourselves: it does the quoting and it reports the
+errors.
+
+What it does I<not> get used for is sftp.  Net::SFTP::Foreign hangs rather than
+failing when the far side will not let it write -- a root-owned directory wedges
+the run instead of reporting EPERM -- so files go over as the stdin of a command
+whose exit status we can actually read.  The writers below all go through one place that does it.
 
 =head2 qx_hv($shell_command)
 
@@ -418,23 +434,23 @@ sub qx_hv {
     my ($self, $cmd) = @_;
     return qx{$cmd} if $self->is_local;
 
-    my ($out, undef, undef) = $self->ssh->cmd($cmd);
-    return $out;
+    return $self->_unhang($cmd, sub { ($self->ssh->cmd($cmd))[0] });
 }
 
 sub system_hv {
     my ($self, @argv) = @_;
     return system(@argv) >> 8 if $self->is_local;
-    return $self->ssh->cmd_exit_code(@argv);
+
+    return $self->_unhang(join(' ', @argv), sub { $self->ssh->cmd_exit_code(@argv) });
 }
 
 =head1 FILES ON THE HYPERVISOR
 
 Each of these is the obvious local filesystem call when the hypervisor is us,
-and the same thing over sftp on the L</ssh> connection when it isn't.  The
-C<sudo> option on the writers is for destinations under C</etc> and C</usr>:
-sftp writes as whoever we logged in as, so those go to a staging path and get
-moved into place afterwards.
+and a command over the L</ssh> connection when it isn't.  The C<sudo> option on
+the writers is for destinations under C</etc> and C</usr>; it puts C<sudo> in
+front of the write itself, so there is no staging file in between whose
+ownership or location could be wrong.
 
 =over 4
 
@@ -465,11 +481,7 @@ Copy a whole directory tree across, contents and all.
 sub file_exists_hv {
     my ($self, $path) = @_;
     return -f $path ? 1 : 0 if $self->is_local;
-
-    # -f, not -e: every caller wants a regular file, and a directory sitting
-    # where one of these belongs is not the same answer.
-    my $attrs = $self->ssh->sftp->stat($path) or return 0;
-    return Fcntl::S_ISREG($attrs->perm) ? 1 : 0;
+    return $self->system_hv(qw{test -f}, $path) == 0 ? 1 : 0;
 }
 
 sub mkpath_hv {
@@ -479,10 +491,15 @@ sub mkpath_hv {
         return 1;
     }
 
-    my $sftp = $self->ssh->sftp;
     foreach my $path (@paths) {
-        next if $sftp->stat($path);
-        $sftp->mkpath($path) or return 0;
+        next if $self->system_hv(qw{mkdir -p}, $path) == 0;
+
+        # Somewhere above it belongs to root.  Make it anyway, then hand it to
+        # the login user: the guest fetches its payload from here as that user,
+        # so a root-owned tree would only move the problem downstream.
+        my $user = $self->ssh_user // $self->hv_user;
+        return 0 if $self->system_hv(qw{sudo mkdir -p}, $path);
+        $self->system_hv('sudo', 'chown', "$user:", $path);
     }
     return 1;
 }
@@ -500,34 +517,112 @@ sub read_text_hv {
     my ($self, $path) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
 
-    # get() to a real file for the same reason write_text_hv put()s one: the
-    # scalar-at-a-time calls in Net::SFTP::Foreign are the ones that hang.
-    # get_content has not been caught doing it, but it is the same API, and
-    # append_line_hv reaches it seconds after the write that was.
-    my $tmp = File::Temp->new(UNLINK => 1);
-    close $tmp;
-
-    $self->ssh->sftp->get($path, "$tmp") or return undef;
-    return File::Slurper::read_text("$tmp");
+    # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
+    # of the file.
+    my $content = $self->_unhang("cat $path",
+        sub { $self->ssh->capture({ timeout => $TIMEOUT }, 'cat', $path) });
+    return $self->ssh->error ? undef : $content;
 }
 
 sub write_text_hv {
     my ($self, $path, $content, %opts) = @_;
-
     return $self->_write_local($path, $content, %opts) if $self->is_local;
+    return $self->_pour({ stdin_data => $content }, $path, %opts);
+}
 
-    # Content goes to a real local file, and then over as a plain sftp put().
-    #
-    # Net::OpenSSH::More::write would say this in one line, but it is a wrapper
-    # around Net::SFTP::Foreign::put_content, which hangs rather than returning.
-    # put() of a file that exists on disk does not, so we make one.  put_file
-    # does the staging and the sudo from here.
-    my $tmp = File::Temp->new(UNLINK => 1);
-    print {$tmp} $content;
-    close $tmp;
-    chmod 0644, "$tmp";
+sub put_file {
+    my ($self, $local, $remote, %opts) = @_;
 
-    return $self->put_file("$tmp", $path, %opts);
+    if ($self->is_local) {
+        return $self->system_hv(qw{sudo cp}, $local, $remote) == 0
+          if $opts{sudo} && !-w _parent_dir($remote);
+        return File::Copy::copy($local, $remote) ? 1 : 0;
+    }
+
+    return $self->_pour({ stdin_file => $local }, $remote, %opts);
+}
+
+sub put_dir {
+    my ($self, $local, $remote) = @_;
+    return 1 if $self->is_local;
+    $self->mkpath_hv($remote) or return 0;
+
+    # Pack locally, then unpack on the far side out of the same stdin stream
+    # everything else here uses.  One round trip, modes preserved, and a real
+    # exit status at the end of it.
+    my $tarball = File::Temp->new(SUFFIX => '.tar.gz', UNLINK => 1);
+    close $tarball;
+    return 0 if system('tar', '-C', $local, '-czf', "$tarball", '.');
+
+    return $self->_run({ stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-');
+}
+
+# Write a stream to a path on the hypervisor.
+#
+# Everything goes through a command with an exit status rather than through
+# sftp.  Net::SFTP::Foreign hangs rather than failing when the far side will
+# not let it write -- a root-owned directory wedges the run instead of
+# reporting EPERM -- and a provisioner that stops dead with no message is worse
+# than one that says "permission denied".  `tee` cannot do that to us, and
+# `sudo tee` writes as root without any staging file to get wrong.
+sub _pour {
+    my ($self, $stdin, $path, %opts) = @_;
+
+    my @cmd = ($opts{sudo} ? (qw{sudo tee}) : ('tee'), $path);
+    $self->_run({ %$stdin, stdout_discard => 1 }, @cmd) or return 0;
+
+    # tee makes the file with our umask, which is nobody's idea of what belongs
+    # under /etc.
+    $self->system_hv('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $opts{sudo};
+    return 1;
+}
+
+sub _run {
+    my ($self, $opts, @cmd) = @_;
+
+    my $ok = $self->_unhang(join(' ', @cmd),
+        sub { $self->ssh->system({ timeout => $TIMEOUT, %$opts }, @cmd) });
+
+    warn 'Remote ' . join(' ', @cmd) . ' failed: ' . ($self->ssh->error // 'unknown') . "\n" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+=head2 _unhang($what, $code)
+
+Run something that talks to the hypervisor under a SIGALRM, so a wedge is an
+error with a name on it rather than a provisioner that sits there.
+
+The library's own C<timeout> should get there first, and does for anything that
+merely stalls.  This is for the case it cannot see: a call that has stopped
+making progress without the connection noticing, which is exactly how
+Net::SFTP::Foreign used to behave when the far side refused a write.  Nothing
+should ever reach it.
+
+=cut
+
+sub _unhang {
+    my ($self, $what, $code) = @_;
+    return $code->() if $self->is_local;
+
+    my @result = eval {
+        local $SIG{ALRM} = sub { die "__TROG_HV_HUNG__\n" };
+        alarm $HANG_TIMEOUT;
+        my @r = $code->();
+        alarm 0;
+        @r;
+    };
+    my $error = $@;
+    alarm 0;
+
+    die 'Gave up on the hypervisor at ' . $self->uri . " after ${HANG_TIMEOUT}s: $what\n"
+      . "Nothing came back and nothing failed, which usually means a permission\n"
+      . "problem the far side declined to report.  Check that "
+      . ($self->ssh_user // 'the login user')
+      . " can write where this was going.\n"
+      if $error eq "__TROG_HV_HUNG__\n";
+
+    die $error if $error;
+    return wantarray ? @result : $result[0];
 }
 
 sub append_line_hv {
@@ -549,55 +644,21 @@ sub append_line_hv {
     return $self->write_text_hv($path, $existing . "$line\n");
 }
 
-sub put_file {
-    my ($self, $local, $remote, %opts) = @_;
-
-    if ($self->is_local) {
-        return $self->system_hv(qw{sudo cp}, $local, $remote) == 0
-          if $opts{sudo} && !-w _parent_dir($remote);
-        return File::Copy::copy($local, $remote) ? 1 : 0;
-    }
-
-    my $staged = $opts{sudo} ? _staging_path() : $remote;
-    $self->ssh->sftp->put($local, $staged) or return 0;
-
-    return 1 unless $opts{sudo};
-    return $self->_sudo_install($staged, $remote);
-}
-
-sub put_dir {
-    my ($self, $local, $remote) = @_;
-    return 1 if $self->is_local;
-
-    $self->mkpath_hv($remote) or return 0;
-    return $self->ssh->sftp->rput($local, $remote) ? 1 : 0;
-}
-
 sub _write_local {
     my ($self, $path, $content, %opts) = @_;
 
     if ($opts{sudo} && !-w _parent_dir($path)) {
-        my $tmp = _staging_path();
-        File::Slurper::write_text($tmp, $content);
-        my $ok = $self->_sudo_install($tmp, $path);
-        unlink $tmp;
-        return $ok;
+        my $tmp = File::Temp->new(UNLINK => 1);
+        print {$tmp} $content;
+        close $tmp;
+        my $ok = $self->system_hv(qw{sudo cp}, "$tmp", $path) == 0;
+        $self->system_hv('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $ok;
+        return $ok ? 1 : 0;
     }
 
     File::Slurper::write_text($path, $content);
     return 1;
 }
-
-# Move a staged file into a root-owned destination.  mv keeps the staging
-# user's ownership, which isn't what anything under /etc or /usr wants.
-sub _sudo_install {
-    my ($self, $staged, $path) = @_;
-    return 0 if $self->system_hv(qw{sudo mv}, $staged, $path);
-    $self->system_hv(qw{sudo chown root:root}, $path);
-    return 1;
-}
-
-sub _staging_path { return '/tmp/.trog-hv-' . $$ . '-' . time() }
 
 sub _parent_dir {
     my ($path) = @_;

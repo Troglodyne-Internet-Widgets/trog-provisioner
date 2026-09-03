@@ -987,10 +987,10 @@ sub mongle_logging_config {
 
     # The guest ships its logs at the HV, so the collector config goes there too.
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
-    $hv->write_text_hv($lcf, $local_config_template, sudo => !$hv->is_local);
+    $hv->write_text_hv($lcf, $local_config_template, sudo => 1);
     print "Wrote $lcf\n";
 
-    $hv->put_file("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => !$hv->is_local);
+    $hv->put_file("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => 1);
     print "Wrote /etc/logrotate.d/vms.conf\n";
 
     #TODO die if these fail

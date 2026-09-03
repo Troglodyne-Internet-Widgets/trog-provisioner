@@ -215,13 +215,35 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 #
 # Net::OpenSSH::More connects in its constructor, so there is no way to build a
 # real one without a real hypervisor.  Mock it, and assert on what we ask it to
-# do: that is the whole of our side of the contract now that it does the
-# quoting and the transfers.
-subtest 'remote work goes through Net::OpenSSH::More' => sub {
+# do -- which since nothing goes through sftp any more is entirely commands and
+# the streams we hand them.
+subtest 'remote work goes through commands with an exit status' => sub {
     my $hv = fresh(uri => 'qemu+ssh://root@fakehv:2222/system');
 
-    my (@connected, @commands);
-    my $fake_sftp = FakeSFTP->new();
+    my (@connected, @commands, %files);
+
+    # Stand in for the far side: `tee PATH` writes its stdin there, `cat PATH`
+    # reads it back, `test -f` answers for it.
+    my $run = sub {
+        my ($opts, @cmd) = @_;
+        push @commands, { opts => $opts, cmd => [@cmd] };
+
+        my @argv = @cmd;
+        shift @argv if $argv[0] eq 'sudo';
+
+        if ($argv[0] eq 'tee') {
+            my $content = $opts->{stdin_data};
+            $content = do {
+                open(my $fh, '<', $opts->{stdin_file}) or return 0;
+                local $/;
+                <$fh>;
+            } if defined $opts->{stdin_file};
+            $files{ $argv[1] } = $content;
+            return 1;
+        }
+        return exists $files{ $argv[2] } ? 1 : 0 if $argv[0] eq 'test';
+        return 1;
+    };
 
     my $mock = Test::MockModule->new('Net::OpenSSH::More');
     $mock->redefine(new => sub {
@@ -229,17 +251,26 @@ subtest 'remote work goes through Net::OpenSSH::More' => sub {
         @connected = %opts;
         return bless {}, $class;
     });
+    $mock->redefine(system => sub { my ($self, $opts, @cmd) = @_; return $run->($opts, @cmd) });
+    $mock->redefine(capture => sub {
+        my ($self, $opts, @cmd) = @_;
+        push @commands, { opts => $opts, cmd => [@cmd] };
+        return $files{ $cmd[1] };
+    });
+    $mock->redefine(error => sub { 0 });
     $mock->redefine(cmd => sub {
         my ($self, @cmd) = @_;
-        push @commands, [@cmd];
+        push @commands, { cmd => [@cmd] };
         return ("output of @cmd", '', 0);
     });
     $mock->redefine(cmd_exit_code => sub {
         my ($self, @cmd) = @_;
-        push @commands, [@cmd];
-        return 0;
+        push @commands, { cmd => [@cmd] };
+        my @argv = @cmd;
+        shift @argv if $argv[0] eq 'sudo';
+        return $argv[0] eq 'test' ? (exists $files{ $argv[2] } ? 0 : 1) : 0;
     });
-    $mock->redefine(sftp => sub { $fake_sftp });
+    $mock->redefine(sftp => sub { die "nothing should be reaching sftp any more\n" });
 
     # The connection is built from the URI, and only once.
     is($hv->qx_hv('id -un'), 'output of id -un', 'qx_hv returns stdout');
@@ -248,97 +279,64 @@ subtest 'remote work goes through Net::OpenSSH::More' => sub {
     is($opts{user}, 'root',   'user from the URI');
     is($opts{port}, 2222,     'port from the URI');
     ok(!$opts{use_persistent_shell}, 'the persistent shell is off, our commands are one-shot');
+    is($hv->ssh, $hv->ssh, 'the connection is opened once and kept');
 
-    my $conn = $hv->ssh;
-    is($hv->ssh, $conn, 'the connection is opened once and kept');
-
-    # A pipeline goes over as one string; an argv list goes over as a list, and
-    # Net::OpenSSH does the escaping we used to do by hand.
-    $hv->qx_hv(q{brctl show | grep -v virbr});
-    is_deeply($commands[-1], [q{brctl show | grep -v virbr}], 'a pipeline is passed through whole');
-
+    # Arguments go over as a list; Net::OpenSSH does the escaping we used to.
     my $nasty = "a b\tc 'quoted' \$HOME * ; rm -rf /";
     is($hv->system_hv('touch', $nasty), 0, 'system_hv returns the exit code');
-    is_deeply($commands[-1], ['touch', $nasty], 'arguments are handed over unmangled, not pre-quoted');
+    is_deeply($commands[-1]{cmd}, ['touch', $nasty], 'unmangled, not pre-quoted');
 
-    # Files go over sftp on that same connection.
+    # Content is poured down a command's stdin rather than put over sftp.
     $hv->write_text_hv('/tmp/plain', "hello\n");
-    is($fake_sftp->{content}{'/tmp/plain'}, "hello\n",
-        'write_text_hv puts a real file rather than going through put_content');
-    ok($hv->file_exists_hv('/tmp/plain'), 'file_exists_hv sees it');
-    is($hv->read_text_hv('/tmp/plain'), "hello\n",
-        'read_text_hv gets a real file rather than going through get_content');
-    is($hv->read_text_hv('/tmp/missing'), undef, 'and undef for one that is not there');
+    is_deeply($commands[-1]{cmd}, ['tee', '/tmp/plain'], 'write_text_hv tees it');
+    is($commands[-1]{opts}{stdin_data}, "hello\n", 'with the content on stdin');
+    ok($commands[-1]{opts}{timeout}, 'and a timeout, so a stall is an error');
+    is($hv->read_text_hv('/tmp/plain'), "hello\n", 'read_text_hv cats it back');
+    ok($hv->file_exists_hv('/tmp/plain'), 'file_exists_hv tests for it');
+    ok(!$hv->file_exists_hv('/tmp/nope'), 'and is false for one that is not there');
 
-    ok(!$hv->file_exists_hv('/tmp/nope'), 'file_exists_hv false for missing');
-
-    # A root-owned destination stages, then moves with sudo.
+    # A root-owned destination is written by sudo directly, with no staging
+    # file in between to get the permissions of wrong.
     ok($hv->write_text_hv('/etc/rsyslog.d/10-vm.conf', "conf\n", sudo => 1), 'sudo write');
-    my ($mv) = grep { $_->[0] eq 'sudo' && $_->[1] eq 'mv' } @commands;
-    ok($mv, 'the staged file is moved into place with sudo');
-    is($mv->[3], '/etc/rsyslog.d/10-vm.conf', 'to the right destination');
-    ok((grep { $_->[0] eq 'sudo' && $_->[1] eq 'chown' } @commands),
-        'and chowned, since mv keeps the staging user');
+    my ($tee) = grep { $_->{cmd}[0] eq 'sudo' && $_->{cmd}[1] eq 'tee' } @commands;
+    is_deeply($tee->{cmd}, [qw{sudo tee /etc/rsyslog.d/10-vm.conf}], 'sudo tee, straight to the destination');
+    ok((grep { "@{$_->{cmd}}" eq 'sudo chmod 0644 /etc/rsyslog.d/10-vm.conf' } @commands),
+        'and a chmod, since tee would have used our umask');
+    ok(!(grep { "@{$_->{cmd}}" =~ m/^sudo mv/ } @commands), 'nothing was staged anywhere first');
 
-    # The whole domain directory goes, not just the tarball.
-    ok($hv->put_dir('/opt/domains/vm', '/opt/domains/vm'), 'put_dir');
-    is_deeply($fake_sftp->{rput}[-1], ['/opt/domains/vm', '/opt/domains/vm'], 'recursively');
+    # put_file streams the local file down the same pipe.
+    my $dir = tempdir(CLEANUP => 1);
+    write_text("$dir/src", "payload\n");
+    ok($hv->put_file("$dir/src", '/usr/libexec/thing', sudo => 1), 'put_file');
+    is($files{'/usr/libexec/thing'}, "payload\n", 'the bytes arrived');
 
     # append_line_hv reads what is there and does not duplicate.
     $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
     $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa BBBB two');
     $hv->append_line_hv('/root/.ssh/authorized_keys', 'ssh-rsa AAAA one');
-    is($fake_sftp->{content}{'/root/.ssh/authorized_keys'},
-        "ssh-rsa AAAA one\nssh-rsa BBBB two\n", 'the repeated key was only written once');
+    is($files{'/root/.ssh/authorized_keys'}, "ssh-rsa AAAA one\nssh-rsa BBBB two\n",
+        'the repeated key was only written once');
 };
 
-# A stand-in for Net::SFTP::Foreign holding files in a hash.
-{
-    package FakeSFTP;
-    use strict;
-    use warnings FATAL => 'all';
+# --- The backstop -------------------------------------------------------------
+subtest 'a hang is an error with a name on it' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@fakehv/system');
 
-    sub new { return bless { content => {}, rput => [] }, shift }
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine(new    => sub { bless {}, shift });
+    $mock->redefine(system => sub { sleep 30; return 1 });
 
-    sub stat {
-        my ($self, $path) = @_;
-        return undef unless exists $self->{content}{$path};
-        return FakeSFTP::Attrs->new();
-    }
+    local $Trog::HV::HANG_TIMEOUT = 1;
 
-    sub get_content { return $_[0]->{content}{ $_[1] } }
+    my $started = time;
+    eval { $hv->write_text_hv('/etc/somewhere', "x\n", sudo => 1) };
+    my $took = time - $started;
 
-    sub get {
-        my ( $self, $remote, $local ) = @_;
-        return 0 unless exists $self->{content}{$remote};
-        open( my $fh, '>', $local ) or return 0;
-        print {$fh} $self->{content}{$remote};
-        close $fh;
-        return 1;
-    }
-    sub put_content { $_[0]->{content}{ $_[2] } = $_[1]; return 1 }
-
-    # A real put reads the local file, and so does this: storing a placeholder
-    # would let a write_text_hv that sends the wrong bytes pass.
-    sub put {
-        my ( $self, $local, $remote ) = @_;
-        open( my $fh, '<', $local ) or return 0;
-        $self->{content}{$remote} = do { local $/; <$fh> };
-        close $fh;
-        return 1;
-    }
-    sub mkpath      { return 1 }
-    sub rput        { my ($s, @a) = @_; push @{ $s->{rput} }, [@a]; return 1 }
-}
-
-{
-    package FakeSFTP::Attrs;
-    use strict;
-    use warnings FATAL => 'all';
-    use Fcntl();
-
-    sub new  { return bless {}, shift }
-    sub perm { return Fcntl::S_IFREG() | 0644 }
-}
+    like($@, qr/Gave up on the hypervisor/, 'we stop waiting');
+    like($@, qr/qemu\+ssh:\/\/root\@fakehv\/system/, 'saying which one');
+    like($@, qr/sudo tee \/etc\/somewhere/, 'and what we were doing');
+    like($@, qr/permission\s+problem/, 'and what it usually means');
+    cmp_ok($took, '<', 10, 'and we did it near the deadline, not after the sleep');
+};
 
 done_testing;
