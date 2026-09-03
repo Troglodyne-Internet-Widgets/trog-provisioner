@@ -291,13 +291,12 @@ sub provision_domain {
         my $existing_nc = $guest->capture('sudo cat /etc/netplan/50-cloud-init.yaml');
         my $parsed = YAML::XS::Load($existing_nc);
 
-        my (undef, $bridge_slot) = $hv->nic_slots;
-        my $primary_adapter_name = $config->param('bridge_devname') // "ens$bridge_slot";
-        die "Could not find primary adapter '$primary_adapter_name' in netplan config!" unless ref $parsed->{network}{ethernets}{$primary_adapter_name} eq 'HASH';
+        my $adapter = primary_adapter($parsed, $config, $hv->guest_mac($domain, 1));
+        my $addresses = ($parsed->{network}{ethernets}{$adapter}{addresses} //= []);
 
-        my $num_ips = scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}});
-        @{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}} = uniq(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}}, map { "$_/24"} @$ips);
-        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}})) {
+        my $num_ips = scalar @$addresses;
+        @$addresses = uniq(@$addresses, map { "$_/24" } @$ips);
+        if ($num_ips != scalar @$addresses) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
             File::Slurper::write_text($new_config, $encoded);
@@ -353,6 +352,33 @@ sub provision_domain {
     print "\nAll Done!  The server should be live at $new_ip\n";
 
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
+}
+
+# Which entry in the guest's netplan is the outbound interface?
+#
+# By MAC, because that is the one thing about an interface we decide and the
+# guest cannot disagree with.  cloud-init writes the MAC it matched on into
+# netplan, so the entry we want identifies itself; the name it ended up with is
+# a consequence and not a handle.  Falling back to the name covers a guest
+# built before any of this, whose netplan has no match stanza at all.
+sub primary_adapter {
+    my ($netplan, $config, $mac) = @_;
+
+    my $ethernets = $netplan->{network}{ethernets};
+    die "No ethernets at all in the guest's netplan config!\n" unless ref $ethernets eq 'HASH';
+
+    foreach my $name (sort keys %$ethernets) {
+        my $match = $ethernets->{$name}{match} or next;
+        next unless ref $match eq 'HASH' && defined $match->{macaddress};
+        return $name if lc $match->{macaddress} eq lc $mac;
+    }
+
+    my (undef, $bridge_slot) = Trog::HV->new()->nic_slots;
+    my $named = $config->param('bridge_devname') // "ens$bridge_slot";
+    return $named if ref $ethernets->{$named} eq 'HASH';
+
+    die "Could not find the outbound adapter in the guest's netplan: nothing matches\n"
+      . "$mac, and there is no $named either.  It has: " . join(', ', sort keys %$ethernets) . "\n";
 }
 
 # Whatever is already answering to this name, gone.

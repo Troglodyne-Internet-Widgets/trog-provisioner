@@ -133,6 +133,46 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     }
 };
 
+# --- Which netplan entry gets the static IP ----------------------------------
+subtest 'the outbound adapter is found by MAC, not by name' => sub {
+    my $config = Config::Simple->new(_conf(domain => 'vm.example.com'));
+    my $mac    = '52:54:00:AA:BB:CC';
+
+    # cloud-init writes the MAC it matched on, so the entry identifies itself
+    # whatever the guest ended up calling it.
+    my $renamed = { network => { ethernets => {
+        eth9  => { match => { macaddress => '52:54:00:11:22:33' }, addresses => ['10.0.0.1/24'] },
+        wibble=> { match => { macaddress => lc $mac },             addresses => ['203.0.113.1/24'] },
+    } } };
+    is(Trog::Bin::Provisioner::primary_adapter($renamed, $config, $mac), 'wibble',
+        'found by MAC even under a name nothing would have guessed');
+
+    is(Trog::Bin::Provisioner::primary_adapter($renamed, $config, uc $mac), 'wibble',
+        'and case does not matter');
+
+    # A guest from before any of this has no match stanza; fall back to the name.
+    my $old = { network => { ethernets => {
+        ens3 => { addresses => [] },
+        ens4 => { addresses => ['203.0.113.1/24'] },
+    } } };
+    is(Trog::Bin::Provisioner::primary_adapter($old, $config, $mac), 'ens4',
+        'an older guest falls back to the derived name');
+
+    # And an explicit override still wins that fallback.
+    my $named = Config::Simple->new(_conf(domain => 'vm.example.com', bridge_devname => 'ens3'));
+    is(Trog::Bin::Provisioner::primary_adapter($old, $named, $mac), 'ens3',
+        'bridge_devname is still honoured');
+
+    # Nothing matching at all is an error that says what it looked for.
+    my $neither = { network => { ethernets => { enp0s9 => { addresses => [] } } } };
+    eval { Trog::Bin::Provisioner::primary_adapter($neither, $config, $mac) };
+    like($@, qr/Could not find the outbound adapter/, 'otherwise it says so');
+    like($@, qr/enp0s9/,                              'listing what the guest does have');
+
+    eval { Trog::Bin::Provisioner::primary_adapter({}, $config, $mac) };
+    like($@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error');
+};
+
 sub _conf {
     my (%params) = @_;
     my $dir = tempdir(CLEANUP => 1);
