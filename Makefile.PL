@@ -17,6 +17,7 @@ WriteMakefile(
     },
   },
   PREREQ_PM => {
+    'Carp::Always'   => 0,
     'Cwd'            => 0,
     'Fcntl'          => 0,
     'FindBin'        => 0,

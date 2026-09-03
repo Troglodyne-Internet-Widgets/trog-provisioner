@@ -140,7 +140,10 @@ sub wait_for_ssh {
     my $wait   = 300;
     my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
     die "SSH port never came up after $wait seconds!" unless $ssh_up;
-    my $ssh = Net::OpenSSH::More->new(host => $ip, user => $user, key_path => $key);
+    # use_persistent_shell => 0 for the same reason Trog::HV::ssh sets it: the
+    # persistent Expect shell hangs on things a one-shot connection does not.
+    my $ssh = Net::OpenSSH::More->new(
+        host => $ip, user => $user, key_path => $key, use_persistent_shell => 0);
     die "Could not establish SSH connection as $user!" unless $ssh;
     return $ssh;
 }

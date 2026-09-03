@@ -24,6 +24,8 @@ use Net::EmptyPort;
 use XML::Twig;
 use JSON::MaybeXS;
 
+use Carp::Always;
+
 =head1 NAME
 
 provision - build a VM from a domain directory
@@ -485,8 +487,10 @@ sub wait_for_ssh {
     die "SSH port never came up after $wait seconds!" unless $ssh_up;
 
     # Make sure we can *actually* SSH in
-    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user, key_path => $key );
+    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user, key_path => $key, use_persistent_shell => 0 );
     die "Could not establish SSH connection as $user!" unless $ssh;
+
+    return $ssh;
 }
 
 sub mongle_terraform_template {
@@ -970,10 +974,12 @@ sub mongle_setup_script {
 sub mongle_logging_config {
     my $config = shift;
 
+    print "Connecting to Hypervisor...";
     my $hv         = Trog::HV->new();
+    print "OK!\n";
     my $domain_dir = $hv->domain_dir;
 
-    my $domain = $config->param('domain');
+    my $domain  = $config->param('domain');
     my $ship_to = $config->param('hv_internal_ip');
 
     my $local_config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog.tmpl");
@@ -982,11 +988,14 @@ sub mongle_logging_config {
     # The guest ships its logs at the HV, so the collector config goes there too.
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
     $hv->write_text_hv($lcf, $local_config_template, sudo => !$hv->is_local);
+    print "Wrote $lcf\n";
 
     $hv->put_file("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => !$hv->is_local);
+    print "Wrote /etc/logrotate.d/vms.conf\n";
 
     #TODO die if these fail
     $hv->system_hv(qw{sudo systemctl restart rsyslog});
+    print "Restarted rsyslogd\n";
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;
