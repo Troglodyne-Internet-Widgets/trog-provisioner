@@ -4,6 +4,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use Test::More;
+use Test::MockModule qw{strict};
 use File::Temp qw{tempdir};
 use File::Path qw{make_path};
 use File::Slurper qw{write_text read_text};
@@ -38,31 +39,25 @@ subtest 'remove_rsyslog_config skips missing file cleanly' => sub {
     is($@, '', 'no exception for missing rsyslog config in dryrun');
 };
 
-# --- remove_tf_configs ---
-subtest 'remove_tf_configs removes matching files' => sub {
+# --- destroy_disks ---
+subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     my $domain = 'test.example';
 
-    # tf_config_dir comes off the hypervisor now, so we can point it somewhere
-    # writable and check the real thing rather than a re-implementation of it.
-    my $tfdir = tempdir(CLEANUP => 1);
-    Trog::HV->forget();
-    Trog::HV->new(domain_dir => $tmpdir, tf_dir => $tfdir);
-    make_path("$tfdir/config");
+    my (@deleted, %exists);
+    %exists = map { $_ => 1 } ("$domain-qcow2", "$domain-cloudinit.iso", 'baseimage-qcow2');
 
-    my @expected = map { "$tfdir/config/$domain.$_" } qw{tf cloud_init.cfg network_config.cfg};
-    write_text($_, "# placeholder\n") for @expected;
-    my $bystander = "$tfdir/config/other.example.tf";
-    write_text($bystander, "# placeholder\n");
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(volume        => sub { $exists{ $_[1] } });
+    $hv_mock->redefine(delete_volume => sub { push @deleted, $_[1]; return 1 });
 
-    Trog::Bin::Destroy::remove_tf_configs($domain, 1);
-    ok(-f $_, "dryrun left $_ alone") for @expected;
+    Trog::Bin::Destroy::destroy_disks($domain, 1);
+    is_deeply(\@deleted, [], 'dryrun removes nothing');
 
-    Trog::Bin::Destroy::remove_tf_configs($domain, 0);
-    ok(!-f $_, "removed $_") for @expected;
-    ok(-f $bystander, 'another domain\'s config was left alone');
-
-    Trog::HV->forget();
-    Trog::HV->new(domain_dir => $tmpdir);
+    Trog::Bin::Destroy::destroy_disks($domain, 0);
+    is_deeply([sort @deleted], ["$domain-cloudinit.iso", "$domain-qcow2"],
+        'the guest disk and its seed go');
+    ok(!(grep { m/baseimage/ } @deleted),
+        'and the base image, which every other guest is layered on, does not');
 };
 
 # --- remove_authorized_key ---

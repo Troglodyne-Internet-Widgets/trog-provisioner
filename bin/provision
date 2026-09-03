@@ -8,20 +8,15 @@ use warnings FATAL => 'all';
 use FindBin();
 use FindBin::libs;
 use Config::Simple();
-use File::Path();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Guest();
 use File::Slurper();
-use File::Copy();
 use YAML::XS();
 use JSON::PP();
 use List::Util qw{any uniq};
-use File::Which qw {which};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
-use XML::Twig;
-use JSON::MaybeXS;
 
 use Carp::Always;
 
@@ -59,12 +54,6 @@ say, which for most people is still this machine.
 
 Where the per-domain directories live.  Defaults to F</opt/domains>.
 
-=item B<--tfdir> DIR
-
-Where terraform's config and state live.  Defaults to F</opt/terraform> for the
-default hypervisor, and to a per-hypervisor directory under
-F</opt/terraform/hv/> for any other.
-
 =item B<--existing> IP
 
 Layer this domain's configuration onto an already running VM rather than
@@ -79,8 +68,8 @@ Write out everything that would be applied, but don't apply it.
 =head1 DESCRIPTION
 
 Reads F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> out of the domain
-directory, renders the terraform and cloud-init configuration for the domain,
-and applies it against the hypervisor.  See L<Trog::HV> for what "the
+directory, renders the libvirt XML and cloud-init configuration for the domain,
+and defines it on the hypervisor.  See L<Trog::HV> for what "the
 hypervisor" means when it isn't this machine.
 
 =cut
@@ -99,13 +88,12 @@ sub main {
 
     umask 0022;
 
-    my ($reuse, $uri, $domain_dir, $tf_dir, $hvconf);
+    my ($reuse, $uri, $domain_dir, $hvconf);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'domaindir=s' => \$domain_dir,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
-        'tfdir=s'     => \$tf_dir,
         'hvconf=s'    => \$hvconf,
     );
 
@@ -123,8 +111,6 @@ sub main {
     my $udf = "$domain_dir/$domain/users.yaml";
     die "User definition file $domain_dir/$udf not present!" unless -f $udf;
 
-    die "Terraform not installed" unless which('terraform');
-
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
 
@@ -133,13 +119,11 @@ sub main {
     my $hv = choose_hypervisor($config, $domain, {
         uri        => $uri,
         domain_dir => $domain_dir,
-        tf_dir     => $tf_dir,
         hvconf     => $hvconf,
     });
     print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
-    # Basic setup.  The config/state dir is ours; the disk pool is the HV's.
-    File::Path::make_path($hv->tf_config_dir);
+    # The storage pool is the hypervisor's, and it may not have one yet.
     $hv->mkpath($hv->pool_path)
       or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
 
@@ -154,15 +138,6 @@ sub main {
           or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
         $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
     }
-
-    # A hypervisor that used to run this tool on itself has its own terraform
-    # state.  Start from that rather than from nothing.
-    adopt_hypervisor_state($hv);
-
-    # Fix the terraform state.
-    # We have to do this every time, for every single known domain.
-    # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
-    sync_tf_state_with_libvirt();
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
@@ -223,7 +198,7 @@ sub main {
 sub choose_hypervisor {
     my ($config, $domain, $opts) = @_;
 
-    my %paths = (domain_dir => $opts->{domain_dir}, tf_dir => $opts->{tf_dir});
+    my %paths = (domain_dir => $opts->{domain_dir});
 
     return Trog::HV->new(uri => $opts->{uri}, %paths) if $opts->{uri};
 
@@ -239,16 +214,7 @@ sub choose_hypervisor {
 
     # The command line still outranks the fleet on where *our* files go.
     $hv->{domain_dir} = $opts->{domain_dir} if defined $opts->{domain_dir};
-    $hv->{tf_dir}     = $opts->{tf_dir}     if defined $opts->{tf_dir};
     return $hv;
-}
-
-sub sync_tf_state_with_libvirt {
-    my $statefile  = Trog::HV->new()->tf_config_dir . '/terraform.tfstate';
-    return unless -f $statefile;
-    my $tf_domains = get_tf_managed_domains($statefile);
-    my %volatile   = extract_volatile_libvirt_info($tf_domains);
-    #brainwash_tfstate($statefile, %volatile);
 }
 
 sub provision_domain {
@@ -256,9 +222,6 @@ sub provision_domain {
 
     my $hv         = Trog::HV->new();
     my $domain_dir = $hv->domain_dir;
-
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
 
     # Set this to simplify calling conventions
     $config->param('domain', $domain);
@@ -300,15 +263,14 @@ sub provision_domain {
         $key = "$domain_dir/$depends/key.rsa" if $depends;
 
         # Make sure any existing VMs don't have this domain
-        clean_domain_resources($domain,$domain_mongled);
-        unlink $hv->tf_config_dir . "/$domain.tf";
+        clean_domain_resources($domain);
 
         print "Attempting to access Machine\n";
         my $guest = Trog::Guest->new(name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key);
 
         my $output = '';
         print "Installing Updated cloud-init and forcing re-run...\n";
-        my $init = $hv->tf_config_dir . "/$domain.cloud_init.cfg";
+        my $init = "$domain_dir/$domain/user-data";
         my $ci_dir = "/var/lib/cloud/instances/$domain";
         $guest->put_file($init, 'cloud-config.txt') or die "Could not ship the cloud-init config to $domain";
         # Remove the semaphore that says this was run, then run the needed targets
@@ -349,32 +311,16 @@ sub provision_domain {
         return ($reuser, $old_ssh_ip);
     }
 
-    # TODO move the deletion of unneeded resources above the SSH reuse stuff, remove dependent VMs from conf.
-    my $tf = mongle_terraform_template($config);
-    print "Wrote $tf\n";
+    # Anything already answering to this name has to go before we define one.
+    clean_domain_resources($domain);
+
+    my ($xml, $file) = mongle_domain_xml($config);
+    print "Wrote $file\n";
 
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $old_ip)) if $dryrun;
 
-    chdir $hv->tf_config_dir;
-    # Figure out if we need to liquidate/respawn/spawn existing stuff
-    my $result = 0;
-    # If something named this domain exists, but is supposed to depend on something else, destroy it.
-    clean_domain_resources($domain,$domain_mongled);
-
-    system(qw{terraform init});
-    $result = $? >> 8;
-    die "Could not initialize terraform" if $result;
-
-    #XXX Terraform wants ot rebuild everything even if a trivial autoassigned pty port changes
-    # As such we need to tell it to only EVER change what we have requested
-    system(qw{terraform plan -out tf.plan},  "-target=libvirt_domain.$domain_mongled");
-    $result = $? >> 8;
-    die "Could not establish terraform execution plan" if $result;
-
-    system(qw{terraform apply tf.plan});
-    $result = $? >> 8;
-	#XXX the provider is buggy, so we just have to pray
-    warn "Terraform cried uncle, but we're going to continue anyways" if $result;
+    print "Defining and starting $domain...\n";
+    $hv->define_domain($xml);
 
     # If we're not re-using the VM, waste the old DHCP lease, so we don't fill up the table and gum everything up.
     $hv->release_dhcp_lease($old_ip) unless $old_ip eq 'bogus';
@@ -397,347 +343,188 @@ sub provision_domain {
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
 }
 
-# Terraform state for a hypervisor we have not talked to from here before.
+# Whatever is already answering to this name, gone.
 #
-# Every hypervisor of any age was provisioned by running this tool on it, which
-# left a terraform state at /opt/terraform/config.  Reaching the same machine
-# remotely gives it a state directory of its own, and starting that empty means
-# terraform believes none of the pool, the base image or any existing domain
-# exists -- so it sets about creating them, and libvirt refuses one at a time.
-#
-# Importing our way out is not available: the libvirt provider accepts an
-# import id for a volume and then reports no such object whatever you give it,
-# so only the pool can be adopted that way.  Taking the hypervisor's own state
-# is both the whole answer and the more honest one -- it is the same terraform
-# managing the same resources, just from somewhere else now.
-sub adopt_hypervisor_state {
-    my ($hv) = @_;
-    return 0 if $hv->is_local;
-
-    my $local = $hv->tf_config_dir . '/terraform.tfstate';
-    return 0 if -f $local;
-
-    my $remote = $hv->remote_tf_state;
-    return 0 unless $hv->file_exists($remote);
-
-    print "No terraform state here for " . $hv->uri . " yet, and $remote has one.\n";
-    print "Adopting it, so terraform knows what already exists.\n";
-
-    $hv->get_file($remote, $local)
-      or die "Could not copy $remote off the hypervisor; refusing to run terraform\n"
-      . "against an empty state, which would try to rebuild everything on it.\n";
-
-    return 1;
-}
-
-# Put our state back where the hypervisor keeps its own.
-#
-# We adopted it on the way in; by now it describes resources that did not exist
-# when we picked it up.  Leaving the hypervisor's copy at the old serial means
-# the next person to run this on the machine itself starts from a state that
-# has forgotten whatever we just built, and sets about building it again.
-#
-# This is a copy between two files and nothing arbitrates it.  Two machines
-# provisioning the same hypervisor at once will overwrite each other, and the
-# real answer to that is a remote backend with locking rather than anything
-# here.
-sub return_hypervisor_state {
-    my ($hv) = @_;
-    return 0 if $hv->is_local || $dryrun;
-
-    my $local = $hv->tf_config_dir . '/terraform.tfstate';
-    return 0 unless -f $local;
-
-    my $remote = $hv->remote_tf_state;
-    print "Returning terraform state to $remote on " . $hv->uri . "\n";
-
-    $hv->put_file($local, $remote)
-      or warn "Could not put the terraform state back on the hypervisor; its copy at\n"
-      . "$remote is now behind ours, and a run from the machine itself would\n"
-      . "rebuild what we just made.\n";
-
-    return 1;
-}
-
-# An import block for something libvirt already has, or nothing at all when it
-# does not: terraform can only adopt what exists.
-sub _import_block {
-    my ($address, $id, $what) = @_;
-    return '' unless defined $id && length $id;
-
-    print "Re-Using the existing $what ($id)\n";
-    return qq|
-import {
-    to = $address
-    id = "$id"
-}
-|;
-}
-
+# A domain we are about to define cannot share a name with one that already
+# exists, and its disk is a fresh overlay on the base image -- keeping the old
+# one would hand the new guest the old one's filesystem.  This used to have to
+# fight terraform for the privilege; now it asks libvirt.
 sub clean_domain_resources {
-    my ($domain,$domain_mongled) = @_;
-
-    #XXX sigh sigh sigh
-    # We also have to whack any VM which exists with this name but is shutdown because TF is incapable of fixing this
+    my ($domain) = @_;
     my $hv = Trog::HV->new();
+
     if ($hv->domain_exists($domain)) {
-        # Kill it, how frigging hard can it be???
-        print "Terminating existing VM $domain via libvirt...\n";
+        print "Terminating the existing VM $domain\n";
         $hv->annihilate_domain($domain);
     }
 
-    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
-    my $resources = qx{terraform state list};
-    chomp $resources;
-    foreach my $resource (split(/\n/, $resources)) {
-        next unless $resource =~ m/\Q$domain_mongled\E/;
-        next if any { $_ eq $resource } @exempt;
-        print "Terminating $resource\n";
-        #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
-        #XXX So we have to instead painstakingly kill everything that isn't.
-        #XXX they claim modules are the way to do this, but that appears to be false.
-        #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
-        system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
-    }
-
+    $hv->delete_volume("$domain-qcow2");
+    $hv->delete_volume("$domain-cloudinit.iso");
+    return 1;
 }
 
-sub mongle_terraform_template {
+# Render the libvirt XML for a domain, and make the disks it refers to.
+#
+# This used to write terraform HCL.  Terraform's model is that it owns the
+# world and may rebuild it; ours is that the hypervisor owns the world and we
+# are adding one guest.  Reconciling those cost a state file per hypervisor,
+# import blocks, ignore_changes for attributes the provider would not report
+# back, and a provider that cannot import a volume at all.  This is less code
+# than the machinery that was keeping terraform's opinion at bay.
+sub mongle_domain_xml {
     my ($config) = @_;
 
-    my $domain = $config->param('domain');
-    my $image  = $config->param('image');
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
+
+    my $domain    = $config->param('domain');
+    my $image     = $config->param('image');
     my $disk_size = $config->param('size');
-    my $ram_mb = $config->param('memory');
+    my $ram_mb    = $config->param('memory');
     my $cpus      = $config->param('cpus');
 
-    # These have no sane default, and every one of them goes straight into the
-    # terraform template.  Say which one is missing rather than letting the
-    # substitution produce a config file that won't parse.
-    foreach my $required (
-        [image  => $image], [size => $disk_size],
-        [memory => $ram_mb], [cpus => $cpus],
-    ) {
-        my ($key, $value) = @$required;
-        die "MUST SET $key in provision.conf for $domain\n"
-          unless defined $value && length $value;
-    }
     # host-passthrough exposes the bare-metal CPU (incl. AVX/AVX2/etc.) to the
     # guest — required by anything that probes cpuid for vector extensions
     # (e.g. the `claude` CLI bundled v8 snapshot).  Override to host-model,
     # custom, or a specific model name only if you need live migration to a
     # differently-specced HV.
-    my $cpu_mode  = $config->param('cpu_mode') // 'host-passthrough';
+    my $cpu_mode = $config->param('cpu_mode') // 'host-passthrough';
 
-    my $hv         = Trog::HV->new();
-    my $domain_dir = $hv->domain_dir;
+    # These have no sane default, and every one of them goes into the XML.
+    # Say which one is missing rather than producing a domain that won't define.
+    foreach my $required (
+        [image  => $image],  [size => $disk_size],
+        [memory => $ram_mb], [cpus => $cpus],
+    ) {
+        my ($key, $value) = @$required;
+        die "MUST SET $key in provision.conf for $domain\n" unless defined $value && length $value;
+    }
 
     my $bridge_device = $hv->bridge_device;
     print "Using outbound bridge $bridge_device\n";
 
-    # OK, let's get the UUID of our storage pool IN CASE we are re-using it
-    # TODO make this configurable so we can use lvm
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
+    # The pool, the image everything is layered on, and this guest's own disk.
+    $hv->pool();
+    my $base = $hv->base_image($image);
+    my $disk = $hv->create_disk("$domain-qcow2", backing => $base, capacity => $disk_size);
 
-    my $libvirt_pool = $hv->pool_uuid('tf_disks');
-    my $pool_path    = $hv->pool_path;
+    my ($extra_disks, $filesystems) = mongle_extra_disks($config);
 
-    # Anything libvirt already has, terraform is told to adopt rather than
-    # create.  Without this it tries to make them again and libvirt refuses --
-    # "storage volume 'baseimage-qcow2' exists already" -- which no amount of
-    # re-running gets past, because the resource is not in state to destroy.
-    my $import_block = _import_block('libvirt_pool.tf_disks', $libvirt_pool, "storage pool at $pool_path");
+    my $cloudinit = $hv->cloudinit_iso($domain, mongle_cloud_init($config));
 
-    # Volumes get no import block.  The provider takes the id, looks for the
-    # volume, finds nothing whatever you hand it -- key, path, pool/name -- and
-    # fails with "Cannot import non-existent remote object", so an import block
-    # for one is a guaranteed error rather than a recovery.  A volume that
-    # exists without state is handled by adopt_hypervisor_state instead.
-    my ($image_block, $volume_block) = ('', '');
-
-    # The provider needs a real URI even when we let libvirt pick our own, and
-    # it needs to be told about SSH in a way libvirt's own client works out.
-    my $libvirt_uri = $hv->provider_uri;
-    print "Terraform will reach libvirt at $libvirt_uri\n" unless $hv->is_local;
-
-    my %to_mongle = (
-        'main.tmpl'   => "main.tf",
-        'domain.tmpl' => "$domain.tf",
+    my $xml = File::Slurper::read_text("$FindBin::Bin/../domain.xml.tmpl");
+    my %substitutions = (
+        REPLACEME   => $domain,
+        MUGUBYTES   => $ram_mb,
+        NUMCPUS     => $cpus,
+        CPUMODE     => $cpu_mode,
+        DISKPATH    => $disk,
+        CLOUDINIT   => $cloudinit,
+        BRIDGENAME  => $bridge_device,
+        EXTRADISKS  => $extra_disks,
+        FILESYSTEMS => $filesystems,
     );
+    $xml =~ s/%$_%/$substitutions{$_}/gmx for keys %substitutions;
 
-	# If the user instructs us to attach other disks via disks.txt, we should obey
-	my $disks_config = "$domain_dir/$domain/mounts.txt";
-	my $attach = ',';
-    my $fsmounts = '';
-	my $mapper = '';
-	if (-f $disks_config) {
-		my $disks = File::Slurper::read_text($disks_config);
-		my @devnames = 'vdb'..'vdz';
-		my (@extra_disks,@filesystems);
-        my $order = 2;
-		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
-			my ($pool, $disk) = split(/=/, $diskspec);
+    my $file = "$domain_dir/$domain/domain.xml";
+    File::Slurper::write_text($file, $xml);
+    return ($xml, $file);
+}
 
-            #TODO should allow the user to pass this via diskspec
-            my $type = "qcow2";
+# Whatever mounts.txt asks for, as libvirt device XML.
+#
+# Each line is pool=name.  A `raw` pool is a host block device, `dir` is a
+# directory shared in over virtiofs, `file` is an image file, and anything else
+# is taken as the name of another libvirt pool.  `fuse` is skipped: the guest
+# mounts those itself.
+sub mongle_extra_disks {
+    my ($config) = @_;
 
-            # Don't do anything for fuse devices
+    my $hv         = Trog::HV->new();
+    my $domain     = $config->param('domain');
+    my $domain_dir = $hv->domain_dir;
+
+    my $spec_file = "$domain_dir/$domain/mounts.txt";
+    my (@disks, @filesystems, $mapper);
+    $mapper = '';
+
+    if (-f $spec_file) {
+        my @devnames = ('vdb' .. 'vdz');
+        my $order    = 2;
+
+        foreach my $diskspec (grep { $_ } split(/\n/, File::Slurper::read_text($spec_file))) {
+            my ($pool, $disk) = split(/=/, $diskspec);
             next if $pool eq 'fuse';
 
-            # Proper boot order...
             $order++;
+            my $dev = shift @devnames or die "Ran out of vdnames!\n";
 
-			# Attach to the guest IFF the thing exists
-			my $dev = shift @devnames;
-			die "Ran out of vdnames!" unless $dev;
+            # The guest gets a map of what it asked for to where it landed.
+            $mapper .= $pool eq 'dir' ? "$disk=$dev\n" : "$disk=/dev/$dev\n";
 
-			# we have to build a mapping file which will end up in /root.
-			$mapper .= "$disk=/dev/$dev\n" unless $pool eq 'dir';
-            $mapper .= "$disk=$dev\n"      if     $pool eq 'dir';
+            if ($pool eq 'dir') {
+                # virtiofs-better is `virtiofsd --inode-file-handles=mandatory`,
+                # without which a busy share runs the daemon out of file handles.
+                push @filesystems, sprintf(<<'FS', _xml($disk), _xml($dev));
+    <filesystem type='mount' accessmode='passthrough'>
+      <driver type='virtiofs' queue='1024'/>
+      <binary path='/usr/libexec/virtiofs-better'>
+        <open_files max='4092'/>
+      </binary>
+      <source dir='%s'/>
+      <target dir='%s'/>
+    </filesystem>
+FS
+                next;
+            }
 
             if ($pool eq 'raw') {
-                # Just use a raw block device
-                push(@extra_disks,qq|
-		  {
-			source = {
-                block = {
-				    dev = "$disk"
-                }
-			}
-            driver = {
-                name = "qemu"
-                type = "raw"
-            }
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            boot = {
-                order = $order
-            }
-			device = "disk"
-            type = "block"
-		  }|);
+                push @disks, sprintf(<<'DISK', _xml($disk), _xml($dev), $order);
+    <disk type='block' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source dev='%s'/>
+      <target dev='%s' bus='virtio'/>
+      <boot order='%d'/>
+    </disk>
+DISK
                 next;
             }
 
-            #XXX we may have to set binary.path='some_script' which is `virtiofs --inode-file-handles=mandatory $@`
-            # Just mount a dir on the HV
-            if ($pool eq 'dir') {
-                push(@filesystems,qq|
-		  {
-			source = {
-                mount = {
-				    dir = "$disk"
-                }
-			}
-            target = {
-                dir = "$dev"
-            }
-            driver = {
-                type = "virtiofs"
-            }
-            boot = {
-                order = $order
-            }
-            binary = {
-                path = "/usr/libexec/virtiofs-better"
-                open_files = {
-                    max = 4092
-                }
-            }
-            access_mode="passthrough"
-		  }|);
-                next;
-            }
-
-            if ($pool eq 'file') {
-			    #XXX untested, may not work?
-			    push(@extra_disks,qq|
-		  {
-			source = {
-				file = {
-					file = "$disk"
-				}
-			}
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            driver = {
-                name = "qemu"
-                type = "$type"
-            }
-            boot = {
-                order = $order
-            }
-			device = "disk"
-		  }|);
-            }
-            # Otherwise just assume we got a pool name
-	        push(@extra_disks,qq|
-		  {
-			source = {
-				pool = "$pool"
-				volume = "$disk"
-			}
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            driver = {
-                name = "qemu"
-                type = "$type"
-            }
-            boot = {
-                order = $order
-            }
-			device = "disk"
-		  }|);
-		}
-		$attach   .= join(',', grep { $_ } @extra_disks);
-        $fsmounts = "filesystems = [".join(',', grep { $_ } @filesystems)."]";
-	}
-	# Write /root/devices.map
-	File::Slurper::write_text("$domain_dir/$domain/devices.map", $mapper);
-
-    my @files_mongled;
-    foreach my $file (keys(%to_mongle)) {
-        my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
-
-        $tf_template =~ s/%BRIDGENAME%/$bridge_device/gmx;
-        $tf_template =~ s/%REPLACEME%/$domain/gmx;
-        $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
-        $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
-        $tf_template =~ s/%MUGUBYTES%/$ram_mb/gmx;
-        $tf_template =~ s/%NUMCPUS%/$cpus/gmx;
-        $tf_template =~ s/%CPUMODE%/$cpu_mode/gmx;
-        $tf_template =~ s/%CLOUDIMG%/$image/gmx;
-        $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
-        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
-        $tf_template =~ s/%VOLUME_IMPORT%/$volume_block/gmx;
-		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
-        $tf_template =~ s/%FILESYSTEMS%/$fsmounts/gmx;
-        $tf_template =~ s/%LIBVIRT_URI%/$libvirt_uri/gmx;
-        $tf_template =~ s/%POOLPATH%/$pool_path/gmx;
-
-        my $tfile = $hv->tf_config_dir . "/$to_mongle{$file}";
-        File::Slurper::write_text($tfile, $tf_template);
-        push(@files_mongled, $tfile);
+            # A file, or a volume in some other pool -- either way it resolves
+            # to a path, and libvirt wants the path.
+            my $path = $pool eq 'file' ? $disk : ($hv->volume_path($disk, $pool) // $disk);
+            push @disks, sprintf(<<'DISK', _xml($path), _xml($dev), $order);
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='%s'/>
+      <target dev='%s' bus='virtio'/>
+      <boot order='%d'/>
+    </disk>
+DISK
+        }
     }
 
-    #XXX tf plugin should do this automatically, but does not
-    $hv->remove("$pool_path/commoninit.iso");
+    File::Slurper::write_text("$domain_dir/$domain/devices.map", $mapper);
+    return (join('', @disks), join('', @filesystems));
+}
 
-    return join(', ', @files_mongled);
+sub _xml {
+    my ($str) = @_;
+    $str = '' unless defined $str;
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    $str =~ s/"/&quot;/g;
+    $str =~ s/'/&apos;/g;
+    return $str;
 }
 
 # Slam in the IPs, gw, resolvers
 sub mongle_network_configuration {
     my $config = shift;
 
-    my $hv = Trog::HV->new();
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
 
     my $domain = $config->param('domain');
     my $ips  = _coerce_array($config->param('ips'));
@@ -812,9 +599,9 @@ sub mongle_network_configuration {
        },
     };
 
-    my $cf = $hv->tf_config_dir . "/$domain.network_config.cfg";
-    File::Slurper::write_text($cf, YAML::XS::Dump($netconf));
-    return $cf;
+    my $rendered = YAML::XS::Dump($netconf);
+    File::Slurper::write_text("$domain_dir/$domain/network-config", $rendered);
+    return $rendered;
 }
 
 sub inject_admin_key {
@@ -952,9 +739,23 @@ APT {
              }]
         }
     };
-    my $cf = $hv->tf_config_dir . "/$domain.cloud_init.cfg";
-    File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
-    return $cf;
+    # Kept beside the domain as well as going into the seed, so you can read
+    # what a guest was built with without unpacking an ISO.
+    my $user_data = "#cloud-config\n" . YAML::XS::Dump($clown_config);
+    File::Slurper::write_text("$domain_dir/$domain/user-data", $user_data);
+    return $user_data;
+}
+
+# NoCloud wants an instance-id.  Keeping it stable across rebuilds is what
+# stops cloud-init deciding it has already run and skipping everything.
+sub mongle_meta_data {
+    my ($config) = @_;
+    my $domain = $config->param('domain');
+
+    return YAML::XS::Dump({
+        'instance-id'    => $domain,
+        'local-hostname' => $domain,
+    });
 }
 
 sub mongle_setup_script {
@@ -1018,101 +819,6 @@ sub mongle_logging_config {
     my $lf = "$domain_dir/$domain/rsyslog.conf";
     File::Slurper::write_text($lf, $config_template);
     return $lf;
-}
-
-sub get_tf_managed_domains {
-    my ($statefile) = @_;
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = $json->decode(File::Slurper::read_text($statefile));
-
-    my @domains;
-    foreach my $res (@{$parsed->{resources}}) {
-        next unless $res->{type} eq 'libvirt_domain';
-        push(@domains, $res->{name});
-    }
-    return \@domains;
-}
-
-sub extract_volatile_libvirt_info {
-    my ($domains) = @_;
-
-    my %info;
-    my $domain;
-
-    my $extract_console = sub {
-        my ($t, $section) = @_;
-
-        my $source = $section->first_child('source');
-        my $target  = $section->first_child('target');
-        my $name  = $target ? $target->att('type') : '';
-        $info{$domain}{$name} = $source->att('path') if $source && $name;
-        $section->purge();
-    };
-
-    my $extract_graphics = sub {
-        my ($t, $section) = @_;
-        my $type = $section->att('type');
-        $info{$domain}{$type} = $section->att('port');
-        $section->purge();
-    };
-
-    my $xml = XML::Twig->new(
-        twig_roots => {
-            'console'  => $extract_console,
-            'graphics' => $extract_graphics,
-        },
-        twig_print_outside_roots => 0,
-    );
-
-    my $hv = Trog::HV->new();
-    foreach my $mongled (@$domains) {
-        $domain = $mongled;
-        $domain =~ s/-/\./g;
-
-        # First, see if the domain is up.  If it's not, we don't care.
-        next unless $hv->domain_is_running($domain);
-
-        my $raw = $hv->domain_xml($domain) or return ();
-        $domain = $mongled;
-        $xml->parse($raw);
-    }
-
-    return %info;
-}
-
-# I AM YURI. YOU WILL OBEY ME.
-sub brainwash_tfstate {
-    my ($statefile, %opts) = @_;
-
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = $json->decode(File::Slurper::read_text($statefile));
-
-    foreach my $mongled (keys %opts) {
-        foreach my $res (@{$parsed->{resources}}) {
-            next unless $res->{type} eq 'libvirt_domain';
-            next unless $res->{name} eq $mongled;
-            foreach my $instance (@{$res->{instances}}) {
-                if (exists $instance->{attributes}{devices}{consoles}) {
-                    foreach my $console (@{$instance->{attributes}{devices}{consoles}}) {
-                        $console->{source}{pty} = $opts{$mongled}{$console->{target}{type}} if $opts{$mongled}{$console->{target}{type}};
-                    }
-                }
-                if (exists $instance->{attributes}{devices}{graphics}) {
-                    foreach my $graphic (@{$instance->{attributes}{devices}{consoles}}) {
-                        $graphic->{vnc}{port}   = $opts{$mongled}{vnc}   if $opts{$mongled}{vnc}   && exists $graphic->{vnc};
-                        $graphic->{spice}{port} = $opts{$mongled}{spice} if $opts{$mongled}{spice} && exists $graphic->{spice};
-                    }
-                }
-            }
-        }
-    }
-    File::Copy::copy($statefile, "$statefile.bak");
-    my $encoded = $json->encode($parsed);
-    File::Slurper::write_text($statefile, $encoded);
-    print "Overwrote $statefile with current VM socket state, old saved as $statefile.bak\n";
-    return 1;
 }
 
 exit main(@ARGV) unless caller;

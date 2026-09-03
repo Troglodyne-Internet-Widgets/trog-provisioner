@@ -93,24 +93,6 @@ subtest 'slug is filesystem safe and stable' => sub {
 };
 
 # --- Paths --------------------------------------------------------------------
-subtest 'terraform state is kept per-hypervisor' => sub {
-    is(fresh()->tf_dir, '/opt/terraform',
-        'the default hypervisor keeps using the historical path');
-    is(fresh(uri => 'qemu:///system')->tf_dir, '/opt/terraform',
-        'so does an explicit qemu:///system');
-
-    my $remote = fresh(uri => 'qemu+ssh://root@hv1.example.net/system');
-    is($remote->tf_dir, '/opt/terraform/hv/qemu_ssh_root_hv1_example_net_system',
-        'a remote hypervisor gets its own state tree so the two never cross-destroy');
-    is($remote->tf_config_dir, $remote->tf_dir . '/config', 'tf_config_dir hangs off it');
-
-    isnt($remote->tf_dir, fresh(uri => 'qemu+ssh://root@hv2.example.net/system')->tf_dir,
-        'two remote hypervisors do not share state');
-
-    is(fresh(uri => 'qemu+ssh://root@hv1.example.net/system', tf_dir => '/somewhere/else')->tf_dir,
-        '/somewhere/else', '--tfdir wins');
-};
-
 subtest 'pool and domain paths default the way they always did' => sub {
     my $hv = fresh();
     is($hv->pool_path,  '/opt/terraform/disks', 'pool_path');
@@ -189,63 +171,6 @@ subtest 'guest_ssh_ip' => sub {
 };
 
 # --- The URI terraform gets is not always the one Sys::Virt gets -------------
-subtest 'provider_uri tells terraform what libvirt works out for itself' => sub {
-    my $dir = tempdir(CLEANUP => 1);
-    mkdir "$dir/.ssh";
-    write_text("$dir/.ssh/known_hosts", "hashed nonsense\n");
-    local $ENV{HOME} = $dir;
-
-    # A local connection has no SSH for any of this to be about.
-    is(fresh()->provider_uri, 'qemu:///system', 'left alone when there is no ssh');
-
-    # The key in an agent and none on disk is what breaks the provider: it
-    # defaults to privkey, finds no keyfile, and reports an empty path.
-    {
-        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
-        my $hv = fresh(uri => 'qemu+ssh://root@hv1/system');
-        my $uri = $hv->provider_uri;
-        like($uri, qr/\Aqemu\+ssh:\/\/root\@hv1\/system\?/, 'the URI itself is untouched');
-        like($uri, qr/sshauth=agent/,      'told to use the agent');
-        unlike($uri, qr/privkey/,          'and not offered privkey with no key to back it');
-        like($uri, qr{known_hosts=\Q$dir\E/\.ssh/known_hosts}, 'and where known_hosts is');
-    }
-
-    # A key on disk gets named, and offered alongside the agent.
-    {
-        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
-        write_text("$dir/.ssh/id_ed25519", "not really a key\n");
-        my $uri = fresh(uri => 'qemu+ssh://root@hv1/system')->provider_uri;
-        like($uri, qr/sshauth=agent,privkey/, 'both methods, agent first');
-        like($uri, qr{keyfile=\Q$dir\E/\.ssh/id_ed25519}, 'and the key named');
-        unlink "$dir/.ssh/id_ed25519";
-    }
-
-    # No agent and no key: say nothing rather than assert something false.
-    {
-        local $ENV{SSH_AUTH_SOCK};
-        delete $ENV{SSH_AUTH_SOCK};
-        unlike(fresh(uri => 'qemu+ssh://root@hv1/system')->provider_uri, qr/sshauth/,
-            'no auth method claimed when we have none to offer');
-    }
-
-    # What the config says wins, and so does anything already in the URI.
-    {
-        local $ENV{SSH_AUTH_SOCK} = '/tmp/agent.sock';
-        my $pinned = fresh(uri => 'qemu+ssh://root@hv1/system?sshauth=password&no_verify=1');
-        my $uri = $pinned->provider_uri;
-        like($uri, qr/sshauth=password/, 'a method spelled out in the URI is left alone');
-        like($uri, qr/no_verify=1/,      'and so is anything else in there');
-
-        is(fresh(uri => 'qemu+ssh://root@hv1/system', provider_uri => 'qemu+ssh://elsewhere/system')->provider_uri,
-            'qemu+ssh://elsewhere/system', 'provider_uri overrides the lot');
-
-        like(fresh(uri => 'qemu+ssh://root@hv1/system', key_path => '/keys/hv1')->provider_uri,
-            qr{keyfile=/keys/hv1}, 'ssh_key from the config is used');
-        like(fresh(uri => 'qemu+ssh://root@hv1/system', known_hosts_verify => 'ignore')->provider_uri,
-            qr/known_hosts_verify=ignore/, 'and so is known_hosts_verify');
-    }
-};
-
 # --- Local file operations degrade to plain filesystem calls ------------------
 subtest 'local file helpers' => sub {
     my $hv  = fresh();
@@ -532,5 +457,120 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
     like($@, qr/NOPASSWD/,                                   'and what to put in sudoers');
     like($@, qr/\broot\b/,                                   'for the right user');
 };
+
+# --- Building things, which is what terraform used to do ----------------------
+subtest 'a disk is an overlay on the base image' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@hv/system');
+
+    my @created;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(volume_path => sub { undef });
+    $mock->redefine(pool        => sub { FakeBuildPool->new(\@created) });
+
+    my $path = quietly(sub { $hv->create_disk('vm.example.com-qcow2',
+        backing => '/opt/terraform/disks/baseimage-qcow2', capacity => 42949672960) });
+
+    is($path, '/opt/terraform/disks/vm.example.com-qcow2', 'made, and its path came back');
+    like($created[0], qr{<name>vm\.example\.com-qcow2</name>},  'named');
+    like($created[0], qr{<capacity unit='bytes'>42949672960<},   'sized');
+    like($created[0], qr{<backingStore><path>/opt/terraform/disks/baseimage-qcow2</path>},
+        'laid over the base image rather than copying it');
+    like($created[0], qr{<format type='qcow2'/></backingStore>}, 'which is qcow2 too');
+
+    # One that is already there is left alone: it is a guest's filesystem.
+    $mock->redefine(volume_path => sub { '/opt/terraform/disks/vm.example.com-qcow2' });
+    is($hv->create_disk('vm.example.com-qcow2', backing => '/base', capacity => 1),
+        '/opt/terraform/disks/vm.example.com-qcow2', 'an existing disk is returned, not remade');
+    is(scalar @created, 1, 'and nothing new was created');
+};
+
+subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@hv/system');
+
+    my (@ran, %written);
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(mkpath       => sub { 1 });
+    $mock->redefine(write_text   => sub { $written{ $_[1] } = $_[2]; return 1 });
+    $mock->redefine(refresh_pool => sub { 1 });
+    $mock->redefine(iso_maker    => sub { 'xorriso' });
+    $mock->redefine(run          => sub { my ($s, @c) = @_; push @ran, [@c]; return 0 });
+
+    my $path = quietly(sub {
+        $hv->cloudinit_iso('vm.example.com',
+            'user-data'      => "#cloud-config\n",
+            'meta-data'      => "instance-id: vm\n",
+            'network-config' => "version: 1\n");
+    });
+
+    is($path, '/opt/terraform/disks/vm.example.com-cloudinit.iso', 'lands in the pool');
+
+    my ($iso) = grep { $_->[0] eq 'xorriso' } @ran;
+    is_deeply([@{$iso}[0, 1, 2]], [qw{xorriso -as mkisofs}], 'xorriso in mkisofs mode');
+    ok((grep { $_ eq 'cidata' } @$iso), 'labelled cidata, which is how NoCloud finds it');
+    ok((grep { m/user-data\z/ } @$iso), 'with the user-data');
+
+    is(scalar(grep { m{/user-data\z} } keys %written), 1, 'the files were written out first');
+    ok((grep { $_->[0] eq 'rm' } @ran), 'and the workdir cleaned up after');
+};
+
+subtest 'the base image is fetched once' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@hv/system');
+
+    my @ran;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(volume_path  => sub { undef });
+    $mock->redefine(refresh_pool => sub { 1 });
+    $mock->redefine(run          => sub { my ($s, @c) = @_; push @ran, join(' ', @c); return 0 });
+
+    quietly(sub { $hv->base_image('https://example.test/noble.img') });
+
+    ok((grep { m/curl .*\.partial/ } @ran),
+        'downloaded to a partial name, so libvirt never sees a half a file');
+    ok((grep { m/\Amv .*\.partial /  } @ran), 'and moved into place after');
+
+    # Already there: no fetch at all.
+    @ran = ();
+    $mock->redefine(volume_path => sub { '/opt/terraform/disks/baseimage-qcow2' });
+    is($hv->base_image('https://example.test/noble.img'), '/opt/terraform/disks/baseimage-qcow2',
+        'an image already in the pool is used as it is');
+    is_deeply(\@ran, [], 'nothing was fetched');
+
+    # No image and no URL is an error, not an empty download.
+    $mock->redefine(volume_path => sub { undef });
+    eval { $hv->base_image(undef) };
+    like($@, qr/No image URL configured/, 'and nothing to fetch is an error');
+};
+
+{
+    package FakeBuildPool;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { my ($class, $created) = @_; return bless { created => $created }, $class }
+
+    sub create_volume {
+        my ($self, $xml) = @_;
+        push @{ $self->{created} }, $xml;
+        my ($name) = $xml =~ m{<name>([^<]+)</name>};
+        return FakeBuildVolume->new("/opt/terraform/disks/$name");
+    }
+}
+
+{
+    package FakeBuildVolume;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new      { my ($class, $path) = @_; return bless { path => $path }, $class }
+    sub get_path { return $_[0]->{path} }
+}
+
+sub quietly {
+    my ($code) = @_;
+    open(my $capture, '>', \my $out) or die $!;
+    my $result = do { local *STDOUT = $capture; $code->() };
+    close $capture;
+    return $result;
+}
 
 done_testing;

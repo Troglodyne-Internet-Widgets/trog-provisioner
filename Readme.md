@@ -123,54 +123,35 @@ The hypervisor and the guest are reached the same way, so both are subclasses of
 
 That means:
 
-1. **Terraform's libvirt provider is told about SSH explicitly.**  libvirt's own client shells out to `ssh`, so it gets `~/.ssh/config`, your agent and `ProxyJump` for free.  The terraform provider dials SSH itself in Go and reads none of that -- if your key is in an agent and there's no `id_rsa` on disk, it fails with `failed to read ssh key : open : no such file or directory`.  So the URI it gets has `sshauth`, `keyfile` and `known_hosts` filled in from what we can work out.  Override any of them in hypervisors.conf; see `hypervisors.conf.example`.
 
-2. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
+1. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
 
-3. **You need passwordless SSH to the HV** as the user the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
+2. **You need passwordless SSH to the HV** as the user the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
 
     Passwordless `sudo` there is strongly preferred but no longer required: `sudo` runs with `-n`, and if the far side asks for a password you get prompted once and it's remembered for the rest of the run.  Run non-interactively -- from cron, or with stdin redirected -- and there's nobody to ask, so you get an error naming the user and the `NOPASSWD` line to add instead of a hang.
 
-4. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
+3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
-5. **Terraform state is kept per-hypervisor.**  The default connection keeps using `/opt/terraform`; anything else gets `/opt/terraform/hv/<name>`, or `/opt/terraform/hv/<mangled uri>` for a hypervisor that came from `--connect` and so has no name.  Sharing one state directory across hypervisors would have terraform believe HV A's resources live on HV B and destroy accordingly.  Override with `tf_dir` in hypervisors.conf, or `--tfdir`.
 
-6. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
+4. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
 
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
 
-7. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+5. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
-### Terraform and things that already exist
+### Why there is no terraform any more
 
-Two mechanisms, and you need both:
+There was, and every one of these is a thing it did:
 
-**`import` blocks** adopt a resource terraform didn't create.  `bin/provision` emits one for the `tf_disks` pool whenever libvirt already has a pool by that name, so the pool is brought under management rather than fought over.
+* It wanted a state file per hypervisor, because one shared between two would have it believe HV A's resources lived on HV B and destroy accordingly.
+* Reaching a hypervisor that had been provisioned from itself, that state started empty -- so terraform believed nothing existed and set about recreating the pool, the base image and every domain, which libvirt refused one at a time.
+* Adopting what already existed needed `import` blocks, plus `ignore_changes` for every attribute the provider wouldn't report back afterwards (`target` on the pool, `create` and `backing_store` on the volumes) -- without which it planned a replacement on every run, which `prevent_destroy` then refused.
+* And `libvirt_volume` can't be imported at all in 0.9.1.  It takes the id, looks for the volume, and answers `Cannot import non-existent remote object` for the volume key, its path and `pool/name` alike, on a volume it can otherwise see perfectly well.
 
-**`ignore_changes`** covers attributes the provider doesn't round-trip.  Importing a pool leaves `target = null` in state whatever the pool is really configured as, so terraform sees `null -> {path=...}`, decides that needs a replacement (storage pools can't be updated in place), and then `prevent_destroy` refuses it -- a standoff no amount of re-running gets out of:
+The machinery holding all that at bay got larger than the thing it stood in for.  `bin/provision` now renders libvirt XML from `domain.xml.tmpl` and hands it to `Sys::Virt`: define the pool if it's absent, fetch the base image if it's absent, make the guest's disk as an overlay on it, build the cloud-init seed with `xorriso`, define the domain and start it.  There's no state file, because libvirt is the state.
 
-```
-Error: Update Not Supported
-Storage pools cannot be updated. All changes require replacement.
-```
+The hypervisor needs `xorriso` (or `genisoimage`/`mkisofs`) for the seed ISO, and `curl` to fetch the base image.  Nothing else.
 
-`ignore_changes = [ target ]` on the pool ends it.  `target` is only read when the pool is created, so there's nothing there worth diffing.
-
-### State follows the hypervisor
-
-Every hypervisor of any age was provisioned by running this tool *on* it, which left a terraform state at `/opt/terraform/config`.  Reaching that same machine remotely gives it a state directory of its own here, and starting that empty means terraform believes nothing on the hypervisor exists -- so it sets about creating the pool, the base image and every domain again, and libvirt refuses them one at a time.
-
-So `bin/provision` adopts it.  The first time it works on a hypervisor it has no state for, it copies the hypervisor's own state across and starts from that; at the end of a successful run it copies the state back, so the machine's copy doesn't fall behind and send the next local run rebuilding what you just made.  Override the path it looks at with `remote_tf_state` in hypervisors.conf.
-
-Nothing arbitrates this.  Two machines provisioning the same hypervisor at once will overwrite each other's state, and the real answer to that is a terraform remote backend with locking rather than anything this tool does.
-
-### One thing you can't import
-
-Volumes get no import block, because the provider can't do it.  It accepts an id for a `libvirt_volume`, looks for the volume, and reports `Cannot import non-existent remote object` whatever you hand it -- the volume key, its path, `pool/name`, all of them, for a volume that demonstrably exists.  The pool imports fine; volumes simply don't, in 0.9.1.  That's why the state has to be adopted wholesale instead.
-
-`create`, `backing_store` and `target` are still ignored on the volumes for the same reason as the pool's `target`: they're read once at creation and never reported back, so diffing them plans a replacement -- of the base image, which `prevent_destroy` then refuses, or of a guest's disk, which it doesn't.
-
-Where the pool actually lives is read back from libvirt rather than assumed, so `pool_path` is right even when somebody made the pool somewhere other than `/opt/terraform/disks`.  Set `pool_path` in hypervisors.conf to override.
 
 ### Nuking a wedged storage pool
 

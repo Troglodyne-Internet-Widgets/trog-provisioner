@@ -1,0 +1,78 @@
+<!-- libvirt domain for %REPLACEME%, written by bin/provision.
+     Everything between %...% is substituted; see mongle_domain_xml. -->
+<domain type='kvm'>
+  <name>%REPLACEME%</name>
+  <memory unit='MiB'>%MUGUBYTES%</memory>
+  <currentMemory unit='MiB'>%MUGUBYTES%</currentMemory>
+  <vcpu placement='static'>%NUMCPUS%</vcpu>
+
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+    <pae/>
+  </features>
+
+  <!-- host-passthrough by default, so the guest sees the real CPU including
+       AVX and friends.  Anything that probes cpuid for vector extensions
+       needs it; migratability is what you trade for that. -->
+  <cpu mode='%CPUMODE%'/>
+
+  <!-- virtiofs needs shared memory, and memfd is how you get it without
+       hugepages.  Without this block every filesystem below fails to start. -->
+  <memoryBacking>
+    <source type='memfd'/>
+    <access mode='shared'/>
+  </memoryBacking>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='%DISKPATH%'/>
+      <target dev='vda' bus='virtio'/>
+      <boot order='1'/>
+    </disk>
+%EXTRADISKS%
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='%CLOUDINIT%'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+      <boot order='2'/>
+    </disk>
+
+    <!-- Two interfaces: the libvirt NAT for the hypervisor to reach it by
+         lease, and the outbound bridge for its real address. -->
+    <interface type='network'>
+      <source network='default'/>
+      <model type='virtio'/>
+    </interface>
+    <interface type='bridge'>
+      <source bridge='%BRIDGENAME%'/>
+      <model type='virtio'/>
+    </interface>
+
+%FILESYSTEMS%
+    <!-- Cloud images expect a console and sulk without one:
+         https://bugs.launchpad.net/cloud-images/+bug/1573095 -->
+    <serial type='pty'><target port='0'/></serial>
+    <console type='pty'><target type='serial' port='0'/></console>
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <video><model type='virtio'/></video>
+    <memballoon model='virtio'/>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>

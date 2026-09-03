@@ -99,7 +99,6 @@ subtest 'a fleet is read in file order' => sub {
     is($hv1->bridge_device,  'br0',                                  'bridge_device, so no probing');
     is($hv1->reserve_memory, 4096,                                   'reserve_memory');
     is($hv1->max_guests,     20,                                     'max_guests');
-    is($hv1->tf_dir, '/opt/terraform/hv/hv1', 'terraform state is per-hypervisor, named after it');
 
     is($fleet->hypervisor('hv2')->reserve_memory, 2048, 'unset limits fall back to the defaults');
     is($fleet->hypervisor('hv2')->cpu_overcommit, 4,    'including the cpu overcommit ratio');

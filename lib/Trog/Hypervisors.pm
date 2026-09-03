@@ -120,7 +120,7 @@ sub default_path {
 
 The hypervisor a guest is on, made current -- for every tool that acts on an
 existing guest rather than creating one.  Takes C<uri>, C<hvconf>,
-C<domain_dir>, C<tf_dir> and C<config>, all optional.
+C<domain_dir> and C<config>, all optional.
 
 An explicit C<uri> (i.e. C<--connect>) wins outright.  Failing that, a
 configured fleet is searched, and not finding the guest anywhere in it is an
@@ -133,7 +133,7 @@ C<Trog::HV::from_config>, which is where the hypervisor used to come from.
 sub find {
     my ($class, $domain, %opts) = @_;
 
-    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir tf_dir};
+    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
 
     return Trog::HV->new(uri => $opts{uri}, %paths) if $opts{uri};
 
@@ -182,11 +182,9 @@ sub hypervisor {
     return $self->{built}{$name} //= Trog::HV->candidate(
         name     => $name,
         uri      => $block->{libvirt_uri},
-        key_path => $block->{ssh_key},
-        map { $_ => $block->{$_} }
+            map { $_ => $block->{$_} }
           grep { defined $block->{$_} }
-          qw{tf_dir pool_path domain_dir bridge_device virbr_device
-             provider_uri known_hosts known_hosts_verify remote_tf_state
+          qw{pool_path domain_dir bridge_device virbr_device
              reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
     );
 }

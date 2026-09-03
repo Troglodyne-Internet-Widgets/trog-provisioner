@@ -8,7 +8,6 @@ use parent 'Trog::Machine';
 use Sys::Virt();
 use URI();
 use URI::Split();
-use URI::Escape();
 
 =head1 NAME
 
@@ -26,7 +25,7 @@ Trog::HV - the hypervisor we are provisioning against
 
     $hv->annihilate_domain('vm.example.com');
     $hv->write_text('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
-    print $hv->tf_config_dir, "\n";
+    print $hv->pool_path, "\n";
 
 =head1 DESCRIPTION
 
@@ -79,7 +78,7 @@ process, or a fresh local one if there wasn't any.  Called with options it
 builds a new hypervisor and makes I<that> the instance from then on, so the
 configuration only has to be read once.
 
-Options: C<uri>, C<tf_dir>, C<pool_path>, C<domain_dir>, C<bridge_device>,
+Options: C<uri>, C<pool_path>, C<domain_dir>, C<bridge_device>,
 C<virbr_device>.  Undefined and empty values are ignored, which lets callers
 pass unset command line options straight through.
 
@@ -154,7 +153,7 @@ Build the hypervisor from a L<Config::Simple> object, with anything passed in
 C<%override> (i.e. from the command line) winning over what the file says.  A
 false C<$config> is fine and means "everything is defaulted".
 
-Reads C<libvirt_uri> for the URI, and C<tf_dir>, C<pool_path>, C<domain_dir>,
+Reads C<libvirt_uri> for the URI, and C<pool_path>, C<domain_dir>,
 C<bridge_device> and C<virbr_device> under their own names.
 
 =cut
@@ -162,9 +161,7 @@ C<bridge_device> and C<virbr_device> under their own names.
 # Constructor option => the provision.conf key it reads.
 my %CONFIG_KEY = (
     uri      => 'libvirt_uri',
-    key_path => 'ssh_key',
-    map { $_ => $_ } qw{tf_dir pool_path domain_dir bridge_device virbr_device
-                        provider_uri known_hosts known_hosts_verify remote_tf_state},
+    map { $_ => $_ } qw{pool_path domain_dir bridge_device virbr_device},
 );
 
 sub from_config {
@@ -237,8 +234,7 @@ True when the hypervisor is this very machine, i.e. the historical behavior.
 
 =head2 slug
 
-A filesystem-safe token identifying this hypervisor, used to keep terraform
-state for different hypervisors from stomping on each other.
+A filesystem-safe token identifying this hypervisor.
 
 =cut
 
@@ -288,103 +284,7 @@ sub ssh_host {
 
 sub describe { return 'the hypervisor at ' . $_[0]->uri }
 
-=head2 provider_uri
-
-The connection string for terraform's libvirt provider, which is not always the
-same string L</uri> hands to L<Sys::Virt>.
-
-libvirt's own client shells out to C<ssh>, so it gets F<~/.ssh/config>, your
-agent, C<ProxyJump> and everything else you have configured, for free.  The
-terraform provider does not: it dials SSH itself in Go, reads none of that, and
-its idea of a default is to look for a private key file and give up.  If your
-key lives in an agent -- which it does, if you have ever run C<ssh-add> and
-have no F<id_rsa> on disk -- it fails with:
-
-    failed to read ssh key : open : no such file or directory
-    no ssh password set
-
-So the URI it gets is told, explicitly, what libvirt was able to work out for
-itself: use the agent when there is one, use a key file when we can name one,
-and where to find F<known_hosts>.
-
-Everything is overridable from F<hypervisors.conf>, and anything you put in the
-query string of C<libvirt_uri> yourself is left alone:
-
-    ssh_key            = /home/you/.ssh/id_ed25519
-    known_hosts        = /home/you/.ssh/known_hosts
-    known_hosts_verify = ignore
-    provider_uri       = qemu+ssh://...    ; bypass all of the above
-
-=cut
-
-sub provider_uri {
-    my ($self) = @_;
-    return $self->{provider_uri} if defined $self->{provider_uri};
-
-    # A local connection has no SSH for any of this to be about.
-    return $self->uri if $self->is_local || !defined $self->ssh_host;
-
-    my ($scheme, $authority, $path, $query, $fragment) = URI::Split::uri_split($self->uri);
-
-    # Whatever the URI already says wins; we are filling gaps, not overruling.
-    my @given = defined $query ? split(/[&;]/, $query) : ();
-    my %params = map { my ($k, $v) = split(/=/, $_, 2); ($k => $v) } @given;
-
-    my @methods;
-    push @methods, 'agent'   if $ENV{SSH_AUTH_SOCK};
-    my $key = $self->ssh_key;
-    push @methods, 'privkey' if $key;
-
-    # privkey with no keyfile is what produces "failed to read ssh key : open :",
-    # so only offer what we can actually back up.
-    $params{sshauth} //= join(',', @methods) if @methods;
-    $params{keyfile} //= $key if $key;
-
-    my $known_hosts = $self->{known_hosts} // "$ENV{HOME}/.ssh/known_hosts";
-    $params{known_hosts} //= $known_hosts if -f $known_hosts;
-    $params{known_hosts_verify} //= $self->{known_hosts_verify} if $self->{known_hosts_verify};
-
-    my $rebuilt = join('&', map { $_ . '=' . _escape($params{$_}) } sort grep { defined $params{$_} } keys %params);
-    return URI::Split::uri_join($scheme, $authority, $path, ($rebuilt || undef), $fragment);
-}
-
-=head2 ssh_key
-
-The private key file to hand terraform, from C<ssh_key> in F<hypervisors.conf>
-or an obvious one in F<~/.ssh>.  Undef when the only key is in an agent, which
-is fine -- that is what C<sshauth=agent> is for.
-
-=cut
-
-sub ssh_key {
-    my ($self) = @_;
-    return $self->{key_path} if defined $self->{key_path};
-
-    my ($found) = grep { -f $_ } map { "$ENV{HOME}/.ssh/$_" } qw{id_ed25519 id_rsa id_ecdsa};
-    return $found;
-}
-
-# Commas and colons are legal in a query string and appear in sshauth lists and
-# paths; escaping them only makes the URI harder to read back in an error.
-sub _escape { return URI::Escape::uri_escape($_[0], q{^A-Za-z0-9\-._~/,:}) }
-
 =head1 PATHS
-
-=head2 tf_dir
-
-Where terraform's config and state live, I<on this machine>.
-
-Terraform state is per-hypervisor: one state dir shared between several would
-have terraform believe resources on HV A live on HV B and destroy accordingly.
-So anything but the default connection gets its own tree.
-
-=head2 tf_config_dir
-
-C<tf_dir> plus the C<config/> terraform actually runs in.
-
-=head2 pool_path
-
-Where the C<tf_disks> storage pool lives, I<on the hypervisor>.
 
 =head2 domain_dir
 
@@ -393,26 +293,7 @@ both ends: the guest pulls its payload from the hypervisor's copy.
 
 =cut
 
-sub tf_dir {
-    my ($self) = @_;
-    return $self->{tf_dir} if defined $self->{tf_dir};
-    return '/opt/terraform' if $self->uri eq $DEFAULT_URI;
 
-    # A hypervisor out of hypervisors.conf has a name worth reading in a path.
-    return '/opt/terraform/hv/' . ($self->name // $self->slug);
-}
-
-sub tf_config_dir { return $_[0]->tf_dir . '/config' }
-
-=head2 remote_tf_state
-
-Where a hypervisor that was provisioned from itself keeps its own terraform
-state.  This is the historical path, and it exists on any machine that used to
-run this tool locally.
-
-=cut
-
-sub remote_tf_state { return $_[0]->{remote_tf_state} // '/opt/terraform/config/terraform.tfstate' }
 sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
 
 sub pool_path {
@@ -692,6 +573,241 @@ sub nuke_pool {
         eval { $pool->$step(); 1 } or warn "pool $step failed for $name: $@";
     }
     return 1;
+}
+
+=head1 BUILDING THINGS
+
+Everything terraform used to do, done against libvirt directly.
+
+Terraform was never a good fit here.  Its model is that it owns the world and
+can rebuild it; ours is that the hypervisor owns the world and we add one guest
+to it.  Reconciling those cost a state file per hypervisor, import blocks for
+things it did not create, C<ignore_changes> for attributes the provider would
+not report back, and a provider that cannot import a volume at all.  Defining
+the XML ourselves is less code than the machinery that was holding terraform's
+opinion at bay.
+
+=head2 pool($name)
+
+The storage pool object, made if it is not there yet: defined, started, and set
+to start with the host.  C<$name> defaults to C<tf_disks>.
+
+=cut
+
+sub pool {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+    return $self->{_pools}{$name} if $self->{_pools}{$name};
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
+
+    unless ($pool) {
+        my $path = $self->pool_path;
+        print "Defining storage pool $name at $path\n";
+
+        $pool = $vmm->define_storage_pool(<<"XML");
+<pool type='dir'>
+  <name>$name</name>
+  <target><path>$path</path></target>
+</pool>
+XML
+        eval { $pool->build(Sys::Virt::StoragePool::BUILD_NEW()) };
+        $pool->set_autostart(1);
+    }
+
+    eval { $pool->create() } unless $pool->is_active();
+    return $self->{_pools}{$name} = $pool;
+}
+
+=head2 volume($name, $pool)
+
+A volume by name, or undef when the pool has no such volume.
+
+=head2 volume_path($name, $pool)
+
+Where that volume's file actually is, which is what a domain's disk needs.
+
+=cut
+
+sub volume {
+    my ($self, $name, $pool) = @_;
+    return eval { $self->pool($pool)->get_volume_by_name($name) };
+}
+
+sub volume_path {
+    my ($self, $name, $pool) = @_;
+    my $volume = $self->volume($name, $pool) or return undef;
+    return eval { $volume->get_path() };
+}
+
+=head2 base_image($url, $name)
+
+The base image every guest's disk is layered on, downloaded onto the
+hypervisor if it is not there yet.  Returns its path.
+
+The download is the one thing here libvirt cannot do for us -- it has no notion
+of fetching a URL -- so it is a curl on the far side, into the pool directory,
+followed by a refresh so libvirt notices.
+
+=cut
+
+sub base_image {
+    my ($self, $url, $name) = @_;
+    $name //= 'baseimage-qcow2';
+
+    my $path = $self->volume_path($name);
+    return $path if $path;
+
+    die "No image URL configured, and no $name in the pool to fall back on\n"
+      unless defined $url && length $url;
+
+    $path = $self->pool_path . "/$name";
+    print "Fetching the base image from $url\n";
+
+    # To a partial name first: a half-downloaded file that libvirt has already
+    # noticed is worse than no file at all.
+    my $partial = "$path.partial";
+    $self->run(qw{curl -fL --retry 3 -o}, $partial, $url) == 0
+      or die "Could not fetch $url onto " . $self->describe . "\n";
+
+    $self->run('mv', $partial, $path) == 0 or die "Could not put the base image in place\n";
+    $self->refresh_pool();
+
+    return $self->volume_path($name) // $path;
+}
+
+=head2 create_disk($name, %opts)
+
+A qcow2 volume backed by the base image, made if it is not already there.
+C<backing> is the path to lay it over and C<capacity> its size in bytes.
+Returns the path.
+
+=cut
+
+sub create_disk {
+    my ($self, $name, %opts) = @_;
+
+    my $existing = $self->volume_path($name);
+    return $existing if $existing;
+
+    my $capacity = $opts{capacity} or die "No size given for the disk $name\n";
+    my $backing  = $opts{backing};
+
+    my $backing_xml = $backing
+      ? "<backingStore><path>" . _xml_escape($backing) . "</path><format type='qcow2'/></backingStore>"
+      : '';
+
+    print "Creating disk $name ($capacity bytes)" . ($backing ? " over $backing" : '') . "\n";
+
+    my $volume = $self->pool->create_volume(<<"XML");
+<volume>
+  <name>@{[ _xml_escape($name) ]}</name>
+  <capacity unit='bytes'>$capacity</capacity>
+  <target><format type='qcow2'/></target>
+  $backing_xml
+</volume>
+XML
+
+    return $volume->get_path();
+}
+
+=head2 delete_volume($name, $pool)
+
+Remove a volume, and say whether there was one to remove.
+
+=head2 refresh_pool($name)
+
+Make libvirt look at the pool directory again, for when something has appeared
+in it that libvirt did not put there.
+
+=cut
+
+sub delete_volume {
+    my ($self, $name, $pool) = @_;
+    my $volume = $self->volume($name, $pool) or return 0;
+    eval { $volume->delete(0); 1 } or do { warn "Could not delete the volume $name: $@"; return 0 };
+    return 1;
+}
+
+sub refresh_pool {
+    my ($self, $name) = @_;
+    eval { $self->pool($name)->refresh() };
+    return 1;
+}
+
+=head2 cloudinit_iso($domain, %files)
+
+Build the cloud-init seed ISO on the hypervisor and put it in the pool.
+
+C<%files> are the NoCloud file names and their contents -- C<user-data>,
+C<meta-data>, C<network-config>.  The volume label has to be C<cidata> or
+cloud-init will not look at it.
+
+=cut
+
+sub cloudinit_iso {
+    my ($self, $domain, %files) = @_;
+
+    my $name    = "$domain-cloudinit.iso";
+    my $workdir = "/tmp/trog-cloudinit-$domain-$$";
+    my $path    = $self->pool_path . "/$name";
+
+    $self->mkpath($workdir) or die "Could not make $workdir on " . $self->describe . "\n";
+    foreach my $file (sort keys %files) {
+        $self->write_text("$workdir/$file", $files{$file})
+          or die "Could not write $file for $domain on " . $self->describe . "\n";
+    }
+
+    my $maker = $self->iso_maker;
+    print "Building the cloud-init seed for $domain with $maker\n";
+
+    # -volid cidata is not decoration: NoCloud finds its seed by that label.
+    my @cmd = $maker eq 'xorriso' ? ($maker, '-as', 'mkisofs') : ($maker);
+    my $rc = $self->run(@cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
+        map { "$workdir/$_" } sort keys %files);
+
+    $self->run(qw{rm -rf}, $workdir);
+    die "Could not build the cloud-init seed for $domain\n" if $rc;
+
+    $self->refresh_pool();
+    return $path;
+}
+
+=head2 iso_maker
+
+Whichever of C<xorriso>, C<genisoimage> or C<mkisofs> the hypervisor has.
+
+=cut
+
+sub iso_maker {
+    my ($self) = @_;
+    return $self->{_iso_maker} if $self->{_iso_maker};
+
+    foreach my $maker (qw{xorriso genisoimage mkisofs}) {
+        next if $self->run('sh', '-c', "command -v $maker >/dev/null 2>&1");
+        return $self->{_iso_maker} = $maker;
+    }
+
+    die 'No ISO builder on ' . $self->describe . ": install xorriso or genisoimage.\n"
+      . "cloud-init reads its configuration off a small ISO, and something has to make it.\n";
+}
+
+=head2 define_domain($xml, %opts)
+
+Define a domain from XML and start it.  Set C<autostart> to have it come back
+with the host, which is what every guest here wants.
+
+=cut
+
+sub define_domain {
+    my ($self, $xml, %opts) = @_;
+
+    my $domain = $self->vmm->define_domain($xml);
+    eval { $domain->set_autostart(1) } if $opts{autostart} // 1;
+    eval { $domain->create() } unless $domain->is_active();
+
+    return $domain;
 }
 
 =head1 SNAPSHOTS

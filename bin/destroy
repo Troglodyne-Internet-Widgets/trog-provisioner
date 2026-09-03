@@ -9,7 +9,6 @@ use FindBin::libs;
 use Trog::HV();
 use Trog::Hypervisors();
 use File::Slurper();
-use List::Util qw{any};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
 
@@ -45,11 +44,6 @@ the one that does is the one we destroy on.
 
 Where the per-domain directories live.  Defaults to F</opt/domains>.
 
-=item B<--tfdir> DIR
-
-Where terraform's config and state live.  Defaults to the same per-hypervisor
-path C<provision> writes to.
-
 =item B<--purge>
 
 Also delete the domain directory, on both this machine and the hypervisor.
@@ -63,9 +57,9 @@ Say what would be removed without removing any of it.
 =head1 DESCRIPTION
 
 Undoes what C<provision> did: stops and undefines the VM, destroys the
-terraform resources belonging to it, and removes the hypervisor-side rsyslog
-config and authorized key it left behind.  Shared resources (the base image and
-the storage pool) are left alone.
+disks belonging to it, and removes the hypervisor-side rsyslog config and
+authorized key it left behind.  Shared resources -- the base image and the
+storage pool -- are left alone.
 
 =cut
 
@@ -74,13 +68,12 @@ sub main {
 
     umask 0022;
 
-    my ($purge, $dryrun, $uri, $tf_dir, $domain_dir, $hvconf);
+    my ($purge, $dryrun, $uri, $domain_dir, $hvconf);
     GetOptionsFromArray(\@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
-        'tfdir=s'     => \$tf_dir,
         'hvconf=s'    => \$hvconf,
     );
 
@@ -91,14 +84,11 @@ sub main {
     $domain =~ s/\///g;
 
     my $hv = Trog::Hypervisors->find($domain,
-        uri => $uri, hvconf => $hvconf, tf_dir => $tf_dir, domain_dir => $domain_dir);
+        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir);
     print "Destroying on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     $domain_dir = $hv->domain_dir;
 
-
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
 
     print "Destroying domain: $domain\n";
     print "[DRY RUN] No changes will be made.\n" if $dryrun;
@@ -106,19 +96,16 @@ sub main {
     # 1. Stop and undefine the VM
     destroy_vm($domain, $dryrun);
 
-    # 2. Remove terraform-managed resources for this domain
-    destroy_tf_resources($domain, $domain_mongled, $dryrun);
+    # 2. Remove the disks it was using
+    destroy_disks($domain, $dryrun);
 
-    # 3. Remove HV-side terraform config files
-    remove_tf_configs($domain, $dryrun);
-
-    # 4. Remove HV-side rsyslog config
+    # 3. Remove HV-side rsyslog config
     remove_rsyslog_config($domain, $dryrun);
 
-    # 5. Remove the domain's SSH pubkey from the HV's authorized_keys
+    # 4. Remove the domain's SSH pubkey from the HV's authorized_keys
     remove_authorized_key($domain, $dryrun);
 
-    # 6. Optionally purge the domain directory
+    # 5. Optionally purge the domain directory
     if ($purge) {
         purge_domain_dir($domain, $dryrun);
     } else {
@@ -143,43 +130,17 @@ sub destroy_vm {
     return;
 }
 
-sub destroy_tf_resources {
-    my ($domain, $domain_mongled, $dryrun) = @_;
-
-    my $tf_config_dir = Trog::HV->new()->tf_config_dir;
-    return unless -d $tf_config_dir;
-
-    chdir $tf_config_dir or do {
-        warn "Cannot chdir to $tf_config_dir: $!\n";
-        return;
-    };
-
-    my $resources = qx{terraform state list 2>/dev/null};
-    chomp $resources;
-    return unless $resources;
-
-    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
-    foreach my $resource (split(/\n/, $resources)) {
-        next unless $resource =~ m/\Q$domain_mongled\E/;
-        next if any { $_ eq $resource } @exempt;
-        print "Destroying terraform resource $resource\n";
-        unless ($dryrun) {
-            system(qw{terraform destroy -auto-approve -target}, $resource);
-        }
-    }
-    return;
-}
-
-sub remove_tf_configs {
+sub destroy_disks {
     my ($domain, $dryrun) = @_;
+    my $hv = Trog::HV->new();
 
-    my $cfgdir = Trog::HV->new()->tf_config_dir;
-    my @patterns = map { "$cfgdir/$domain.$_" } qw{tf cloud_init.cfg network_config.cfg};
-
-    foreach my $f (@patterns) {
-        next unless -f $f;
-        print "Removing $f\n";
-        unlink $f unless $dryrun;
+    # The guest's own overlay and its cloud-init seed.  The base image is
+    # shared by every guest on the hypervisor and is emphatically not ours to
+    # remove; nor is the pool.
+    foreach my $volume ("$domain-qcow2", "$domain-cloudinit.iso") {
+        next unless $hv->volume($volume);
+        print "Removing volume $volume\n";
+        $hv->delete_volume($volume) unless $dryrun;
     }
     return;
 }

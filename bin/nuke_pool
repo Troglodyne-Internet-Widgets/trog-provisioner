@@ -13,7 +13,7 @@ use Trog::Hypervisors();
 
 =head1 NAME
 
-nuke_pool - tear down the tf_disks storage pool because terraform is braindead
+nuke_pool - tear down the tf_disks storage pool and everything in it
 
 =head1 SYNOPSIS
 
@@ -55,8 +55,8 @@ F</opt/terraform/disks>.
 =head1 DESCRIPTION
 
 Removes the pool's directory from the hypervisor and then stops, deletes and
-undefines the pool itself.  Terraform gets itself into states nothing else will
-get it out of; this is that.
+undefines the pool itself.  Every guest disk on the hypervisor lives in there,
+so this is a bigger hammer than it looks.
 
 =cut
 
