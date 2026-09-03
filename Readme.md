@@ -141,6 +141,23 @@ That means:
 
 7. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
+### Terraform and things that already exist
+
+Two mechanisms, and you need both:
+
+**`import` blocks** adopt a resource terraform didn't create.  `bin/provision` emits one for the `tf_disks` pool whenever libvirt already has a pool by that name, so the pool is brought under management rather than fought over.
+
+**`ignore_changes`** covers attributes the provider doesn't round-trip.  Importing a pool leaves `target = null` in state whatever the pool is really configured as, so terraform sees `null -> {path=...}`, decides that needs a replacement (storage pools can't be updated in place), and then `prevent_destroy` refuses it -- a standoff no amount of re-running gets out of:
+
+```
+Error: Update Not Supported
+Storage pools cannot be updated. All changes require replacement.
+```
+
+`ignore_changes = [ target ]` on the pool ends it.  `target` is only read when the pool is created, so there's nothing there worth diffing.
+
+Where the pool actually lives is read back from libvirt rather than assumed, so `pool_path` is right even when somebody made the pool somewhere other than `/opt/terraform/disks`.  Set `pool_path` in hypervisors.conf to override.
+
 ### Nuking a wedged storage pool
 
 Terraform gets the `tf_disks` pool into states nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:

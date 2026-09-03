@@ -403,8 +403,38 @@ sub tf_dir {
 }
 
 sub tf_config_dir { return $_[0]->tf_dir . '/config' }
-sub pool_path     { return $_[0]->{pool_path} // '/opt/terraform/disks' }
 sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
+
+sub pool_path {
+    my ($self) = @_;
+    return $self->{pool_path} if defined $self->{pool_path};
+
+    # Where the pool actually is beats where we would have put one.  We delete
+    # things out of this path and hand it to terraform, and a pool somebody
+    # made somewhere else is not a reason to be wrong about both.
+    return $self->{_pool_path} //= ($self->pool_target('tf_disks') // '/opt/terraform/disks');
+}
+
+=head2 pool_target($name)
+
+Where an existing storage pool keeps its volumes, straight out of libvirt, or
+undef if there is no such pool to ask about.
+
+=cut
+
+sub pool_target {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+
+    my $xml = eval {
+        my $vmm  = $self->vmm;
+        my $pool = $vmm->get_storage_pool_by_name($name);
+        $pool->get_xml_description();
+    } or return undef;
+
+    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>}s;
+    return $path;
+}
 
 =head2 authorized_keys
 

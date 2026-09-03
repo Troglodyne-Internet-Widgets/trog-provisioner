@@ -121,6 +121,48 @@ subtest 'pool and domain paths default the way they always did' => sub {
     is($set->domain_dir, '/srv/domains', 'domain_dir override');
 };
 
+subtest 'an existing pool says where it is, and is believed' => sub {
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(vmm => sub { FakePoolVMM->new('/var/lib/libvirt/images') });
+
+    is(fresh(uri => 'qemu+ssh://hv/system')->pool_target('tf_disks'), '/var/lib/libvirt/images',
+        'read straight out of the pool XML');
+    is(fresh(uri => 'qemu+ssh://hv/system')->pool_path, '/var/lib/libvirt/images',
+        'and used, rather than where we would have put one');
+
+    # An explicit setting still wins; it is the guess we are replacing.
+    is(fresh(uri => 'qemu+ssh://hv/system', pool_path => '/srv/pool')->pool_path, '/srv/pool',
+        'pool_path from the config still wins');
+
+    # No pool yet, or no libvirt to ask: fall back rather than blow up.
+    $mock->redefine(vmm => sub { die "no libvirt here\n" });
+    is(fresh(uri => 'qemu+ssh://hv/system')->pool_target('tf_disks'), undef, 'undef when we cannot ask');
+    is(fresh(uri => 'qemu+ssh://hv/system')->pool_path, '/opt/terraform/disks', 'and the default stands');
+};
+
+{
+    package FakePoolVMM;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { my ($class, $path) = @_; return bless { path => $path }, $class }
+    sub get_storage_pool_by_name { return FakePool->new($_[0]->{path}) }
+}
+
+{
+    package FakePool;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { my ($class, $path) = @_; return bless { path => $path }, $class }
+
+    sub get_xml_description {
+        my ($self) = @_;
+        return qq{<pool type='dir'><name>tf_disks</name>}
+          . qq{<target><path>$self->{path}</path><permissions><mode>0755</mode></permissions></target></pool>};
+    }
+}
+
 # --- Which address we SSH to on the guest ------------------------------------
 subtest 'guest_ssh_ip' => sub {
     my $dir = tempdir(CLEANUP => 1);

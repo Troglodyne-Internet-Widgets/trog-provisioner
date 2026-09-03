@@ -453,9 +453,10 @@ sub mongle_terraform_template {
     # OK, let's get the UUID of our storage pool IN CASE we are re-using it
     # TODO make this configurable so we can use lvm
     my $libvirt_pool = $hv->pool_uuid('tf_disks');
+    my $pool_path    = $hv->pool_path;
     my ($import_block, $image_block) = ('', '');
     if ($libvirt_pool) {
-        print "Re-Using existing libvirt pool $libvirt_pool\n";
+        print "Re-Using existing libvirt pool $libvirt_pool at $pool_path\n";
         $import_block = qq|
 import {
     to = libvirt_pool.tf_disks
@@ -471,7 +472,6 @@ import {
     # it needs to be told about SSH in a way libvirt's own client works out.
     my $libvirt_uri = $hv->provider_uri;
     print "Terraform will reach libvirt at $libvirt_uri\n" unless $hv->is_local;
-    my $pool_path   = $hv->pool_path;
 
     my %to_mongle = (
         'main.tmpl'   => "main.tf",

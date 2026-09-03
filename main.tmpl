@@ -22,6 +22,14 @@ resource "libvirt_pool" "tf_disks" {
     }
     lifecycle {
         prevent_destroy = true
+
+        # The provider does not report target back when it imports an existing
+        # pool -- state ends up with target = null however the pool is actually
+        # configured.  Terraform then sees null -> {path=...}, storage pools
+        # cannot be updated, so it plans a replacement, and prevent_destroy
+        # refuses it: a standoff nothing gets out of.  target is only read when
+        # the pool is created anyway, so there is nothing here worth diffing.
+        ignore_changes = [ target ]
     }
 }
 
