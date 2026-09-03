@@ -226,8 +226,13 @@ sub provision_domain {
     # Set this to simplify calling conventions
     $config->param('domain', $domain);
 
-    my $nc = mongle_network_configuration($config);
-    print "Wrote $nc\n";
+    # Order matters here.  The network configuration works out the hypervisor's
+    # internal IP and sshd port and stashes them on the config; the setup script
+    # needs both; the logging config writes the rsyslog drop-in that cloud-init
+    # then reads back in.
+    my %seed;
+    $seed{'network-config'} = mongle_network_configuration($config);
+    print "Wrote the network configuration for $domain\n";
 
     my $ss = mongle_setup_script($config);
     print "Wrote $ss\n";
@@ -235,8 +240,9 @@ sub provision_domain {
     my $lc = mongle_logging_config($config);
     print "Wrote $lc\n";
 
-    my $cc = mongle_cloud_init($config);
-    print "Wrote $cc\n";
+    $seed{'user-data'} = mongle_cloud_init($config);
+    $seed{'meta-data'} = mongle_meta_data($config);
+    print "Wrote the cloud-init configuration for $domain\n";
 
     # Everything the domain dir is going to hold now holds it, so the HV can
     # have its copy.  The guest pulls its payload from there.
@@ -314,7 +320,7 @@ sub provision_domain {
     # Anything already answering to this name has to go before we define one.
     clean_domain_resources($domain);
 
-    my ($xml, $file) = mongle_domain_xml($config);
+    my ($xml, $file) = mongle_domain_xml($config, \%seed);
     print "Wrote $file\n";
 
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $old_ip)) if $dryrun;
@@ -372,7 +378,7 @@ sub clean_domain_resources {
 # back, and a provider that cannot import a volume at all.  This is less code
 # than the machinery that was keeping terraform's opinion at bay.
 sub mongle_domain_xml {
-    my ($config) = @_;
+    my ($config, $seed) = @_;
 
     my $hv         = Trog::HV->new();
     my $domain_dir = $hv->domain_dir;
@@ -410,7 +416,13 @@ sub mongle_domain_xml {
 
     my ($extra_disks, $filesystems) = mongle_extra_disks($config);
 
-    my $cloudinit = $hv->cloudinit_iso($domain, mongle_cloud_init($config));
+    # NoCloud wants all three, and cloud-init will not look at a seed that is
+    # missing any of them.
+    foreach my $file (qw{user-data meta-data network-config}) {
+        die "No $file to build the cloud-init seed for $domain from\n"
+          unless defined $seed->{$file} && length $seed->{$file};
+    }
+    my $cloudinit = $hv->cloudinit_iso($domain, %$seed);
 
     my $xml = File::Slurper::read_text("$FindBin::Bin/../domain.xml.tmpl");
     my %substitutions = (

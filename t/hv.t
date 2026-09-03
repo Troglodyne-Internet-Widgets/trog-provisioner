@@ -568,9 +568,9 @@ subtest 'the base image is fetched once' => sub {
 sub quietly {
     my ($code) = @_;
     open(my $capture, '>', \my $out) or die $!;
-    my $result = do { local *STDOUT = $capture; $code->() };
+    my @result = do { local *STDOUT = $capture; $code->() };
     close $capture;
-    return $result;
+    return wantarray ? @result : $result[0];
 }
 
 done_testing;
