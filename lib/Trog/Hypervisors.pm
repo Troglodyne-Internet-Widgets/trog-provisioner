@@ -186,7 +186,7 @@ sub hypervisor {
         map { $_ => $block->{$_} }
           grep { defined $block->{$_} }
           qw{tf_dir pool_path domain_dir bridge_device virbr_device
-             provider_uri known_hosts known_hosts_verify
+             provider_uri known_hosts known_hosts_verify remote_tf_state
              reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
     );
 }

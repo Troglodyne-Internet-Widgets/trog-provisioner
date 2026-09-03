@@ -62,6 +62,7 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(mkpath      => sub { 1 });
     $hv_mock->redefine(file_exists => sub { 1 });
+    $hv_mock->redefine(get_file    => sub { write_text($_[2], '{}'); return 1 });
 
     # no_auto: the modulino is already loaded from bin/provision, and there is
     # no Trog/Bin/Provisioner.pm for MockModule to go looking for.
@@ -85,6 +86,83 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     $hv = $run->('--domaindir', $dir, '--tfdir', $tfdir,
         qw{--connect qemu+ssh://root@clihv/system vm.example.com});
     is($hv->uri, 'qemu+ssh://root@clihv/system', '--connect wins over the config');
+};
+
+# --- Adopting the state a hypervisor already had -----------------------------
+subtest 'a hypervisor with its own terraform state has it adopted' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/config";
+
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(is_local      => sub { 0 });
+    $hv_mock->redefine(tf_dir        => sub { $dir });
+    $hv_mock->redefine(file_exists   => sub { 1 });
+
+    my @fetched;
+    $hv_mock->redefine(get_file => sub {
+        my ($self, $remote, $local) = @_;
+        push @fetched, [$remote, $local];
+        write_text($local, '{"serial":1163}');
+        return 1;
+    });
+
+    Trog::HV->forget();
+    my $hv = Trog::HV->new(uri => 'qemu+ssh://root@hv1/system');
+
+    ok(quietly(sub { Trog::Bin::Provisioner::adopt_hypervisor_state($hv) }), 'adopted');
+    is_deeply($fetched[0], ['/opt/terraform/config/terraform.tfstate', "$dir/config/terraform.tfstate"],
+        'from where a self-provisioned hypervisor keeps it');
+
+    # ...and never a second time, or we would undo whatever has happened since.
+    ok(!quietly(sub { Trog::Bin::Provisioner::adopt_hypervisor_state($hv) }),
+        'not again once we have a state of our own');
+    is(scalar @fetched, 1, 'so the local state is left alone');
+};
+
+subtest 'nothing is adopted when there is nothing to adopt' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/config";
+
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(tf_dir      => sub { $dir });
+    $hv_mock->redefine(get_file    => sub { die "should not have fetched anything\n" });
+
+    Trog::HV->forget();
+    $hv_mock->redefine(is_local    => sub { 1 });
+    $hv_mock->redefine(file_exists => sub { 1 });
+    ok(!Trog::Bin::Provisioner::adopt_hypervisor_state(Trog::HV->new()),
+        'a local hypervisor already writes where it always did');
+
+    Trog::HV->forget();
+    $hv_mock->redefine(is_local    => sub { 0 });
+    $hv_mock->redefine(file_exists => sub { 0 });
+    ok(!Trog::Bin::Provisioner::adopt_hypervisor_state(Trog::HV->new(uri => 'qemu+ssh://root@hv1/system')),
+        'and a hypervisor with no state of its own has nothing to give us');
+};
+
+subtest 'the state goes back to the hypervisor afterwards' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/config";
+    write_text("$dir/config/terraform.tfstate", '{"serial":1164}');
+
+    my @put;
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(is_local => sub { 0 });
+    $hv_mock->redefine(tf_dir   => sub { $dir });
+    $hv_mock->redefine(put_file => sub { push @put, [@_[1, 2]]; return 1 });
+
+    Trog::HV->forget();
+    my $hv = Trog::HV->new(uri => 'qemu+ssh://root@hv1/system');
+
+    ok(quietly(sub { Trog::Bin::Provisioner::return_hypervisor_state($hv) }), 'returned');
+    is_deeply($put[0], ["$dir/config/terraform.tfstate", '/opt/terraform/config/terraform.tfstate'],
+        'to where the hypervisor keeps its own');
+
+    # A dry run changed nothing, so it has nothing to hand back.
+    no warnings 'once';
+    local $Trog::Bin::Provisioner::dryrun = 1;
+    ok(!quietly(sub { Trog::Bin::Provisioner::return_hypervisor_state($hv) }), 'not after a dryrun');
+    is(scalar @put, 1, 'and nothing was sent');
 };
 
 # --- Adopting what libvirt already has ---------------------------------------

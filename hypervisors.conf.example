@@ -29,6 +29,11 @@ libvirt_uri    = qemu+ssh://root@hv1.example.net/system
 ; ...or bypass the lot and hand terraform this verbatim:
 ;provider_uri       = qemu+ssh://root@hv1.example.net/system?sshauth=agent
 
+; Where this machine keeps its own terraform state, from back when it was
+; provisioned by running the tool on it.  We adopt that the first time we work
+; on it from elsewhere, and hand it back afterwards.
+;remote_tf_state    = /opt/terraform/config/terraform.tfstate
+
 ; Skip autodetection when `brctl show | tail -n1` guesses wrong.
 bridge_device  = br0
 virbr_device   = virbr0

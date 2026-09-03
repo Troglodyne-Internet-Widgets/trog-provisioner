@@ -322,6 +322,10 @@ Append a line, but only if it isn't already there.
 
 Copy a whole directory tree across, contents and all.
 
+=item C<get_file($remote, $local)>
+
+The other direction, for one file.
+
 =back
 
 =cut
@@ -409,6 +413,13 @@ sub put_dir {
     return 0 if system('tar', '-C', $local, '-czf', "$tarball", '.');
 
     return $self->_run({ stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-');
+}
+
+sub get_file {
+    my ($self, $remote, $local) = @_;
+    return File::Copy::copy($remote, $local) ? 1 : 0 if $self->is_local;
+
+    return $self->_run({ stdout_file => $local }, 'cat', $remote);
 }
 
 sub append_line {

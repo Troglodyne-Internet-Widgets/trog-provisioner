@@ -155,6 +155,10 @@ sub main {
         $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
     }
 
+    # A hypervisor that used to run this tool on itself has its own terraform
+    # state.  Start from that rather than from nothing.
+    adopt_hypervisor_state($hv);
+
     # Fix the terraform state.
     # We have to do this every time, for every single known domain.
     # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
@@ -202,6 +206,10 @@ sub main {
 
     # If we don't do this, any subsequent manual tf plan will explode violently
     sync_tf_state_with_libvirt();
+
+    # Hand the state back, so the hypervisor's own copy is not left behind
+    # describing a world that has moved on without it.
+    return_hypervisor_state($hv);
 
     return 0;
 }
@@ -389,6 +397,68 @@ sub provision_domain {
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
 }
 
+# Terraform state for a hypervisor we have not talked to from here before.
+#
+# Every hypervisor of any age was provisioned by running this tool on it, which
+# left a terraform state at /opt/terraform/config.  Reaching the same machine
+# remotely gives it a state directory of its own, and starting that empty means
+# terraform believes none of the pool, the base image or any existing domain
+# exists -- so it sets about creating them, and libvirt refuses one at a time.
+#
+# Importing our way out is not available: the libvirt provider accepts an
+# import id for a volume and then reports no such object whatever you give it,
+# so only the pool can be adopted that way.  Taking the hypervisor's own state
+# is both the whole answer and the more honest one -- it is the same terraform
+# managing the same resources, just from somewhere else now.
+sub adopt_hypervisor_state {
+    my ($hv) = @_;
+    return 0 if $hv->is_local;
+
+    my $local = $hv->tf_config_dir . '/terraform.tfstate';
+    return 0 if -f $local;
+
+    my $remote = $hv->remote_tf_state;
+    return 0 unless $hv->file_exists($remote);
+
+    print "No terraform state here for " . $hv->uri . " yet, and $remote has one.\n";
+    print "Adopting it, so terraform knows what already exists.\n";
+
+    $hv->get_file($remote, $local)
+      or die "Could not copy $remote off the hypervisor; refusing to run terraform\n"
+      . "against an empty state, which would try to rebuild everything on it.\n";
+
+    return 1;
+}
+
+# Put our state back where the hypervisor keeps its own.
+#
+# We adopted it on the way in; by now it describes resources that did not exist
+# when we picked it up.  Leaving the hypervisor's copy at the old serial means
+# the next person to run this on the machine itself starts from a state that
+# has forgotten whatever we just built, and sets about building it again.
+#
+# This is a copy between two files and nothing arbitrates it.  Two machines
+# provisioning the same hypervisor at once will overwrite each other, and the
+# real answer to that is a remote backend with locking rather than anything
+# here.
+sub return_hypervisor_state {
+    my ($hv) = @_;
+    return 0 if $hv->is_local || $dryrun;
+
+    my $local = $hv->tf_config_dir . '/terraform.tfstate';
+    return 0 unless -f $local;
+
+    my $remote = $hv->remote_tf_state;
+    print "Returning terraform state to $remote on " . $hv->uri . "\n";
+
+    $hv->put_file($local, $remote)
+      or warn "Could not put the terraform state back on the hypervisor; its copy at\n"
+      . "$remote is now behind ours, and a run from the machine itself would\n"
+      . "rebuild what we just made.\n";
+
+    return 1;
+}
+
 # An import block for something libvirt already has, or nothing at all when it
 # does not: terraform can only adopt what exists.
 sub _import_block {
@@ -478,10 +548,13 @@ sub mongle_terraform_template {
     # "storage volume 'baseimage-qcow2' exists already" -- which no amount of
     # re-running gets past, because the resource is not in state to destroy.
     my $import_block = _import_block('libvirt_pool.tf_disks', $libvirt_pool, "storage pool at $pool_path");
-    my $image_block  = _import_block('libvirt_volume.image_base',
-        $hv->volume_key('tf_disks', 'baseimage-qcow2'), 'base image');
-    my $volume_block = _import_block("libvirt_volume.$domain_mongled-qcow2",
-        $hv->volume_key('tf_disks', "$domain-qcow2"), "disk for $domain");
+
+    # Volumes get no import block.  The provider takes the id, looks for the
+    # volume, finds nothing whatever you hand it -- key, path, pool/name -- and
+    # fails with "Cannot import non-existent remote object", so an import block
+    # for one is a guaranteed error rather than a recovery.  A volume that
+    # exists without state is handled by adopt_hypervisor_state instead.
+    my ($image_block, $volume_block) = ('', '');
 
     # The provider needs a real URI even when we let libvirt pick our own, and
     # it needs to be told about SSH in a way libvirt's own client works out.

@@ -156,7 +156,19 @@ Storage pools cannot be updated. All changes require replacement.
 
 `ignore_changes = [ target ]` on the pool ends it.  `target` is only read when the pool is created, so there's nothing there worth diffing.
 
-The same two mechanisms cover the volumes.  `bin/provision` emits an import for `baseimage-qcow2` and for the guest's own disk whenever libvirt already has them -- otherwise terraform tries to create them and libvirt refuses with `storage volume 'baseimage-qcow2' exists already`, which you can't re-run your way out of, because the resource isn't in state to destroy either.  `create`, `backing_store` and `target` are ignored on those for the same reason as the pool's: they're read once at creation and never reported back.
+### State follows the hypervisor
+
+Every hypervisor of any age was provisioned by running this tool *on* it, which left a terraform state at `/opt/terraform/config`.  Reaching that same machine remotely gives it a state directory of its own here, and starting that empty means terraform believes nothing on the hypervisor exists -- so it sets about creating the pool, the base image and every domain again, and libvirt refuses them one at a time.
+
+So `bin/provision` adopts it.  The first time it works on a hypervisor it has no state for, it copies the hypervisor's own state across and starts from that; at the end of a successful run it copies the state back, so the machine's copy doesn't fall behind and send the next local run rebuilding what you just made.  Override the path it looks at with `remote_tf_state` in hypervisors.conf.
+
+Nothing arbitrates this.  Two machines provisioning the same hypervisor at once will overwrite each other's state, and the real answer to that is a terraform remote backend with locking rather than anything this tool does.
+
+### One thing you can't import
+
+Volumes get no import block, because the provider can't do it.  It accepts an id for a `libvirt_volume`, looks for the volume, and reports `Cannot import non-existent remote object` whatever you hand it -- the volume key, its path, `pool/name`, all of them, for a volume that demonstrably exists.  The pool imports fine; volumes simply don't, in 0.9.1.  That's why the state has to be adopted wholesale instead.
+
+`create`, `backing_store` and `target` are still ignored on the volumes for the same reason as the pool's `target`: they're read once at creation and never reported back, so diffing them plans a replacement -- of the base image, which `prevent_destroy` then refuses, or of a guest's disk, which it doesn't.
 
 Where the pool actually lives is read back from libvirt rather than assumed, so `pool_path` is right even when somebody made the pool somewhere other than `/opt/terraform/disks`.  Set `pool_path` in hypervisors.conf to override.
 

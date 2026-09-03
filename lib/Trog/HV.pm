@@ -164,7 +164,7 @@ my %CONFIG_KEY = (
     uri      => 'libvirt_uri',
     key_path => 'ssh_key',
     map { $_ => $_ } qw{tf_dir pool_path domain_dir bridge_device virbr_device
-                        provider_uri known_hosts known_hosts_verify},
+                        provider_uri known_hosts known_hosts_verify remote_tf_state},
 );
 
 sub from_config {
@@ -403,6 +403,16 @@ sub tf_dir {
 }
 
 sub tf_config_dir { return $_[0]->tf_dir . '/config' }
+
+=head2 remote_tf_state
+
+Where a hypervisor that was provisioned from itself keeps its own terraform
+state.  This is the historical path, and it exists on any machine that used to
+run this tool locally.
+
+=cut
+
+sub remote_tf_state { return $_[0]->{remote_tf_state} // '/opt/terraform/config/terraform.tfstate' }
 sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
 
 sub pool_path {
