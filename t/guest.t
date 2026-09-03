@@ -60,7 +60,8 @@ subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
 
     my @ran;
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine(run => sub { my ($s, @c) = @_; push @ran, join(' ', @c); return 0 });
+    $machine->redefine(run      => sub { my ($s, @c) = @_; push @ran, join(' ', @c); return 0 });
+    $machine->redefine(run_sudo => sub { my ($s, @c) = @_; push @ran, 'sudo ' . join(' ', @c); return 0 });
     $machine->redefine(capture => sub {
         my ($s, $cmd) = @_;
         push @ran, $cmd;
@@ -83,8 +84,9 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
     my $guest = Trog::Guest->new(host => '203.0.113.10', user => 'ubuntu');
 
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine(run     => sub { 1 });
-    $machine->redefine(capture => sub { '[]' });
+    $machine->redefine(run      => sub { 1 });
+    $machine->redefine(run_sudo => sub { 1 });
+    $machine->redefine(capture  => sub { '[]' });
 
     eval { quietly(sub { $guest->wait_for_cloud_init('vm.example.com') }) };
     like($@, qr/Cloud init reported failure/, 'dies');
@@ -94,8 +96,9 @@ subtest 'cloud-init that does not return JSON is fatal' => sub {
     my $guest = Trog::Guest->new(host => '203.0.113.10', user => 'ubuntu');
 
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine(run     => sub { 0 });
-    $machine->redefine(capture => sub { 'command not found' });
+    $machine->redefine(run      => sub { 0 });
+    $machine->redefine(run_sudo => sub { 0 });
+    $machine->redefine(capture  => sub { 'command not found' });
 
     eval { quietly(sub { $guest->wait_for_cloud_init('vm.example.com') }) };
     like($@, qr/did not return a JSON array/, 'dies rather than carrying on blind');
@@ -106,8 +109,9 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
 
     my @ran;
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine(run     => sub { my ($s, @c) = @_; push @ran, join(' ', @c); return 0 });
-    $machine->redefine(capture => sub { 'the last few lines' });
+    $machine->redefine(run      => sub { my ($s, @c) = @_; push @ran, join(' ', @c); return 0 });
+    $machine->redefine(run_sudo => sub { my ($s, @c) = @_; push @ran, 'sudo ' . join(' ', @c); return 0 });
+    $machine->redefine(capture  => sub { 'the last few lines' });
 
     ok(quietly(sub { $guest->wait_for_makefile('vm.example.com') }), 'finishes');
 

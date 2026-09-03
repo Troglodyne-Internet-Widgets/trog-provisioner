@@ -125,7 +125,9 @@ That means:
 
 1. **A remote hypervisor has to be named with an ssh transport.**  `qemu+ssh://user@host/system` (or `+libssh`/`+libssh2`) tells us both how to talk to libvirt and how to get a shell.  `qemu+tcp://` and `qemu+tls://` give us libvirt but no filesystem, so they're refused up front rather than failing halfway through a build.
 
-2. **You need passwordless SSH to the HV** as the user the URI names, with passwordless `sudo`.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
+2. **You need passwordless SSH to the HV** as the user the URI names.  We use your `~/.ssh/config`, so jump hosts and per-host identities work as you'd expect.
+
+    Passwordless `sudo` there is strongly preferred but no longer required: `sudo` runs with `-n`, and if the far side asks for a password you get prompted once and it's remembered for the rest of the run.  Run non-interactively -- from cron, or with stdin redirected -- and there's nobody to ask, so you get an error naming the user and the `NOPASSWD` line to add instead of a hang.
 
 3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 

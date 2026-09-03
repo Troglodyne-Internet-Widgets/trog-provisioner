@@ -8,6 +8,7 @@ use File::Copy();
 use File::Temp();
 use File::Slurper();
 use Net::OpenSSH::More();
+use Term::ReadKey();
 
 =head1 NAME
 
@@ -16,7 +17,7 @@ Trog::Machine - a machine we reach over SSH and put files on
 =head1 SYNOPSIS
 
     # Not used directly.  See Trog::HV and Trog::Guest.
-    $machine->run(qw{sudo systemctl restart rsyslog});
+    $machine->run_sudo(qw{systemctl restart rsyslog});
     $machine->write_text('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
     $machine->put_file($local, '/root/setup.sh', sudo => 1, mode => '0755');
 
@@ -164,6 +165,133 @@ sub run {
     return $self->_unhang(join(' ', @argv), sub { $self->ssh->cmd_exit_code(@argv) });
 }
 
+=head1 SUDO
+
+Almost everything this tool does on a hypervisor needs root, and C<sudo> over
+an SSH connection has no terminal to ask for a password at.  Left alone it says
+so and fails, which is how a run gets three minutes in and then stops on
+something nobody can act on.
+
+So: C<sudo -n> first, so a password requirement is an immediate, legible
+failure rather than a wait on a terminal that will never appear.  If that is
+what happened, ask for the password once, remember it for the rest of the run,
+and carry on.
+
+The password never travels with the data.  C<sudo -S> reads it from standard
+input, which is where C<put_file> and C<write_text> are already sending the
+file, and sudo reading ahead into the content is not a thing to leave to
+chance.  Privileged writes therefore land in a file we own and are moved into
+place afterwards -- one command with the password on stdin, one with the
+content, never both.
+
+=head2 sudo_password
+
+The remembered password for this machine, if we have had to ask for one.
+Cached against the machine we asked about, so two objects pointing at the same
+host share it and nobody gets asked twice.
+
+=cut
+
+# Passwords by target, so rebuilding a machine object does not ask again.
+my %SUDO_PASSWORD;
+
+sub sudo_password {
+    my ($self) = @_;
+    return $SUDO_PASSWORD{ $self->_sudo_key };
+}
+
+sub _sudo_key { return $_[0]->ssh_target // 'localhost' }
+
+sub _remember { return $SUDO_PASSWORD{ $_[0]->_sudo_key } = $_[1] }
+
+# A seam, so the no-terminal path is testable somewhere that has one.
+sub _have_terminal { return -t STDIN ? 1 : 0 }
+
+=head2 forget_sudo_passwords
+
+Drop every remembered password.  Only tests should need this.
+
+=cut
+
+sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
+
+sub _ask_for_sudo_password {
+    my ($self) = @_;
+
+    die 'sudo on ' . $self->describe . " wants a password, and there is no terminal to ask at.\n"
+      . 'Either run this where it can ask, or give '
+      . ($self->ssh_user // 'the login user')
+      . " passwordless sudo there:\n"
+      . '    ' . ($self->ssh_user // 'youruser') . " ALL=(ALL) NOPASSWD: ALL\n"
+      . "in /etc/sudoers.d/, via visudo.\n"
+      unless $self->_have_terminal();
+
+    print {*STDERR} '[sudo] password for ' . ($self->ssh_user // 'you') . ' on ' . $self->describe . ': ';
+    Term::ReadKey::ReadMode('noecho');
+    my $password = <STDIN>;
+    Term::ReadKey::ReadMode('restore');
+    print {*STDERR} "\n";
+
+    chomp $password if defined $password;
+    die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
+
+    return $self->_remember($password);
+}
+
+# What sudo says when it wants a password it cannot ask for.
+sub _wants_password {
+    my ($output) = @_;
+    return 0 unless defined $output;
+    return $output =~ m/sudo: (?:a )?(?:password is required|a terminal is required|no password was provided)/ ? 1 : 0;
+}
+
+sub _wrong_password {
+    my ($output) = @_;
+    return 0 unless defined $output;
+    return $output =~ m/sudo: \d+ incorrect password attempt|Sorry, try again/ ? 1 : 0;
+}
+
+=head2 run_sudo(@argv)
+
+Run something as root, asking for a password if the far side turns out to want
+one.  Returns the exit code, like C<run>.
+
+=cut
+
+sub run_sudo {
+    my ($self, @argv) = @_;
+
+    # A local sudo has our own terminal to ask at, so let it.
+    return $self->run('sudo', @argv) if $self->is_local;
+    return $self->_run_sudo_attempt(0, @argv);
+}
+
+sub _run_sudo_attempt {
+    my ($self, $attempts, @argv) = @_;
+
+    my $password = $self->sudo_password;
+    my @sudo  = defined $password ? (qw{sudo -S -p}, q{}) : (qw{sudo -n});
+    my %stdin = defined $password ? (stdin_data => "$password\n") : ();
+
+    my ($out, $err) = $self->_unhang(join(' ', 'sudo', @argv), sub {
+        $self->ssh->capture2({ timeout => $TIMEOUT, %stdin }, @sudo, @argv);
+    });
+    my $rc = $? >> 8;
+    return 0 unless $rc;
+
+    my $said = ($out // '') . ($err // '');
+    return $rc unless _wants_password($said) || _wrong_password($said);
+
+    # Three goes at typing it, then give up rather than loop.
+    die 'Could not authenticate sudo on ' . $self->describe . "\n" if $attempts >= 3;
+
+    print {*STDERR} "Sorry, try again.\n" if _wrong_password($said);
+    delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
+    $self->_ask_for_sudo_password();
+
+    return $self->_run_sudo_attempt($attempts + 1, @argv);
+}
+
 =head1 FILES
 
 Each of these is the obvious local filesystem call when the machine is us, and
@@ -218,8 +346,8 @@ sub mkpath {
         # the login user, who is the one that will be writing into it.
         my $user = $self->ssh_user // $self->capture('id -un');
         chomp $user if defined $user;
-        return 0 if $self->run(qw{sudo mkdir -p}, $path);
-        $self->run('sudo', 'chown', "$user:", $path);
+        return 0 if $self->run_sudo(qw{mkdir -p}, $path);
+        $self->run_sudo('chown', "$user:", $path);
     }
     return 1;
 }
@@ -254,7 +382,7 @@ sub put_file {
     my ($self, $local, $remote, %opts) = @_;
 
     if ($self->is_local) {
-        return $self->run(qw{sudo cp}, $local, $remote) == 0
+        return $self->run_sudo(qw{cp}, $local, $remote) == 0
           if $opts{sudo} && !-w _parent_dir($remote);
         return File::Copy::copy($local, $remote) ? 1 : 0;
     }
@@ -296,17 +424,42 @@ sub append_line {
     return $self->write_text($path, $existing . "$line\n");
 }
 
-# Write a stream to a path on the far side.  See "Why none of this uses sftp".
+# Write a stream to a path on the far side.  See "Why none of this uses sftp"
+# and "SUDO": the content and the sudo password both want stdin, so a
+# privileged write is two commands and never one.
 sub _pour {
     my ($self, $stdin, $path, %opts) = @_;
 
-    my @cmd = ($opts{sudo} ? (qw{sudo tee}) : ('tee'), $path);
-    $self->_run({ %$stdin, stdout_discard => 1 }, @cmd) or return 0;
+    unless ($opts{sudo}) {
+        return $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $path);
+    }
 
-    # tee makes the file with root's umask, which is not a decision anything
-    # under /etc should be left to.
-    $self->run('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $opts{sudo};
-    return 1;
+    my $staged = $self->_staging_path or return 0;
+    $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $staged) or do {
+        $self->remove($staged);
+        return 0;
+    };
+
+    my $mode = $opts{mode} // '0644';
+    my $ok = !$self->run_sudo('mv', $staged, $path)
+      && !$self->run_sudo('chown', 'root:root', $path)
+      && !$self->run_sudo('chmod', $mode, $path);
+
+    $self->remove($staged) unless $ok;
+    return $ok ? 1 : 0;
+}
+
+# Somewhere we can definitely write, made by the far side rather than guessed
+# at: mktemp gives us a private file in a directory that exists.
+sub _staging_path {
+    my ($self) = @_;
+
+    my $path = $self->capture('mktemp');
+    chomp $path if defined $path;
+    return $path if defined $path && length $path && $path =~ m{\A/};
+
+    warn 'Could not make a staging file on ' . $self->describe . "\n";
+    return undef;
 }
 
 sub _run {
@@ -363,8 +516,8 @@ sub _write_local {
         my $tmp = File::Temp->new(UNLINK => 1);
         print {$tmp} $content;
         close $tmp;
-        my $ok = $self->run(qw{sudo cp}, "$tmp", $path) == 0;
-        $self->run('sudo', 'chmod', ($opts{mode} // '0644'), $path) if $ok;
+        my $ok = $self->run_sudo(qw{cp}, "$tmp", $path) == 0;
+        $self->run_sudo('chmod', ($opts{mode} // '0644'), $path) if $ok;
         return $ok ? 1 : 0;
     }
 

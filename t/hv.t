@@ -252,6 +252,18 @@ subtest 'remote work goes through commands with an exit status' => sub {
         return bless {}, $class;
     });
     $mock->redefine(system => sub { my ($self, $opts, @cmd) = @_; return $run->($opts, @cmd) });
+
+    # run_sudo goes through capture2, and this far side has passwordless sudo.
+    $mock->redefine(capture2 => sub {
+        my ($self, $opts, @cmd) = @_;
+        push @commands, { opts => $opts, cmd => [@cmd] };
+
+        my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;
+        $files{ $argv[2] } = delete $files{ $argv[1] } if $argv[0] eq 'mv';
+
+        $? = 0;
+        return ('', '');
+    });
     $mock->redefine(capture => sub {
         my ($self, $opts, @cmd) = @_;
         push @commands, { opts => $opts, cmd => [@cmd] };
@@ -261,6 +273,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
     $mock->redefine(cmd => sub {
         my ($self, @cmd) = @_;
         push @commands, { cmd => [@cmd] };
+        return ('/tmp/staged.XXXX', '', 0) if "@cmd" eq 'mktemp';
         return ("output of @cmd", '', 0);
     });
     $mock->redefine(cmd_exit_code => sub {
@@ -295,14 +308,19 @@ subtest 'remote work goes through commands with an exit status' => sub {
     ok($hv->file_exists('/tmp/plain'), 'file_exists tests for it');
     ok(!$hv->file_exists('/tmp/nope'), 'and is false for one that is not there');
 
-    # A root-owned destination is written by sudo directly, with no staging
-    # file in between to get the permissions of wrong.
+    # A privileged destination is staged and moved, because the content and the
+    # sudo password both want stdin and cannot share it.
     ok($hv->write_text('/etc/rsyslog.d/10-vm.conf', "conf\n", sudo => 1), 'sudo write');
-    my ($tee) = grep { $_->{cmd}[0] eq 'sudo' && $_->{cmd}[1] eq 'tee' } @commands;
-    is_deeply($tee->{cmd}, [qw{sudo tee /etc/rsyslog.d/10-vm.conf}], 'sudo tee, straight to the destination');
-    ok((grep { "@{$_->{cmd}}" eq 'sudo chmod 0644 /etc/rsyslog.d/10-vm.conf' } @commands),
-        'and a chmod, since tee would have used our umask');
-    ok(!(grep { "@{$_->{cmd}}" =~ m/^sudo mv/ } @commands), 'nothing was staged anywhere first');
+
+    my ($tee) = grep { $_->{cmd}[0] eq 'tee' && $_->{cmd}[1] eq '/tmp/staged.XXXX' } @commands;
+    ok($tee, 'the content is teed unprivileged into a file we own');
+    is($tee->{opts}{stdin_data}, "conf\n", 'with no password anywhere near it');
+
+    my $said = join '|', map { "@{$_->{cmd}}" } @commands;
+    like($said, qr{sudo -n mv /tmp/staged\.XXXX /etc/rsyslog\.d/10-vm\.conf}, 'then moved into place');
+    like($said, qr{sudo -n chown root:root},  'chowned');
+    like($said, qr{sudo -n chmod 0644},       'and chmodded, since tee would have used our umask');
+    is($files{'/etc/rsyslog.d/10-vm.conf'}, "conf\n", 'and the bytes ended up there');
 
     # put_file streams the local file down the same pipe.
     my $dir = tempdir(CLEANUP => 1);
@@ -329,14 +347,70 @@ subtest 'a hang is an error with a name on it' => sub {
     local $Trog::Machine::HANG_TIMEOUT = 1;
 
     my $started = time;
-    eval { $hv->write_text('/etc/somewhere', "x\n", sudo => 1) };
+    eval { $hv->write_text('/tmp/somewhere', "x\n") };
     my $took = time - $started;
 
     like($@, qr/Gave up on the hypervisor/, 'we stop waiting');
     like($@, qr/qemu\+ssh:\/\/root\@fakehv\/system/, 'saying which one');
-    like($@, qr/sudo tee \/etc\/somewhere/, 'and what we were doing');
+    like($@, qr/tee \/tmp\/somewhere/, 'and what we were doing');
     like($@, qr/permission\s+problem/, 'and what it usually means');
     cmp_ok($took, '<', 10, 'and we did it near the deadline, not after the sleep');
+};
+
+# --- sudo that wants a password ----------------------------------------------
+subtest 'a sudo password is asked for once and then remembered' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@needsauth/system');
+
+    my (@attempts, $asked);
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine(new => sub { bless {}, shift });
+    $mock->redefine(capture2 => sub {
+        my ($self, $opts, @cmd) = @_;
+        push @attempts, { cmd => [@cmd], stdin => $opts->{stdin_data} };
+
+        # -n gets the message sudo gives when it cannot ask.
+        if (grep { $_ eq '-n' } @cmd) {
+            $? = 1 << 8;
+            return ('', "sudo: a password is required\n");
+        }
+        $? = 0;
+        return ('', '');
+    });
+
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine(_ask_for_sudo_password => sub { $asked++; return $_[0]->_remember('hunter2') });
+
+    is($hv->run_sudo(qw{systemctl restart rsyslog}), 0, 'the command succeeds in the end');
+    is($asked, 1, 'we asked for a password');
+
+    is_deeply($attempts[0]{cmd}, [qw{sudo -n systemctl restart rsyslog}],
+        'the first go is -n, so a password requirement fails rather than waits on a terminal');
+    is($attempts[0]{stdin}, undef, 'and sends nothing');
+    is_deeply($attempts[1]{cmd}, [qw{sudo -S -p}, q{}, qw{systemctl restart rsyslog}],
+        'the retry reads the password from stdin');
+    is($attempts[1]{stdin}, "hunter2\n", 'which is where the password went');
+
+    # ...and not again, for anything else on the same machine.
+    is($hv->run_sudo(qw{systemctl restart cron}), 0, 'a later command also succeeds');
+    is($asked, 1, 'without asking a second time');
+    is($attempts[-1]{stdin}, "hunter2\n", 'the remembered password was reused');
+};
+
+subtest 'with no terminal to ask at, say what to configure' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://root@noterminal/system');
+    Trog::Machine::forget_sudo_passwords();
+
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine(new => sub { bless {}, shift });
+    $mock->redefine(capture2 => sub { $? = 1 << 8; return ('', "sudo: a password is required\n") });
+
+    my $tty = Test::MockModule->new('Trog::Machine');
+    $tty->redefine(_have_terminal => sub { 0 });
+
+    eval { $hv->run_sudo(qw{systemctl restart rsyslog}) };
+    like($@, qr/wants a password, and there is no terminal/, 'says what happened');
+    like($@, qr/NOPASSWD/,                                   'and what to put in sudoers');
+    like($@, qr/\broot\b/,                                   'for the right user');
 };
 
 done_testing;

@@ -152,7 +152,7 @@ sub main {
     if (!$hv->file_exists('/usr/libexec/virtiofs-better')) {
         $hv->put_file("$FindBin::Bin/../virtiofs-better", '/usr/libexec/virtiofs-better', sudo => 1)
           or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
-        $hv->run(qw{sudo chmod 0755 /usr/libexec/virtiofs-better});
+        $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
     }
 
     # Fix the terraform state.
@@ -304,9 +304,9 @@ sub provision_domain {
         my $ci_dir = "/var/lib/cloud/instances/$domain";
         $guest->put_file($init, 'cloud-config.txt') or die "Could not ship the cloud-init config to $domain";
         # Remove the semaphore that says this was run, then run the needed targets
-        $guest->run(qw{sudo rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
+        $guest->run_sudo(qw{rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
         print $guest->capture('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
-        $guest->run(qw{sudo rm}, "$ci_dir/sem/cc_users_groups");
+        $guest->run_sudo(qw{rm}, "$ci_dir/sem/cc_users_groups");
         print $guest->capture('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
 
         my $ips  = _coerce_array($config->param('ips'));
@@ -918,7 +918,7 @@ sub mongle_logging_config {
     print "Wrote /etc/logrotate.d/vms.conf\n";
 
     #TODO die if these fail
-    $hv->run(qw{sudo systemctl restart rsyslog});
+    $hv->run_sudo(qw{systemctl restart rsyslog});
     print "Restarted rsyslogd\n";
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");

@@ -488,7 +488,7 @@ sub release_dhcp_lease {
         return 0;
     }
 
-    return $self->run('sudo', "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
+    return $self->run_sudo("VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
 }
 
 =head2 eject_cdrom($domain, $target)
@@ -537,7 +537,7 @@ sub nuke_pool {
 
     # The directory goes first: pool-delete on a pool whose backing store is
     # already gone is a no-op, but the reverse leaves files libvirt still owns.
-    $self->run(qw{sudo rm -rf}, $self->pool_path);
+    $self->run_sudo(qw{rm -rf}, $self->pool_path);
 
     my $vmm  = $self->vmm;
     my $pool = eval { $vmm->get_storage_pool_by_name($name) };

@@ -196,8 +196,8 @@ sub remove_rsyslog_config {
 
     print "Removing rsyslog config $conf\n";
     unless ($dryrun) {
-        $hv->run(qw{sudo rm -f}, $conf);
-        $hv->run(qw{sudo systemctl restart rsyslog});
+        $hv->run_sudo(qw{rm -f}, $conf);
+        $hv->run_sudo(qw{systemctl restart rsyslog});
     }
     return;
 }

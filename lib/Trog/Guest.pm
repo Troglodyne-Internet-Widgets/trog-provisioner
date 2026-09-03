@@ -144,7 +144,7 @@ sub wait_for_cloud_init {
         next unless $target;
 
         print "$target failed during $stage, re-running...\n";
-        $self->run(qw{sudo rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target");
+        $self->run_sudo(qw{rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target");
         print $self->capture("sudo cloud-init single --name $target") . "\n\n";
     }
     return 1;
