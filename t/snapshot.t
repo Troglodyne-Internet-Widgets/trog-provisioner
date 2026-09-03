@@ -4,6 +4,7 @@ use warnings FATAL => 'all';
 
 use Test::More;
 use Test::MockModule qw{strict};
+use File::Temp qw{tempdir};
 use Pod::Usage();
 
 use FindBin;
@@ -11,6 +12,11 @@ use FindBin::libs;
 
 require_ok("$FindBin::Bin/../bin/snapshot")
   or BAIL_OUT('bin/snapshot does not load; the install is incomplete');
+
+# Point --hvconf at nothing, so these never read the fleet file of whatever
+# machine the suite happens to be running on.
+my $NO_FLEET = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+sub main_snapshot { return Trog::Bin::Snapshot::main('--hvconf', $NO_FLEET, @_) }
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section("$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS');
@@ -31,7 +37,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(create_snapshot        => sub { 0 });
     $hv_mock->redefine(snapshot_current_name  => sub { undef });
 
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { main_snapshot('myvm.lan') };
     like($@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails');
 }
 
@@ -41,7 +47,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(create_snapshot       => sub { 1 });
     $hv_mock->redefine(snapshot_current_name => sub { undef });
 
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { main_snapshot('myvm.lan') };
     like($@, qr/No current snapshot/, 'main() dies when no snapshot is current after create');
 }
 
@@ -51,7 +57,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(create_snapshot       => sub { 1 });
     $hv_mock->redefine(snapshot_current_name => sub { 'same-snap' });
 
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { main_snapshot('myvm.lan') };
     like($@, qr/unchanged after create/, 'main() dies when the current snapshot does not change');
 }
 
@@ -63,7 +69,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' });
 
     my $rc;
-    eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { $rc = main_snapshot('myvm.lan') };
     is($@,  '', 'no exception on success when nothing was current before');
     is($rc, 0,  'main() returns 0 on success');
 }
@@ -76,7 +82,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' });
 
     my $rc;
-    eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { $rc = main_snapshot('myvm.lan') };
     is($@,  '', 'no exception when before differs from after');
     is($rc, 0,  'main() returns 0');
 }
@@ -89,7 +95,7 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
     $hv_mock->redefine(create_snapshot       => sub { @captured = @_; return 1 });
     $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' });
 
-    Trog::Bin::Snapshot::main(qw{myvm.lan --name mysnap});
+    main_snapshot(qw{myvm.lan --name mysnap});
     is($captured[1], 'myvm.lan', 'domain forwarded');
     is($captured[2], 'mysnap',   '--name value forwarded');
 }

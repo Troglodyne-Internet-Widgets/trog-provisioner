@@ -239,11 +239,7 @@ subtest 'remote work goes through Net::OpenSSH::More' => sub {
         push @commands, [@cmd];
         return 0;
     });
-    $mock->redefine(sftp  => sub { $fake_sftp });
-    $mock->redefine(write => sub {
-        my ($self, $file, $content, $mode) = @_;
-        return $fake_sftp->put_content($content, $file);
-    });
+    $mock->redefine(sftp => sub { $fake_sftp });
 
     # The connection is built from the URI, and only once.
     is($hv->qx_hv('id -un'), 'output of id -un', 'qx_hv returns stdout');
@@ -267,9 +263,12 @@ subtest 'remote work goes through Net::OpenSSH::More' => sub {
 
     # Files go over sftp on that same connection.
     $hv->write_text_hv('/tmp/plain', "hello\n");
-    is($fake_sftp->{content}{'/tmp/plain'}, "hello\n", 'write_text_hv writes through sftp');
+    is($fake_sftp->{content}{'/tmp/plain'}, "hello\n",
+        'write_text_hv puts a real file rather than going through put_content');
     ok($hv->file_exists_hv('/tmp/plain'), 'file_exists_hv sees it');
-    is($hv->read_text_hv('/tmp/plain'), "hello\n", 'read_text_hv reads it back');
+    is($hv->read_text_hv('/tmp/plain'), "hello\n",
+        'read_text_hv gets a real file rather than going through get_content');
+    is($hv->read_text_hv('/tmp/missing'), undef, 'and undef for one that is not there');
 
     ok(!$hv->file_exists_hv('/tmp/nope'), 'file_exists_hv false for missing');
 
@@ -308,8 +307,26 @@ subtest 'remote work goes through Net::OpenSSH::More' => sub {
     }
 
     sub get_content { return $_[0]->{content}{ $_[1] } }
+
+    sub get {
+        my ( $self, $remote, $local ) = @_;
+        return 0 unless exists $self->{content}{$remote};
+        open( my $fh, '>', $local ) or return 0;
+        print {$fh} $self->{content}{$remote};
+        close $fh;
+        return 1;
+    }
     sub put_content { $_[0]->{content}{ $_[2] } = $_[1]; return 1 }
-    sub put         { $_[0]->{content}{ $_[2] } = 'copied'; return 1 }
+
+    # A real put reads the local file, and so does this: storing a placeholder
+    # would let a write_text_hv that sends the wrong bytes pass.
+    sub put {
+        my ( $self, $local, $remote ) = @_;
+        open( my $fh, '<', $local ) or return 0;
+        $self->{content}{$remote} = do { local $/; <$fh> };
+        close $fh;
+        return 1;
+    }
     sub mkpath      { return 1 }
     sub rput        { my ($s, @a) = @_; push @{ $s->{rput} }, [@a]; return 1 }
 }

@@ -6,6 +6,7 @@ use warnings FATAL => 'all';
 use Fcntl();
 use File::Path();
 use File::Copy();
+use File::Temp();
 use File::Slurper();
 use Sys::Virt();
 use URI();
@@ -498,23 +499,35 @@ sub unlink_hv {
 sub read_text_hv {
     my ($self, $path) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
-    return $self->ssh->sftp->get_content($path);
+
+    # get() to a real file for the same reason write_text_hv put()s one: the
+    # scalar-at-a-time calls in Net::SFTP::Foreign are the ones that hang.
+    # get_content has not been caught doing it, but it is the same API, and
+    # append_line_hv reaches it seconds after the write that was.
+    my $tmp = File::Temp->new(UNLINK => 1);
+    close $tmp;
+
+    $self->ssh->sftp->get($path, "$tmp") or return undef;
+    return File::Slurper::read_text("$tmp");
 }
 
 sub write_text_hv {
     my ($self, $path, $content, %opts) = @_;
 
-    if ($self->is_local) {
-        return $self->_write_local($path, $content, %opts);
-    }
+    return $self->_write_local($path, $content, %opts) if $self->is_local;
 
-    # sftp can only write as the user we logged in as, so anything under /etc
-    # or /usr goes to a staging path first and gets moved into place with sudo.
-    my $staged = $opts{sudo} ? _staging_path() : $path;
-    $self->ssh->write($staged, $content, '0644') or return 0;
+    # Content goes to a real local file, and then over as a plain sftp put().
+    #
+    # Net::OpenSSH::More::write would say this in one line, but it is a wrapper
+    # around Net::SFTP::Foreign::put_content, which hangs rather than returning.
+    # put() of a file that exists on disk does not, so we make one.  put_file
+    # does the staging and the sudo from here.
+    my $tmp = File::Temp->new(UNLINK => 1);
+    print {$tmp} $content;
+    close $tmp;
+    chmod 0644, "$tmp";
 
-    return 1 unless $opts{sudo};
-    return $self->_sudo_install($staged, $path);
+    return $self->put_file("$tmp", $path, %opts);
 }
 
 sub append_line_hv {

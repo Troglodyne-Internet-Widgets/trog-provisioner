@@ -57,6 +57,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     my $tfdir = tempdir(CLEANUP => 1);
 
+    my $no_fleet = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(mkpath_hv      => sub { 1 });
     $hv_mock->redefine(file_exists_hv => sub { 1 });
@@ -68,8 +70,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     my $run = sub {
         Trog::HV->forget();
-        eval { Trog::Bin::Provisioner::main(@_) };
-        is($@, "far enough\n", 'got as far as the hypervisor being built');
+        eval { Trog::Bin::Provisioner::main('--hvconf', $no_fleet, @_) };
+        like($@, qr/\Afar enough$/m, 'got as far as the hypervisor being built');
         return Trog::HV->new();
     };
 

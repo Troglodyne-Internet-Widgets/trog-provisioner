@@ -27,6 +27,11 @@ use FindBin::libs;
 require_ok("$FindBin::Bin/../bin/restore")
   or BAIL_OUT('bin/restore does not load; the install is incomplete');
 
+# Point --hvconf at nothing, so these never read the fleet file of whatever
+# machine the suite happens to be running on.
+my $NO_FLEET = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+sub main_restore { return Trog::Bin::Restore::main('--hvconf', $NO_FLEET, @_) }
+
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section("$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS');
 like($synopsis, qr/--latest/,  'POD documents --latest');
@@ -60,7 +65,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names => sub { () });
 
-    eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
+    eval { main_restore('--latest', 'myvm.lan') };
     like($@, qr/No snapshots found/, 'main() dies when no snapshots exist');
 }
 
@@ -69,7 +74,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names => sub { ('snap-a', 'snap-b') });
 
-    eval { Trog::Bin::Restore::main(qw{--name snap-z myvm.lan}) };
+    eval { main_restore(qw{--name snap-z myvm.lan}) };
     like($@, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there');
 }
 
@@ -79,7 +84,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     $hv_mock->redefine(snapshot_names   => sub { ('snap-a') });
     $hv_mock->redefine(revert_snapshot  => sub { 0 });
 
-    eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
+    eval { main_restore('--latest', 'myvm.lan') };
     like($@, qr/Failed to revert/, 'main() dies when the revert fails');
 }
 
@@ -89,7 +94,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     $hv_mock->redefine(snapshot_names  => sub { ('snap-a') });
     $hv_mock->redefine(revert_snapshot => sub { 1 });
 
-    eval { Trog::Bin::Restore::main(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
+    eval { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
     like($@, qr/No provision\.conf found/, 'main() dies when provision.conf is missing');
 }
 
@@ -121,7 +126,7 @@ sub _make_conf {
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
     $bin_mock->redefine(wait_for_ssh => sub { 1 });
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
+    main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
     is($reverted[2], 'snap-c', '--latest picks the last snapshot');
 }
 
@@ -137,7 +142,7 @@ sub _make_conf {
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
     $bin_mock->redefine(wait_for_ssh => sub { 1 });
 
-    Trog::Bin::Restore::main('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
+    main_restore('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
     is($reverted[2], 'snap-a', '--oldest picks the first snapshot');
 }
 
@@ -153,7 +158,7 @@ sub _make_conf {
     $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
     $bin_mock->redefine(wait_for_ssh => sub { 1 });
 
-    Trog::Bin::Restore::main(qw{--name snap-b --domaindir}, $tmpdir, 'myvm.lan');
+    main_restore(qw{--name snap-b --domaindir}, $tmpdir, 'myvm.lan');
     is($reverted[1], 'myvm.lan', 'the domain is passed along');
     is($reverted[2], 'snap-b',   '--name picks the specified snapshot');
 }
@@ -170,7 +175,7 @@ sub _make_conf {
     $hv_mock->redefine(revert_snapshot => sub { 1 });
     $bin_mock->redefine(wait_for_ssh => sub { @ssh_args = @_; return 1 });
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
+    main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
     is($ssh_args[0], 'ubuntu',                 'wait_for_ssh called with admin_user');
     is($ssh_args[2], '10.0.0.42',              'wait_for_ssh called with IP from provision.conf');
     like($ssh_args[1], qr{myvm\.lan/key\.rsa}, 'wait_for_ssh called with domain key path');
@@ -188,7 +193,7 @@ sub _make_conf {
     $hv_mock->redefine(revert_snapshot => sub { 1 });
     $bin_mock->redefine(wait_for_ssh => sub { 1 });
 
-    Trog::Bin::Restore::main(qw{--latest --connect qemu+ssh://hv1/system --domaindir},
+    main_restore(qw{--latest --connect qemu+ssh://hv1/system --domaindir},
         $tmpdir, 'myvm.lan');
     is($seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we asked for');
 }
