@@ -56,14 +56,26 @@
     </disk>
 
     <!-- Two interfaces: the libvirt NAT for the hypervisor to reach it by
-         lease, and the outbound bridge for its real address. -->
+         lease, and the outbound bridge for its real address.
+
+         Both the PCI slot and the MAC are pinned rather than left to libvirt.
+         The slot is what the guest's interface name is derived from ; ens3
+         and ens4 here, because systemd names a PCI NIC after its hotplug slot
+         ; so leaving it to allocation order means the names move whenever the
+         device list does.  The MAC is derived from the domain name, so it is
+         the same on every rebuild: the DHCP lease stays put, and the network
+         configuration can match on it rather than on a name. -->
     <interface type='network'>
+      <mac address='%NATMAC%'/>
       <source network='default'/>
       <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
     </interface>
     <interface type='bridge'>
+      <mac address='%BRIDGEMAC%'/>
       <source bridge='%BRIDGENAME%'/>
       <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
     </interface>
 
 %FILESYSTEMS%

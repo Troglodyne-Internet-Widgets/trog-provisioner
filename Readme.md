@@ -20,6 +20,7 @@ Even business units at giant corporations can do just fine with this approach.
     * contact\_email: Email address to send root's mail to
     * depends\_on: Whether this system is to be provisioned on something that may or may not already exist
     * admin\_user: What the name of the admin user is in the event we want to provision on already existing systems.  This user needs passwordless sudo; when omitted we use root.
+    * dhcp\_devname / bridge\_devname: What the guest calls its two interfaces.  Worked out from the PCI slots the domain XML pins them to -- `ens3` for the libvirt NAT, `ens4` for the outbound bridge -- so you only need these if your image names interfaces some other way.  They used to be mandatory, because what a guest called its NICs depended on the machine type and on whatever order libvirt assigned PCI slots in.  Both are pinned now, and cloud-init matches each interface by MAC rather than by name, so the name is only what it ends up called.
     * hypervisor: Pin this guest to a named hypervisor out of hypervisors.conf, when it genuinely has to live on a particular machine.  Normally you leave this out and let it be placed.  See "PROVISIONING A REMOTE HYPERVISOR" below.
 
     Nothing else here says anything about *where* the guest runs; that's what hypervisors.conf is for.  A guest definition that names a machine is a guest definition you can't move.

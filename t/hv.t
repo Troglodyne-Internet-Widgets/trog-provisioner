@@ -573,4 +573,64 @@ sub quietly {
     return wantarray ? @result : $result[0];
 }
 
+# --- Guest identity, which is what makes device names knowable ---------------
+subtest 'a guest MAC is derived from its name and does not move' => sub {
+    my $hv = fresh();
+
+    my $nat    = $hv->guest_mac('vm.example.com', 0);
+    my $bridge = $hv->guest_mac('vm.example.com', 1);
+
+    like($nat, qr/\A52:54:00(:[0-9a-f]{2}){3}\z/, 'a QEMU-prefixed MAC');
+    isnt($nat, $bridge, 'the two interfaces differ');
+
+    is($hv->guest_mac('vm.example.com', 0), $nat,
+        'the same guest gets the same MAC every time, so its lease survives a rebuild');
+    isnt($hv->guest_mac('other.example.com', 0), $nat, 'a different guest does not');
+
+    # Any hypervisor agrees, since it comes from the name and nothing else.
+    is(fresh(uri => 'qemu+ssh://hv2/system')->guest_mac('vm.example.com', 0), $nat,
+        'and so does another hypervisor');
+
+    is_deeply([$hv->nic_slots], [3, 4], 'the slots are pinned, which is what makes ens3/ens4 true');
+};
+
+subtest 'leases are looked up by MAC, not by name' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://hv/system');
+
+    my @asked;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(vmm => sub { FakeLeaseVMM->new(\@asked) });
+
+    is($hv->lease_ip('default', mac => '52:54:00:aa:bb:cc'), '192.168.122.50', 'found');
+    is($asked[0], '52:54:00:aa:bb:cc', 'and dnsmasq was asked about that MAC, not sifted afterwards');
+
+    # The hostname match is still there, and is still a substring match: a guest
+    # called vm.example.com matches a lease for sub.vm.example.com.
+    is($hv->lease_ip('default', hostname => 'vm.example.com'), '192.168.122.50', 'hostname still works');
+    is($hv->lease_ip('default', hostname => 'nothing.here'), undef, 'and misses when it should');
+};
+
+{
+    package FakeLeaseVMM;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { my ($class, $asked) = @_; return bless { asked => $asked }, $class }
+    sub get_network_by_name { return FakeNet->new($_[0]->{asked}) }
+}
+
+{
+    package FakeNet;
+    use strict;
+    use warnings FATAL => 'all';
+
+    sub new { my ($class, $asked) = @_; return bless { asked => $asked }, $class }
+
+    sub get_dhcp_leases {
+        my ($self, $mac) = @_;
+        push @{ $self->{asked} }, $mac;
+        return ({ ipaddr => '192.168.122.50', mac => '52:54:00:aa:bb:cc', hostname => 'vm.example.com' });
+    }
+}
+
 done_testing;

@@ -254,8 +254,10 @@ sub provision_domain {
     $qdn = $depends if $depends;
     $qdn =~ s/\.\S+$//;
 
-    #XXX this can be fooled if you have two VMs, one a subdo of the other
-    my $old_ip = $hv->lease_ip('default', $qdn) // 'bogus';
+    # By MAC, which is exact: the hostname match this used to do could be
+    # fooled by a guest that is a subdomain of another.
+    my $nat_mac = $hv->guest_mac($domain, 0);
+    my $old_ip  = $hv->lease_ip('default', mac => $nat_mac) // 'bogus';
 
     if ($reuse) {
         my $old_ssh_ip = $hv->guest_ssh_ip($config, $old_ip);
@@ -289,7 +291,8 @@ sub provision_domain {
         my $existing_nc = $guest->capture('sudo cat /etc/netplan/50-cloud-init.yaml');
         my $parsed = YAML::XS::Load($existing_nc);
 
-        my $primary_adapter_name = $config->param('bridge_devname');
+        my (undef, $bridge_slot) = $hv->nic_slots;
+        my $primary_adapter_name = $config->param('bridge_devname') // "ens$bridge_slot";
         die "Could not find primary adapter '$primary_adapter_name' in netplan config!" unless ref $parsed->{network}{ethernets}{$primary_adapter_name} eq 'HASH';
 
         my $num_ips = scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}});
@@ -328,13 +331,16 @@ sub provision_domain {
     print "Defining and starting $domain...\n";
     $hv->define_domain($xml);
 
-    # If we're not re-using the VM, waste the old DHCP lease, so we don't fill up the table and gum everything up.
-    $hv->release_dhcp_lease($old_ip) unless $old_ip eq 'bogus';
-
+    # We used to nuke the old lease here, because a rebuilt guest arrived with a
+    # freshly generated MAC and so took a second address while the first sat in
+    # the table until it expired.  Its MAC is derived from its name now, so it
+    # asks for the lease it already had and there is nothing to clean up --
+    # which also means we wait for that lease to appear rather than for a
+    # different address to.
     print "Waiting for VM to come live...";
     my $new_ip = '';
     for (1..30) {
-        $new_ip = $hv->lease_ip('default', $qdn, exclude => $old_ip);
+        $new_ip = $hv->lease_ip('default', mac => $nat_mac);
         last if $new_ip;
         print ".";
         sleep 1;
@@ -431,6 +437,8 @@ sub mongle_domain_xml {
         MUGUBYTES   => $ram_mb,
         NUMCPUS     => $cpus,
         CPUMODE     => $cpu_mode,
+        NATMAC      => $hv->guest_mac($domain, 0),
+        BRIDGEMAC   => $hv->guest_mac($domain, 1),
         POOLNAME    => 'tf_disks',
         DISKVOLUME  => $disk_volume,
         CLOUDINIT   => $cloudinit,
@@ -549,11 +557,19 @@ sub mongle_network_configuration {
     die "MUST SET gateway in provision.conf when ips are set\n"
       if @$ips && !(defined $gw && length $gw);
 
-    # XXX ugh there is no way to set consistent devnames, fml
-    my $dhcp_devname = $config->param('dhcp_devname');
-    die "MUST SET dhcp_devname in provision.conf" unless $dhcp_devname;
-    my $bridge_devname = $config->param('bridge_devname');
-    die "MUST SET bridge_devname in provision.conf" unless $dhcp_devname;
+    # These used to have to be told to us, because what the guest calls its
+    # interfaces depends on the machine type and the order libvirt happened to
+    # assign PCI slots in.  Both are ours to decide now: the slots are pinned in
+    # the domain XML, and systemd names a PCI NIC after its hotplug slot, so
+    # slot 3 and slot 4 are ens3 and ens4.
+    #
+    # The MAC is what actually does the work, though.  cloud-init matches the
+    # interface on that and renames it to the name below, so a guest whose
+    # kernel names things some other way still gets the right configuration on
+    # the right card.  The names are only what they end up called afterwards.
+    my ($nat_slot, $bridge_slot) = $hv->nic_slots;
+    my $dhcp_devname   = $config->param('dhcp_devname')   // "ens$nat_slot";
+    my $bridge_devname = $config->param('bridge_devname') // "ens$bridge_slot";
 
     # We need two adapters, one on virbr0 and another on the bridge.
     # So, we need to figure out:
@@ -595,6 +611,7 @@ sub mongle_network_configuration {
                 {
                     type => 'physical',
                     name => $bridge_devname,
+                    mac_address => $hv->guest_mac($domain, 1),
                     subnets => \@subnets,
                     gateway4 => $gw,
                     nameservers => {
@@ -605,6 +622,7 @@ sub mongle_network_configuration {
                 {
                     type => 'physical',
                     name => $dhcp_devname,
+                    mac_address => $hv->guest_mac($domain, 0),
                     subnets => [
                         {
                             type => 'dhcp',

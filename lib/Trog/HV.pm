@@ -6,6 +6,7 @@ use warnings FATAL => 'all';
 use parent 'Trog::Machine';
 
 use Sys::Virt();
+use Digest::SHA();
 use URI();
 use URI::Split();
 
@@ -463,25 +464,33 @@ sub annihilate_domain {
     return 1;
 }
 
-=head2 lease_ip($network, $hostname, %opts)
+=head2 lease_ip($network, %opts)
 
-The address libvirt has leased on C<$network> (usually C<default>) to the guest
-calling itself C<$hostname>.  Pass C<exclude> to ignore a known-stale address,
-which is how we tell a new lease from the one the old VM had.
+The address libvirt has leased on C<$network>, usually C<default>.
+
+Pass C<mac> and it asks dnsmasq for that interface's lease and nothing else,
+which is exact.  Pass C<hostname> and it matches on what the guest called
+itself, which is a substring match and can be fooled: a guest named
+C<vm.example.com> matches a lease belonging to C<sub.vm.example.com>.  Prefer
+the MAC; C<guest_mac> exists so there always is one.
 
 =cut
 
 sub lease_ip {
-    my ($self, $network, $hostname, %opts) = @_;
+    my ($self, $network, %opts) = @_;
 
     my $vmm = $self->vmm;
     my $net = eval { $vmm->get_network_by_name($network) } or return undef;
-    my @leases = eval { $net->get_dhcp_leases() };
+
+    # get_dhcp_leases filters by MAC on the far side, so with one we ask a
+    # precise question rather than sifting the answer.
+    my @leases = eval { $net->get_dhcp_leases($opts{mac}) };
     return undef unless @leases;
 
     foreach my $lease (@leases) {
-        next unless defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$hostname\E/;
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
+        next if defined $opts{hostname}
+          && !(defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/);
         next if defined $opts{exclude} && $lease->{ipaddr} eq $opts{exclude};
         return $lease->{ipaddr};
     }
@@ -809,6 +818,42 @@ sub define_domain {
 
     return $domain;
 }
+
+=head1 GUEST IDENTITY
+
+=head2 guest_mac($domain, $index)
+
+A MAC address for one of a guest's interfaces, derived from its name so that it
+is the same every time.
+
+Letting libvirt generate them means a rebuilt guest arrives with new MACs: it
+takes a new DHCP lease while the old one sits in the table until it expires,
+and any network configuration that matched on a name rather than an address
+has to guess which interface is which.  Deriving them removes both problems --
+the lease is the same lease, and the configuration can say exactly which
+interface it means.
+
+C<52:54:00> is the QEMU/KVM prefix; the rest is the first three bytes of a
+digest of the domain and the interface index.  Three bytes is not a lot, so
+two guests colliding is possible in principle -- at a few thousand of them.
+
+=head2 nic_slots
+
+Which PCI slots the two interfaces sit in, in order.  Pinned because systemd
+names a PCI NIC after its hotplug slot: these are what make the guest call them
+C<ens3> and C<ens4> rather than whatever this month's device ordering implies.
+
+=cut
+
+sub guest_mac {
+    my ($self, $domain, $index) = @_;
+    $index //= 0;
+
+    my $digest = Digest::SHA::sha256_hex("$domain/$index");
+    return join(':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/);
+}
+
+sub nic_slots { return (3, 4) }
 
 =head1 SNAPSHOTS
 
