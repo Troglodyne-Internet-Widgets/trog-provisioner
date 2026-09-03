@@ -6,13 +6,16 @@
   <currentMemory unit='MiB'>%MUGUBYTES%</currentMemory>
   <vcpu placement='static'>%NUMCPUS%</vcpu>
 
+  <!-- i440fx, not q35: every guest on these hypervisors is i440fx, and the
+       machine type decides the PCI topology a guest's kernel already knows.
+       `pc` is the alias for the host qemu's newest i440fx, so this does not
+       pin a version the next hypervisor may not have. -->
   <os>
-    <type arch='x86_64' machine='q35'>hvm</type>
+    <type arch='x86_64' machine='pc'>hvm</type>
   </os>
 
   <features>
     <acpi/>
-    <apic/>
     <pae/>
   </features>
 
@@ -20,6 +23,7 @@
        AVX and friends.  Anything that probes cpuid for vector extensions
        needs it; migratability is what you trade for that. -->
   <cpu mode='%CPUMODE%'/>
+  <clock offset='utc'/>
 
   <!-- virtiofs needs shared memory, and memfd is how you get it without
        hugepages.  Without this block every filesystem below fails to start. -->
@@ -30,12 +34,15 @@
 
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>restart</on_reboot>
-  <on_crash>restart</on_crash>
+  <on_crash>destroy</on_crash>
 
   <devices>
-    <disk type='file' device='disk'>
+    <!-- By volume rather than by path, so the domain does not hardcode where
+         the pool happens to live.  The backing store is baked into the qcow2
+         at creation; libvirt reports it back but we do not declare it. -->
+    <disk type='volume' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='%DISKPATH%'/>
+      <source pool='%POOLNAME%' volume='%DISKVOLUME%'/>
       <target dev='vda' bus='virtio'/>
       <boot order='1'/>
     </disk>
@@ -64,15 +71,14 @@
          https://bugs.launchpad.net/cloud-images/+bug/1573095 -->
     <serial type='pty'><target port='0'/></serial>
     <console type='pty'><target type='serial' port='0'/></console>
-    <channel type='unix'>
-      <target type='virtio' name='org.qemu.guest_agent.0'/>
-    </channel>
+    <console type='pty'><target type='virtio' port='1'/></console>
 
     <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
-    <video><model type='virtio'/></video>
-    <memballoon model='virtio'/>
-    <rng model='virtio'>
-      <backend model='random'>/dev/urandom</backend>
-    </rng>
+    <video><model type='cirrus' vram='16384' heads='1' primary='yes'/></video>
+    <!-- stats period is what makes `virsh dommemstat` say anything; the
+         existing guests have it. -->
+    <memballoon model='virtio'>
+      <stats period='5'/>
+    </memballoon>
   </devices>
 </domain>

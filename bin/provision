@@ -412,7 +412,8 @@ sub mongle_domain_xml {
     # The pool, the image everything is layered on, and this guest's own disk.
     $hv->pool();
     my $base = $hv->base_image($image);
-    my $disk = $hv->create_disk("$domain-qcow2", backing => $base, capacity => $disk_size);
+    my $disk_volume = "$domain-qcow2";
+    $hv->create_disk($disk_volume, backing => $base, capacity => $disk_size);
 
     my ($extra_disks, $filesystems) = mongle_extra_disks($config);
 
@@ -430,7 +431,8 @@ sub mongle_domain_xml {
         MUGUBYTES   => $ram_mb,
         NUMCPUS     => $cpus,
         CPUMODE     => $cpu_mode,
-        DISKPATH    => $disk,
+        POOLNAME    => 'tf_disks',
+        DISKVOLUME  => $disk_volume,
         CLOUDINIT   => $cloudinit,
         BRIDGENAME  => $bridge_device,
         EXTRADISKS  => $extra_disks,
@@ -477,12 +479,14 @@ sub mongle_extra_disks {
             if ($pool eq 'dir') {
                 # virtiofs-better is `virtiofsd --inode-file-handles=mandatory`,
                 # without which a busy share runs the daemon out of file handles.
+                #
+                # The terraform config asked for open_files max here too, and it
+                # never did anything: libvirt has no such element, accepts the
+                # domain, and silently drops it.  The wrapper is the whole fix.
                 push @filesystems, sprintf(<<'FS', _xml($disk), _xml($dev));
     <filesystem type='mount' accessmode='passthrough'>
       <driver type='virtiofs' queue='1024'/>
-      <binary path='/usr/libexec/virtiofs-better'>
-        <open_files max='4092'/>
-      </binary>
+      <binary path='/usr/libexec/virtiofs-better'/>
       <source dir='%s'/>
       <target dir='%s'/>
     </filesystem>
