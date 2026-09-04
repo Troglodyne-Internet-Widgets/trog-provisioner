@@ -3,9 +3,27 @@ use strict;
 use warnings;
 use Test::More;
 
+# The server is a tarball off archive.mariadb.org, not a package, so check it
+# arrived and is the release asked for before checking anything runs.  The
+# recipe passed install_mariadb.sh an undeclared -- and so empty -- user, which
+# shifted every argument along: the script took the version for its client and
+# the dump path for its version, and fetched a URL with a filesystem path in the
+# middle of it.  curl saved the 404 and tar was the first thing to complain.
+ok(-x '/opt/mysql/bin/mariadbd', 'the mariadb server binary is installed');
+
+my $version = `/opt/mysql/bin/mariadbd --version 2>/dev/null`;
+like($version, qr/\Q[% version %]\E/, 'and is the version this recipe pinned');
+
+# Owned by mysql, group the recipe's user, which is what the chown that got
+# `mysql:10.11` as its group was meant to do.
+my @stat = stat('/opt/mysql');
+my $group = $stat[5] // -1;
+is(scalar getgrgid($group), '[% user %]', '/opt/mysql is group [% user %]');
+
 my $status = `systemctl is-active mariadb 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'mariadb is running');
 ok(-d '/opt/mysql', 'mysql data directory exists');
+ok(-d '/opt/mysql/data', 'and it was initialised');
 
 done_testing();

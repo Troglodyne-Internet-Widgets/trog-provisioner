@@ -8,6 +8,15 @@ CLIENT=$1
 VERSION=$2
 SCHEMA=$3
 
+# An empty argument is no argument at all once the shell has split the command
+# line, so a template variable that rendered empty silently shifted these along
+# -- $CLIENT held the version, $VERSION held the path to the dump, and the
+# download asked archive.mariadb.org for a URL with a filesystem path in the
+# middle of it.  Say so instead.
+for arg in CLIENT VERSION SCHEMA; do
+    [ -n "${!arg}" ] || { echo "install_mariadb.sh: $arg is empty; refusing to guess" >&2; exit 2; }
+done
+
 wait_for_mysql() {
     retry=30
     ctr=0
@@ -36,7 +45,10 @@ wait_for_no_mysql() {
 if [ ! -f /opt/mysql/bin/mariadbd ]; then
     ln -s /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
     mkdir -p /opt/mysql
-    curl -so /tmp/mysql.tar.gz -- https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz
+    # -f: without it curl saves the error page on a 404 and the only sign is
+    # tar saying "not in gzip format" several lines later.
+    curl -fso /tmp/mysql.tar.gz -- https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz \
+        || { echo "install_mariadb.sh: could not download mariadb $VERSION" >&2; exit 3; }
     stat /tmp/mysql.tar.gz
     stat /opt/mysql/
     echo "curl -so /tmp/mysql.tar.gz -- https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz"
