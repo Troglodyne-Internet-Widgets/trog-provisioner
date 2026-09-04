@@ -31,7 +31,10 @@ Connects this host to an OpenVPN server as a client.
 
 Client certificates (ca.crt, client.crt, client.key, ta.key) must be
 pre-generated on the VPN server via easy-rsa and placed in cert_dir on the
-hypervisor.  The recipe rsyncs them to the provisioned host.
+hypervisor.  The recipe rsyncs them to the provisioned host as the
+C<transfer_user> from ipmap.cfg, over the hypervisor's NAT address -- the same
+way the data recipe fetches a domain's payload, and for the same reason: this
+runs before the guest's DNS is any use.
 
 Because the VPN tunnel is brought up during provisioning (not deferred to
 postrun), any recipe that needs connectivity through the tunnel must run after
@@ -44,7 +47,9 @@ tunnel (e.g. C<order: A>).
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{openvpn};
+        # It fetches its certificates off the hypervisor, so it needs what does
+        # the fetching as much as it needs openvpn.
+        return qw{openvpn openssh-client rsync};
     }
     die "Unsupported packager";
 }

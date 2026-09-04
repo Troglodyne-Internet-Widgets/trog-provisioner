@@ -204,7 +204,7 @@ foreach my $recipe (@available) {
 # hours later, at the point where it had already been told the build succeeded.
 subtest 'every rsync off the hypervisor names it' => sub {
     my %seen;
-    foreach my $recipe (qw{data adminconfig makefile}) {
+    foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
         foreach my $tt ("$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt") {
             next unless -f $tt;
             # Configured the way new_config configures it, bridge and all;
