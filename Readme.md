@@ -270,6 +270,41 @@ as a version problem — it is a constant that is not exported, or a call the fa
 side does not implement, blamed on whatever was being attempted at the time.
 Compared on major.minor; a patch release apart is fine.
 
+### When a guest will not boot
+
+`bin/provision` can only tell you a guest never asked for an address.  A guest
+that never boots has no lease, no ssh and no logs to go and get, so there is
+nothing to read.  `bin/debug_boot` is how you read it anyway.
+
+Start with the console.  It points the guest's serial port at a file on the
+hypervisor, restarts it, and hands back every line the kernel and systemd
+printed — as text, from the first line of firmware:
+
+```
+bin/debug_boot --console vm.example.com
+```
+
+A hang is the last line before the silence.  `--fetch` re-reads that capture
+without another restart, and `--shot` grabs the screen as it is now.
+
+With libguestfs on the hypervisor, you can go further without booting anything:
+
+```
+bin/debug_boot --cat vm.example.com /var/log/cloud-init.log
+bin/debug_boot --ls  vm.example.com /etc/netplan
+bin/debug_boot --single vm.example.com     # then --vnc for the tunnel
+```
+
+`--single` writes `single` onto the kernel command line in the guest's own
+grub.cfg and starts it, so it comes up in rescue mode by itself — no five second
+window to catch and no keystrokes to get right.  The guest has to be off first,
+since it is a write to its disk.  `bin/preflight` says whether libguestfs is
+there; without it, `--hold` turns on the firmware boot menu and `--keys` sends
+keystrokes, which is holding ESC by hand and about as reliable.
+
+`--console`, `--hold` and `--single` all change something.  `--restore` puts the
+serial port, the boot menu and the kernel command line all back.
+
 ### Nuking a wedged storage pool
 
 A storage pool can get into a state nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:

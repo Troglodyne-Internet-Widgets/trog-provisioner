@@ -14,9 +14,11 @@ templates produce text; it says nothing about whether the packages exist, the
 service starts, the firewall lets it out, or the Makefile target succeeds. The
 only thing that answers those is a guest.
 
-Use this when making or changing a recipe. Everything below is a helper in
-`.claude/skills/provisioning-recipes/scripts/` — run them, don't reimplement
-them.
+Use this when making or changing a recipe. Everything below is either a tool in
+`bin/` or a helper in `.claude/skills/provisioning-recipes/scripts/` — run them,
+don't reimplement them. The split is whether it is useful outside this
+procedure: `bin/preflight` and `bin/debug_boot` are, the scratch configuration
+and its teardown are not.
 
 ## Before anything else
 
@@ -122,14 +124,14 @@ an unrelated network problem.
 
 `collect_artifacts` needs a guest with a shell. A guest that never boots has no
 lease, no ssh and no logs, and `bin/provision` can only tell you it never asked
-for an address. `scripts/debug_boot` is for that.
+for an address. `bin/debug_boot` is for that.
 
 **Start with `--console`.** It points the guest's serial port at a file on the
 hypervisor, restarts it, and hands back every line the kernel and systemd
 printed — as text, greppable, from the first line of firmware:
 
 ```
-.claude/skills/provisioning-recipes/scripts/debug_boot --console "$DOMAIN"
+bin/debug_boot --console "$DOMAIN"
 ```
 
 A hang is the last line before the silence. This beats screenshots, which show
@@ -140,8 +142,8 @@ capture without another restart; `--shot` grabs the screen as it is now.
 or even be running:
 
 ```
-debug_boot --cat "$DOMAIN" /var/log/cloud-init.log
-debug_boot --ls  "$DOMAIN" /etc/netplan
+bin/debug_boot --cat "$DOMAIN" /var/log/cloud-init.log
+bin/debug_boot --ls  "$DOMAIN" /etc/netplan
 ```
 
 **To get a shell on a guest that will not finish booting**, `--single` writes

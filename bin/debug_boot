@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-package Trog::Skill::DebugBoot;
+package Trog::Bin::DebugBoot;
 
 #ABSTRACT: Watch a guest boot, and stop it at the boot menu when it will not.
 
@@ -26,24 +26,24 @@ debug_boot - watch a guest boot, and stop it at the boot menu when it will not
 
 =head1 SYNOPSIS
 
-    debug_boot --console vm.test      # restart it, capture the whole boot as text
-    debug_boot --fetch   vm.test      # read the capture again without restarting
-    debug_boot --hold    vm.test      # restart it and stop at the boot menu
-    debug_boot --shot    vm.test      # what is on the screen right now
-    debug_boot --vnc     vm.test      # how to get a VNC session to it
-    debug_boot --keys    vm.test KEY_ESC KEY_DOWN KEY_ENTER
-    debug_boot --restore vm.test      # put the domain back how it was
+    bin/debug_boot --console vm.test  # restart it, capture the whole boot as text
+    bin/debug_boot --fetch   vm.test  # read the capture again without restarting
+    bin/debug_boot --hold    vm.test  # restart it and stop at the boot menu
+    bin/debug_boot --shot    vm.test  # what is on the screen right now
+    bin/debug_boot --vnc     vm.test  # how to get a VNC session to it
+    bin/debug_boot --keys    vm.test KEY_ESC KEY_DOWN KEY_ENTER
+    bin/debug_boot --restore vm.test  # put the domain and the disk back
 
-    debug_boot --cat    vm.test /var/log/cloud-init.log   # off its disk, powered off
-    debug_boot --ls     vm.test /etc/netplan
-    debug_boot --single vm.test       # boot it single-user, no keystrokes involved
+    bin/debug_boot --cat    vm.test /var/log/cloud-init.log   # off its disk
+    bin/debug_boot --ls     vm.test /etc/netplan
+    bin/debug_boot --single vm.test   # boot it single-user, no keystrokes involved
 
 =head1 DESCRIPTION
 
 A guest that provisions and then misbehaves leaves logs, and
-C<collect_artifacts> fetches them.  A guest that never boots leaves nothing at
-all: no lease, no ssh, no log to collect, and C<bin/provision> can only say that
-it never asked for an address.
+the provisioning-recipes skill fetches them.  A guest that never boots leaves
+nothing at all: no lease, no ssh, no log to collect, and C<bin/provision> can
+only say that it never asked for an address.
 
 This is for that case.
 
