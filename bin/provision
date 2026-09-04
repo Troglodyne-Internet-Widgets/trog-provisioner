@@ -127,6 +127,7 @@ sub _readable {
 sub main {
     my @args = @_;
 
+    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
     my ($reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap);
@@ -359,8 +360,7 @@ sub provision_domain {
     if ($reuse) {
         my $old_ssh_ip = $hv->guest_ssh_ip($config, $old_ip);
         return ($reuser, $old_ssh_ip) if $dryrun;
-        #$old_ip = $reuse;
-
+    
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
         # Otherwise we'll use the agent.

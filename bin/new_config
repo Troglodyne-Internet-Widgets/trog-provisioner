@@ -13,7 +13,6 @@ no warnings qw{experimental};
 use feature qw{state};
 use re '/aa';
 
-use FindBin;
 use FindBin::libs;
 
 use YAML::XS;
@@ -35,7 +34,6 @@ use Trog::Config();
 use File::Copy qw{copy};
 use Hash::Merge();
 use File::Find();
-use FindBin::libs;
 
 # For secret getting/setting
 use Scalar::Util qw{looks_like_number};
@@ -585,8 +583,7 @@ sub handle_domain {
     $global_config->{transfer_user}   = $transfer_user;
     $global_config->{hv_ssh_port}     = $hv_ssh_port;
 
-    ## no critic(Subroutines::ProhibitAmbiguousFunctionCalls)
-    my $do            = Provisioner::Recipe::data->new(%provisioner_opts);
+    my $do            = 'Provisioner::Recipe::data'->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
     my @tests = $do->tests();
     mkdir "$cfg_dir/t";
@@ -895,6 +892,7 @@ sub pack_scripts {
         close $probe;
         copy("$from/$script", "$to/$script")
           or die "Could not copy $script into $to: $!\n";
+        ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
         chmod( (stat("$from/$script"))[2] & 07777, "$to/$script" );
         push @packed, "scripts/$script";
     }

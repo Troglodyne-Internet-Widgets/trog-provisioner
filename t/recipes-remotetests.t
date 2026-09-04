@@ -14,6 +14,8 @@ use FindBin::libs;
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 use YAML;
 use File::Find;
@@ -60,7 +62,7 @@ mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
 mkdir "$tmpdir/data/backup.test.test";
 mkdir "$tmpdir/data/backupdestination.test.test";
-system( 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', "$tmpdir/data/backup.test.test/backup.rsa", '-N', '', '-q' );
+system( qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", '-N', '', '-q' );
 die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
 File::Copy::copy("$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa");
 File::Touch::touch("$tmpdir/dotfiles/test");

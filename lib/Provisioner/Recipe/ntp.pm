@@ -65,11 +65,13 @@ sub args {
                 minItems => 1,
                 items    => { type => 'string' },
                 default  => [
-                    'ntp.ubuntu.com',
-                    '0.pool.ntp.org',
-                    '1.pool.ntp.org',
-                    '2.pool.ntp.org',
-                    '3.pool.ntp.org',
+                    qw{
+                      ntp.ubuntu.com
+                      0.pool.ntp.org
+                      1.pool.ntp.org
+                      2.pool.ntp.org
+                      3.pool.ntp.org
+                    }
                 ],
             },
             makestep => { type => 'string', default => '1.0 3' },

@@ -8,7 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-use List::Util qw{any};
 use UUID ();
 
 use parent qw{Provisioner::Recipe};

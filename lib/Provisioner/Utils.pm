@@ -11,9 +11,13 @@ use re '/aa';
 use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
+# Named as strings in the dispatch table below, never as code, so nothing static
+# can see that loading them is the whole point.
+## no critic (ProhibitUnusedImports)
 use Crypt::PK::Ed25519();
 use Crypt::PK::ECC();
 use Crypt::PK::RSA();
+## use critic
 
 # Helpers used across various modules
 

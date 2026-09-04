@@ -15,6 +15,8 @@ use FindBin::libs;
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 
 use Test::More;
@@ -92,7 +94,7 @@ sub renders_ok {
 
 # Test that a recipe dies when a required field is absent.
 # $extra should include all fields needed EXCEPT $field.
-# We explicitly pass $field => undef to shadow any default in %G.
+# The field is passed as undef on purpose, to shadow any default in %G.
 sub rejects_missing {
     my ( $name, $extra, $field, $desc ) = @_;
     $desc //= "$name rejects missing $field";
@@ -109,7 +111,7 @@ sub rejects_missing {
 my $tmp = tempdir( CLEANUP => 1 );
 my $ddir = "$tmp/test.test.test";
 mkdir $ddir;
-system( 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', "$ddir/key.rsa", '-N', '', '-q' );
+system( qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", '-N', '', '-q' );
 
 # Build list of known modules with required input data
 my %required_config = (
@@ -271,13 +273,13 @@ rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn', 
 # ntp: validate enforces server list constraints
 # ----------------------------------------------------------------
 subtest 'ntp rejects empty server list' => sub {
-    my $r = Provisioner::Recipe::ntp->new(%PROV);
+    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => [] ) };
     ok( $res, 'ntp dies with empty servers list' );
 };
 
 subtest 'ntp rejects non-array servers' => sub {
-    my $r = Provisioner::Recipe::ntp->new(%PROV);
+    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => 'not-an-array' ) };
     ok( $res, 'ntp dies when servers is not an ARRAY' );
 };
@@ -286,7 +288,7 @@ subtest 'ntp rejects non-array servers' => sub {
 # ufw: validate enforces port_forward structure
 # ----------------------------------------------------------------
 subtest 'ufw rejects malformed port_forwards' => sub {
-    my $r = Provisioner::Recipe::ufw->new(%PROV);
+    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
     my $res = exception { $r->render( %G, port_forwards => [ { from => 80 } ] ) };
     ok( $res, 'ufw dies when port_forward entry missing to' );
 };
@@ -303,7 +305,7 @@ renders_ok( 'mail', {
 # ----------------------------------------------------------------
 subtest 'matrix homeserver.yaml includes redis section when redis recipe is loaded' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -327,7 +329,7 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
 
 subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loaded' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -345,7 +347,7 @@ subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loa
 
 subtest 'matrix homeserver.yaml includes redis password when redis_password is set' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = Provisioner::Recipe::matrix->new(%PROV);
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',

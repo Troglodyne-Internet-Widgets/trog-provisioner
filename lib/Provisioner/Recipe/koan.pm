@@ -11,7 +11,6 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use Crypt::PRNG();
-use List::Util qw{any};
 
 =head1 Provisioner::Recipe::koan
 

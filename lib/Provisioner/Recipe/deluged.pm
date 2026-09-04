@@ -8,7 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-use List::Util qw{any};
 use parent qw{Provisioner::Recipe};
 
 =head1 Provisioner::Recipe::deluged

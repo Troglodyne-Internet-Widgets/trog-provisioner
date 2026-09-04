@@ -10,7 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-use List::Util qw{any};
 use Crypt::PRNG();
 
 =head1 Provisioner::Recipe::gogs
