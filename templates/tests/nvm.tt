@@ -4,7 +4,13 @@ use warnings;
 use Test::More;
 
 my $user = '[% user %]';
-my $home = "/home/$user";
+
+# passwd, not /home/$user: a service user's home is the domain directory and the
+# admin user's is under /home, and this recipe is used with both.  Guessing is
+# how the recipe itself came to write its .bashrc lines somewhere nothing read
+# them.
+chomp(my $home = `getent passwd $user | cut -d: -f6`);
+ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
