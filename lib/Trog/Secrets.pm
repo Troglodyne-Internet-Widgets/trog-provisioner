@@ -92,19 +92,24 @@ sub needed {
     return %found;
 }
 
-=head2 prompt
+=head2 prompt($message)
 
-Ask for the password to the database.
+Ask for a password, without echoing it.
+
+Here rather than anywhere else because this is where the asking already was,
+and one way of asking is better than two: L<Trog::Machine> wants the same thing
+when sudo on the far side turns out to need a password.
 
 =cut
 
 sub prompt {
-    my ($class) = @_;
+    my ($class, $message) = @_;
+    $message //= 'Enter password:';
 
     # IO::Prompter and IO::Prompt fall out with each other over @ARGV unless it
     # is flattened first.
     local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
-    return IO::Prompter::prompt('Enter password:', -echo => '*');
+    return IO::Prompter::prompt($message, -echo => '*');
 }
 
 =head2 read($file, $password, %needed)

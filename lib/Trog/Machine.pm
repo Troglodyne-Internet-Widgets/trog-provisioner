@@ -13,7 +13,7 @@ use File::Slurper();
 use IPC::Run3();
 use File::Slurper::Temp();
 use Net::OpenSSH::More();
-use Term::ReadKey();
+use Trog::Secrets();
 
 =head1 NAME
 
@@ -241,13 +241,9 @@ sub _ask_for_sudo_password {
       . "in /etc/sudoers.d/, via visudo.\n"
       unless $self->_have_terminal();
 
-    print {*STDERR} '[sudo] password for ' . ($self->ssh_user // 'you') . ' on ' . $self->describe . ': ';
-    Term::ReadKey::ReadMode('noecho');
-    my $password = <STDIN>;
-    Term::ReadKey::ReadMode('restore');
-    print {*STDERR} "\n";
+    my $password = Trog::Secrets->prompt(
+        '[sudo] password for ' . ($self->ssh_user // 'you') . ' on ' . $self->describe . ':');
 
-    chomp $password if defined $password;
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 
     return $self->_remember($password);

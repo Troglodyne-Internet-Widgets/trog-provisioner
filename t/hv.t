@@ -476,6 +476,37 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
     like($@, qr/\broot\b/,                                   'for the right user');
 };
 
+subtest 'the sudo password is asked for the same way every other one is' => sub {
+    Trog::HV->forget();
+    Trog::Machine->forget_sudo_passwords();
+    my $hv = fresh(uri => 'qemu+ssh://root@hv/system');
+
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine(new => sub { bless {}, shift });
+    $mock->redefine(capture2 => sub {
+        my ($self, $opts, @cmd) = @_;
+        # -n is the probe; it fails by design, which is what sends us to ask.
+        if (grep { $_ eq '-n' } @cmd) { $? = 1 << 8; return ('', "sudo: a password is required\n") }
+        $? = 0;
+        return ('', '');
+    });
+
+    my $tty = Test::MockModule->new('Trog::Machine');
+    $tty->redefine(_have_terminal => sub { 1 });
+
+    # One way of asking, in Trog::Secrets, rather than a second one here with
+    # Term::ReadKey doing its own echo suppression.
+    my @asked;
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine(prompt => sub { push @asked, $_[1]; 'hunter2' });
+
+    quietly(sub { $hv->run_sudo(qw{true}) });
+
+    is(scalar @asked, 1, 'asked once');
+    like($asked[0], qr/\[sudo\] password for root/, 'saying who it is for');
+    like($asked[0], qr/hv/,                           'and which machine');
+};
+
 # --- Building things, which is what terraform used to do ----------------------
 subtest 'a disk is an overlay on the base image' => sub {
     my $hv = fresh(uri => 'qemu+ssh://root@hv/system');
