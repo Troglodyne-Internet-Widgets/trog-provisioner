@@ -59,12 +59,12 @@ subtest 'abstract() reads the file rather than loading it' => sub {
     is_deeply(\@missing, [], 'every recipe has an ABSTRACT line') or diag "no abstract: @missing";
 };
 
-subtest 'properties() reads both spellings' => sub {
+subtest 'properties() reads what the validator reads, and nothing else' => sub {
     is_deeply(Provisioner::Cookbook->properties({ properties => { a => {} } }), { a => {} }, 'properties');
 
-    # Some recipes say parameters, which OpenAPIv3 ignores -- so those fields
-    # are not validated at all.  The scaffold still has to see them.
-    is_deeply(Provisioner::Cookbook->properties({ parameters => { b => {} } }), { b => {} }, 'parameters');
+    # Deliberately not 'parameters'.  OpenAPIv3 ignores it, so offering those
+    # fields in a scaffold would claim the recipe checks something it does not.
+    is_deeply(Provisioner::Cookbook->properties({ parameters => { b => {} } }), {}, 'not parameters');
     is_deeply(Provisioner::Cookbook->properties({}),    {}, 'neither');
     is_deeply(Provisioner::Cookbook->properties(undef), {}, 'nothing at all');
 };
@@ -194,5 +194,34 @@ subtest 'every real recipe can be loaded and scaffolded' => sub {
     }
     is_deeply(\@broken, [], 'all of them') or diag join "\n", @broken;
 };
+
+subtest 'no recipe declares its fields somewhere the validator will not look' => sub {
+    # An object schema spells its fields "properties".  Spell it "parameters"
+    # and OpenAPIv3 skips the lot: the recipe looks validated, accepts anything,
+    # and says nothing.  Seven did.  This is why they do not any more.
+    my $http = Test::MockModule->new('HTTP::Tiny');
+    $http->redefine(get => sub { { success => 0, status => 599, content => '' } });
+
+    my @wrong;
+    foreach my $name (Provisioner::Cookbook->names()) {
+        my %spec = Provisioner::Cookbook->spec($name);
+        push @wrong, map { "$name: $_" } stray_parameters(\%spec, q{});
+    }
+    is_deeply(\@wrong, [], 'every schema says properties') or diag join "\n", @wrong;
+};
+
+# Anywhere in a schema that a "parameters" key sits where "properties" belongs.
+sub stray_parameters {
+    my ($node, $path) = @_;
+
+    my $ref = ref $node;
+    return map { stray_parameters($node->[$_], "$path\[$_]") } 0 .. $#$node if $ref eq 'ARRAY';
+    return () unless $ref eq 'HASH';
+
+    my @found;
+    push @found, ($path eq q{} ? '(top level)' : $path) if exists $node->{parameters};
+    push @found, map { stray_parameters($node->{$_}, $path eq q{} ? $_ : "$path.$_") } sort keys %$node;
+    return @found;
+}
 
 done_testing();

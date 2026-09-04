@@ -45,7 +45,7 @@ sub args {
     return (
         type => "object",
         required => [qw{from to}],
-        parameters => {
+        properties => {
             from => { type => "string" },
             to   => { type => "string" },
         },

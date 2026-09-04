@@ -164,23 +164,22 @@ sub spec {
 
 The properties of an object schema.
 
-Most recipes spell this C<properties>, which is what OpenAPIv3 calls it and
-what the validator reads.  Some spell it C<parameters>, which the validator
-ignores -- meaning those fields are not actually being validated.  That is
-worth fixing in the recipes; until it is, both are read here, because a
-scaffold that skipped them would be missing exactly the fields nothing else is
-checking either.
+Only C<properties>, which is what OpenAPIv3 calls it and what the validator
+reads.  Seven recipes used to spell it C<parameters>, which the validator
+ignores -- so those fields were not being checked at all.  They are fixed, and
+t/recipes.t will not let another one in.
+
+Reading both was tempting and would have been wrong: a scaffold that offers
+fields the validator does not look at is telling you the recipe accepts
+something it will not actually check.  Better to agree with the validator and
+have the misspelling show up as an empty schema.
 
 =cut
 
 sub properties {
     my ($class, $spec) = @_;
     return {} unless ref $spec eq 'HASH';
-
-    foreach my $key (qw{properties parameters}) {
-        return $spec->{$key} if ref $spec->{$key} eq 'HASH';
-    }
-    return {};
+    return ref $spec->{properties} eq 'HASH' ? $spec->{properties} : {};
 }
 
 =head2 PLACEHOLDER

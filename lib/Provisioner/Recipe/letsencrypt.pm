@@ -66,7 +66,7 @@ sub args {
         properties => {
             registrar              => {
                 type => 'object',
-                parameters => {
+                properties => {
                     type => { type => "string" },
                     user => { type => "string" },
                     key  => { type => "string" },

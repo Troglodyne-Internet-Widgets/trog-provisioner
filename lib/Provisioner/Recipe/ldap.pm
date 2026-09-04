@@ -55,7 +55,7 @@ sub args {
                 default => [],
                 items => {
                     type => 'object',
-                    parameters => {
+                    properties => {
                         gecos         => { type => 'string' },
                         name          => { type => 'string' },
                         shell         => { type => 'string' },

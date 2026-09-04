@@ -59,7 +59,7 @@ sub args {
                 type  => 'array',
                 items => {
                     type => 'object',
-                    parameters => {
+                    properties => {
                         type       => { type => 'string' },
                         options    => { type => 'string' },
                         mountpoint => { type => 'string' },
@@ -71,7 +71,7 @@ sub args {
                 type  => 'array',
                 items => {
                     type => 'object',
-                    parameters => {
+                    properties => {
                         type       => { type => 'string' },
                         options    => { type => 'string' },
                         mountpoint => { type => 'string' },

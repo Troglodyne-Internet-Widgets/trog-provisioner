@@ -101,7 +101,7 @@ sub args {
             relay  => {
                 type       => "object",
                 default => {},
-                parameters => {
+                properties => {
                     host => { type => "string" },
                     port => { type => "integer", minimum => 0 },
                 },

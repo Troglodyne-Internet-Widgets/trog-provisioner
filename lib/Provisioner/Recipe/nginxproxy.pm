@@ -96,7 +96,7 @@ sub args {
                 description => "vhost vars by port number",
                 additionalProperties => {
                     type       => 'object',
-                    parameters => {
+                    properties => {
                         proxy_uri      => { type => 'string' },
                         static_dir     => { type => 'string' },
                         auth_statics   => { type => 'string' },

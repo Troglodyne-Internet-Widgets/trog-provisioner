@@ -298,7 +298,7 @@ sub args {
                 additionalProperties => {
                     type => 'object',
                     required => [qw{github_url}],
-                    parameters => {
+                    properties => {
                         cli_provider => { type => 'string', enum => [qw{claude codex copilot local}], default => 'claude' },
                         github_url   => { type => 'string' },
                         base_branch  => { type => 'string', default => 'master' },
