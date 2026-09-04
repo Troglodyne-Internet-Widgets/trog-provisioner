@@ -11,7 +11,12 @@ server {
     [% END -%]
     server_tokens off;
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+[%# Space separated, and no www of its own: server_name is a space separated
+    list, so joining with a comma made a server name with a comma stuck to it
+    that matches nothing, and new_config already appends www and mail to
+    the aliases of every domain -- so naming www here as well made nginx report a
+    conflicting server name and ignore the second one. -%]
+    server_name [% domain %] [% full_aliases.join(' ') %];
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
@@ -28,7 +33,12 @@ server {
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+[%# Space separated, and no www of its own: server_name is a space separated
+    list, so joining with a comma made a server name with a comma stuck to it
+    that matches nothing, and new_config already appends www and mail to
+    the aliases of every domain -- so naming www here as well made nginx report a
+    conflicting server name and ignore the second one. -%]
+    server_name [% domain %] [% full_aliases.join(' ') %];
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;

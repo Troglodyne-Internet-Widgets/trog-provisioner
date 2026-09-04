@@ -38,4 +38,38 @@ foreach my $block (split m/^server \{/m, $vhost) {
     unlike($block, qr/proxy_pass/,              'and does not proxy');
 }
 
+# -f passes on an empty file.  This whole template is one loop over vhosts, so
+# anything that leaves that loop with nothing to iterate -- a flat-interface
+# config, or a stray apostrophe in a template comment, which Xslate lexes as a
+# string opener and swallows the rest of the file on -- writes a valid, empty,
+# entirely silent vhost.
+ok(length($vhost) > 0, 'the vhost is not empty');
+like($vhost, qr/^server \{/m, 'and has at least one server block in it');
+
+# nginx wants http://unix:<path>:<uri>.  install_dir already starts with a
+# slash, so this built unix://opt/... with the path doubled and no closing
+# colon, and nginx refused the entire configuration with "no closing \":\" in
+# unix domain socket".
+unlike($vhost, qr{unix://}, 'no doubled slash after unix:');
+foreach my $pass ($vhost =~ m{^\s*proxy_pass\s+(http://unix:\S+);}gm) {
+    like($pass, qr{^http://unix:/[^:]+:\S*$}, "$pass terminates the socket path with a colon");
+}
+
+# server_name is a space separated list.  Joining the aliases with a comma made
+# a name with a comma stuck to it, which matches nothing and is never reported.
+foreach my $names ($vhost =~ m/^\s*server_name\s+([^;]+);/gm) {
+    unlike($names, qr/,/, 'no comma in server_name');
+
+    # www is appended to every domain's aliases already; naming it here as well
+    # made nginx report a conflicting server name and ignore one of them.
+    my %seen;
+    my @dupes = grep { $seen{$_}++ } split ' ', $names;
+    is_deeply(\@dupes, [], 'and no name listed twice') or diag $names;
+}
+
+# Plain HTTP on the plain HTTP port.  ssl defaulted to true for every vhost, so
+# a port 80 vhost that asked for neither ssl nor a redirect spoke TLS on 80.
+unlike($vhost, qr/^\s*listen\s+(\[::\]:)?80\b[^;]*\bssl\b/m,
+    'port 80 does not claim ssl') or diag $vhost;
+
 done_testing();

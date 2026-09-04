@@ -107,7 +107,12 @@ sub args {
                         # thing redirected to, and defaulting both this and ssl
                         # to true made every vhost claim to be both.
                         ssl_redirect   => { type => 'boolean' },
-                        ssl            => { type => 'boolean', default => 1 },
+                        # No default here either, for the same reason: this one
+                        # was left defaulting to true, so a port 80 vhost that
+                        # asked for neither -- tcms and tpsgi both do -- came
+                        # out as `listen 80 ssl` and spoke TLS on the plain HTTP
+                        # port.  Every recipe that wants it says so.
+                        ssl            => { type => 'boolean' },
                     },
                 },
             },
@@ -153,7 +158,14 @@ sub enrich {
             my $uri = $vopts->{proxy_uri};
             die "Must set proxy_uri in [nginxproxy] section" if !$uri;
             # let's make sure the proxy_uri accepts either a file or an actual uri
-            $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri"
+            # nginx wants http://unix:<path>:<uri> -- the socket path is
+            # terminated by a colon and what follows it is the URI.  This built
+            # `http://unix://opt/domains/<dom>/run/app.sock`: install_dir already
+            # begins with a slash, so the path came out doubled, and with no
+            # closing colon nginx refuses the whole file with "no closing \":\"
+            # in unix domain socket".  Every guest proxying to a socket failed
+            # to start nginx.
+            $vopts->{proxy_uri} = "http://unix:$opts{install_dir}/$opts{domain}/$uri:/"
                 if $uri && $uri !~ m/^http/;
         }
     }
