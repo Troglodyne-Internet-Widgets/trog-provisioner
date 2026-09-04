@@ -1,6 +1,11 @@
 # Setup the domain and its aliases
 mv nginx.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
-systemctl restart nginx
+# Queued, not immediate.  The nginx recipe is a dependency of this one, and a
+# dependency is ordered after the thing that dragged it in -- so at this point
+# conf.d/global.conf is not installed yet, and this vhost's proxy block refers
+# to $connection_upgrade, which that file's map defines.  Restarting here fails
+# on `unknown "connection_upgrade" variable` every time.
+[% script_dir %]/queue_postrun_task systemctl restart nginx
 # Get ready for ACME
 mkdir -p [% install_dir %]/[% domain %]/www/.well_known; /bin/true
 chown [% user %]:www-data [% install_dir %]/[% domain %]/www/.well_known
