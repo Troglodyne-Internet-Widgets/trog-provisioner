@@ -157,6 +157,10 @@ sub args {
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
         properties => {
             server_name               => { type => 'string' },
+            # Listed on the guest's index page.  The template used it before
+            # anything declared it, and its loop said chan while its body said
+            # channel, so every suggestion came out as #@domain.
+            channels                  => { type => 'array', items => { type => 'string' }, default => [] },
             admin_user                => { type => 'string', default => 'admin' },
             admin_password            => { type => 'string' },
             smtp_host                 => { type => 'string' },

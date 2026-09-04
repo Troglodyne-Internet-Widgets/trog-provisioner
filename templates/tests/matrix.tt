@@ -21,6 +21,14 @@ ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain
 ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
     'and matrix did not write a competing one');
 
+# The index page lists the channels the recipe was given.  Its loop said chan
+# and its body said channel, so every entry rendered as #@domain.
+my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
+unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
+[% FOREACH chan IN channels %]
+like($index, qr/#\Q[% chan %]\E\@/, 'channel [% chan %] is listed');
+[% END %]
+
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
 
