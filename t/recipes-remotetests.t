@@ -114,11 +114,16 @@ ns2=ns2.test.test";
 
 #XXX hate having to hardcode this, should really make this a toplevel thing in recipes
 my %recipes_raw = (
-    imagemagick =>  { version => '7.1.0' },
+    # Both of these are full releases on purpose.  The archives they come from
+    # publish one artifact per release, so a series like 7.1.0 or 10.11 is a
+    # 404 the recipe cannot do anything useful with -- which is why both
+    # recipes now insist on the whole version, and why these fixtures have to
+    # look like the real thing.
+    imagemagick =>  { version => '7.1.0-48' },
     mariadb => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
-        version  => '10.11',
+        version  => '10.11.6',
     },
     tpsgi => { routers => ['app.psgi'] },
     tcms =>  { tcms_dir => 'tcms' },
