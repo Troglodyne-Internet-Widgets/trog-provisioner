@@ -3,6 +3,18 @@ use strict;
 use warnings;
 use Test::More;
 
+# The binary is downloaded rather than packaged, so check it arrived before
+# anything else: the release used to be fetched from the GitHub mirror, which
+# has never published one, and every provision died on a 404 here.
+ok(-x '/usr/local/bin/garage', 'the garage binary is installed and executable');
+
+my $version = `/usr/local/bin/garage --version 2>/dev/null`;
+like($version, qr/\Q[% version %]\E/, 'and is the version this recipe pinned');
+
+# curl writes to .tmp and moves it into place; one left behind means the
+# download half-finished and the guest is running whatever was there before.
+ok(!-e '/usr/local/bin/garage.tmp', 'no half-downloaded binary left behind');
+
 my $status = `systemctl is-active garage 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'garage is running');
