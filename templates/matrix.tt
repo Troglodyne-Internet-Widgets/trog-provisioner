@@ -52,7 +52,7 @@ for i in {1..30}; do
         echo "Matrix Synapse is ready"
         break
     fi
-    echo "Waiting for Matrix Synapse to start... ($i/30)"
+    echo "Waiting for Matrix Synapse to start... ($$i/30)"
     sleep 2
 done
 # Register admin user if not exists

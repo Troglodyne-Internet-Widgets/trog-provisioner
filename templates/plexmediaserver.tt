@@ -23,11 +23,11 @@ chmod 0750 '[% dir %]'
 [% END %]
 # Configure Plex Preferences.xml with SSL cert and account info
 PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'
-mkdir -p "$PREFS_DIR"
+mkdir -p "$$PREFS_DIR"
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
 PLEX_USER='[% plex_login_name %]' \
 PLEX_MAIL='[% admin_mail %]' \
-PREFS_PATH="$PREFS_DIR/Preferences.xml" \
+PREFS_PATH="$$PREFS_DIR/Preferences.xml" \
 python3 -c "
 import xml.etree.ElementTree as ET, os
 p = os.environ['PREFS_PATH']
@@ -37,8 +37,8 @@ root.set('PlexOnlineUsername', os.environ['PLEX_USER'])
 root.set('PlexOnlineMail', os.environ['PLEX_MAIL'])
 ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)
 "
-chown -R plex:[% admin_user %] "$PREFS_DIR"
-chmod 0640 "$PREFS_DIR/Preferences.xml"
+chown -R plex:[% admin_user %] "$$PREFS_DIR"
+chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
 [% script_dir %]/queue_postrun_task systemctl start plexmediaserver
