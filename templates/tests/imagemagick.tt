@@ -3,8 +3,29 @@ use strict;
 use warnings;
 use Test::More;
 
-my $convert = `which convert 2>/dev/null`;
-chomp $convert;
-ok($convert, 'convert command is available');
+my $wanted = '[% version %]';
+( my $base = $wanted ) =~ s/-[0-9]+$//;
+
+# The whole point of this recipe is the perl bindings, and `which convert` says
+# nothing about them.  The perl they are built against is the one the perl
+# recipe installs under /opt/perl5; imagemagick never declared it needs that
+# recipe, so on a guest without one build_imagick.sh found no directory, took
+# the empty name it got, and ran every step against "/opt/perl5//bin/perl".
+my ($perl) = glob('/opt/perl5/*/bin/perl');
+ok( $perl && -x $perl, 'there is a perl under /opt/perl5 to build against' );
+
+SKIP: {
+    skip 'no perl under /opt/perl5', 1 unless $perl && -x $perl;
+
+    my $bindings = `$perl -MImage::Magick -e 'print \$Image::Magick::VERSION' 2>&1`;
+    like( $bindings, qr/\Q$base\E/, "Image::Magick loads under $perl and reports $base" )
+        or diag $bindings;
+}
+
+# And the binaries the build installed, at the version the recipe asked for --
+# not whatever a package happened to leave on the PATH.
+my $magick = `magick -version 2>/dev/null` || `convert -version 2>/dev/null`;
+like( $magick, qr/\QImageMagick $wanted\E/, "the installed imagemagick is $wanted" )
+    or diag $magick;
 
 done_testing();
