@@ -269,7 +269,7 @@ sub set_secrets {
             if (looks_like_number($component)) {
                 $to_eval .= "[$component]";
             } else {
-                $to_eval .= "{$component}";
+                $to_eval .= "{'$component'}";
             }
         }
         $to_eval .= ' = $replacement;';
