@@ -1,0 +1,4 @@
+echo "Autorestart"
+[% IF autorestart %]
+mv autorestart_cron /etc/cron.d/[% domain %]-autorestart
+[% END -%]

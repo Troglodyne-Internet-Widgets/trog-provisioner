@@ -1,0 +1,14 @@
+#!/bin/bash
+
+TARGET=$1
+LINK_NAME=$2
+
+# Mount things inside a chroot
+mkdir -p $LINK_NAME
+cp /etc/fstab /tmp/fstab.new
+echo "$TARGET $LINK_NAME none defaults,bind 0 0" >> /tmp/fstab.new
+sort < /tmp/fstab.new | uniq | grep -o '^[^#]*' > /tmp/fstab.newer
+chown root:root /tmp/fstab.newer
+mv /etc/fstab /etc/fstab.bak
+mv /tmp/fstab.newer /etc/fstab
+mount $TARGET

@@ -1,0 +1,38 @@
+<html>
+    <head>
+        <style>
+            body { background-color: #CCC; color: black; width: calc(100vw - 1rem); margin: 0; padding: 0; font-size: 1.5rem; }
+	    img { max-width: 30rem; }
+	    div { margin: auto; max-width: 50rem; }
+        </style>
+	<title>[% domain %] Chat Server</title>
+    </head>
+    <body>
+	<div>
+        <pre>
+[% domain %] Matrix chat server:
+****************************************
+Suggested Client: <a href="https://element.io" title="Element.io Client">Element</a>
+Other clients can be found at <a href="https://matrix.org" title="Matrix Home">the Matrix Homepage</a>
+
+Once you have loaded the client,
+use the below connection details.
+
+Connection Details
+  Home Server: https://[% domain %]:8448
+  Suggested Channels:
+    [% FOR chan IN channels %]
+    #[% channel %]@[% domain %]
+    [% END %]
+
+If you already have a matrix account on another
+home server, just connect to the channels above,
+as federation works just fine.
+
+Otherwise, new user registrations currently are open,
+though you will need to pay attention to a verification
+email from an address at our server.
+        </pre>
+	</div>
+    </body>
+</html>

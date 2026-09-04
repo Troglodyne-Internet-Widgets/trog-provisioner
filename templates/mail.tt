@@ -1,0 +1,185 @@
+# Housekeeping
+mkdir -p /mail/[% domain %]
+# opendkim
+mkdir -p /etc/opendkim/keys/[% domain %]
+mv TrustedHosts /etc/opendkim
+mv SigningTable /etc/opendkim
+mv KeyTable /etc/opendkim
+mv InternalHosts /etc/opendkim
+mv /etc/opendkim.conf /etc/opendkim.conf.orig
+mv opendkim.conf /etc/opendkim.conf
+chown opendkim:opendkim /etc/opendkim.conf
+# Generate the key if it does not exist, otherwise use the one you got.
+mv [% install_dir %]/[% domain %]/.mail/keys/* /etc/opendkim/keys/; /bin/true
+[ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
+chown -R opendkim:opendkim /etc/opendkim/
+chmod -R 0755 /etc/opendkim
+sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
+# Stash a copy in /mail owned by the admin for schlepping.
+cp -r /etc/opendkim/keys /mail/keys
+chown -R [% admin_user %]:[% admin_user %] /mail/keys
+mkdir /var/spool/postfix/opendkim
+chown opendkim:postfix /var/spool/postfix/opendkim
+chmod 0770 /var/spool/postfix/opendkim
+[% script_dir %]/queue_postrun_task systemctl restart opendkim
+# opendmarc
+mkdir -p /etc/opendmarc
+mv /etc/opendmarc.conf /etc/opendmarc.conf.orig
+mv opendmarc.conf /etc/opendmarc.conf
+mv ignore.hosts /etc/opendmarc
+chown -R opendmarc:opendmarc /etc/opendmarc/
+chown opendmarc:opendmarc /etc/opendmarc.conf
+mkdir /var/spool/postfix/opendmarc
+chown opendmarc:postfix /var/spool/postfix/opendmarc
+chmod 0770 /var/spool/postfix/opendmarc
+[% script_dir %]/queue_postrun_task systemctl restart opendmarc
+# update DNS records IFF we have a dns server locally
+[% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %] /mail/[% domain %]/default.private
+# dovecot
+# First, remove all the worse-than-useless foo in conf.d
+mv /etc/dovecot/conf.d /etc/dovecot/conf-available
+mkdir -p /etc/dovecot/conf.d
+mv dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
+mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
+sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
+mv mailpasswd /mail/[% domain %]/passwd
+[% script_dir %]/queue_postrun_task systemctl restart dovecot
+# Stash a copy of the mailnames, and restore it if necessary
+# TODO make the old one take precedence via configuration
+mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
+mv [% install_dir %]/[% domain %]/mailnames/* /mail/[% domain %]/; /bin/true
+chown -R dovecot:dovecot /mail/[% domain %]/
+# amvavisd-new
+mv 50-user /etc/amavis/conf.d/
+chown root:root /etc/amavis/conf.d/50-user
+[% script_dir %]/queue_postrun_task systemctl restart amavis
+# postfix
+mv aliases /etc/aliases
+chown root:root /etc/aliases
+chown root:root /etc/aliases.db
+newaliases
+mkdir -p /etc/postfix/header_checks
+mkdir -p /etc/postfix/virtual
+chmod 0755 /etc/postfix/virtual
+chmod 0755 /etc/postfix/header_checks
+# header shenanigans
+mv header_checks /etc/postfix/header_checks/[% domain %]
+chown -R root:root /etc/postfix/header_checks
+chown root:root /etc/postfix/virtual
+# user maps
+mv virtual_maps    /etc/postfix/virtual/maps
+chown root:root /etc/postfix/virtual/maps
+postmap /etc/postfix/virtual/maps
+# aliases
+mv virtual_aliases /etc/postfix/virtual/aliases
+chown root:root /etc/postfix/virtual/aliases
+postmap /etc/postfix/virtual/aliases
+# Relay maps
+mv sdd_relay_maps /etc/postfix
+chown root:root /etc/postfix/sdd_relay_maps
+postmap /etc/postfix/sdd_relay_maps
+# who relays where
+mv transport_maps /etc/postfix/transport_maps
+chown root:root /etc/postfix/transport_maps
+postmap /etc/postfix/transport_maps
+# Recipient access checks
+mv recipient_access_pcre /etc/postfix/recipient_access_pcre
+chown root:root /etc/postfix/recipient_access_pcre
+# Fix perms
+chmod -R 0600 /etc/postfix/virtual
+chmod -R 0600 /etc/postfix/header_checks
+chmod 0600 /etc/postfix/master.cf
+chmod 0600 /etc/postfix/sdd_relay_maps
+chmod 0600 /etc/postfix/recipient_access_pcre
+chmod 0600 /etc/postfix/transport_maps
+# configure main.cf -- most of the time the defaults are sane
+[% UNLESS ipv6 %]postconf -e -- "inet_protocols=ipv4"
+[% END -%]# basic stuff
+postconf -e -- "mydomain=[% domain %]"
+postconf -e -- "myhostname=mail.[% domain %]"
+postconf -e -- 'myorigin=$$mydomain'
+postconf -e -- 'mydestination=$$myhostname, localhost, [% FOREACH alias IN full_aliases.sort() %][% alias %], [% END %]'
+postconf -e -- "masquerade_domains=[% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %] [% END %]"
+# Sometimes when you are behind NAT this can trip you up -- not all routers are created equal.
+# Generally you will want to set this on if in a DC.
+# That's because you don't get put on RBLs for sending from multiple IPs
+[% IF bind_mainip %]
+postconf -e -- "smtp_bind_address=[% main_ip %]"
+[% END %]
+# Allow ez-tracing
+postconf -e -- "debugger_command=PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $process_id 2>&1 | logger -p mail.info) & sleep 5" 
+# vmailboxen
+postconf -e -- "virtual_mailbox_base=/mail"
+postconf -e -- "virtual_mailbox_domains=[% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %] [% END %]"
+postconf -e -- "virtual_mailbox_maps=hash:/etc/postfix/virtual/maps"
+postconf -e -- "virtual_alias_maps=hash:/etc/postfix/virtual/aliases"
+postconf -e -- "virtual_uid_maps=static:$$(id -u dovecot)"
+postconf -e -- "virtual_gid_maps=static:$$(id -u dovecot)"
+# Header checks
+postconf -e -- "header_checks=regexp:/etc/postfix/header_checks/[% domain %]"
+# We are not a relay
+postconf -e -- "mynetworks=127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128"
+# In case we use a relay
+postconf -e -- "sender_dependent_relayhost_maps=hash:/etc/postfix/sdd_relay_maps"
+postconf -e -- "transport_maps=hash:/etc/postfix/transport_maps"
+# Prevent SMTP smuggling
+postconf -e -- "smtpd_forbid_bare_newline=normalize"
+# Don't even talk to people we can't resolve or that are on RBLs
+postconf -e -- "smtpd_client_restrictions=permit_mynetworks, reject_unknown_reverse_client_hostname, reject_unknown_client_hostname, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, permit"
+# Prevent abusive behavior w/data
+postconf -e -- "smtpd_data_restrictions=reject_unauth_pipelining, permit"
+# Reject bad HELO
+postconf -e -- "smtpd_helo_restrictions=permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname, permit"
+# Don't accept mail that is FROM obviously bogus addrs when incoming.
+postconf -e -- "smtpd_sender_restrictions=permit_mynetworks, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit"
+# Tell SASL what accounts are on the server.
+postconf -e -- "smtpd_sender_login_maps=hash:/etc/postfix/virtual/maps"
+# Don't accept mail which is TO things that are either bogus or not on here when incoming.
+postconf -e -- "smtpd_recipient_restrictions=permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, check_recipient_access pcre:/etc/postfix/recipient_access_pcre, permit"
+# SSL
+postconf -e -- "smtpd_tls_cert_file=/etc/ssl/certs/[% domain %].pem"
+postconf -e -- "smtpd_tls_key_file=/etc/ssl/private/[% domain %].pem"
+# milters, ldas etc
+postconf -e -- "mailbox_transport = lmtp:unix:private/dovecot-lmtp"
+postconf -e -- "virtual_transport = lmtp:unix:private/dovecot-lmtp"
+postconf -e -- "content_filter = smtp-amavis:[127.0.0.1]:10024, spamassassin"
+postconf -e -- "milter_default_action=accept"
+postconf -e -- "smtpd_milters=local:opendkim/opendkim.sock,local:opendmarc/opendmarc.sock"
+postconf -e -- 'non_smtpd_milters=$$smtpd_milters'
+# SASL
+postconf -e -- "smtpd_sasl_type = dovecot"
+postconf -e -- "smtpd_sasl_path = private/auth"
+postconf -e -- "smtpd_sasl_auth_enable = yes"
+postconf -e -- "smtpd_sasl_security_options= noanonymous"
+postconf -e -- "smtpd_sasl_local_domain=$$myhostname"
+postconf -e -- "smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination"
+# master.cf shenanigans
+mv /etc/postfix/master.cf /etc/postfix/master.cf.orig
+mv master.cf /etc/postfix
+chown root:root /etc/postfix/master.cf
+chmod 0600 /etc/postfix/master.cf
+# Fix any bad postmap perms
+chmod 0644 /etc/postfix/virtual/*.db
+chmod 0644 /etc/postfix/*.db
+# Fix postfix's dumbass resolver copy grabbing a broken out of the box config (thank you systemd-resolved)
+[% script_dir %]/queue_postrun_task "cat /etc/resolv.conf > /var/spool/postfix/resolv.conf"
+[% script_dir %]/queue_postrun_task systemctl restart postfix
+# Setup autodiscover URIs
+mkdir -p '[% install_dir %]/autodiscover.[% domain %]/autodiscover'; /bin/true
+mv autodiscover.xml '[% install_dir %]/autodiscover.[% domain %]/autodiscover/'
+chown -R www-data:www-data  '[% install_dir %]/autodiscover.[% domain %]'
+chmod -R 0770 '[% install_dir %]/autodiscover.[% domain %]'
+[% IF modules.grep('nginxproxy').size() %]
+mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
+[% script_dir %]/queue_postrun_task systemctl reload nginx
+[%- END %]
+# Setup mailboxes and sieve scripts for the various users
+[% FOR name IN names.keys() %]
+test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && ln -s "/mail/[% domain %]/[% name %]/[% name %].sieve" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievc "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+[% FOR box IN names.$name.mailboxes %]
+doveadm mailbox create -u [% name %] [% box %]
+[% END -%]
+[% END -%]
+# Set up mail cron to run sa-learn etc
+install -m 0644 -o root -g root mailcron /etc/cron.d/[% domain %]-mailcron

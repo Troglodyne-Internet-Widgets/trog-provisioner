@@ -1,0 +1,16 @@
+[Unit]
+Description=Synapse Matrix homeserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matrix-synapse
+Group=matrix-synapse
+WorkingDirectory=/etc/matrix-synapse
+ExecStart=/usr/bin/python3 -m synapse.app.homeserver --config-path /etc/matrix-synapse/homeserver.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,423 @@
+#!/usr/bin/env perl
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+
+=head1 NAME
+
+t/recipes.t - every recipe renders, and refuses what it should
+
+=cut
+
+# A -f or -x in here is asserting on a file this test just made, in a temporary
+# directory nothing else can see.  There is no window for it to be wrong in, so
+# the TOCTOU policies have nothing to catch.
+## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
+
+use FindBin;
+use FindBin::libs;
+
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+
+use Test::More;
+use Test::NoWarnings;
+use Test::Fatal qw{exception};
+use File::Temp qw(tempdir);
+use IPC::Run3();
+use File::Find();
+use File::Slurper();
+use Text::Xslate();
+
+my $template_dir = "$FindBin::Bin/../templates";
+
+# Global vars bin/new_config injects into every template render.
+my %G = (
+    domain                     => 'test.test.test',
+    subdomain                  => 'test',
+    tld                        => 'test.test',
+    install_dir                => '/opt/domains',
+    data_source                => '/opt/data',
+    script_dir                 => '/root/bin',
+    user                       => 'www-data',
+    admin_user                 => 'admin',
+    admin_email                => 'admin@test.test',
+    main_ip                    => '192.168.1.100',
+    tld_ip                     => '192.168.1.1',
+    hv_ip                      => '192.168.122.1',
+    hv_ssh_port                => 22,
+    transfer_user              => 'transfer',
+    aliases                    => { test => ['www.test', 'mail.test'] },
+    full_aliases               => ['www.test.test.test'],
+    modules                    => [],
+    ipmap                      => { test => '192.168.1.100' },
+    nameservers                => {},
+    packager_invocation        => 'apt-get install -y',
+    packager_up_invocation     => 'apt-get upgrade -y',
+    packager_remove_invocation => 'apt-get remove -y',
+    local_dns_access_token     => '',
+    users                      => [
+        { name => 'admin', gecos => 'Admin User', shell => '/bin/bash' },
+        { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
+    ],
+);
+
+my %PROV = (
+    target_packager => 'deb',
+    template_dirs   => [$template_dir],
+);
+
+# Test that a recipe renders without error given %G merged with $extra.
+sub renders_ok {
+    my ( $name, $extra, $desc ) = @_;
+    $desc //= $name;
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    subtest $desc => sub {
+        use_ok("Provisioner::Recipe::$name");
+        my $r;
+        my $res = exception { $r = "Provisioner::Recipe::$name"->new(%PROV) };
+        is( $res, undef, "$name->new() succeeds" );
+        # We may or may not have global/domain specific templates, but we need at least one.
+        my $has_template;
+        if (-f "$template_dir/$name.tt") {
+            $res = exception { $r->render( %G, %$extra ) };
+            is( $@, '', "$name->render() succeeds" );
+            $has_template++;
+        }
+        if (-f "$template_dir/$name.global.tt") {
+            $res = exception { $r->render_global( %G, %$extra ) };
+            is( $@, '', "$name->render_global() succeeds" );
+            $has_template++;
+        }
+        ok($has_template, "Has either a global or domain specific template");
+    };
+}
+
+# Test that a recipe dies when a required field is absent.
+# $extra should include all fields needed EXCEPT $field.
+# The field is passed as undef on purpose, to shadow any default in %G.
+sub rejects_missing {
+    my ( $name, $extra, $field, $desc ) = @_;
+    $desc //= "$name rejects missing $field";
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
+    subtest $desc => sub {
+        my $r = "Provisioner::Recipe::$name"->new(%PROV);
+        eval { $r->render( %G, %$extra, $field => undef ) };
+        ok( $@, "render() dies without $field" );
+    };
+}
+
+# Needed by backup recipes
+my $tmp = tempdir( CLEANUP => 1 );
+my $ddir = "$tmp/test.test.test";
+mkdir $ddir;
+IPC::Run3::run3([qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, '', qw{-q}], \undef, \undef, undef);
+
+# Build list of known modules with required input data
+my %required_config = (
+    data => { from => '/opt/data', to => '/opt/domains' },
+    imagemagick =>  { version => '7.1.0' },
+    mariadb => {
+        root_pw  => 's3cr3t',
+        dumpfile => 'dump.sql',
+        version  => '10.11',
+    },
+    tpsgi => { routers => ['app.psgi'] },
+    tcms =>  { tcms_dir => 'tcms' },
+    adminconfig => { skel => '/opt/dotfiles' },
+    admincode => {
+        repos_from => [],
+        basedir    => 'Code',
+    },
+    nginxproxy => {
+        vhosts => {
+            8080 => {
+                proxy_uri  => 'run/app.sock',
+                static_dir => 'www/static',
+            },
+        },
+    },
+    letsencrypt => {
+        registrar => { type => 'route53', user => 'foo', key => 'bar' },
+    },
+    pdns => { api_key => 'test-api-key' },
+    matrix => {
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        modules        => ['nginxproxy'],
+    },
+    roundcube => {
+        version => '1.6.0',
+        modules => ['nginxproxy'],
+    },
+    koan => {
+        user               => 'koan',
+        koan_email         => 'koan@test.test',
+        messaging_provider => 'telegram',
+        telegram_token     => 'fake-token',
+        telegram_chat_id   => 12345,
+        cli_provider       => 'local',
+        github_user        => 'test-bot',
+        github_token       => 'ghp_fakefakefake',
+    },
+    backupdestination => {
+        base_dir    => '/opt/backups',
+        hosts       => ['backup.host'],
+        targets     => ['etc'],
+        key_file    => 'key.rsa',
+        data_source => $tmp,
+    },
+    backup => {
+        modules     => [],
+        targets     => { etc => '/etc' },
+        key_file    => 'key.rsa',
+        data_source => $tmp,
+    },
+    ldap => {
+        admin_password => 's3cr3t',
+    },
+    sssd => {
+        ldap_uri => 'ldaps://ldap.test.test.test',
+        base_dn  => 'dc=test,dc=test',
+    },
+);
+
+# test everything available.
+my @available;
+File::Find::find( {
+    wanted => sub {
+        my $object = $_;
+        return unless (-f $object && $object =~ m/\.pm$/);
+        my ($name) = $object =~ m/(.+)\.pm$/;
+        push(@available, $name);
+    },
+},
+"lib/Provisioner/Recipe/");
+
+#
+# Crank dat minimum viable case
+#
+foreach my $recipe (@available) {
+    my $input = {};
+    $input = $required_config{$recipe} if exists $required_config{$recipe};
+    renders_ok( $recipe, $input, "$recipe with minimum viable input" );
+}
+
+# The guest rsyncs its payload off the hypervisor, so every one of these has to
+# name it.  When the host came out empty the recipe still rendered, and still
+# looked plausible -- 'doge@:/opt/data/...' -- and only failed on the guest,
+# hours later, at the point where it had already been told the build succeeded.
+subtest 'every rsync off the hypervisor names it' => sub {
+    my %seen;
+    foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
+        foreach my $tt ("$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt") {
+            next unless -f $tt;
+            # Configured the way new_config configures it, bridge and all;
+            # a bare Xslate cannot render the ones using TT2 vmethods.
+            my $xslate = Text::Xslate->new(
+                path     => [$template_dir],
+                syntax   => 'TTerse',
+                module   => [qw{Text::Xslate::Bridge::TT2}],
+                function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+            );
+            my $out = $xslate->render_string(
+                File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
+            next unless index($out, 'rsync') >= 0;
+            $seen{$recipe}++;
+            unlike($out, qr/\@:/,   "$recipe: no empty host between the user and the path");
+            like($out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}");
+        }
+    }
+    ok(scalar keys %seen, 'and there were rsyncing recipes to check');
+};
+
+# ----------------------------------------------------------------
+# Validate: required fields cause die
+# ----------------------------------------------------------------
+rejects_missing( 'mariadb', { dumpfile => 'd.sql', version => '10' }, 'root_pw' );
+rejects_missing( 'mariadb', { root_pw => 'x', version => '10'     }, 'dumpfile' );
+rejects_missing( 'mariadb', { root_pw => 'x', dumpfile => 'd.sql' }, 'version'  );
+
+rejects_missing( 'adminconfig', {},                              'skel'    );
+rejects_missing( 'imagemagick', {},                              'version'  );
+rejects_missing( 'pdns',        {},                              'api_key'  );
+
+rejects_missing( 'koan', {
+    koan_email         => 'k@test.test',
+    messaging_provider => 'telegram',
+    telegram_token     => 'tok',
+    telegram_chat_id   => 1,
+    cli_provider       => 'local',
+    github_user        => 'bot',
+    github_token       => 'ghp_x',
+}, 'user' );
+
+rejects_missing( 'matrix', {
+    server_name => 'test.test.test',
+    smtp_host   => 'mail.test.test',
+    smtp_user   => 'n@test.test',
+    smtp_pass   => 'p',
+    smtp_domain => 'test.test',
+    modules     => ['nginxproxy'],
+}, 'admin_password', 'matrix rejects missing admin_password' );
+
+rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
+rejects_missing( 'sssd', { base_dn => 'dc=test,dc=test' }, 'ldap_uri', 'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn', 'sssd rejects missing base_dn' );
+
+# ----------------------------------------------------------------
+# ntp: validate enforces server list constraints
+# ----------------------------------------------------------------
+subtest 'ntp rejects empty server list' => sub {
+    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
+    my $res = exception { $r->render( %G, servers => [] ) };
+    ok( $res, 'ntp dies with empty servers list' );
+};
+
+subtest 'ntp rejects non-array servers' => sub {
+    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
+    my $res = exception { $r->render( %G, servers => 'not-an-array' ) };
+    ok( $res, 'ntp dies when servers is not an ARRAY' );
+};
+
+# ----------------------------------------------------------------
+# ufw: validate enforces port_forward structure
+# ----------------------------------------------------------------
+subtest 'ufw rejects malformed port_forwards' => sub {
+    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
+    my $res = exception { $r->render( %G, port_forwards => [ { from => 80 } ] ) };
+    ok( $res, 'ufw dies when port_forward entry missing to' );
+};
+
+# ----------------------------------------------------------------
+# cron: MAILFROM is a local part, and the templates append the domain
+# ----------------------------------------------------------------
+subtest 'cron addresses: a local part gets the domain, an address does not' => sub {
+    my $r = 'Provisioner::Recipe::cron'->new(%PROV);
+    my $d = $G{domain};
+
+    is(exception { $r->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+
+    like($r->render_file('files/cron.root.tt', %G, from => 'cron'),
+        qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended');
+
+    # Appending to an address gives somebody@example.com@this.domain, which is
+    # what the old template did to every value the old schema would accept.
+    like($r->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
+        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands');
+};
+
+subtest 'cron MAILTO per script' => sub {
+    my $r   = 'Provisioner::Recipe::cron'->new(%PROV);
+    my $d   = $G{domain};
+    my @out = split("\n", $r->render_file('files/cron.root.domain.tt', %G,
+        root_scripts => [
+            { interval => '0 0 * * *',   cmd => '/silent.pl' },
+            { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
+            { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
+            { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
+        ]));
+
+    # The MAILTO in force for a line is the last one before it.
+    my %to;
+    my $current = '';
+    foreach my $line (@out) {
+        $current = $1 if $line =~ m/^MAILTO="([^"]*)"$/;
+        $to{$1}  = $current if $line =~ m{command (/\S+)};
+    }
+
+    is($to{'/silent.pl'}, $G{admin_email},
+        'a script that says nothing about mail has not been thought about, so the admin gets it');
+    is($to{'/none.pl'}, '',
+        q{and one that says 'none' does not want it, which cron spells as an empty MAILTO});
+    is($to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone');
+    is($to{'/local.pl'},     "ops\@$d",            'a local part gets the domain');
+};
+
+#
+# Render stuff with optional fields
+#
+renders_ok( 'mail', {
+    ipv6 => 0,
+}, 'mail with ipv6 disabled' );
+
+# ----------------------------------------------------------------
+# matrix: homeserver.yaml.tt includes redis block when redis is loaded
+# ----------------------------------------------------------------
+subtest 'matrix homeserver.yaml includes redis section when redis recipe is loaded' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        redis_host     => '127.0.0.1',
+        redis_port     => 6379,
+        modules        => ['nginxproxy', 'redis'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds with redis in modules' );
+    like( $out, qr/redis:/, 'homeserver.yaml contains redis block' );
+    like( $out, qr/enabled:\s*true/, 'redis block has enabled: true' );
+    like( $out, qr/host:\s*"127\.0\.0\.1"/, 'redis host defaults to 127.0.0.1' );
+    like( $out, qr/port:\s*6379/, 'redis port defaults to 6379' );
+    unlike( $out, qr/^\s+password: "/m, 'no redis password field when redis_password is not set' );
+};
+
+subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loaded' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        modules        => ['nginxproxy'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds without redis in modules' );
+    unlike( $out, qr/redis:/, 'homeserver.yaml has no redis block' );
+};
+
+subtest 'matrix homeserver.yaml includes redis password when redis_password is set' => sub {
+    use_ok('Provisioner::Recipe::matrix');
+    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my %matrix_cfg = (
+        server_name    => 'test.test.test',
+        admin_password => 's3cr3t',
+        smtp_host      => 'mail.test.test',
+        smtp_user      => 'notify@test.test',
+        smtp_pass      => 'smtp-pass',
+        smtp_domain    => 'test.test',
+        redis_password => 'supersecret',
+        modules        => ['nginxproxy', 'redis'],
+    );
+    my $out;
+    my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
+    is( $err, undef, 'render_file succeeds with redis_password set' );
+    like( $out, qr/^\s+password:\s*"supersecret"/m, 'redis password appears in output' );
+};
+
+# TODO more stuff with optional fields - probably need to make Provisioner::Recipe insist you enumerate required/optional fields and validate automatically
+
+Test::NoWarnings::had_no_warnings();
+done_testing();

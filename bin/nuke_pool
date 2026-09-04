@@ -1,8 +1,100 @@
-#!/bin/bash
+#!/usr/bin/env perl
 
-#nuke the storage pool because tf = braindead
+package Trog::Bin::NukePool;
 
-rm -rf /opt/terraform/disks
-virsh pool-destroy tf_disks
-virsh pool-delete tf_disks
-virsh pool-undefine tf_disks
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+use FindBin::libs;
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+nuke_pool - tear down the tf_disks storage pool and everything in it
+
+=head1 SYNOPSIS
+
+    nuke_pool [OPTIONS]
+
+    nuke_pool
+    nuke_pool --connect qemu+ssh://root@hv1.example.net/system
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the pool.  Defaults to
+whatever libvirt itself would pick, i.e. this machine.
+
+=item B<--hypervisor> NAME
+
+A hypervisor out of F<hypervisors.conf>, by name, instead of a connection
+string.  This one takes a name rather than searching for a guest, because a
+storage pool belongs to a machine and not to any one guest.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
+
+=item B<--pool> NAME
+
+Which pool to nuke.  Defaults to C<tf_disks>.
+
+=item B<--poolpath> DIR
+
+Where that pool's backing store lives on the hypervisor.  Defaults to
+F</opt/terraform/disks>.
+
+=back
+
+=head1 DESCRIPTION
+
+Removes the pool's directory from the hypervisor and then stops, deletes and
+undefines the pool itself.  Every guest disk on the hypervisor lives in there,
+so this is a bigger hammer than it looks.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($uri, $pool, $pool_path, $name, $hvconf, $domain_dir);
+    GetOptionsFromArray(\@args,
+        'connect=s'    => \$uri,
+        'pool=s'       => \$pool,
+        'poolpath=s'   => \$pool_path,
+        'hypervisor=s' => \$name,
+        'hvconf=s'     => \$hvconf,
+        'domaindir=s'  => \$domain_dir,
+    ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
+
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass --connect or --hypervisor, not both')
+      if $uri && $name;
+
+    my $hv;
+    if ($name) {
+        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path);
+        die "No hypervisors are configured, so --hypervisor has nothing to name\n"
+          unless $fleet->configured;
+        $hv = $fleet->hypervisor($name)->activate();
+    }
+    else {
+        $hv = Trog::HV->new(uri => $uri, pool_path => $pool_path);
+    }
+    $hv->{pool_path} = $pool_path if defined $pool_path;
+    $hv->nuke_pool($pool // 'tf_disks');
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

@@ -1,0 +1,302 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Preflight;
+
+#ABSTRACT: Say whether a throwaway guest can be built at all, before any time is spent trying.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+
+use Sys::Virt();
+
+use Trog::Config();
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+preflight - say whether a throwaway guest can be built, before any time is spent trying
+
+=head1 SYNOPSIS
+
+    bin/preflight
+    bin/preflight --connect qemu+ssh://root@hv/system
+
+=head1 DESCRIPTION
+
+Provisioning a guest takes minutes and touches a hypervisor.  Every check here
+is one that, if it fails, fails the whole run -- so they all happen up front,
+all of them run even after the first failure, and each one that fails says what
+to do about it.
+
+Worth running against a hypervisor you have not built on before, or after
+changing anything about how you reach one.  The failures it catches are the ones
+that otherwise surface minutes in, as something that reads like an unrelated
+problem: a sudo prompt that hangs the run rather than failing it, a Sys::Virt
+that is a release out of step and so is missing a constant.
+
+Exits 0 when a run is worth starting and 1 when it is not.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+Check this hypervisor rather than whichever the fleet would pick.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to the one under L<Trog::Config>.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($uri, $hvconf, $help);
+    GetOptionsFromArray(\@args,
+        'connect=s' => \$uri,
+        'hvconf=s'  => \$hvconf,
+        'help'      => \$help,
+    );
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    my $hv = hypervisor($uri, $hvconf);
+    return 1 unless $hv;
+
+    print "Hypervisor: " . $hv->uri . "\n\n";
+
+    # Every check runs even once one has failed: being told about the sudo and
+    # then, a fix later, about the missing xorriso is two round trips where one
+    # would do.
+    my @failed = grep { !$_->{ok} } map { $_->($hv) } (
+        \&check_reachable,
+        \&check_passwordless_sudo,
+        \&check_iso_builder,
+        \&check_libvirt,
+        \&check_sys_virt_in_step,
+        \&check_config,
+    );
+
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } (\&note_libguestfs);
+
+    if (@notes) {
+        print "\nNot required, but worth having:\n\n";
+        foreach my $note (@notes) {
+            print "  * $note->{what}\n";
+            print "    $_\n" for split("\n", $note->{fix});
+            print "\n";
+        }
+    }
+
+    return 0 unless @failed;
+
+    print "\n" . scalar(@failed) . " thing" . (@failed == 1 ? '' : 's') . " to fix first:\n\n";
+    foreach my $failure (@failed) {
+        print "  * $failure->{what}\n";
+        print "    $_\n" for split("\n", $failure->{fix});
+        print "\n";
+    }
+    return 1;
+}
+
+sub hypervisor {
+    my ($uri, $hvconf) = @_;
+
+    my $hv = eval {
+        return Trog::HV->new(uri => $uri) if $uri;
+
+        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+        return Trog::HV->new() unless $fleet->configured;
+
+        my ($name) = $fleet->names();
+        return $fleet->hypervisor($name);
+    };
+
+    print "Could not work out which hypervisor to use: $@" unless $hv;
+    return $hv;
+}
+
+sub report {
+    my ($ok, $what, $fix) = @_;
+    printf "%s %s\n", ($ok ? '  ok  ' : 'FAILED'), $what;
+    return { ok => $ok, what => $what, fix => $fix };
+}
+
+sub check_reachable {
+    my ($hv) = @_;
+
+    return report(1, 'The hypervisor is this machine', q{}) if $hv->is_local;
+
+    my $whoami = eval { $hv->capture('whoami') };
+    chomp $whoami if defined $whoami;
+
+    return report(1, "Reached " . $hv->ssh_target . " as $whoami", q{})
+      if defined $whoami && length $whoami;
+
+    return report(0, 'Cannot reach ' . $hv->describe, <<"FIX");
+ssh -v @{[ $hv->ssh_target ]} and see what it says.  This wants an agent or a
+key already trusted there; nothing here can answer a password prompt.
+FIX
+}
+
+sub check_passwordless_sudo {
+    my ($hv) = @_;
+
+    return report(1, 'Passwordless sudo', q{}) if $hv->run(qw{sudo -n true}) == 0;
+
+    my $user   = $hv->ssh_user // 'you';
+    my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
+
+    return report(0, "No passwordless sudo for $user on $target", <<"FIX");
+Provisioning writes to the storage pool, defines domains, and edits the
+rsyslog config, all through sudo.  A password prompt in the middle of that
+has nowhere to be answered from, and the run hangs rather than failing.
+
+On $target:
+
+    echo '$user ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-$user
+    sudo chmod 0440 /etc/sudoers.d/90-$user
+
+Then check it took:
+
+    ssh @{[ $hv->ssh_target // $user ]} sudo -n true
+
+This is a real grant of root on a hypervisor.  If that is not something you
+want standing, make it, use it, and take it away again afterwards.
+FIX
+}
+
+sub check_iso_builder {
+    my ($hv) = @_;
+
+    my $maker = eval { $hv->iso_maker };
+    return report(1, "Cloud-init seed builder: $maker", q{}) if $maker;
+
+    return report(0, 'No ISO builder on the hypervisor', <<'FIX');
+cloud-init reads its configuration off a small ISO, and something has to make
+it:
+
+    sudo apt install xorriso
+FIX
+}
+
+sub check_libvirt {
+    my ($hv) = @_;
+
+    my $version = eval { $hv->vmm->get_library_version() };
+    return report(1, 'libvirt answers, running ' . libvirt_version($version), q{}) if $version;
+
+    return report(0, 'libvirt did not answer', <<"FIX");
+$@
+The URI is @{[ $hv->uri ]}.  Check libvirtd is running there and that the user
+is in the libvirt group.
+FIX
+}
+
+# Sys::Virt is released in lockstep with libvirt and binds the API of the
+# release it was built against.  Talk to a daemon from a different one and the
+# failures are not "version mismatch": they are a constant that is not exported,
+# or a call the far side does not implement, surfacing as an error about
+# whatever was being attempted at the time.
+sub check_sys_virt_in_step {
+    my ($hv) = @_;
+
+    my $remote = eval { $hv->vmm->get_library_version() };
+    return report(0, 'Could not ask the hypervisor its libvirt version', <<'FIX') unless $remote;
+libvirt did not answer, so this could not be checked.  Fix that first; the
+answer is above.
+FIX
+
+    my $there = libvirt_version($remote);
+    my $here  = Sys::Virt->VERSION;
+
+    my ($here_mm)  = $here  =~ m/\A(\d+\.\d+)/;
+    my ($there_mm) = $there =~ m/\A(\d+\.\d+)/;
+
+    return report(1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{})
+      if defined $here_mm && defined $there_mm && $here_mm eq $there_mm;
+
+    return report(0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX");
+These want to be the same release.  Sys::Virt is versioned to track libvirt and
+binds the API of the one it was built against, so a mismatch does not announce
+itself -- it shows up as a missing constant or an unimplemented call, blamed on
+whatever was being done at the time.
+
+Either bring this machine to $there:
+
+    apt-cache policy libvirt-dev    # what is available here
+    cpanm Sys::Virt\@$there         # once libvirt-dev matches
+
+or provision from a machine whose libvirt already does.  Installing a Sys::Virt
+that does not match the local libvirt-dev will not build.
+
+FIX
+}
+
+sub check_config {
+    my ($hv) = @_;
+
+    my $dir = Trog::Config->dir;
+
+    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml};
+    return report(1, "Configuration to copy from: $dir", q{}) unless @missing;
+
+    return report(0, "Missing from $dir: " . join(', ', @missing), <<"FIX");
+These are where an installation says which machines exist and what every guest
+gets.  See Trog::Config for where this directory is and how to point it
+somewhere else.
+FIX
+}
+
+# Not a requirement: nothing here needs it to provision anything, and failing a
+# run over its absence would refuse runs that would have worked.  It is the
+# difference between guessing at why a guest will not boot and reading its disk,
+# so it is worth saying it is missing.
+sub note_libguestfs {
+    my ($hv) = @_;
+
+    my ($found) = grep { $hv->run('sh', '-c', "command -v $_ >/dev/null 2>&1") == 0 }
+        qw{virt-cat virt-ls virt-edit};
+
+    return { ok => 1 } if $found;
+
+    return { ok => 0, what => 'No libguestfs on the hypervisor', fix => <<'FIX' };
+Without it, a guest that will not boot can only be looked at through its
+console.  With it, its disk can be read while it is off -- the cloud-init log
+of a guest that never came up, the netplan it was actually given -- and its
+kernel command line can be edited to boot single-user, rather than driving
+GRUB with timed keystrokes.
+
+    sudo apt install libguestfs-tools
+FIX
+}
+
+# libvirt packs its version into one integer: major * 1000000 + minor * 1000 +
+# release.
+sub libvirt_version {
+    my ($packed) = @_;
+    return sprintf '%d.%d.%d', int($packed / 1000000), int($packed / 1000) % 1000, $packed % 1000;
+}
+
+sub readable {
+    my ($path) = @_;
+    open(my $fh, '<', $path) or return 0;
+    close $fh;
+    return 1;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

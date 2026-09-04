@@ -2,59 +2,115 @@
 
 package Trog::Bin::Destroy;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
-use Cwd qw{abs_path};
-use FindBin;
-use Config::Simple();
+use re '/aa';
+use FindBin::libs;
+use Trog::HV();
+use Trog::Hypervisors();
+use File::Path();
 use File::Slurper();
-use List::Util qw{any};
-use File::Which qw{which};
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
 
-our $domain_dir;
+=head1 NAME
+
+destroy - tear a provisioned VM back down
+
+=head1 SYNOPSIS
+
+    destroy [OPTIONS] DOMAIN
+
+    destroy vm.example.com
+    destroy --purge --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.  A remote
+hypervisor has to be named with an ssh transport
+(C<qemu+ssh://user@host/system>).
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we destroy on.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.
+
+=item B<--purge>
+
+Also delete the domain directory, on both this machine and the hypervisor.
+
+=item B<--dryrun>
+
+Say what would be removed without removing any of it.
+
+=back
+
+=head1 DESCRIPTION
+
+Undoes what C<provision> did: stops and undefines the VM, destroys the
+disks belonging to it, and removes the hypervisor-side rsyslog config and
+authorized key it left behind.  Shared resources -- the base image and the
+storage pool -- are left alone.
+
+=cut
 
 sub main {
     my @args = @_;
 
+    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
-    my ($purge, $dryrun);
+    my ($purge, $dryrun, $uri, $domain_dir, $hvconf);
     GetOptionsFromArray(\@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
         'dryrun'      => \$dryrun,
+        'connect=s'   => \$uri,
+        'hvconf=s'    => \$hvconf,
     );
 
     my $domain = shift @args;
-    die "Usage: destroy [--domaindir DIR] [--purge] [--dryrun] DOMAIN\n" unless $domain;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
 
-    $domain_dir //= '/opt/domains';
     $domain =~ s/\///g;
 
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
+    my $hv = Trog::Hypervisors->find($domain,
+        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir);
+    print "Destroying on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
+
+    $domain_dir = $hv->domain_dir;
+
 
     print "Destroying domain: $domain\n";
     print "[DRY RUN] No changes will be made.\n" if $dryrun;
 
-    # 1. Stop and undefine the VM via virsh
+    # 1. Stop and undefine the VM
     destroy_vm($domain, $dryrun);
 
-    # 2. Remove terraform-managed resources for this domain
-    destroy_tf_resources($domain, $domain_mongled, $dryrun);
+    # 2. Remove the disks it was using
+    destroy_disks($domain, $dryrun);
 
-    # 3. Remove HV-side terraform config files
-    remove_tf_configs($domain, $dryrun);
-
-    # 4. Remove HV-side rsyslog config
+    # 3. Remove HV-side rsyslog config
     remove_rsyslog_config($domain, $dryrun);
 
-    # 5. Remove the domain's SSH pubkey from the HV's authorized_keys
+    # 4. Remove the domain's SSH pubkey from the HV's authorized_keys
     remove_authorized_key($domain, $dryrun);
 
-    # 6. Optionally purge the domain directory
+    # 5. Optionally purge the domain directory
     if ($purge) {
         purge_domain_dir($domain, $dryrun);
     } else {
@@ -68,104 +124,92 @@ sub main {
 sub destroy_vm {
     my ($domain, $dryrun) = @_;
 
-    my $vm_list = qx{virsh list --all 2>/dev/null};
-    if ($vm_list =~ m/\Q$domain\E/) {
-        print "Stopping VM $domain...\n";
-        unless ($dryrun) {
-            system(qw{virsh destroy}, $domain);
-            system(qw{virsh undefine --nvram}, $domain);
-        }
-    } else {
-        print "VM $domain not found in virsh, skipping.\n";
-    }
-}
-
-sub destroy_tf_resources {
-    my ($domain, $domain_mongled, $dryrun) = @_;
-
-    my $tf_config_dir = '/opt/terraform/config';
-    return unless -d $tf_config_dir;
-
-    chdir $tf_config_dir or do {
-        warn "Cannot chdir to $tf_config_dir: $!\n";
+    my $hv = Trog::HV->new();
+    unless ($hv->domain_exists($domain)) {
+        print "VM $domain not found on " . $hv->uri . ", skipping.\n";
         return;
-    };
-
-    my $resources = qx{terraform state list 2>/dev/null};
-    chomp $resources;
-    return unless $resources;
-
-    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
-    foreach my $resource (split(/\n/, $resources)) {
-        next unless $resource =~ m/\Q$domain_mongled\E/;
-        next if any { $_ eq $resource } @exempt;
-        print "Destroying terraform resource $resource\n";
-        unless ($dryrun) {
-            system(qw{terraform destroy -auto-approve -target}, $resource);
-        }
     }
+
+    print "Stopping VM $domain...\n";
+    $hv->annihilate_domain($domain) unless $dryrun;
+    return;
 }
 
-sub remove_tf_configs {
+sub destroy_disks {
     my ($domain, $dryrun) = @_;
+    my $hv = Trog::HV->new();
 
-    my @patterns = (
-        "/opt/terraform/config/$domain.tf",
-        "/opt/terraform/config/$domain.cloud_init.cfg",
-        "/opt/terraform/config/$domain.network_config.cfg",
-    );
-
-    foreach my $f (@patterns) {
-        if (-f $f) {
-            print "Removing $f\n";
-            unlink $f unless $dryrun;
-        }
+    # The guest's own overlay and its cloud-init seed.  The base image is
+    # shared by every guest on the hypervisor and is emphatically not ours to
+    # remove; nor is the pool.
+    foreach my $volume ("$domain-qcow2", "$domain-cloudinit.iso") {
+        next unless $hv->volume($volume);
+        print "Removing volume $volume\n";
+        $hv->delete_volume($volume) unless $dryrun;
     }
+    return;
 }
 
 sub remove_rsyslog_config {
     my ($domain, $dryrun) = @_;
 
+    my $hv   = Trog::HV->new();
     my $conf = "/etc/rsyslog.d/10-$domain.conf";
-    if (-f $conf) {
-        print "Removing rsyslog config $conf\n";
-        unless ($dryrun) {
-            unlink $conf;
-            system(qw{sudo systemctl restart rsyslog});
-        }
-    } else {
+    unless ($hv->file_exists($conf)) {
         print "No rsyslog config found at $conf, skipping.\n";
+        return;
     }
+
+    print "Removing rsyslog config $conf\n";
+    unless ($dryrun) {
+        $hv->run_sudo(qw{rm -f}, $conf);
+        $hv->run_sudo(qw{systemctl restart rsyslog});
+    }
+    return;
 }
 
 sub remove_authorized_key {
     my ($domain, $dryrun) = @_;
 
-    my $pubkey_file = "$domain_dir/$domain/key.rsa.pub";
-    return unless -f $pubkey_file;
-
-    my $pubkey = File::Slurper::read_text($pubkey_file);
+    my $hv          = Trog::HV->new();
+    my $pubkey_file = $hv->domain_dir . "/$domain/key.rsa.pub";
+    my $pubkey = eval { File::Slurper::read_text($pubkey_file) };
+    return unless defined $pubkey;
     chomp $pubkey;
 
-    my $ak = "$ENV{HOME}/.ssh/authorized_keys";
-    return unless -f $ak;
+    my $ak = $hv->authorized_keys;
+    return unless $hv->file_exists($ak);
 
-    my $contents = File::Slurper::read_text($ak);
-    if ($contents =~ m/\Q$pubkey\E/) {
-        print "Removing domain SSH key from $ak\n";
-        unless ($dryrun) {
-            my @lines = grep { $_ !~ m/\Q$pubkey\E/ } split(/\n/, $contents);
-            File::Slurper::write_text($ak, join("\n", @lines) . "\n");
-        }
-    } else {
+    # Taking a line out means rewriting the file, so this is the one place that
+    # has to read it first -- and the one place that can lock somebody out of
+    # their own machine by getting it wrong.  Refuse on anything unexpected.
+    my $contents = $hv->read_text($ak);
+    die "Could not read $ak on " . $hv->describe . "; refusing to rewrite it blind\n"
+      unless defined $contents && length $contents;
+
+    unless ($contents =~ m/\Q$pubkey\E/) {
         print "Domain SSH key not found in $ak, skipping.\n";
+        return;
     }
+
+    print "Removing domain SSH key from $ak\n";
+    return if $dryrun;
+
+    my @before = split("\n", $contents);
+    my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
+    die "Removing the key for $domain from $ak would drop "
+      . (scalar(@before) - scalar(@after)) . " lines, not 1; refusing\n"
+      unless scalar(@after) == scalar(@before) - 1;
+
+    $hv->write_text($ak, join("\n", @after) . "\n");
+    return;
 }
 
 sub purge_domain_dir {
     my ($domain, $dryrun) = @_;
 
-    my $dir = "$domain_dir/$domain";
+    my $hv  = Trog::HV->new();
+    my $dir = $hv->domain_dir . "/$domain";
     unless (-d $dir) {
         print "Domain directory $dir not found, skipping.\n";
         return;
@@ -173,8 +217,11 @@ sub purge_domain_dir {
 
     print "Purging domain directory $dir\n";
     unless ($dryrun) {
-        system('rm', '-rf', $dir);
+        File::Path::remove_tree($dir);
+        # A remote HV holds a copy of the whole domain dir for the guest to pull.
+        $hv->run(qw{rm -rf}, $dir) unless $hv->is_local;
     }
+    return;
 }
 
 exit main(@ARGV) unless caller;

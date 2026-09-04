@@ -1,0 +1,3 @@
+[% FOREACH mount IN disks %]
+[% mount.pool %]=[% mount.device %]
+[% END -%]

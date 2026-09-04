@@ -1,0 +1,3 @@
+[% FOR var IN grub_vars.keys() %]
+[% var %]="[% grub_vars.$var %]"
+[% END %]

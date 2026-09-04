@@ -1,0 +1,1 @@
+forward-zones+=[% domain %]=127.0.01:2500

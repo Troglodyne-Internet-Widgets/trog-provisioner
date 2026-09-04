@@ -2,23 +2,99 @@
 
 package Trog::Bin::Provisioner;
 
-use strict;
-use warnings;
+use 5.041;
 
-use Cwd qw{abs_path};
-use FindBin;
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+use FindBin();
+use FindBin::libs;
 use Config::Simple();
+use Trog::HV();
+use Trog::Hypervisors();
+use Trog::Guest();
+use Trog::Config();
+use File::Basename();
 use File::Slurper();
-use File::Copy();
+use IPC::Run3();
+use File::Slurper::Temp();
 use YAML::XS();
 use JSON::PP();
 use List::Util qw{any uniq};
-use File::Which qw {which};
 use Getopt::Long qw{GetOptionsFromArray};
-use Net::OpenSSH::More;
-use Net::EmptyPort;
-use XML::Twig;
-use JSON::MaybeXS;
+use Pod::Usage qw{pod2usage};
+
+use Carp::Always;
+
+=head1 NAME
+
+provision - build a VM from a domain directory
+
+=head1 SYNOPSIS
+
+    provision [OPTIONS] DOMAIN
+
+    provision vm.example.com
+    provision --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor to build on.  Bypasses
+F<hypervisors.conf> entirely: no placement, no capacity check, build it there.
+A remote hypervisor has to be named with an ssh transport
+(C<qemu+ssh://user@host/system>), since we need its filesystem as well as its
+libvirt.
+
+=item B<--no-config>
+
+Skip generating the domain's configuration, and build from whatever is already
+in its directory.  Normally F<bin/new_config> is run first, which is what
+writes F<provision.conf> and packs F<data.tar.gz>; pass this when you want to
+build exactly what is on disk.
+
+=item B<--recipes> FILE
+
+Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/recipes.yaml>.
+
+=item B<--ipmap> FILE
+
+Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/ipmap.cfg>.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
+When it exists, the hypervisor is chosen from it -- see L<Trog::Hypervisors>.
+When it doesn't, the hypervisor is whatever F<provision.conf> and C<--connect>
+say, which for most people is still this machine.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.
+
+=item B<--existing> IP
+
+Layer this domain's configuration onto an already running VM rather than
+building a new one.
+
+=item B<--dryrun>
+
+Write out everything that would be applied, but don't apply it.
+
+=back
+
+=head1 DESCRIPTION
+
+Reads F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> out of the domain
+directory, renders the libvirt XML and cloud-init configuration for the domain,
+and defines it on the hypervisor.  See L<Trog::HV> for what "the
+hypervisor" means when it isn't this machine.
+
+=cut
 
 sub _coerce_array {
     return \@_;
@@ -27,56 +103,100 @@ sub _coerce_array {
 #TODO: cpu/gpu passthru accel via techniques such as the following:
 # https://github.com/HarbourHeading/KVM-GPU-Passthrough
 
-our $domain_dir;
 our $dryrun;
+
+# Open a file, or die saying which one and why.
+#
+# A -f test is a promise about a moment that has already passed by the time
+# anything acts on it, and it cannot tell "not there" from "there but not ours
+# to read" -- which is the failure this tool actually hits, running as a user
+# that may not own the domain directory.  Opening it answers both questions at
+# once, and the answer is still true when the handle is used.
+sub _must_read {
+    my ($path, $what) = @_;
+    open(my $fh, '<', $path) or die "$what: $path ($!)\n";
+    return $fh;
+}
+
+# The same question where the answer is allowed to be no.
+sub _readable {
+    my ($path) = @_;
+    open(my $fh, '<', $path) or return 0;
+    close $fh;
+    return 1;
+}
+
 sub main {
     my @args = @_;
 
+    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
-    my ($reuse);
+    my ($reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'domaindir=s' => \$domain_dir,
         'dryrun'      => \$dryrun,
+        'connect=s'   => \$uri,
+        'hvconf=s'    => \$hvconf,
+        'no-config'   => \$no_config,
+        'recipes=s'   => \$recipes,
+        'ipmap=s'     => \$ipmap,
     );
 
     my $domain = shift @args;
-    die "No domain passed" unless $domain;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
 
-    $domain_dir //='/opt/domains';
-
+    # Everything the hypervisor knows about itself comes off provision.conf, so
+    # we have to find that the hard way first.
+    $domain_dir //= '/opt/domains';
     $domain =~ s/\///g;
+
+    # Build the domain's configuration first.  It is what writes provision.conf
+    # and packs data.tar.gz, and it needs the hypervisor to write either -- so
+    # it picks the hypervisor too, and everything after this shares it.
+    generate_config($domain, {
+        domain_dir => $domain_dir,
+        recipes    => $recipes,
+        ipmap      => $ipmap,
+        hvconf     => $hvconf,
+        uri        => $uri,
+    }) unless $no_config;
+
     my $cfile = "$domain_dir/$domain/provision.conf";
-    die "No such file provision.conf in $domain_dir/$domain/" unless -f $cfile;
+    close _must_read($cfile, "No provision.conf for $domain");
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    die "User definition file $domain_dir/$udf not present!" unless -f $udf;
-
-    die "Terraform not installed" unless which('terraform');
-
-    # Basic setup
-    mkdir '/opt/terraform';
-    mkdir '/opt/terraform/disks';
-    mkdir '/opt/terraform/config';
+    close _must_read($udf, "No users.yaml for $domain");
 
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
 
+    # Figure out which hypervisor we're talking to before we touch anything.
+    # Every other sub picks this same object back up with Trog::HV->new().
+    my $hv = choose_hypervisor($config, $domain, {
+        uri        => $uri,
+        domain_dir => $domain_dir,
+        hvconf     => $hvconf,
+    });
+    print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
+
+    # The storage pool is the hypervisor's, and it may not have one yet.
+    $hv->mkpath($hv->pool_path)
+      or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
+
+    $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
-    die "No data to host in $domain/" unless -f $data;
-    # Stash domain dir in config object for later use
-    $config->param('domain_dir', $domain_dir);
+    close _must_read($data, "No data to host for $domain");
 
-    # Start off by fixing a sillyness in virtiofs
-    if (!-f '/usr/libexec/virtiofs-better') {
-    	File::Copy::copy('virtiofs-better', '/usr/libexec/virtiofs-better') or die('Could not copy virtiofs-better to  /usr/libexec/virtiofs-better, you may have to do this manually');
+    # Start off by fixing a sillyness in virtiofs.  This runs as part of the
+    # qemu process, so it has to land on the hypervisor, not on us.
+    if (!$hv->file_exists('/usr/libexec/virtiofs-better')) {
+        $hv->put_file("$FindBin::Bin/../virtiofs-better", '/usr/libexec/virtiofs-better', sudo => 1)
+          or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
+        $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
     }
-
-    # Fix the terraform state.
-    # We have to do this every time, for every single known domain.
-    # This is because there is NO GUARANTEE that the tfstate is in sync with actual libvirt state.
-    sync_tf_state_with_libvirt();
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
@@ -85,7 +205,7 @@ sub main {
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        die "No such file provision.conf in $domain_dir/$depends/" unless -f $cfile;
+        close _must_read($cfile, "No provision.conf for $depends, which $domain depends on");
         my $dconfig = Config::Simple->new($dcfile);
 
         #XXX should probably die here if the admin_users differ!
@@ -93,9 +213,11 @@ sub main {
         $skey = "$domain_dir/$depends/key.rsa";
         ($reuser, $reuse) = provision_domain($dconfig, $depends, $reuse, $reuser);
         if (!$dryrun) {
-            my $ssh = wait_for_ssh($reuser, $skey, $reuse) or die "$depends never came up";
-            wait_for_cloud_init($ssh, $domain);
-            wait_for_makefile($ssh, $depends);
+            my $guest = Trog::Guest->new(name => $depends, host => $reuse, user => $reuser, key_path => $skey);
+            $guest->wait_for_ssh();
+            $guest->wait_for_cloud_init($domain);
+            $hv->eject_cdrom($depends);
+            $guest->wait_for_makefile($depends);
         }
 
     }
@@ -104,101 +226,113 @@ sub main {
     return 0 if $dryrun;
 
     print "ssh -i $skey $user\@$ip\n";
-    my $ssh = wait_for_ssh($user, $skey, $ip) or die "$domain never came up";
+    my $guest = Trog::Guest->new(name => $domain, host => $ip, user => $user, key_path => $skey);
+    $guest->wait_for_ssh();
 
-	if (-f "$domain_dir/$domain/devices.map") {
-		print "Syncing disk map\n";
-		my $r = $ssh->sftp->put( "$domain_dir/$domain/devices.map", "devices.map" );
-		die "could not sync devices map!" unless $r;
-		$ssh->cmd("sudo cp devices.map /root/devices.map");
-	}
+    my $map = "$domain_dir/$domain/devices.map";
+    if (_readable($map)) {
+        print "Syncing disk map\n";
+        $guest->put_file($map, '/root/devices.map', sudo => 1)
+          or die "could not sync devices map!";
+    }
 
-    wait_for_cloud_init($ssh, $domain);
-    wait_for_makefile($ssh, $domain);
+    $guest->wait_for_cloud_init($domain);
 
-    # If we don't do this, any subsequent manual tf plan will explode violently
-    sync_tf_state_with_libvirt();
+    # Only now.  The seed ISO has to stay in the drive for as long as cloud-init
+    # might want to read it, which is until it says it is finished; pulling it
+    # out any earlier leaves the guest with no user, no keys and no netplan, and
+    # the pulling-out is only to stop the guest booting off it next time.
+    $hv->eject_cdrom($domain);
+
+    $guest->wait_for_makefile($domain);
 
     return 0;
 }
 
-sub sync_tf_state_with_libvirt {
-    my $statefile  = "/opt/terraform/config/terraform.tfstate";
-    return unless -f $statefile;
-    my $tf_domains = get_tf_managed_domains($statefile);
-    my %volatile   = extract_volatile_libvirt_info($tf_domains);
-    #brainwash_tfstate($statefile, %volatile);
-}
+# Run the config generator for this domain, if there is anything for it to
+# work from.
+#
+# The two used to be separate repositories and separate runs: you generated a
+# domain's configuration, then provisioned it.  That worked while the generator
+# could assume it was running on the hypervisor it was writing about -- it read
+# the internal IP and the sshd port off the local machine.  Once the hypervisor
+# became a choice, the two halves had to agree on which one, and the only
+# honest way for them to agree is to be one program.
+sub generate_config {
+    my ($domain, $opts) = @_;
 
-sub wait_for_cloud_init {
-    my ($ssh, $domain, $t) = @_;
+    my $dir     = $opts->{domain_dir};
+    my $recipes = $opts->{recipes} // Trog::Config->path('recipes.yaml');
+    my $ipmap   = $opts->{ipmap}   // Trog::Config->path('ipmap.cfg');
 
-    # TODO make configurable
-    $t //= '30m';
-    print "Waiting up to $t for Cloud-init to finish...\n";
-    my $rc = $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
-    print "Done!\n";
-    die "Cloud init reported failure! Investigate machine." if $rc;
-
-    # See if we got a lying exit code above
-    my ($raw) = $ssh->cmd("sudo cloud-init analyze dump");
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = eval {$json->decode($raw) };
-    die "cloud-init analyze dump failed to return JSON array!" unless ref $parsed eq 'ARRAY';
-
-    my @failures = grep { ($_->{result} // '') eq "FAIL" } @$parsed;
-    foreach my $fail (@failures) {
-        my ($module, $mtarget) = split('/', $fail->{name});
-        next unless $mtarget;
-        my ($stage, $target) = split('-', $mtarget);
-        next unless $target;
-        print "$target failed during $stage, re-running...\n";
-        my $ci_dir = "/var/lib/cloud/instances/$domain";
-        # Remove the semaphore that says this was run, then run the needed targets
-        $ssh->cmd_exit_code(qw{sudo rm}, "$ci_dir/sem/$stage\_$target");
-        my ($out) = $ssh->cmd({ use_persistent_shell => 0 }, qw{sudo cloud-init single --name}, $target);
-        print "$out\n\n";
+    # No site data, nothing to generate: somebody is provisioning from a domain
+    # directory they wrote by hand, which is a supported thing to do.
+    my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
+    unless (_readable($recipes) || -d $recipe_dir) {
+        print "No recipes at $recipes, building from what is already in $dir/$domain\n";
+        return 0;
     }
+
+    print "Generating the configuration for $domain...\n";
+
+    # An explicit --connect settles the hypervisor before the generator gets to
+    # choose one; it picks the singleton up from there.
+    Trog::HV->new(uri => $opts->{uri}, domain_dir => $dir) if $opts->{uri};
+
+    push @INC, '.';
+    my $generator = File::Basename::dirname(__FILE__) . '/new_config';
+    require $generator;    ## no critic (Modules::RequireBarewordIncludes)
+    my $result = Trog::Provisioner::Config::Generator::main(
+        '--recipes', $recipes, '--ipmap', $ipmap, $domain);
+
+    die "Could not generate the configuration for $domain\n" if $result;
+    return 1;
 }
 
-sub wait_for_makefile {
-    my ($ssh, $domain, $t) = @_;
+# Which hypervisor does this guest belong on?
+#
+# --connect is the manual override and skips every question below.  Otherwise,
+# if there is a hypervisors.conf, it decides: the guest goes where it already
+# lives, or where it fits.  With no fleet configured we are back to the old
+# behaviour, where provision.conf carried the connection details itself.
+sub choose_hypervisor {
+    my ($config, $domain, $opts) = @_;
 
-    # TODO make configurable
-    $t //= '30m';
+    my %paths = (domain_dir => $opts->{domain_dir});
 
-    print "Waiting up to $t for ATD queue to flush...\n";
-    my ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+    return Trog::HV->new(uri => $opts->{uri}, %paths) if $opts->{uri};
 
-    print "Waiting up to $t for Makefile payload to start...\n";
-    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'until [ -f /var/log/$domain.setup.log ]; do sleep 1; done;'});
+    my $fleet = Trog::Hypervisors->load(
+        $opts->{hvconf} // Trog::Hypervisors->default_path);
+    return Trog::HV->from_config($config, %paths) unless $fleet->configured;
 
-    print "Waiting up to $t for Makefile payload to finish...\n";
-    $ssh->cmd_exit_code(qq{sudo timeout $t bash -c 'while lsof | grep /var/log/$domain.setup.log; do sleep 1; done;'});
+    warn "hypervisors.conf decides which hypervisor $domain lands on; the "
+      . "libvirt_uri in its provision.conf is ignored\n"
+      if $config->param('libvirt_uri');
 
-    print "Waiting up to $t for any makefile queued ATD jobs to flush...\n";
-    ($out) = $ssh->cmd(qq{sudo timeout $t bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'});
+    my $hv = $fleet->select_for($domain, $config);
 
-    print "Last log:\n";
-    my ($ll) = $ssh->cmd(qq{sudo tail /var/log/$domain.setup.log});
-    print "$ll\n";
-
-    print "\nDone!\n";
+    # The command line still outranks the fleet on where *our* files go.
+    $hv->{domain_dir} = $opts->{domain_dir} if defined $opts->{domain_dir};
+    return $hv;
 }
 
 sub provision_domain {
     my ($config, $domain, $reuse, $reuser, $depends) = @_;
 
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
 
     # Set this to simplify calling conventions
     $config->param('domain', $domain);
-    my $domain_dir = $config->param('domain_dir');
 
-    my $nc = mongle_network_configuration($config);
-    print "Wrote $nc\n";
+    # Order matters here.  The network configuration works out the hypervisor's
+    # internal IP and sshd port and stashes them on the config; the setup script
+    # needs both; the logging config writes the rsyslog drop-in that cloud-init
+    # then reads back in.
+    my %seed;
+    $seed{'network-config'} = mongle_network_configuration($config);
+    print "Wrote the network configuration for $domain\n";
 
     my $ss = mongle_setup_script($config);
     print "Wrote $ss\n";
@@ -206,8 +340,13 @@ sub provision_domain {
     my $lc = mongle_logging_config($config);
     print "Wrote $lc\n";
 
-    my $cc = mongle_cloud_init($config);
-    print "Wrote $cc\n";
+    $seed{'user-data'} = mongle_cloud_init($config);
+    $seed{'meta-data'} = mongle_meta_data($config);
+    print "Wrote the cloud-init configuration for $domain\n";
+
+    # Everything the domain dir is going to hold now holds it, so the HV can
+    # have its copy.  The guest pulls its payload from there.
+    $hv->sync_domain_dir($domain);
 
     # If the domain is already up, let's find the IP.
     # We can't guarantee we have a static IP, so use the internal.
@@ -215,403 +354,349 @@ sub provision_domain {
     $qdn = $depends if $depends;
     $qdn =~ s/\.\S+$//;
 
-    #XXX this can be fooled if you have two VMs, one a subdo of the other
-    my $old_ip = qx#virsh net-dhcp-leases default | grep $qdn | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
-    $old_ip = 'bogus' unless $old_ip;
-    chomp $old_ip;
+    # By MAC, which is exact: the hostname match this used to do could be
+    # fooled by a guest that is a subdomain of another.
+    my $nat_mac = $hv->guest_mac($domain, 0);
+    my $old_ip  = $hv->lease_ip('default', mac => $nat_mac) // 'bogus';
 
     if ($reuse) {
-        return ($reuser, $old_ip) if $dryrun;
-        #$old_ip = $reuse;
+        my $old_ssh_ip = $hv->guest_ssh_ip($config, $old_ip);
+        return ($reuser, $old_ssh_ip) if $dryrun;
 
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
-        my %opts = ( host => $old_ip );
-        $opts{user}     = $reuser;
-
-        # Make sure any existing VMs don't have this domain
-        clean_domain_resources($domain,$domain_mongled);
-        unlink "/opt/terraform/config/$domain.tf";
-
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
         # Otherwise we'll use the agent.
-        $opts{key_path} = "$domain_dir/$domain/key.rsa";
-        $opts{key_path} = "$domain_dir/$depends/key.rsa" if $depends;
+        my $key = "$domain_dir/$domain/key.rsa";
+        $key = "$domain_dir/$depends/key.rsa" if $depends;
+
+        # Make sure any existing VMs don't have this domain
+        clean_domain_resources($domain);
+
         print "Attempting to access Machine\n";
-        my $ssh = Net::OpenSSH::More->new(%opts);
+        my $guest = Trog::Guest->new(name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key);
 
         my $output = '';
         print "Installing Updated cloud-init and forcing re-run...\n";
-        my $init = "/opt/terraform/config/$domain.cloud_init.cfg";
+        my $init = "$domain_dir/$domain/user-data";
         my $ci_dir = "/var/lib/cloud/instances/$domain";
-        $ssh->sftp->put($init, 'cloud-config.txt');
+        $guest->put_file($init, 'cloud-config.txt') or die "Could not ship the cloud-init config to $domain";
         # Remove the semaphore that says this was run, then run the needed targets
-        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
-        ($output) = $ssh->cmd("sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt");
-        print "$output\n";
-        $ssh->cmd(qw{sudo rm}, "$ci_dir/sem/cc_users_groups");
-        ($output) = $ssh->cmd("sudo cloud-init single --name cc_users_groups -f cloud-config.txt");
-        print "$output\n";
+        $guest->run_sudo(qw{rm}, "$ci_dir/sem/cc_package_update_upgrade_install");
+        print $guest->capture('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
+        $guest->run_sudo(qw{rm}, "$ci_dir/sem/cc_users_groups");
+        print $guest->capture('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
 
         my $ips  = _coerce_array($config->param('ips'));
-        my ($existing_nc) = $ssh->cmd("sudo cat /etc/netplan/50-cloud-init.yaml");
+        my $existing_nc = $guest->capture('sudo cat /etc/netplan/50-cloud-init.yaml');
         my $parsed = YAML::XS::Load($existing_nc);
 
-        my $primary_adapter_name = $config->param('bridge_devname');
-        die "Could not find primary adapter '$primary_adapter_name' in netplan config!" unless ref $parsed->{network}{ethernets}{$primary_adapter_name} eq 'HASH';
+        my $adapter = primary_adapter($parsed, $config, $hv->guest_mac($domain, 1));
+        my $addresses = ($parsed->{network}{ethernets}{$adapter}{addresses} //= []);
 
-        my $num_ips = scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}});
-        @{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}} = uniq(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}}, map { "$_/24"} @$ips);
-        if ($num_ips != scalar(@{$parsed->{network}{ethernets}{$primary_adapter_name}{addresses}})) {
+        my $num_ips = scalar @$addresses;
+        @$addresses = uniq(@$addresses, map { "$_/24" } @$ips);
+        if ($num_ips != scalar @$addresses) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
-            File::Slurper::write_text($new_config, $encoded);
+            File::Slurper::Temp::write_text($new_config, $encoded);
             print "Setting up IP for $domain...\n";
-            $ssh->sftp->put($new_config, "network-config-merged.yaml");
-            $ssh->cmd("sudo mv network-config-merged.yaml /etc/netplan/50-cloud-init.yaml");
-            $ssh->cmd("sudo chmod 0600 /etc/netplan/50-cloud-init.yaml");
-            $ssh->cmd("sudo chown root:root /etc/netplan/50-cloud-init.yaml");
-            ($output) = $ssh->cmd("sudo netplan apply");
+            # Straight to where it belongs, as root, rather than landing in the
+            # home directory and being moved and chmodded afterwards.
+            $guest->put_file($new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600')
+              or die "Could not install the netplan config on $domain";
+            $output = $guest->capture('sudo netplan apply');
             chomp $output;
             print "$output\n" if $output;
         }
 
         print "Syncing setup script\n";
-        my $res = $ssh->sftp->put( "$domain_dir/$domain/setup.sh", "setup-$domain.sh" );
-        $ssh->cmd("chmod +x setup-$domain.sh");
-        $ssh->cmd("sudo mv setup-$domain.sh /root");
+        $guest->put_file("$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755')
+          or die "Could not ship the setup script to $domain";
         print "Scheduling job to run setup script\n";
-        ($output) = $ssh->cmd("sudo at now -f /root/setup-$domain.sh");
-        print $output;
+        print $guest->capture("sudo at now -f /root/setup-$domain.sh");
         print "Done.\n";
-        return ($reuser, $old_ip);
+        return ($reuser, $old_ssh_ip);
     }
 
-    # TODO move the deletion of unneeded resources above the SSH reuse stuff, remove dependent VMs from conf.
-    my $tf = mongle_terraform_template($config);
-    print "Wrote $tf\n";
+    # Anything already answering to this name has to go before we define one.
+    clean_domain_resources($domain);
 
-    return ($config->param('admin_user'), $old_ip) if $dryrun;
+    my ($xml, $file) = mongle_domain_xml($config, \%seed);
+    print "Wrote $file\n";
 
-    chdir "/opt/terraform/config";
-    # Figure out if we need to liquidate/respawn/spawn existing stuff
-    my $result = 0;
-    # If something named this domain exists, but is supposed to depend on something else, destroy it.
-    clean_domain_resources($domain,$domain_mongled);
+    return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $old_ip)) if $dryrun;
 
-    system(qw{terraform init});
-    $result = $? >> 8;
-    die "Could not initialize terraform" if $result;
+    print "Defining and starting $domain...\n";
+    $hv->define_domain($xml);
 
-    #XXX Terraform wants ot rebuild everything even if a trivial autoassigned pty port changes
-    # As such we need to tell it to only EVER change what we have requested
-    system(qw{terraform plan -out tf.plan},  "-target=libvirt_domain.$domain_mongled");
-    $result = $? >> 8;
-    die "Could not establish terraform execution plan" if $result;
-
-    system(qw{terraform apply tf.plan});
-    $result = $? >> 8;
-	#XXX the provider is buggy, so we just have to pray
-    warn "Terraform cried uncle, but we're going to continue anyways" if $result;
-
-    # If we're not re-using the VM, waste the old DHCP lease, so we don't fill up the table and gum everything up.
-	my $leasehelper = -f "/usr/lib/libvirt/libvirt_leaseshelper" ? "/usr/lib/libvirt/libvirt_leaseshelper" : "/usr/libexec/libvirt_leaseshelper";
-    my $nuked = qx#sudo VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip#;
-    print qq#sudo VIR_BRIDGE_NAME=virbr0 $leasehelper del ip $old_ip\n#;
-
-
-    print "Waiting for VM to come live...";
-    my $new_ip='';
-    my $oldip_grep = "| grep -v $old_ip";
+    # We used to nuke the old lease here, because a rebuilt guest arrived with a
+    # freshly generated MAC and so took a second address while the first sat in
+    # the table until it expired.  Its MAC is derived from its name now, so it
+    # asks for the lease it already had and there is nothing to clean up --
+    # which also means we wait for that lease to appear rather than for a
+    # different address to.
+    # Its MAC is derived from its name, so a rebuilt guest asks for the lease it
+    # already had.  That also means the lease is usually already in the table
+    # before this guest has finished POSTing -- it is the previous boot's, for
+    # the same MAC and the same address.  So this finds the address; it does not
+    # establish that anything is running at it.  wait_for_ssh does that.
+    print "Looking up the address for $domain...";
+    my $new_ip = '';
     for (1..30) {
-        $new_ip = qx#virsh net-dhcp-leases default | grep $qdn $oldip_grep | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//#;
-        print qq#virsh net-dhcp-leases default | grep $qdn $oldip_grep | awk '{print \$5}' | sed -E s/\\\\/[0-9]+\$//\n#;
-        chomp $new_ip;
-        last if $new_ip && ($new_ip ne $old_ip);
+        $new_ip = $hv->lease_ip('default', mac => $nat_mac);
+        last if $new_ip;
         print ".";
         sleep 1;
     }
-    die "\nVM never came up!\n" unless $new_ip;
+    die "\n$domain never asked for a lease!\n" unless $new_ip;
 
-    # Eject the CDROM we used for cloud-init
-    my $out = print qx{virsh attach-disk '$domain' '' sda --driver qemu --type cdrom --mode readonly};
-    chomp $out;
-    warn "Could not eject cdrom: $out" unless $out eq 'Disk attached successfully';
+    print "\nDefined and started; $domain should come up at $new_ip\n";
 
-    print "\nAll Done!  The server should be live at $new_ip\n";
-
-    return ($config->param('admin_user'), $new_ip);
+    return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
 }
 
+# Which entry in the guest's netplan is the outbound interface?
+#
+# By MAC, because that is the one thing about an interface we decide and the
+# guest cannot disagree with.  cloud-init writes the MAC it matched on into
+# netplan, so the entry we want identifies itself; the name it ended up with is
+# a consequence and not a handle.  Falling back to the name covers a guest
+# built before any of this, whose netplan has no match stanza at all.
+sub primary_adapter {
+    my ($netplan, $config, $mac) = @_;
+
+    my $ethernets = $netplan->{network}{ethernets};
+    die "No ethernets at all in the guest's netplan config!\n" unless ref $ethernets eq 'HASH';
+
+    foreach my $name (sort keys %$ethernets) {
+        my $match = $ethernets->{$name}{match} or next;
+        next unless ref $match eq 'HASH' && defined $match->{macaddress};
+        return $name if lc $match->{macaddress} eq lc $mac;
+    }
+
+    my (undef, $bridge_slot) = Trog::HV->new()->nic_slots;
+    my $named = $config->param('bridge_devname') // "ens$bridge_slot";
+    return $named if ref $ethernets->{$named} eq 'HASH';
+
+    die "Could not find the outbound adapter in the guest's netplan: nothing matches\n"
+      . "$mac, and there is no $named either.  It has: " . join(', ', sort keys %$ethernets) . "\n";
+}
+
+# Whatever is already answering to this name, gone.
+#
+# A domain we are about to define cannot share a name with one that already
+# exists, and its disk is a fresh overlay on the base image -- keeping the old
+# one would hand the new guest the old one's filesystem.  This used to have to
+# fight terraform for the privilege; now it asks libvirt.
 sub clean_domain_resources {
-    my ($domain,$domain_mongled) = @_;
+    my ($domain) = @_;
+    my $hv = Trog::HV->new();
 
-    #XXX sigh sigh sigh
-    # We also have to whack any VM which exists with this name but is shutdown because TF is incapable of fixing this
-    my $vm_list = qx{virsh list --all};
-    if ($vm_list =~ m/\Q$domain\E/) {
-        # Kill it, how frigging hard can it be???
-        print "Terminating existing VM $domain via virsh...\n";
-        system(qw{virsh destroy}, $domain);
-        system(qw{virsh undefine}, $domain);
+    if ($hv->domain_exists($domain)) {
+        print "Terminating the existing VM $domain\n";
+        $hv->annihilate_domain($domain);
     }
 
-    my @exempt = qw{libvirt_volume.image_base libvirt_pool.tf_disks};
-    my $resources = qx{terraform state list};
-    chomp $resources;
-    foreach my $resource (split(/\n/, $resources)) {
-        next unless $resource =~ m/\Q$domain_mongled\E/;
-        next if any { $_ eq $resource } @exempt;
-        print "Terminating $resource\n";
-        #XXX terraform has no good means to say "HEY THESE ARE SHARED RESOURCES HANDS OFF!"
-        #XXX So we have to instead painstakingly kill everything that isn't.
-        #XXX they claim modules are the way to do this, but that appears to be false.
-        #XXX Maybe I have to instead make both the shared and vm specific stuff modules? IDK
-        system(qw{terraform destroy -auto-approve -target}, $resource) unless any { $_ eq $resource } @exempt;
-    }
-
+    $hv->delete_volume("$domain-qcow2");
+    $hv->delete_volume("$domain-cloudinit.iso");
+    return 1;
 }
 
-sub wait_for_ssh {
-    my ($user, $key, $ip) = @_;
-    print "Waiting for $ip:22 to come live...\n";
-    my $wait = 300;
-    my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
-    die "SSH port never came up after $wait seconds!" unless $ssh_up;
+# Render the libvirt XML for a domain, and make the disks it refers to.
+#
+# This used to write terraform HCL.  Terraform's model is that it owns the
+# world and may rebuild it; ours is that the hypervisor owns the world and we
+# are adding one guest.  Reconciling those cost a state file per hypervisor,
+# import blocks, ignore_changes for attributes the provider would not report
+# back, and a provider that cannot import a volume at all.  This is less code
+# than the machinery that was keeping terraform's opinion at bay.
+sub mongle_domain_xml {
+    my ($config, $seed) = @_;
 
-    # Make sure we can *actually* SSH in
-    my $ssh = Net::OpenSSH::More->new( host => $ip, user => $user, key_path => $key );
-    die "Could not establish SSH connection as $user!" unless $ssh;
-}
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
 
-sub mongle_terraform_template {
-    my ($config) = @_;
-
-    my $domain = $config->param('domain');
-    my $image  = $config->param('image');
+    my $domain    = $config->param('domain');
+    my $image     = $config->param('image');
     my $disk_size = $config->param('size');
-    my $ram_mb = $config->param('memory');
+    my $ram_mb    = $config->param('memory');
     my $cpus      = $config->param('cpus');
+
     # host-passthrough exposes the bare-metal CPU (incl. AVX/AVX2/etc.) to the
-    # guest — required by anything that probes cpuid for vector extensions
+    # guest -- required by anything that probes cpuid for vector extensions
     # (e.g. the `claude` CLI bundled v8 snapshot).  Override to host-model,
     # custom, or a specific model name only if you need live migration to a
     # differently-specced HV.
-    my $cpu_mode  = $config->param('cpu_mode') // 'host-passthrough';
+    my $cpu_mode = $config->param('cpu_mode') // 'host-passthrough';
 
-    my $bridge_device = qx/brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print \$1}'/;
-    die "Could not determine outbound bridge device!" unless $bridge_device;
-    chomp $bridge_device;
+    # These have no sane default, and every one of them goes into the XML.
+    # Say which one is missing rather than producing a domain that won't define.
+    foreach my $required (
+        [image  => $image],  [size => $disk_size],
+        [memory => $ram_mb], [cpus => $cpus],
+    ) {
+        my ($key, $value) = @$required;
+        die "MUST SET $key in provision.conf for $domain\n" unless defined $value && length $value;
+    }
+
+    my $bridge_device = $hv->bridge_device;
     print "Using outbound bridge $bridge_device\n";
 
-    # OK, let's get the UUID of our storage pool IN CASE we are re-using it
-    my $pool_info = qx/virsh pool-list --uuid --name --all/;
-    my %pools;
-    open my $pd, '<', \$pool_info;
-    foreach my $line (<$pd>) {
-        my ($k,$v) = $line =~ m/^\s*(\S+)\s+(\S+)\s*$/;
-        $pools{$v} = $k if $v;
+    # The pool, the image everything is layered on, and this guest's own disk.
+    $hv->pool();
+    my $base = $hv->base_image($image);
+    my $disk_volume = "$domain-qcow2";
+    $hv->create_disk($disk_volume, backing => $base, capacity => $disk_size);
+
+    my ($extra_disks, $filesystems) = mongle_extra_disks($config);
+
+    # NoCloud wants all three, and cloud-init will not look at a seed that is
+    # missing any of them.
+    foreach my $file (qw{user-data meta-data network-config}) {
+        die "No $file to build the cloud-init seed for $domain from\n"
+          unless defined $seed->{$file} && length $seed->{$file};
     }
-    close $pd;
+    my $cloudinit = $hv->cloudinit_iso($domain, %$seed);
 
-    # TODO make this configurable so we can use lvm
-    my $libvirt_pool = $pools{tf_disks};
-    my ($import_block, $image_block) = ('', '');
-    if ($libvirt_pool) {
-        print "Re-Using existing libvirt pool $libvirt_pool\n";
-        $import_block = qq|
-import {
-    to = libvirt_pool.tf_disks
-    id = "$libvirt_pool"
-}
-|;
-    }
-
-    my $domain_mongled = $domain;
-    $domain_mongled =~ s/\./-/g;
-
-    my %to_mongle = (
-        'main.tmpl'   => "config/main.tf",
-        'domain.tmpl' => "config/$domain.tf",
+    my $xml = File::Slurper::read_text(File::Basename::dirname(__FILE__) . '/../domain.xml.tmpl');
+    my %substitutions = (
+        REPLACEME   => $domain,
+        MUGUBYTES   => $ram_mb,
+        NUMCPUS     => $cpus,
+        CPUMODE     => $cpu_mode,
+        NATMAC      => $hv->guest_mac($domain, 0),
+        BRIDGEMAC   => $hv->guest_mac($domain, 1),
+        POOLNAME    => 'tf_disks',
+        DISKVOLUME  => $disk_volume,
+        CLOUDINIT   => $cloudinit,
+        BRIDGENAME  => $bridge_device,
+        EXTRADISKS  => $extra_disks,
+        FILESYSTEMS => $filesystems,
     );
+    $xml =~ s/%$_%/$substitutions{$_}/gmx for keys %substitutions;
 
-	# If the user instructs us to attach other disks via disks.txt, we should obey
-	my $disks_config = "/opt/domains/$domain/mounts.txt";
-	my $attach = ',';
-    my $fsmounts = '';
-	my $mapper = '';
-	if (-f $disks_config) {
-		my $disks = File::Slurper::read_text($disks_config);
-		my @devnames = 'vdb'..'vdz';
-		my (@extra_disks,@filesystems);
-        my $order = 2;
-		foreach my $diskspec (grep { $_ } split(/\n/, $disks)) {
-			my ($pool, $disk) = split(/=/, $diskspec);
+    my $file = "$domain_dir/$domain/domain.xml";
+    File::Slurper::Temp::write_text($file, $xml);
+    return ($xml, $file);
+}
 
-            #TODO should allow the user to pass this via diskspec
-            my $type = "qcow2";
+# Whatever mounts.txt asks for, as libvirt device XML.
+#
+# Each line is pool=name.  A `raw` pool is a host block device, `dir` is a
+# directory shared in over virtiofs, `file` is an image file, and anything else
+# is taken as the name of another libvirt pool.  `fuse` is skipped: the guest
+# mounts those itself.
+sub mongle_extra_disks {
+    my ($config) = @_;
 
-            # Don't do anything for fuse devices
+    my $hv         = Trog::HV->new();
+    my $domain     = $config->param('domain');
+    my $domain_dir = $hv->domain_dir;
+
+    my $spec_file = "$domain_dir/$domain/mounts.txt";
+    my (@disks, @filesystems, $mapper);
+    $mapper = '';
+
+    if (_readable($spec_file)) {
+        my @devnames = ('vdb' .. 'vdz');
+        my $order    = 2;
+
+        foreach my $diskspec (grep { $_ } split("\n", File::Slurper::read_text($spec_file))) {
+            my ($pool, $disk) = split("=", $diskspec);
             next if $pool eq 'fuse';
 
-            # Proper boot order...
             $order++;
+            my $dev = shift @devnames or die "Ran out of vdnames!\n";
 
-			# Attach to the guest IFF the thing exists
-			my $dev = shift @devnames;
-			die "Ran out of vdnames!" unless $dev;
+            # The guest gets a map of what it asked for to where it landed.
+            $mapper .= $pool eq 'dir' ? "$disk=$dev\n" : "$disk=/dev/$dev\n";
 
-			# we have to build a mapping file which will end up in /root.
-			$mapper .= "$disk=/dev/$dev\n" unless $pool eq 'dir';
-            $mapper .= "$disk=$dev\n"      if     $pool eq 'dir';
+            if ($pool eq 'dir') {
+                # virtiofs-better is `virtiofsd --inode-file-handles=mandatory`,
+                # without which a busy share runs the daemon out of file handles.
+                #
+                # The terraform config asked for open_files max here too, and it
+                # never did anything: libvirt has no such element, accepts the
+                # domain, and silently drops it.  The wrapper is the whole fix.
+                push @filesystems, sprintf(<<'FS', _xml($disk), _xml($dev));
+    <filesystem type='mount' accessmode='passthrough'>
+      <driver type='virtiofs' queue='1024'/>
+      <binary path='/usr/libexec/virtiofs-better'/>
+      <source dir='%s'/>
+      <target dir='%s'/>
+    </filesystem>
+FS
+                next;
+            }
 
             if ($pool eq 'raw') {
-                # Just use a raw block device
-                push(@extra_disks,qq|
-		  {
-			source = {
-                block = {
-				    dev = "$disk"
-                }
-			}
-            driver = {
-                name = "qemu"
-                type = "raw"
-            }
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            boot = {
-                order = $order
-            }
-			device = "disk"
-            type = "block"
-		  }|);
+                push @disks, sprintf(<<'DISK', _xml($disk), _xml($dev), $order);
+    <disk type='block' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source dev='%s'/>
+      <target dev='%s' bus='virtio'/>
+      <boot order='%d'/>
+    </disk>
+DISK
                 next;
             }
 
-            #XXX we may have to set binary.path='some_script' which is `virtiofs --inode-file-handles=mandatory $@`
-            # Just mount a dir on the HV
-            if ($pool eq 'dir') {
-                push(@filesystems,qq|
-		  {
-			source = {
-                mount = {
-				    dir = "$disk"
-                }
-			}
-            target = {
-                dir = "$dev"
-            }
-            driver = {
-                type = "virtiofs"
-            }
-            boot = {
-                order = $order
-            }
-            binary = {
-                path = "/usr/libexec/virtiofs-better"
-                open_files = {
-                    max = 4092
-                }
-            }
-            access_mode="passthrough"
-		  }|);
-                next;
-            }
-
-            if ($pool eq 'file') {
-			    #XXX untested, may not work?
-			    push(@extra_disks,qq|
-		  {
-			source = {
-				file = {
-					file = "$disk"
-				}
-			}
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            driver = {
-                name = "qemu"
-                type = "$type"
-            }
-            boot = {
-                order = $order
-            }
-			device = "disk"
-		  }|);
-            }
-            # Otherwise just assume we got a pool name
-	        push(@extra_disks,qq|
-		  {
-			source = {
-				pool = "$pool"
-				volume = "$disk"
-			}
-			target = {
-				dev = "$dev"
-				bus = "virtio"
-			}
-            driver = {
-                name = "qemu"
-                type = "$type"
-            }
-            boot = {
-                order = $order
-            }
-			device = "disk"
-		  }|);
-		}
-		$attach   .= join(',', grep { $_ } @extra_disks);
-        $fsmounts = "filesystems = [".join(',', grep { $_ } @filesystems)."]";
-	}
-	# Write /root/devices.map
-	File::Slurper::write_text("/opt/domains/$domain/devices.map", $mapper);
-
-    my @files_mongled;
-    foreach my $file (keys(%to_mongle)) {
-        my $tf_template = File::Slurper::read_text("$FindBin::Bin/../$file");
-
-        $tf_template =~ s/%BRIDGENAME%/$bridge_device/gmx;
-        $tf_template =~ s/%REPLACEME%/$domain/gmx;
-        $tf_template =~ s/%MONGLED%/$domain_mongled/gmx;
-        $tf_template =~ s/%GIGGLEBYTES%/$disk_size/gmx;
-        $tf_template =~ s/%MUGUBYTES%/$ram_mb/gmx;
-        $tf_template =~ s/%NUMCPUS%/$cpus/gmx;
-        $tf_template =~ s/%CPUMODE%/$cpu_mode/gmx;
-        $tf_template =~ s/%CLOUDIMG%/$image/gmx;
-        $tf_template =~ s/%LIBVIRT_POOL_IMPORT%/$import_block/gmx;
-#        $tf_template =~ s/%BASE_IMAGE_IMPORT%/$image_block/gmx;
-		$tf_template =~ s/%EXTRADISKS%/$attach/gmx;
-        $tf_template =~ s/%FILESYSTEMS%/$fsmounts/gmx;
-
-        my $tfile = "/opt/terraform/$to_mongle{$file}";
-        File::Slurper::write_text($tfile, $tf_template);
-        push(@files_mongled, $tfile);
+            # A file, or a volume in some other pool -- either way it resolves
+            # to a path, and libvirt wants the path.
+            my $path = $pool eq 'file' ? $disk : ($hv->volume_path($disk, $pool) // $disk);
+            push @disks, sprintf(<<'DISK', _xml($path), _xml($dev), $order);
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='%s'/>
+      <target dev='%s' bus='virtio'/>
+      <boot order='%d'/>
+    </disk>
+DISK
+        }
     }
 
-    #XXX tf plugin should do this automatically, but does not
-    unlink "/opt/terraform/disks/commoninit.iso";
+    File::Slurper::Temp::write_text("$domain_dir/$domain/devices.map", $mapper);
+    return (join('', @disks), join('', @filesystems));
+}
 
-    return join(', ', @files_mongled);
+sub _xml {
+    my ($str) = @_;
+    $str = '' unless defined $str;
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    $str =~ s/"/&quot;/g;
+    $str =~ s/'/&apos;/g;
+    return $str;
 }
 
 # Slam in the IPs, gw, resolvers
 sub mongle_network_configuration {
     my $config = shift;
 
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
+
     my $domain = $config->param('domain');
     my $ips  = _coerce_array($config->param('ips'));
     my $gw   = $config->param('gateway');
     my $res  = _coerce_array($config->param('resolvers'));
+    die "MUST SET gateway in provision.conf when ips are set\n"
+      if @$ips && !(defined $gw && length $gw);
 
-    # XXX ugh there is no way to set consistent devnames, fml
-    my $dhcp_devname = $config->param('dhcp_devname');
-    die "MUST SET dhcp_devname in provision.conf" unless $dhcp_devname;
-    my $bridge_devname = $config->param('bridge_devname');
-    die "MUST SET bridge_devname in provision.conf" unless $dhcp_devname;
+    # These used to have to be told to us, because what the guest calls its
+    # interfaces depends on the machine type and the order libvirt happened to
+    # assign PCI slots in.  Both are ours to decide now: the slots are pinned in
+    # the domain XML, and systemd names a PCI NIC after its hotplug slot, so
+    # slot 3 and slot 4 are ens3 and ens4.
+    #
+    # The MAC is what actually does the work, though.  cloud-init matches the
+    # interface on that and renames it to the name below, so a guest whose
+    # kernel names things some other way still gets the right configuration on
+    # the right card.  The names are only what they end up called afterwards.
+    my ($nat_slot, $bridge_slot) = $hv->nic_slots;
+    my $dhcp_devname   = $config->param('dhcp_devname')   // "ens$nat_slot";
+    my $bridge_devname = $config->param('bridge_devname') // "ens$bridge_slot";
 
     # We need two adapters, one on virbr0 and another on the bridge.
     # So, we need to figure out:
@@ -619,26 +704,12 @@ sub mongle_network_configuration {
     # 2. name of the bridge device.
     # 3. IP of bridge device.
 
-    my $virbr_device = qx/brctl show | grep virbr | tail -n1 | awk '{print \$1}'/;
-    die "Could not determine libvirt network device!" unless $virbr_device;
-    chomp $virbr_device;
-    print "Using libvirt network device $virbr_device\n";
+    print "Using libvirt network device " . $hv->virbr_device . "\n";
+    print "HV internal IP: " . $hv->virbr_ip . "\n";
 
-    my $virbr_ip = qx/ip addr show dev $virbr_device | grep inet | head -n1 | awk '{print \$2}'/;
-    die "Could not determine IP address for $virbr_device" unless $virbr_ip;
-    chomp $virbr_ip;
-    $virbr_ip =~ s/\/\d\d$//;
-    print "HV internal IP: $virbr_ip\n";
-
-    # Stash this in the config object for later use by the clown-config
-    $config->param('hv_internal_ip', $virbr_ip);
-    # Figure the same with the HV's SSH port
-    # XXX because there might be multiple SSH instances running on the machine, we have to check config instead of netstat
-    my $ssh_port = qx#grep '^Port' /etc/ssh/sshd_config | awk '{print \$2}'#;
-    chomp $ssh_port;
-    warn "Could not determine SSH port for HV, assuming 22" unless $ssh_port;
-    $ssh_port ||=22;
-    $config->param('hv_ssh_port', $ssh_port);
+    # Stash these in the config object for later use by the clown-config
+    $config->param('hv_internal_ip', $hv->virbr_ip);
+    $config->param('hv_sshd_port',   $hv->sshd_port);
 
     # Such an astonishingly tedious format
     my @subnets = map {
@@ -667,6 +738,7 @@ sub mongle_network_configuration {
                 {
                     type => 'physical',
                     name => $bridge_devname,
+                    mac_address => $hv->guest_mac($domain, 1),
                     subnets => \@subnets,
                     gateway4 => $gw,
                     nameservers => {
@@ -677,6 +749,7 @@ sub mongle_network_configuration {
                 {
                     type => 'physical',
                     name => $dhcp_devname,
+                    mac_address => $hv->guest_mac($domain, 0),
                     subnets => [
                         {
                             type => 'dhcp',
@@ -687,9 +760,9 @@ sub mongle_network_configuration {
        },
     };
 
-    my $cf = "/opt/terraform/config/$domain.network_config.cfg";
-    File::Slurper::write_text($cf, YAML::XS::Dump($netconf));
-    return $cf;
+    my $rendered = YAML::XS::Dump($netconf);
+    File::Slurper::Temp::write_text("$domain_dir/$domain/network-config", $rendered);
+    return $rendered;
 }
 
 sub inject_admin_key {
@@ -712,24 +785,31 @@ sub inject_admin_key {
 sub mongle_cloud_init {
     my $config = shift;
 
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
+
     my $domain = $config->param('domain');
     my $contactemail = $config->param('contact_email');
     my $hv_ip = $config->param('hv_internal_ip');
-    my $user = getpwuid($<);
+    die "MUST SET contact_email in provision.conf for $domain\n"
+      unless defined $contactemail && length $contactemail;
 
-    # Generate a new key for the child
-    qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};
-    die "No key generated!" unless -f "$domain_dir/$domain/key.rsa";
-    die "No pubkey generated!" unless -f "$domain_dir/$domain/key.rsa.pub";
+    # Generate a new key for the child.  This used to pipe yes(1) in to answer
+    # the overwrite prompt; removing the old key first means there is no prompt.
+    my $key = "$domain_dir/$domain/key.rsa";
+    unlink $key, "$key.pub";
+    IPC::Run3::run3([qw{ssh-keygen -t rsa -f}, $key, qw{-N}, '', qw{-q}], \undef, \undef, undef);
+    close _must_read($key,       "ssh-keygen made no key for $domain");
+    close _must_read("$key.pub", "ssh-keygen made no pubkey for $domain");
     chmod 0600, "$domain_dir/$domain/key.rsa";
     chmod 0600, "$domain_dir/$domain/key.rsa.pub";
 
-    # Authorize the key with the transfer user.
+    # Authorize the key with the transfer user *on the hypervisor* -- that's the
+    # box the guest will scp its payload back from.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
-    open(my $fh, '>>', "$ENV{HOME}/.ssh/authorized_keys");
-    print $fh "$pubkey\n";
-    close($fh);
+    $hv->append_line($hv->authorized_keys, $pubkey)
+      or die "Could not authorize the key for $domain on the hypervisor";
 
     my $pkgs = _coerce_array($config->param('packages'));
     # We absolutely must have atd, sendmail and make.
@@ -823,19 +903,39 @@ APT {
              }]
         }
     };
-    my $cf = "/opt/terraform/config/$domain.cloud_init.cfg";
-    File::Slurper::write_text($cf, "#cloud-config\n".YAML::XS::Dump($clown_config));
-    return $cf;
+    # Kept beside the domain as well as going into the seed, so you can read
+    # what a guest was built with without unpacking an ISO.
+    my $user_data = "#cloud-config\n" . YAML::XS::Dump($clown_config);
+    File::Slurper::Temp::write_text("$domain_dir/$domain/user-data", $user_data);
+    return $user_data;
+}
+
+# NoCloud wants an instance-id.  Keeping it stable across rebuilds is what
+# stops cloud-init deciding it has already run and skipping everything.
+sub mongle_meta_data {
+    my ($config) = @_;
+    my $domain = $config->param('domain');
+
+    return YAML::XS::Dump({
+        'instance-id'    => $domain,
+        'local-hostname' => $domain,
+    });
 }
 
 sub mongle_setup_script {
     my $config = shift;
+
+    my $hv         = Trog::HV->new();
+    my $domain_dir = $hv->domain_dir;
+
     my $domain          = $config->param('domain');
     my $hvip            = $config->param('hv_internal_ip');
-    my $hv_ssh_port     = $config->param('hv_ssh_port');
+    my $hv_ssh_port     = $config->param('hv_sshd_port');
     my $pre_make_script = $config->param('pre_make_script');
 
-    my ($username) = getpwuid($<);
+    my $username = $hv->hv_user();
+    die "Could not determine the transfer user on the hypervisor" unless $username;
+    chomp $username;
 
     my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
     $script_template =~ s/%THISIP%/$hvip/gmx;
@@ -846,131 +946,43 @@ sub mongle_setup_script {
     $script_template =~ s/%PRE_MAKE%/$pre_make_script/gmx if $pre_make_script;
 
     my $sf = "$domain_dir/$domain/setup.sh";
-    File::Slurper::write_text($sf, $script_template);
+    File::Slurper::Temp::write_text($sf, $script_template);
     return $sf;
 }
 
 # Make this VM send its rsyslog to here, or wherever is setup correctly
 sub mongle_logging_config {
     my $config = shift;
-    my $domain = $config->param('domain');
+
+    print "Connecting to Hypervisor...";
+    my $hv         = Trog::HV->new();
+    print "OK!\n";
+    my $domain_dir = $hv->domain_dir;
+
+    my $domain  = $config->param('domain');
     my $ship_to = $config->param('hv_internal_ip');
 
     my $local_config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog.tmpl");
     $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
-    # Write the local rsyslog conf
+    # The guest ships its logs at the HV, so the collector config goes there too.
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
-    File::Slurper::write_text($lcf, $local_config_template);
+    $hv->write_text($lcf, $local_config_template, sudo => 1);
+    print "Wrote $lcf\n";
 
-    # Write the local rsyslog logrotate conf
-    File::Copy::copy("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf");
+    $hv->put_file("$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => 1);
+    print "Wrote /etc/logrotate.d/vms.conf\n";
 
     #TODO die if these fail
-    system(qw{sudo systemctl restart rsyslog});
+    $hv->run_sudo(qw{systemctl restart rsyslog});
+    print "Restarted rsyslogd\n";
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;
 
     my $lf = "$domain_dir/$domain/rsyslog.conf";
-    File::Slurper::write_text($lf, $config_template);
+    File::Slurper::Temp::write_text($lf, $config_template);
     return $lf;
-}
-
-sub get_tf_managed_domains {
-    my ($statefile) = @_;
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = $json->decode(File::Slurper::read_text($statefile));
-
-    my @domains;
-    foreach my $res (@{$parsed->{resources}}) {
-        next unless $res->{type} eq 'libvirt_domain';
-        push(@domains, $res->{name});
-    }
-    return \@domains;
-}
-
-sub extract_volatile_libvirt_info {
-    my ($domains) = @_;
-
-    my %info;
-    my $domain;
-
-    my $extract_console = sub {
-        my ($t, $section) = @_;
-
-        my $source = $section->first_child('source');
-        my $target  = $section->first_child('target');
-        my $name  = $target ? $target->att('type') : '';
-        $info{$domain}{$name} = $source->att('path') if $source && $name;
-        $section->purge();
-    };
-
-    my $extract_graphics = sub {
-        my ($t, $section) = @_;
-        my $type = $section->att('type');
-        $info{$domain}{$type} = $section->att('port');
-        $section->purge();
-    };
-
-    my $xml = XML::Twig->new(
-        twig_roots => {
-            'console'  => $extract_console,
-            'graphics' => $extract_graphics,
-        },
-        twig_print_outside_roots => 0,
-    );
-
-    foreach my $mongled (@$domains) {
-        $domain = $mongled;
-        $domain =~ s/-/\./g;
-
-        # First, see if the domain is up.  If it's not, we don't care.
-        my $state = `virsh dominfo $domain | grep 'State'`;
-        next if $state !~ m/running/i;
-
-        my $raw = `virsh dumpxml $domain 2>&1`;
-        return () if $raw =~ m/failed to get domain/;
-        $domain = $mongled;
-        $xml->parse($raw);
-    }
-
-    return %info;
-}
-
-# I AM YURI. YOU WILL OBEY ME.
-sub brainwash_tfstate {
-    my ($statefile, %opts) = @_;
-
-    my $json = JSON::MaybeXS->new(utf8 => 1, pretty => 1);
-
-    my $parsed = $json->decode(File::Slurper::read_text($statefile));
-
-    foreach my $mongled (keys %opts) {
-        foreach my $res (@{$parsed->{resources}}) {
-            next unless $res->{type} eq 'libvirt_domain';
-            next unless $res->{name} eq $mongled;
-            foreach my $instance (@{$res->{instances}}) {
-                if (exists $instance->{attributes}{devices}{consoles}) {
-                    foreach my $console (@{$instance->{attributes}{devices}{consoles}}) {
-                        $console->{source}{pty} = $opts{$mongled}{$console->{target}{type}} if $opts{$mongled}{$console->{target}{type}};
-                    }
-                }
-                if (exists $instance->{attributes}{devices}{graphics}) {
-                    foreach my $graphic (@{$instance->{attributes}{devices}{consoles}}) {
-                        $graphic->{vnc}{port}   = $opts{$mongled}{vnc}   if $opts{$mongled}{vnc}   && exists $graphic->{vnc};
-                        $graphic->{spice}{port} = $opts{$mongled}{spice} if $opts{$mongled}{spice} && exists $graphic->{spice};
-                    }
-                }
-            }
-        }
-    }
-    File::Copy::copy($statefile, "$statefile.bak");
-    my $encoded = $json->encode($parsed);
-    File::Slurper::write_text($statefile, $encoded);
-    print "Overwrote $statefile with current VM socket state, old saved as $statefile.bak\n";
-    return 1;
 }
 
 exit main(@ARGV) unless caller;

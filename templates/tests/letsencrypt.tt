@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/etc/dehydrated/domains.d/[% domain %].conf', 'dehydrated domain config exists');
+ok(-f '/etc/dehydrated/hooks/[% domain %].sh', 'dehydrated hook script exists');
+
+done_testing();

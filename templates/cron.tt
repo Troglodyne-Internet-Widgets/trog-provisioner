@@ -1,0 +1,12 @@
+mv root.domain.crontab /etc/cron.d/[% domain %]
+chown root:root /etc/cron.d/[% domain %]
+chmod 0644 /etc/cron.d/[% domain %]
+# Obviously, don't use the same service user for each domain!
+[% IF user %]
+crontab -u [% user %] user.crontab
+[% END -%]
+[% IF user %]
+mkdir [% install_dir %]/[% domain %]/.cache; /bin/true
+chown [% user %]:[% user %] [% install_dir %]/[% domain %]/.cache
+[% END -%]
+[% script_dir %]/queue_postrun_task systemctl restart cronie

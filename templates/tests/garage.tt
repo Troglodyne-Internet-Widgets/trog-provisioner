@@ -1,0 +1,14 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active garage 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'garage is running');
+
+my $node_id = `garage node id -q 2>/dev/null`;
+chomp $node_id;
+ok($node_id, 'garage node id is available');
+
+done_testing();

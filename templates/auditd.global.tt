@@ -1,0 +1,1 @@
+mv global.rules /etc/audit/rules.d/global.rules

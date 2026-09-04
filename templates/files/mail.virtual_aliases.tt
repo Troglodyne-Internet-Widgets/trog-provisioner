@@ -1,0 +1,3 @@
+[% FOREACH alias IN mail_aliases %]
+[% alias.from %]@[% domain %] [% alias.to %]
+[%- END %]

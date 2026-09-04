@@ -1,0 +1,5 @@
+mkdir /etc/systemd/resolved.conf.d/; /bin/true
+cp 10-disable-stub-resolver.conf /etc/systemd/resolved.conf.d/
+chown -R systemd-resolve:systemd-resolve /etc/systemd/resolved.conf.d/
+chmod 0660 /etc/systemd/resolved.conf.d/10-disable-stub-resolver.conf
+[% script_dir %]/queue_postrun_task systemctl restart systemd-resolved

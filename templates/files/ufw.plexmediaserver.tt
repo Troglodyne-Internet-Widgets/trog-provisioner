@@ -1,0 +1,4 @@
+[plexmediaserver]
+title=Plex Media Server
+description=Plex personal media streaming server
+ports=32400/tcp

@@ -1,0 +1,8 @@
+# Kernel backlog tuning for nginx - managed by provisioner
+# See: https://docs.nginx.com/nginx/admin-guide/web-server/serving-static-content/#optimize-the-backlog-queue
+
+# Maximum socket listen backlog; must be >= nginx listen backlog value
+net.core.somaxconn = [% backlog %]
+
+# Maximum SYN backlog (half-open connections)
+net.ipv4.tcp_max_syn_backlog = [% backlog %]

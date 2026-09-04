@@ -1,0 +1,12 @@
+MAILTO="[% admin_email %]"
+[% IF from %]
+MAILFROM="[% from %]"
+[% END %]
+
+PATH="[% install_dir %]/[% domain %]/bin:/bin:/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin"
+HOME="[% install_dir %]/[% domain %]"
+
+[% FOREACH s IN user_scripts %]
+MAILTO="[% s.mailto %]"
+[% s.interval %] command [% s.cmd %]
+[% END %]

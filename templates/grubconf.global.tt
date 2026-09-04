@@ -1,0 +1,3 @@
+mv 00-grub.conf /etc/default/grub.d/00-grub.conf
+chown root:root /etc/default/grub.d/00-grub.conf
+update-grub

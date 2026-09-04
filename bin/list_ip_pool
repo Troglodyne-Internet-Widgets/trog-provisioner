@@ -1,0 +1,128 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::list_ip_pool;
+
+#ABSTRACT: Display static IP pool status.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Config::Simple;
+use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
+use Cpanel::JSON::XS;
+
+use Provisioner::IPPool;
+
+=head1 USAGE
+
+    list_ip_pool [--ipmap=file] [--available] [--assigned] [--json]
+
+Display static IP pool status: which IPs are assigned to VMs, which are available.
+
+=head2 ipmap.cfg format
+
+Add an [ip_pool] section to your ipmap.cfg:
+
+    [ip_pool]
+    ; Explicit list of all IPs in the pool (space-separated)
+    addresses = 192.168.1.10 192.168.1.11 192.168.1.12 192.168.1.13
+
+    ; OR specify one or more CIDR blocks (space-separated)
+    ; cidr = 192.168.1.0/24 10.0.0.0/28
+
+Both keys may coexist; addresses are merged with CIDR expansion.
+
+Assigned IPs are read from the [ips] section and cross-referenced to show
+which pool IPs are still available for new VMs.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my $cfile = Trog::Config->path('ipmap.cfg');
+    my ( $assigned, $available, $json );
+
+    GetOptionsFromArray(
+        \@args,
+        'ipmap=s'   => \$cfile,
+        'assigned'  => \$assigned,
+        'available' => \$available,
+        'json'      => \$json,
+    );
+
+    # Just give us everything if nothing is passed
+    ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
+
+    my $c    = Config::Simple->new($cfile);
+    die "$Config::Simple::errstr\n" unless $c;
+    my $ips  = $c->param( -block => 'ips' )     // {};
+    my $pool = $c->param( -block => 'ip_pool' ) // {};
+
+    unless ( keys %$pool ) {
+        print STDERR "No [ip_pool] section found in $cfile\n";
+        print STDERR "Add one like:\n\n";
+        print STDERR "  [ip_pool]\n";
+        print STDERR "  addresses = 192.168.1.10 192.168.1.11 192.168.1.12\n\n";
+        print STDERR "  OR\n\n";
+        print STDERR "  [ip_pool]\n";
+        print STDERR "  cidr = 192.168.1.0/24\n\n";
+        return 1;
+    }
+
+    my @pool_ips = Provisioner::IPPool::pool_ips($pool);
+
+    unless (@pool_ips) {
+        print STDERR "ip_pool section found but no IPs could be parsed.\n";
+        return 1;
+    }
+
+    # Build assigned-IP lookup from [ips] section (strip CIDR suffix if present)
+    my %assigned;
+    for my $domain ( sort keys %$ips ) {
+        my $ip = $ips->{$domain};
+        $ip =~ s|/\d+$||;
+        $assigned{$ip} = $domain;
+    }
+
+    my @available = grep { !$assigned{$_} } @pool_ips;
+    my @used      = grep { $assigned{$_} } @pool_ips;
+
+    if ($json) {
+        my $out = {};
+        $out->{available} = \@available if $available;
+        $out->{assigned}  = \%assigned  if $assigned;
+        print Cpanel::JSON::XS::encode_json($out);
+        return 0;
+    }
+
+    printf "IP Pool:  %d total, %d assigned, %d available\n\n",
+      scalar(@pool_ips), scalar(@used), scalar(@available);
+
+    if ( @used && $assigned ) {
+        print "Assigned:\n";
+        printf "  %-20s %s\n", $_, $assigned{$_} for @used;
+        print "\n";
+    }
+
+    if (@available) {
+        if ($available) {
+            print "Available:\n";
+            printf "  %s\n", $_ for @available;
+        }
+    }
+    else {
+        print "Pool exhausted:  no IPs available.\n";
+    }
+
+}
+
+exit main(@ARGV) unless caller;
+
+1;

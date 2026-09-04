@@ -1,0 +1,71 @@
+# Troglodyne perlcritic policy
+severity  = 1
+only      = 1
+force     = 0
+verbose   = 1
+#theme     = 
+#include   =
+#exclude   =
+criticism-fatal = 1
+color     = 1
+allow-unsafe = 1
+# Usability
+[Modules::RequirePerlVersion]
+[Documentation::RequirePod]
+# Security
+[ValuesAndExpressions::PreventSQLInjection]
+; [CodeLayout::RequireASCII] is not here on purpose.  Every file declares
+; use 5.041, which turns on source::encoding "ascii" and makes a non-ASCII
+; character in code a compile error -- stricter than the policy, and not
+; skippable.  The policy also applies to POD, where the only thing it ever
+; caught was a contributor's name in the section Dist::Zilla generates, and
+; spelling somebody's name wrong is not a code standard.
+[RegularExpressions::RequireDefault]
+strict = 1
+# PEBCAK catches
+[BuiltinFunctions::ProhibitDeleteOnArrays]
+[Subroutines::ProhibitAmbiguousFunctionCalls]
+[ValuesAndExpressions::ProhibitSingleArgArraySlice]
+[Bangs::ProhibitUselessRegexModifiers]
+[Bangs::ProhibitCommentedOutCode]
+[Tics::ProhibitUseBase]
+[Plicease::ProhibitLeadingZeros]
+[RegularExpressions::ProhibitEmptyAlternatives]
+[ValuesAndExpressions::UnexpandedSpecialLiteral]
+[CodeLayout::ProhibitIfIfSameLine]
+[ValuesAndExpressions::ConstantBeforeLt]
+[ValuesAndExpressions::ProhibitDuplicateHashKeys]
+# any access checks are necessarily a TOCTOU waiting to happen
+[ValuesAndExpressions::ProhibitFiletest_f]
+[ValuesAndExpressions::ProhibitFiletest_rwxRWX]
+# Bikeshed
+[CognitiveComplexity::ProhibitExcessCognitiveComplexity]
+warn_level = 40
+info_level = 30
+[Variables::ProhibitUselessInitialization]
+[PreferredModules]
+config = .preferred_modules.ini
+[logicLAB::RequireSheBang]
+formats = #!/usr/bin/env perl
+# Performance
+[logicLAB::ProhibitShellDispatch]
+[ProhibitPipeOpen]
+[Performance::ProhibitRegexForSimpleSubstring]
+[ProhibitUseLib]
+[ProhibitUsageSubs]
+[RequireQwForLiteralLists]
+[ProhibitNoWarningsRedefine]
+[RequireFatalWarnings]
+[ProhibitUnusedImports]
+# Neither of these can be seen statically: IO::Prompter installs prompt() from a
+# custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
+# name, from a string.
+allow = IO::Prompter Text::Xslate::Bridge::TT2 re
+# Extensions to perl -c
+[CompileTime]
+# Good idea, but module doesn't install due to bad testsuite...we'll have to fork
+#[Dynamic::ValidateAgainstSymbolTable]
+#at_inc_suffix=lib
+#inspect_required_modules=1
+#inspect_autoloaders=1
+#max_recursion=2

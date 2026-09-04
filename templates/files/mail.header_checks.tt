@@ -1,0 +1,2 @@
+/^X-\w+:/		WARN
+/^subject: *$/  REJECT No Subject

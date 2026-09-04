@@ -1,0 +1,2 @@
+[% domain %] [% domain %]:default:/etc/opendkim/keys/[% domain %]/default.private
+[% domain %] [% domain %]:mail:/etc/opendkim/keys/[% domain %]/default.private

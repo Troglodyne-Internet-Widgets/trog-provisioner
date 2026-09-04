@@ -1,0 +1,76 @@
+From 967dc649452c400061ed350624f8984a971a444c Mon Sep 17 00:00:00 2001
+From: George Baugh <george@troglodyne.net>
+Date: Wed, 8 Oct 2025 19:11:25 +0000
+Subject: [PATCH 2/2] Allow lexicon providers to define their acceptable record
+ types
+
+Do this via overriding the class variable VALID_TYPES,
+which is set by default to be the same list as is currently used.
+
+See powerdns.py for an example of doing this.
+It sets the list to an empty list, which means any RR type is valid.
+---
+ usr/lib/python3/dist-packages/lexicon/_private/parser.py             |  1 -
+ usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py |  2 +-
+ usr/lib/python3/dist-packages/lexicon/interfaces.py                  | 16 ++++++++++++++++
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/usr/lib/python3/dist-packages/lexicon/_private/parser.py b/usr/lib/python3/dist-packages/lexicon/_private/parser.py
+index 2d121c1d..d3acba84 100644
+--- a/usr/lib/python3/dist-packages/lexicon/_private/parser.py
++++ b/usr/lib/python3/dist-packages/lexicon/_private/parser.py
+@@ -28,7 +28,6 @@ def generate_base_provider_parser() -> argparse.ArgumentParser:
+         "type",
+         help="specify the entry type",
+         default="TXT",
+-        choices=["A", "AAAA", "CNAME", "MX", "NS", "SOA", "TXT", "SRV", "LOC"],
+     )
+ 
+     parser.add_argument("--name", help="specify the record name")
+diff --git a/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py b/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
+index db6904f8..0d8f896f 100644
+--- a/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
++++ b/usr/lib/python3/dist-packages/lexicon/_private/providers/powerdns.py
+@@ -31,7 +31,7 @@ import requests
+ from lexicon.interfaces import Provider as BaseProvider
+ 
+ LOGGER = logging.getLogger(__name__)
+-
++BaseProvider.VALID_TYPES = []
+ 
+ class PowerDNSProviderError(Exception):
+     """Generic PowerDNS exception"""
+diff --git a/usr/lib/python3/dist-packages/lexicon/interfaces.py b/usr/lib/python3/dist-packages/lexicon/interfaces.py
+index 1fb8455d..16d85743 100644
+--- a/usr/lib/python3/dist-packages/lexicon/interfaces.py
++++ b/usr/lib/python3/dist-packages/lexicon/interfaces.py
+@@ -66,6 +66,13 @@ class Provider(ABC):
+         self.domain = str(self.config.resolve("lexicon:domain"))
+         self.domain_id = None
+ 
++        # Check the type is valid for the given provider.
++        if not self._type_valid(self.VALID_TYPES):
++            raise ValueError(self._get_lexicon_option('type') + " records are not supported by " + self.provider_name )
++
++    # Default types, override by changing this in the provider, disable check by setting to []
++    VALID_TYPES=["A", "AAAA", "CNAME", "MX", "NS", "SOA", "TXT", "SRV", "LOC"]
++
+     # Provider API: instance methods
+ 
+     @abstractmethod
+@@ -228,3 +235,12 @@ class Provider(ABC):
+ 
+     def _get_provider_option(self, option: str) -> str | None:
+         return self.config.resolve(f"lexicon:{self.provider_name}:{option}")
++
++    def _type_valid(self, types: list[str]=[]) -> bool:
++        if len(types) == 0:
++            return True
++        try:
++            types.index(self._get_lexicon_option("type"))
++        except:
++            return False
++        return True
+-- 
+2.25.1
+

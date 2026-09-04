@@ -1,0 +1,26 @@
+# User / PW db
+userdb {
+    driver = passwd-file
+    args = /mail/[% domain %]/passwd
+    result_failure = continue
+    result_internalfail = continue
+}
+passdb {
+    driver = passwd-file
+    args = /mail/[% domain %]/passwd
+}
+
+# SNI
+local_name [% domain %] {
+  ssl_cert = </etc/ssl/certs/[% domain %].pem
+  ssl_key = </etc/ssl/private/[% domain %].pem
+}
+
+[% FOREACH alias IN full_aliases.sort() %]
+local_name [% alias %] {
+  ssl_cert = </etc/ssl/certs/[% domain %].pem
+  ssl_key = </etc/ssl/private/[% domain %].pem
+}
+[% END %]
+
+

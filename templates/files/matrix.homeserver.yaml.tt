@@ -1,0 +1,96 @@
+# Configuration file for Synapse.
+#
+# For more information on how to configure Synapse, including a complete accounting of
+# each option, go to docs/usage/configuration/config_documentation.md or
+# https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html
+
+server_name: "matrix.[% domain %]"
+pid_file: /var/run/matrix-synapse.pid
+
+public_baseurl: https://matrix.[% domain %]/
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    bind_addresses: ['::1', '127.0.0.1']
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: sqlite3
+  args:
+    database: [% install_dir %]/matrix.[% domain %]/homeserver.db
+
+log_config: "/etc/matrix-synapse/log.yaml"
+
+media_store_path: [% install_dir %]/matrix.[% domain %]/media
+
+signing_key_path: [% install_dir %]/matrix.[% domain %]/homeserver.signing.key
+
+trusted_key_servers:
+  - server_name: "matrix.org"
+    verify_keys:
+      "ed25519:auto": "Noi6WqcDj0QmPxCNQqgezwTlBKrfqehY1u2FyWP9uYw"
+
+registration_shared_secret: "[% registration_shared_secret %]"
+
+enable_registration: true
+
+admin_contact: 'mailto:admin@[% domain %]'
+
+federation_domain_whitelist:
+  - [% domain %]
+
+# URL preview
+url_preview_enabled: true
+
+url_preview_ip_range_blacklist:
+  - '127.0.0.0/8'
+  - '10.0.0.0/8'
+  - '172.16.0.0/12'
+  - '192.168.0.0/16'
+  - '100.64.0.0/10'
+  - '169.254.0.0/16'
+  - '::1/128'
+  - 'fe80::/64'
+  - 'fc00::/7'
+
+url_preview_url_blacklist:
+  - username: '*'
+  - password: '*'
+  - scheme: 'http'
+  - netloc: '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+
+url_preview_accept_language:
+  - en
+
+# Registration requires email
+registrations_require_3pid:
+  - email
+
+# Auto join rooms
+auto_join_rooms:
+  - "#general:[% server_name %]"
+
+# Email config
+email:
+  smtp_host: "[% smtp_host %]"
+  smtp_port: "[% smtp_port %]"
+  smtp_user: "[% smtp_user %]"
+  smtp_pass: "[% smtp_pass %]"
+  require_transport_security: "[% require_transport_security %]"
+  notif_from: "%(app)s chat server <[% smtp_user %]@[% smtp_domain %]>"
+[% IF modules.grep('redis').size() %]
+
+# Redis pub/sub - enabled because redis recipe is co-loaded on this host
+redis:
+  enabled: true
+  host: "[% redis_host %]"
+  port: [% redis_port %]
+[% IF redis_password %]
+  password: "[% redis_password %]"
+[% END -%]
+[% END %]

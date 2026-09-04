@@ -1,0 +1,4 @@
+# Mail corn cobs for [% domain %]
+[% FOR user IN names.keys() %]
+21 2 * * * root command sa-learn --spam -u spamd --dir /mail/[% domain %]/[% user %]/INBOX/spam
+[% END %]

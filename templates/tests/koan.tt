@@ -1,0 +1,13 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active koan 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'koan service is running');
+
+ok(-d '[% install_dir %]/[% domain %]/koan', 'koan repo directory exists');
+ok(-d '[% install_dir %]/[% domain %]/.venv', 'python virtualenv exists');
+
+done_testing();

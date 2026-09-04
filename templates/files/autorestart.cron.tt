@@ -1,0 +1,1 @@
+*/5 * * * * root command [% script_dir %]/reboot_if_needed [% autorestart %]

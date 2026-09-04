@@ -1,0 +1,15 @@
+[Unit]
+Description=Mariadb
+Wants=multi-user.target
+After=multi-user.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=exec
+PIDFile=/opt/mysql/pidfile
+ExecStart=/opt/mysql/bin/mariadbd --defaults-file=/opt/mysql/my.cnf
+WorkingDirectory=/opt/mysql
+Restart=always
+OOMPolicy=restart

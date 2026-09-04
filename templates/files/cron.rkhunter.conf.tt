@@ -1,0 +1,678 @@
+MAIL_ON_WARNINGS=[% admin_email %]
+ROTATE_MIRRORS=1
+UPDATE_MIRRORS=1
+MIRRORS_MODE=0
+TMPDIR=/var/lib/rkhunter/tmp
+DBDIR=/var/lib/rkhunter/db
+SCRIPTDIR=/usr/share/rkhunter/scripts
+BINDIR=/bin /usr/bin /sbin /usr/sbin /usr/local/bin /root/bin
+LANGUAGE=en
+UPDATE_LANG="en"
+LOGFILE=/var/log/rkhunter.log
+# This ships logrotated, don't know why upstream doesn't set this high
+APPEND_LOG=1
+USE_SYSLOG=authpriv.warning
+COLOR_SET2=0
+WHITELISTED_IS_WHITE=0
+
+AUTO_X_DETECT=1
+ALLOW_SSH_ROOT_USER=no
+ALLOW_SSH_PROT_V1=0
+
+ENABLE_TESTS=ALL
+#DISABLE_TESTS=suspscan hidden_ports hidden_procs deleted_files packet_cap_apps apps
+
+PKGMGR=DPKG
+
+#
+# It is possible that a file, which is part of a package, may have been
+# modified by the administrator. Typically this occurs for configuration
+# files. However, the package manager may list the file as being modified.
+# For the RPM package manager this may well depend on how the package was
+# built. This option specifies a pathname which is to be exempt from the
+# package manager verification process, and which will be treated
+# as a non-packaged file. As such, the file properties are still checked.
+#
+# This option only takes effect if the PKGMGR option has been set, and
+# is not 'NONE'.
+#
+# This option may be specified more than once.
+#
+# NOTE: Whenever this option is changed 'rkhunter --propupd' must be run.
+#
+# The default value is the null string.
+#
+#PKGMGR_NO_VRFY=""
+
+# These options specify a command, directory or file pathname which will be
+# included or excluded in the file properties checks.
+#
+# For the USER_FILEPROP_FILES_DIRS option, simple command names - for example,
+# 'top' - and directory names are added to the internal list of directories to
+# be searched for each of the command names in the command list. Additionally,
+# full pathnames to files, which need not be commands, may be given. Any files
+# or directories which are already part of the internal lists will be silently
+# ignored from the configuration.
+#
+# For the USER_FILEPROP_FILES_DIRS option, wildcards are allowed, except for
+# simple command names.
+# For example, 'top*' cannot be given, but '/usr/bin/top*' is allowed.
+#
+# To extend the use of wildcards to include recursive checking of directories,
+# see the GLOBSTAR configuration option.
+#
+# Specific files may be excluded by using the EXCLUDE_USER_FILEPROP_FILES_DIRS
+# option. Wildcards may be used with this option.
+#
+# By combining these two options, and using wildcards, whole directories can be
+# excluded. For example:
+#
+#     USER_FILEPROP_FILES_DIRS=/etc/*
+#     USER_FILEPROP_FILES_DIRS=/etc/*/*
+#     EXCLUDE_USER_FILEPROP_FILES_DIRS=/etc/rc?.d/*
+#
+# This will look for files in the first two directory levels of '/etc'. However,
+# anything in '/etc/rc0.d', '/etc/rc1.d', '/etc/rc2.d' and so on, will be
+# excluded.
+#
+# NOTE: Only files and directories which have been added by the user, and are
+# not part of the internal lists, can be excluded. So, for example, it is not
+# possible to exclude the 'ps' command by using '/bin/ps'. These will be
+# silently ignored from the configuration.
+#
+# Both options can be specified more than once.
+#
+# NOTE: Whenever these options are changed 'rkhunter --propupd' must be run.
+#
+# The default value for both options is the null string.
+#
+#USER_FILEPROP_FILES_DIRS=top
+#USER_FILEPROP_FILES_DIRS=/usr/local/sbin
+#USER_FILEPROP_FILES_DIRS=/etc/rkhunter.conf
+#USER_FILEPROP_FILES_DIRS=/etc/rkhunter.conf.local
+#USER_FILEPROP_FILES_DIRS=/etc/rkhunter.d/*
+#EXCLUDE_USER_FILEPROP_FILES_DIRS=/opt/ps*
+
+#
+# This option whitelists files and directories from existing, or not existing,
+# on the system at the time of testing. This option is used when the
+# configuration file options themselves are checked, and during the file
+# properties check, the hidden files and directories checks, and the filesystem
+# check of the '/dev' directory.
+#
+# This option may be specified more than once, and may use wildcards.
+# Be aware though that this is probably not what you want to do as the
+# wildcarding will be expanded after files have been deleted. As such
+# deleted files won't be whitelisted if wildcarded.
+#
+# NOTE: The user must take into consideration how often the file will appear
+# and disappear from the system in relation to how often rkhunter is run. If
+# the file appears, and disappears, too often then rkhunter may not notice
+# this. All it will see is that the file has changed. The inode number and DTM
+# will certainly be different for each new file, and rkhunter will report this.
+#
+# The default value is the null string.
+#
+#EXISTWHITELIST=""
+
+#
+# Whitelist various attributes of the specified file. The attributes are those
+# of the 'attributes' test. Specifying a file name here does not include it
+# being whitelisted for the write permission test (see below).
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#ATTRWHITELIST=/usr/bin/date
+
+#
+# Allow the specified file to have the 'others' (world) permission have the
+# write-bit set. For example, files with permissions r-xr-xrwx or rwxrwxrwx.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#WRITEWHITELIST=/usr/bin/date
+
+#
+# Allow the specified file to be a script.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+SCRIPTWHITELIST=/usr/bin/egrep
+SCRIPTWHITELIST=/usr/bin/fgrep
+SCRIPTWHITELIST=/usr/bin/which
+SCRIPTWHITELIST=/usr/bin/ldd
+#SCRIPTWHITELIST=/usr/bin/lwp-request
+SCRIPTWHITELIST=/usr/bin/which.debianutils
+SCRIPTWHITELIST=/usr/sbin/adduser
+#SCRIPTWHITELIST=/usr/sbin/prelink
+#SCRIPTWHITELIST=/usr/sbin/unhide.rb
+
+#
+# Allow the specified file to have the immutable attribute set.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#IMMUTWHITELIST=/sbin/ifdown
+
+#
+# If this option is set to '1', then the immutable-bit test is reversed. That
+# is, the files are expected to have the bit set. A value of '0' means that the
+# immutable-bit should not be set.
+#
+# The default value is '0'.
+#
+#IMMUTABLE_SET=0
+
+#
+# If this option is set to '1', then any changed inode value is ignored in
+# the file properties check. The inode test itself still runs, but it will
+# always return that no inodes have changed.
+#
+# This option may be useful for filesystems such as Btrfs, which handle inodes
+# slightly differently than other filesystems.
+#
+# The default value is '0'.
+#
+#SKIP_INODE_CHECK=0
+
+#
+# Allow the specified hidden directory to be whitelisted.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#ALLOWHIDDENDIR=/etc/.java
+#ALLOWHIDDENDIR=/etc/.git
+#ALLOWHIDDENDIR=/dev/.lxc
+
+#
+# Allow the specified hidden file to be whitelisted.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+# 
+#ALLOWHIDDENFILE=/usr/share/man/man1/..1.gz
+#ALLOWHIDDENFILE=/usr/bin/.fipscheck.hmac
+#ALLOWHIDDENFILE=/usr/bin/.ssh.hmac
+#ALLOWHIDDENFILE=/usr/lib/.libfipscheck.so.1.1.0.hmac
+#ALLOWHIDDENFILE=/usr/lib/hmaccalc/sha1hmac.hmac
+#ALLOWHIDDENFILE=/usr/lib/hmaccalc/sha256hmac.hmac
+#ALLOWHIDDENFILE=/usr/sbin/.sshd.hmac
+#ALLOWHIDDENFILE=/usr/share/man/man5/.k5login.5.gz
+#ALLOWHIDDENFILE=/usr/share/man/man5/.k5identity.5.gz
+#ALLOWHIDDENFILE=/etc/.gitignore
+#ALLOWHIDDENFILE=/etc/.bzrignore
+#ALLOWHIDDENFILE=/etc/.etckeeper
+
+#
+# Allow the specified process to use deleted files. The process name may be
+# followed by a colon-separated list of full pathnames (which have been
+# deleted). The process will then only be whitelisted if it is using one of
+# the given pathnames. For example:
+#
+#     ALLOWPROCDELFILE=/usr/libexec/gconfd-2:/tmp/abc:/var/tmp/xyz
+#
+# This option may be specified more than once. It may also use wildcards, but
+# only in the deleted file pathnames, not in the process name. The use of
+# extended pattern matching in pathname expansion (for example, '**') is not
+# supported for this option. However, the option itself extends globbing when
+# the '*' character is used by matching zero or more characters in the
+# pathname, including those in sub-directories. For example, the pathname
+# '/tmp/abc/def/xyz' would not be matched by shell globbing using '/tmp/*/xyz'
+# but is matched when used in this option. Similarly, using '/tmp/*' will
+# match any file found in the '/tmp' directory or any sub-directories.
+#
+# The default value is the null string.
+#
+#ALLOWPROCDELFILE=/sbin/cardmgr
+#ALLOWPROCDELFILE=/usr/lib/libgconf2-4/gconfd-2
+#ALLOWPROCDELFILE=/usr/sbin/mysqld:/tmp/ib*
+#ALLOWPROCDELFILE=/usr/lib/iceweasel/iceweasel
+#ALLOWPROCDELFILE=/usr/bin/file-roller
+
+#
+# Allow the specified process to listen on any network interface.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#ALLOWPROCLISTEN=/sbin/dhclient
+#ALLOWPROCLISTEN=/usr/bin/dhcpcd
+#ALLOWPROCLISTEN=/usr/sbin/tcpdump
+#ALLOWPROCLISTEN=/usr/sbin/snort-plain
+
+#
+# Allow the specified network interfaces to be in promiscuous mode.
+#
+# This is a space-separated list of interface names. The option may be
+# specified more than once.
+#
+# The default value is the null string.
+#
+#ALLOWPROMISCIF=eth0
+
+SCAN_MODE_DEV=THOROUGH
+
+#
+# Allow the specified file to be present in the '/dev' directory, and not
+# regarded as suspicious.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#ALLOWDEVFILE=/dev/shm/pulse-shm-*
+#ALLOWDEVFILE=/dev/shm/sem.ADBE_*
+
+#
+# Allow the specified process pathnames to use shared memory segments.
+#
+# This option may be specified more than once, and may use wildcard characters.
+#
+# The default value is the null string.
+#
+#ALLOWIPCPROC=/usr/bin/firefox
+#ALLOWIPCPROC=/usr/bin/vlc
+
+#
+# Allow the specified memory segment creator PIDs to use shared memory segments.
+#
+# This is a space-separated list of PID numbers (as given by the
+# 'ipcs -p' command). This option may be specified more than once.
+#
+# The default value is the null string.
+#
+#ALLOWIPCPID=12345 6789
+
+#
+# Allow the specified account names to use shared memory segments.
+#
+# This is a space-separated list of account names. The option may be specified
+# more than once.
+#
+# The default value is the null string.
+#
+#ALLOWIPCUSER=usera userb
+
+#
+# This option can be used to set the maximum shared memory segment size
+# (in bytes) that is not considered suspicious. Any segment above this size,
+# and with 600 or 666 permissions, will be considered suspicious during the
+# shared memory check.
+#
+# The default is 1048576 (1M) bytes.
+#
+#IPC_SEG_SIZE=1048576
+
+PHALANX2_DIRTEST=1
+
+#
+# This option tells rkhunter where the inetd configuration file is located.
+#
+# The default value is the null string.
+#
+#INETD_CONF_PATH=/etc/inetd.conf
+
+#
+# This option allows the specified enabled inetd services.
+#
+# This is a space-separated list of service names. The option may be specified
+# more than once.
+#
+# For non-Solaris users the simple service name should be used.
+# For example:
+#
+#     INETD_ALLOWED_SVC=echo
+#
+# For Solaris 9 users the simple service name should also be used, but
+# if it is an RPC service, then the executable pathname should be used.
+# For example:
+#
+#     INETD_ALLOWED_SVC=imaps
+#     INETD_ALLOWED_SVC=/usr/sbin/rpc.metad /usr/sbin/rpc.metamhd
+#
+# For Solaris 10 users the service/FMRI name should be used. For example:
+#
+#     INETD_ALLOWED_SVC=/network/rpc/meta
+#     INETD_ALLOWED_SVC=/network/rpc/metamed
+#     INETD_ALLOWED_SVC=/application/font/stfsloader
+#     INETD_ALLOWED_SVC=/network/rpc-100235_1/rpc_ticotsord
+#
+# The default value is the null string.
+#
+#INETD_ALLOWED_SVC=echo
+
+#
+# This option tells rkhunter where the xinetd configuration file is located.
+#
+# The default value is the null string.
+#
+#XINETD_CONF_PATH=/etc/xinetd.conf
+
+#
+# This option allows the specified enabled xinetd services. Whilst it would be
+# nice to use the service names themselves, at the time of testing we only have
+# the pathname available. As such, these entries are the xinetd file pathnames.
+#
+# This is a space-separated list of service names. The option may be specified
+# more than once.
+#
+# The default value is the null string.
+#
+#XINETD_ALLOWED_SVC=/etc/xinetd.d/echo
+
+#
+# This option allows the specified accounts to have no password. NIS/YP entries
+# do not need to be listed as they are automatically whitelisted.
+#
+# This is a space-separated list of account names. The option may be specified
+# more than once.
+#
+# The default value is the null string.
+#
+#PWDLESS_ACCOUNTS=abc
+
+ALLOW_SYSLOG_REMOTE_LOGGING=1
+
+#
+# This option allows the specified applications, or a specific version of an
+# application, to be whitelisted. If a specific version is to be whitelisted,
+# then the name must be followed by a colon and then the version number.
+# For example:
+#
+#     APP_WHITELIST=openssl:0.9.7d gpg httpd:1.3.29
+#
+# This is a space-separated list of pathnames. The option may be specified
+# more than once.
+#
+# The default value is the null string.
+#
+#APP_WHITELIST=""
+
+# 
+# Set this option to scan for suspicious files in directories which pose a
+# relatively higher risk due to user write access.
+#
+# Please do not enable the 'suspscan' test by default as it is CPU and I/O
+# intensive, and prone to producing false positives. Do review all settings
+# before usage. Also be aware that running 'suspscan' in combination with
+# verbose logging on, rkhunter's default, will show all ignored files.
+#
+# Please consider adding all directories the user the (web)server runs as,
+# and has write access to, including the document root (e.g: '/var/www') and
+# log directories (e.g: '/var/log/httpd'). 
+#
+# This is a space-separated list of directory pathnames. The option may be
+# specified more than once.
+#
+# The default value is the '/tmp' and '/var/tmp' directories.
+#
+#SUSPSCAN_DIRS=/tmp /var/tmp
+
+#
+# This option specifies the directory for temporary files used by the
+# 'suspscan' test. A memory-based directory, such as a tempfs filesystem, is
+# better (faster). Do not use a directory name that is listed in SUSPSCAN_DIRS
+# as that is highly likely to cause false-positive results.
+#
+# The default value is '/dev/shm'.
+#
+#SUSPSCAN_TEMP=/dev/shm
+
+#
+# This option specifies the 'suspscan' test maximum filesize in bytes. Files
+# larger than this will not be inspected. Do make sure you have enough space
+# available in your temporary files directory.
+#
+# The default value is '1024000'.
+#
+#SUSPSCAN_MAXSIZE=1024000
+
+#
+# This option specifies the 'suspscan' test score threshold. Below this value
+# no hits will be reported.
+#
+# The default value is '200'.
+#
+#SUSPSCAN_THRESH=200
+
+#
+# This option may be used to whitelist file pathnames from the suspscan test.
+#
+# Shell globbing may be used in the pathname. Also see the GLOBSTAR configuration
+# option.
+#
+# This option may be specified more than once.
+#
+# The default value is the null string.
+#
+#SUSPSCAN_WHITELIST=""
+
+#
+# The following options can be used to whitelist network ports which are known
+# to have been used by malware. 
+#
+# The PORT_WHITELIST option is a space-separated list of one or more of two
+# types of whitelisting. These are:
+#
+#   1) a 'protocol:port' pair
+#   2) an asterisk ('*')
+#
+# Only the UDP or TCP protocol may be specified, and the port number must be
+# between 1 and 65535 inclusive.
+#
+# The asterisk can be used to indicate that any executable which rkhunter can
+# locate as a command, is whitelisted. (Also see BINDIR)
+#
+# The PORT_PATH_WHITELIST option specifies one of two types of whitelisting.
+# These are:
+#
+#   1) a pathname to an executable
+#   2) a combined pathname, protocol and port
+#
+# As above, the protocol can only be TCP or UDP, and the port number must be
+# between 1 and 65535 inclusive.
+#
+# Examples:
+#
+#     PORT_WHITELIST=TCP:2001 UDP:32011
+#     PORT_PATH_WHITELIST=/usr/sbin/squid
+#     PORT_PATH_WHITELIST=/usr/sbin/squid:TCP:3801
+#
+# NOTE: In order to whitelist a pathname, or use the asterisk option, the
+# 'lsof' command must be present.
+#
+# Both options may be specified more than once.
+#
+# The default value for both options is the null string.
+#
+#PORT_WHITELIST=""
+#PORT_PATH_WHITELIST=""
+
+WARN_ON_OS_CHANGE=1
+
+#
+# Set the following option to '1' if you want rkhunter to automatically run a
+# file properties update ('--propupd') if the O/S has changed. Detection of an
+# O/S change occurs during the file properties check. Setting a value of '0'
+# will cause rkhunter not to do an automatic update.
+#
+# WARNING: Only set this option if you are sure that the update will work
+# correctly. That is, that the database directory is writeable, that a valid
+# hash function is available, and so on. This can usually be checked simply by
+# running 'rkhunter --propupd' at least once.
+#
+# The default value is '0'.
+#
+UPDT_ON_OS_CHANGE=1
+
+#
+# The following two options can be used to whitelist files and directories that
+# would normally be flagged with a warning during the various rootkit and
+# malware checks. Only existing files and directories can be specified, and
+# these must be full pathnames not links.
+#
+# Additionally, the RTKT_FILE_WHITELIST option may include a string after the
+# file name (separated by a colon). This will then only whitelist that string
+# in that file (as part of the malware checks). For example:
+#
+#     RTKT_FILE_WHITELIST=/etc/rc.local:hdparm
+#
+# If the option list includes the filename on its own as well, then the file
+# will be whitelisted from rootkit checks of the files existence, but still
+# only the specific string within the file will be whitelisted. For example:
+#
+#     RTKT_FILE_WHITELIST=/etc/rc.local
+#     RTKT_FILE_WHITELIST=/etc/rc.local:hdparm
+#
+# To whitelist a file from the existence checks, but not from the strings
+# checks, then include the filename on its own and on its own but with just
+# a colon appended. For example:
+#
+#     RTKT_FILE_WHITELIST=/etc/rc.local
+#     RTKT_FILE_WHITELIST=/etc/rc.local:
+#
+# NOTE: It is recommended that if you whitelist any files, then you include
+# those files in the file properties check. See the USER_FILEPROP_FILES_DIRS
+# configuration option.
+#
+# Both of these options may be specified more than once.
+#
+# For both options the default value is the null string.
+#
+#RTKT_DIR_WHITELIST=""
+#RTKT_FILE_WHITELIST=""
+
+#
+# The following option can be used to whitelist shared library files that would
+# normally be flagged with a warning during the preloaded shared library check.
+# These library pathnames usually exist in the '/etc/ld.so.preload' file or in
+# the LD_PRELOAD environment variable.
+#
+# NOTE: It is recommended that if you whitelist any files, then you include
+# those files in the file properties check. See the USER_FILEPROP_FILES_DIRS
+# configuration option.
+#
+# This option is a space-separated list of library pathnames. The option may be
+# specified more than once.
+#
+# The default value is the null string.
+#
+#SHARED_LIB_WHITELIST=/lib/snoopy.so
+
+#
+# To force rkhunter to use the supplied script for the 'stat' or 'readlink'
+# command the following two options can be used. The value must be set to
+# 'BUILTIN'.
+#
+# NOTE: IRIX users will probably need to enable STAT_CMD.
+#
+# For both options the default value is the null string.
+#
+#STAT_CMD=BUILTIN
+#READLINK_CMD=BUILTIN
+
+WEB_CMD=curl -L
+
+USE_LOCKING=1
+SHOW_LOCK_MSGS=1
+
+#
+# If this option is set to 'THOROUGH' then rkhunter will search (on a per
+# rootkit basis) for filenames in all of the directories (as defined by the
+# result of running 'find / -xdev'). While still not optimal, as it still
+# searches for only file names as opposed to file contents, this is one step
+# away from the rigidity of searching in known (evidence) or default
+# (installation) locations.
+#
+# THIS OPTION SHOULD NOT BE ENABLED BY DEFAULT.
+#
+# You should only activate this feature as part of a more thorough
+# investigation, which should be based on relevant best practices and
+# procedures. 
+#
+# Enabling this feature implies you have the knowledge to interpret the
+# results properly. 
+#
+# The default value is the null string.
+#
+#SCANROOTKITMODE=THOROUGH
+
+#
+# The following option can be set to the name(s) of the tests the 'unhide'
+# command is to use. Options such as '-m' and '-v' may be specified, but will
+# only take effect when they are seen. The test names are a space-separated
+# list, and will be executed in the order given.
+#
+# This option may be specified more than once.
+#
+# The default value is 'sys' in order to maintain compatibility with older
+# versions of 'unhide'.
+#
+#UNHIDE_TESTS=sys
+
+#
+# The following option can be used to set options for the 'unhide-tcp' command.
+# The options are space-separated.
+#
+# This option may be specified more than once.
+#
+# The default value is the null string.
+#
+#UNHIDETCP_OPTS=""
+
+SHOW_SUMMARY_WARNINGS_NUMBER=1
+SHOW_SUMMARY_TIME=3
+
+#
+# The two options below may be used to check if a file is missing or empty
+# (that is, it has a size of zero). The EMPTY_LOGFILES option will also check
+# if the file is missing, since that can be interpreted as a file of no size.
+# However, the file will only be reported as missing if the MISSING_LOGFILES
+# option hasn't already done this.
+#
+# Both options are space-separated lists of pathnames, and may be specified
+# more than once.
+#
+# NOTE: Log files are usually 'rotated' by some mechanism. At that time it is
+# perfectly possible for the file to be either missing or empty. As such these
+# options may produce false-positive warnings when log files are rotated.
+#
+# For both options the default value is the null string.
+#
+#EMPTY_LOGFILES=""
+#MISSING_LOGFILES=""
+
+#
+# This option can be set to either '0' or '1'. If set to '1' then the globbing
+# characters '**' can be used to allow the recursive checking of directories.
+# This can be useful, for example, with the USER_FILEPROP_FILES_DIRS option.
+# For example:
+#
+#	USER_FILEPROP_FILES_DIRS=/etc/**/*.conf
+#
+# This will check all '.conf' files within the '/etc' directory, and any
+# sub-directories (at any level). If GLOBSTAR is not set, then the shell will
+# interpret '**' as '*' and only one level of sub-directories will be checked.
+#
+# NOTE: This option is only valid for those shells which support the 'globstar'
+# option. Typically this will be 'bash' (version 4 and above) via the 'shopt' command,
+# and 'ksh' via the 'set' command.
+#
+# The default value is '0'.
+#
+#GLOBSTAR=0
+
+INSTALLDIR=/usr
+

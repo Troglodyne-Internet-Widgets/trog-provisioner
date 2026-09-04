@@ -2,59 +2,94 @@
 
 package Trog::Bin::Snapshot;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
-use File::Which qw{which};
+use re '/aa';
+use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+use Trog::Hypervisors();
 
-sub usage {
-    return "Usage: $0 [--name NAME] DOMAIN\n";
-}
+=head1 NAME
+
+snapshot - take a live snapshot of a provisioned VM
+
+=head1 SYNOPSIS
+
+    snapshot [OPTIONS] DOMAIN
+
+    snapshot vm.example.com
+    snapshot --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--name> NAME
+
+What to call the snapshot.  Left to libvirt, which names it after the current
+time, if you don't say.
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.  Only used
+to find F<hypervisors.conf>.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we snapshot.
+
+=back
+
+=head1 DESCRIPTION
+
+Takes an atomic live snapshot and then checks that libvirt actually made one, by
+confirming the domain's current snapshot changed.  Dies if it didn't, since a
+snapshot command that quietly did nothing is worse than one that failed.
+
+=cut
 
 sub main {
     my @args = @_;
 
-    my ($name);
-    GetOptionsFromArray(\@args, 'name=s' => \$name);
+    my ($name, $uri, $domain_dir, $hvconf);
+    GetOptionsFromArray(\@args,
+        'name=s'      => \$name,
+        'connect=s'   => \$uri,
+        'domaindir=s' => \$domain_dir,
+        'hvconf=s'    => \$hvconf,
+    );
 
     my $domain = shift @args;
-    die usage() unless $domain;
-    die "virsh not installed\n" unless which('virsh');
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
 
-    my $before = _virsh_snap_current($domain);
-    chomp $before if defined $before;
+    my $hv = Trog::Hypervisors->find($domain,
+        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir);
 
-    my @cmd = ('snapshot-create', '--atomic', '--live', $domain);
-    push @cmd, '--name', $name if defined $name;
+    my $before = $hv->snapshot_current_name($domain);
 
     print "Creating snapshot for $domain...\n";
-    my $rc = _virsh(@cmd);
-    die "Failed to create snapshot for $domain\n" if $rc;
+    die "Failed to create snapshot for $domain\n" unless $hv->create_snapshot($domain, $name);
 
-    my $after = _virsh_snap_current($domain);
-    chomp $after if defined $after;
+    my $after = $hv->snapshot_current_name($domain);
+    die "No current snapshot found after create\n" unless defined $after && length $after;
 
-    die "No current snapshot found after create\n"
-        unless defined $after && length $after;
-
-    if (defined $before && $before eq $after) {
-        die "Current snapshot unchanged after create (still '$after') — snapshot may not have been created\n";
-    }
+    die "Current snapshot unchanged after create (still '$after') -- snapshot may not have been created\n"
+      if defined $before && $before eq $after;
 
     print "Snapshot '$after' created and verified as current.\n";
     return 0;
-}
-
-sub _virsh {
-    system('virsh', @_) >> 8;
-}
-
-sub _virsh_snap_current {
-    my ($domain) = @_;
-    my $out = qx{virsh snapshot-current --name \Q$domain\E 2>/dev/null};
-    return undef if $?;
-    return $out;
 }
 
 main(@ARGV) unless caller;

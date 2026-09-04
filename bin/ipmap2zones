@@ -1,0 +1,151 @@
+#!/usr/bin/env perl
+
+#ABSTRACT: generate a zonefile for the configured guests
+
+package Trog::Provisioner::IPMap2Zones;
+
+use 5.0041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin;
+use FindBin::libs;
+
+use Config::Simple;
+use Text::Xslate;
+use Text::Xslate::Bridge::TT2;
+use Net::IP;
+use List::Util qw{uniq};
+use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
+use File::Slurper::Temp;
+
+=head1 ipmap2zones
+
+=head2 SYNOPSIS
+
+    ipmap2zones [--ipmap=file] [--output-dir=dir] [domain ...]
+
+=head2 DESCRIPTION
+
+Generate BIND-style zone files from ipmap.cfg, one file per domain.
+
+With no domain arguments, generates zone files for every domain in the [ips]
+section of ipmap.cfg.  Output is written to the current directory (or the
+directory specified with --output-dir) as C<domain.zone>.
+
+Zone files are rendered via C<templates/files/pdns.zone.tt> using the same
+variable set that C<new_config> would pass, so the output is identical to what
+the pdns recipe would install at provision time.
+
+=head2 OPTIONS
+
+=over 4
+
+=item --ipmap=FILE
+
+Path to ipmap.cfg.  Defaults to C<ipmap.cfg> in the current directory.
+
+=item --output-dir=DIR
+
+Directory to write zone files into.  Defaults to the current directory.  The
+directory must already exist.
+
+=back
+
+=cut
+
+my ( $cfile, $output_dir );
+
+sub main {
+    my @args = @_;
+
+    GetOptionsFromArray(
+        \@args,
+        'ipmap=s'      => \$cfile,
+        'output-dir=s' => \$output_dir,
+    );
+
+    $cfile      //= Trog::Config->path('ipmap.cfg');
+    $output_dir //= '.';
+
+    die "Output directory $output_dir does not exist\n" unless -d $output_dir;
+
+    my $c           = Config::Simple->new($cfile);
+    die "$Config::Simple::errstr\n" unless $c;
+    my $global_conf = $c->param( -block => 'global' );
+    my $ip_conf     = $c->param( -block => 'ips' );
+    my $alias_conf  = $c->param( -block => 'aliases' ) // {};
+    my $ns_conf     = $c->param( -block => 'nameservers' ) // {};
+
+    die "Must set admin_email in global section of $cfile\n"
+        unless $global_conf->{admin_email};
+
+    my @domains = @args ? @args : sort keys(%$ip_conf);
+    die "No domains defined in [ips] section of $cfile\n" unless @domains;
+
+    my $template_dir = "$FindBin::Bin/../templates";
+    my $tt = Text::Xslate->new(
+        {
+            path     => [$template_dir],
+            syntax   => 'TTerse',
+            module   => [qw{Text::Xslate::Bridge::TT2}],
+            function => { _formatters() },
+        }
+    );
+
+    foreach my $domain (@domains) {
+        die "No IP defined for '$domain' in [ips] section of $cfile\n"
+            unless $ip_conf->{$domain};
+
+        my $aliases = _coerce_arrayref( $alias_conf->{$domain} );
+        push( @$aliases, "www.$domain", "mail.$domain" );
+        $alias_conf->{$domain} = [ uniq @$aliases ];
+
+        my %vars = (
+            domain        => $domain,
+            ipmap         => $ip_conf,
+            aliases       => $alias_conf,
+            nameservers   => $ns_conf,
+            admin_email   => $global_conf->{admin_email},
+            serial        => time(),
+            extra_records => '',
+            modules       => [],
+        );
+
+        my $zone    = $tt->render( 'files/pdns.zone.tt', \%vars );
+        my $outfile = "$output_dir/$domain.zone";
+        File::Slurper::Temp::write_binary( $outfile, $zone );
+        print "Wrote $outfile\n";
+    }
+
+    return 0;
+}
+
+sub _formatters {
+    return (
+        reverse_ip => Text::Xslate::html_builder(
+            sub {
+                my $ip = shift;
+                return Net::IP->new($ip)->reverse_ip();
+            }
+        ),
+        email_for_dns => Text::Xslate::html_builder(
+            sub {
+                my $email = shift;
+                $email =~ tr/@/./;
+                return $email;
+            }
+        ),
+    );
+}
+
+sub _coerce_arrayref {
+    my ($input) = @_;
+    return [] unless $input;
+    return ref $input eq 'ARRAY' ? $input : [$input];
+}
+
+main(@ARGV) unless caller;

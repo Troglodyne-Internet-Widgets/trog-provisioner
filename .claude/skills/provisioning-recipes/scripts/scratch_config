@@ -1,0 +1,199 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::ScratchConfig;
+
+#ABSTRACT: A throwaway configuration directory, with a throwaway secret store to match.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use File::Copy qw{copy};
+use File::Path qw{make_path remove_tree};
+use File::Slurper();
+use File::Slurper::Temp();
+use File::Temp();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+use YAML::XS();
+
+use Trog::Config();
+use Trog::Secrets();
+
+=head1 NAME
+
+scratch_config - a throwaway configuration directory, with a throwaway secret store to match
+
+=head1 SYNOPSIS
+
+    eval "$(.claude/skills/provisioning-recipes/scripts/scratch_config)"
+    # TROG_PROVISIONER_CONFIG and TROG_SCRATCH_PASS are now set
+
+    scratch_config --print-dir       # just the path
+    scratch_config --remove DIR      # throw one away
+
+=head1 DESCRIPTION
+
+Builds a configuration directory that can be provisioned against without going
+anywhere near the real one, and prints shell to point at it.
+
+What it copies, and what it deliberately does not:
+
+=over 4
+
+=item F<ipmap.cfg>
+
+Copied.  A guest built from it gets an address out of the real pool, and out of
+the copy's C<[ips]> block, so it cannot be handed one that is already spoken
+for.  The assignment is written to the copy, so the real map does not grow an
+entry for a guest that will not exist by lunchtime.
+
+=item F<recipes.yaml>
+
+Copied, for the C<_base> block: what every guest gets, which is most of what a
+recipe under test will interact with.
+
+=item F<hypervisors.conf>
+
+Copied when there is one.  Without it there is no fleet, and a throwaway guest
+gets built on whatever libvirt this machine has rather than on the hypervisor
+the real ones live on -- which on a workstation means it does not get built at
+all.
+
+=item F<recipes.d/>
+
+B<Not> copied, deliberately.  new_config gathers secrets across every domain it
+can see, so copying these would mean needing every password in the real store
+in order to build one throwaway guest.  Empty, the only secrets wanted are
+C<_base>'s.
+
+=item F<secrets.kdbx>
+
+Not copied.  A new one is built holding a made-up value for every C<secret:>
+reference in the copied F<recipes.yaml>, under a password printed to stdout.
+
+=back
+
+The values in it are visibly fake -- C<throwaway:group/entry/field>.  Anything
+that reaches a real service with one gets rejected, which is the intent: a
+recipe that talks to a registrar will fail at the point it tries, rather than
+succeeding against somebody's live DNS.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--dir> DIR
+
+Build it here rather than in a fresh temporary directory.
+
+=item B<--print-dir>
+
+Print the directory alone, no shell.
+
+=item B<--remove> DIR
+
+Delete a scratch directory.  Refuses anything that does not look like one, so a
+mistyped variable cannot take out the real configuration.
+
+=back
+
+=cut
+
+our $MARKER = '.trog-scratch-config';
+
+sub main {
+    my @args = @_;
+
+    my ($dir, $print_dir, $remove, $help);
+    GetOptionsFromArray(\@args,
+        'dir=s'     => \$dir,
+        'print-dir' => \$print_dir,
+        'remove=s'  => \$remove,
+        'help'      => \$help,
+    );
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    return remove($remove) if $remove;
+
+    my $source = Trog::Config->dir;
+    $dir //= File::Temp::tempdir('trog-scratch-XXXXXXXX', TMPDIR => 1);
+
+    my ($password, $has_fleet, @refs) = build($source, $dir);
+
+    if ($print_dir) {
+        print "$dir\n";
+        return 0;
+    }
+
+    print {*STDERR} "Scratch configuration in $dir\n";
+    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml"
+      . ($has_fleet ? ", hypervisors.conf\n" : "\n");
+    print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
+      unless $has_fleet;
+    print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
+    print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value"
+      . (@refs == 1 ? '' : 's') . ":\n";
+    print {*STDERR} "    $_\n" for @refs;
+    print {*STDERR} "\n";
+
+    print "export TROG_PROVISIONER_CONFIG=$dir\n";
+    print "export TROG_SCRATCH_PASS=$password\n";
+    return 0;
+}
+
+sub build {
+    my ($source, $dir) = @_;
+
+    make_path("$dir/recipes.d");
+
+    # What says this is ours to delete later.
+    File::Slurper::Temp::write_text("$dir/$MARKER", "Built by scratch_config; safe to remove.\n");
+
+    foreach my $file (qw{ipmap.cfg recipes.yaml}) {
+        copy("$source/$file", "$dir/$file")
+          or die "Could not copy $source/$file into the scratch config: $!\n";
+    }
+
+    # The fleet, when there is one.  Its absence is a legitimate state -- it
+    # means this machine is the hypervisor -- so this is not fatal, but getting
+    # it wrong silently sends the guest to the wrong libvirt.
+    my $fleet = 'hypervisors.conf';
+    my $has_fleet = copy("$source/$fleet", "$dir/$fleet") ? 1 : 0;
+
+    my %needed = Trog::Secrets->needed(YAML::XS::Load(File::Slurper::read_binary("$dir/recipes.yaml")));
+    my @refs   = sort keys %{ { map { $_ => 1 } values %needed } };
+
+    my $password = File::Temp::tempdir() =~ s{.*/}{}r;    # a throwaway name for a throwaway store
+
+    # Visibly fake, so that anything reaching a real service with one is refused
+    # rather than quietly working.  What the values are is this harness's
+    # business; making the database is Trog::Secrets'.
+    Trog::Secrets->write("$dir/secrets.kdbx", $password,
+        map { $_ => 'throwaway:' . substr($_, length 'secret:') } @refs);
+    chmod 0600, "$dir/secrets.kdbx";
+
+    return ($password, $has_fleet, @refs);
+}
+
+
+
+
+sub remove {
+    my ($dir) = @_;
+
+    die "Refusing to remove '$dir': no $MARKER in it, so it is not one of ours.\n"
+      unless -f "$dir/$MARKER";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+
+    remove_tree($dir);
+    print {*STDERR} "Removed $dir\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

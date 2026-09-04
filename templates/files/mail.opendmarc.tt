@@ -1,0 +1,25 @@
+# OpenDMARC configuration
+AuthservID mail.[% domain %]
+TrustedAuthservIDs mail.[% domain %]
+
+# XXX this shit is so incredibly twitchy,
+# 0777 is the ONLY way it will work with chrooted postfix, sigh
+# running as any other user than opendmarc WILL NOT WORK
+UMask 000
+UserID opendmarc:postfix
+PidFile /run/opendmarc/opendmarc.pid
+Socket local:/var/spool/postfix/opendmarc/opendmarc.sock
+AutoRestart true
+
+RejectFailures true
+FailureReports true
+Syslog true
+SyslogFacility mail
+HistoryFile /var/log/opendmarc.log
+
+FailureReportsSentBy postmaster@[% domain %]
+FailureReportsBcc postmaster@[% domain %]
+
+IgnoreHosts /etc/opendmarc/ignore.hosts
+
+PublicSuffixList /usr/share/publicsuffix/effective_tld_names.dat

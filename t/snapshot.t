@@ -1,116 +1,141 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
-BEGIN {
-    $INC{'File/Which.pm'} = 1;
-    package File::Which;
-    use Exporter 'import';
-    our @EXPORT_OK = qw{which};
-    sub which { return '/usr/bin/virsh' }
+use re '/aa';
+
+=head1 NAME
+
+t/snapshot.t - bin/snapshot: taking one, and naming it
+
+=cut
+
+use Test::More;
+use IPC::Run3();
+use Test::MockModule qw{strict};
+use File::Temp qw{tempdir};
+use Pod::Usage();
+
+use FindBin;
+use FindBin::libs;
+
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+
+require_ok("$FindBin::Bin/../bin/snapshot")
+  or BAIL_OUT('bin/snapshot does not load; the install is incomplete');
+
+# Point --hvconf at nothing, so these never read the fleet file of whatever
+# machine the suite happens to be running on.
+my $NO_FLEET = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+sub main_snapshot { return Trog::Bin::Snapshot::main('--hvconf', $NO_FLEET, @_) }
+
+# The interface is documented in POD now, and pod2usage prints that.
+my $synopsis = _pod_section("$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS');
+like($synopsis, qr/--name/,   'POD documents --name');
+like($synopsis, qr/--connect/,'POD documents --connect');
+like($synopsis, qr/DOMAIN/,   'POD documents the DOMAIN argument');
+
+# No domain -> usage, non-zero exit.  This one has to be a real run, since
+# pod2usage exits rather than dying.
+my ($out, $rc) = _run("$FindBin::Bin/../bin/snapshot");
+isnt($rc, 0, 'no arguments exits non-zero');
+like($out, qr/No domain passed/, 'saying what was missing');
+like($out, qr/Usage:/,           'and printing the usage out of the POD');
+
+# libvirt refuses to snapshot -> dies
+{
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot        => sub { 0 });
+    $hv_mock->redefine(snapshot_current_name  => sub { undef });
+
+    eval { main_snapshot('myvm.lan') };
+    like($@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails');
 }
 
-use Test::More tests => 15;
-
-require './bin/snapshot';
-
-# usage() lists expected options
-my $usage = Trog::Bin::Snapshot::usage();
-like($usage, qr/--name/,   'usage mentions --name');
-like($usage, qr/DOMAIN/,   'usage mentions DOMAIN');
-
-# No domain → dies with usage
-eval { Trog::Bin::Snapshot::main() };
-like($@, qr/Usage:/, 'main() with no args dies with usage');
-
-# virsh create fails → dies
+# No current snapshot after create -> dies
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 1 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { undef };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { undef });
 
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
-    like($@, qr/Failed to create snapshot/, 'main() dies when virsh create fails');
-}
-
-# No current snapshot after create → dies
-{
-    no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { undef };
-
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
+    eval { main_snapshot('myvm.lan') };
     like($@, qr/No current snapshot/, 'main() dies when no snapshot is current after create');
 }
 
-# Current snapshot unchanged → dies
+# Current snapshot unchanged -> dies
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub { "same-snap\n" };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { 'same-snap' });
 
-    eval { Trog::Bin::Snapshot::main('myvm.lan') };
-    like($@, qr/unchanged after create/, 'main() dies when current snapshot does not change');
+    eval { main_snapshot('myvm.lan') };
+    like($@, qr/unchanged after create/, 'main() dies when the current snapshot does not change');
 }
 
-# Happy path — before is undef (no prior snapshot), after is new name
+# Happy path -- nothing was current before
 {
-    no warnings 'redefine';
     my $call = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        $call++;
-        return $call == 1 ? undef : "new-snap\n";
-    };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' });
 
     my $rc;
-    eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
-    is($@,  '',  'main() no exception on success when before was undef');
-    is($rc, 0,   'main() returns 0 on success');
+    eval { $rc = main_snapshot('myvm.lan') };
+    is($@,  '', 'no exception on success when nothing was current before');
+    is($rc, 0,  'main() returns 0 on success');
 }
 
-# Happy path — before differs from after
+# Happy path -- before differs from after
 {
-    no warnings 'redefine';
     my $call = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        $call++;
-        return $call == 1 ? "old-snap\n" : "new-snap\n";
-    };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' });
 
     my $rc;
-    eval { $rc = Trog::Bin::Snapshot::main('myvm.lan') };
-    is($@,  '', 'main() no exception when before differs from after');
+    eval { $rc = main_snapshot('myvm.lan') };
+    is($@,  '', 'no exception when before differs from after');
     is($rc, 0,  'main() returns 0');
 }
 
-# --name is forwarded to virsh
+# --name reaches libvirt
 {
-    no warnings 'redefine';
     my @captured;
-    my $ncall = 0;
-    local *Trog::Bin::Snapshot::_virsh             = sub { @captured = @_; return 0 };
-    local *Trog::Bin::Snapshot::_virsh_snap_current = sub {
-        return ++$ncall == 1 ? undef : "mysnap\n";
-    };
+    my $call = 0;
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(create_snapshot       => sub { @captured = @_; return 1 });
+    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' });
 
-    Trog::Bin::Snapshot::main('myvm.lan', '--name', 'mysnap');
-    ok((grep { $_ eq 'mysnap' } @captured), '--name value forwarded to virsh');
-    ok((grep { $_ eq '--atomic' } @captured), '--atomic flag present');
-    ok((grep { $_ eq '--live' } @captured),   '--live flag present');
+    main_snapshot(qw{myvm.lan --name mysnap});
+    is($captured[1], 'myvm.lan', 'domain forwarded');
+    is($captured[2], 'mysnap',   '--name value forwarded');
 }
 
-# _virsh_snap_current returns undef when virsh exits non-zero
-{
-    no warnings 'redefine';
-    # We just test that the sub doesn't die; actual virsh call not run in tests
-    # because qx{} is called inline. Just verify the code path is accessible.
-    can_ok('Trog::Bin::Snapshot', '_virsh_snap_current');
+sub _run {
+    my (@cmd) = @_;
+    my $out = q{};
+    IPC::Run3::run3([$^X, @cmd], \undef, \$out, \$out);
+    return ($out, $?);
 }
 
-# _virsh wraps system() correctly (call count / args)
-{
-    no warnings 'redefine';
-    can_ok('Trog::Bin::Snapshot', '_virsh');
+sub _pod_section {
+    my ($file, $sections) = @_;
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $file,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => $sections,
+    );
+    close $fh;
+    return $text // '';
 }
+
+done_testing;

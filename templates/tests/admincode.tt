@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-d '[% install_dir %]/[% domain %]/[% basedir %]', 'code directory exists');
+ok(-d '/home/[% admin_user %]/bin', 'admin bin directory exists');
+
+done_testing();

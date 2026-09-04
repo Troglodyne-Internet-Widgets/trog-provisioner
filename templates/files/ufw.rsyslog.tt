@@ -1,0 +1,5 @@
+[rsyslog]
+title=Remote Rsyslog
+description=SMTP relay over port 25025
+ports=514
+

@@ -1,0 +1,22 @@
+#!/bin/bash
+
+TARGET=$1
+LINK_NAME=$2
+TYPE=$3
+OPTIONS=$4
+PARTITION=$5
+
+ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F "=" '{print $2}')
+[[ -z $PARTITION ]] && PARTITION=1
+[[ $PARTITION = 'NONE' ]] && PARTITION=''
+ACTUAL_TARGET="$ACTUAL_TARGET$PARTITION"
+
+# Mount things inside a chroot
+mkdir -p $LINK_NAME
+cp /etc/fstab /tmp/fstab.new
+echo "$ACTUAL_TARGET $LINK_NAME $TYPE $OPTIONS 0 0" >> /tmp/fstab.new
+sort < /tmp/fstab.new | uniq | grep -o '^[^#]*' > /tmp/fstab.newer
+chown root:root /tmp/fstab.newer
+mv /etc/fstab /etc/fstab.bak
+mv /tmp/fstab.newer /etc/fstab
+mount $LINK_NAME

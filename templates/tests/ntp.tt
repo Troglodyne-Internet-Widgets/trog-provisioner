@@ -1,0 +1,28 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active chrony 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'chrony is running');
+
+# Not enough on its own: the recipe defers `systemctl restart chrony` to a
+# postrun task, so at this point chrony is still up on the packaged config and
+# would say "active" however broken ours is.  What we wrote is what to check.
+ok(-f '/etc/chrony/chrony.conf', 'chrony config exists');
+
+my $conf = do { local (@ARGV, $/) = '/etc/chrony/chrony.conf'; <> } // '';
+
+# chronyd refuses to start on a directive with no argument after it, which is
+# what an unset default renders as.
+my @bare = grep { m/^\s*(makestep|pool|server|driftfile|maxupdateskew)\s*$/ } split m/\n/, $conf;
+is_deeply(\@bare, [], 'no directive was left without its argument')
+    or diag "bare directives: @bare";
+
+# [ \t] rather than \s: \s matches a newline, so the arguments would happily
+# be found on the following line.
+like($conf, qr/^[ \t]*makestep[ \t]+\S+[ \t]+\S+[ \t]*$/m, 'makestep has both of its arguments');
+ok(scalar(grep { m/^\s*(pool|server)\s+\S+/ } split m/\n/, $conf), 'at least one time source');
+
+done_testing();

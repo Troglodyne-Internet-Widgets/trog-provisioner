@@ -1,0 +1,27 @@
+# Create torrent storage directory - readable by nginx (www-data)
+mkdir -p [% install_dir %]/[% domain %]/torrents
+chown debian-deluged:www-data [% install_dir %]/[% domain %]/torrents
+chmod 0750 [% install_dir %]/[% domain %]/torrents
+# Deploy deluged core config before first start so download_location is set
+mkdir -p /var/lib/deluged/config
+if [ ! -f /var/lib/deluged/config/core.conf ]; then \
+    mv deluged_core.conf /var/lib/deluged/config/core.conf; \
+    chown root:debian-deluged /var/lib/deluged/config/core.conf; \
+    chmod 0640 /var/lib/deluged/config/core.conf; \
+fi
+chown -R debian-deluged:debian-deluged /var/lib/deluged/config
+# Enable and queue service starts
+systemctl enable deluged
+systemctl enable deluge-web
+[% script_dir %]/queue_postrun_task systemctl start deluged
+[% script_dir %]/queue_postrun_task systemctl start deluge-web
+# UFW application profile for BitTorrent ports
+mv deluged_ufw.conf /etc/ufw/applications.d/deluged
+chown root:root /etc/ufw/applications.d/deluged
+chmod 0644 /etc/ufw/applications.d/deluged
+# Nginx vhost for file serving and web UI proxy
+mkdir -p /etc/nginx/sites-enabled
+mv deluged_nginx.conf /etc/nginx/sites-enabled/files.[% domain %].conf
+chown root:root /etc/nginx/sites-enabled/files.[% domain %].conf
+chmod 0644 /etc/nginx/sites-enabled/files.[% domain %].conf
+[% script_dir %]/queue_postrun_task systemctl reload nginx

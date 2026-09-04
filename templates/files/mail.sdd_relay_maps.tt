@@ -1,0 +1,7 @@
+[% IF relay.host %]
+[% FOR user IN names.keys().sort() %]
+[% user %]@[% domain %]    [[% relay.host %]]:[% relay.port %]
+[%- END %]
+opendmarc@[% domain %] [[% relay.host %]]:[% relay.port %]
+root@[% domain %] [[% relay.host %]]:[% relay.port %]
+[% END %]

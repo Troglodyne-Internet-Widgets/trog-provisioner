@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Queue up stuff to get run by atd after we are done
+echo $* >> /root/post_install.sh

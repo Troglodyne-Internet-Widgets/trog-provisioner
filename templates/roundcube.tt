@@ -1,0 +1,18 @@
+mkdir -p [% install_dir %]/webmail.[% domain %]
+mkdir -p [% install_dir %]/webmail.[% domain %]_data
+wget -O [% install_dir %]/webmail.[% domain %]/roundcube.tar.gz https://github.com/roundcube/roundcubemail/releases/download/[% version %]/roundcubemail-[% version %]-complete.tar.gz
+cd [% install_dir %]/webmail.[% domain %] && tar --strip-components=1 -zxvf roundcube.tar.gz
+install fpm.ini /etc/php/$(PHP_VER)/fpm/pool.d/roundcube-[% domain %].ini
+install config.inc.php [% install_dir %]/webmail.[% domain %]/config/config.inc.php
+[% script_dir %]/queue_postrun_task systemctl restart php$(PHP_VER)-fpm
+# Initialize the roundcube database, because autocreate is beyond them
+sqlite3 [% install_dir %]/webmail.[% domain %]_data/roundcube.db < [% install_dir %]/webmail.[% domain %]/SQL/sqlite.initial.sql
+chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]_data
+chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]
+# Setup the vhost
+mkdir -p /etc/nginx/sites-enabled; /bin/true
+mv webmail_nginx.conf /etc/nginx/sites-enabled/webmail.[% domain %].conf
+chown root:root /etc/nginx/sites-enabled/webmail.[% domain %].conf
+[% script_dir %]/queue_postrun_task systemctl reload nginx
+# Clean up
+rm [% install_dir %]/webmail.[% domain %]/roundcube.tar.gz

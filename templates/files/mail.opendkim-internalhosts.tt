@@ -1,0 +1,6 @@
+[% domain %]
+[% FOR alias IN full_aliases %]
+[% alias %]
+[% END %]
+192.168.0.0/255.255.255.0
+localhost

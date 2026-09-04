@@ -1,35 +1,53 @@
 #!/usr/bin/env perl
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
+
+use re '/aa';
+
+=head1 NAME
+
+t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
+
+=cut
 
 use Test::More;
+use IPC::Run3();
+use Test::MockModule qw{strict};
 use File::Temp qw{tempdir};
 use File::Path qw{make_path};
-use File::Slurper qw{write_text read_text};
+use File::Slurper();
+use File::Slurper::Temp();
+use Pod::Usage();
 
 use FindBin;
-require "$FindBin::Bin/../bin/destroy";
+use FindBin::libs;
 
-# Override domain_dir to a temp dir
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+use Trog::HV();
+
+require_ok("$FindBin::Bin/../bin/destroy")
+  or BAIL_OUT('bin/destroy does not load; the install is incomplete');
+
+# Point the hypervisor's domain dir at a temp tree.  Everything else in the
+# script picks this same object back up with Trog::HV->new().
 my $tmpdir = tempdir(CLEANUP => 1);
-$Trog::Bin::Destroy::domain_dir = $tmpdir;
+Trog::HV->forget();
+Trog::HV->new(domain_dir => $tmpdir);
 
-# Helpers
 sub make_domain_dir {
     my ($domain) = @_;
     my $dir = "$tmpdir/$domain";
     make_path($dir);
     # Write a fake pubkey
-    write_text("$dir/key.rsa.pub", "ssh-rsa AAAA fake-key-$domain comment\n");
+    File::Slurper::Temp::write_text("$dir/key.rsa.pub", "ssh-rsa AAAA fake-key-$domain comment\n");
     return $dir;
-}
-
-sub make_authorized_keys {
-    my (@keys) = @_;
-    my $ak = "$ENV{HOME}/.ssh/authorized_keys";
-    # Back it up and restore after test
-    return $ak;
 }
 
 # --- remove_rsyslog_config ---
@@ -39,32 +57,31 @@ subtest 'remove_rsyslog_config skips missing file cleanly' => sub {
     is($@, '', 'no exception for missing rsyslog config in dryrun');
 };
 
-# --- remove_tf_configs ---
-subtest 'remove_tf_configs removes matching files' => sub {
+# --- destroy_disks ---
+subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     my $domain = 'test.example';
-    my $cfgdir = '/opt/terraform/config';
 
-    # Use temp dir to simulate tf config files
-    my $fake_cfgdir = tempdir(CLEANUP => 1);
-    my @expected = map { "$fake_cfgdir/$domain.$_" } qw{tf cloud_init.cfg network_config.cfg};
-    write_text($_, "# placeholder\n") for @expected;
+    my (@deleted, %exists);
+    %exists = map { $_ => 1 } ("$domain-qcow2", "$domain-cloudinit.iso", 'baseimage-qcow2');
 
-    # Patch the path in the function call by rewriting files to where function looks
-    my $real_cfgdir = '/opt/terraform/config';
-    # Since we can't easily redirect /opt/terraform/config in tests without mocking,
-    # verify the logic: files should be unlinked if they exist
-    for my $f (@expected) {
-        ok(-f $f, "test file exists: $f");
-        unlink $f;
-        ok(!-f $f, "file removed: $f");
-    }
-    pass('remove_tf_configs file removal logic verified');
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(volume        => sub { $exists{ $_[1] } });
+    $hv_mock->redefine(delete_volume => sub { push @deleted, $_[1]; return 1 });
+
+    Trog::Bin::Destroy::destroy_disks($domain, 1);
+    is_deeply(\@deleted, [], 'dryrun removes nothing');
+
+    Trog::Bin::Destroy::destroy_disks($domain, 0);
+    is_deeply([sort @deleted], ["$domain-cloudinit.iso", "$domain-qcow2"],
+        'the guest disk and its seed go');
+    ok(!(grep { index($_, 'baseimage') >= 0 } @deleted),
+        'and the base image, which every other guest is layered on, does not');
 };
 
 # --- remove_authorized_key ---
 subtest 'remove_authorized_key removes only the domain key' => sub {
     my $domain = 'remove-key.example';
-    my $dir = make_domain_dir($domain);
+    make_domain_dir($domain);
 
     my $fake_home = tempdir(CLEANUP => 1);
     make_path("$fake_home/.ssh");
@@ -72,33 +89,33 @@ subtest 'remove_authorized_key removes only the domain key' => sub {
 
     my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
     my $other_key  = "ssh-rsa BBBB other-key other-comment";
-    write_text($ak, "$other_key\n$domain_key\n");
+    File::Slurper::Temp::write_text($ak, "$other_key\n$domain_key\n");
 
     local $ENV{HOME} = $fake_home;
 
     Trog::Bin::Destroy::remove_authorized_key($domain, 0);
 
-    my $after = read_text($ak);
+    my $after = File::Slurper::read_text($ak);
     unlike($after, qr/\Qfake-key-$domain\E/, 'domain key removed');
     like($after,   qr/\Qother-key\E/,        'other key preserved');
 };
 
 subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
     my $domain = 'dryrun-key.example';
-    my $dir = make_domain_dir($domain);
+    make_domain_dir($domain);
 
     my $fake_home = tempdir(CLEANUP => 1);
     make_path("$fake_home/.ssh");
     my $ak = "$fake_home/.ssh/authorized_keys";
 
     my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
-    write_text($ak, "$domain_key\n");
+    File::Slurper::Temp::write_text($ak, "$domain_key\n");
 
     local $ENV{HOME} = $fake_home;
 
     Trog::Bin::Destroy::remove_authorized_key($domain, 1);
 
-    my $after = read_text($ak);
+    my $after = File::Slurper::read_text($ak);
     like($after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed');
 };
 
@@ -122,9 +139,30 @@ subtest 'purge_domain_dir dryrun leaves directory intact' => sub {
 };
 
 # --- main: missing domain ---
-subtest 'main dies without domain argument' => sub {
-    eval { Trog::Bin::Destroy::main('--dryrun') };
-    like($@, qr/Usage/, 'dies with usage message when no domain given');
+# pod2usage exits, so this has to be a real run.
+subtest 'main exits with the usage when given no domain' => sub {
+    my $out = q{};
+    IPC::Run3::run3([$^X, "$FindBin::Bin/../bin/destroy", '--dryrun'], \undef, \$out, \$out);
+    isnt($?, 0, 'exits non-zero');
+    like($out, qr/No domain passed/, 'saying what was missing');
+    like($out, qr/Usage:/,           'and printing the usage out of the POD');
+};
+
+subtest 'the POD documents the interface' => sub {
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => "$FindBin::Bin/../bin/destroy",
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => 'SYNOPSIS|OPTIONS',
+    );
+    close $fh;
+
+    like($text, qr/--purge/,   'POD documents --purge');
+    like($text, qr/--dryrun/,  'POD documents --dryrun');
+    like($text, qr/--connect/, 'POD documents --connect');
+    like($text, qr/DOMAIN/,    'POD documents the DOMAIN argument');
 };
 
 done_testing;

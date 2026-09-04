@@ -1,0 +1,15 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active sssd 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'sssd is running');
+
+ok(-f '/etc/sssd/sssd.conf', 'sssd config exists');
+
+my $mode = (stat('/etc/sssd/sssd.conf'))[2];
+is($mode & 0777, 0600, 'sssd.conf has mode 0600');
+
+done_testing();

@@ -1,0 +1,5 @@
+rm /etc/fail2ban/jail.d/[% domain %].conf; /bin/true
+rm /etc/fail2ban/filter.d/[% domain %].conf; /bin/true
+mv jail.cfg   /etc/fail2ban/jail.d/[% domain %].conf
+mv filter.cfg /etc/fail2ban/filter.d/[% domain %].conf
+systemctl reload fail2ban

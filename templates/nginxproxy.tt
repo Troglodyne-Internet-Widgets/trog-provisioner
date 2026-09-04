@@ -1,0 +1,7 @@
+# Setup the domain and its aliases
+mv nginx.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
+systemctl restart nginx
+# Get ready for ACME
+mkdir -p [% install_dir %]/[% domain %]/www/.well_known; /bin/true
+chown [% user %]:www-data [% install_dir %]/[% domain %]/www/.well_known
+chmod 0755 [% install_dir %]/[% domain %]/www/.well_known

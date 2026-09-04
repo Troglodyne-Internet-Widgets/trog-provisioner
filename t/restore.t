@@ -1,15 +1,16 @@
 #!/usr/bin/env perl
-use strict;
-use warnings;
+use 5.041;
 
-BEGIN {
-    # Stub File::Which
-    $INC{'File/Which.pm'} = 1;
-    package File::Which;
-    use Exporter 'import';
-    our @EXPORT_OK = qw{which};
-    sub which { return '/usr/bin/virsh' }
-}
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+
+=head1 NAME
+
+t/restore.t - bin/restore: putting a guest back to a snapshot
+
+=cut
 
 BEGIN {
     # Stub Net::EmptyPort so tests don't do real network waits
@@ -25,66 +26,93 @@ BEGIN {
     sub new { bless {}, shift }
 }
 
-use Test::More tests => 19;
+use Test::More;
+use IPC::Run3();
 use File::Temp qw{tempdir};
+use Test::MockModule qw{strict};
+use Pod::Usage();
 
-require './bin/restore';
+use FindBin;
+use FindBin::libs;
 
-# usage() mentions expected flags
-my $usage = Trog::Bin::Restore::usage();
-like($usage, qr/--latest/,  'usage mentions --latest');
-like($usage, qr/--oldest/,  'usage mentions --oldest');
-like($usage, qr/--name/,    'usage mentions --name');
-like($usage, qr/DOMAIN/,    'usage mentions DOMAIN');
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 
-# No domain → dies with usage
-eval { Trog::Bin::Restore::main() };
-like($@, qr/Usage:/, 'main() with no args dies with usage');
+require_ok("$FindBin::Bin/../bin/restore")
+  or BAIL_OUT('bin/restore does not load; the install is incomplete');
 
-# No mode → dies with usage
-eval { Trog::Bin::Restore::main('myvm.lan') };
-like($@, qr/Usage:/, 'main() with domain but no mode dies with usage');
+# Point --hvconf at nothing, so these never read the fleet file of whatever
+# machine the suite happens to be running on.
+my $NO_FLEET = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+sub main_restore { return Trog::Bin::Restore::main('--hvconf', $NO_FLEET, @_) }
 
-# Multiple modes → dies with usage
-eval { Trog::Bin::Restore::main('--latest', '--oldest', 'myvm.lan') };
-like($@, qr/Usage:/, 'main() with multiple mode flags dies with usage');
+# The interface is documented in POD now, and pod2usage prints that.
+my $synopsis = _pod_section("$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS');
+like($synopsis, qr/--latest/,  'POD documents --latest');
+like($synopsis, qr/--oldest/,  'POD documents --oldest');
+like($synopsis, qr/--name/,    'POD documents --name');
+like($synopsis, qr/--connect/, 'POD documents --connect');
+like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
 
-# No snapshots → dies
+# No domain, and no mode, both exit non-zero with the usage.  These have to be
+# real runs, since pod2usage exits rather than dying.
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list = sub { () };
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore");
+    isnt($rc, 0, 'no arguments exits non-zero');
+    like($out, qr/No domain passed/, 'saying what was missing');
+    like($out, qr/Usage:/,           'and printing the usage out of the POD');
+}
 
-    eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
+{
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore", 'myvm.lan');
+    isnt($rc, 0, 'a domain with no mode exits non-zero');
+    like($out, qr/exactly one of --latest/, 'saying which flags to pick between');
+}
+
+{
+    my ($out, $rc) = _run("$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan});
+    isnt($rc, 0, 'two modes at once exits non-zero');
+}
+
+# No snapshots -> dies
+{
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names => sub { () });
+
+    eval { main_restore('--latest', 'myvm.lan') };
     like($@, qr/No snapshots found/, 'main() dies when no snapshots exist');
 }
 
-# --name for nonexistent snapshot → dies
+# --name for nonexistent snapshot -> dies
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list = sub { ('snap-a', 'snap-b') };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names => sub { ('snap-a', 'snap-b') });
 
-    eval { Trog::Bin::Restore::main('--name', 'snap-z', 'myvm.lan') };
-    like($@, qr/not found for myvm.lan/, 'main() dies when named snapshot not found');
+    eval { main_restore(qw{--name snap-z myvm.lan}) };
+    like($@, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there');
 }
 
-# virsh revert fails → dies
+# Revert fails -> dies
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 1 };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names   => sub { ('snap-a') });
+    $hv_mock->redefine(revert_snapshot  => sub { 0 });
 
-    eval { Trog::Bin::Restore::main('--latest', 'myvm.lan') };
-    like($@, qr/Failed to revert/, 'main() dies when virsh revert fails');
+    eval { main_restore('--latest', 'myvm.lan') };
+    like($@, qr/Failed to revert/, 'main() dies when the revert fails');
 }
 
-# Missing provision.conf → dies
+# Missing provision.conf -> dies
 {
-    no warnings 'redefine';
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 0 };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { ('snap-a') });
+    $hv_mock->redefine(revert_snapshot => sub { 1 });
 
-    eval { Trog::Bin::Restore::main('--latest', '--domaindir', '/tmp/nonexistent_xyz', 'myvm.lan') };
-    like($@, qr/No provision\.conf found/, 'main() dies when provision.conf missing');
+    eval { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
+    like($@, qr/No provision\.conf to read/, 'main() dies when provision.conf is missing');
 }
 
 # Helper: build a minimal provision.conf in a temp dir
@@ -105,78 +133,108 @@ sub _make_conf {
 
 # --latest picks last snapshot and reverts to it
 {
-    no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
+    $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-c', '--latest picks the last snapshot');
+    main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
+    is($reverted[2], 'snap-c', '--latest picks the last snapshot');
 }
 
 # --oldest picks first snapshot
 {
-    no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
+    $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
-    Trog::Bin::Restore::main('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-a', '--oldest picks the first snapshot');
+    main_restore('--oldest', '--domaindir', $tmpdir, 'myvm.lan');
+    is($reverted[2], 'snap-a', '--oldest picks the first snapshot');
 }
 
 # --name picks the specified snapshot
 {
-    no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
     my @reverted;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a', 'snap-b', 'snap-c') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @reverted = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { qw{snap-a snap-b snap-c} });
+    $hv_mock->redefine(revert_snapshot => sub { @reverted = @_; return 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
-    Trog::Bin::Restore::main('--name', 'snap-b', '--domaindir', $tmpdir, 'myvm.lan');
-    is($reverted[1], 'snap-b', '--name picks the specified snapshot');
+    main_restore(qw{--name snap-b --domaindir}, $tmpdir, 'myvm.lan');
+    is($reverted[1], 'myvm.lan', 'the domain is passed along');
+    is($reverted[2], 'snap-b',   '--name picks the specified snapshot');
 }
 
 # wait_for_ssh called with correct user, key, ip
 {
-    no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42');
 
-    my @ssh_args;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-a') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { @ssh_args = @_; return 1 };
+    my $connected;
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { ('snap-a') });
+    $hv_mock->redefine(revert_snapshot => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { $connected = $_[0]; return $_[0] });
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($ssh_args[0], 'ubuntu',                       'wait_for_ssh called with admin_user');
-    is($ssh_args[2], '10.0.0.42',                    'wait_for_ssh called with IP from provision.conf');
-    like($ssh_args[1], qr{myvm\.lan/key\.rsa},       'wait_for_ssh called with domain key path');
+    main_restore('--latest', '--domaindir', $tmpdir, 'myvm.lan');
+    is($connected->ssh_user, 'ubuntu',    'the guest is reached as admin_user');
+    is($connected->ssh_host, '10.0.0.42',  'at the IP from provision.conf');
+    is($connected->name,     'myvm.lan',   'and knows what it is called');
+    like($connected->ssh_key, qr{myvm\.lan/key\.rsa}, 'with the domain key');
 }
 
-# virsh revert receives correct --snapshotname and --running flags
+# --connect reaches the hypervisor object
 {
-    no warnings 'redefine';
     my $tmpdir = tempdir(CLEANUP => 1);
     _make_conf($tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5');
 
-    my @cmd_args;
-    local *Trog::Bin::Restore::_virsh_snap_list   = sub { ('snap-x') };
-    local *Trog::Bin::Restore::_virsh_snap_revert = sub { @cmd_args = @_; return 0 };
-    local *Trog::Bin::Restore::wait_for_ssh       = sub { 1 };
+    my $seen;
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(snapshot_names  => sub { $seen = $_[0]->uri; return ('snap-a') });
+    $hv_mock->redefine(revert_snapshot => sub { 1 });
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh => sub { return $_[0] });
 
-    Trog::Bin::Restore::main('--latest', '--domaindir', $tmpdir, 'myvm.lan');
-    is($cmd_args[0], 'myvm.lan',  '_virsh_snap_revert receives domain');
-    is($cmd_args[1], 'snap-x',    '_virsh_snap_revert receives snapshot name');
+    main_restore(qw{--latest --connect qemu+ssh://hv1/system --domaindir},
+        $tmpdir, 'myvm.lan');
+    is($seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we asked for');
 }
+
+sub _run {
+    my (@cmd) = @_;
+    my $out = q{};
+    IPC::Run3::run3([$^X, @cmd], \undef, \$out, \$out);
+    return ($out, $?);
+}
+
+sub _pod_section {
+    my ($file, $sections) = @_;
+    open(my $fh, '>', \my $text) or die $!;
+    Pod::Usage::pod2usage(
+        -input    => $file,
+        -output   => $fh,
+        -exitval  => 'NOEXIT',
+        -verbose  => 99,
+        -sections => $sections,
+    );
+    close $fh;
+    return $text // '';
+}
+
+done_testing;

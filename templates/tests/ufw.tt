@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $ufw_status = `ufw status 2>/dev/null | head -1`;
+chomp $ufw_status;
+like($ufw_status, qr/active/i, 'ufw is active');
+
+done_testing();

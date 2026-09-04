@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/etc/systemd/resolved.conf.d/10-disable-stub-resolver.conf',
+    'stub resolver config exists');
+
+done_testing();

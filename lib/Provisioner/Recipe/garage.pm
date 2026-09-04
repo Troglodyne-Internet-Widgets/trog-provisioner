@@ -1,0 +1,183 @@
+package Provisioner::Recipe::garage;
+
+#ABSTRACT: Install and configure the Garage S3-compatible object store.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use parent qw{Provisioner::Recipe};
+
+use Crypt::PRNG();
+use HTTP::Tiny;
+use JSON::PP;
+
+=head1 Provisioner::Recipe::garage
+
+=head2 SYNOPSIS
+
+    somedomain:
+        garage:
+            version: v1.0.1
+            data_dir: /var/lib/garage/data
+            metadata_dir: /var/lib/garage/meta
+            replication_factor: 1
+            s3_region: garage
+            api_port: 3900
+            rpc_port: 3901
+            web_port: 3902
+            admin_port: 3903
+            zone: dc1
+            capacity: 1G
+            buckets:
+                - my-bucket
+                - another-bucket
+
+=head2 DESCRIPTION
+
+Installs and configures L<Garage|https://garagehq.deuxfleurs.fr/>, a lightweight
+S3-compatible distributed object-storage server.
+
+Downloads the statically-linked garage binary from GitHub releases, installs a
+systemd service, writes C</etc/garage.toml>, and runs C<garage_init.sh> to
+apply a single-node layout and create any requested S3 buckets.
+
+=head3 deps
+
+Requires C<curl> to download the Garage binary.
+
+=head3 validate
+
+Validates the recipe configuration:
+
+=over 4
+
+=item C<rpc_secret> (optional)  64-character hex string used as the shared
+RPC secret between cluster nodes.  Auto-generated with C<openssl rand -hex 32>
+on first run and persisted to C<rpc_secret.txt> in the domain output directory.
+
+=item C<version> (optional, default: latest GitHub release)  Garage release tag to download.
+
+=item C<data_dir> (optional, default C</var/lib/garage/data>)
+
+=item C<metadata_dir> (optional, default C</var/lib/garage/meta>)
+
+=item C<replication_factor> (optional, default C<1>)  1 for single-node.
+
+=item C<s3_region> (optional, default C<garage>)
+
+=item C<api_port> (optional, default C<3900>)  S3 API listen port.
+
+=item C<rpc_port> (optional, default C<3901>)  Inter-node RPC port.
+
+=item C<web_port> (optional, default C<3902>)  S3 static-web serve port.
+
+=item C<admin_port> (optional, default C<3903>)  Admin API port.
+
+=item C<zone> (optional, default C<dc1>)  Zone name for the layout assignment.
+
+=item C<capacity> (optional, default C<1G>)  Storage capacity hint for layout.
+
+=item C<nofile_limit> (optional, default C<65536>)  C<LimitNOFILE> value for the systemd unit.
+
+=item C<buckets> (optional)  List of bucket names to create after startup.
+
+=back
+
+=cut
+
+sub deps {
+    my ($self) = @_;
+    if ( $self->{target_packager} eq 'deb' ) {
+        return qw{curl liblmdb0};
+    }
+    die "Unsupported packager";
+}
+
+sub _latest_garage_version {
+    my $res = HTTP::Tiny->new( timeout => 10 )->get(
+        'https://api.github.com/repos/deuxfleurs-org/garage/releases/latest',
+        { headers => { 'Accept' => 'application/vnd.github+json' } },
+    );
+    if ( $res->{success} ) {
+        my $data = eval { JSON::PP::decode_json( $res->{content} ) };
+        return $data->{tag_name} if $data && $data->{tag_name};
+    }
+    warn "garage: could not fetch latest release version from GitHub, falling back to v1.0.1\n";
+    return 'v1.0.1';
+}
+
+sub _rpc_secret {
+    my ($self) = @_;
+    my $secret_file = "$self->{output_dir}/rpc_secret.txt";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    if ( -f $secret_file ) {
+        open( my $fh, '<', $secret_file ) or die "Cannot read $secret_file: $!";
+        chomp( my $secret = <$fh> );
+        return $secret;
+    }
+
+    # 32 bytes -> the 64 hex chars garage expects for rpc_secret
+    my $secret = Crypt::PRNG::random_bytes_hex(32);
+    die "Could not generate rpc_secret" unless $secret =~ /^[0-9a-f]{64}$/;
+    open( my $fh, '>', $secret_file ) or die "Cannot write $secret_file: $!";
+    print $fh "$secret\n";
+    close $fh;
+    chmod 0600, $secret_file;
+    return $secret;
+}
+
+sub args {
+    my $self = shift;
+    return (
+        type       => 'object',
+        properties => {
+            rpc_secret         => { type => 'string',  default => $self->_rpc_secret(), },
+            version            => { type => 'string',  default => _latest_garage_version(), },
+            data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
+            metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },
+            replication_factor => { type => 'integer', default => 1 },
+            s3_region          => { type => 'string',  default => 'garage' },
+            api_port           => { type => 'integer', default => 3900, minimum => 1024 },
+            rpc_port           => { type => 'integer', default => 3901, minimum => 1024 },
+            web_port           => { type => 'integer', default => 3902, minimum => 1024 },
+            admin_port         => { type => 'integer', default => 3903, minimum => 1024 },
+            zone               => { type => 'string',  default => 'dc1' },
+            capacity           => { type => 'string',  default => '1G' },
+            nofile_limit       => { type => 'integer', default => '65536' },
+            buckets            => {
+                type  => 'array',
+                default => [],
+                items => { type => 'string' },
+            },
+        },
+    );
+}
+
+sub template_files {
+    return (
+        'garage.toml.tt'    => 'garage.toml',
+        'garage.service.tt' => 'garage.service',
+        'garage_init.sh.tt' => 'garage_init.sh',
+    );
+}
+
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+    # data_dir and metadata_dir are user-configurable; fall back to defaults.
+    # Operators using non-default paths must add them to backup targets manually.
+    my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
+    my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
+    return (
+        "$data_dir/"     => 'garage/data/',
+        "$metadata_dir/" => 'garage/meta/',
+    );
+}
+
+sub tests {
+    return qw{garage.tt};
+}
+
+1;

@@ -1,0 +1,9 @@
+[postfix-relay]
+title=Postfix-Relay
+description=SMTP relay over port 25025
+ports=25025
+
+[amavis]
+title=Amavis
+description=Amavis virus scanning service
+ports=10024

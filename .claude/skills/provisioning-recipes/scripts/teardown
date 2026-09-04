@@ -1,0 +1,129 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::Teardown;
+
+#ABSTRACT: Take the throwaway guest and the throwaway configuration back out again.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use File::Basename();
+use Getopt::Long qw{GetOptionsFromArray};
+use IPC::Run3();
+use Pod::Usage qw{pod2usage};
+
+=head1 NAME
+
+teardown - take the throwaway guest and the throwaway configuration back out again
+
+=head1 SYNOPSIS
+
+    teardown vm.test
+    teardown --keep-config vm.test
+
+=head1 DESCRIPTION
+
+Destroys the guest, purges its domain directory from here and from the
+hypervisor, and removes the scratch configuration directory.
+
+Run it even when the provision failed -- especially then.  A half-built guest
+still holds an address out of the pool, a disk in the storage pool and a
+definition in libvirt, and the next run will collide with all three.  Collect
+the artifacts first; they are gone after this.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--keep-config>
+
+Leave the scratch configuration directory alone.  For when the next run should
+reuse the same throwaway secret store rather than building another.
+
+=item B<--connect> URI, B<--hvconf> FILE
+
+Passed through to C<bin/destroy>.
+
+=item B<--dryrun>
+
+Say what would go without any of it going.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($keep_config, $uri, $hvconf, $dryrun, $help);
+    GetOptionsFromArray(\@args,
+        'keep-config' => \$keep_config,
+        'connect=s'   => \$uri,
+        'hvconf=s'    => \$hvconf,
+        'dryrun'      => \$dryrun,
+        'help'        => \$help,
+    );
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    my $domain = shift @args;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
+
+    my $rc = destroy_guest($domain, $uri, $hvconf, $dryrun);
+    $rc ||= remove_config($dryrun) unless $keep_config;
+
+    return $rc;
+}
+
+sub destroy_guest {
+    my ($domain, $uri, $hvconf, $dryrun) = @_;
+
+    my $destroy = File::Basename::dirname(__FILE__) . '/../../../../bin/destroy';
+
+    my @cmd = ($^X, $destroy, '--purge', $domain);
+    push @cmd, '--connect', $uri    if $uri;
+    push @cmd, '--hvconf',  $hvconf if $hvconf;
+    push @cmd, '--dryrun'           if $dryrun;
+
+    print {*STDERR} "Destroying $domain\n";
+    IPC::Run3::run3(\@cmd, \undef, undef, undef);
+    my $rc = $? >> 8;
+
+    # Worth saying rather than swallowing: what is left behind is a disk and a
+    # lease that the next run will trip over.
+    print {*STDERR} "\nbin/destroy exited $rc; $domain may still be on the hypervisor.\n"
+      . "Check with: virsh -c \$URI list --all\n" if $rc;
+
+    return $rc;
+}
+
+sub remove_config {
+    my ($dryrun) = @_;
+
+    my $dir = $ENV{TROG_PROVISIONER_CONFIG};
+    unless (defined $dir && length $dir) {
+        print {*STDERR} "TROG_PROVISIONER_CONFIG is not set, so there is no scratch config to remove.\n";
+        return 0;
+    }
+
+    # scratch_config knows its own; it refuses anything that is not one, which
+    # is what stops an unset variable taking out /etc/trog-provisioner.
+    my $scratch = File::Basename::dirname(__FILE__) . '/scratch_config';
+
+    if ($dryrun) {
+        print {*STDERR} "Would remove the scratch config at $dir\n";
+        return 0;
+    }
+
+    IPC::Run3::run3([$^X, $scratch, '--remove', $dir], \undef, undef, undef);
+    return $? >> 8;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

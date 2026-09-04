@@ -2,14 +2,38 @@
 
 package Trog::Bin::SetupProvisioner;
 
-use strict;
-use warnings;
+use 5.041;
 
-use File::Slurper;
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+use File::Slurper();
+use IPC::Run3();
+use File::Slurper::Temp();
 
 # Basically our 'install script'
 
 #TODO ideally, we just ship this all as a 'config rpm/deb'.
+
+=head1 NAME
+
+setup_provisioner - prepare this machine to be a hypervisor
+
+=head1 SYNOPSIS
+
+    bin/setup_provisioner
+
+=head1 DESCRIPTION
+
+The install script: everything a machine needs before it can host guests.
+
+Most of it is still a stub.  What works today is the rsyslog step, which makes
+the machine willing to collect the logs its guests ship at it; the rest returns
+true and says what it ought to be doing.  Each step's number is what main()
+returns when that step fails.
+
+=cut
 
 sub main {
     my @args = @_;
@@ -20,13 +44,12 @@ sub main {
 
     setup_kvm() or return 1;
     setup_public_bridge() or return 2;
-    setup_terraform() or return 3;
-    setup_rsyslog() or return 4;
-    setup_auditd() or return 5;
-    setup_management_interface() or return 6;
-    setup_firewall() or return 7;
-    setup_fail2ban() or return 8;
-    setup_crons() or return 9;
+    setup_rsyslog() or return 3;
+    setup_auditd() or return 4;
+    setup_management_interface() or return 5;
+    setup_firewall() or return 6;
+    setup_fail2ban() or return 7;
+    setup_crons() or return 8;
     return 0;
 }
 
@@ -40,15 +63,10 @@ sub setup_public_bridge {
 1;
 }
 
-# TODO ensure terraform is installed w/ relevant modules
-sub setup_terraform {
-1;
-}
-
 # TODO ensure rsyslog is configured to ingest logs & configured properly locally
 sub setup_rsyslog {
-    die "/etc/rsyslog.conf does not exist, unsupported configuration" unless -f '/etc/rsyslog.conf';
-    my $rs_conf = File::Slurper::read_text('/etc/rsyslog.conf');
+    my $rs_conf = eval { File::Slurper::read_text('/etc/rsyslog.conf') };
+    die "Could not read /etc/rsyslog.conf, unsupported configuration: $@" unless defined $rs_conf;
 
     my @must_have;
     foreach my $type (qw{imudp imtcp}) {
@@ -65,9 +83,9 @@ sub setup_rsyslog {
         }
     }
     if ($changed) {
-        File::Slurper::write_text('/etc/rsyslog.conf', $rs_conf);
+        File::Slurper::Temp::write_text('/etc/rsyslog.conf', $rs_conf);
         # TODO check this worked
-        system(qw{systemctl restart rsyslogd});
+        IPC::Run3::run3([qw{systemctl restart rsyslogd}], \undef, undef, undef);
     }
     return 1;
 }

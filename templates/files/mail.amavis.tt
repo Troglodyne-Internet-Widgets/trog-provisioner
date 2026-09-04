@@ -1,0 +1,14 @@
+use strict;
+
+@mynetworks = qw{[% main_ip %]/32 127.0.0.0/8 [::1]};
+@inet_acl   = qw{[% main_ip %] 127.0.0.1 [::1]};
+
+$X_HEADER_LINE = "[% domain %] Thought Police";
+
+$final_virus_destiny = D_DISCARD; # (defaults to D_BOUNCE)
+
+$final_banned_destiny = D_REJECT; # (defaults to D_BOUNCE)
+
+$final_spam_destiny = D_PASS; # (defaults to D_REJECT but we handle elsewhere)
+
+1;

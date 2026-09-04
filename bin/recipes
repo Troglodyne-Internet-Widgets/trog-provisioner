@@ -1,0 +1,128 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::Recipes;
+
+#ABSTRACT: List the recipes, or say what one of them takes.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Cpanel::JSON::XS();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+
+use Provisioner::Cookbook();
+
+=head1 NAME
+
+recipes - list the recipes, or say what one of them takes
+
+=head1 SYNOPSIS
+
+    bin/recipes                 # every recipe, and what it is for
+    bin/recipes --json          # the same, for something other than a human
+    bin/recipes mariadb         # what mariadb takes, as JSON
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--json>
+
+Print the listing as JSON rather than as a table.  A single recipe's schema is
+JSON either way -- that is what it is.
+
+=item B<--scaffold>
+
+Instead of the schema, print the configuration F<bin/new_guest> would generate
+for this recipe: defaults where the recipe has them, C<CHANGEME> where it does
+not.
+
+=item B<--all>
+
+With C<--scaffold>, include the optional fields too.
+
+=back
+
+=head1 DESCRIPTION
+
+Every recipe declares what it accepts in C<args()>, an OpenAPIv3 object schema
+that the provisioner validates a domain's configuration against.  This prints
+it, so you can find out what to write in F<recipes.d/> without reading the
+recipe.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($json, $scaffold, $all, $help);
+    GetOptionsFromArray(\@args,
+        'json'     => \$json,
+        'scaffold' => \$scaffold,
+        'all'      => \$all,
+        'help'     => \$help,
+    );
+
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    my $encoder = Cpanel::JSON::XS->new->pretty->canonical;
+
+    my $name = shift @args;
+    return list($encoder, $json) unless defined $name;
+
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'One recipe at a time') if @args;
+
+    # Dies naming the recipe and pointing at the listing, which is the whole
+    # reason to go through the Cookbook rather than requiring it here.
+    my $spec = describe($name, $scaffold, $all);
+    print $encoder->encode($spec);
+    return 0;
+}
+
+# What to print for one recipe: its schema, or the config we would write for it.
+sub describe {
+    my ($name, $scaffold, $all) = @_;
+
+    if ($scaffold) {
+        my ($config, @todo) = Provisioner::Cookbook->scaffold($name, all => $all);
+        return {
+            recipe        => $name,
+            configuration => { $name => $config },
+            needs_filling => \@todo,
+        };
+    }
+
+    Provisioner::Cookbook->load($name);
+    my %spec = Provisioner::Cookbook->spec($name);
+    return \%spec;
+}
+
+sub list {
+    my ($encoder, $json) = @_;
+
+    my @names = Provisioner::Cookbook->names();
+
+    if ($json) {
+        print $encoder->encode([
+            map { { name => $_, abstract => Provisioner::Cookbook->abstract($_) } } @names
+        ]);
+        return 0;
+    }
+
+    my ($width) = sort { $b <=> $a } map { length } @names;
+    foreach my $name (@names) {
+        printf "%-*s  %s\n", $width, $name, Provisioner::Cookbook->abstract($name) // '';
+    }
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

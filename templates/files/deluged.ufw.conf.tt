@@ -1,0 +1,4 @@
+[Deluge]
+title=Deluge BitTorrent
+description=Deluge seedbox daemon BitTorrent listen ports
+ports=6881:6891/tcp|6881:6891/udp

@@ -1,0 +1,9 @@
+#!/bin/bash
+
+export LEXICON_[% registrar.type.upper() %]_AUTH_USERNAME="[% registrar.user %]"
+export LEXICON_[% registrar.type.upper() %]_AUTH_TOKEN="[% registrar.key %]"
+
+COMMAND=$1;
+shift;
+
+lexicon [% registrar.type %] $COMMAND [% domain %] $@

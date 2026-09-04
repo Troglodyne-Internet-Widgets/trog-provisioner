@@ -1,0 +1,203 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::QualifySiteData;
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+use FindBin::libs;
+use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
+use Pod::Usage qw{pod2usage};
+use File::Slurper();
+use File::Slurper::Temp();
+use File::Copy();
+
+=head1 NAME
+
+qualify_site_data - spell out the short domain names in an older ipmap.cfg and recipes.d
+
+=head1 SYNOPSIS
+
+    qualify_site_data --tld troglodyne.net [--ipmap ipmap.cfg] [--recipes recipes.d] [--dryrun]
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--tld> DOMAIN
+
+The parent domain that used to be appended to every short name.  Required: it
+is the thing being removed, so it cannot be worked out afterwards.
+
+=item B<--ipmap> FILE
+
+Defaults to F<ipmap.cfg>.
+
+=item B<--recipes> DIR
+
+Defaults to F<recipes.d>.
+
+=item B<--dryrun>
+
+Say what would change without changing it.
+
+=back
+
+=head1 DESCRIPTION
+
+Domains used to be written two ways: short, with a C<tld> from the global
+section appended, or fully qualified for anything under some other parent --
+which the config called an "addon" and handled separately.  Now they are
+written one way, in full, as F<recipes.d> already named its files.
+
+This does the rename once: every unqualified key in the C<[ips]> and
+C<[aliases]> blocks, every unqualified alias value, and the top-level key of
+each recipe.  It drops the C<[addons]> block and the C<tld> setting, which no
+longer mean anything.
+
+Both files are copied to F<.bak> first.  It is not clever: a key with a dot in
+it is assumed to be qualified already and is left alone.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($tld, $ipmap, $recipes, $dryrun);
+    GetOptionsFromArray(\@args,
+        'tld=s'     => \$tld,
+        'ipmap=s'   => \$ipmap,
+        'recipes=s' => \$recipes,
+        'dryrun'    => \$dryrun,
+    ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
+
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass --tld, the parent domain that used to be appended')
+      unless $tld;
+
+    $ipmap   //= Trog::Config->path('ipmap.cfg');
+    $recipes //= 'recipes.d';
+
+    qualify_ipmap($ipmap, $tld, $dryrun);
+    qualify_recipes($recipes, $tld, $dryrun);
+
+    print $dryrun ? "\nDry run; nothing was written.\n" : "\nDone.\n";
+    return 0;
+}
+
+sub qualify_ipmap {
+    my ($path, $tld, $dryrun) = @_;
+    # Reading it is the test.  A -f first would answer for a moment that has
+    # passed by the time we read, and would not tell us whether we may.
+    my $text = eval { File::Slurper::read_text($path) };
+    return 0 unless defined $text;
+
+    my @lines = split("\n", $text, -1);
+    my ($block, @out, $changed) = ('');
+
+    # A short name and a qualified one can both be in there meaning the same
+    # machine -- `mysql` and `mysql.troglodyne.net` -- with different addresses.
+    # Qualifying makes them one key, and one of the addresses would just
+    # disappear.  Find that first and refuse, because which of the two is the
+    # live one is not something to guess about.
+    my %claims;
+    my $current = '';
+    foreach my $line (@lines) {
+        $current = $1 if $line =~ m/\A\s*\[(\w+)\]/;
+        next unless $current eq 'ips';
+        next unless $line =~ m/\A\s*([^=\s]+)\s*=\s*(.*?)\s*\z/;
+        my ($key, $value) = ($1, $2);
+        push @{ $claims{ index($key, q{.}) >= 0 ? $key : "$key.$tld" } }, "$key = $value";
+    }
+
+    my @collisions = grep { @{ $claims{$_} } > 1 } sort keys %claims;
+    die "Qualifying $path would collapse these into one entry each:\n"
+      . join('', map { "  $_\n" . join('', map { "      $_\n" } @{ $claims{$_} }) } @collisions)
+      . "\nOne address per domain.  Delete whichever is not the live one and run this again.\n"
+      if @collisions;
+
+    foreach my $line (@lines) {
+        if ($line =~ m/\A\s*\[(\w+)\]/) {
+            $block = $1;
+
+            # addons was how a domain said it was not under the tld.  Every
+            # domain says that for itself now.
+            if ($block eq 'addons') {
+                print "Dropping the [addons] block\n";
+                $changed = 1;
+            }
+            push @out, $line unless $block eq 'addons';
+            next;
+        }
+        next if $block eq 'addons';
+
+        if ($block eq 'global' && $line =~ m/\A\s*tld\s*=/) {
+            print "Dropping tld= from [global]\n";
+            $changed = 1;
+            next;
+        }
+
+        if (($block eq 'ips' || $block eq 'aliases') && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(.*)\z/) {
+            my ($lead, $key, $eq, $value) = ($1, $2, $3, $4);
+            my $new_key = index($key, q{.}) >= 0 ? $key : "$key.$tld";
+
+            # Alias values are domains too.
+            my @values = map { index($_, q{.}) >= 0 ? $_ : "$_.$tld" } split(/\s*,\s*/, $value);
+            my $new_value = join(', ', @values);
+
+            if ("$new_key$new_value" ne "$key$value") {
+                print "  $key -> $new_key\n" if $new_key ne $key;
+                $changed = 1;
+            }
+            push @out, "$lead$new_key$eq$new_value";
+            next;
+        }
+
+        push @out, $line;
+    }
+
+    return print "$path is already fully qualified\n" unless $changed;
+    return 1 if $dryrun;
+
+    File::Copy::copy($path, "$path.bak") or die "Could not back up $path: $!\n";
+    File::Slurper::Temp::write_text($path, join("\n", @out));
+    print "Rewrote $path (old copy at $path.bak)\n";
+    return 1;
+}
+
+sub qualify_recipes {
+    my ($dir, $tld, $dryrun) = @_;
+    return 0 unless -d $dir;
+
+    foreach my $file (sort glob("$dir/*.yaml")) {
+        my $text = File::Slurper::read_text($file);
+
+        # The top-level key is the domain; everything under it is indented.
+        my $changed = 0;
+        my @out = map {
+            my $line = $_;
+            if ($line =~ m/\A([A-Za-z0-9_-]+):\s*\z/ && $1 ne '_base' && $1 ne '_shared') {
+                print "  $file: $1 -> $1.$tld\n";
+                $changed = 1;
+                "$1.$tld:";
+            }
+            else { $line }
+        } split("\n", $text, -1);
+
+        next unless $changed;
+        next if $dryrun;
+
+        File::Copy::copy($file, "$file.bak") or die "Could not back up $file: $!\n";
+        File::Slurper::Temp::write_text($file, join("\n", @out));
+        print "Rewrote $file (old copy at $file.bak)\n";
+    }
+    return 1;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

@@ -1,0 +1,1250 @@
+package Trog::HV;
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aa';
+use parent 'Trog::Machine';
+
+use Sys::Virt();
+use Digest::SHA();
+use URI();
+use URI::Split();
+
+=head1 NAME
+
+Trog::HV - the hypervisor we are provisioning against
+
+=head1 SYNOPSIS
+
+    use Trog::HV();
+
+    my $config = Config::Simple->new('/opt/domains/vm.example.com/provision.conf');
+    my $uri    = 'qemu+ssh://root@hv1.example.net/system';    # or undef, from --connect
+
+    # Once, wherever the config and command line are read:
+    Trog::HV->from_config($config, uri => $uri);
+
+    # Everywhere else, in any package, without threading it through:
+    my $hv = Trog::HV->new();
+
+    $hv->annihilate_domain('vm.example.com');
+    $hv->write_text('/etc/rsyslog.d/10-vm.conf', 'some config', sudo => 1);
+    print $hv->pool_path, "\n";
+
+=head1 DESCRIPTION
+
+Everything in this toolkit that used to assume "the hypervisor is this machine"
+goes through here instead:
+
+=over 4
+
+=item * libvirt itself, via L<Sys::Virt>, which speaks every transport a
+connection URI can name and needs no shell to do it.
+
+=item * shell commands that have to run I<on> the HV (brctl, ip, sshd_config,
+the libvirt lease helper).
+
+=item * files that have to live I<on> the HV (the storage pool dir,
+virtiofs-better, rsyslog drop-ins, the domain directory the guest pulls its
+payload from).
+
+=item * the paths those things live at, and the HV-derived facts (bridge
+device, internal IP, sshd port) the templates need.
+
+=back
+
+When no URI is configured we are the hypervisor, and every one of those degrades
+to exactly what the code did before: libvirt's own default connection and plain
+C<system>/C<File::*> against the local filesystem.
+
+The object is a singleton.  C<< Trog::HV->new() >> with no arguments hands back
+whichever hypervisor was configured earlier in the process, so callers do not
+have to pass it around or keep their own copy.
+
+=head1 CLASS METHODS
+
+=cut
+
+our $DEFAULT_URI = 'qemu:///system';
+
+# Transports over which we can also get a shell on the HV.
+my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
+
+# The one hypervisor this process is talking to.
+my $INSTANCE;
+
+=head2 new(%opts)
+
+Build (or return) the hypervisor.
+
+Called with no meaningful options it returns the instance built earlier in the
+process, or a fresh local one if there wasn't any.  Called with options it
+builds a new hypervisor and makes I<that> the instance from then on, so the
+configuration only has to be read once.
+
+Options: C<uri>, C<pool_path>, C<domain_dir>, C<bridge_device>,
+C<virbr_device>.  Undefined and empty values are ignored, which lets callers
+pass unset command line options straight through.
+
+=cut
+
+sub new {
+    my ($class, %opts) = @_;
+
+    # Drop the options that weren't actually given, so an unset --connect
+    # doesn't look like a request for a different hypervisor.
+    my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
+    return $INSTANCE if $INSTANCE && !%given;
+
+    return $class->candidate(%given)->activate();
+}
+
+=head2 candidate(%opts)
+
+Build a hypervisor without making it the current one.
+
+C<new> is a singleton because almost everything wants "the hypervisor we are
+working with".  Choosing between several is the exception: L<Trog::Hypervisors>
+has to hold them all at once to compare them, and only the winner becomes
+current.  Same options as C<new>, plus C<name>.
+
+=head2 activate
+
+Make this hypervisor the one C<new> hands back from here on.  Returns itself,
+so it chains.
+
+=cut
+
+sub activate {
+    my ($self) = @_;
+    $INSTANCE = $self;
+    return $self;
+}
+
+sub candidate {
+    my ($class, %opts) = @_;
+
+    my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
+    my $uri = $given{uri};
+    my $explicit = defined($uri) ? 1 : 0;
+    $uri = $DEFAULT_URI unless $explicit;
+
+    my $parsed = _parse_uri($uri)
+      or die "Could not parse libvirt connection URI '$uri'\n";
+
+    my $self = bless {
+        %given,
+        uri      => $uri,
+        explicit => $explicit,
+        %$parsed,
+    }, $class;
+
+    # A remote hypervisor we can't get a shell on is only half usable, and the
+    # half that's missing (files, bridge detection) isn't optional.  Say so now
+    # rather than three minutes into a provision run.
+    die "The hypervisor at $uri is remote, but its transport gives us no shell.\n"
+      . "Use an ssh transport instead, e.g. qemu+ssh://root\@"
+      . ($self->{host} // 'hypervisor')
+      . "/system, so we can reach its filesystem.\n"
+      if !$self->is_local && !defined $self->ssh_host;
+
+    return $self;
+}
+
+=head2 from_config($config, %override)
+
+Build the hypervisor from a L<Config::Simple> object, with anything passed in
+C<%override> (i.e. from the command line) winning over what the file says.  A
+false C<$config> is fine and means "everything is defaulted".
+
+Reads C<libvirt_uri> for the URI, and C<pool_path>, C<domain_dir>,
+C<bridge_device> and C<virbr_device> under their own names.
+
+=cut
+
+# Constructor option => the provision.conf key it reads.
+my %CONFIG_KEY = (
+    uri      => 'libvirt_uri',
+    map { $_ => $_ } qw{pool_path domain_dir bridge_device virbr_device},
+);
+
+sub from_config {
+    my ($class, $config, %override) = @_;
+
+    my $param = sub {
+        my ($key) = @_;
+        return undef unless $config;
+        my $val = $config->param($key);
+        $val = $val->[0] if ref $val eq 'ARRAY';
+        return (defined $val && length $val) ? $val : undef;
+    };
+
+    return $class->new(map { $_ => $override{$_} // $param->($CONFIG_KEY{$_}) } keys %CONFIG_KEY);
+}
+
+=head2 forget()
+
+Drop the memoized instance.  Only tests should need this.
+
+=cut
+
+sub forget {
+    undef $INSTANCE;
+    return 1;
+}
+
+# A libvirt connection URI is a URI: driver[+transport]://[user@][host][:port]/path
+#
+# L<URI> knows nothing about the driver+transport scheme, so it hands back a
+# URI::_foreign with no authority accessors.  Split it generically instead and
+# re-parse the authority under a scheme URI does understand, which gets us
+# userinfo, bracketed IPv6 and ports without a regex of our own.
+sub _parse_uri {
+    my ($uri) = @_;
+
+    my ($scheme, $authority, $path) = URI::Split::uri_split($uri);
+    return undef unless defined $scheme && length $scheme;
+
+    my ($driver, $transport) = split(quotemeta('+'), $scheme, 2);
+    return undef unless defined $driver && length $driver;
+
+    my $server = (defined $authority && length $authority) ? URI->new("ssh://$authority") : undef;
+
+    return {
+        driver    => $driver,
+        transport => $transport,
+        user      => $server ? $server->user : undef,
+        host      => ($server && defined $server->host && length $server->host) ? $server->host : undef,
+        port      => $server ? $server->port : undef,
+        path      => $path,
+    };
+}
+
+=head1 IDENTITY
+
+=head2 uri
+
+The libvirt connection URI, defaulted to C<qemu:///system>.
+
+=head2 explicit
+
+Whether the URI was actually asked for, as opposed to defaulted.  When it
+wasn't, we let libvirt resolve its own default connection exactly as C<virsh>
+with no C<-c> would.
+
+=head2 is_local
+
+True when the hypervisor is this very machine, i.e. the historical behavior.
+
+=head2 slug
+
+A filesystem-safe token identifying this hypervisor.
+
+=cut
+
+sub uri      { return $_[0]->{uri} }
+sub explicit { return $_[0]->{explicit} }
+
+=head2 name
+
+What F<hypervisors.conf> calls this hypervisor, or undef when it didn't come
+from there.
+
+=cut
+
+sub name { return $_[0]->{name} }
+
+sub is_local {
+    my ($self) = @_;
+    return !defined $self->{host};
+}
+
+sub slug {
+    my ($self) = @_;
+    my $slug = $self->{uri};
+    $slug =~ s/[^A-Za-z0-9]+/_/g;
+    $slug =~ s/\A_+|_+\z//g;
+    return $slug;
+}
+
+=head2 ssh_host, ssh_user, ssh_port, ssh_target
+
+Where to ssh to in order to run something on the hypervisor, all inferred from
+the connection URI.  C<ssh_host> is undef when the transport can't give us a
+shell, which C<new> refuses to build in the first place.  C<ssh_port> falls back
+to 22, the way any other ssh client would.
+
+=cut
+
+sub ssh_host {
+    my ($self) = @_;
+    return undef unless defined $self->{host};
+
+    # A bare qemu://host/system speaks libvirt's native remote transport, but
+    # that still tunnels over ssh by default, so treat it as ssh-able too.
+    return $self->{host} if !defined $self->{transport} || $SSH_TRANSPORT{ $self->{transport} };
+    return undef;
+}
+
+sub describe { return 'the hypervisor at ' . $_[0]->uri }
+
+=head1 PATHS
+
+=head2 domain_dir
+
+Where the per-domain directories live.  This path has to mean the same thing on
+both ends: the guest pulls its payload from the hypervisor's copy.
+
+=head2 pool_path
+
+Where the storage pool keeps its volumes, asked of libvirt rather than assumed:
+we delete things out of this path, and a pool somebody made somewhere else is
+not a reason to be wrong about it.  Falls back to F</opt/terraform/disks>, which
+is where the volumes on a hypervisor built by the old tool actually are.
+
+=cut
+
+
+sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
+
+sub pool_path {
+    my ($self) = @_;
+    return $self->{pool_path} if defined $self->{pool_path};
+
+    # Where the pool actually is beats where we would have put one: we delete
+    # things out of this path, and a pool somebody made somewhere else is not a
+    # reason to be wrong about it.  The name and the default are historical --
+    # terraform chose both -- and are kept because that is where the volumes on
+    # a hypervisor built by the old tool actually live.
+    return $self->{_pool_path} //= ($self->pool_target('tf_disks') // '/opt/terraform/disks');
+}
+
+=head2 pool_target($name)
+
+Where an existing storage pool keeps its volumes, straight out of libvirt, or
+undef if there is no such pool to ask about.
+
+=cut
+
+sub pool_target {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+
+    my $xml = eval {
+        my $vmm  = $self->vmm;
+        my $pool = $vmm->get_storage_pool_by_name($name);
+        $pool->get_xml_description();
+    } or return undef;
+
+    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>}s;
+    return $path;
+}
+
+=head2 authorized_keys
+
+The C<authorized_keys> file of the hypervisor-side transfer user, which is the
+account the guest scp's its payload out of.
+
+=cut
+
+sub authorized_keys {
+    my ($self) = @_;
+    return "$ENV{HOME}/.ssh/authorized_keys" if $self->is_local;
+
+    my $home = $self->capture('echo $HOME');
+    chomp $home if defined $home;
+    die "Could not determine the home directory of the transfer user on the hypervisor\n"
+      unless defined $home && length $home;
+    return "$home/.ssh/authorized_keys";
+}
+
+=head2 hv_user
+
+The unprivileged user the guest will scp its payload back from.
+
+=cut
+
+sub hv_user {
+    my ($self) = @_;
+    return scalar getpwuid($<) if $self->is_local;
+    return $self->ssh_user if defined $self->ssh_user;
+
+    my $who = $self->capture('id -un');
+    chomp $who if defined $who;
+    return $who;
+}
+
+=head1 LIBVIRT
+
+All of this goes through L<Sys::Virt>, which talks the connection URI's
+transport itself.  There is no shelling out to C<virsh> and no assumption that
+the hypervisor's libvirt is reachable any way other than the URI we were given.
+
+=head2 vmm
+
+The L<Sys::Virt> connection, opened on first use and kept.
+
+=cut
+
+sub vmm {
+    my ($self) = @_;
+    return $self->{vmm} if $self->{vmm};
+
+    # An unasked-for URI means "whatever libvirt would pick", which is what
+    # virsh with no -c did before any of this was configurable.
+    my $uri = $self->explicit ? $self->uri : '';
+    $self->{vmm} = eval { Sys::Virt->new(uri => $uri, readonly => 0) }
+      or die "Could not connect to libvirt at " . $self->uri . ": $@\n";
+    return $self->{vmm};
+}
+
+# Domain lookups throw when the domain is simply absent, which is not an error
+# anywhere we ask.  Opening the connection happens outside the eval, so a
+# hypervisor we can't reach at all doesn't get reported as "no such domain".
+sub _domain {
+    my ($self, $name) = @_;
+    my $vmm = $self->vmm;
+    return eval { $vmm->get_domain_by_name($name) };
+}
+
+=over 4
+
+=item C<domain_exists($name)>
+
+=item C<domain_is_running($name)>
+
+=item C<domain_xml($name)>
+
+The domain's XML description, or undef if there is no such domain.
+
+=back
+
+=cut
+
+sub domain_exists     { return defined $_[0]->_domain($_[1]) ? 1 : 0 }
+sub domain_is_running { my $d = $_[0]->_domain($_[1]); return $d && $d->is_active ? 1 : 0 }
+
+sub domain_xml {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return undef;
+    return $domain->get_xml_description();
+}
+
+=head2 annihilate_domain($name)
+
+Stop and undefine a domain, nvram and all, and don't complain if it was already
+gone or already off.  Which is
+the only reason we do.
+
+Returns true if there was something there to remove.
+
+=cut
+
+sub annihilate_domain {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return 0;
+
+    # A domain that is already shut off can't be destroyed, and that's the
+    # normal case here rather than a problem.
+    eval { $domain->destroy() };
+    eval {
+        $domain->undefine(Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA());
+        1;
+    } or do {
+        # Older libvirt without nvram support for this domain type.
+        eval { $domain->undefine() };
+    };
+    return 1;
+}
+
+=head2 lease_ip($network, %opts)
+
+The address libvirt has leased on C<$network>, usually C<default>.
+
+Pass C<mac> and it asks dnsmasq for that interface's lease and nothing else,
+which is exact.  Pass C<hostname> and it matches on what the guest called
+itself, which is a substring match and can be fooled: a guest named
+C<vm.example.com> matches a lease belonging to C<sub.vm.example.com>.  Prefer
+the MAC; C<guest_mac> exists so there always is one.
+
+=cut
+
+sub lease_ip {
+    my ($self, $network, %opts) = @_;
+
+    my $vmm = $self->vmm;
+    my $net = eval { $vmm->get_network_by_name($network) } or return undef;
+
+    # get_dhcp_leases filters by MAC on the far side, so with one we ask a
+    # precise question rather than sifting the answer.
+    my @leases = eval { $net->get_dhcp_leases($opts{mac}) };
+    return undef unless @leases;
+
+    foreach my $lease (@leases) {
+        next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
+        next if defined $opts{hostname}
+          && !(defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/);
+        next if defined $opts{exclude} && $lease->{ipaddr} eq $opts{exclude};
+        return $lease->{ipaddr};
+    }
+    return undef;
+}
+
+=head2 release_dhcp_lease($ip, $bridge)
+
+Drop a stale lease so the table doesn't fill up and gum everything else.
+
+This is the one libvirt operation we still shell out for: libvirt exposes DHCP
+leases read-only (C<virNetworkGetDHCPLeases> has no counterpart that deletes
+one), so releasing a lease means poking dnsmasq through libvirt's own lease
+helper on the hypervisor.
+
+=cut
+
+sub release_dhcp_lease {
+    my ($self, $ip, $bridge) = @_;
+    return 0 unless defined $ip && length $ip;
+    $bridge //= $self->virbr_device;
+
+    my ($helper) = grep { $self->file_exists($_) }
+      qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
+    unless ($helper) {
+        warn "No libvirt lease helper found on the hypervisor, leaving the lease for $ip alone\n";
+        return 0;
+    }
+
+    return $self->run_sudo("VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
+}
+
+=head2 eject_cdrom($domain, $target)
+
+Yank the cloud-init ISO back out, so the guest doesn't try to boot it again on
+its next start.  C<$target> defaults to C<sda>, which is where the domain XML
+puts it.
+
+Call this only once the guest says cloud-init has finished.  The seed has to
+stay in the drive for as long as cloud-init might want to read it; taking it
+out earlier leaves the guest with no user, no keys and no netplan.
+
+=cut
+
+sub eject_cdrom {
+    my ($self, $name, $target) = @_;
+    $target //= 'sda';
+
+    my $domain = $self->_domain($name) or return 0;
+    my $xml    = qq{<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><target dev='$target' bus='sata'/><readonly/></disk>};
+
+    my $flags = Sys::Virt::Domain::DEVICE_MODIFY_LIVE() | Sys::Virt::Domain::DEVICE_MODIFY_CONFIG();
+    my $ok    = eval { $domain->update_device($xml, $flags); 1 };
+    warn "Could not eject the cloud-init cdrom from $name: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+=head2 nuke_pool($name)
+
+Tear a storage pool down completely -- stop it, delete its contents, forget it
+-- and remove its directory from the hypervisor.  For a pool that has got
+itself into a state nothing else will get it out of.
+
+=cut
+
+sub nuke_pool {
+    my ($self, $name) = @_;
+
+    # The directory goes first: pool-delete on a pool whose backing store is
+    # already gone is a no-op, but the reverse leaves files libvirt still owns.
+    $self->run_sudo(qw{rm -rf}, $self->pool_path);
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
+    unless ($pool) {
+        print "No storage pool named $name on " . $self->uri . ", nothing to nuke.\n";
+        return 0;
+    }
+
+    foreach my $step (qw{destroy delete undefine}) {
+        eval { $pool->$step(); 1 } or warn "pool $step failed for $name: $@";
+    }
+    return 1;
+}
+
+=head1 BUILDING THINGS
+
+Everything terraform used to do, done against libvirt directly.
+
+Terraform was never a good fit here.  Its model was that it owned the world and
+can rebuild it; ours is that the hypervisor owns the world and we add one guest
+to it.  Reconciling those cost a state file per hypervisor, import blocks for
+things it did not create, C<ignore_changes> for attributes the provider would
+not report back, and a provider that cannot import a volume at all.  Defining
+the XML ourselves is less code than the machinery that was holding terraform's
+opinion at bay.
+
+=head2 pool($name)
+
+The storage pool object, made if it is not there yet: defined, started, and set
+to start with the host.  C<$name> defaults to C<tf_disks>.
+
+=cut
+
+sub pool {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+    return $self->{_pools}{$name} if $self->{_pools}{$name};
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
+
+    unless ($pool) {
+        my $path = $self->pool_path;
+        print "Defining storage pool $name at $path\n";
+
+        $pool = $vmm->define_storage_pool(<<"XML");
+<pool type='dir'>
+  <name>$name</name>
+  <target><path>$path</path></target>
+</pool>
+XML
+        eval { $pool->build(Sys::Virt::StoragePool::BUILD_NEW()) };
+        $pool->set_autostart(1);
+    }
+
+    eval { $pool->create() } unless $pool->is_active();
+    return $self->{_pools}{$name} = $pool;
+}
+
+=head2 volume($name, $pool)
+
+A volume by name, or undef when the pool has no such volume.
+
+=head2 volume_path($name, $pool)
+
+Where that volume's file actually is, which is what a domain's disk needs.
+
+=cut
+
+sub volume {
+    my ($self, $name, $pool) = @_;
+    return eval { $self->pool($pool)->get_volume_by_name($name) };
+}
+
+sub volume_path {
+    my ($self, $name, $pool) = @_;
+    my $volume = $self->volume($name, $pool) or return undef;
+    return eval { $volume->get_path() };
+}
+
+=head2 base_image($url, $name)
+
+The base image every guest's disk is layered on, downloaded onto the
+hypervisor if it is not there yet.  Returns its path.
+
+The download is the one thing here libvirt cannot do for us -- it has no notion
+of fetching a URL -- so it is a curl on the far side, into the pool directory,
+followed by a refresh so libvirt notices.
+
+=cut
+
+sub base_image {
+    my ($self, $url, $name) = @_;
+    $name //= 'baseimage-qcow2';
+
+    my $path = $self->volume_path($name);
+    return $path if $path;
+
+    die "No image URL configured, and no $name in the pool to fall back on\n"
+      unless defined $url && length $url;
+
+    $path = $self->pool_path . "/$name";
+    print "Fetching the base image from $url\n";
+
+    # To a partial name first: a half-downloaded file that libvirt has already
+    # noticed is worse than no file at all.
+    my $partial = "$path.partial";
+    $self->run(qw{curl -fL --retry 3 -o}, $partial, $url) == 0
+      or die "Could not fetch $url onto " . $self->describe . "\n";
+
+    $self->run('mv', $partial, $path) == 0 or die "Could not put the base image in place\n";
+    $self->refresh_pool();
+
+    return $self->volume_path($name) // $path;
+}
+
+=head2 create_disk($name, %opts)
+
+A qcow2 volume backed by the base image, made if it is not already there.
+C<backing> is the path to lay it over and C<capacity> its size in bytes.
+Returns the path.
+
+=cut
+
+sub create_disk {
+    my ($self, $name, %opts) = @_;
+
+    my $existing = $self->volume_path($name);
+    return $existing if $existing;
+
+    my $capacity = $opts{capacity} or die "No size given for the disk $name\n";
+    my $backing  = $opts{backing};
+
+    my $backing_xml = $backing
+      ? "<backingStore><path>" . _xml_escape($backing) . "</path><format type='qcow2'/></backingStore>"
+      : '';
+
+    print "Creating disk $name ($capacity bytes)" . ($backing ? " over $backing" : '') . "\n";
+
+    my $volume = $self->pool->create_volume(<<"XML");
+<volume>
+  <name>@{[ _xml_escape($name) ]}</name>
+  <capacity unit='bytes'>$capacity</capacity>
+  <target><format type='qcow2'/></target>
+  $backing_xml
+</volume>
+XML
+
+    return $volume->get_path();
+}
+
+=head2 delete_volume($name, $pool)
+
+Remove a volume, and say whether there was one to remove.
+
+=head2 refresh_pool($name)
+
+Make libvirt look at the pool directory again, for when something has appeared
+in it that libvirt did not put there.
+
+=cut
+
+sub delete_volume {
+    my ($self, $name, $pool) = @_;
+    my $volume = $self->volume($name, $pool) or return 0;
+    eval { $volume->delete(0); 1 } or do { warn "Could not delete the volume $name: $@"; return 0 };
+    return 1;
+}
+
+sub refresh_pool {
+    my ($self, $name) = @_;
+    eval { $self->pool($name)->refresh() };
+    return 1;
+}
+
+=head2 cloudinit_iso($domain, %files)
+
+Build the cloud-init seed ISO on the hypervisor and put it in the pool.
+
+C<%files> are the NoCloud file names and their contents -- C<user-data>,
+C<meta-data>, C<network-config>.  The volume label has to be C<cidata> or
+cloud-init will not look at it.
+
+=cut
+
+sub cloudinit_iso {
+    my ($self, $domain, %files) = @_;
+
+    my $name    = "$domain-cloudinit.iso";
+    my $workdir = "/tmp/trog-cloudinit-$domain-$$";
+    my $path    = $self->pool_path . "/$name";
+
+    $self->mkpath($workdir) or die "Could not make $workdir on " . $self->describe . "\n";
+    foreach my $file (sort keys %files) {
+        $self->write_text("$workdir/$file", $files{$file})
+          or die "Could not write $file for $domain on " . $self->describe . "\n";
+    }
+
+    my $maker = $self->iso_maker;
+    print "Building the cloud-init seed for $domain with $maker\n";
+
+    # -volid cidata is not decoration: NoCloud finds its seed by that label.
+    my @cmd = $maker eq 'xorriso' ? ($maker, '-as', 'mkisofs') : ($maker);
+    my $rc = $self->run(@cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
+        map { "$workdir/$_" } sort keys %files);
+
+    $self->run(qw{rm -rf}, $workdir);
+    die "Could not build the cloud-init seed for $domain\n" if $rc;
+
+    $self->refresh_pool();
+    return $path;
+}
+
+=head2 iso_maker
+
+Whichever of C<xorriso>, C<genisoimage> or C<mkisofs> the hypervisor has.
+
+=cut
+
+sub iso_maker {
+    my ($self) = @_;
+    return $self->{_iso_maker} if $self->{_iso_maker};
+
+    foreach my $maker (qw{xorriso genisoimage mkisofs}) {
+        next if $self->run('sh', '-c', "command -v $maker >/dev/null 2>&1");
+        return $self->{_iso_maker} = $maker;
+    }
+
+    die 'No ISO builder on ' . $self->describe . ": install xorriso or genisoimage.\n"
+      . "cloud-init reads its configuration off a small ISO, and something has to make it.\n";
+}
+
+=head2 define_domain($xml, %opts)
+
+Define a domain from XML and start it.  Set C<autostart> to have it come back
+with the host, which is what every guest here wants.
+
+=cut
+
+sub define_domain {
+    my ($self, $xml, %opts) = @_;
+
+    my $domain = $self->vmm->define_domain($xml);
+    eval { $domain->set_autostart(1) } if $opts{autostart} // 1;
+    eval { $domain->create() } unless $domain->is_active();
+
+    return $domain;
+}
+
+=head1 GUEST IDENTITY
+
+=head2 guest_mac($domain, $index)
+
+A MAC address for one of a guest's interfaces, derived from its name so that it
+is the same every time.
+
+Letting libvirt generate them means a rebuilt guest arrives with new MACs: it
+takes a new DHCP lease while the old one sits in the table until it expires,
+and any network configuration that matched on a name rather than an address
+has to guess which interface is which.  Deriving them removes both problems --
+the lease is the same lease, and the configuration can say exactly which
+interface it means.
+
+C<52:54:00> is the QEMU/KVM prefix; the rest is the first three bytes of a
+digest of the domain and the interface index.  Three bytes is not a lot, so
+two guests colliding is possible in principle -- at a few thousand of them.
+
+=head2 nic_slots
+
+Which PCI slots the two interfaces sit in, in order.  Pinned because systemd
+names a PCI NIC after its hotplug slot: these are what make the guest call them
+C<ens3> and C<ens4> rather than whatever this month's device ordering implies.
+
+=cut
+
+sub guest_mac {
+    my ($self, $domain, $index) = @_;
+    $index //= 0;
+
+    my $digest = Digest::SHA::sha256_hex("$domain/$index");
+    return join(':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/);
+}
+
+sub nic_slots { return (3, 4) }
+
+=head1 SNAPSHOTS
+
+=head2 snapshot_names($domain)
+
+Every snapshot the domain has, oldest first.  libvirt hands them back in no
+particular order, so they get sorted by creation time here -- C<restore
+--latest> and C<--oldest> mean nothing otherwise.
+
+=head2 snapshot_current_name($domain)
+
+The name of the domain's current snapshot, or undef if it has none.
+
+=head2 create_snapshot($domain, $name)
+
+Take a live atomic snapshot.  C<$name> may be undef, in which case libvirt names
+it after the current time.  Returns true on success.
+
+=head2 revert_snapshot($domain, $name)
+
+Revert to a named snapshot and leave the domain running.  Returns true on
+success.
+
+=cut
+
+sub snapshot_names {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return ();
+
+    my @snaps = eval { $domain->list_all_snapshots() };
+    return () unless @snaps;
+
+    my @dated = map { { name => $_->get_name(), created => _snapshot_created($_) } } @snaps;
+    return map  { $_->{name} }
+           sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
+           grep { defined $_->{name} && length $_->{name} } @dated;
+}
+
+# <creationTime> is seconds since the epoch.  A snapshot without one sorts to
+# the front, which is where an unknown age belongs.
+sub _snapshot_created {
+    my ($snap) = @_;
+    my $xml = eval { $snap->get_xml_description() } // '';
+    my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
+    return $created // 0;
+}
+
+sub snapshot_current_name {
+    my ($self, $name) = @_;
+    my $domain = $self->_domain($name) or return undef;
+    my $snap   = eval { $domain->current_snapshot() } or return undef;
+    return $snap->get_name();
+}
+
+sub create_snapshot {
+    my ($self, $name, $snapname) = @_;
+    my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
+
+    my $xml = '<domainsnapshot>';
+    $xml .= '<name>' . _xml_escape($snapname) . '</name>' if defined $snapname && length $snapname;
+    $xml .= '</domainsnapshot>';
+
+    my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
+
+    # LIVE only means anything for a running domain, and libvirt rejects it for
+    # one that isn't.
+    $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
+
+    my $ok = eval { $domain->create_snapshot($xml, $flags); 1 };
+    warn "Snapshot of $name failed: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+sub revert_snapshot {
+    my ($self, $name, $snapname) = @_;
+    my $domain = $self->_domain($name) or return 0;
+    my $snap   = eval { $domain->get_snapshot_by_name($snapname) } or return 0;
+
+    my $ok = eval { $snap->revert_to(Sys::Virt::DomainSnapshot::REVERT_RUNNING()); 1 };
+    warn "Revert of $name to $snapname failed: $@" unless $ok;
+    return $ok ? 1 : 0;
+}
+
+sub _xml_escape {
+    my ($str) = @_;
+    $str =~ s/&/&amp;/g;
+    $str =~ s/</&lt;/g;
+    $str =~ s/>/&gt;/g;
+    return $str;
+}
+
+=head1 HYPERVISOR FACTS
+
+The network layout the guest templates need.  Each is autodetected on the
+hypervisor unless the config pinned it, because C<brctl show | tail -n1> guesses
+wrong often enough to be worth overriding.
+
+=head2 bridge_device
+
+The outbound bridge the guest's public interface attaches to.
+
+=head2 virbr_device
+
+The libvirt NAT bridge.
+
+=head2 virbr_ip
+
+The hypervisor's address on that NAT bridge, which is what the guest scp's from
+and ships its logs to.
+
+=head2 sshd_port
+
+The port the hypervisor's sshd listens on.  Read out of C<sshd_config> rather
+than off the wire, since there may be several sshd instances running.
+
+=cut
+
+sub bridge_device {
+    my ($self) = @_;
+    return $self->{bridge_device} if defined $self->{bridge_device};
+
+    my $device = $self->capture(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
+    chomp $device if defined $device;
+    die "Could not determine outbound bridge device on " . $self->uri . "!\n"
+      . "Set bridge_device in provision.conf if autodetection can't find it.\n"
+      unless $device;
+
+    return $self->{bridge_device} = $device;
+}
+
+sub virbr_device {
+    my ($self) = @_;
+    return $self->{virbr_device} if defined $self->{virbr_device};
+
+    my $device = $self->capture(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
+    chomp $device if defined $device;
+    die "Could not determine libvirt network device on " . $self->uri . "!\n"
+      . "Set virbr_device in provision.conf if autodetection can't find it.\n"
+      unless $device;
+
+    return $self->{virbr_device} = $device;
+}
+
+sub virbr_ip {
+    my ($self) = @_;
+    return $self->{virbr_ip} if defined $self->{virbr_ip};
+
+    my $device = $self->virbr_device;
+    my $ip     = $self->capture("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
+    die "Could not determine IP address for $device\n" unless $ip;
+    chomp $ip;
+    $ip =~ s{/\d+\z}{};
+
+    return $self->{virbr_ip} = $ip;
+}
+
+sub sshd_port {
+    my ($self) = @_;
+    return $self->{sshd_port} if defined $self->{sshd_port};
+
+    my $port = $self->capture(q{grep '^Port' /etc/ssh/sshd_config | awk '{print $2}'});
+    chomp $port if defined $port;
+    warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
+
+    return $self->{sshd_port} = ($port || 22);
+}
+
+=head1 CAPACITY
+
+What the hypervisor has, what its guests have already been promised, and
+whether one more will fit.  All of it comes from libvirt, so it is what the
+hypervisor actually believes rather than what a config file claimed a year ago.
+
+Memory is counted as I<committed> rather than I<used>: a guest that has been
+promised 8G is holding 8G against us even while it idles at 400M.  Overcommit
+memory and the OOM killer eventually picks one of your VMs.  CPUs are the other
+way round -- overcommitting cores is normal and expected -- so those are
+measured against C<cpu_overcommit> times the physical count.
+
+=head2 reserve_memory, reserve_cpus, reserve_disk, max_guests, cpu_overcommit
+
+The limits from F<hypervisors.conf>.  C<reserve_memory> is MB to leave for the
+host itself, C<reserve_disk> is bytes to leave in the pool, C<max_guests> caps
+the domain count (0 means no cap), and C<cpu_overcommit> is how many vCPUs per
+physical CPU is considered acceptable.  They default to 2048MB, 1 CPU, 10GB, no
+cap, and 4.
+
+=cut
+
+sub reserve_memory  { return $_[0]->{reserve_memory}  // 2048 }
+sub reserve_cpus    { return $_[0]->{reserve_cpus}    // 1 }
+sub reserve_disk    { return $_[0]->{reserve_disk}    // 10 * 1024 * 1024 * 1024 }
+sub max_guests      { return $_[0]->{max_guests}      // 0 }
+sub cpu_overcommit  { return $_[0]->{cpu_overcommit}  // 4 }
+
+=head2 capacity
+
+A snapshot of the hypervisor, cached for the life of the object:
+
+    memory_mb        physical memory
+    memory_committed committed to guests, running or not
+    memory_free      what is left after the reserve
+    cpus             physical CPUs
+    cpus_allocatable cpus * cpu_overcommit
+    cpus_committed   vCPUs handed to running guests
+    cpus_free        what is left after the reserve
+    disk_free        free bytes in the storage pool, after the reserve
+    guests           how many domains it knows about
+
+Dies if libvirt cannot be reached, since a hypervisor we cannot ask about is
+not one we should be placing guests on.
+
+=cut
+
+sub capacity {
+    my ($self) = @_;
+    return $self->{capacity} if $self->{capacity};
+
+    my $node = $self->vmm->get_node_info();
+    my @domains = $self->vmm->list_all_domains();
+
+    my ($memory_committed, $cpus_committed) = (0, 0);
+    foreach my $domain (@domains) {
+        my $info = eval { $domain->get_info() } or next;
+
+        # maxMem is what the guest may grow into, and is what we have to hold
+        # against the host whether or not it is using it yet.
+        $memory_committed += ($info->{maxMem} // 0) / 1024;
+        $cpus_committed   += ($info->{nrVirtCpu} // 0) if eval { $domain->is_active() };
+    }
+
+    my $memory_mb        = ($node->{memory} // 0) / 1024;
+    my $cpus             = $node->{cpus} // 0;
+    my $cpus_allocatable = $cpus * $self->cpu_overcommit;
+
+    return $self->{capacity} = {
+        memory_mb        => $memory_mb,
+        memory_committed => $memory_committed,
+        memory_free      => $memory_mb - $memory_committed - $self->reserve_memory,
+        cpus             => $cpus,
+        cpus_allocatable => $cpus_allocatable,
+        cpus_committed   => $cpus_committed,
+        cpus_free        => $cpus_allocatable - $cpus_committed - $self->reserve_cpus,
+        disk_free        => $self->pool_free() - $self->reserve_disk,
+        guests           => scalar @domains,
+    };
+}
+
+=head2 pool_free($name)
+
+Free bytes in the storage pool, or 0 when there isn't one yet -- a pool
+nothing has built yet has no space in it, which is the honest answer.
+
+=cut
+
+sub pool_free {
+    my ($self, $name) = @_;
+    $name //= 'tf_disks';
+
+    my $vmm  = $self->vmm;
+    my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return 0;
+    my $info = eval { $pool->get_info() } or return 0;
+    return $info->{available} // 0;
+}
+
+=head2 shortfalls(%needs)
+
+Every reason this hypervisor cannot take a guest wanting C<memory_mb>, C<cpus>
+and C<disk_bytes>, in words a person can act on.  An empty list means it fits.
+
+=cut
+
+sub shortfalls {
+    my ($self, %needs) = @_;
+
+    my $have = $self->capacity;
+    my @reasons;
+
+    push @reasons, sprintf('needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
+        $needs{memory_mb}, $have->{memory_free},
+        $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory)
+      if ($needs{memory_mb} // 0) > $have->{memory_free};
+
+    push @reasons, sprintf('needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
+        $needs{cpus}, $have->{cpus_free},
+        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus)
+      if ($needs{cpus} // 0) > $have->{cpus_free};
+
+    push @reasons, sprintf('needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
+        _gb($needs{disk_bytes}), _gb($have->{disk_free}), _gb($self->reserve_disk))
+      if ($needs{disk_bytes} // 0) > $have->{disk_free};
+
+    push @reasons, sprintf('already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests)
+      if $self->max_guests && $have->{guests} >= $self->max_guests;
+
+    return @reasons;
+}
+
+sub _gb { return int(($_[0] // 0) / (1024 * 1024 * 1024)) }
+
+=head2 headroom(%needs)
+
+How comfortably this hypervisor would hold the guest, from 0 (exactly full) to
+1 (empty), taken as the tightest of the three resources once the guest is on
+it.  Placing by the tightest resource is what keeps one hypervisor from filling
+its disk while the fleet still has plenty of RAM.
+
+=cut
+
+sub headroom {
+    my ($self, %needs) = @_;
+
+    my $have = $self->capacity;
+    my @fractions;
+
+    push @fractions, _fraction($have->{memory_free} - ($needs{memory_mb}  // 0), $have->{memory_mb});
+    push @fractions, _fraction($have->{cpus_free}   - ($needs{cpus}       // 0), $have->{cpus_allocatable});
+    push @fractions, _fraction($have->{disk_free}   - ($needs{disk_bytes} // 0), $have->{disk_free} + ($needs{disk_bytes} // 0));
+
+    my ($tightest) = sort { $a <=> $b } @fractions;
+    return $tightest;
+}
+
+sub _fraction {
+    my ($left, $total) = @_;
+    return 0 if !$total;
+    my $fraction = $left / $total;
+    return $fraction < 0 ? 0 : $fraction;
+}
+
+=head1 PROVISIONING
+
+=head2 sync_domain_dir($domain)
+
+Put the domain's directory on the hypervisor.
+
+The guest pulls its payload off the hypervisor over the NAT network, so when the
+hypervisor isn't us, C<domain_dir> has to exist on both ends.  The whole
+directory goes, not just the tarball: what else lives in there is decided by
+whatever provisions these domains, not by this repository, so we are in no
+position to guess which parts the guest will reach for.
+
+Note that this puts the guest's private key on the hypervisor too.  That is the
+cost of the hypervisor being the machine the guest fetches from.
+
+=cut
+
+sub sync_domain_dir {
+    my ($self, $domain) = @_;
+    return $self->sync_dir($self->domain_dir . "/$domain");
+}
+
+=head2 sync_dir($path)
+
+Ship a directory to the same path on the hypervisor, and make sure it is there
+even when there is nothing to ship.
+
+That second half matters more than it sounds.  A guest rsyncs its payload out of
+a directory on the hypervisor, and rsync fails rather than shrugging when the
+source is not there -- so a directory that is empty here has to be an empty
+directory there, not an absent one.
+
+=cut
+
+sub sync_dir {
+    my ($self, $path) = @_;
+    return 1 if $self->is_local;
+
+    return $self->mkpath($path) ? 1 : 0 unless -d $path;
+
+    print "Shipping $path to the hypervisor...\n";
+    $self->put_dir($path, $path)
+      or die "Could not copy $path to the hypervisor\n";
+    return 1;
+}
+
+=head2 guest_ssh_ip($config, $lease_ip)
+
+Which address I<we> use to SSH into a guest.
+
+On a local hypervisor the libvirt NAT lease is reachable and always was.  On a
+remote one it isn't -- it only routes from the hypervisor itself -- so we need
+the guest's bridged static address instead, and there is no way to guess it.
+
+=cut
+
+sub guest_ssh_ip {
+    my ($self, $config, $lease_ip) = @_;
+    return $lease_ip if $self->is_local;
+
+    my ($ip) = grep { defined $_ && length $_ } $config->param('ips');
+    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n"
+      . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease ("
+      . ($lease_ip // 'none')
+      . ") is only\nreachable from the hypervisor itself.\n"
+      unless $ip;
+    return $ip;
+}
+
+=head1 SEE ALSO
+
+L<Sys::Virt>
+
+=cut
+
+1;

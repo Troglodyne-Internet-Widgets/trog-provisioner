@@ -1,0 +1,17 @@
+[Unit]
+Description=Gogs self-hosted Git service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=[% gogs_admin %]
+Group=[% gogs_admin %]
+WorkingDirectory=/usr/local/lib/gogs
+Environment=GOGS_CUSTOM=[% install_dir %]/git.[% domain %]/custom
+ExecStart=/usr/local/lib/gogs/gogs web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

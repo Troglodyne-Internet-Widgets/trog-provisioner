@@ -1,0 +1,44 @@
+# Add the official Plex apt repository
+curl -sS https://downloads.plex.tv/plex-keys/PlexSign.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
+echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://downloads.plex.tv/repos/deb public main" > /etc/apt/sources.list.d/plexmediaserver.list
+DEBIAN_FRONTEND="noninteractive" apt-get update -q
+[% packager_invocation | mark_raw %] plexmediaserver
+# Ensure the plex service user exists (created by package but guard anyway)
+id plex > /dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /var/lib/plexmediaserver plex
+# Plex data directory
+mkdir -p '/var/lib/plexmediaserver/Library/Application Support'
+chown -R plex:[% admin_user %] /var/lib/plexmediaserver
+chmod -R 0750 /var/lib/plexmediaserver
+[% IF claim_token %]
+# Write claim token for initial server linking (consumed on first start)
+grep -q '^PLEX_CLAIM=' /etc/default/plexmediaserver \
+    && sed -i 's|^PLEX_CLAIM=.*|PLEX_CLAIM=[% claim_token %]|' /etc/default/plexmediaserver \
+    || echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
+[% END %]
+[% FOR dir IN media_dirs %]
+# Set up media directory [% dir %]
+mkdir -p '[% dir %]'
+chown plex:[% admin_user %] '[% dir %]'
+chmod 0750 '[% dir %]'
+[% END %]
+# Configure Plex Preferences.xml with SSL cert and account info
+PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'
+mkdir -p "$PREFS_DIR"
+PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
+PLEX_USER='[% plex_login_name %]' \
+PLEX_MAIL='[% admin_mail %]' \
+PREFS_PATH="$PREFS_DIR/Preferences.xml" \
+python3 -c "
+import xml.etree.ElementTree as ET, os
+p = os.environ['PREFS_PATH']
+root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences')
+root.set('customCertificatePath', os.environ['PLEX_CERT'])
+root.set('PlexOnlineUsername', os.environ['PLEX_USER'])
+root.set('PlexOnlineMail', os.environ['PLEX_MAIL'])
+ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)
+"
+chown -R plex:[% admin_user %] "$PREFS_DIR"
+chmod 0640 "$PREFS_DIR/Preferences.xml"
+[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
+[% script_dir %]/queue_postrun_task systemctl start plexmediaserver

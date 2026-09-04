@@ -1,0 +1,16 @@
+[% FOREACH mount IN disks %]
+[% IF mount.pool == 'dir' %]
+    [% script_dir %]/mount_virtiofs [% mount.device %] [% mount.mountpoint %] [% mount.type %]
+    [% NEXT %]
+[% END %]
+[% script_dir %]/add_to_fstab [% mount.device %] [% mount.mountpoint %] [% mount.type %] [% mount.options %] [% mount.partition %]
+[% END -%]
+[% IF fuse.size() %]
+# this works because we generate them in the same order as we are splitting them!
+csplit --suppress-matched --quiet --digits 1 --prefix mount -- fusemounts.txt "/--SEPARATOR--/" "{*}"
+[% END -%]
+[% FOREACH mount IN fuse %]
+mv mount[% loop.index %] /etc/systemd/system/[% mount.servicename %].service
+sudo -u [% user %] systemctl --user enable [% mount.servicename %].service
+sudo -u [% user %] systemctl --user start  [% mount.servicename %]
+[% END -%]

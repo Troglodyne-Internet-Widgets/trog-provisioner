@@ -1,0 +1,8 @@
+[ [% domain %] ]
+enabled = true
+port = http,https
+filter = [% domain %]
+logpath = [% install_dir %]/[% domain %]/log/tpsgi.log
+maxretry = 5
+findtime = 60
+bantime  = 600

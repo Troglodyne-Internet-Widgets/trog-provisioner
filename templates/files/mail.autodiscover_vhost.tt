@@ -1,0 +1,12 @@
+server {
+    listen 80;
+[% IF ipv6 %]    listen [::]:80;
+[% END -%]
+
+    server_name autodiscover.[% domain %] autoconfig.[% domain %];
+
+    location / {
+        root [% install_dir %]/autodiscover.[% domain %]/;
+    }
+
+}

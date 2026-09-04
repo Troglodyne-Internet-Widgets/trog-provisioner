@@ -1,0 +1,9 @@
+slapd slapd/no_configuration boolean false
+slapd slapd/domain string [% domain %]
+slapd shared/organization string [% domain %]
+slapd slapd/password1 password [% admin_password %]
+slapd slapd/password2 password [% admin_password %]
+slapd slapd/backend select MDB
+slapd slapd/purge_database boolean false
+slapd slapd/move_old_database boolean true
+slapd slapd/allow_ldap_v2 boolean false

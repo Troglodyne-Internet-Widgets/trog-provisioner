@@ -1,0 +1,3 @@
+#!/bin/bash
+# Make sure we log the outcome of the postinstall process
+bash /root/post_install.sh

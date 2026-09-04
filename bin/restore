@@ -2,39 +2,110 @@
 
 package Trog::Bin::Restore;
 
+use 5.041;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
+use re '/aa';
+use FindBin::libs;
 use Config::Simple;
-use File::Which qw{which};
 use Getopt::Long qw{GetOptionsFromArray};
-use Net::EmptyPort;
-use Net::OpenSSH::More;
+use Pod::Usage qw{pod2usage};
+use Trog::Guest();
+use Trog::Hypervisors();
 
-sub usage {
-    return "Usage: $0 [--latest|--oldest|--name SNAP] [--domaindir DIR] DOMAIN\n";
-}
+=head1 NAME
+
+restore - revert a provisioned VM to one of its snapshots
+
+=head1 SYNOPSIS
+
+    restore [--latest|--oldest|--name SNAP] [OPTIONS] DOMAIN
+
+    restore --latest vm.example.com
+    restore --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+
+=head1 OPTIONS
+
+Exactly one of B<--latest>, B<--oldest> or B<--name> is required.
+
+=over 4
+
+=item B<--latest>
+
+Revert to the newest snapshot.
+
+=item B<--oldest>
+
+Revert to the oldest snapshot.
+
+=item B<--name> SNAP
+
+Revert to the named snapshot.
+
+=item B<--domaindir> DIR
+
+Where the per-domain directories live.  Defaults to F</opt/domains>.
+
+=item B<--connect> URI
+
+The libvirt connection string of the hypervisor holding the domain.  Skips the
+search described under C<--hvconf> and goes straight there.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
+When it exists, every hypervisor in it is asked whether it has this guest, and
+the one that does is the one we revert.
+
+=back
+
+=head1 DESCRIPTION
+
+Reverts the domain and leaves it running, then waits until it can actually SSH
+in at the address F<provision.conf> gives for it, so a revert that produced an
+unreachable VM is reported as a failure rather than a success.
+
+=cut
 
 sub main {
     my @args = @_;
 
-    my ($latest, $oldest, $name, $domain_dir);
+    my ($latest, $oldest, $name, $domain_dir, $uri, $hvconf);
     GetOptionsFromArray(\@args,
         'latest'      => \$latest,
         'oldest'      => \$oldest,
         'name=s'      => \$name,
         'domaindir=s' => \$domain_dir,
+        'connect=s'   => \$uri,
+        'hvconf=s'    => \$hvconf,
     );
-    $domain_dir //= '/opt/domains';
 
     my $domain = shift @args;
-    die usage() unless $domain;
-    die "virsh not installed\n" unless which('virsh');
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
 
     my $modes = grep { defined $_ } ($latest, $oldest, $name);
-    die usage() unless $modes == 1;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass exactly one of --latest, --oldest or --name')
+      unless $modes == 1;
 
-    my @snaps = _virsh_snap_list($domain);
+    # We need to know which hypervisor to ask about snapshots before we ask.
+    # With a fleet configured that is whichever one has the guest; without one
+    # it is whatever provision.conf says, so peek at that now.  The file being
+    # mandatory is enforced further down, where it always was.
+    $domain_dir //= '/opt/domains';
+    my $cfile = "$domain_dir/$domain/provision.conf";
+    my $hv = Trog::Hypervisors->find($domain,
+        uri        => $uri,
+        hvconf     => $hvconf,
+        domain_dir => $domain_dir,
+        config     => scalar eval { Config::Simple->new($cfile) },
+    );
+    print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
+
+    my @snaps = $hv->snapshot_names($domain);
     die "No snapshots found for $domain\n" unless @snaps;
 
     my $snapname;
@@ -49,46 +120,22 @@ sub main {
     }
 
     print "Reverting $domain to snapshot '$snapname'...\n";
-    my $rc = _virsh_snap_revert($domain, $snapname);
-    die "Failed to revert $domain to '$snapname'\n" if $rc;
+    die "Failed to revert $domain to '$snapname'\n" unless $hv->revert_snapshot($domain, $snapname);
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
-    my $cfile = "$domain_dir/$domain/provision.conf";
-    die "No provision.conf found at $cfile\n" unless -f $cfile;
-
-    my $config = Config::Simple->new($cfile);
+    my $config = eval { Config::Simple->new($cfile) }
+      or die "No provision.conf to read at $cfile: $Config::Simple::errstr\n";
     my $user   = $config->param('admin_user') // 'root';
     my $ips    = $config->param('ips');
     my ($ip)   = ref $ips ? @$ips : split /[\s,]+/, ($ips // '');
     die "Could not determine IP for $domain from provision.conf\n" unless $ip;
 
-    wait_for_ssh($user, "$domain_dir/$domain/key.rsa", $ip);
+    Trog::Guest->new(name => $domain, host => $ip, user => $user,
+        key_path => "$domain_dir/$domain/key.rsa")->wait_for_ssh();
+
     print "SSH verified. $domain is up at $ip.\n";
     return 0;
-}
-
-sub _virsh_snap_list {
-    my ($domain) = @_;
-    my @names = qx{virsh snapshot-list --name \Q$domain\E 2>/dev/null};
-    chomp @names;
-    return grep { length $_ } @names;
-}
-
-sub _virsh_snap_revert {
-    my ($domain, $snapname) = @_;
-    system('virsh', 'snapshot-revert', '--snapshotname', $snapname, '--running', $domain) >> 8;
-}
-
-sub wait_for_ssh {
-    my ($user, $key, $ip) = @_;
-    print "Waiting for $ip:22 to come live...\n";
-    my $wait   = 300;
-    my $ssh_up = Net::EmptyPort::wait_port({ host => $ip, port => 22, max_wait => $wait });
-    die "SSH port never came up after $wait seconds!" unless $ssh_up;
-    my $ssh = Net::OpenSSH::More->new(host => $ip, user => $user, key_path => $key);
-    die "Could not establish SSH connection as $user!" unless $ssh;
-    return $ssh;
 }
 
 main(@ARGV) unless caller;

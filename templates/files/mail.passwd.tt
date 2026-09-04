@@ -1,0 +1,7 @@
+# Mail passwd for [% domain %]
+
+[%- FOR user IN names.keys().sort() -%]
+[% user %]@[% domain %]:[% names.$user.password | salted_sha_512 %]:%REPLACEME%:%REPLACEME%:[% names.$user.gecos %]:/mail/[% domain %]/[% user %]:/usr/sbin/noshell
+
+[%- END -%]
+catchall@dev.troglodyne.net:::::/mail/[% domain %]/catchall:/usr/sbin/noshell

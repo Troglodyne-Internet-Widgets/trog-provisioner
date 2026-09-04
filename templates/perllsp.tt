@@ -1,0 +1,19 @@
+# Install PerlNavigator LSP server globally via npm
+npm install -g perlnavigator-server
+
+# Install vim-lsp plugin family into admin user's native vim pack directory.
+# vim 8+ loads packages from ~/.vim/pack/*/start/ automatically - no plugin manager needed.
+mkdir -p /home/[% admin_user %]/.vim/pack/lsp/start
+
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/async.vim"            /home/[% admin_user %]/.vim/pack/lsp/start/async
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/vim-lsp"              /home/[% admin_user %]/.vim/pack/lsp/start/vim-lsp
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete.vim"     /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete.vim
+git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete-lsp.vim" /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete-lsp.vim
+
+chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vim
+
+# Drop the perllsp vimrc snippet into ~/.vim/ and source it from ~/.vimrc
+install -m 0644 -o [% admin_user %] -g [% admin_user %] perllsp.vim /home/[% admin_user %]/.vim/perllsp.vim
+
+echo "source ~/.vim/perllsp.vim" >> /home/[% admin_user %]/.vimrc
+chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vimrc
