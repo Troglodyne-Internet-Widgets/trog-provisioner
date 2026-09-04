@@ -2,7 +2,9 @@
 retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys CBC8B383
 retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys FD380FBB
 retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.com:80
-apt-add-repository http://repo.powerdns.com/ubuntu -p auth-master
+# A release train, not auth-master: master is PowerDNS's development branch and
+# it put 5.1.0~alpha1+master.380 on the guest.
+apt-add-repository http://repo.powerdns.com/ubuntu -p [% repo_branch %]
 apt-get update
 apt-get install -y pdns-server
 # Patch lexicon to work with unix sockets XXX it may have already been applied.

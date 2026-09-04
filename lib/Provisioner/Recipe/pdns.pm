@@ -53,6 +53,12 @@ sub args {
         properties => {
             api_key       => { type => 'string' },
             extra_records => { type => 'string' },
+            # Which repo.powerdns.com train to install from.  This asked for
+            # auth-master, which is the development branch: guests came up with
+            # 5.1.0~alpha1+master.380 on them.  A release train, so an upgrade
+            # is a decision rather than whatever landed on master that morning.
+            repo_branch   => { type => 'string', default => 'auth-49',
+                               pattern => '^auth-[0-9]+$' },
         },
     );
 }
