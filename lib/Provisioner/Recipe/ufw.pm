@@ -38,10 +38,33 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub enrich {
+    my ($self, %opts) = @_;
+
+    # The hypervisor is always one, whether or not anybody said so: it is what
+    # the guest fetches its payload from, over ssh, repeatedly.
+    my @nets = @{ $opts{admin_networks} // [] };
+    unshift @nets, $opts{hv_ip} if $opts{hv_ip} && !grep { $_ eq $opts{hv_ip} } @nets;
+    $opts{admin_networks} = \@nets;
+
+    return %opts;
+}
+
 sub args {
     return (
         type       => 'object',
         properties => {
+            # Networks allowed in without ufw's rate limit.  Its limit denies a
+            # source that opens six connections in thirty seconds, and a
+            # provision opens far more than that -- so without an exemption the
+            # provisioner throttles itself out of the guest partway through
+            # building it, and everything after that fails as "connection
+            # refused" on an address that worked a minute earlier.
+            admin_networks => {
+                type    => 'array',
+                items   => { type => 'string' },
+                default => [],
+            },
             port_forwards => {
                 type  => 'array',
                 items => {

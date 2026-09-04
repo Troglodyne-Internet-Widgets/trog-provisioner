@@ -7,15 +7,19 @@ use warnings;
 
 =head2 SYNOPSIS
 
-    setup-ufw-rules [--dry-run]
+    setup-ufw-rules [--dry-run] [NETWORK ...]
 
 =head2 DESCRIPTION
 
 Configure UFW firewall rules based on available applications.
 
+Every application profile is allowed out and rate limited in.  Any networks
+named on the command line are allowed in without the rate limit, which is what
+keeps the provisioner from throttling itself out of the guest it is building.
+
 =cut
 
-my $DRY_RUN = $ARGV[0] ? 1 : 0;
+my $DRY_RUN = (grep { $_ eq '--dry-run' } @ARGV) ? 1 : 0;
 
 # Enable every available service.
 my $list = qx{ufw app list};
@@ -31,14 +35,21 @@ my @rules = (
     [qw{default deny incoming}],
 );
 
-# Allow, but rate limit; control the limit in user.rules
+# Allow, but rate limit; control the limit in user.rules.
+#
+# Except from the networks we are administered from.  ufw's limit denies a
+# source that opens six connections in thirty seconds, and a provision opens far
+# more than that -- so the provisioner locks itself out partway through its own
+# run, and every step after that fails as "connection refused" on an address
+# that was working a minute earlier.  Those networks are passed in; without any,
+# nothing is exempted and this behaves as it did.
+my @admin = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
+
 foreach my $app (@apps) {
-    push(@rules,
-        ["allow", "out", $app],
-    );
-    push(@rules,
-        ["limit", "in", $app],
-    );
+    push(@rules, ["allow", "out", $app]);
+
+    push(@rules, ["allow", "from", $_, "to", "any", "app", $app]) for @admin;
+    push(@rules, ["limit", "in", $app]);
 }
 
 @rules = map { unshift(@{$_}, '--dry-run'); $_ } @rules if $DRY_RUN;
