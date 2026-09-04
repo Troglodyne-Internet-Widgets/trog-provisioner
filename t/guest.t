@@ -5,6 +5,12 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+# A -f or -x in here is asserting on a file this test just made, in a temporary
+# directory nothing else can see.  There is no window for it to be wrong in, so
+# the TOCTOU policies have nothing to catch.
+## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
+
 use Test::More;
 use File::Temp();
 use Test::MockModule qw{strict};
@@ -75,17 +81,17 @@ subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
         push @ran, $cmd;
         return '[{"name":"modules-final/config-foo","result":"FAIL"},'
              . '{"name":"modules-config/config-bar","result":"SUCCESS"}]'
-          if $cmd =~ m/analyze dump/;
+          if index($cmd, 'analyze dump') >= 0;
         return 're-ran it';
     });
 
     ok(quietly(sub { $guest->wait_for_cloud_init('vm.example.com') }), 'finishes');
 
-    ok((grep { m/Boot configuration complete/ } @ran), 'waited for the boot to report complete');
-    ok((grep { m{sudo rm /var/lib/cloud/instances/vm\.example\.com/sem/config_foo} } @ran),
+    ok((grep { index($_, 'Boot configuration complete') >= 0 } @ran), 'waited for the boot to report complete');
+    ok((grep { index($_, 'sudo rm /var/lib/cloud/instances/vm.example.com/sem/config_foo') >= 0 } @ran),
         'removed the semaphore of the module that failed');
-    ok((grep { m/cloud-init single --name foo/ } @ran), 'and re-ran it');
-    ok(!(grep { m/--name bar/ } @ran), 'left the one that succeeded alone');
+    ok((grep { index($_, 'cloud-init single --name foo') >= 0 } @ran), 'and re-ran it');
+    ok(!(grep { index($_, '--name bar') >= 0 } @ran), 'left the one that succeeded alone');
 };
 
 subtest 'a cloud-init that reports failure is fatal' => sub {
@@ -123,10 +129,10 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
 
     ok(quietly(sub { $guest->wait_for_makefile('vm.example.com') }), 'finishes');
 
-    my @queue = grep { m/atq/ } @ran;
+    my @queue = grep { index($_, 'atq') >= 0 } @ran;
     is(scalar @queue, 2, 'twice, because the Makefile may queue work of its own');
-    ok((grep { m{until \[ -f /var/log/vm\.example\.com\.setup\.log \]} } @ran), 'waited for the log to appear');
-    ok((grep { m{while lsof \| grep /var/log/vm\.example\.com\.setup\.log} } @ran), 'and to stop being written');
+    ok((grep { index($_, 'until [ -f /var/log/vm.example.com.setup.log ]') >= 0 } @ran), 'waited for the log to appear');
+    ok((grep { index($_, 'while lsof | grep /var/log/vm.example.com.setup.log') >= 0 } @ran), 'and to stop being written');
 };
 
 # These print their progress; the tests do not need to read it.

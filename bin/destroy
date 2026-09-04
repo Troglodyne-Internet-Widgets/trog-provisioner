@@ -171,9 +171,8 @@ sub remove_authorized_key {
 
     my $hv          = Trog::HV->new();
     my $pubkey_file = $hv->domain_dir . "/$domain/key.rsa.pub";
-    return unless -f $pubkey_file;
-
-    my $pubkey = File::Slurper::read_text($pubkey_file);
+    my $pubkey = eval { File::Slurper::read_text($pubkey_file) };
+    return unless defined $pubkey;
     chomp $pubkey;
 
     my $ak = $hv->authorized_keys;
@@ -194,7 +193,7 @@ sub remove_authorized_key {
     print "Removing domain SSH key from $ak\n";
     return if $dryrun;
 
-    my @before = split(/\n/, $contents);
+    my @before = split("\n", $contents);
     my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
     die "Removing the key for $domain from $ak would drop "
       . (scalar(@before) - scalar(@after)) . " lines, not 1; refusing\n"

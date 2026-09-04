@@ -5,6 +5,12 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+# A -f or -x in here is asserting on a file this test just made, in a temporary
+# directory nothing else can see.  There is no window for it to be wrong in, so
+# the TOCTOU policies have nothing to catch.
+## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
+
 use FindBin;
 use FindBin::libs;
 

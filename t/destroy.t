@@ -63,7 +63,7 @@ subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     Trog::Bin::Destroy::destroy_disks($domain, 0);
     is_deeply([sort @deleted], ["$domain-cloudinit.iso", "$domain-qcow2"],
         'the guest disk and its seed go');
-    ok(!(grep { m/baseimage/ } @deleted),
+    ok(!(grep { index($_, 'baseimage') >= 0 } @deleted),
         'and the base image, which every other guest is layered on, does not');
 };
 

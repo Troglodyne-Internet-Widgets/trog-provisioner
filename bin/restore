@@ -101,7 +101,7 @@ sub main {
         uri        => $uri,
         hvconf     => $hvconf,
         domain_dir => $domain_dir,
-        config     => (-f $cfile ? Config::Simple->new($cfile) : undef),
+        config     => scalar eval { Config::Simple->new($cfile) },
     );
     print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
@@ -124,8 +124,8 @@ sub main {
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
-    die "No provision.conf found at $cfile\n" unless -f $cfile;
-    my $config = Config::Simple->new($cfile);
+    my $config = eval { Config::Simple->new($cfile) }
+      or die "No provision.conf to read at $cfile: $Config::Simple::errstr\n";
     my $user   = $config->param('admin_user') // 'root';
     my $ips    = $config->param('ips');
     my ($ip)   = ref $ips ? @$ips : split /[\s,]+/, ($ips // '');

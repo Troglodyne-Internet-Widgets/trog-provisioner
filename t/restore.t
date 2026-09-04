@@ -102,7 +102,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     $hv_mock->redefine(revert_snapshot => sub { 1 });
 
     eval { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
-    like($@, qr/No provision\.conf found/, 'main() dies when provision.conf is missing');
+    like($@, qr/No provision\.conf to read/, 'main() dies when provision.conf is missing');
 }
 
 # Helper: build a minimal provision.conf in a temp dir

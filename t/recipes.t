@@ -4,6 +4,12 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aa';
+
+# A -f or -x in here is asserting on a file this test just made, in a temporary
+# directory nothing else can see.  There is no window for it to be wrong in, so
+# the TOCTOU policies have nothing to catch.
+## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
+
 use FindBin;
 use FindBin::libs;
 
@@ -218,7 +224,7 @@ subtest 'every rsync off the hypervisor names it' => sub {
             );
             my $out = $xslate->render_string(
                 File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
-            next unless $out =~ m/rsync/;
+            next unless index($out, 'rsync') >= 0;
             $seen{$recipe}++;
             unlike($out, qr/\@:/,   "$recipe: no empty host between the user and the path");
             like($out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}");

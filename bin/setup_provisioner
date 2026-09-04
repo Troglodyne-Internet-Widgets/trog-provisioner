@@ -44,8 +44,8 @@ sub setup_public_bridge {
 
 # TODO ensure rsyslog is configured to ingest logs & configured properly locally
 sub setup_rsyslog {
-    die "/etc/rsyslog.conf does not exist, unsupported configuration" unless -f '/etc/rsyslog.conf';
-    my $rs_conf = File::Slurper::read_text('/etc/rsyslog.conf');
+    my $rs_conf = eval { File::Slurper::read_text('/etc/rsyslog.conf') };
+    die "Could not read /etc/rsyslog.conf, unsupported configuration: $@" unless defined $rs_conf;
 
     my @must_have;
     foreach my $type (qw{imudp imtcp}) {

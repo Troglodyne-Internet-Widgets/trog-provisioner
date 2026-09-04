@@ -83,10 +83,11 @@ sub load {
     my ($class, $path) = @_;
 
     my $self = bless { path => $path, order => [], blocks => {} }, $class;
-    return $self unless defined $path && -f $path;
+    return $self unless defined $path;
 
-    my $config = Config::Simple->new($path)
-      or die "Could not read $path: " . Config::Simple->error() . "\n";
+    # No fleet configured is a normal state, so a file we cannot read is the
+    # same answer as one that is not there: this machine, and no placement.
+    my $config = eval { Config::Simple->new($path) } or return $self;
 
     # Config::Simple gives us "block.key" pairs and no way to ask for the block
     # names, so recover them in the order the file lists them.

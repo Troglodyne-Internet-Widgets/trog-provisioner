@@ -90,9 +90,12 @@ sub main {
 
 sub qualify_ipmap {
     my ($path, $tld, $dryrun) = @_;
-    return 0 unless -f $path;
+    # Reading it is the test.  A -f first would answer for a moment that has
+    # passed by the time we read, and would not tell us whether we may.
+    my $text = eval { File::Slurper::read_text($path) };
+    return 0 unless defined $text;
 
-    my @lines = split(/\n/, File::Slurper::read_text($path), -1);
+    my @lines = split("\n", $text, -1);
     my ($block, @out, $changed) = ('');
 
     # A short name and a qualified one can both be in there meaning the same
@@ -107,7 +110,7 @@ sub qualify_ipmap {
         next unless $current eq 'ips';
         next unless $line =~ m/\A\s*([^=\s]+)\s*=\s*(.*?)\s*\z/;
         my ($key, $value) = ($1, $2);
-        push @{ $claims{ $key =~ m/\./ ? $key : "$key.$tld" } }, "$key = $value";
+        push @{ $claims{ index($key, q{.}) >= 0 ? $key : "$key.$tld" } }, "$key = $value";
     }
 
     my @collisions = grep { @{ $claims{$_} } > 1 } sort keys %claims;
@@ -139,10 +142,10 @@ sub qualify_ipmap {
 
         if (($block eq 'ips' || $block eq 'aliases') && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(.*)\z/) {
             my ($lead, $key, $eq, $value) = ($1, $2, $3, $4);
-            my $new_key = $key =~ m/\./ ? $key : "$key.$tld";
+            my $new_key = index($key, q{.}) >= 0 ? $key : "$key.$tld";
 
             # Alias values are domains too.
-            my @values = map { m/\./ ? $_ : "$_.$tld" } split(/\s*,\s*/, $value);
+            my @values = map { index($_, q{.}) >= 0 ? $_ : "$_.$tld" } split(/\s*,\s*/, $value);
             my $new_value = join(', ', @values);
 
             if ("$new_key$new_value" ne "$key$value") {
@@ -182,7 +185,7 @@ sub qualify_recipes {
                 "$1.$tld:";
             }
             else { $line }
-        } split(/\n/, $text, -1);
+        } split("\n", $text, -1);
 
         next unless $changed;
         next if $dryrun;

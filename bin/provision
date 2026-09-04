@@ -103,6 +103,27 @@ sub _coerce_array {
 
 our $dryrun;
 
+# Open a file, or die saying which one and why.
+#
+# A -f test is a promise about a moment that has already passed by the time
+# anything acts on it, and it cannot tell "not there" from "there but not ours
+# to read" -- which is the failure this tool actually hits, running as a user
+# that may not own the domain directory.  Opening it answers both questions at
+# once, and the answer is still true when the handle is used.
+sub _must_read {
+    my ($path, $what) = @_;
+    open(my $fh, '<', $path) or die "$what: $path ($!)\n";
+    return $fh;
+}
+
+# The same question where the answer is allowed to be no.
+sub _readable {
+    my ($path) = @_;
+    open(my $fh, '<', $path) or return 0;
+    close $fh;
+    return 1;
+}
+
 sub main {
     my @args = @_;
 
@@ -141,10 +162,10 @@ sub main {
     }) unless $no_config;
 
     my $cfile = "$domain_dir/$domain/provision.conf";
-    die "No such file provision.conf in $domain_dir/$domain/" unless -f $cfile;
+    close _must_read($cfile, "No provision.conf for $domain");
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    die "User definition file $domain_dir/$udf not present!" unless -f $udf;
+    close _must_read($udf, "No users.yaml for $domain");
 
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
@@ -164,7 +185,7 @@ sub main {
 
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
-    die "No data to host in $domain/" unless -f $data;
+    close _must_read($data, "No data to host for $domain");
 
     # Start off by fixing a sillyness in virtiofs.  This runs as part of the
     # qemu process, so it has to land on the hypervisor, not on us.
@@ -181,7 +202,7 @@ sub main {
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        die "No such file provision.conf in $domain_dir/$depends/" unless -f $cfile;
+        close _must_read($cfile, "No provision.conf for $depends, which $domain depends on");
         my $dconfig = Config::Simple->new($dcfile);
 
         #XXX should probably die here if the admin_users differ!
@@ -206,7 +227,7 @@ sub main {
     $guest->wait_for_ssh();
 
     my $map = "$domain_dir/$domain/devices.map";
-    if (-f $map) {
+    if (_readable($map)) {
         print "Syncing disk map\n";
         $guest->put_file($map, '/root/devices.map', sudo => 1)
           or die "could not sync devices map!";
@@ -244,7 +265,7 @@ sub generate_config {
     # No site data, nothing to generate: somebody is provisioning from a domain
     # directory they wrote by hand, which is a supported thing to do.
     my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
-    unless (-f $recipes || -d $recipe_dir) {
+    unless (_readable($recipes) || -d $recipe_dir) {
         print "No recipes at $recipes, building from what is already in $dir/$domain\n";
         return 0;
     }
@@ -574,12 +595,12 @@ sub mongle_extra_disks {
     my (@disks, @filesystems, $mapper);
     $mapper = '';
 
-    if (-f $spec_file) {
+    if (_readable($spec_file)) {
         my @devnames = ('vdb' .. 'vdz');
         my $order    = 2;
 
-        foreach my $diskspec (grep { $_ } split(/\n/, File::Slurper::read_text($spec_file))) {
-            my ($pool, $disk) = split(/=/, $diskspec);
+        foreach my $diskspec (grep { $_ } split("\n", File::Slurper::read_text($spec_file))) {
+            my ($pool, $disk) = split("=", $diskspec);
             next if $pool eq 'fuse';
 
             $order++;
@@ -773,8 +794,8 @@ sub mongle_cloud_init {
 
     # Generate a new key for the child
     qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};
-    die "No key generated!" unless -f "$domain_dir/$domain/key.rsa";
-    die "No pubkey generated!" unless -f "$domain_dir/$domain/key.rsa.pub";
+    close _must_read("$domain_dir/$domain/key.rsa",     "ssh-keygen made no key for $domain");
+    close _must_read("$domain_dir/$domain/key.rsa.pub", "ssh-keygen made no pubkey for $domain");
     chmod 0600, "$domain_dir/$domain/key.rsa";
     chmod 0600, "$domain_dir/$domain/key.rsa.pub";
 

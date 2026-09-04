@@ -205,7 +205,7 @@ sub _parse_uri {
     my ($scheme, $authority, $path) = URI::Split::uri_split($uri);
     return undef unless defined $scheme && length $scheme;
 
-    my ($driver, $transport) = split(/\+/, $scheme, 2);
+    my ($driver, $transport) = split(quotemeta('+'), $scheme, 2);
     return undef unless defined $driver && length $driver;
 
     my $server = (defined $authority && length $authority) ? URI->new("ssh://$authority") : undef;

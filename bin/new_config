@@ -388,7 +388,7 @@ sub handle_domain {
     # Everything in the map is spelled out, so a bare label is a leftover from
     # when there was a tld to append and is worth saying so about rather than
     # quietly assigning it a fresh address.
-    my @unqualified = grep { $_ !~ m/\./ } sort keys %$ip_conf;
+    my @unqualified = grep { index($_, q{.}) < 0 } sort keys %$ip_conf;
     die "These entries in the [ips] block of $cfile are not fully qualified:\n"
       . join('', map { "  $_\n" } @unqualified)
       . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
@@ -404,7 +404,7 @@ sub handle_domain {
     # to append and no separate notion of an addon: a domain that is not under
     # your usual parent is just a domain, spelled out.
     my $fqdn = $domain;
-    my ($subdomain, $tld) = split(/\./, $domain, 2);
+    my ($subdomain, $tld) = split(quotemeta('.'), $domain, 2);
     die "'$domain' is not a fully qualified domain name.\n"
       . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n"
       . "  new_config $domain.example.com\n"
@@ -890,7 +890,9 @@ sub pack_scripts {
     my @packed;
     opendir(my $dh, $from) or die "Could not read $from: $!\n";
     foreach my $script (sort grep { !m/\A\.\.?\z/ } readdir $dh) {
-        next unless -f "$from/$script";
+        # Opening it both skips the subdirectories and proves we may read it.
+        open(my $probe, '<', "$from/$script") or next;
+        close $probe;
         copy("$from/$script", "$to/$script")
           or die "Could not copy $script into $to: $!\n";
         chmod( (stat("$from/$script"))[2] & 07777, "$to/$script" );

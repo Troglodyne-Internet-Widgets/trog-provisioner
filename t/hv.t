@@ -6,6 +6,12 @@ use warnings FATAL => 'all';
 
 use re '/aa';
 
+
+# A -f or -x in here is asserting on a file this test just made, in a temporary
+# directory nothing else can see.  There is no window for it to be wrong in, so
+# the TOCTOU policies have nothing to catch.
+## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
+
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{read_text write_text};
@@ -199,7 +205,7 @@ subtest 'append_line does not duplicate' => sub {
     $hv->append_line($ak, 'ssh-rsa BBBB two');
     $hv->append_line($ak, 'ssh-rsa AAAA one');
 
-    my @lines = split(/\n/, read_text($ak));
+    my @lines = split("\n", read_text($ak));
     is(scalar(@lines), 2, 'the repeated key was only written once');
     is_deeply(\@lines, ['ssh-rsa AAAA one', 'ssh-rsa BBBB two'], 'in order');
 };
@@ -317,7 +323,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
         if ($argv[0] eq 'grep') {
             my ($line, $file) = @argv[-2, -1];
             return 1 unless defined $files{$file};
-            return (grep { $_ eq $line } split(/\n/, $files{$file})) ? 0 : 1;
+            return (grep { $_ eq $line } split("\n", $files{$file})) ? 0 : 1;
         }
         return 0;
     });

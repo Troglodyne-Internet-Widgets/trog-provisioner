@@ -335,7 +335,11 @@ The other direction, for one file.
 
 sub file_exists {
     my ($self, $path) = @_;
-    return -f $path ? 1 : 0 if $self->is_local;
+    if ($self->is_local) {
+        open(my $fh, '<', $path) or return 0;
+        close $fh;
+        return 1;
+    }
     return $self->run(qw{test -f}, $path) == 0 ? 1 : 0;
 }
 
@@ -395,9 +399,10 @@ sub put_file {
     my ($self, $local, $remote, %opts) = @_;
 
     if ($self->is_local) {
-        return $self->run_sudo(qw{cp}, $local, $remote) == 0
-          if $opts{sudo} && !-w _parent_dir($remote);
-        return File::Copy::copy($local, $remote) ? 1 : 0;
+        # Copy it ourselves if we can; sudo is the fallback, not the forecast.
+        return 1 if File::Copy::copy($local, $remote);
+        return $self->run_sudo(qw{cp}, $local, $remote) == 0 ? 1 : 0 if $opts{sudo};
+        return 0;
     }
 
     return $self->_pour({ stdin_file => $local }, $remote, %opts);
@@ -439,10 +444,8 @@ sub append_line {
     $self->mkpath(_parent_dir($path));
 
     if ($self->is_local) {
-        if (-f $path) {
-            my $existing = File::Slurper::read_text($path);
-            return 1 if grep { $_ eq $line } split(/\n/, $existing);
-        }
+        my $existing = eval { File::Slurper::read_text($path) };
+        return 1 if defined $existing && grep { $_ eq $line } split("\n", $existing);
         open(my $fh, '>>', $path) or die "Could not open $path: $!";
         print {$fh} "$line\n";
         close($fh);
@@ -566,20 +569,24 @@ sub _unhang {
     return wantarray ? @result : $result[0];
 }
 
+# Write it ourselves if we can, and reach for sudo only when that fails.
+#
+# This used to ask -w about the parent directory first.  Writing is the only
+# question worth asking: -w answers for a moment that has passed by the time we
+# act on it, and it cannot see an immutable bit, a full disk or a read-only
+# mount -- all of which say "no" to a write that -w said yes to.
 sub _write_local {
     my ($self, $path, $content, %opts) = @_;
 
-    if ($opts{sudo} && !-w _parent_dir($path)) {
-        my $tmp = File::Temp->new(UNLINK => 1);
-        print {$tmp} $content;
-        close $tmp;
-        my $ok = $self->run_sudo(qw{cp}, "$tmp", $path) == 0;
-        $self->run_sudo('chmod', ($opts{mode} // '0644'), $path) if $ok;
-        return $ok ? 1 : 0;
-    }
+    return 1 if eval { File::Slurper::write_text($path, $content); 1 };
+    die $@ unless $opts{sudo};
 
-    File::Slurper::write_text($path, $content);
-    return 1;
+    my $tmp = File::Temp->new(UNLINK => 1);
+    print {$tmp} $content;
+    close $tmp;
+    my $ok = $self->run_sudo(qw{cp}, "$tmp", $path) == 0;
+    $self->run_sudo('chmod', ($opts{mode} // '0644'), $path) if $ok;
+    return $ok ? 1 : 0;
 }
 
 sub _parent_dir {
