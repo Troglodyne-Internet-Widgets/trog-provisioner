@@ -159,6 +159,52 @@ reliable — use it only as the fallback.
 **`--restore` puts the domain and the disk back.** Unnecessary before a
 teardown, which is the usual ending, but do it on anything you intend to keep.
 
+## What tends to be wrong
+
+Every one of these came out of provisioning a recipe and reading what happened.
+Most are cheap to check statically, before spending ten minutes on a guest.
+
+**A recipe fragment is a Makefile, not a shell script.** Everything a recipe's
+`.tt` emits becomes a make recipe line, and that has three consequences that
+have each broken a recipe here:
+
+- Make eats a single `$` before the shell sees it, so shell expansions need
+  `$$`. `postgres` asked apt for `postgresql-client-` this way, and a trailing
+  dash is how apt spells *remove*.
+- Each line runs in its own shell, so a variable set on one line is gone by the
+  next. That is the same postgres bug, and `plexmediaserver` wrote its
+  preferences file to `/Preferences.xml` for it.
+- A command spanning lines needs `\` on every one of them, or make hands the
+  shell an unterminated quote. `plexmediaserver` had a seven-line `python3 -c "`.
+
+**A template that moves a file `template_files` does not generate** kills the
+target and everything after it. `deluged` and `matrix` both moved an nginx vhost
+that no template produced — in both cases the vhost was `nginxproxy`'s, which
+they already require.
+
+**A template that uses a variable the recipe does not declare** renders it
+empty. `nginxproxy` emitted `listen 443 ssl backlog=;`, which nginx refuses
+outright.
+
+**A file `template_files` generates that nothing installs** is dead. `ufw`
+generates the rate limits it means to apply and has never installed them.
+
+**A package name that is not in the archive is never installed and never
+complained about.** Three were wrong here. Ask the archive, do not assume.
+
+**A field cannot be both `required` and filled in by `enrich`** — enrich runs
+after validation. `perl` required a user that only enrich could supply, so
+anything depending on it could not build.
+
+**A guest test that renders no assertions fails the build**, because Test::More
+exits 255 on none. Check what a recipe's test renders to when the recipe is
+configured with nothing.
+
+**Ask whether the test would notice.** Several here passed while the thing they
+named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
+before the config it checks was applied, and asking `systemctl is-active nginx`
+says nothing about a config file nginx has not read yet — `nginx -t` does.
+
 ## When you find something, pin it with the guest's own test
 
 Every recipe ships a test that runs **on the guest**, at the end of the
