@@ -2,7 +2,7 @@ PATH="[% script_dir %]:/bin:/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin"
 
 MAILTO="[% admin_email %]"
 [% IF from %]
-MAILFROM="[% from %]@[% domain %]"
+MAILFROM="[% from %]"
 [% END %]
 
 # SAR

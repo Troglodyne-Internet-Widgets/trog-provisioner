@@ -2,7 +2,7 @@ PATH="[% script_dir %]:/bin:/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin"
 
 MAILTO="[% admin_email %]"
 [% IF from %]
-MAILFROM="[% from %]@[% domain %]"
+MAILFROM="[% from %]"
 [% END %]
 
 [% IF modules.grep('letsencrypt').size() %]
@@ -12,10 +12,6 @@ MAILFROM="[% from %]@[% domain %]"
 
 # Site-specific crons
 [% FOR cob in root_scripts %]
-[% IF cob.mailto != "none" %]
 MAILTO="[% cob.mailto %]"
-[% ELSE %]
-MAILTO="[% admin_email %]"
-[% END %]
 [% cob.interval %] root command [% cob.cmd %]
 [% END %]

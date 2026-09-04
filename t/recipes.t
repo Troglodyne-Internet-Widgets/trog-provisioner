@@ -304,16 +304,46 @@ subtest 'ufw rejects malformed port_forwards' => sub {
 # ----------------------------------------------------------------
 # cron: MAILFROM is a local part, and the templates append the domain
 # ----------------------------------------------------------------
-subtest 'cron takes a bare local part for MAILFROM' => sub {
+subtest 'cron addresses: a local part gets the domain, an address does not' => sub {
     my $r = 'Provisioner::Recipe::cron'->new(%PROV);
+    my $d = $G{domain};
 
-    # The templates write MAILFROM="[% from %]@[% domain %]", so an address
-    # here would render as user@host@domain.  This was declared as an email
-    # type, which required precisely the value that breaks it.
-    is(exception { $r->render(%G, from => 'cron') }, undef, 'a local part is what it wants');
+    is(exception { $r->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
 
-    my $out = $r->render_file('files/cron.root.tt', %G, from => 'cron');
-    like($out, qr/^MAILFROM="cron\@\Q$G{domain}\E"$/m, 'and the domain gets appended to it');
+    like($r->render_file('files/cron.root.tt', %G, from => 'cron'),
+        qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended');
+
+    # Appending to an address gives somebody@example.com@this.domain, which is
+    # what the old template did to every value the old schema would accept.
+    like($r->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
+        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands');
+};
+
+subtest 'cron MAILTO per script' => sub {
+    my $r   = 'Provisioner::Recipe::cron'->new(%PROV);
+    my $d   = $G{domain};
+    my @out = split("\n", $r->render_file('files/cron.root.domain.tt', %G,
+        root_scripts => [
+            { interval => '0 0 * * *',   cmd => '/silent.pl' },
+            { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
+            { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
+            { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
+        ]));
+
+    # The MAILTO in force for a line is the last one before it.
+    my %to;
+    my $current = '';
+    foreach my $line (@out) {
+        $current = $1 if $line =~ m/^MAILTO="([^"]*)"$/;
+        $to{$1}  = $current if $line =~ m{command (/\S+)};
+    }
+
+    is($to{'/silent.pl'}, $G{admin_email},
+        'a script that says nothing about mail has not been thought about, so the admin gets it');
+    is($to{'/none.pl'}, '',
+        q{and one that says 'none' does not want it, which cron spells as an empty MAILTO});
+    is($to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone');
+    is($to{'/local.pl'},     "ops\@$d",            'a local part gets the domain');
 };
 
 #
