@@ -223,6 +223,22 @@ complained about.** Three were wrong here. Ask the archive, do not assume.
 after validation. `perl` required a user that only enrich could supply, so
 anything depending on it could not build.
 
+**`enrich` runs more than once, over the same nested hash.** Once for the
+recipe's fragment and again for every template file it renders, and `%opts`
+carries the same nested references each time — so anything it rewrites in place,
+the next pass sees. `nginxproxy` rewrote a vhost's `proxy_uri` from a socket path
+to an upstream name; the second pass saw something already starting with `http`,
+skipped it, and rendered a vhost naming an upstream it no longer declared.
+Write enrich so running it twice reaches the same answer, keeping what it needs
+to do that.
+
+**Ask nginx, do not reason about nginx.** `systemctl restart nginx` failing tells
+you nothing; the guest's `nginx -t` tells you exactly what is wrong. Three
+recipes were blocked on one line — a socket in a `proxy_pass` inside
+`location @default`, which nginx refuses because a named location may not carry
+a URI part, while the socket form requires one. No amount of reading the
+template would have produced that sentence. Keep a guest and ask it.
+
 **A guest test that renders no assertions fails the build**, because Test::More
 exits 255 on none. Check what a recipe's test renders to when the recipe is
 configured with nothing.
@@ -231,6 +247,18 @@ configured with nothing.
 named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
 before the config it checks was applied, and asking `systemctl is-active nginx`
 says nothing about a config file nginx has not read yet — `nginx -t` does.
+
+## Two things about the harness
+
+**Never edit a script while it is running.** bash reads a script incrementally,
+by byte offset, so editing one mid-run resumes it somewhere meaningless. Editing
+`run_one` while a sweep was using it killed the run that was in flight and left
+an orphaned guest behind. Copy the harness to a new directory for the next batch
+instead.
+
+**Do not edit templates while a sweep is provisioning either** — the run picks up
+whatever is on disk when it generates its configuration, so a batch started
+before a change and finished after it tells you nothing you can attribute.
 
 ## When you find something, pin it with the guest's own test
 
