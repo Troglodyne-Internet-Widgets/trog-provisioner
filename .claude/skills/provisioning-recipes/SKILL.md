@@ -240,8 +240,9 @@ a URI part, while the socket form requires one. No amount of reading the
 template would have produced that sentence. Keep a guest and ask it.
 
 **A guest test that renders no assertions fails the build**, because Test::More
-exits 255 on none. Check what a recipe's test renders to when the recipe is
-configured with nothing.
+exits 255 on none. `t/recipes.t` renders all of them, compiles each, and checks
+each asserts something -- run it after touching one, rather than finding out at
+the end of a provision.
 
 **Ask whether the test would notice.** Several here passed while the thing they
 named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
@@ -255,6 +256,21 @@ by byte offset, so editing one mid-run resumes it somewhere meaningless. Editing
 `run_one` while a sweep was using it killed the run that was in flight and left
 an orphaned guest behind. Copy the harness to a new directory for the next batch
 instead.
+
+**Give the scratch guest a service user.** Every real domain sets one in its
+`_global`, and several recipes only line up when it exists: the `service_user`
+target gives that account the domain directory as its home, and
+`build_latest_perl.sh` symlinks `cpanm` into that home -- which is exactly where
+`tcms` and `tpsgi` look for it. Without one, the sweep falls back to the admin
+user, whose home is under `/home`, and those paths disagree for reasons that
+have nothing to do with the recipe.
+
+**A dummy value that is no longer needed is worse than none.** `perl.user` was
+pinned to `www-data` back when the field was required. It is filled in from the
+service user now, so the dummy did nothing but override it -- and `/var/www`
+does not exist on a guest with no web server, so the perl build stopped and
+`imagemagick`, which builds against that perl, had nothing to build against.
+Re-read the dummies when the schema they were written for changes.
 
 **Do not edit templates while a sweep is provisioning either** — the run picks up
 whatever is on disk when it generates its configuration, so a batch started
