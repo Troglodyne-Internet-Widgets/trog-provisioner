@@ -32,7 +32,7 @@ my %G = (
     admin_email                => 'admin@test.test',
     main_ip                    => '192.168.1.100',
     tld_ip                     => '192.168.1.1',
-    hv_host                    => 'hv.example.com',
+    hv_ip                      => '192.168.122.1',
     hv_ssh_port                => 22,
     transfer_user              => 'transfer',
     provisioner_dir            => "$FindBin::Bin/..",
@@ -220,7 +220,7 @@ subtest 'every rsync off the hypervisor names it' => sub {
             next unless $out =~ m/rsync/;
             $seen{$recipe}++;
             unlike($out, qr/\@:/,   "$recipe: no empty host between the user and the path");
-            like($out, qr/\@\Q$G{hv_host}\E:/, "$recipe: rsyncs from $G{hv_host}");
+            like($out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}");
         }
     }
     ok(scalar keys %seen, 'and there were rsyncing recipes to check');

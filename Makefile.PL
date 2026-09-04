@@ -32,7 +32,6 @@ WriteMakefile(
     'JSON::PP'       => 0,
     'List::Util'     => 0,
     'Sys::Virt'      => 0,
-    'Sys::Hostname::FQDN' => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
     'parent'             => 0,

@@ -9,7 +9,6 @@ use Sys::Virt();
 use Digest::SHA();
 use URI();
 use URI::Split();
-use Sys::Hostname::FQDN();
 
 =head1 NAME
 
@@ -285,39 +284,6 @@ sub ssh_host {
 }
 
 sub describe { return 'the hypervisor at ' . $_[0]->uri }
-
-=head2 hostname
-
-The name a guest should use to reach this hypervisor.
-
-Guests rsync their payload off the hypervisor, so the generated Makefile needs
-to name it.  That used to be the address of C<virbr0>, read off whichever
-machine ran the generator -- which was right only for as long as that was
-always the hypervisor itself.  Run it anywhere else and there is no virbr0 to
-read, so the host came out empty and the guest rsynced from nowhere.
-
-For a remote hypervisor this is the host out of the connection URI: we were
-given a name that resolves, so we use it.  For a local one there is no URI to
-read it from, so L<Sys::Hostname::FQDN> answers for us -- C<localhost> would be
-right for us and useless to the guest, which has to cross a network to get
-here.
-
-=cut
-
-sub hostname {
-    my ($self) = @_;
-    return $self->{hostname} if defined $self->{hostname};
-
-    my $host = $self->ssh_host;
-    return $self->{hostname} = $host if defined $host && length $host;
-
-    $host = Sys::Hostname::FQDN::fqdn();
-    die "Could not determine a hostname for " . $self->describe
-      . "; a guest has to be told where to rsync its payload from.\n"
-      unless defined $host && length $host;
-
-    return $self->{hostname} = $host;
-}
 
 =head1 PATHS
 

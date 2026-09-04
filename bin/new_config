@@ -568,7 +568,13 @@ sub handle_domain {
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
 
-    $global_config->{hv_host}         = $hv->hostname;
+    # The guest rsyncs its payload off the hypervisor before it has working DNS,
+    # so this has to be an address and not a name.  virbr_ip asks the hypervisor
+    # for it over the connection -- reading virbr0 off whichever machine ran the
+    # generator is how this came out empty in the first place -- and the NAT
+    # bridge is directly attached to the guest, so it needs no routing or
+    # resolution to reach.
+    $global_config->{hv_ip}           = $hv->virbr_ip;
     $global_config->{provisioner_dir} = $provisioner_dir;
     $global_config->{tld}             = $tld;
     $global_config->{admin_user}      = $admin_user;

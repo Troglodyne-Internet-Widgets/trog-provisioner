@@ -70,7 +70,7 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	 touch $@
 
 [% state_dir %]/scripts:
-	mkdir -p [% script_dir %]; rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_host %]:[% provisioner_dir %]/scripts/* [% script_dir %]
+	mkdir -p [% script_dir %]; rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% provisioner_dir %]/scripts/* [% script_dir %]
 	touch $@
 
 # Make a self-signed cert FIRST, because everybody and their mama needs a damn cert
