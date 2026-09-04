@@ -58,6 +58,17 @@ Egress the firewall stopped, as C<SPT=>/C<DPT=> pairs, written by
 outgoing_blocks.sh.  A recipe that needs to reach something it was never given a
 hole for shows up here rather than in its own log.
 
+=item F<failed-units.log>, F<journal-errors.log>, F<nginx-t.log>
+
+Not files off the guest but answers to questions put to it: which units failed,
+what the journal recorded at error level, and what nginx makes of its
+configuration.
+
+A failed C<systemctl restart> reports only "Job for nginx.service failed"; the
+sentence saying why is in the journal, and C<nginx -t> will say it on demand.
+Three recipes sat on one nginx message for a whole sweep because none of this
+was collected.
+
 =item F</root/post_install.sh>
 
 What was queued to run after the Makefile finished.  Recipes append to this,
@@ -114,7 +125,12 @@ sub main {
     $into //= File::Temp::tempdir("trog-artifacts-$domain-XXXXXX", TMPDIR => 1);
     make_path($into);
 
-    my @results = map { fetch($guest, $domain, $_, $into) } artifacts($domain);
+    # Asked for, not read: a failed `systemctl restart` says only "Job for
+    # nginx.service failed", and the sentence that says why is in the journal.
+    # Three recipes were stuck on one nginx message for a whole sweep because
+    # nothing collected it.
+    my @results = map { capture_to($guest, $_->[0], "$into/$_->[1]") } probes();
+    push @results, map { fetch($guest, $domain, $_, $into) } artifacts($domain);
 
     print {*STDERR} "\n";
     printf {*STDERR} "%-34s %s\n", $_->{remote},
@@ -139,6 +155,30 @@ sub artifacts {
           /root/post_install.sh
         },
     );
+}
+
+# Questions to ask the guest, rather than files to read off it.  Each is a
+# command and the file its output goes into.
+sub probes {
+    return (
+        # Which units are unhappy, and what they said when they gave up.
+        [ 'systemctl --failed --no-pager --no-legend',        'failed-units.log' ],
+        [ 'journalctl -b --no-pager -p err',                  'journal-errors.log' ],
+
+        # nginx will not tell you what is wrong with a configuration by failing
+        # to start; it will tell you immediately if you ask it.
+        [ 'command -v nginx >/dev/null && nginx -t 2>&1 || echo "no nginx here"',
+          'nginx-t.log' ],
+    );
+}
+
+sub capture_to {
+    my ($guest, $command, $local) = @_;
+
+    my $content = eval { $guest->capture("sudo sh -c '$command'") } // q{};
+    File::Slurper::Temp::write_text($local, $content);
+
+    return { remote => "\$ $command", ok => 1, local => $local, bytes => length $content };
 }
 
 # Everything about how to reach the guest, from the configuration that built it.
