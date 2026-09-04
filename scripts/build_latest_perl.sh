@@ -30,9 +30,19 @@ fi
 
 CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
 
-if [ ! -d $CLIENT_HOMEDIR ]; then
-	echo "Can't get client's homedir!";
-	exit 255;
+if [ -z "$CLIENT_HOMEDIR" ]; then
+	echo "build_latest_perl.sh: no such account '$CLIENT'" >&2
+	exit 255
+fi
+
+# Named, because "Can't get client's homedir!" says neither which account nor
+# which directory, and the answer is usually that the account is not the one the
+# domain meant: a service user has the domain directory as its home and that is
+# made by the service_user target, but an account like www-data has /var/www,
+# which only exists if something else created it.
+if [ ! -d "$CLIENT_HOMEDIR" ]; then
+	echo "build_latest_perl.sh: home directory '$CLIENT_HOMEDIR' for '$CLIENT' does not exist" >&2
+	exit 255
 fi
 
 # Build some symlinks to the perl for use by other? setup scripts

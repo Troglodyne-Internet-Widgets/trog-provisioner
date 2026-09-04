@@ -448,5 +448,64 @@ subtest 'no template comment leaves a quote open' => sub {
     }
 };
 
+# A guest test is a template that becomes a Perl script, and nothing checked it
+# was one until it ran on a guest -- at the end of a provision, which is a slow
+# way to find a syntax error.  Test::More also exits 255 when a script makes no
+# assertions at all, so a test that renders to nothing fails the whole build for
+# a recipe that was asked to do nothing.
+subtest 'every guest test renders to a Perl script that says something' => sub {
+    my $xslate = Text::Xslate->new(
+        path     => [$template_dir],
+        syntax   => 'TTerse',
+        module   => [qw{Text::Xslate::Bridge::TT2}],
+        function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+    );
+
+    # Enough of a configuration for any of them to render.  What matters is that
+    # the result is Perl and has assertions in it, not what it would assert.
+    my %vars = (
+        %G,
+        domain      => 'd.test',      install_dir => '/opt/domains',
+        admin_user  => 'doge',        user        => 'svc',
+        script_dir  => '/root/bin',   version     => '1.2.3-4',
+        zone        => 'dc1',         buckets     => ['a'],
+        channels    => ['x'],         disks       => [],
+        fuse        => [],            gogs_admin  => 'git',
+        key_file    => 'key.rsa',     pubkey      => 'ssh-rsa AAAA',
+        admin_email => 'a@b.test',    base_dn     => 'dc=d,dc=test',
+        full_aliases => ['www.d.test'], modules   => ['perl'],
+        vhosts      => {},            upstreams   => {},
+        tcms_dir    => 'tCMS',        basedir     => 'code',
+        port        => 636,           users       => [],
+    );
+
+    my $dir = tempdir(CLEANUP => 1);
+    my @tests;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @tests, $File::Find::name if m/[.]tt\z/ } },
+        "$template_dir/tests",
+    );
+    ok(scalar @tests, 'there are guest tests to check');
+
+    foreach my $tt (sort @tests) {
+        ( my $name = $tt ) =~ s{.*/}{};
+
+        my $rendered = eval { $xslate->render("tests/$name", \%vars) };
+        ok(defined $rendered, "$name renders") or do { diag $@; next };
+
+        # It has to be Perl.
+        my $file = "$dir/" . ( $name =~ s/[.]tt\z/.t/r );
+        File::Slurper::write_text($file, $rendered);
+
+        my ($out, $err) = (q{}, q{});
+        IPC::Run3::run3([$^X, '-c', $file], \undef, \$out, \$err);
+        is($? >> 8, 0, "$name compiles") or diag $err;
+
+        # And it has to assert something, or Test::More exits 255 on it.
+        ok($rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
+            "$name makes at least one assertion or says why it is not");
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
