@@ -40,12 +40,14 @@ debug_boot - watch a guest boot, and stop it at the boot menu when it will not
 
 =head1 DESCRIPTION
 
-A guest that provisions and then misbehaves leaves logs, and
-the provisioning-recipes skill fetches them.  A guest that never boots leaves
-nothing at all: no lease, no ssh, no log to collect, and C<bin/provision> can
-only say that it never asked for an address.
+A guest that provisions and then misbehaves leaves logs on itself, and you can
+go and read them.  A guest that never boots leaves nothing at all: no lease, no
+ssh, and no log to go and read.  C<bin/provision> can only tell you it never
+asked for an address.
 
-This is for that case.
+This is for that case.  It is as useful on a guest that has been running for a
+year and will not come back from a reboot as it is on one that has never come up
+at all.
 
 =head2 Start with --console
 

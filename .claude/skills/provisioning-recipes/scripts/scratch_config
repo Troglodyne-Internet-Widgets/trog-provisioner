@@ -13,7 +13,6 @@ use re '/aa';
 use FindBin::libs;
 
 use File::Copy qw{copy};
-use File::KeePass::KDBX();
 use File::Path qw{make_path remove_tree};
 use File::Slurper();
 use File::Slurper::Temp();
@@ -23,6 +22,7 @@ use Pod::Usage qw{pod2usage};
 use YAML::XS();
 
 use Trog::Config();
+use Trog::Secrets();
 
 =head1 NAME
 
@@ -165,58 +165,23 @@ sub build {
     my $fleet = 'hypervisors.conf';
     my $has_fleet = copy("$source/$fleet", "$dir/$fleet") ? 1 : 0;
 
-    my @refs     = secret_refs("$dir/recipes.yaml");
+    my %needed = Trog::Secrets->needed(YAML::XS::Load(File::Slurper::read_binary("$dir/recipes.yaml")));
+    my @refs   = sort keys %{ { map { $_ => 1 } values %needed } };
+
     my $password = File::Temp::tempdir() =~ s{.*/}{}r;    # a throwaway name for a throwaway store
 
-    write_kdbx("$dir/secrets.kdbx", $password, @refs);
+    # Visibly fake, so that anything reaching a real service with one is refused
+    # rather than quietly working.  What the values are is this harness's
+    # business; making the database is Trog::Secrets'.
+    Trog::Secrets->write("$dir/secrets.kdbx", $password,
+        map { $_ => 'throwaway:' . substr($_, length 'secret:') } @refs);
     chmod 0600, "$dir/secrets.kdbx";
 
     return ($password, $has_fleet, @refs);
 }
 
-# Every secret: reference in a configuration, wherever it is nested.
-sub secret_refs {
-    my ($path) = @_;
-    return sort keys %{ { map { $_ => 1 } _walk(YAML::XS::Load(File::Slurper::read_binary($path))) } };
-}
 
-sub _walk {
-    my ($node) = @_;
 
-    my $ref = ref $node;
-    return map { _walk($_) } @$node          if $ref eq 'ARRAY';
-    return map { _walk($node->{$_}) } sort keys %$node if $ref eq 'HASH';
-    return ()                                unless defined $node && !$ref;
-    return ($node) if index($node, 'secret:') == 0;
-    return ();
-}
-
-# The same shape new_config reads: a group per first path element, an entry per
-# second, and the third names the field on it.
-sub write_kdbx {
-    my ($path, $password, @refs) = @_;
-
-    my $kdbx = File::KeePass::KDBX->new;
-    $kdbx->add_group({ title => 'Root' });
-
-    my %groups;
-    foreach my $ref (@refs) {
-        my ($group, $title, $field) = split('/', substr($ref, length 'secret:'));
-        die "Malformed secret reference '$ref': wanted secret:group/entry/field\n"
-          unless defined $group && defined $title && defined $field;
-
-        $groups{$group} //= $kdbx->add_group({ title => $group });
-        my $entry = $kdbx->find_entry({ group => $groups{$group}{gid}, title => $title })
-          // $kdbx->add_entry({ group => $groups{$group}{gid}, title => $title });
-
-        # Visibly fake, so that anything reaching a real service with it is
-        # refused rather than quietly working.
-        $entry->{$field} = "throwaway:$group/$title/$field";
-    }
-
-    $kdbx->save_db($path, $password);
-    return $path;
-}
 
 sub remove {
     my ($dir) = @_;

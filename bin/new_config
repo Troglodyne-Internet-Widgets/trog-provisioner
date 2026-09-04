@@ -31,14 +31,12 @@ use Archive::Tar();
 use File::Path qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
+use Trog::Secrets();
 use File::Copy qw{copy};
 use Hash::Merge();
 use File::Find();
 
 # For secret getting/setting
-use Scalar::Util qw{looks_like_number};
-use File::KeePass::KDBX;
-use IO::Prompter;
 
 use Provisioner::IPPool;
 use Provisioner::Utils;
@@ -190,89 +188,10 @@ sub get_config {
 }
 
 # Basically build a pointer so we can modify the actual value, cuz the actual ref can't survive the iterator var :(
-sub gather_needed_secrets {
-    my $rconf = $_[0];
 
-    my %matches;
-    my @iterator = values(%$rconf);
-    my @pointers = keys(%$rconf);
-
-    for (my $i=0; $i < scalar(@iterator); $i++) {
-        my $type = ref $iterator[$i];
-        my $ptr = $pointers[$i];
-        if ($type eq 'HASH') {
-            push(@iterator, values(%{$iterator[$i]}));
-            push(@pointers, map { "$ptr/$_" } keys(%{$iterator[$i]}));
-        } elsif ($type eq 'ARRAY') {
-            if (@{$iterator[$i]}) {
-                push(@iterator, @{$iterator[$i]} );
-                push(@pointers, map { "$ptr/$_" } 0..(scalar(@{$iterator[$i]})-1));
-            }
-        } elsif (!$type) {
-            $matches{$ptr} = $iterator[$i] if $iterator[$i] && $iterator[$i] =~ m/^secret:/;
-        }
-        # If it's anything other than these 3 types it won't ever match. It's YAML.
-    }
-
-    return %matches;
-}
-
-sub get_secrets {
-    my %rmap = @_;
-
-    die "Must provide at least one key" unless %rmap;
-
-    # Get the password on STDIN
-    #XXX IO::Prompter is incompatible with IO::P unless u do this
-    *ARGV= join(' ', @ARGV);
-    my $pass = prompt('Enter password:', -echo=> '*');
-
-    # Transform keys into fully qualified hash of group to key
-    my %keymap;
-    foreach my $route (keys(%rmap)) {
-        die "Malformed key passed, must start with secret:" unless index($rmap{$route}, 'secret:') == 0;
-        my $kv = substr($rmap{$route}, 7); #secret: is 7 chars
-        my ( $k, $v, $w ) = split( '/', $kv );
-        die "Malformed key passed '$kv', must be group/key/what" unless $k && $v && $w;
-        $keymap{$k} //= [];
-        push(@{$keymap{$k}}, { route => $route, key => $v, what => $w });
-    }
-
-    my $kdb = File::KeePass::KDBX->load_db($sfile, $pass) or die "Could not open provided kdbx: got ($sfile)";
-    $kdb->unlock() or die "Could not unlock provided kdbx";
-    my %response;
-    foreach my $group (keys(%keymap)) {
-        my $g = $kdb->find_group({ title => $group });
-        die "Invalid group '$group' provided" unless $g;
-        foreach my $key (@{$keymap{$group}}) {
-            my $k = $kdb->find_entry({ group => $g->{gid}, title => $key->{key} });
-            die "Invalid key '$key->{key}' provided" unless $k;
-            die "Provided what '$key->{what}' does not exist in $key->{key}" unless $k->{$key->{what}};
-            $response{$key->{route}} = $k->{$key->{what}};
-        }
-    }
-    $kdb->lock();
-    return %response;
-}
 
 # Resolve the JSON::Pointer style path to deep hash param
 # XXX Regrettably needs a touch() of eval()
-sub set_secrets {
-    my ($rconf, %to_set) = @_;
-    foreach my $path (keys(%to_set)) {
-        my $to_eval = '$rconf->';
-        my $replacement = $to_set{$path};
-        foreach my $component (split('/', $path)) {
-            if (looks_like_number($component)) {
-                $to_eval .= "[$component]";
-            } else {
-                $to_eval .= "{'$component'}";
-            }
-        }
-        $to_eval .= ' = $replacement;';
-        eval $to_eval or die "Could not replace secret!";
-    }
-}
 
 sub get_recipe_config {
     state $c;
@@ -424,15 +343,11 @@ sub handle_domain {
         $ip_conf->{$domain} = $static_ip;
     }
 
-    # Figure out what secrets need to be replaced by gathering the refs to their strings
-    my %to_replace = gather_needed_secrets($rconf);
-
+    # A recipe carries a note saying where a password is, not the password.
+    my %to_replace = Trog::Secrets->needed($rconf);
     if (%to_replace) {
-        # Ingest and the secrets.
-        my %secrets = get_secrets(%to_replace);
-
-        # Replace the secrets
-        set_secrets($rconf, %secrets);
+        my %secrets = Trog::Secrets->read($sfile, Trog::Secrets->prompt, %to_replace);
+        Trog::Secrets->apply($rconf, %secrets);
         %secrets = ();
     }
 
