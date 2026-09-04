@@ -10,4 +10,17 @@ is($status, 'active', 'koan service is running');
 ok(-d '[% install_dir %]/[% domain %]/koan', 'koan repo directory exists');
 ok(-d '[% install_dir %]/[% domain %]/.venv', 'python virtualenv exists');
 
+# Owned by the domain's service user.  Three of these were installed with a
+# hardcoded `-o koan`, which is the account name only because the one domain
+# running this recipe happens to use it; any other would have got
+# "install: invalid user 'koan'" and taken the target down with it.
+foreach my $file (
+    '[% install_dir %]/[% domain %]/koan/.env',
+    '[% install_dir %]/[% domain %]/koan/instance/config.yaml',
+) {
+    next unless -e $file;
+    my $owner = scalar getpwuid((stat $file)[4]);
+    is($owner, '[% user %]', "$file is owned by [% user %]");
+}
+
 done_testing();
