@@ -25,9 +25,10 @@ chown [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]/custo
 # Set ownership on data directories
 chown -R [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]
 chmod -R 0750 [% install_dir %]/git.[% domain %]
-# Deploy nginx vhost
-mkdir -p /etc/nginx/sites-enabled
-install -m 0644 gogs.nginx.conf /etc/nginx/sites-enabled/git.[% domain %].conf
+# No vhost here.  This installed a gogs.nginx.conf that template_files does not
+# generate and never has, so the target died on "cannot stat" and took the rest
+# of the build with it.  The vhost belongs to nginxproxy, which this recipe
+# requires and configures to proxy to gogs on port 3000.
 # Deploy systemd service
 install -m 0644 gogs.service /etc/systemd/system/gogs.service
 systemctl daemon-reload

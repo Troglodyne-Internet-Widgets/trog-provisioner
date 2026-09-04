@@ -25,4 +25,14 @@ my $passwd = `getent passwd [% gogs_admin %] 2>/dev/null`;
 ok($passwd, 'the [% gogs_admin %] account exists');
 like($passwd, qr{:\Q[% install_dir %]/git.[% domain %]\E:}, 'with the home directory the recipe asked for');
 
+# The vhost belongs to nginxproxy, which this recipe requires and points at
+# gogs on port 3000.  gogs used to install one of its own from a template that
+# does not exist, which killed the target outright.
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
+ok(!-e '/etc/nginx/sites-enabled/git.[% domain %].conf',
+    'and gogs did not write a competing one');
+
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
+
 done_testing();
