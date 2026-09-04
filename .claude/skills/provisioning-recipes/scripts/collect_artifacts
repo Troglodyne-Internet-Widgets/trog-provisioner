@@ -163,7 +163,18 @@ sub probes {
     return (
         # Which units are unhappy, and what they said when they gave up.
         [ 'systemctl --failed --no-pager --no-legend',        'failed-units.log' ],
-        [ 'journalctl -b --no-pager -p err',                  'journal-errors.log' ],
+        # warning, not err: a daemon that refuses to start usually explains
+        # itself below error level, and systemd's own "Failed to start" -- which
+        # is all err catches -- says nothing at all.
+        [ 'journalctl -b --no-pager -p warning',              'journal-errors.log' ],
+
+        # And the units that are down or flapping, with the log lines that go
+        # with them.  A service in auto-restart is not "failed" yet, so it does
+        # not show up in systemctl --failed while it is still trying.
+        [ q{for u in $(systemctl list-units --type=service --state=failed,auto-restart,activating}
+          . q{ --no-legend --plain 2>/dev/null | awk '{print $1}'); }
+          . q{do systemctl status --no-pager -l -n 40 "$u"; done},
+          'unhappy-units.log' ],
 
         # nginx will not tell you what is wrong with a configuration by failing
         # to start; it will tell you immediately if you ask it.

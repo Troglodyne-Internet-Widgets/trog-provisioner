@@ -30,4 +30,19 @@ is_deeply(\@dupes, [], 'no forward-zone line appears twice') or diag $recursor_c
 unlike($recursor_conf, qr/^forward-zones=test\.test=/m,
     'no hardcoded test.test forward zone') or diag $recursor_conf;
 
+# The unit configure_pdns rewrites.  It used to end the command line with a
+# bare --chroot, which takes a value and was given none, so pdns_server refused
+# to start every time and the only thing said out loud was systemd's "Failed to
+# start pdns.service".
+my $execstart = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
+like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or diag $execstart;
+unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
+    or diag $execstart;
+
+# The recursor forwards the domain to the authoritative server on 2500.  The
+# address here was written 127.0.01.
+my $recursor = do { local (@ARGV, $/) = '/etc/powerdns/recursor.d/[% domain %].conf'; <> } // '';
+like($recursor, qr/forward-zones\+?=\Q[% domain %]\E=127\.0\.0\.1:2500/,
+    'the recursor forwards the domain to 127.0.0.1:2500') or diag $recursor;
+
 done_testing();
