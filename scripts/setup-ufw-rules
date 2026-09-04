@@ -35,18 +35,33 @@ my @rules = (
     [qw{default deny incoming}],
 );
 
-# Allow, but rate limit; control the limit in user.rules.
+# Rate limit ssh, and only ssh.
 #
-# Except from the networks we are administered from.  ufw's limit denies a
-# source that opens six connections in thirty seconds, and a provision opens far
-# more than that -- so the provisioner locks itself out partway through its own
-# run, and every step after that fails as "connection refused" on an address
-# that was working a minute earlier.  Those networks are passed in; without any,
-# nothing is exempted and this behaves as it did.
+# ufw's limit denies a source that opens six connections in thirty seconds.
+# That is the classic anti-brute-force setting for ssh and nonsense for anything
+# a browser talks to: one page load opens more than six, so applying it to
+# Nginx Full rate limited real visitors off the site.  It was applied to every
+# application profile there was.
+#
+# templates/files/ufw.user.rules.tt says what was meant -- 1024 hits a second on
+# 22, 80 and 443 -- but nothing has ever installed that file, so what took
+# effect was ufw's default.
+#
+# Even for ssh the limit is too tight for us: a provision opens far more than
+# six connections, so the provisioner locks itself out partway through its own
+# run and every step after that fails as "connection refused" on an address that
+# was working a minute earlier.  The networks we administer from are passed in
+# and exempted; with none given, nothing is.
 my @admin = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
+my %rate_limited = (OpenSSH => 1);
 
 foreach my $app (@apps) {
     push(@rules, ["allow", "out", $app]);
+
+    unless ($rate_limited{$app}) {
+        push(@rules, ["allow", "in", $app]);
+        next;
+    }
 
     push(@rules, ["allow", "from", $_, "to", "any", "app", $app]) for @admin;
     push(@rules, ["limit", "in", $app]);

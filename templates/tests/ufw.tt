@@ -18,4 +18,14 @@ like($rules, qr/OpenSSH/, 'ssh is allowed at all') or diag $rules;
 like($rules, qr{\Q[% net %]\E}, 'ssh from [% net %] is not rate limited');
 [% END %]
 
+# ufw's limit is six connections in thirty seconds.  That is the right setting
+# for ssh and the wrong one for anything a browser talks to -- one page load
+# opens more than six -- and it was applied to every application profile there
+# was, so a site rate limited its own visitors off itself.
+foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/null`) {
+    $web =~ s/^\s+|\s+$//g;
+    next unless length $web;
+    unlike($rules, qr/^\s*\Q$web\E\s+LIMIT/mi, "$web is not rate limited");
+}
+
 done_testing();
