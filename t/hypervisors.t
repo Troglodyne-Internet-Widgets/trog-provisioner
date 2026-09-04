@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{write_text};
@@ -319,8 +322,6 @@ subtest 'shortfalls and headroom' => sub {
 # A stand-in for a libvirt connection.
 {
     package FakeVMM;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { return bless {}, shift }
     sub get_node_info { return { memory => 32768 * 1024, cpus => 8, model => 'x86_64' } }
@@ -337,8 +338,6 @@ subtest 'shortfalls and headroom' => sub {
 
 {
     package FakeDomain;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, %o) = @_; return bless {%o}, $class }
     sub get_info  { my ($s) = @_; return { maxMem => $s->{maxMem}, nrVirtCpu => $s->{nrVirtCpu} } }

@@ -1,6 +1,8 @@
-use strict;
-use warnings;
+use 5.041;
 
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
 use ExtUtils::MakeMaker;
 
 WriteMakefile(

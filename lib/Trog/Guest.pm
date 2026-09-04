@@ -1,8 +1,11 @@
 package Trog::Guest;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use parent 'Trog::Machine';
 
 use Net::EmptyPort();

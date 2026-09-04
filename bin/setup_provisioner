@@ -2,9 +2,12 @@
 
 package Trog::Bin::SetupProvisioner;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use File::Slurper;
 
 # Basically our 'install script'

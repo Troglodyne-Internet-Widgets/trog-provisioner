@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
-use strict;
-use warnings;
+use 5.041;
 
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
 use FindBin;
 use FindBin::libs;
 
@@ -35,7 +37,6 @@ my %G = (
     hv_ip                      => '192.168.122.1',
     hv_ssh_port                => 22,
     transfer_user              => 'transfer',
-    provisioner_dir            => "$FindBin::Bin/..",
     aliases                    => { test => ['www.test', 'mail.test'] },
     full_aliases               => ['www.test.test.test'],
     modules                    => [],

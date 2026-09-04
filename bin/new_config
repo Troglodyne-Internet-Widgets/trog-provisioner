@@ -11,7 +11,6 @@ use warnings FATAL => 'all';
 
 no warnings qw{experimental};
 use feature qw{state};
-use warnings;
 use re '/aa';
 
 use FindBin;
@@ -525,7 +524,6 @@ sub handle_domain {
     my %fragments;
     my %global_fragments;
 
-    my $provisioner_dir = Cwd::abs_path( $FindBin::Bin . "/../" );
     my $root_scripts    = '/root/bin';
 
     my %formatters = (
@@ -550,7 +548,6 @@ sub handle_domain {
     # TODO stop hardcoding some things, and document this in P::R
     my %provisioner_opts = (
         target_packager => 'deb',
-        provisioner_dir => $provisioner_dir,
         script_loc      => $root_scripts,
         output_dir      => $cfg_dir,
         template_dirs   => \@paths,
@@ -575,7 +572,6 @@ sub handle_domain {
     # bridge is directly attached to the guest, so it needs no routing or
     # resolution to reach.
     $global_config->{hv_ip}           = $hv->virbr_ip;
-    $global_config->{provisioner_dir} = $provisioner_dir;
     $global_config->{tld}             = $tld;
     $global_config->{admin_user}      = $admin_user;
     $global_config->{admin_email}     = $admin_email;

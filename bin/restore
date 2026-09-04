@@ -2,9 +2,12 @@
 
 package Trog::Bin::Restore;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use FindBin::libs;
 use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};

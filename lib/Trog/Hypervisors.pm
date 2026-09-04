@@ -1,8 +1,11 @@
 package Trog::Hypervisors;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use Config::Simple();
 use Trog::Config();
 use Trog::HV();

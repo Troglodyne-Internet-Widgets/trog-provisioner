@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
-use strict;
-use warnings;
+use 5.041;
 
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
 use FindBin;
 use FindBin::libs;
 

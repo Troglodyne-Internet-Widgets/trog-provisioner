@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use FindBin;
 use FindBin::libs;
 
@@ -19,7 +22,7 @@ use Text::Xslate();
 require_ok( "$FindBin::Bin/../bin/new_config" ) or die "could not require SUT: $@";
 
 subtest "the helper scripts ride along in the tarball" => sub {
-    # They used to be rsynced off the hypervisor from provisioner_dir, which is
+    # They used to be rsynced off the hypervisor from the generator's own checkout
     # this checkout's path.  The hypervisor's checkout is somewhere else, so the
     # guest asked for a directory that was not there:
     #   rsync: [sender] change_dir "/home/.../scripts" failed: No such file...

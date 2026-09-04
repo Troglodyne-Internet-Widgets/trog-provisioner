@@ -1,8 +1,11 @@
 package Trog::Config;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 =head1 NAME
 
 Trog::Config - where this installation keeps its configuration

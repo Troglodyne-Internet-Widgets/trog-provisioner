@@ -2,9 +2,12 @@
 
 package Trog::Bin::Provisioner;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use FindBin();
 use FindBin::libs;
 use Config::Simple();
@@ -497,7 +500,7 @@ sub mongle_domain_xml {
     my $cpus      = $config->param('cpus');
 
     # host-passthrough exposes the bare-metal CPU (incl. AVX/AVX2/etc.) to the
-    # guest — required by anything that probes cpuid for vector extensions
+    # guest -- required by anything that probes cpuid for vector extensions
     # (e.g. the `claude` CLI bundled v8 snapshot).  Override to host-model,
     # custom, or a specific model name only if you need live migration to a
     # differently-specced HV.

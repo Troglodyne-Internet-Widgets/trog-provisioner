@@ -1,6 +1,8 @@
-use strict;
-use warnings;
+use 5.041;
 
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
 use FindBin;
 use FindBin::libs;
 
@@ -225,7 +227,6 @@ sub test_recipe {
 
     no strict 'refs';
     my $r = "Provisioner::Recipe::$recipe"->new(%opt);
-    use strict;
 
     my @tests = $r->tests();
     ok(@tests, "$recipe recipe Has tests");

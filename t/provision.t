@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper qw{write_text};

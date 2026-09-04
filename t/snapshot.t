@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp qw{tempdir};

@@ -1,7 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 BEGIN {
     # Stub Net::EmptyPort so tests don't do real network waits
     $INC{'Net/EmptyPort.pm'} = 1;
@@ -64,7 +67,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     isnt($rc, 0, 'two modes at once exits non-zero');
 }
 
-# No snapshots → dies
+# No snapshots -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names => sub { () });
@@ -73,7 +76,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     like($@, qr/No snapshots found/, 'main() dies when no snapshots exist');
 }
 
-# --name for nonexistent snapshot → dies
+# --name for nonexistent snapshot -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names => sub { ('snap-a', 'snap-b') });
@@ -82,7 +85,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     like($@, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there');
 }
 
-# Revert fails → dies
+# Revert fails -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names   => sub { ('snap-a') });
@@ -92,7 +95,7 @@ like($synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument');
     like($@, qr/Failed to revert/, 'main() dies when the revert fails');
 }
 
-# Missing provision.conf → dies
+# Missing provision.conf -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(snapshot_names  => sub { ('snap-a') });

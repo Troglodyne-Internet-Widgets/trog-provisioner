@@ -1,8 +1,11 @@
 package Trog::Machine;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use File::Path();
 use File::Copy();
 use File::Temp();

@@ -1,8 +1,10 @@
 #!/usr/bin/env perl
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
-use warnings FATAL => 'all';
+use re '/aa';
 
 use Test::More;
 use File::Temp qw{tempdir};
@@ -128,8 +130,6 @@ subtest 'an existing pool says where it is, and is believed' => sub {
 
 {
     package FakePoolVMM;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, $path) = @_; return bless { path => $path }, $class }
     sub get_storage_pool_by_name { return FakePool->new($_[0]->{path}) }
@@ -137,8 +137,6 @@ subtest 'an existing pool says where it is, and is believed' => sub {
 
 {
     package FakePool;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, $path) = @_; return bless { path => $path }, $class }
 
@@ -547,8 +545,6 @@ subtest 'the base image is fetched once' => sub {
 
 {
     package FakeBuildPool;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, $created) = @_; return bless { created => $created }, $class }
 
@@ -562,8 +558,6 @@ subtest 'the base image is fetched once' => sub {
 
 {
     package FakeBuildVolume;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new      { my ($class, $path) = @_; return bless { path => $path }, $class }
     sub get_path { return $_[0]->{path} }
@@ -616,8 +610,6 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 
 {
     package FakeLeaseVMM;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, $asked) = @_; return bless { asked => $asked }, $class }
     sub get_network_by_name { return FakeNet->new($_[0]->{asked}) }
@@ -625,8 +617,6 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 
 {
     package FakeNet;
-    use strict;
-    use warnings FATAL => 'all';
 
     sub new { my ($class, $asked) = @_; return bless { asked => $asked }, $class }
 

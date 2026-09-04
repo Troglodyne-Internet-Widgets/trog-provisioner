@@ -2,9 +2,12 @@
 
 package Trog::Bin::Snapshot;
 
+use 5.041;
+
 use strict;
 use warnings FATAL => 'all';
 
+use re '/aa';
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
@@ -82,7 +85,7 @@ sub main {
     my $after = $hv->snapshot_current_name($domain);
     die "No current snapshot found after create\n" unless defined $after && length $after;
 
-    die "Current snapshot unchanged after create (still '$after') — snapshot may not have been created\n"
+    die "Current snapshot unchanged after create (still '$after') -- snapshot may not have been created\n"
       if defined $before && $before eq $after;
 
     print "Snapshot '$after' created and verified as current.\n";
