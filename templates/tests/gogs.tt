@@ -8,4 +8,21 @@ chomp $status;
 is($status, 'active', 'gogs is running');
 ok(-f '[% install_dir %]/git.[% domain %]/custom/conf/app.ini', 'gogs config exists');
 
+# These four are made in one brace expansion, which is bash and not POSIX sh.
+# Make ran recipe lines under /bin/sh -- dash, here -- until the Makefile said
+# otherwise, and dash made one directory named after the whole brace list, so
+# none of these existed and app.ini had nowhere to be installed.
+foreach my $dir (qw{repos data log custom/conf}) {
+    ok(-d "[% install_dir %]/git.[% domain %]/$dir", "the $dir directory was created");
+}
+ok(!-d '[% install_dir %]/git.[% domain %]/{repos,data,log,custom/conf}',
+    'and none was created with the braces taken literally');
+
+# The account gogs runs as.  Its useradd sat behind an `id -u ... &>/dev/null ||`
+# guard, and dash reads &> as a background & -- so the guard always succeeded
+# and the account was never created on a guest that did not already have one.
+my $passwd = `getent passwd [% gogs_admin %] 2>/dev/null`;
+ok($passwd, 'the [% gogs_admin %] account exists');
+like($passwd, qr{:\Q[% install_dir %]/git.[% domain %]\E:}, 'with the home directory the recipe asked for');
+
 done_testing();
