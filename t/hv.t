@@ -643,4 +643,44 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     }
 }
 
+# --- Getting a directory to the far side ---------------------------------------
+subtest 'sync_dir ships what is there, and makes what is not' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    my $hv  = fresh(uri => 'qemu+ssh://hv/system');
+
+    my (@put, @made);
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(put_dir => sub { push @put,  [@_[1, 2]]; 1 });
+    $mock->redefine(mkpath  => sub { push @made, $_[1];      1 });
+
+    ok(quietly(sub { $hv->sync_dir("$dir/present") }), 'a directory that is not there still succeeds')
+      or diag 'sync_dir returned false';
+    is_deeply(\@made, ["$dir/present"], 'by making an empty one on the far side');
+    is_deeply(\@put,  [], 'with nothing to put in it');
+
+    # A guest rsyncs out of this directory, and rsync fails rather than
+    # shrugging when the source is not there -- so empty here has to be an
+    # empty directory there, not an absent one.
+    mkdir "$dir/present";
+    (@put, @made) = ((), ());
+    ok(quietly(sub { $hv->sync_dir("$dir/present") }), 'and one that is there');
+    is_deeply(\@put, [["$dir/present", "$dir/present"]], 'goes over to the same path');
+
+    # Nothing to ship anywhere when the hypervisor is this machine.
+    (@put, @made) = ((), ());
+    ok(Trog::HV->forget() && fresh()->sync_dir("$dir/present"), 'a local hypervisor is a no-op');
+    is_deeply([@put, @made], [], 'touching nothing');
+};
+
+subtest 'sync_domain_dir is sync_dir on the domain directory' => sub {
+    my $hv = fresh(uri => 'qemu+ssh://hv/system', domain_dir => '/opt/domains');
+
+    my @synced;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(sync_dir => sub { push @synced, $_[1]; 1 });
+
+    $hv->sync_domain_dir('vm.example.com');
+    is_deeply(\@synced, ['/opt/domains/vm.example.com'], 'derived from domain_dir');
+};
+
 done_testing;

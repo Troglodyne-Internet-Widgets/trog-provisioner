@@ -879,6 +879,18 @@ sub handle_domain {
     }
 
     $tar->write( "$cfg_dir/data.tar.gz", Archive::Tar::COMPRESS_GZIP() ) or die "Could not write $cfg_dir/data.tar.gz: " . Archive::Tar->error();
+
+    # The guest rsyncs its payload out of the data directory on the hypervisor,
+    # and this is the end of the run that owns that directory: it makes the
+    # datadirs the recipes asked for, and writes back whatever remote_files were
+    # fetched off the last guest.  So it goes over now.
+    #
+    # It goes over even when there is nothing in it.  A domain that has never
+    # existed has no data of its own yet, and rsync fails rather than shrugging
+    # when the source directory is not there -- which fails the data target, and
+    # takes the rest of the Makefile with it before any other recipe has run.
+    $hv->sync_dir("$data_config->{from}/$fqdn");
+
     print "Done.\n";
     return 0;
 }

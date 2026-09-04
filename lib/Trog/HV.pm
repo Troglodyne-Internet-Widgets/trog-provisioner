@@ -1191,14 +1191,30 @@ cost of the hypervisor being the machine the guest fetches from.
 
 sub sync_domain_dir {
     my ($self, $domain) = @_;
+    return $self->sync_dir($self->domain_dir . "/$domain");
+}
+
+=head2 sync_dir($path)
+
+Ship a directory to the same path on the hypervisor, and make sure it is there
+even when there is nothing to ship.
+
+That second half matters more than it sounds.  A guest rsyncs its payload out of
+a directory on the hypervisor, and rsync fails rather than shrugging when the
+source is not there -- so a directory that is empty here has to be an empty
+directory there, not an absent one.
+
+=cut
+
+sub sync_dir {
+    my ($self, $path) = @_;
     return 1 if $self->is_local;
 
-    my $local = $self->domain_dir . "/$domain";
-    return 1 unless -d $local;
+    return $self->mkpath($path) ? 1 : 0 unless -d $path;
 
-    print "Shipping $local to the hypervisor...\n";
-    $self->put_dir($local, $local)
-      or die "Could not copy $local to the hypervisor\n";
+    print "Shipping $path to the hypervisor...\n";
+    $self->put_dir($path, $path)
+      or die "Could not copy $path to the hypervisor\n";
     return 1;
 }
 
