@@ -176,6 +176,13 @@ have each broken a recipe here:
   preferences file to `/Preferences.xml` for it.
 - A command spanning lines needs `\` on every one of them, or make hands the
   shell an unterminated quote. `plexmediaserver` had a seven-line `python3 -c "`.
+- Make runs recipe lines under `/bin/sh`, which is **dash** on Ubuntu, not bash.
+  `gogs` made its four directories in one brace expansion and got a single
+  directory named `{repos,data,log,custom/conf}`, and wrote `id -u gogs
+  &>/dev/null || useradd` — dash reads `&>` as a background `&` and a
+  redirection, so the guard always succeeded and the `useradd` was dead code.
+  Do not "fix" this by setting `SHELL := /bin/bash`: `makefile.tt` relies on
+  dash's `echo` expanding `\n` when it writes sendmail's config.
 
 **A template that moves a file `template_files` does not generate** kills the
 target and everything after it. `deluged` and `matrix` both moved an nginx vhost
@@ -185,6 +192,26 @@ they already require.
 **A template that uses a variable the recipe does not declare** renders it
 empty. `nginxproxy` emitted `listen 443 ssl backlog=;`, which nginx refuses
 outright.
+
+**An apostrophe inside a `[%# ... %]` comment empties the rest of the file.**
+Xslate lexes the inside of a directive, comments included, so `every domain's
+aliases` opens a string that runs to the next quote and swallows everything
+between — silently, with no error and a zero exit. The nginx vhost came out two
+bytes long. `t/recipes.t` checks every template comment closes its quotes; run
+it after editing one.
+
+**A default on a field that is only true sometimes is wrong for everything
+else.** `nginxproxy` defaulted `ssl` to true for every vhost, so a port 80 vhost
+that asked for neither `ssl` nor `ssl_redirect` came out `listen 80 ssl` and
+spoke TLS on the plain HTTP port. Its neighbour `ssl_redirect` had the default
+removed for exactly this reason and the comment saying so was sitting right
+above it.
+
+**A URL nothing checks is a URL nobody has fetched.** `garage` took both its
+version and its binary from a GitHub repository that is a mirror and has never
+cut a release: the version lookup 404'd on every run and fell back behind a
+warning, and the download 404'd fatally. Fetch the URL yourself before believing
+it.
 
 **A file `template_files` generates that nothing installs** is dead. `ufw`
 generates the rate limits it means to apply and has never installed them.

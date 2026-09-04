@@ -419,5 +419,34 @@ subtest 'matrix homeserver.yaml includes redis password when redis_password is s
 
 # TODO more stuff with optional fields - probably need to make Provisioner::Recipe insist you enumerate required/optional fields and validate automatically
 
+# Xslate lexes the inside of a directive, comments included, so an apostrophe in
+# a [%# ... %] block opens a string that runs to whatever quote comes next.
+# Everything between is swallowed, and what comes out is a shorter file, or an
+# empty one, with no error anywhere -- a comment reading "every domain's
+# aliases" emptied the whole nginx vhost.
+subtest 'no template comment leaves a quote open' => sub {
+    my @templates;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @templates, $File::Find::name if m/[.]tt\z/ } },
+        $template_dir,
+    );
+    ok(scalar @templates, 'there are templates to check');
+
+    foreach my $tt (sort @templates) {
+        my $body = File::Slurper::read_text($tt);
+        ( my $name = $tt ) =~ s/^\Q$template_dir\E\///;
+
+        # Every [%# ... %] block, which may span lines.
+        while ( $body =~ m/(\[%#.*?%\])/gs ) {
+            my $comment = $1;
+            foreach my $quote ( q{'}, q{"} ) {
+                my $count = () = $comment =~ m/\Q$quote\E/g;
+                ok( $count % 2 == 0, "$name: a comment closes every $quote it opens" )
+                  or diag $comment;
+            }
+        }
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
