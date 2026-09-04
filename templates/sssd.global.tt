@@ -2,9 +2,12 @@
 install -m 0600 sssd.conf /etc/sssd/sssd.conf
 chown root:root /etc/sssd/sssd.conf
 
-# Wire NSS and PAM to use SSSD
+# Wire NSS and PAM to use SSSD.  pam-auth-update is the Debian-family way and
+# does the whole job; authselect used to be called here as well, which is a
+# Fedora tool whose profiles rewrite the same files in a different style.  It is
+# not in this recipe's packages either, so all it ever produced was a "command
+# not found" swallowed by the /bin/true after it.
 pam-auth-update --enable sss
-authselect select sssd --force; /bin/true
 
 # Enable automatic home directory creation on first login
 pam-auth-update --enable mkhomedir; /bin/true
