@@ -1,0 +1,11 @@
+snap list 2>&1 | awk '{print $1}' | tail -n +2 | xargs snap remove; /bin/true
+systemctl stop snapd; /bin/true
+systemctl disable snapd; /bin/true
+systemctl mask snapd; /bin/true
+apt purge snapd -y; /bin/true
+apt-mark hold snapd; /bin/true
+rm -rf /root/snap; /bin/true
+rm -rf /snap; /bin/true
+rm -rf /var/lib/snapd; /bin/true
+rm -rf /var/snap; /bin/true
+mv nosnap.pref /etc/apt/preferences.d/nosnap.pref

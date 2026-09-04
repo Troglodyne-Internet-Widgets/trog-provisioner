@@ -1,0 +1,17 @@
+verbose = 0
+[% IF custom_log %]
+custom_log = [% custom_log %]
+[% END -%]
+[% IF routers -%]
+routers = [% routers.join(',') %]
+[% END -%]
+[% IF loggers -%]
+loggers = [% loggers.join(',') %]
+[% END -%]
+domain = [% domain %]
+user = [% user %]
+http_user=www-data
+indices=
+[% IF basedir -%]
+basedir=[% basedir %]
+[% END -%]

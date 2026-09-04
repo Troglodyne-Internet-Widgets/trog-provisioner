@@ -1,0 +1,25 @@
+[Unit]
+Description=Koan messaging bridge ([% domain %])
+After=network-online.target
+Wants=network-online.target
+PartOf=koan.service
+
+[Service]
+Type=simple
+User=[% user %]
+Group=[% user %]
+WorkingDirectory=[% install_dir %]/[% domain %]/koan/koan
+EnvironmentFile=[% install_dir %]/[% domain %]/koan/.env
+EnvironmentFile=-[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env
+Environment=KOAN_ROOT=[% install_dir %]/[% domain %]/koan
+Environment=PYTHONPATH=[% install_dir %]/[% domain %]/koan/koan
+Environment=PATH=[% install_dir %]/[% domain %]/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=[% install_dir %]/[% domain %]
+ExecStart=[% install_dir %]/[% domain %]/.venv/bin/python app/awake.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:[% install_dir %]/[% domain %]/koan/logs/awake.log
+StandardError=append:[% install_dir %]/[% domain %]/koan/logs/awake.log
+
+[Install]
+WantedBy=multi-user.target

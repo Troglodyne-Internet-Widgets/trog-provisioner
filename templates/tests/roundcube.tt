@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-d '[% install_dir %]/webmail.[% domain %]', 'roundcube directory exists');
+ok(-f '[% install_dir %]/webmail.[% domain %]/config/config.inc.php', 'roundcube config exists');
+ok(-f '/etc/nginx/sites-enabled/webmail.[% domain %].conf', 'roundcube nginx vhost exists');
+
+done_testing();

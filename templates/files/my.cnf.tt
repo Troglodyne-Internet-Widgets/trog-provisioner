@@ -1,0 +1,35 @@
+[server]
+user=mysql
+basedir=/opt/mysql/
+datadir=/opt/mysql/data
+socket=/opt/mysql/mysql.sock
+general_log=1
+general_log_file=/opt/mysql/query.log
+skip_networking=1
+pid_file=/opt/mysql/pidfile
+log_bin=/opt/mysql/binlogs/maria_binlog
+max_allowed_packet=256M
+sql_mode=ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+local-infile=0
+max_delayed_threads=0
+character-set-client-handshake = FALSE
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+symbolic-links=0
+slow_query_log = 1
+slow_query_log_file = /opt/mysql/logs/slow-query.log
+long_query_time = 30
+
+[client]
+socket=/opt/mysql/mysql.sock
+user=root
+password=[% root_pw %]
+
+[mysqlcheck]
+socket=/opt/mysql/mysql.sock
+user=root
+password=[% root_pw %]
+
+[mariabackup]
+socket=/opt/mysql/mysql.sock
+

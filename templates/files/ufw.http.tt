@@ -1,0 +1,4 @@
+[APT]
+title=APT
+description=Allow HTTP/DNS requests for Apt
+ports=53,80,443/tcp|53/udp

@@ -1,0 +1,29 @@
+[Unit]
+Description=Koan agent loop ([% domain %])
+After=network-online.target koan-awake.service
+Wants=network-online.target
+Requires=koan-awake.service
+BindsTo=koan-awake.service
+
+[Service]
+Type=simple
+User=[% user %]
+Group=[% user %]
+WorkingDirectory=[% install_dir %]/[% domain %]/koan/koan
+EnvironmentFile=[% install_dir %]/[% domain %]/koan/.env
+# Loaded if present - written by `app.matrix_login` on first provision when
+# the bootstrap (matrix_password) path is in use.  The leading `-` makes
+# systemd tolerate the file's absence on first boot.
+EnvironmentFile=-[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env
+Environment=KOAN_ROOT=[% install_dir %]/[% domain %]/koan
+Environment=PYTHONPATH=[% install_dir %]/[% domain %]/koan/koan
+Environment=PATH=[% install_dir %]/[% domain %]/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=[% install_dir %]/[% domain %]
+ExecStart=[% install_dir %]/[% domain %]/.venv/bin/python app/run.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:[% install_dir %]/[% domain %]/koan/logs/run.log
+StandardError=append:[% install_dir %]/[% domain %]/koan/logs/run.log
+
+[Install]
+WantedBy=multi-user.target

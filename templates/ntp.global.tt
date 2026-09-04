@@ -1,0 +1,13 @@
+# Remove competing NTP daemons before installing chrony
+[% packager_remove_invocation %] ntp ntpdate; /bin/true
+# Disable systemd-timesyncd if present - chrony replaces it
+systemctl stop systemd-timesyncd; /bin/true
+systemctl disable systemd-timesyncd; /bin/true
+systemctl mask systemd-timesyncd; /bin/true
+
+# Install chrony config and activate
+mv chrony.conf /etc/chrony/chrony.conf
+chown root:root /etc/chrony/chrony.conf
+chmod 0644 /etc/chrony/chrony.conf
+systemctl enable chrony
+[% script_dir %]/queue_postrun_task systemctl restart chrony

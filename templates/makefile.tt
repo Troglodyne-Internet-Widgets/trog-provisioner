@@ -1,0 +1,105 @@
+[% FOR var IN vars.keys().sort() %]
+[% var %] := [% vars.$var | mark_raw %]
+[% END -%]
+
+[% global_targets = ['sysctl', 'packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
+[% IF user -%]
+[% IF user == admin_user -%]
+[% global_targets.unshift('admin_user') -%]
+[% ELSE -%]
+[% global_targets.unshift('service_user') -%]
+[% END -%]
+[% END -%]
+[% global_targets.unshift('state') -%]
+
+.PHONY: all
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %] [% state_dir %]/test
+	[% script_dir %]/post_install
+	touch /root/install_complete
+
+[% state_dir %]/state:
+	mkdir -p [% state_dir %]
+	touch $@
+
+[% state_dir %]/sysctl:
+	echo "net.ipv4.conf.all.arp_announce=1" > /etc/sysctl.d/10-arp-flux.conf
+	echo "net.ipv4.conf.all.arp_ignore=2" >> /etc/sysctl.d/10-arp-flux.conf
+	sysctl -p
+	touch $@
+
+[% state_dir %]/packages:
+	# We have to account for broken packages that depend on apache or some other incompatible sofware for no reason
+	# Or forgets to list a dependency, or relies on a curses UI to install
+	# As such we have no way of knowing whether we have a fucked kit or not, yay
+	[% packager_up_invocation | mark_raw %]; /bin/true
+	#[% packager_invocation | mark_raw %] [% FOR pkg IN packages %][% pkg %] [% END %]; /bin/true
+	#[% packager_invocation | mark_raw %] [% FOR pkg IN packages %][% pkg %] [% END %]; /bin/true
+	touch $@
+
+[% state_dir %]/testdeps:
+	/bin/true;
+	[% IF testdeps.size() %]
+	cpanm [% testdeps.join(' ') %]
+	[% END -%]
+
+[% state_dir %]/test:
+	prove -vm
+
+[% state_dir %]/sendmail:
+	# Make sure mailing works by forcing send-only lo and enabling starttls
+	! grep starttls.m4 /etc/mail/sendmail.mc && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc; /bin/true
+	! grep starttls.m4 /etc/mail/submit.mc && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc; /bin/true
+	test -f /etc/mail/sendmail.conf && sed -i -e "s/eth0/lo/gm" /etc/mail/sendmail.conf; /bin/true
+	#XXX something mangles this later
+	test -f /etc/mail/sendmail.conf && chattr +ie /etc/mail/sendmail.conf; /bin/true
+	test -f /etc/mail/sendmail.conf && systemctl enable sendmail; /bin/true
+	test -f /etc/mail/sendmail.conf && [% script_dir %]/queue_postrun_task systemctl restart sendmail; /bin/true
+	newaliases
+	touch $@
+
+[% state_dir %]/service_user:
+	useradd -s /usr/sbin/nologin -d [% install_dir %]/[% domain %] [% user %]
+	mkdir -p [% install_dir %]/[% domain %]; /bin/true
+	chown [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
+	touch $@
+
+[% state_dir %]/admin_user:
+	 mkdir -p [% install_dir %]; /bin/true
+	 ln -s /home/[% admin_user %] [% install_dir %]/[% domain %]
+	 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]
+	 touch $@
+
+[% state_dir %]/scripts:
+	mkdir -p [% script_dir %]; rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% provisioner_dir %]/scripts/* [% script_dir %]
+	touch $@
+
+# Make a self-signed cert FIRST, because everybody and their mama needs a damn cert
+[% state_dir %]/ssl:
+	mkdir -p '/etc/letsencrypt/live/[% domain %]'
+	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:www.[% domain %],DNS:mail.[% domain %][% full_aliases.join(',DNS:') %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
+	# Setup the link to LE certs
+	ln -s /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
+	ln -s /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
+	touch $@
+
+# Be explicit about SSH security
+# You will want to have users setup via ipmap/recipes.
+[% state_dir %]/ssh:
+	echo 'PermitRootLogin prohibit-password' > /etc/ssh/sshd_config.d/100-security.conf
+	echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config.d/100-security.conf
+	touch $@
+
+[% state_dir %]/data:
+[% data_fragment | tabinate -%]
+	touch $@
+
+[% FOR module IN global_fragments.keys().sort() %]
+[% global_state_dir %]/global_[% module %]:
+[% global_fragments.$module | tabinate -%]
+	touch $@
+[% END -%]
+[% FOR module IN fragments.keys().sort() %]
+[% state_dir %]/[% module %]:
+[% fragments.$module | tabinate -%]
+	touch $@
+[% END -%]

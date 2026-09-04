@@ -1,0 +1,8 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+ok(-f '/etc/cron.d/autoupdate', 'autoupdate cron exists');
+
+done_testing();

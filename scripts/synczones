@@ -1,0 +1,159 @@
+#!/usr/bin/env perl
+
+package ZoneSyncer;
+
+use strict;
+use warnings;
+
+use List::Util qw{any};
+use JSON qw{decode_json};
+use Net::DNS::ZoneFile;
+use Config::Simple;
+use Getopt::Long qw{GetOptionsFromArray};
+
+=head1 synczones
+
+=head2 SYNOPSIS
+
+    synczones --driver powerdns --config /etc/synczones.conf zonefile.zone
+
+=head2 DESCRIPTION
+
+Synchronize DNS zone files with DNS providers using lexicon.
+
+=cut
+
+# Not exhaustive, just what we know how to do. 
+# See zonediff() for why, lots of jiggly stuff here.
+my @record_types = qw{SOA A AAAA MX CNAME TXT SRV CAA};
+
+my %d2o = (
+	powerdns => 'pdns-server',
+);
+
+sub main {
+    my (@args) = @_;
+
+    my @drivers;
+    my ($cfile, $dryrun, $quiet);
+    GetOptionsFromArray(\@args,
+        'driver=s@' => \@drivers,
+        'config=s'  => \$cfile,
+        'dryrun'    => \$dryrun,
+        'quiet'     => \$quiet,
+    );
+
+    die "Must pass at least one zonefile" unless @args;
+    die "Must pass at least one --driver" unless @drivers;
+
+    $cfile //= '/etc/synczones.conf';
+    my $config = Config::Simple->new($cfile);
+    my %dconf = $config->vars();
+
+    # TODO check perms on config aren't group/world readable and owned by root
+
+    foreach my $zone (@args) {
+        die "No such zonefile $zone" unless -f $zone;
+        my $zf = Net::DNS::ZoneFile->new( $zone );
+        my @zones = $zf->read;
+        my %zhash = map { my $rt = $_; $rt => [grep { uc($_->type()) eq $rt } @zones] } @record_types;
+        my $origin = $zf->origin;
+        $origin =~ s/\.$//;
+        foreach my $driver (@drivers) {
+            my @preamble = ("lexicon", $driver);
+	        push( @preamble, '--auth-username='.qq{'$dconf{"$driver.auth_username"}'}) if $dconf{"$driver.auth_username"};
+            push( @preamble, '--auth-token='.qq{'$dconf{"$driver.auth_token"}'})    if $dconf{"$driver.auth_token"};
+            push( @preamble, qw{--output=JSON} );
+            # Some drivers, like powerdns, plesk etc require a server address
+            push( @preamble, "--$d2o{$driver}=".qq{'$dconf{"$driver.server"}'}) if $dconf{"$driver.server"};
+
+            # Now, let's figure out if we have to do anything.
+            my $lexicon = join(' ', @preamble);
+            foreach my $type (@record_types) {
+                my $listcmd = "$lexicon list $origin $type";
+                print "Scanning for existing $type records for $origin on $driver..." unless $quiet;
+                my $result  = qx{$listcmd};
+                die "command failed." if $?;
+                print "Done.\n" unless $quiet;
+
+                my $decoded = decode_json($result);
+                my %crud = zonediff($zhash{$type}, $decoded);
+                foreach my $action (keys(%crud)) {
+                    my $nr_changes = scalar(@{$crud{$action}});
+                    print "Found $nr_changes $type $action\n" unless $quiet;
+                    foreach my $to_do (@{$crud{$action}}) {
+                        my @cmd_suffix;
+                        my $content = $to_do->{content};
+                        my $ttl     = $to_do->{ttl};
+                        my $name    = $to_do->{name};
+                        my $ident   = $to_do->{id};
+                        push(@cmd_suffix, "--identifier '$ident'") if $action ne 'create';
+                        push(@cmd_suffix, "--ttl $ttl")            if $action ne 'delete';
+                        push(@cmd_suffix, "--name '$name'")        if $action ne 'delete';
+                        push(@cmd_suffix, "--content '$content'")  if $action ne 'delete';
+                        my $suffix = join(' ', @cmd_suffix) // '';
+                        my $do_cmd = qq{$lexicon $action $origin $type $suffix};
+                        if ($dryrun) {
+                            print "$do_cmd\n";
+                            next;
+                        }
+                        my $out = qx($do_cmd);
+                        die "Failure reported:\n$do_cmd\n\n$out" if $?;
+                    }
+                    print "Done with $nr_changes $type $action\n" if $nr_changes && !$quiet;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+sub zonediff {
+    my ($zones_from_file, $zones_actual) = @_;
+
+    my @to_update;
+    my @to_create;
+    my @to_delete;
+    OUTER: while (my $to_sync = shift @$zones_from_file) {
+        my $raw = $to_sync->plain;
+        my $update_id = undef;
+
+        # Build plain form(s)
+        @$zones_actual = map {
+            my $s = $_;
+            my $dquot = $_->{content} =~ s/"//g;
+            $s->{plain} = "$_->{name}. $_->{ttl} IN $_->{type} $_->{content}";
+            $s->{pdot}  = "$s->{plain}.";
+            $s->{pquot} = qq|$_->{name}. $_->{ttl} IN $_->{type} "$_->{content}"|;
+            $s->{dquot} = qq|$_->{name}. $_->{ttl} IN $_->{type} $dquot|;
+            $s
+        } @$zones_actual;
+
+        # Scan for the zone.
+        for (0..scalar(@$zones_actual)) {
+            my $pmatch = shift @$zones_actual;
+            # If we find the zone, throw it away, nothing to do.
+            if (any { $_ eq $raw } ($pmatch->{plain}, $pmatch->{pdot}, $pmatch->{pquot}, $pmatch->{dquot})) {
+                $update_id = $pmatch->{id};
+                next OUTER;
+            }
+            # Slam it back on the stack otherwise.
+            push(@$zones_actual, $pmatch);
+        }
+
+        # You can have many of most types of records, but not these two.
+        my $do_update = any { $to_sync->type eq $_ } qw{SOA NS};
+
+        # If we have any zones from the remote left we need to delete them in favor of creating the new ones.
+        push(@to_delete, @$zones_actual) unless $do_update;
+        my $ref2push = $do_update ? \@to_update : \@to_create;
+
+        die "Cannot attempt to do two updates to ".$to_sync->type()." records." if $do_update && @to_update > 1;
+        push(@$ref2push, { content => $to_sync->rdstring, name => $to_sync->owner, id => $update_id, ttl => $to_sync->ttl } );
+    }
+    return ( update => \@to_update, create => \@to_create, delete => \@to_delete );
+}
+

@@ -1,0 +1,62 @@
+$ORIGIN [% domain %].
+$TTL    300
+
+@       IN      SOA     ns1.[% domain %]. [% admin_email | email_for_dns %]. (
+                        [% serial %]      ; Serial (unix timestamp)
+                        300               ; Refresh
+                        300               ; Retry
+                        1209600           ; Expire
+                        10800 )           ; Minimum
+
+; We are our own nameserver, delegated.
+@ 300 IN NS ns1.[% domain %].
+
+; If we have any *other* namservers clustered, add them too.
+[% FOREACH ns IN nameservers.values().sort() %]
+@        300      IN NS   [% ns %].
+[% END -%]
+
+[% FOREACH subdo IN ipmap.keys().sort() %]
+[% NEXT IF subdo != domain %]
+@       IN A    [% ipmap.$subdo %]
+ns1     IN A    [% ipmap.$subdo %]
+;[% ipmap.$subdo | reverse_ip %] IN PTR  [% subdo %]
+[% END -%]
+
+[% FOREACH sub IN aliases.keys().sort() %]
+[% NEXT IF sub != domain %]
+[% FOREACH alias IN aliases.$sub.sort() %]
+[% alias %] IN CNAME @
+[% END -%]
+[% END -%]
+
+; Mail
+@       IN MX 10 mail.[% domain %]
+autodiscover IN CNAME @
+autoconfig   IN CNAME @
+
+; Autodiscover TXT record
+@ IN TXT "mailconf=https://autoconfig.[% domain %]/autoconfig/autoconfig.xml"
+
+; DKIM/DMARC. If we have mail setup, we'll modify this with the relevant lexicon script.
+default._domainkey IN TXT  "o=-"
+mail._domainkey    IN TXT  "o=-"
+_dmarc             IN TXT  "v=DMARC1; p=none"
+@                  IN TXT  "v=spf1 +a +mx -all"
+
+_imaps._tcp        IN SRV 0 0 993 mail.[% domain %].
+_pop3s._tcp        IN SRV 0 0 995 mail.[% domain %].
+_smtps._tcp        IN SRV 0 0 465 mail.[% domain %].
+_submission.tcp    IN SRV 0 0 564 mail.[% domain %].
+_autodiscover._tcp IN SRV 0 0 80  mail.[% domain %].
+
+[% IF modules.grep('matrix').size() %]
+; Matrix subdomains
+matrix       IN CNAME @
+admin.matrix IN CNAME @
+[% END -%]
+
+; Include your DKIM key record below, ACME/CAA & GSV et cetera
+[% IF extra_records %]
+[% extra_records | mark_raw %]
+[% END %]

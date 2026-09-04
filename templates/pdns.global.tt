@@ -1,0 +1,35 @@
+# Grab up to date pdns.  Regrettably key servers are flaky, gotta retry over n over
+retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys CBC8B383
+retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys FD380FBB
+retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.com:80
+apt-add-repository http://repo.powerdns.com/ubuntu -p auth-master
+apt-get update
+apt-get install -y pdns-server
+# Patch lexicon to work with unix sockets XXX it may have already been applied.
+cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-pdns-af-unix.patch; /bin/true
+cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-arbitrary-record-types.patch; /bin/true
+# Run on port 2500 so the recursor can run
+mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
+# Make sure additions to recursing actually work
+echo "forward-zones=test.test=192.168.1.1" >> /etc/powerdns/recursor.conf
+# Configure the zone to be loaded into pdns
+mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
+# Set up the API so we can use lexicon
+mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
+mv synczones.conf /etc/synczones.conf
+chown root:root /etc/synczones.conf
+chmod 0600 /etc/synczones.conf
+# Apply schema
+sqlite3 /var/spool/powerdns/zones.db < /usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql
+# Don't need no bind
+mkdir -p /etc/powerdns/config-available
+mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf
+# Fix broken service configuration
+[% script_dir %]/configure_pdns
+mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
+chown -R pdns:pdns /var/spool/powerdns/run
+mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
+[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[% script_dir %]/queue_postrun_task systemctl restart rsyslog
+[% script_dir %]/queue_postrun_task systemctl enable pdns
+[% script_dir %]/queue_postrun_task systemctl enable pdns-recursor

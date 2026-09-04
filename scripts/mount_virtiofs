@@ -1,0 +1,37 @@
+#!/bin/bash
+
+TARGET=$1
+LINK_NAME=$2
+TYPE=$3
+
+ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F "=" '{print $2}')
+LINK_NAME_REPLACED=$(echo "$LINK_NAME" | sed -e "s|^/||" | sed -e "s|/|-|")
+mkdir -p $LINK_NAME
+
+# Actually mount it
+MNTFILE="/usr/lib/systemd/system/$LINK_NAME_REPLACED.mount"
+
+echo "[Unit]" >> $MNTFILE
+echo "Description=Shared dir from HV" >> $MNTFILE
+echo "After=multi-user.target" >> $MNTFILE
+echo "[Mount]" >> $MNTFILE
+echo "What=$ACTUAL_TARGET" >> $MNTFILE
+echo "Where=$LINK_NAME" >> $MNTFILE
+echo "Type=virtiofs" >> $MNTFILE
+echo "[Install]" >> $MNTFILE
+echo "WantedBy=multi-user.target" >> $MNTFILE
+
+AUTOMNTFILE="/usr/lib/systemd/system/$LINK_NAME_REPLACED.automount"
+echo "[Unit]" >> $AUTOMNTFILE
+echo "Description=Automount $LINK_NAME" >> $AUTOMNTFILE
+echo "ConditionPathExists=$LINK_NAME" >> $AUTOMNTFILE
+echo "[Automount]" >> $AUTOMNTFILE
+echo "Where=$LINK_NAME" >> $AUTOMNTFILE
+echo "TimeoutIdleSec=10" >> $AUTOMNTFILE
+echo "[Install]" >> $AUTOMNTFILE
+echo "WantedBy=multi-user.target" >> $AUTOMNTFILE
+
+systemctl daemon-reload
+systemctl enable $LINK_NAME_REPLACED.mount
+systemctl start $LINK_NAME_REPLACED.mount
+#mount -t virtiofs $ACTUAL_TARGET $LINK_NAME

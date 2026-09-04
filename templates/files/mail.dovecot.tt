@@ -1,0 +1,64 @@
+[% UNLESS ipv6 %]listen = *
+[% END -%]mail_home = /mail/%Ld/%Ln
+mail_location = maildir:/mail/%Ld/%Ln/Maildir:UTF-8
+postmaster_address = postmaster@mail.[% domain %]
+
+first_valid_uid=1
+first_valid_gid=1
+
+mail_uid=dovecot
+mail_gid=dovecot
+
+# Enable Maildir++ quota support.
+mail_plugins = $mail_plugins quota
+
+# Take quota limits from maildirsize file. If it doesn't exist, don't enforce.
+plugin {
+  quota = maildir:User quota
+  quota_grace = 0
+}
+
+plugin {
+    quota_warning  = storage=95%% quota-warning %u
+}
+
+service quota-warning {
+    executable = script /mail/scripts/dovecot_overquota
+    user = dovecot
+    unix_listener quota-warning {
+        user = dovecot
+    }
+}
+
+# Sieve
+protocol lda {
+  mail_plugins = $mail_plugins sieve
+}
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
+}
+
+# Whole server SSL
+ssl_cert = </etc/ssl/certs/[% domain %].pem
+ssl_key =  </etc/ssl/private/[% domain %].pem
+ssl = required
+disable_plaintext_auth = yes
+
+# LMTPD
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+     user = postfix
+     group = postfix
+     mode = 0600
+  }
+}
+
+# SASL
+service auth {
+    unix_listener /var/spool/postfix/private/auth {
+        mode = 0660
+        user = postfix
+        group = postfix
+    }   
+}
+auth_mechanisms = plain login

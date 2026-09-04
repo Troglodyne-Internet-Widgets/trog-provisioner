@@ -1,0 +1,2 @@
+rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% skel %]/ /home/[% admin_user %]/
+chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]

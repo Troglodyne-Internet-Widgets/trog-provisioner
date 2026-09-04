@@ -1,0 +1,8 @@
+[powerdns]
+auth_token=[% api_key %]
+server=local:/var/spool/powerdns/api.sock
+[% IF registrar %]
+[[% registrar.type %]]
+auth_username=[% registrar.user %]
+auth_token=[% registrar.key %]
+[% END %]

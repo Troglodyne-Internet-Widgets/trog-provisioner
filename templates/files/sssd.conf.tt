@@ -1,0 +1,27 @@
+[sssd]
+services = nss, pam
+config_file_version = 2
+domains = LDAP
+
+[domain/LDAP]
+id_provider = ldap
+auth_provider = ldap
+ldap_uri = [% ldap_uri %]
+ldap_search_base = [% base_dn %]
+ldap_id_use_start_tls = false
+ldap_tls_reqcert = demand
+ldap_tls_cacertdir = /etc/ssl/certs
+[%- IF bind_dn %]
+ldap_default_bind_dn = [% bind_dn %]
+ldap_default_authtok = [% bind_password %]
+[%- END %]
+ldap_user_object_class = posixAccount
+ldap_group_object_class = posixGroup
+enumerate = true
+cache_credentials = true
+ldap_schema = rfc2307
+
+[nss]
+homedir_substring = /home
+
+[pam]

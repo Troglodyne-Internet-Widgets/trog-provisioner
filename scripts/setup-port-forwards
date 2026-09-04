@@ -1,0 +1,23 @@
+#!/bin/bash
+
+[ $# -eq 0 ] && exit 0;
+
+sed -i '/^\*filter/i *nat' /etc/ufw/before.rules
+sed -i '/^\*filter/i :POSTROUTING ACCEPT [0:0]' /etc/ufw/before.rules
+
+for portmap in $@
+do
+    declare -a array
+    for port in $(echo $portmap | tr "=" "\n")
+    do
+        array+=("$port")
+    done
+    FROM=${array[0]}
+    TO=${array[1]}
+
+    echo "Forwarding port $FROM to $TO"
+
+    sed -i "/^\*filter/i -A PREROUTING -p tcp --dport $FROM -j REDIRECT --to-port $TO" /etc/ufw/before.rules
+done
+
+sed -i '/^\*filter/i COMMIT\n' /etc/ufw/before.rules

@@ -1,0 +1,25 @@
+bind [% bind %]
+port [% port %]
+daemonize no
+supervised systemd
+loglevel notice
+logfile /var/log/redis/redis-server.log
+dir /var/lib/redis
+[% IF save %]
+save 900 1
+save 300 10
+save 60 10000
+[% ELSE %]
+save ""
+[% END %]
+[% IF requirepass %]
+requirepass [% requirepass %]
+[% END %]
+[% IF maxmemory %]
+maxmemory [% maxmemory %]
+[% END %]
+[% IF maxmemory_policy %]
+maxmemory-policy [% maxmemory_policy %]
+[% ELSE %]
+maxmemory-policy noeviction
+[% END %]

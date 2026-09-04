@@ -1,0 +1,45 @@
+" PerlNavigator LSP configuration,  managed by provisioner, do not edit by hand.
+[% IF modules.grep('perl').size() -%]
+" perl recipe is active, use the custom perlbrew perl when available.
+let s:perl_path = glob('/opt/perl5/*/bin/perl')
+let s:perl_path = !empty(s:perl_path) ? split(s:perl_path, "\n")[0] : '[% perl_path %]'
+[% ELSE -%]
+let s:perl_path = '[% perl_path %]'
+[% END -%]
+
+if executable('perlnavigator')
+    au User lsp_setup call lsp#register_server({
+        \ 'name': 'perlnavigator',
+        \ 'cmd': {server_info->['perlnavigator', '--stdio']},
+        \ 'allowlist': ['perl'],
+        \ 'workspace_config': {
+        \   'perlnavigator': {
+        \     'perlPath': s:perl_path,
+        \     'enableWarnings': v:true,
+        \     'perlcriticProfile': '/etc/perlcriticrc',
+        \     'perltidyProfile':   '/etc/perltidyrc',
+        \     "perlcriticMessageFormat": "%m [Policy: %p] - %a | Docs: https://metacpan.org/pod/Perl::Critic::Policy::%p"
+        \   },
+        \ },
+        \ })
+endif
+
+function! s:on_lsp_buffer_enabled() abort
+    setlocal omnifunc=lsp#complete
+    setlocal signcolumn=yes
+    nmap <buffer> gd <plug>(lsp-definition)
+    nmap <buffer> gr <plug>(lsp-references)
+    nmap <buffer> K  <plug>(lsp-hover)
+    nmap <buffer> <leader>rn <plug>(lsp-rename)
+    nmap <buffer> [g <plug>(lsp-previous-diagnostic)
+    nmap <buffer> ]g <plug>(lsp-next-diagnostic)
+endfunction
+
+augroup perllsp
+    au!
+    autocmd User lsp_buffer_enabled call s:on_lsp_buffer_enabled()
+augroup END
+
+let g:asyncomplete_auto_popup = 1
+let g:lsp_diagnostics_enabled = 1
+let g:lsp_diagnostics_echo_cursor = 1

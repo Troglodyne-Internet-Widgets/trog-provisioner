@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active plexmediaserver 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'plex media server is running');
+ok(-d '/var/lib/plexmediaserver', 'plex data directory exists');
+
+done_testing();

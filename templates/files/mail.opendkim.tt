@@ -1,0 +1,29 @@
+# OpenDKIM configuration
+
+Syslog                  yes
+SyslogSuccess           no
+LogWhy                  yes
+X-Header				yes
+
+DNSTimeout				5
+
+Canonicalization        relaxed/simple
+Mode                    sv
+SubDomains              yes
+OversignHeaders         From
+
+KeyTable				/etc/opendkim/KeyTable
+SigningTable			refile:/etc/opendkim/SigningTable
+InternalHosts			/etc/opendkim/InternalHosts
+
+UserID                  opendkim:opendkim
+UMask                   000
+
+Socket                  local:/var/spool/postfix/opendkim/opendkim.sock
+PidFile                 /run/opendkim/opendkim.pid
+Background				yes
+AutoRestart				yes
+
+# The trust anchor enables DNSSEC. In Debian, the trust anchor file is provided
+# by the package dns-root-data.
+TrustAnchorFile         /usr/share/dns/root.key

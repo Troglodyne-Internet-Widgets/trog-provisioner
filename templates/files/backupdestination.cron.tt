@@ -1,0 +1,6 @@
+[% FOREACH backuphost IN hosts %]
+# Backup at midnight every day.
+0 0 * * * root command [% script_dir %]/backup.sh [% backuphost %] "[% base_dir %]" "[% install_dir %]/[% domain %]/[% key_file %]" [% host_port_map.$backuphost %] [% targets.join(' ') %] &>> /var/log/backups/[% backuphost %].log
+# Run the retention script every friday at noon.
+0 12 * * 5 root command [% script_dir %]/retention.sh [% backuphost %] "[% base_dir %]" &>> /var/log/backups/[% backuphost %].log
+[% END %]

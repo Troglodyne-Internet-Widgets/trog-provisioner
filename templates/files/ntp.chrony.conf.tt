@@ -1,0 +1,22 @@
+# chrony.conf - managed by provisioner, do not edit by hand
+[% FOR server IN servers %]
+pool [% server %] iburst
+[% END -%]
+
+# Allow stepping the clock on startup (rather than slewing) when offset is large
+makestep [% makestep %]
+
+# Record the rate at which the system clock gains/loses time
+driftfile /var/lib/chrony/chrony.drift
+
+# Log tracking, measurements, and statistics to files
+logdir /var/log/chrony
+
+# Enable NTP kernel synchronisation
+rtcsync
+
+# Reduce clock error spikes from bad samples
+maxdistance 1.5
+
+# Stop operating as an NTP server (client-only mode)
+port 0

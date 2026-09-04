@@ -1,0 +1,8 @@
+# Reject anything incoming (and outgoing from) to a domain we don't host
+# This also has the benefit of nailing 'undisclosed_recipient' spammers
+
+/^.*@[% domain %]$/
+    DUNNO
+
+/^(.*)$/
+    550 Unknown User: $1 (contact postmaster@[% domain %] for assistance)

@@ -1,0 +1,98 @@
+[% FOR vhost in vhosts.keys() %]
+[% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
+[% IF !ssl && ssl_redirect %]
+server {
+    listen [% vhost %];
+    [% IF ipv6 %]
+    listen [::]:[% vhost %] backlog=[% backlog %];
+    [% END -%]
+    server_tokens off;
+
+    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+    return 301 https://$host$request_uri;
+}
+[% ELSE -%]
+[% auth_statics = vhosts.$vhost.auth_statics -%]
+[% auth_uri     = vhosts.$vhost.auth_uri -%]
+[% proxy_uri    = vhosts.$vhost.proxy_uri -%]
+[% static_dir   = vhosts.$vhost.static_dir || install_dir _ '/' _ domain _ '/www' -%]
+[% public_dir   = vhosts.$vhost.public_dir %]
+[% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
+server {
+    listen [% $vhost %] [% ssl %] backlog=[% backlog %];
+    [% IF ipv6 %]
+    listen [::]:[% vhost %] [% ssl %] backlog=[% backlog %];
+    [% END -%]
+
+    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+    location / {
+        gzip on;
+        etag on;
+        expires 1d;
+        sendfile on;
+        sendfile_max_chunk 1m;
+        tcp_nopush on;
+        root [% install_dir %]/[% domain %]/[% static_dir %];
+        try_files $uri $uri.html $uri/index.html @default;
+    }
+
+    [% IF public_dir %]
+    location /[% public_dir %] {
+        alias [% install_dir %]/[% domain %]/[% public_dir %];
+        autoindex on;
+        autoindex_exact_size off;
+        autoindex_localtime on;
+        sendfile on;
+        sendfile_max_chunk 1m;
+        tcp_nopush on;
+    }
+    [% END -%]
+
+    [% IF auth_statics AND auth_uri %]
+    location /[% auth_statics %] {
+        auth_request [% auth_uri %];
+        etag on;
+        expires 1d;
+        sendfile on;
+        tcp_nopush on;
+        sendfile_max_chunk 1m;
+        root [% install_dir %]/[% domain %]/[% static_dir %];
+    }
+    location = [% auth_uri %] {
+        internal;
+        proxy_pass              [% proxy_uri %];
+        proxy_pass_request_body off;
+        proxy_set_header        Content-Length "";
+        proxy_set_header        X-Original-URI  $request_uri;
+        proxy_set_header        X-Forwarded-For $remote_addr;
+        proxy_set_header        X-Forwarded-Proto $scheme;
+    }
+    [% END -%]
+
+    [% IF nocache_prefix %]
+    location [% nocache_prefix %] {
+        sendfile on;
+        sendfile_max_chunk 1m;
+        tcp_nopush on;
+        root [% install_dir %]/[% domain %]/[% static_dir %];
+        try_files $uri @default;
+    }
+    [% END -%]
+
+    location @default {
+        proxy_pass [% proxy_uri %];
+        proxy_buffering off;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host            $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+[% END -%]
+[% END -%]

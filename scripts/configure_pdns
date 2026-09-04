@@ -1,0 +1,30 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use File::Copy;
+use Config::Simple;
+
+=head1 configure_pdns
+
+=head2 SYNOPSIS
+
+    configure_pdns
+
+=head2 DESCRIPTION
+
+Fix PowerDNS systemd unit file for chroot operation.
+
+=cut
+my $service_file = "/usr/lib/systemd/system/pdns.service";
+die "Can't find service file $service_file" unless -f $service_file;
+
+my $cfg = Config::Simple->new($service_file);
+
+$cfg->param("Service.WorkingDirectory", "/var/spool/powerdns");
+my $invocation = "/usr/sbin/pdns_server --guardian=no --daemon=no --logging-facility=1 --log-timestamp=yes --write-pid=no --chroot";
+$cfg->param("Service.ExecStart", $invocation);
+
+File::Copy::copy($service_file, "$service_file.bak");
+$cfg->save();

@@ -1,0 +1,13 @@
+port = 40404
+[% FOR target IN targets.keys() %]
+[[% target %]]
+use chroot = yes
+open noatime = yes 
+list = no
+path = [% targets.$target %]
+uid = root
+gid = root
+[% IF excludes %]
+excludes = [% excludes.$target %]
+[% END -%]
+[% END %]

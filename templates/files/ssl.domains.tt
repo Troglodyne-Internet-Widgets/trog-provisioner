@@ -1,0 +1,1 @@
+[% domain %] [% FOR alias IN full_aliases %] [% alias %][% END %][% IF modules.grep('matrix').size() %] matrix.[% domain %] admin.matrix.[% domain %][% END %]

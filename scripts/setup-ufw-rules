@@ -1,0 +1,60 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+=head1 setup-ufw-rules
+
+=head2 SYNOPSIS
+
+    setup-ufw-rules [--dry-run]
+
+=head2 DESCRIPTION
+
+Configure UFW firewall rules based on available applications.
+
+=cut
+
+my $DRY_RUN = $ARGV[0] ? 1 : 0;
+
+# Enable every available service.
+my $list = qx{ufw app list};
+my @apps = split(/\n/, $list);
+shift @apps;
+@apps = map { s/^\s+//; $_ } @apps;
+
+# Sane defaults
+my @rules = (
+    [qw{reset}],
+    [qw{enable}],
+    [qw{default deny outgoing}],
+    [qw{default deny incoming}],
+);
+
+# Allow, but rate limit; control the limit in user.rules
+foreach my $app (@apps) {
+    push(@rules,
+        ["allow", "out", $app],
+    );
+    push(@rules,
+        ["limit", "in", $app],
+    );
+}
+
+@rules = map { unshift(@{$_}, '--dry-run'); $_ } @rules if $DRY_RUN;
+@rules = map { unshift(@{$_}, 'ufw'); $_ } @rules;
+
+foreach my $rule (@rules) {
+    system(@$rule);
+}
+
+# Allow outgoing ports for userspace so we can ssh outgoing etc
+system(qw{ufw allow out 32768:61000/tcp});
+system(qw{ufw allow out 32768:61000/udp});
+system(qw{ufw allow in 32768:61000/tcp});
+system(qw{ufw allow in 32768:61000/udp});
+# Allow dhcp v4/v6
+system(qw{ufw allow out 67:68/udp});
+system(qw{ufw allow in 67:68/udp});
+system(qw{ufw allow out 546:547/udp});
+system(qw{ufw allow in 546:547/udp});

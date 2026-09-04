@@ -1,0 +1,41 @@
+server {
+    listen 443 ssl;
+[% IF ipv6 %]    listen [::]:443 ssl;
+[% END -%]
+    server_name webmail.[% domain -%];
+	server_tokens off;
+
+    ssl_certificate     /etc/ssl/certs/[% domain -%].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain -%].pem;
+
+    index index.php;
+	root [% install_dir -%]/webmail.[% domain -%]/;
+
+    location ~* \.(ico|css|js|gif|jpe?g|png)(\?[0-9]+)?$ {
+        expires max;
+        log_not_found on;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php$is_args$args;
+    }
+
+    location ~ ^/index\.php(/|$) {
+        fastcgi_hide_header X-Powered-By;
+        fastcgi_pass unix:/var/run/roundcube-[% domain -%].sock;
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+        internal;
+    }
+
+}
+
+server {
+	listen 80;
+[% IF ipv6 %]	listen [::]:80;
+[% END -%]
+	server_name webmail.[% domain %];
+	return 301 https://$host$request_uri;
+}

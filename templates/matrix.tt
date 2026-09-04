@@ -1,0 +1,66 @@
+# Setup directories
+mkdir -p [% install_dir %]/matrix.[% domain %]
+mkdir -p [% install_dir %]/matrix.[% domain %]/media
+mkdir -p [% install_dir %]/admin.matrix.[% domain %]
+mkdir -p /etc/matrix-synapse
+mkdir -p /var/log/matrix-synapse
+# Set ownership using admin_user pattern
+chown -R matrix-synapse:[% admin_user %] [% install_dir %]/matrix.[% domain %]
+chmod -R 0750 [% install_dir %]/matrix.[% domain %]
+chown -R matrix-synapse:matrix-synapse /var/log/matrix-synapse
+# Deploy configuration files
+cp homeserver.yaml /etc/matrix-synapse/
+cp log.yaml /etc/matrix-synapse/
+cp matrix-synapse.service /etc/systemd/system/
+chown root:root /etc/matrix-synapse/homeserver.yaml
+chown root:root /etc/matrix-synapse/log.yaml
+chmod 0644 /etc/matrix-synapse/homeserver.yaml
+chmod 0644 /etc/matrix-synapse/log.yaml
+# Generate signing key if it doesn't exist
+if [ ! -f [% install_dir %]/matrix.[% domain %]/homeserver.signing.key ]; then \
+    python3 -c "from synapse.crypto import key; print(key.generate_signing_key('ed25519').decode('ascii'))" > [% install_dir %]/matrix.[% domain %]/homeserver.signing.key; \
+    chown matrix-synapse:[% admin_user %] [% install_dir %]/matrix.[% domain %]/homeserver.signing.key; \
+    chmod 0600 [% install_dir %]/matrix.[% domain %]/homeserver.signing.key; \
+fi
+# Download and setup Synapse Admin
+[% script_dir %]/matrix.download-admin.sh [% install_dir %]/admin.matrix.[% domain %]
+chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]
+chmod -R 0750 [% install_dir %]/admin.matrix.[% domain %]
+# Setup nginx sites
+mkdir -p /etc/nginx/sites-enabled
+cp matrix.nginx.conf /etc/nginx/sites-enabled/matrix.[% domain %].conf
+cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
+chown root:root /etc/nginx/sites-enabled/matrix.[% domain %].conf
+chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
+chmod 0644 /etc/nginx/sites-enabled/*.conf
+# Slam in the chat index.html
+install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www; /bin/true
+install -m 0755 -o [% user %] -g www-data matrix.index.html [% install_dir %]/[% domain %]/www
+# Enable service (actual start will be queued)
+systemctl daemon-reload
+systemctl enable matrix-synapse
+# Queue service start for postrun
+[% script_dir %]/queue_postrun_task systemctl start matrix-synapse
+[% script_dir %]/queue_postrun_task systemctl reload nginx
+# Create script to register admin user after service is running
+cat > [% script_dir %]/matrix_register_admin.sh <<'EOF'
+#!/bin/bash
+# Wait for Matrix Synapse to be ready
+for i in {1..30}; do
+    if curl -s http://127.0.0.1:8008/_matrix/client/versions > /dev/null 2>&1; then
+        echo "Matrix Synapse is ready"
+        break
+    fi
+    echo "Waiting for Matrix Synapse to start... ($i/30)"
+    sleep 2
+done
+# Register admin user if not exists
+if ! su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] -p [% admin_password %] --admin 2>&1" | grep -q "User ID already taken"; then
+    echo "Admin user registered successfully"
+else
+    echo "Admin user already exists"
+fi
+EOF
+chmod +x [% script_dir %]/matrix_register_admin.sh
+# Queue admin user creation for postrun
+[% script_dir %]/queue_postrun_task [% script_dir %]/matrix_register_admin.sh

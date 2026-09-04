@@ -1,6 +1,21 @@
 *.swp
 *.swo
 *.swn
-.terraform*
+
+# Site data: whose machines these are, what goes on them, and the passwords.
+# None of it belongs in the repository.
+ipmap.cfg
+recipes.yaml
+recipes.d/
+secrets.kdbx
+vendor/
+
+# Build leavings
 MYMETA*
 Makefile
+pm_to_blib
+blib/
+cover_db/
+.build
+Provisioner-Recipe-*
+trog-provisioner-*

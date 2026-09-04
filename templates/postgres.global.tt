@@ -1,0 +1,12 @@
+yes | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+# Determine version: use configured value or detect latest available from PGDG
+[% IF version -%]
+PG_VERSION=[% version %]
+[% ELSE -%]
+PG_VERSION=$(apt-cache search '^postgresql-[0-9]' | awk '{print $1}' | grep -oP '[0-9]+$' | sort -rn | head -1)
+[% END -%]
+[% packager_invocation %] postgresql-client-${PG_VERSION} postgresql-${PG_VERSION} postgresql-server-dev-18 postgresql-plperl-${PG_VERSION}
+systemctl enable postgresql
+[% script_dir %]/queue_postrun_task systemctl restart postgresql
+# Allow local TCP connections with md5 auth
+for f in /etc/postgresql/*/main/pg_hba.conf; do grep -qF 'host all all 127.0.0.1/32 md5' "$f" || echo 'host all all 127.0.0.1/32 md5' >> "$f"; done

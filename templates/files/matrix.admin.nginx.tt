@@ -1,0 +1,31 @@
+server {
+    listen 443 ssl;
+[% IF ipv6 %]    listen [::]:443 ssl;
+[% END -%]
+    server_name admin.matrix.[% domain %];
+    server_tokens off;
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+    root [% install_dir %]/admin.matrix.[% domain %]/;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+server {
+    listen 80;
+[% IF ipv6 %]    listen [::]:80;
+[% END -%]
+    server_name admin.matrix.[% domain %];
+    return 301 https://$host$request_uri;
+}

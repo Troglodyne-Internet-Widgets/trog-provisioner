@@ -1,0 +1,5 @@
+[%- IF relay.host -%]
+[% FOR relay_destination IN relay.to %]
+[% relay_destination %] relay:[[% relay.host%]]:[% relay.port %]
+[% END %]
+[%- END -%]

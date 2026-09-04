@@ -1,0 +1,20 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active slapd 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'slapd is running');
+
+ok(-f '/etc/ldap/slapd.d/cn=config.ldif', 'slapd OLC config exists');
+
+# Verify LDAPS port is listening
+my $ldaps = `ss -tlnp 2>/dev/null | grep ':636'`;
+ok($ldaps, 'LDAPS port 636 is listening');
+
+# Verify base DN is accessible
+my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
+like($search, qr/dn:\s*[% base_dn %]/i, 'base DN is searchable');
+
+done_testing();

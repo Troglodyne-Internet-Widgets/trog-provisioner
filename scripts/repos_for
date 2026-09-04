@@ -1,0 +1,71 @@
+#!/usr/bin/env perl
+
+package Trog::repogetter;
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Carp::Always;
+use Getopt::Long qw{GetOptionsFromArray};
+use File::pushd qw{pushd};
+use Pithub;
+
+sub main {
+
+	my ($API_URL, $API_TOKEN, @entities) = @ARGV;
+
+	die "API URL must be first arg" unless $API_URL;
+	die "API Token must be second arg" unless $API_TOKEN;
+
+	my %cache;
+	my $cfile = "$ENV{HOME}/.repos_for.dump";
+	my $c = do($cfile) if -f $cfile;
+	%cache = %$c if ref $c eq 'HASH';
+
+	if (!exists $cache{$API_URL}) {
+		foreach my $entity (@entities) {
+			my $ph = Pithub->new(
+				user => $entity,
+				api_uri => $API_URL,
+				token   => $API_TOKEN,
+			);
+
+			my $result = $ph->repos->list();
+			$result->auto_pagination(1);
+			while (my $row = $result->next) {
+				my $owning_entity = $row->{owner}->{login};
+				$cache{$API_URL}{$owning_entity}{$row->{name}} = {
+					clone_url 	   => $row->{clone_url},
+					ssh_url        => $row->{ssh_url},
+					default_branch => $row->{default_branch},
+				}
+			}
+		}
+		# Store the cache
+		open(my $fh, '>', $cfile);
+		print $fh Dumper(\%cache);
+		close($fh);
+	}
+
+	foreach my $entity (@entities) {
+		foreach my $repo (keys(%{$cache{$API_URL}{$entity}})) {
+			my $robj = $cache{$API_URL}{$entity}{$repo};
+			# Clone it unless it's already present.
+			next if -d $repo;
+			print "Cloning $repo...\n";
+			system(qw{git clone}, $robj->{clone_url});
+			# If we couldn't clone it, we can try the SSH URI in case the user setup a key in their skel.
+			if (!-d $repo) {
+				system(qw{git clone}, $robj->{ssh_url});
+				next if -d $repo;
+			}
+			next unless -d $repo;
+			my $d = pushd($repo);
+			print "Rewriting origin in $repo...\n";
+			system(qw{git remote set-url origin}, $robj->{ssh_url});
+		}
+	}
+}
+
+exit main(@ARGV) unless caller;

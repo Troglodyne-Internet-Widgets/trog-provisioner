@@ -1,0 +1,2 @@
+mv backupdestination.cron /etc/cron.d/[% domain %]-backups
+chmod 0600 "[% install_dir %]/[% domain %]/[% key_file %]"

@@ -1,0 +1,20 @@
+PATH="[% script_dir %]:/bin:/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin"
+
+MAILTO="[% admin_email %]"
+[% IF from %]
+MAILFROM="[% from %]@[% domain %]"
+[% END %]
+
+# SAR
+0,10,20,30,40,50 * * * * root command gather_sar.sh
+
+# Security scans
+0    0 * * *  root command rkhunter --update &>/dev/null
+5    0 * * *  root command rkhunter --rwo --nomow -l /root/rkhunter.log --check
+*/5  * * * *  root command segfaults.sh
+*/5  * * * *  root command escalations.sh [% admin_user %]
+*/5  * * * *  root command oomdetect.sh
+*/5  * * * *  root command newusers.sh
+*/5  * * * *  root command logdrops.sh
+*/5  * * * *  root command outgoing_blocks.sh
+*/30 * * * *  root command changes_in_packaged_files.sh

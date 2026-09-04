@@ -1,0 +1,17 @@
+<?php
+$config = [];
+$config['log_driver'] = 'syslog';
+$config['db_dsnw'] = 'sqlite:///[% install_dir -%]/webmail.[% domain -%]_data/roundcube.db?mode=0640';
+$config['imap_host'] = 'mail.[% domain %]:143';
+$config['smtp_host'] = 'tls://mail.[% domain %]:587';
+$config['smtp_user'] = '%u';
+$config['smtp_pass'] = '%p';
+$config['support_url'] = 'https://mail.[% domain %]/support';
+$config['product_name'] = 'Roundcube Webmail';
+$config['des_key'] = '[% des_key -%]';
+$config['skin'] = 'elastic';
+$config['plugins'] = [
+    'archive',
+    'zipdownload',
+];
+?>

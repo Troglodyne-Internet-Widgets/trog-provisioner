@@ -1,0 +1,18 @@
+# Install nvm for [% user %] via the official install script (idempotent)
+su - [% user %] -s /bin/bash -c \
+    "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | bash"
+
+# Install latest Node.js and set it as the default alias
+su - [% user %] -s /bin/bash -c \
+    ". ~/.nvm/nvm.sh && nvm install node && nvm alias default node"
+
+# Ensure 'nvm use node' appears in .bashrc after the nvm init block
+# Don't forget that $user's homedir is the domain dir
+grep -qF 'nvm use node &>/dev/null' '[% install_dir %]/[% domain %]/.bashrc' 2>/dev/null \
+    || echo 'nvm use node &>/dev/null' >> '[% install_dir %]/[% domain %]/.bashrc'
+
+# Point NODE_PATH at the active node's global node_modules, otherwise requiring
+# anything installed with 'npm -g' fails.  'nvm use' above exports NVM_BIN
+# (.../versions/node/vX.Y.Z/bin), so this follows whatever version is current.
+grep -qF 'export NODE_PATH=' '[% install_dir %]/[% domain %]/.bashrc' 2>/dev/null \
+    || echo '[ -n "$$NVM_BIN" ] && export NODE_PATH="$${NVM_BIN%/bin}/lib/node_modules"; /bin/true' >> '[% install_dir %]/[% domain %]/.bashrc'

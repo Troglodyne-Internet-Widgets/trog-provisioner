@@ -1,0 +1,9 @@
+#!/bin/bash
+
+export LEXICON_POWERDNS_AUTH_TOKEN="[% api_key %]"
+export LEXICON_POWERDNS_SERVER="/var/spool/powerdns/api.sock"
+
+COMMAND=$1;
+shift;
+
+lexicon --delegated [% domain %] powerdns $COMMAND [% domain %] $@

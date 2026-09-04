@@ -1,0 +1,7 @@
+# Setup the dirindex vhost
+mv nginxdirindex.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
+systemctl restart nginx
+# Ensure the root directory exists and is browsable by nginx
+mkdir -p [% install_dir %]/[% domain %]; /bin/true
+chown root:www-data [% install_dir %]/[% domain %]
+chmod 0755 [% install_dir %]/[% domain %]

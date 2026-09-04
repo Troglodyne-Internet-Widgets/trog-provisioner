@@ -1,0 +1,21 @@
+PATH="[% script_dir %]:/bin:/usr/bin:/usr/local/bin:/usr/sbin:/usr/local/sbin"
+
+MAILTO="[% admin_email %]"
+[% IF from %]
+MAILFROM="[% from %]@[% domain %]"
+[% END %]
+
+[% IF modules.grep('letsencrypt').size() %]
+# SSL
+0 0 * * * root command dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --cron >> /var/log/dehydrated.log
+[% END %]
+
+# Site-specific crons
+[% FOR cob in root_scripts %]
+[% IF cob.mailto != "none" %]
+MAILTO="[% cob.mailto %]"
+[% ELSE %]
+MAILTO="[% admin_email %]"
+[% END %]
+[% cob.interval %] root command [% cob.cmd %]
+[% END %]

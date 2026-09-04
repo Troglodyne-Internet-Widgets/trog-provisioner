@@ -1,0 +1,7 @@
+[% script_dir %]/build_latest_perl.sh [% user %]
+# Critic config for AIs outside of normally configured paths
+install -m 0755 perl.tidy.rc   /etc/perltidyrc
+install -m 0755 perl.critic.rc /etc/perlcriticrc
+# Won't overwrite existing configs
+ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perltidyrc; /bin/true
+ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perlcriticrc; /bin/true

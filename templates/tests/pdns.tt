@@ -1,0 +1,14 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $pdns = `systemctl is-active pdns 2>/dev/null`;
+chomp $pdns;
+is($pdns, 'active', 'pdns is running');
+
+my $recursor = `systemctl is-active pdns-recursor 2>/dev/null`;
+chomp $recursor;
+is($recursor, 'active', 'pdns-recursor is running');
+
+done_testing();

@@ -1,0 +1,6 @@
+CA="letsencrypt"
+BASEDIR=/var/lib/dehydrated
+CONFIG_D=/etc/dehydrated/conf.d
+DOMAINS_D=/etc/dehydrated/domains.d
+DOMAINS_TXT=/etc/dehydrated/domains.txt
+WELLKNOWN=/var/www/html

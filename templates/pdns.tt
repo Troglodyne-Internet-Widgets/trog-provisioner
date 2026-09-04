@@ -1,0 +1,17 @@
+# Configure the recursor to answer for our domain
+mv pdns-recursor-domain.conf /etc/powerdns/recursor.d/[% domain %].conf
+# Build the zone database
+mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
+# TODO do this via lexicon instead
+cp zonefile /var/spool/powerdns/[% domain %]/bind.zone
+zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdns/[% domain %]/zone.sql
+sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
+chown -R pdns:pdns /var/spool/powerdns
+chmod -R 0775 /var/spool/powerdns
+[% script_dir %]/queue_postrun_task systemctl restart pdns
+[% script_dir %]/queue_postrun_task systemctl restart pdns-recursor
+# Setup lexicon shortcuts
+mkdir -p /opt/lexicon/[% domain %]; /bin/true
+mv lexicon-pdns.sh /opt/lexicon/[% domain %]/pdns
+chmod -R 0700 /opt/lexicon/[% domain %]
+chown -R root:root /opt/lexicon/[% domain %]
