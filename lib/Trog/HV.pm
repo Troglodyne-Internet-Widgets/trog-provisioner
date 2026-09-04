@@ -9,6 +9,7 @@ use Sys::Virt();
 use Digest::SHA();
 use URI();
 use URI::Split();
+use Sys::Hostname::FQDN();
 
 =head1 NAME
 
@@ -297,9 +298,9 @@ read, so the host came out empty and the guest rsynced from nowhere.
 
 For a remote hypervisor this is the host out of the connection URI: we were
 given a name that resolves, so we use it.  For a local one there is no URI to
-read it from, and the machine's own idea of its fully qualified name is the
-best available answer -- C<localhost> would be right for us and useless to the
-guest, which has to cross a network to get here.
+read it from, so L<Sys::Hostname::FQDN> answers for us -- C<localhost> would be
+right for us and useless to the guest, which has to cross a network to get
+here.
 
 =cut
 
@@ -310,8 +311,7 @@ sub hostname {
     my $host = $self->ssh_host;
     return $self->{hostname} = $host if defined $host && length $host;
 
-    $host = $self->capture('hostname -f');
-    chomp $host if defined $host;
+    $host = Sys::Hostname::FQDN::fqdn();
     die "Could not determine a hostname for " . $self->describe
       . "; a guest has to be told where to rsync its payload from.\n"
       unless defined $host && length $host;

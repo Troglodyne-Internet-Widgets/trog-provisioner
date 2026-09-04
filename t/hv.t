@@ -216,17 +216,15 @@ subtest 'the hostname is the one a guest can reach' => sub {
     # Locally there is no URI to read it from, and localhost is no use to a
     # guest that has to cross a network to get here.
     $hv = fresh();
-    my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine(capture => sub {
-        my ($self, $cmd) = @_;
-        is($cmd, 'hostname -f', 'asks the machine for its full name');
-        return "hv0.example.net\n";
-    });
-    is($hv->hostname, 'hv0.example.net', 'chomped');
-    is($hv->hostname, 'hv0.example.net', 'and cached, not asked twice');
+    my $asked = 0;
+    my $fqdn  = Test::MockModule->new('Sys::Hostname::FQDN');
+    $fqdn->redefine(fqdn => sub { $asked++; return 'hv0.example.net' });
+    is($hv->hostname, 'hv0.example.net', 'the machine own fully qualified name');
+    is($hv->hostname, 'hv0.example.net', 'and cached');
+    is($asked, 1, 'not asked twice');
 
     $hv = fresh();
-    $machine->redefine(capture => sub { '' });
+    $fqdn->redefine(fqdn => sub { '' });
     eval { $hv->hostname };
     like($@, qr/Could not determine a hostname/, 'refuses to hand a guest an empty host');
 };
