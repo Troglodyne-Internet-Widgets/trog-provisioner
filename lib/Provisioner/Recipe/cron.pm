@@ -32,7 +32,8 @@ Set mailto to 'none' if you don't care about the output of a script.
 
 Sets up some root crons, and a cron for the service user.
 
-Optionally set MAILFROM as the 'from' parameter.
+Optionally set MAILFROM as the 'from' parameter.  It is the local part alone --
+C<cron> gives you C<cron@$domain> -- because the domain is appended for you.
 
 Root Crons:
 
@@ -58,7 +59,11 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            from => { type => "email" },
+            # A local part, not an address: the templates write
+            # MAILFROM="[% from %]@[% domain %]" and supply the domain
+            # themselves.  This was declared as an email, which asked for
+            # exactly the value that would render as user@host@domain.
+            from => { type => 'string' },
             user_scripts => {
                 type  => 'array',
                 items => {

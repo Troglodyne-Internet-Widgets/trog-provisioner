@@ -301,6 +301,21 @@ subtest 'ufw rejects malformed port_forwards' => sub {
     ok( $res, 'ufw dies when port_forward entry missing to' );
 };
 
+# ----------------------------------------------------------------
+# cron: MAILFROM is a local part, and the templates append the domain
+# ----------------------------------------------------------------
+subtest 'cron takes a bare local part for MAILFROM' => sub {
+    my $r = 'Provisioner::Recipe::cron'->new(%PROV);
+
+    # The templates write MAILFROM="[% from %]@[% domain %]", so an address
+    # here would render as user@host@domain.  This was declared as an email
+    # type, which required precisely the value that breaks it.
+    is(exception { $r->render(%G, from => 'cron') }, undef, 'a local part is what it wants');
+
+    my $out = $r->render_file('files/cron.root.tt', %G, from => 'cron');
+    like($out, qr/^MAILFROM="cron\@\Q$G{domain}\E"$/m, 'and the domain gets appended to it');
+};
+
 #
 # Render stuff with optional fields
 #
