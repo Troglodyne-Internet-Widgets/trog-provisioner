@@ -59,6 +59,11 @@ sub args {
             # is a decision rather than whatever landed on master that morning.
             repo_branch   => { type => 'string', default => 'auth-49',
                                pattern => '^auth-[0-9]+$' },
+            # Zones to forward to another resolver, as zone => address.  There
+            # is no default: what used to be here was one hardcoded
+            # test.test=192.168.1.1, appended to the recursor configuration on
+            # every provision.
+            forward_zones => { type => 'object', default => {} },
         },
     );
 }

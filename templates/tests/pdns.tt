@@ -11,4 +11,23 @@ my $recursor = `systemctl is-active pdns-recursor 2>/dev/null`;
 chomp $recursor;
 is($recursor, 'active', 'pdns-recursor is running');
 
+# The release train the recipe asked for.  This used to install from
+# auth-master, PowerDNS's development branch, so guests ended up running
+# 5.1.0~alpha1+master.380 -- whatever had landed on master that morning.
+my $version = `pdns_server --version 2>&1`;
+unlike($version, qr/alpha|beta|rc\d|master/i, 'pdns is a release, not a development build')
+    or diag $version;
+
+my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';
+
+# One line per configured forward zone, however many times this has been
+# provisioned.  The line used to be appended unconditionally.
+my %seen;
+my @dupes = grep { $seen{$_}++ } ($recursor_conf =~ m/^(forward-zones=.*)$/gm);
+is_deeply(\@dupes, [], 'no forward-zone line appears twice') or diag $recursor_conf;
+
+# And nothing left over from somebody checking that recursion worked.
+unlike($recursor_conf, qr/^forward-zones=test\.test=/m,
+    'no hardcoded test.test forward zone') or diag $recursor_conf;
+
 done_testing();
