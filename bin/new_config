@@ -42,6 +42,7 @@ use IO::Prompter;
 
 use Provisioner::IPPool;
 use Provisioner::Utils;
+use Provisioner::Cookbook();
 use Provisioner::Recipe::data;
 
 # Better stack traces
@@ -471,6 +472,19 @@ sub handle_domain {
     die "Could not work out the transfer user for " . $hv->describe . "\n" unless $transfer_user;
 
     $rconf->{$domain} = Hash::Merge::merge( $base_recipe, $rconf->{$domain} );
+
+    # bin/new_guest writes CHANGEME wherever a recipe requires something it has
+    # no default for.  A placeholder is a perfectly good string, so nothing
+    # further down would object to one -- validation passes, the guest builds,
+    # and the database ends up with a root password of CHANGEME.  So this is
+    # where somebody looks.  After the merge, because _base may well have
+    # supplied the real value.
+    my @unfilled = Provisioner::Cookbook->placeholders_in($rconf->{$domain});
+    die "Still unfilled in the configuration for $domain:\n"
+      . join('', map { "  $_\n" } @unfilled)
+      . "Each of these is a "
+      . Provisioner::Cookbook->PLACEHOLDER
+      . " that new_guest left for you.\n" if @unfilled;
 
     # Include site-specific stuff
     my @paths   = qw{templates};

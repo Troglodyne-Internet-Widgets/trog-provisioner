@@ -162,6 +162,51 @@ These describe an *installation*, not this software.  They used to sit in the ch
 
 `TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--ipmap`, `--recipes` and `--hvconf` individually.
 
+### Spinning one up from the recipes
+
+`bin/new_guest` writes a domain configuration from a list of recipes, so a
+scratch guest is one command rather than a file you copy from another guest and
+edit:
+
+```
+$ bin/new_guest nginx mariadb
+Wrote /etc/trog-provisioner/recipes.d/f1698301-2db6-41ec-90fd-effec2f148d4.test.yaml
+f1698301-2db6-41ec-90fd-effec2f148d4.test: 2 recipes (nginx, mariadb)
+
+Fill these in before provisioning:
+  mariadb.dumpfile
+  mariadb.root_pw
+  mariadb.version
+```
+
+With no `--hostname` it picks a UUID under `.test`, which is a name nobody else
+has and a TLD reserved for exactly this.  `--memory`, `--cpus` and `--size` are
+what placement reads; the defaults are small on purpose.
+
+Every recipe says what it takes in `args()`, an OpenAPIv3 schema, so what to
+write is derivable rather than guessed: fields the recipe requires get their
+default if it has one and `CHANGEME` if it does not, and fields it does not
+require are left out, so the recipe's own defaults keep applying instead of
+being frozen into the file the day it was generated.  Anything `_base` already
+supplies is left to `_base`, which wins the merge anyway.
+
+A `CHANGEME` that reaches `bin/new_config` stops it, naming the keys.  Without
+that it would validate quite happily -- it is a string, and `root_pw` wants a
+string -- and you would get a database whose root password is `CHANGEME`.
+
+`bin/recipes` is the other half of the same thing:
+
+```
+$ bin/recipes                      # every recipe, and what it is for
+$ bin/recipes mariadb              # what mariadb takes, as JSON
+$ bin/recipes --scaffold mariadb   # what new_guest would write for it
+$ bin/recipes --json               # the listing, for something other than a human
+```
+
+Both are `Provisioner::Cookbook` with a command line attached.  It does not
+live under `lib/Provisioner/Recipe/`, because everything there is discovered
+and loaded as a recipe.
+
 ### Everything is spelled out
 
 Domains used to be written two ways: short, with a `tld` from `ipmap.cfg`'s global section appended, or fully qualified for anything under a different parent -- which the config called an "addon" and handled down a separate path.  Both spellings arrived at the same place, and the separate path existed only to undo the appending.
