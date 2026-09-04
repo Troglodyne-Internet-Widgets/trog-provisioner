@@ -4,6 +4,13 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aa';
+
+=head1 NAME
+
+t/Provisioner-IPPool.t - the static address pool: parsing it, and handing out of it
+
+=cut
+
 use Test::More;
 use Test::Fatal;
 use File::Temp qw{tempfile};

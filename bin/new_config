@@ -583,7 +583,7 @@ sub handle_domain {
     $global_config->{transfer_user}   = $transfer_user;
     $global_config->{hv_ssh_port}     = $hv_ssh_port;
 
-    my $do            = 'Provisioner::Recipe::data'->new(%provisioner_opts);
+    my $do            = Provisioner::Recipe::data::->new(%provisioner_opts);
     my $data_fragment = $do->render( %$global_config, %$data_config );
     my @tests = $do->tests();
     mkdir "$cfg_dir/t";

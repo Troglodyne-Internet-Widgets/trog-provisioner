@@ -5,6 +5,13 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+
+=head1 NAME
+
+t/recipes.t - every recipe renders, and refuses what it should
+
+=cut
+
 # A -f or -x in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in, so
 # the TOCTOU policies have nothing to catch.
@@ -23,6 +30,7 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp qw(tempdir);
+use IPC::Run3();
 use File::Find();
 use File::Slurper();
 use Text::Xslate();
@@ -111,7 +119,7 @@ sub rejects_missing {
 my $tmp = tempdir( CLEANUP => 1 );
 my $ddir = "$tmp/test.test.test";
 mkdir $ddir;
-system( qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", '-N', '', '-q' );
+IPC::Run3::run3([qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, '', qw{-q}], \undef, \undef, undef);
 
 # Build list of known modules with required input data
 my %required_config = (

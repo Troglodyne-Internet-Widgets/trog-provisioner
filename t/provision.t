@@ -5,9 +5,17 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+=head1 NAME
+
+t/provision.t - bin/provision: the order it does things in, and the XML it writes
+
+=cut
+
 use Test::More;
+use IPC::Run3();
 use File::Temp qw{tempdir};
-use File::Slurper qw{write_text};
+use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Pod::Usage();
 use Config::Simple();
@@ -42,7 +50,8 @@ subtest 'the POD documents the interface' => sub {
 
 # pod2usage exits rather than dying, so this has to be a real run.
 subtest 'no domain exits with the usage' => sub {
-    my $out = qx{$^X $script 2>&1};
+    my $out = q{};
+    IPC::Run3::run3([$^X, $script], \undef, \$out, \$out);
     isnt($?, 0, 'exits non-zero');
     like($out, qr/No domain passed/, 'saying what was missing');
     like($out, qr/Usage:/,           'and printing the usage out of the POD');
@@ -55,13 +64,13 @@ subtest 'no domain exits with the usage' => sub {
 subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $dir = tempdir(CLEANUP => 1);
     mkdir "$dir/vm.example.com";
-    write_text("$dir/vm.example.com/provision.conf",
+    File::Slurper::Temp::write_text("$dir/vm.example.com/provision.conf",
         "libvirt_uri=qemu+ssh://root\@confhv/system\nips=203.0.113.10\n");
-    write_text("$dir/vm.example.com/users.yaml",  "users: []\n");
-    write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
+    File::Slurper::Temp::write_text("$dir/vm.example.com/users.yaml",  "users: []\n");
+    File::Slurper::Temp::write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
 
     my $fakebin = tempdir(CLEANUP => 1);
-    write_text("$fakebin/terraform", "#!/bin/sh\nexit 0\n");
+    File::Slurper::Temp::write_text("$fakebin/terraform", "#!/bin/sh\nexit 0\n");
     chmod 0755, "$fakebin/terraform";
     local $ENV{PATH} = "$fakebin:$ENV{PATH}";
 
@@ -198,7 +207,7 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 sub _conf {
     my (%params) = @_;
     my $dir = tempdir(CLEANUP => 1);
-    write_text("$dir/provision.conf", join('', map { "$_=$params{$_}\n" } sort keys %params));
+    File::Slurper::Temp::write_text("$dir/provision.conf", join('', map { "$_=$params{$_}\n" } sort keys %params));
     return "$dir/provision.conf";
 }
 
@@ -234,9 +243,9 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     # asserts.
     my $dir = tempdir(CLEANUP => 1);
     mkdir "$dir/vm.example.com";
-    write_text("$dir/vm.example.com/provision.conf", "admin_user=ubuntu\nips=203.0.113.10\n");
-    write_text("$dir/vm.example.com/users.yaml", "users: []\n");
-    write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
+    File::Slurper::Temp::write_text("$dir/vm.example.com/provision.conf", "admin_user=ubuntu\nips=203.0.113.10\n");
+    File::Slurper::Temp::write_text("$dir/vm.example.com/users.yaml", "users: []\n");
+    File::Slurper::Temp::write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
 
     my @order;
 

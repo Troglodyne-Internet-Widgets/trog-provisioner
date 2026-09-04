@@ -29,11 +29,13 @@ WriteMakefile(
     'URI'            => 0,
     'Config::Simple' => 0,
     'File::Slurper'  => 0,
+    'File::Slurper::Temp' => 0,
     'Pod::Usage'     => 0,
     'YAML::XS'       => 0,
     'JSON::PP'       => 0,
     'List::Util'     => 0,
     'Sys::Virt'      => 0,
+    'IPC::Run3'      => 0,
     'Net::OpenSSH::More' => 0,
     'Net::EmptyPort'     => 0,
     'parent'             => 0,
@@ -53,3 +55,16 @@ WriteMakefile(
   },
   test => {TESTS => 't/*.t'}
 );
+
+__END__
+
+=head1 NAME
+
+Makefile.PL - build trog-provisioner the ExtUtils::MakeMaker way
+
+=head1 DESCRIPTION
+
+There is a dist.ini beside this, which is what builds a release.  This is here
+so the repository can be built and tested with nothing but core tools.
+
+=cut

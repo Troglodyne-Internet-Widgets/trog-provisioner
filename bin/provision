@@ -17,6 +17,8 @@ use Trog::Guest();
 use Trog::Config();
 use File::Basename();
 use File::Slurper();
+use IPC::Run3();
+use File::Slurper::Temp();
 use YAML::XS();
 use JSON::PP();
 use List::Util qw{any uniq};
@@ -396,7 +398,7 @@ sub provision_domain {
         if ($num_ips != scalar @$addresses) {
             my $encoded = YAML::XS::Dump($parsed);
             my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
-            File::Slurper::write_text($new_config, $encoded);
+            File::Slurper::Temp::write_text($new_config, $encoded);
             print "Setting up IP for $domain...\n";
             # Straight to where it belongs, as root, rather than landing in the
             # home directory and being moved and chmodded afterwards.
@@ -574,7 +576,7 @@ sub mongle_domain_xml {
     $xml =~ s/%$_%/$substitutions{$_}/gmx for keys %substitutions;
 
     my $file = "$domain_dir/$domain/domain.xml";
-    File::Slurper::write_text($file, $xml);
+    File::Slurper::Temp::write_text($file, $xml);
     return ($xml, $file);
 }
 
@@ -653,7 +655,7 @@ DISK
         }
     }
 
-    File::Slurper::write_text("$domain_dir/$domain/devices.map", $mapper);
+    File::Slurper::Temp::write_text("$domain_dir/$domain/devices.map", $mapper);
     return (join('', @disks), join('', @filesystems));
 }
 
@@ -759,7 +761,7 @@ sub mongle_network_configuration {
     };
 
     my $rendered = YAML::XS::Dump($netconf);
-    File::Slurper::write_text("$domain_dir/$domain/network-config", $rendered);
+    File::Slurper::Temp::write_text("$domain_dir/$domain/network-config", $rendered);
     return $rendered;
 }
 
@@ -792,10 +794,13 @@ sub mongle_cloud_init {
     die "MUST SET contact_email in provision.conf for $domain\n"
       unless defined $contactemail && length $contactemail;
 
-    # Generate a new key for the child
-    qx{yes | ssh-keygen -t rsa -f $domain_dir/$domain/key.rsa -N ''};
-    close _must_read("$domain_dir/$domain/key.rsa",     "ssh-keygen made no key for $domain");
-    close _must_read("$domain_dir/$domain/key.rsa.pub", "ssh-keygen made no pubkey for $domain");
+    # Generate a new key for the child.  This used to pipe yes(1) in to answer
+    # the overwrite prompt; removing the old key first means there is no prompt.
+    my $key = "$domain_dir/$domain/key.rsa";
+    unlink $key, "$key.pub";
+    IPC::Run3::run3([qw{ssh-keygen -t rsa -f}, $key, qw{-N}, '', qw{-q}], \undef, \undef, undef);
+    close _must_read($key,       "ssh-keygen made no key for $domain");
+    close _must_read("$key.pub", "ssh-keygen made no pubkey for $domain");
     chmod 0600, "$domain_dir/$domain/key.rsa";
     chmod 0600, "$domain_dir/$domain/key.rsa.pub";
 
@@ -901,7 +906,7 @@ APT {
     # Kept beside the domain as well as going into the seed, so you can read
     # what a guest was built with without unpacking an ISO.
     my $user_data = "#cloud-config\n" . YAML::XS::Dump($clown_config);
-    File::Slurper::write_text("$domain_dir/$domain/user-data", $user_data);
+    File::Slurper::Temp::write_text("$domain_dir/$domain/user-data", $user_data);
     return $user_data;
 }
 
@@ -941,7 +946,7 @@ sub mongle_setup_script {
     $script_template =~ s/%PRE_MAKE%/$pre_make_script/gmx if $pre_make_script;
 
     my $sf = "$domain_dir/$domain/setup.sh";
-    File::Slurper::write_text($sf, $script_template);
+    File::Slurper::Temp::write_text($sf, $script_template);
     return $sf;
 }
 
@@ -976,7 +981,7 @@ sub mongle_logging_config {
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;
 
     my $lf = "$domain_dir/$domain/rsyslog.conf";
-    File::Slurper::write_text($lf, $config_template);
+    File::Slurper::Temp::write_text($lf, $config_template);
     return $lf;
 }
 

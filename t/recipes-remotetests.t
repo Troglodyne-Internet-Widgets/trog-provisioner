@@ -4,6 +4,13 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+
+=head1 NAME
+
+t/recipes-remotetests.t - the recipes, against a real guest (AUTHOR_TESTING only)
+
+=cut
+
 # A -f or -x in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in, so
 # the TOCTOU policies have nothing to catch.
@@ -17,9 +24,10 @@ use FindBin::libs;
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
-use YAML;
+use YAML::XS();
 use File::Find;
 use File::Temp qw{tempdir tempfile};
+use IPC::Run3();
 use File::Touch;
 use File::Copy;
 
@@ -62,7 +70,7 @@ mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
 mkdir "$tmpdir/data/backup.test.test";
 mkdir "$tmpdir/data/backupdestination.test.test";
-system( qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", '-N', '', '-q' );
+IPC::Run3::run3([qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", qw{-N}, '', qw{-q}], \undef, \undef, undef);
 die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
 File::Copy::copy("$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa");
 File::Touch::touch("$tmpdir/dotfiles/test");
@@ -206,7 +214,7 @@ $recipes_raw{_base} = {
     data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };
 
-my $recipes = YAML::Dump(\%recipes_raw);
+my $recipes = YAML::XS::Dump(\%recipes_raw);
 
 my ($ih, $ipmap_file)  = tempfile();
 print $ih $ipmap;
@@ -275,6 +283,6 @@ sub do_provision {
     foreach my $test (@$tests) {
         my $tname = $test;
         $tname =~ s/tt$/t/;
-        ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname") or die qx{ls $ddir};
+        ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname") or die "nothing generated in $ddir";
     }
 }

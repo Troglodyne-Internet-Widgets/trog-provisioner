@@ -10,6 +10,8 @@ use File::Path();
 use File::Copy();
 use File::Temp();
 use File::Slurper();
+use IPC::Run3();
+use File::Slurper::Temp();
 use Net::OpenSSH::More();
 use Term::ReadKey();
 
@@ -156,7 +158,14 @@ side's shell instead, which is how you write a pipeline.
 
 sub capture {
     my ($self, $cmd) = @_;
-    return qx{$cmd} if $self->is_local;
+    if ($self->is_local) {
+        # A string still reaches a shell, which is the documented contract here
+        # -- callers write pipelines.  What run3 buys is stdin closed rather
+        # than inherited, so a command that decides to read one cannot sit there
+        # waiting on a terminal that is busy elsewhere.
+        IPC::Run3::run3($cmd, \undef, \my $out, undef);
+        return $out;
+    }
 
     return $self->_unhang($cmd, sub { ($self->ssh->cmd($cmd))[0] });
 }
@@ -578,7 +587,7 @@ sub _unhang {
 sub _write_local {
     my ($self, $path, $content, %opts) = @_;
 
-    return 1 if eval { File::Slurper::write_text($path, $content); 1 };
+    return 1 if eval { File::Slurper::Temp::write_text($path, $content); 1 };
     die $@ unless $opts{sudo};
 
     my $tmp = File::Temp->new(UNLINK => 1);

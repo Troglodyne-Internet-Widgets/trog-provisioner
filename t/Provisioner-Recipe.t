@@ -4,6 +4,13 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aa';
+
+=head1 NAME
+
+t/Provisioner-Recipe.t - the recipe base class
+
+=cut
+
 use FindBin::libs;
 
 # Never the installation's real /etc/trog-provisioner: what these assert on

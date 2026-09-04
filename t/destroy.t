@@ -6,11 +6,20 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+=head1 NAME
+
+t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
+
+=cut
+
 use Test::More;
+use IPC::Run3();
 use Test::MockModule qw{strict};
 use File::Temp qw{tempdir};
 use File::Path qw{make_path};
-use File::Slurper qw{write_text read_text};
+use File::Slurper();
+use File::Slurper::Temp();
 use Pod::Usage();
 
 use FindBin;
@@ -37,7 +46,7 @@ sub make_domain_dir {
     my $dir = "$tmpdir/$domain";
     make_path($dir);
     # Write a fake pubkey
-    write_text("$dir/key.rsa.pub", "ssh-rsa AAAA fake-key-$domain comment\n");
+    File::Slurper::Temp::write_text("$dir/key.rsa.pub", "ssh-rsa AAAA fake-key-$domain comment\n");
     return $dir;
 }
 
@@ -80,13 +89,13 @@ subtest 'remove_authorized_key removes only the domain key' => sub {
 
     my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
     my $other_key  = "ssh-rsa BBBB other-key other-comment";
-    write_text($ak, "$other_key\n$domain_key\n");
+    File::Slurper::Temp::write_text($ak, "$other_key\n$domain_key\n");
 
     local $ENV{HOME} = $fake_home;
 
     Trog::Bin::Destroy::remove_authorized_key($domain, 0);
 
-    my $after = read_text($ak);
+    my $after = File::Slurper::read_text($ak);
     unlike($after, qr/\Qfake-key-$domain\E/, 'domain key removed');
     like($after,   qr/\Qother-key\E/,        'other key preserved');
 };
@@ -100,13 +109,13 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
     my $ak = "$fake_home/.ssh/authorized_keys";
 
     my $domain_key = "ssh-rsa AAAA fake-key-$domain comment";
-    write_text($ak, "$domain_key\n");
+    File::Slurper::Temp::write_text($ak, "$domain_key\n");
 
     local $ENV{HOME} = $fake_home;
 
     Trog::Bin::Destroy::remove_authorized_key($domain, 1);
 
-    my $after = read_text($ak);
+    my $after = File::Slurper::read_text($ak);
     like($after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed');
 };
 
@@ -132,7 +141,8 @@ subtest 'purge_domain_dir dryrun leaves directory intact' => sub {
 # --- main: missing domain ---
 # pod2usage exits, so this has to be a real run.
 subtest 'main exits with the usage when given no domain' => sub {
-    my $out = qx{$^X "$FindBin::Bin/../bin/destroy" --dryrun 2>&1};
+    my $out = q{};
+    IPC::Run3::run3([$^X, "$FindBin::Bin/../bin/destroy", '--dryrun'], \undef, \$out, \$out);
     isnt($?, 0, 'exits non-zero');
     like($out, qr/No domain passed/, 'saying what was missing');
     like($out, qr/Usage:/,           'and printing the usage out of the POD');

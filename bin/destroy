@@ -11,6 +11,7 @@ use re '/aa';
 use FindBin::libs;
 use Trog::HV();
 use Trog::Hypervisors();
+use File::Path();
 use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
@@ -216,7 +217,7 @@ sub purge_domain_dir {
 
     print "Purging domain directory $dir\n";
     unless ($dryrun) {
-        system(qw{rm -rf}, $dir);
+        File::Path::remove_tree($dir);
         # A remote HV holds a copy of the whole domain dir for the guest to pull.
         $hv->run(qw{rm -rf}, $dir) unless $hv->is_local;
     }

@@ -15,6 +15,10 @@ use Scalar::Util();
 
 use JSON::Validator::Schema::Troglodyne;
 
+=head1 NAME
+
+Provisioner::Recipe - Base class for the recipes: what every one of them can do, and what each has to say for itself.
+
 =head2 SYNOPSIS
 
     package Provisioner::Recipe::example;

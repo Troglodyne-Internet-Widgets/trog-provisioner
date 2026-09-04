@@ -8,11 +8,32 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
-use File::Slurper;
+use File::Slurper();
+use IPC::Run3();
+use File::Slurper::Temp();
 
 # Basically our 'install script'
 
 #TODO ideally, we just ship this all as a 'config rpm/deb'.
+
+=head1 NAME
+
+setup_provisioner - prepare this machine to be a hypervisor
+
+=head1 SYNOPSIS
+
+    bin/setup_provisioner
+
+=head1 DESCRIPTION
+
+The install script: everything a machine needs before it can host guests.
+
+Most of it is still a stub.  What works today is the rsyslog step, which makes
+the machine willing to collect the logs its guests ship at it; the rest returns
+true and says what it ought to be doing.  Each step's number is what main()
+returns when that step fails.
+
+=cut
 
 sub main {
     my @args = @_;
@@ -62,9 +83,9 @@ sub setup_rsyslog {
         }
     }
     if ($changed) {
-        File::Slurper::write_text('/etc/rsyslog.conf', $rs_conf);
+        File::Slurper::Temp::write_text('/etc/rsyslog.conf', $rs_conf);
         # TODO check this worked
-        system(qw{systemctl restart rsyslogd});
+        IPC::Run3::run3([qw{systemctl restart rsyslogd}], \undef, undef, undef);
     }
     return 1;
 }

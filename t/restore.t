@@ -5,6 +5,13 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+=head1 NAME
+
+t/restore.t - bin/restore: putting a guest back to a snapshot
+
+=cut
+
 BEGIN {
     # Stub Net::EmptyPort so tests don't do real network waits
     $INC{'Net/EmptyPort.pm'} = 1;
@@ -20,6 +27,7 @@ BEGIN {
 }
 
 use Test::More;
+use IPC::Run3();
 use File::Temp qw{tempdir};
 use Test::MockModule qw{strict};
 use Pod::Usage();
@@ -210,7 +218,8 @@ sub _make_conf {
 
 sub _run {
     my (@cmd) = @_;
-    my $out = qx{$^X @cmd 2>&1};
+    my $out = q{};
+    IPC::Run3::run3([$^X, @cmd], \undef, \$out, \$out);
     return ($out, $?);
 }
 

@@ -13,6 +13,7 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
 use Pod::Usage qw{pod2usage};
 use File::Slurper();
+use File::Slurper::Temp();
 use File::Copy();
 
 =head1 NAME
@@ -163,7 +164,7 @@ sub qualify_ipmap {
     return 1 if $dryrun;
 
     File::Copy::copy($path, "$path.bak") or die "Could not back up $path: $!\n";
-    File::Slurper::write_text($path, join("\n", @out));
+    File::Slurper::Temp::write_text($path, join("\n", @out));
     print "Rewrote $path (old copy at $path.bak)\n";
     return 1;
 }
@@ -191,7 +192,7 @@ sub qualify_recipes {
         next if $dryrun;
 
         File::Copy::copy($file, "$file.bak") or die "Could not back up $file: $!\n";
-        File::Slurper::write_text($file, join("\n", @out));
+        File::Slurper::Temp::write_text($file, join("\n", @out));
         print "Rewrote $file (old copy at $file.bak)\n";
     }
     return 1;

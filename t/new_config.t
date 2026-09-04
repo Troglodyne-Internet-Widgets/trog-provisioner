@@ -4,6 +4,13 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 use re '/aa';
+
+=head1 NAME
+
+t/new_config.t - bin/new_config, with the filesystem mocked out from under it
+
+=cut
+
 use FindBin;
 use FindBin::libs;
 

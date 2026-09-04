@@ -6,6 +6,13 @@ use warnings FATAL => 'all';
 
 use re '/aa';
 
+
+=head1 NAME
+
+t/new_config-packaging.t - what bin/new_config packs into a domain, on a real filesystem
+
+=cut
+
 # A -f or -x in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in, so
 # the TOCTOU policies have nothing to catch.

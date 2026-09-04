@@ -7,6 +7,13 @@ use warnings FATAL => 'all';
 use re '/aa';
 
 
+
+=head1 NAME
+
+t/hv.t - Trog::HV: connection URIs, paths, libvirt and capacity
+
+=cut
+
 # A -f or -x in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in, so
 # the TOCTOU policies have nothing to catch.
@@ -14,7 +21,8 @@ use re '/aa';
 
 use Test::More;
 use File::Temp qw{tempdir};
-use File::Slurper qw{read_text write_text};
+use File::Slurper();
+use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
 
@@ -159,10 +167,10 @@ subtest 'an existing pool says where it is, and is believed' => sub {
 subtest 'guest_ssh_ip' => sub {
     my $dir = tempdir(CLEANUP => 1);
 
-    write_text("$dir/with.conf", "ips=203.0.113.10\n");
+    File::Slurper::Temp::write_text("$dir/with.conf", "ips=203.0.113.10\n");
     my $conf_with = Config::Simple->new("$dir/with.conf");
 
-    write_text("$dir/without.conf", "size=42949672960\n");
+    File::Slurper::Temp::write_text("$dir/without.conf", "size=42949672960\n");
     my $conf_without = Config::Simple->new("$dir/without.conf");
 
     my $local = fresh();
@@ -207,7 +215,7 @@ subtest 'append_line does not duplicate' => sub {
     $hv->append_line($ak, 'ssh-rsa BBBB two');
     $hv->append_line($ak, 'ssh-rsa AAAA one');
 
-    my @lines = split("\n", read_text($ak));
+    my @lines = split("\n", File::Slurper::read_text($ak));
     is(scalar(@lines), 2, 'the repeated key was only written once');
     is_deeply(\@lines, ['ssh-rsa AAAA one', 'ssh-rsa BBBB two'], 'in order');
 };
@@ -222,7 +230,7 @@ subtest 'the transfer user is us when the hypervisor is us' => sub {
 subtest 'from_config reads provision.conf, the command line wins' => sub {
     my $dir  = tempdir(CLEANUP => 1);
     my $file = "$dir/provision.conf";
-    write_text($file, join("\n", qw{
+    File::Slurper::Temp::write_text($file, join("\n", qw{
         libvirt_uri=qemu+ssh://confuser@confhv/system
         pool_path=/srv/pool
         domain_dir=/srv/domains
@@ -370,7 +378,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
 
     # put_file streams the local file down the same pipe.
     my $dir = tempdir(CLEANUP => 1);
-    write_text("$dir/src", "payload\n");
+    File::Slurper::Temp::write_text("$dir/src", "payload\n");
     ok($hv->put_file("$dir/src", '/usr/libexec/thing', sudo => 1), 'put_file');
     is($files{'/usr/libexec/thing'}, "payload\n", 'the bytes arrived');
 

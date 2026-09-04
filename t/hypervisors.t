@@ -5,9 +5,16 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+=head1 NAME
+
+t/hypervisors.t - Trog::Hypervisors: reading the fleet, and placing a guest in it
+
+=cut
+
 use Test::More;
 use File::Temp qw{tempdir};
-use File::Slurper qw{write_text};
+use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
 
@@ -28,7 +35,7 @@ sub fleet_file {
     my (%extra) = @_;
     $extra{$_} //= '' for qw{hv1 hv2};
     my $dir = tempdir(CLEANUP => 1);
-    write_text("$dir/hypervisors.conf", <<"CONF");
+    File::Slurper::Temp::write_text("$dir/hypervisors.conf", <<"CONF");
 [hv1]
 libvirt_uri=qemu+ssh://root\@hv1.example.net/system
 bridge_device=br0
@@ -46,7 +53,7 @@ CONF
 sub guest_conf {
     my (%params) = @_;
     my $dir = tempdir(CLEANUP => 1);
-    write_text("$dir/provision.conf", join('', map { "$_=$params{$_}\n" } sort keys %params));
+    File::Slurper::Temp::write_text("$dir/provision.conf", join('', map { "$_=$params{$_}\n" } sort keys %params));
     return Config::Simple->new("$dir/provision.conf");
 }
 
@@ -124,7 +131,7 @@ subtest 'a name the file does not have is an error' => sub {
 
 subtest 'a file with no blocks is an error' => sub {
     my $dir = tempdir(CLEANUP => 1);
-    write_text("$dir/hypervisors.conf", "libvirt_uri=qemu:///system\n");
+    File::Slurper::Temp::write_text("$dir/hypervisors.conf", "libvirt_uri=qemu:///system\n");
     eval { Trog::Hypervisors->load("$dir/hypervisors.conf") };
     like($@, qr/names no hypervisors/, 'dies rather than silently finding nothing');
 };

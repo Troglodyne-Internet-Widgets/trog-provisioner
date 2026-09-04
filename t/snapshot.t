@@ -5,7 +5,15 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
+=head1 NAME
+
+t/snapshot.t - bin/snapshot: taking one, and naming it
+
+=cut
+
 use Test::More;
+use IPC::Run3();
 use Test::MockModule qw{strict};
 use File::Temp qw{tempdir};
 use Pod::Usage();
@@ -111,7 +119,8 @@ like($out, qr/Usage:/,           'and printing the usage out of the POD');
 
 sub _run {
     my (@cmd) = @_;
-    my $out = qx{$^X @cmd 2>&1};
+    my $out = q{};
+    IPC::Run3::run3([$^X, @cmd], \undef, \$out, \$out);
     return ($out, $?);
 }
 

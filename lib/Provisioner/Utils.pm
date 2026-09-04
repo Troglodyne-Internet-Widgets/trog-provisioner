@@ -21,6 +21,10 @@ use Crypt::PK::RSA();
 
 # Helpers used across various modules
 
+=head1 NAME
+
+Provisioner::Utils - Odds and ends the recipes and the generator both need.
+
 =head2 DESCRIPTION
 
 Provisioner::Recipe helpers.
