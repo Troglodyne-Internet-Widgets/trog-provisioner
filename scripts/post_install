@@ -1,3 +1,21 @@
 #!/bin/bash
-# Make sure we log the outcome of the postinstall process
-bash /root/post_install.sh
+# Run the work the recipes deferred, and say so when it does not work.
+#
+# This used to be `bash /root/post_install.sh`, which reports nothing: a service
+# that would not start printed its failure into the log and the provision still
+# exited 0.  Every task runs, because stopping at the first would leave later
+# recipes' deferred work undone, and the exit code is the answer at the end.
+[ -s /root/post_install.sh ] || exit 0
+
+rc=0
+while IFS= read -r task; do
+    [ -n "$task" ] || continue
+    echo "postrun: $task"
+    if ! bash -c "$task"; then
+        echo "postrun FAILED: $task" >&2
+        rc=1
+    fi
+done < /root/post_install.sh
+
+[ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
+exit "$rc"

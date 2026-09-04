@@ -13,8 +13,9 @@
 [% global_targets.unshift('state') -%]
 
 .PHONY: all
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %] [% state_dir %]/test
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %]
 	[% script_dir %]/post_install
+	$(MAKE) --no-print-directory [% state_dir %]/test
 	touch /root/install_complete
 
 [% state_dir %]/state:
@@ -42,6 +43,9 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	cpanm [% testdeps.join(' ') %]
 	[% END -%]
 
+# Last, and after post_install rather than before it.  Most of what a recipe
+# does to a service it defers -- enable here, start there -- so testing ahead of
+# that asks whether the packaged config works, not whether ours does.
 [% state_dir %]/test:
 	prove -vm
 
