@@ -11,7 +11,6 @@ use re '/aa';
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
-use Clone();
 use Scalar::Util();
 
 use JSON::Validator::Schema::Troglodyne;
@@ -152,38 +151,49 @@ sub validate {
     my ($self, %opts) = @_;
     my %args = $self->args();
 
-    apply_defaults(\%opts, \%args);
+    forget_undefs(\%opts, \%args);
 
     my $classname = Scalar::Util::blessed($self);
-    my $validator = JSON::Validator::Schema::Troglodyne->new();
+
+    # OpenAPIv3 coerces booleans, numbers and strings but not defaults, so
+    # nothing was filling them in and every default in every args() documented
+    # an intention that never happened.
+    #
+    # Added to what it already coerces rather than passed on its own: coerce()
+    # replaces the set rather than extending it, and asking for defaults alone
+    # takes booleans back out -- which turns every `type => boolean, default =>
+    # 1` into "Expected boolean - got number", the default failing the check it
+    # was written to satisfy.
+    my $validator = JSON::Validator::Schema::Troglodyne->new;
+    $validator->coerce({ %{ $validator->coerce }, defaults => 1 });
     my @errors = $validator->validate(\%opts, \%args);
     die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
 
     return $self->enrich(%opts);
 }
 
-=head3 apply_defaults($opts, $schema)
+=head3 forget_undefs($opts, $schema)
 
-Fill in whatever the schema says a field defaults to and the configuration did
-not say otherwise about.
+Drop the fields that were named and left empty, so that the schema's default
+gets a chance at them.
 
-JSON::Validator checks data against a schema; it does not fill anything in.  So
-a C<default> in C<args()> documented an intention that nothing carried out, and
-a recipe that declared one got undef instead -- which reaches the template,
-renders as nothing, and produces a configuration file with a directive and no
-argument after it.  That is how chrony ended up refusing to start over a
-C<makestep> with no arguments.
+The validator fills in a default when the key is B<absent>, which is the right
+rule for JSON and the wrong one for YAML.  Written out, a recipe says
 
-Absent and explicitly undef are treated alike: C<makestep:> with nothing after
-it in YAML is how somebody says "whatever you think", not "empty".
+    ntp:
+        makestep:
 
-Nested objects are filled in too, where the configuration has the object at all.
-Array items are not: what a default means for the third element of a list nobody
-supplied is not a question with an obvious answer.
+and means "whatever you think", not "empty" -- but it arrives as an explicit
+undef, which counts as present.  chronyd will not start on a C<makestep> with no
+arguments after it, so the difference is not academic.
+
+Only fields that actually declare a default are dropped.  One that does not is
+left undef, because there the distinction between unset and absent may be
+something a recipe cares about.
 
 =cut
 
-sub apply_defaults {
+sub forget_undefs {
     my ($opts, $schema) = @_;
     return $opts unless ref $opts eq 'HASH' && ref $schema eq 'HASH';
 
@@ -194,10 +204,10 @@ sub apply_defaults {
         my $prop = $props->{$key};
         next unless ref $prop eq 'HASH';
 
-        $opts->{$key} = Clone::clone($prop->{default})
-          if !defined $opts->{$key} && exists $prop->{default};
+        delete $opts->{$key}
+          if exists $opts->{$key} && !defined $opts->{$key} && exists $prop->{default};
 
-        apply_defaults($opts->{$key}, $prop) if ref $opts->{$key} eq 'HASH';
+        forget_undefs($opts->{$key}, $prop) if ref $opts->{$key} eq 'HASH';
     }
 
     return $opts;

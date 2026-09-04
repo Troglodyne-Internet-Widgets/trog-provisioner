@@ -88,43 +88,54 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     like( $domain_out, qr/domain=example\.com/, 'render still renders per-domain template' );
 };
 
-subtest 'schema defaults are filled in, because nothing else fills them' => sub {
-    # JSON::Validator checks data against a schema and fills nothing in, so a
-    # default in args() documented an intention nobody carried out.  chrony
-    # refused to start over a makestep with no arguments after it.
+subtest 'schema defaults are filled in' => sub {
+    # JSON::Validator does this itself, at Schema.pm:758 -- but only under
+    # coerce('defaults'), and OpenAPIv3 coerces booleans, numbers and strings
+    # without it.  Nothing turned it on, so every default in every args()
+    # documented an intention that never happened: chrony got a makestep with no
+    # arguments after it and refused to start.
     my %schema = (
         type       => 'object',
         properties => {
-            plain    => { type => 'string',  default => 'a default' },
-            given    => { type => 'string',  default => 'a default' },
-            emptied  => { type => 'string',  default => 'a default' },
-            listed   => { type => 'array',   default => [qw{one two}] },
-            nodefault=> { type => 'string' },
-            nested   => {
-                type       => 'object',
-                properties => { inner => { type => 'string', default => 'inner default' } },
-            },
+            plain     => { type => 'string', default => 'a default' },
+            given     => { type => 'string', default => 'a default' },
+            emptied   => { type => 'string', default => 'a default' },
+            listed    => { type => 'array',  default => [qw{one two}] },
+            nodefault => { type => 'string' },
+            blank     => { type => 'string' },
         },
     );
 
-    my %opts = (given => 'mine', emptied => undef, nested => { });
-    Provisioner::Recipe::apply_defaults(\%opts, \%schema);
+    my %opts = (given => 'mine', emptied => undef, blank => undef);
+    Provisioner::Recipe::forget_undefs(\%opts, \%schema);
 
-    is($opts{plain}, 'a default', 'an absent field gets its default');
-    is($opts{given}, 'mine',      'one that was given does not');
+    # The validator fills a default in when the key is absent, which is the
+    # right rule for JSON and the wrong one for YAML: "emptied:" with nothing
+    # after it means "whatever you think", not "empty".
+    ok(!exists $opts{emptied}, 'a field named and left empty is dropped, so the default can land');
+    ok(exists $opts{blank} && !defined $opts{blank},
+        'one with no default to land is left alone, since unset may mean something');
 
-    # `makestep:` with nothing after it in YAML is how somebody says "whatever
-    # you think", not "empty".
-    is($opts{emptied}, 'a default', 'and an explicit undef is treated as absent');
+    my $validator = JSON::Validator::Schema::Troglodyne->new->coerce('defaults');
+    $validator->validate(\%opts, \%schema);
 
+    is($opts{plain},   'a default', 'an absent field gets its default');
+    is($opts{emptied}, 'a default', 'and so does one that was emptied');
+    is($opts{given},   'mine',      'one that was given does not');
     ok(!exists $opts{nodefault}, 'a field with no default is not invented');
     is_deeply($opts{listed}, [qw{one two}], 'lists come through');
-    is($opts{nested}{inner}, 'inner default', 'and nested objects are filled too');
+};
 
-    my %other;
-    Provisioner::Recipe::apply_defaults(\%other, \%schema);
-    push @{ $opts{listed} }, 'mutated';
-    is_deeply($other{listed}, [qw{one two}], 'a default is copied, not shared between recipes');
+subtest 'a recipe gets its declared defaults end to end' => sub {
+    require Provisioner::Recipe::ntp;
+    my $r = 'Provisioner::Recipe::ntp'->new(template_dirs => ['templates'], output_dir => '/tmp');
+
+    my %v = $r->validate(domain => 'd.test');
+    is($v{makestep}, '1.0 3', 'through validate(), which is what render_file calls');
+    ok(scalar @{ $v{servers} }, 'including the list of time sources');
+
+    my %u = $r->validate(domain => 'd.test', makestep => undef);
+    is($u{makestep}, '1.0 3', 'and an explicitly empty one still gets it');
 };
 
 done_testing();
