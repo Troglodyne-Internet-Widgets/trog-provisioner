@@ -335,29 +335,12 @@ sub pool_path {
     my ($self) = @_;
     return $self->{pool_path} if defined $self->{pool_path};
 
-    # Where the pool actually is beats where we would have put one.  We delete
-    # things out of this path and hand it to terraform, and a pool somebody
-    # made somewhere else is not a reason to be wrong about both.
+    # Where the pool actually is beats where we would have put one: we delete
+    # things out of this path, and a pool somebody made somewhere else is not a
+    # reason to be wrong about it.  The name and the default are historical --
+    # terraform chose both -- and are kept because that is where the volumes on
+    # a hypervisor built by the old tool actually live.
     return $self->{_pool_path} //= ($self->pool_target('tf_disks') // '/opt/terraform/disks');
-}
-
-=head2 volume_key($pool, $name)
-
-The key of a volume that already exists -- for a directory pool, its path --
-which is the id terraform wants in an C<import> block.  Undef when there is no
-such volume, which is how the caller knows to let terraform create it.
-
-=cut
-
-sub volume_key {
-    my ($self, $pool_name, $name) = @_;
-
-    return eval {
-        my $vmm    = $self->vmm;
-        my $pool   = $vmm->get_storage_pool_by_name($pool_name // 'tf_disks');
-        my $volume = $pool->get_volume_by_name($name);
-        $volume->get_key();
-    };
 }
 
 =head2 pool_target($name)
@@ -474,7 +457,7 @@ sub domain_xml {
 =head2 annihilate_domain($name)
 
 Stop and undefine a domain, nvram and all, and don't complain if it was already
-gone or already off.  Terraform is not reliably able to do this itself, which is
+gone or already off.  Which is
 the only reason we do.
 
 Returns true if there was something there to remove.
@@ -560,8 +543,12 @@ sub release_dhcp_lease {
 =head2 eject_cdrom($domain, $target)
 
 Yank the cloud-init ISO back out, so the guest doesn't try to boot it again on
-its next start.  C<$target> defaults to C<sda>, which is where the terraform
-provider insists on putting it.
+its next start.  C<$target> defaults to C<sda>, which is where the domain XML
+puts it.
+
+Call this only once the guest says cloud-init has finished.  The seed has to
+stay in the drive for as long as cloud-init might want to read it; taking it
+out earlier leaves the guest with no user, no keys and no netplan.
 
 =cut
 
@@ -578,25 +565,13 @@ sub eject_cdrom {
     return $ok ? 1 : 0;
 }
 
-=head2 pool_uuid($name)
-
-The UUID of a storage pool, or undef if it doesn't exist yet.  Terraform needs
-this to adopt a pool it didn't create rather than fighting over it.
-
 =head2 nuke_pool($name)
 
 Tear a storage pool down completely -- stop it, delete its contents, forget it
--- and remove its directory from the hypervisor.  Terraform gets itself into
-states only this can get it out of.
+-- and remove its directory from the hypervisor.  For a pool that has got
+itself into a state nothing else will get it out of.
 
 =cut
-
-sub pool_uuid {
-    my ($self, $name) = @_;
-    my $vmm  = $self->vmm;
-    my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return undef;
-    return $pool->get_uuid_string();
-}
 
 sub nuke_pool {
     my ($self, $name) = @_;
@@ -622,7 +597,7 @@ sub nuke_pool {
 
 Everything terraform used to do, done against libvirt directly.
 
-Terraform was never a good fit here.  Its model is that it owns the world and
+Terraform was never a good fit here.  Its model was that it owned the world and
 can rebuild it; ours is that the hypervisor owns the world and we add one guest
 to it.  Reconciling those cost a state file per hypervisor, import blocks for
 things it did not create, C<ignore_changes> for attributes the provider would
@@ -1139,7 +1114,7 @@ sub capacity {
 =head2 pool_free($name)
 
 Free bytes in the storage pool, or 0 when there isn't one yet -- a pool
-terraform has not built has no space in it, which is the honest answer.
+nothing has built yet has no space in it, which is the honest answer.
 
 =cut
 

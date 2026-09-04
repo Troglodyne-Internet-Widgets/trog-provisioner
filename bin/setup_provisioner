@@ -20,13 +20,12 @@ sub main {
 
     setup_kvm() or return 1;
     setup_public_bridge() or return 2;
-    setup_terraform() or return 3;
-    setup_rsyslog() or return 4;
-    setup_auditd() or return 5;
-    setup_management_interface() or return 6;
-    setup_firewall() or return 7;
-    setup_fail2ban() or return 8;
-    setup_crons() or return 9;
+    setup_rsyslog() or return 3;
+    setup_auditd() or return 4;
+    setup_management_interface() or return 5;
+    setup_firewall() or return 6;
+    setup_fail2ban() or return 7;
+    setup_crons() or return 8;
     return 0;
 }
 
@@ -37,11 +36,6 @@ sub setup_kvm {
 
 # TODO Setup a bridge device on a public IP
 sub setup_public_bridge {
-1;
-}
-
-# TODO ensure terraform is installed w/ relevant modules
-sub setup_terraform {
 1;
 }
 

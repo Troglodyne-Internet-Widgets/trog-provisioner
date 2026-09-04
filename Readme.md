@@ -32,7 +32,7 @@ Even business units at giant corporations can do just fine with this approach.
 4. To set up new sites, have a skeleton site generator to build a blank site tarball.
 
 This all works behind the scenes due to:
-1. Terraform's libvirt provider mounting a bogus cdrom with network setup and cloud-config
+1. A small ISO, labelled `cidata`, mounted as a cdrom, carrying the network setup and cloud-config
 2. libvirt's virtual networking allowing us to talk to this HV.
 3. Spinning off an atd job to actually do the setup when cloud-config is done.
 
@@ -118,7 +118,7 @@ Without a `hypervisors.conf`, `libvirt_uri` in a guest's `provision.conf` still 
 
 ### What that actually does
 
-The URI is handed to terraform's libvirt provider and used for every libvirt call we make, which all go through `Sys::Virt` -- no `virsh`, so libvirt's own transports do the work.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, writing the rsyslog collector config, putting the domain directory somewhere the guest can fetch it from -- and all of it has to happen *on the hypervisor*.  So for a remote URI we open one `Net::OpenSSH::More` connection there and do it over that, commands and file transfers alike.
+The URI is used for every libvirt call we make, which all go through `Sys::Virt` -- no `virsh`, so libvirt's own transports do the work.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, writing the rsyslog collector config, putting the domain directory somewhere the guest can fetch it from -- and all of it has to happen *on the hypervisor*.  So for a remote URI we open one `Net::OpenSSH::More` connection there and do it over that, commands and file transfers alike.
 
 The hypervisor and the guest are reached the same way, so both are subclasses of `Trog::Machine`, which holds the connection, the commands and the file operations.  `Trog::HV` adds libvirt and the paths; `Trog::Guest` adds the waiting a freshly built VM needs.  Nothing in either goes over sftp: `Net::SFTP::Foreign` hangs rather than failing when the far side refuses a write, so files are poured down the standard input of a command instead, and `sudo` goes in front of the write rather than in front of a move afterwards.
 
@@ -191,7 +191,7 @@ The hypervisor needs `xorriso` (or `genisoimage`/`mkisofs`) for the seed ISO, an
 
 ### Nuking a wedged storage pool
 
-Terraform gets the `tf_disks` pool into states nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:
+A storage pool can get into a state nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:
 
 ```
 bin/nuke_pool
