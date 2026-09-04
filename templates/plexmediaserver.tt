@@ -1,6 +1,15 @@
 # Add the official Plex apt repository
 curl -sS https://downloads.plex.tv/plex-keys/PlexSign.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
 echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://downloads.plex.tv/repos/deb public main" > /etc/apt/sources.list.d/plexmediaserver.list
+[%# The Plex repository is checked on its own, before the general update, so that
+    a repository refusing us fails here saying so.  Rolled into the update of
+    everything else it was three lines of apt noise followed by a bare
+    "Error 100" from the install, which names neither the repository nor the
+    reason. -%]
+DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
+    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
+  || { echo "plexmediaserver: downloads.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
 DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] plexmediaserver
 # Ensure the plex service user exists (created by package but guard anyway)
