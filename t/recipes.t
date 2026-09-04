@@ -439,6 +439,15 @@ subtest 'no template comment leaves a quote open' => sub {
         # Every [%# ... %] block, which may span lines.
         while ( $body =~ m/(\[%#.*?%\])/gs ) {
             my $comment = $1;
+
+            # A comment ends at the first %] there is, so a directive written
+            # inside one closes it early and the rest of the prose becomes part
+            # of the template.  A comment saying `[% user %]` in passing put
+            # ", not by a hardcoded koan.  The account is whatever the" into a
+            # Makefile, where make read it as a command.
+            ok( index( $comment, '[%', 2 ) < 0,
+                "$name: no directive inside a comment" )
+              or diag $comment;
             foreach my $quote ( q{'}, q{"} ) {
                 my $count = () = $comment =~ m/\Q$quote\E/g;
                 ok( $count % 2 == 0, "$name: a comment closes every $quote it opens" )

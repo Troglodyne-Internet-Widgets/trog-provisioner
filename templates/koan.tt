@@ -43,11 +43,10 @@ done
 
 # Drop in the rendered configs.  All three live inside KOAN_ROOT so
 # python-dotenv + koan's instance/ lookup find them with no fuss.
-[%# Owned by [% user %], not by a hardcoded koan.  The account is whatever the
-    domain names as its service user and is created by the service_user target
-    under that name -- this worked only because the one domain running koan
-    happens to call it koan, and any other would get
-    "install: invalid user". -%]
+[%# Owned by the service user, not by a hardcoded koan.  The account is
+    whatever the domain names and is created by the service_user target under
+    that name -- this worked only because the one domain running koan happens
+    to call it koan, and any other would get "install: invalid user". -%]
 install -o '[% user %]' -g '[% user %]' -m 0640 koan.env         '[% install_dir %]/[% domain %]/koan/.env'
 install -o '[% user %]' -g '[% user %]' -m 0640 koan.config.yaml '[% install_dir %]/[% domain %]/koan/instance/config.yaml'
 # Don't overwrite one if we salvaged it from a prior run
