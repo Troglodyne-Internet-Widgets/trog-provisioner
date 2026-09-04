@@ -125,7 +125,7 @@ sub deps {
           matrix-synapse-py3
           python3-cryptography
           python3-bcrypt
-          python3-pillow
+          python3-pil
           python3-twisted
           python3-yaml
           python3-jsonschema
@@ -139,7 +139,7 @@ sub deps {
           python3-service-identity
           python3-signedjson
           python3-canonicaljson
-          python3-attrs
+          python3-attr
           python3-txacme
           python3-txredisapi
           python3-matrix-common

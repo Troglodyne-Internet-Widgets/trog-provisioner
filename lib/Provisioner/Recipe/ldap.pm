@@ -83,7 +83,9 @@ sub enrich {
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{slapd ldap-utils libldap-2.5-0};
+        # libldap2, not libldap-2.5-0: the soname is in the package name on
+        # some distros and not on Ubuntu 24.04, where the archive has libldap2.
+        return qw{slapd ldap-utils libldap2};
     }
     die "Unsupported packager";
 }

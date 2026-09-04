@@ -17,4 +17,14 @@ ok($ldaps, 'LDAPS port 636 is listening');
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
 like($search, qr/dn:\s*[% base_dn %]/i, 'base DN is searchable');
 
+# A package name that does not exist in the archive is not an error anywhere:
+# it is simply never installed.  libldap-2.5-0 was in this list, and on Ubuntu
+# 24.04 the archive has libldap2.
+foreach my $pkg (qw{slapd ldap-utils libldap2}) {
+    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
+    # variable inside backticks long before dpkg ever sees it.
+    my $installed = `dpkg -s $pkg 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, "$pkg is installed");
+}
+
 done_testing();

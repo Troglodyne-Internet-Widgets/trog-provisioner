@@ -29,6 +29,16 @@ unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $
 like($index, qr/#\Q[% chan %]\E\@/, 'channel [% chan %] is listed');
 [% END %]
 
+# The packages the recipe asks for.  Nothing fails when one of these does not
+# exist -- the name is simply never installed -- so python3-pillow sat in the
+# list for as long as it did without anybody noticing it is python3-pil here.
+foreach my $pkg (qw{matrix-synapse-py3 python3-pil python3-attr}) {
+    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
+    # variable inside backticks long before dpkg ever sees it.
+    my $installed = `dpkg -s $pkg 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, "$pkg is installed");
+}
+
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
 
