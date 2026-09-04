@@ -29,7 +29,6 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use List::Util qw{uniq any};
 use Net::SFTP::Foreign;
-use IO::Interface::Simple();
 use Archive::Tar();
 use File::Path qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
@@ -528,7 +527,6 @@ sub handle_domain {
 
     my $provisioner_dir = Cwd::abs_path( $FindBin::Bin . "/../" );
     my $root_scripts    = '/root/bin';
-    my $hv_internal_ip  = get_hv_internal_ip();
 
     my %formatters = (
         tabinate => Text::Xslate::html_builder(
@@ -552,7 +550,6 @@ sub handle_domain {
     # TODO stop hardcoding some things, and document this in P::R
     my %provisioner_opts = (
         target_packager => 'deb',
-        hv_internal_ip  => $hv_internal_ip,
         provisioner_dir => $provisioner_dir,
         script_loc      => $root_scripts,
         output_dir      => $cfg_dir,
@@ -571,7 +568,7 @@ sub handle_domain {
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
 
-    $global_config->{hv_ip}           = $hv_internal_ip;
+    $global_config->{hv_host}         = $hv->hostname;
     $global_config->{provisioner_dir} = $provisioner_dir;
     $global_config->{tld}             = $tld;
     $global_config->{admin_user}      = $admin_user;
@@ -879,11 +876,6 @@ sub _get_sftp {
     );
     $ssh->error or $target_is_up = 1;
     return ($ssh, $target_is_up)
-}
-
-sub get_hv_internal_ip {
-    my $if = IO::Interface::Simple->new('virbr0') or return '';
-    return $if->address() // '';
 }
 
 sub _coerce_arrayref {

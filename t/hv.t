@@ -206,6 +206,31 @@ subtest 'append_line does not duplicate' => sub {
     is_deeply(\@lines, ['ssh-rsa AAAA one', 'ssh-rsa BBBB two'], 'in order');
 };
 
+subtest 'the hostname is the one a guest can reach' => sub {
+    # A guest rsyncs its payload off the hypervisor, so the Makefile has to name
+    # it.  This used to be the address of virbr0 read off whichever machine ran
+    # the generator, which came out empty anywhere but the hypervisor itself.
+    my $hv = fresh(uri => 'qemu+ssh://root@hv1.example.net/system');
+    is($hv->hostname, 'hv1.example.net', 'the host out of the URI, which we know resolves');
+
+    # Locally there is no URI to read it from, and localhost is no use to a
+    # guest that has to cross a network to get here.
+    $hv = fresh();
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine(capture => sub {
+        my ($self, $cmd) = @_;
+        is($cmd, 'hostname -f', 'asks the machine for its full name');
+        return "hv0.example.net\n";
+    });
+    is($hv->hostname, 'hv0.example.net', 'chomped');
+    is($hv->hostname, 'hv0.example.net', 'and cached, not asked twice');
+
+    $hv = fresh();
+    $machine->redefine(capture => sub { '' });
+    eval { $hv->hostname };
+    like($@, qr/Could not determine a hostname/, 'refuses to hand a guest an empty host');
+};
+
 subtest 'the transfer user is us when the hypervisor is us' => sub {
     my $hv = fresh();
     is($hv->hv_user, scalar getpwuid($<), 'local transfer user is the caller');

@@ -251,6 +251,7 @@ sub generate_config {
     # choose one; it picks the singleton up from there.
     Trog::HV->new(uri => $opts->{uri}, domain_dir => $dir) if $opts->{uri};
 
+    push @INC, '.';
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;    ## no critic (Modules::RequireBarewordIncludes)
     my $result = Trog::Provisioner::Config::Generator::main(

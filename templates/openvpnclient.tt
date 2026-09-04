@@ -1,6 +1,6 @@
 	# Sync client certificates from hypervisor
 	mkdir -p /etc/openvpn/client
-	rsync -av [% hv_ip %]:[% cert_dir %]/ /etc/openvpn/client/
+	rsync -av [% hv_host %]:[% cert_dir %]/ /etc/openvpn/client/
 	chmod 0600 /etc/openvpn/client/client.key /etc/openvpn/client/ta.key
 	chown root:root /etc/openvpn/client/client.key /etc/openvpn/client/ta.key
 	# Deploy client configuration

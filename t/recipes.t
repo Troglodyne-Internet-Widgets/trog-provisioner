@@ -14,6 +14,8 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp qw(tempdir);
 use File::Find();
+use File::Slurper();
+use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
 
@@ -30,7 +32,7 @@ my %G = (
     admin_email                => 'admin@test.test',
     main_ip                    => '192.168.1.100',
     tld_ip                     => '192.168.1.1',
-    hv_ip                      => '192.168.122.1',
+    hv_host                    => 'hv.example.com',
     hv_ssh_port                => 22,
     transfer_user              => 'transfer',
     provisioner_dir            => "$FindBin::Bin/..",
@@ -195,6 +197,34 @@ foreach my $recipe (@available) {
     $input = $required_config{$recipe} if exists $required_config{$recipe};
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
+
+# The guest rsyncs its payload off the hypervisor, so every one of these has to
+# name it.  When the host came out empty the recipe still rendered, and still
+# looked plausible -- 'doge@:/opt/data/...' -- and only failed on the guest,
+# hours later, at the point where it had already been told the build succeeded.
+subtest 'every rsync off the hypervisor names it' => sub {
+    my %seen;
+    foreach my $recipe (qw{data adminconfig makefile}) {
+        foreach my $tt ("$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt") {
+            next unless -f $tt;
+            # Configured the way new_config configures it, bridge and all;
+            # a bare Xslate cannot render the ones using TT2 vmethods.
+            my $xslate = Text::Xslate->new(
+                path     => [$template_dir],
+                syntax   => 'TTerse',
+                module   => [qw{Text::Xslate::Bridge::TT2}],
+                function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+            );
+            my $out = $xslate->render_string(
+                File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
+            next unless $out =~ m/rsync/;
+            $seen{$recipe}++;
+            unlike($out, qr/\@:/,   "$recipe: no empty host between the user and the path");
+            like($out, qr/\@\Q$G{hv_host}\E:/, "$recipe: rsyncs from $G{hv_host}");
+        }
+    }
+    ok(scalar keys %seen, 'and there were rsyncing recipes to check');
+};
 
 # ----------------------------------------------------------------
 # Validate: required fields cause die
