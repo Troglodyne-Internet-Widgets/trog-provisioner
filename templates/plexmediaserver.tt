@@ -21,23 +21,21 @@ mkdir -p '[% dir %]'
 chown plex:[% admin_user %] '[% dir %]'
 chmod 0750 '[% dir %]'
 [% END %]
-# Configure Plex Preferences.xml with SSL cert and account info
-PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'
-mkdir -p "$$PREFS_DIR"
+# Configure Plex Preferences.xml with SSL cert and account info.
+#
+# One logical line, and one line of python.  Make runs each recipe line in its
+# own shell, so PREFS_DIR set on its own line was empty everywhere it was used
+# -- and the preferences file went to /Preferences.xml rather than into Plex's
+# library.  The python was worse: a "-c" string spanning several lines with no
+# continuations, so make handed the shell a quote it never closed.
+PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
+mkdir -p "$$PREFS_DIR"; \
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
 PLEX_USER='[% plex_login_name %]' \
 PLEX_MAIL='[% admin_mail %]' \
 PREFS_PATH="$$PREFS_DIR/Preferences.xml" \
-python3 -c "
-import xml.etree.ElementTree as ET, os
-p = os.environ['PREFS_PATH']
-root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences')
-root.set('customCertificatePath', os.environ['PLEX_CERT'])
-root.set('PlexOnlineUsername', os.environ['PLEX_USER'])
-root.set('PlexOnlineMail', os.environ['PLEX_MAIL'])
-ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)
-"
-chown -R plex:[% admin_user %] "$$PREFS_DIR"
+python3 -c "import xml.etree.ElementTree as ET, os; p = os.environ['PREFS_PATH']; root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences'); root.set('customCertificatePath', os.environ['PLEX_CERT']); root.set('PlexOnlineUsername', os.environ['PLEX_USER']); root.set('PlexOnlineMail', os.environ['PLEX_MAIL']); ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)"; \
+chown -R plex:[% admin_user %] "$$PREFS_DIR"; \
 chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver

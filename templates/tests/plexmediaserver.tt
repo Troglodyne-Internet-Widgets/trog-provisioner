@@ -8,4 +8,16 @@ chomp $status;
 is($status, 'active', 'plex media server is running');
 ok(-d '/var/lib/plexmediaserver', 'plex data directory exists');
 
+# Where the preferences actually went.  PREFS_DIR was set on its own make recipe
+# line and used on the next, so it was empty in every use and this landed at
+# /Preferences.xml -- and the python that writes it spanned several lines with
+# no continuations, so the shell never got a closing quote at all.
+my $prefs = '/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml';
+ok(-f $prefs, 'Preferences.xml is in the Plex library');
+ok(!-e '/Preferences.xml', 'and not at the root of the filesystem');
+
+my $xml = do { local (@ARGV, $/) = $prefs; <> } // '';
+like($xml, qr/customCertificatePath="[^"]+"/, 'the certificate path was written');
+like($xml, qr/PlexOnlineUsername="\Q[% plex_login_name %]\E"/, 'and the account name');
+
 done_testing();
