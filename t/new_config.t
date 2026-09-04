@@ -19,6 +19,7 @@ use JSON::Validator::Schema::Troglodyne;
 use Text::Xslate;
 use Config::Simple;
 
+
 # It is important to use MockFile last
 use Test::MockFile();
 
@@ -34,19 +35,15 @@ admin_user  = tester
 admin_key   = bogus
 admin_gecos = Test User
 admin_email = test\@test.test
-tld = test.local
-ip = 192.168.1.1
 gateway = 192.168.1.254
 resolvers = 8.8.8.8
-bridge_devname = virbr0
-dhcp_devname = eth0
 transfer_user = provision
 
 [ips]
-testdomain = 192.168.1.10
+testdomain.test.local = 192.168.1.10
 IPMAP
 
-    # recipes.yaml has _base but no 'testdomain' top-level key
+    # recipes.yaml has _base but no 'testdomain.test.local' top-level key
     my $recipe = <<'RECIPES';
 ---
 _base:
@@ -72,13 +69,13 @@ RECIPES
             '--ipmap',   $ipmap_file,
             '--recipes', "$basedir/recipes.yaml",
             '--skip_ssh',
-            'testdomain',
+            'testdomain.test.local',
         )
     };
 
     like(
         $result,
-        qr/No recipe configuration.*testdomain/i,
+        qr/No recipe configuration.*testdomain\.test\.local/i,
         'dies with helpful message when domain is missing from recipe config',
     );
 

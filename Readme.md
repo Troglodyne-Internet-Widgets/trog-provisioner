@@ -27,7 +27,7 @@ Even business units at giant corporations can do just fine with this approach.
     * cpu\_mode: libvirt `<cpu mode="...">` value.  Defaults to `host-passthrough` so the guest sees the HV's real CPU (incl. AVX/AVX2 — required by anything that probes cpuid for vector extensions, e.g. the v8 snapshot bundled with the `claude` CLI).  Set to `host-model` or a specific qemu CPU model if you need to migrate the guest to a differently-specced HV.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
-2. Run `bin/provision $DOMAIN` (add `--connect $URI` to build on another hypervisor)
+2. Run `bin/provision $DOMAIN` -- fully qualified, e.g. `bin/provision mysql.troglodyne.net` (add `--connect $URI` to build on another hypervisor)
 3. It is the responsibility of data.tar.gz to have a Makefile in the TLD which sets up all relevant dependencies, loads up DBs, etc as the default target.
 4. To set up new sites, have a skeleton site generator to build a blank site tarball.
 
@@ -139,6 +139,25 @@ That means:
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
 
 5. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+
+### One repository, one run
+
+`bin/new_config` and `bin/provision` used to live in separate repositories and be run one after the other: generate a domain's configuration, then build the VM.  That held together while the generator could assume it was running *on* the hypervisor it was writing about -- it read the internal IP and the sshd port straight off the local machine.  Once which hypervisor to use became a choice, both halves had to agree on the answer, and the only honest way for them to agree is to be one program.
+
+So `bin/provision` generates the configuration first, and the generator is what picks the hypervisor: the recipe already says how much memory, disk and CPU the guest wants, which is everything placement needs.  `provision.conf` never has to carry it.  `--no-config` skips the generation and builds whatever is already in the domain directory, which is what you want for a domain you wrote by hand.
+
+### Everything is spelled out
+
+Domains used to be written two ways: short, with a `tld` from `ipmap.cfg`'s global section appended, or fully qualified for anything under a different parent -- which the config called an "addon" and handled down a separate path.  Both spellings arrived at the same place, and the separate path existed only to undo the appending.
+
+There is one spelling now, in full, matching what `recipes.d` already named its files:
+
+```
+bin/new_config mysql.troglodyne.net
+bin/provision  mysql.troglodyne.net
+```
+
+`[addons]` and `tld` are gone from `ipmap.cfg`, and the keys in `[ips]` and `[aliases]` -- and the top-level key of each recipe -- are fully qualified.  `bin/qualify_site_data --tld yourdomain.com` does the rename once, backing both up first.  It refuses if two entries would collapse into one, which is worth knowing about: a short name and a qualified one can both be in there meaning the same machine with different addresses, and picking between them is not a decision a script should make.
 
 ### Why there is no terraform any more
 

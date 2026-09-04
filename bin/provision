@@ -43,6 +43,23 @@ A remote hypervisor has to be named with an ssh transport
 (C<qemu+ssh://user@host/system>), since we need its filesystem as well as its
 libvirt.
 
+=item B<--no-config>
+
+Skip generating the domain's configuration, and build from whatever is already
+in its directory.  Normally F<bin/new_config> is run first, which is what
+writes F<provision.conf> and packs F<data.tar.gz>; pass this when you want to
+build exactly what is on disk.
+
+=item B<--recipes> FILE
+
+Handed to F<bin/new_config>.  Defaults to F<recipes.yaml> beside the domain
+directories.
+
+=item B<--ipmap> FILE
+
+Handed to F<bin/new_config>.  Defaults to F<ipmap.cfg> beside the domain
+directories.
+
 =item B<--hvconf> FILE
 
 The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
@@ -88,13 +105,16 @@ sub main {
 
     umask 0022;
 
-    my ($reuse, $uri, $domain_dir, $hvconf);
+    my ($reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap);
     GetOptionsFromArray(\@args,
         'existing=s'  => \$reuse,
         'domaindir=s' => \$domain_dir,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'hvconf=s'    => \$hvconf,
+        'no-config'   => \$no_config,
+        'recipes=s'   => \$recipes,
+        'ipmap=s'     => \$ipmap,
     );
 
     my $domain = shift @args;
@@ -105,6 +125,18 @@ sub main {
     # we have to find that the hard way first.
     $domain_dir //= '/opt/domains';
     $domain =~ s/\///g;
+
+    # Build the domain's configuration first.  It is what writes provision.conf
+    # and packs data.tar.gz, and it needs the hypervisor to write either -- so
+    # it picks the hypervisor too, and everything after this shares it.
+    generate_config($domain, {
+        domain_dir => $domain_dir,
+        recipes    => $recipes,
+        ipmap      => $ipmap,
+        hvconf     => $hvconf,
+        uri        => $uri,
+    }) unless $no_config;
+
     my $cfile = "$domain_dir/$domain/provision.conf";
     die "No such file provision.conf in $domain_dir/$domain/" unless -f $cfile;
 
@@ -187,6 +219,43 @@ sub main {
     return_hypervisor_state($hv);
 
     return 0;
+}
+
+# Run the config generator for this domain, if there is anything for it to
+# work from.
+#
+# The two used to be separate repositories and separate runs: you generated a
+# domain's configuration, then provisioned it.  That worked while the generator
+# could assume it was running on the hypervisor it was writing about -- it read
+# the internal IP and the sshd port off the local machine.  Once the hypervisor
+# became a choice, the two halves had to agree on which one, and the only
+# honest way for them to agree is to be one program.
+sub generate_config {
+    my ($domain, $opts) = @_;
+
+    my $dir     = $opts->{domain_dir};
+    my $recipes = $opts->{recipes} // "$dir/recipes.yaml";
+    my $ipmap   = $opts->{ipmap}   // "$dir/ipmap.cfg";
+
+    # No site data, nothing to generate: somebody is provisioning from a domain
+    # directory they wrote by hand, which is a supported thing to do.
+    unless (-f $recipes || -d "$dir/recipes.d") {
+        print "No recipes at $recipes, building from what is already in $dir/$domain\n";
+        return 0;
+    }
+
+    print "Generating the configuration for $domain...\n";
+
+    # An explicit --connect settles the hypervisor before the generator gets to
+    # choose one; it picks the singleton up from there.
+    Trog::HV->new(uri => $opts->{uri}, domain_dir => $dir) if $opts->{uri};
+
+    require "$FindBin::Bin/new_config";    ## no critic (Modules::RequireBarewordIncludes)
+    my $result = Trog::Provisioner::Config::Generator::main(
+        '--recipes', $recipes, '--ipmap', $ipmap, $domain);
+
+    die "Could not generate the configuration for $domain\n" if $result;
+    return 1;
 }
 
 # Which hypervisor does this guest belong on?

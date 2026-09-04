@@ -183,9 +183,8 @@ sub get_config {
     my $ip_conf     = $c->param( -block => 'ips' );
     my $alias_conf  = $c->param( -block => 'aliases' );
     my $ns_conf     = $c->param( -block => 'nameservers' );
-    my $addons      = $c->param( -block => 'addons' );
     my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
-    return ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $addons, $pool_conf );
+    return ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $pool_conf );
 }
 
 # Basically build a pointer so we can modify the actual value, cuz the actual ref can't survive the iterator var :(
@@ -342,13 +341,31 @@ sub main {
     return 0;
 }
 
+# Where does this guest go?  Whichever hypervisor already has it, else
+# whichever has room, else -- with no fleet configured -- this machine.
+sub choose_hypervisor {
+    my ($domain, $requirements, $basedir) = @_;
+
+    require Trog::HV;
+
+    # Somebody who said --connect has already decided; do not place around them.
+    my $chosen = Trog::HV->new();
+    return $chosen if $chosen->explicit;
+
+    require Trog::Hypervisors;
+    my $fleet = Trog::Hypervisors->load(Trog::Hypervisors->default_path($basedir));
+    return $chosen unless $fleet->configured;
+
+    return $fleet->select_for($domain, $requirements);
+}
+
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 sub handle_domain {
-    my $domain = shift;
+    my ($domain, $hv) = @_;
 
     die "Must pass domain" unless $domain;
 
-    my ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $addons, $pool_conf ) = get_config();
+    my ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $pool_conf ) = get_config();
 
     my $basedir = $global_conf->{basedir};
     die "Must have basedir defined in global section of $cfile" unless $basedir;
@@ -365,61 +382,36 @@ sub handle_domain {
     my $admin_email = $global_conf->{admin_email};
     die "Must set admin_email in global section of $cfile" unless $admin_email;
 
+    # Everything in the map is spelled out, so a bare label is a leftover from
+    # when there was a tld to append and is worth saying so about rather than
+    # quietly assigning it a fresh address.
+    my @unqualified = grep { $_ !~ m/\./ } sort keys %$ip_conf;
+    die "These entries in the [ips] block of $cfile are not fully qualified:\n"
+      . join('', map { "  $_\n" } @unqualified)
+      . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
+      if @unqualified;
+
     my $static_ip = $ip_conf->{$domain};
     unless ($static_ip) {
         $static_ip = Provisioner::IPPool::auto_assign($cfile, $domain, $pool_conf, $ip_conf);
         $ip_conf->{$domain} = $static_ip;
     }
 
-    my $tld = $global_conf->{tld};
-    die "Must set tld for $domain in global section of $cfile" unless $tld;
-
-    my $tld_ip = $global_conf->{ip};
-    die "Must set ip for $tld in global section of $cfile" unless $tld_ip;
-
     my $gateway = $global_conf->{gateway};
-    die "Must set gateway for $tld (ipv4) in global section of $cfile" unless $gateway;
+    die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
 
     my $resolvers = $global_conf->{resolvers};
-    die "Must set resolvers for $tld in global section of $cfile" unless $resolvers;
+    die "Must set resolvers in global section of $cfile" unless $resolvers;
 
-    #XXX sigh, it is apparently impossible in year of our lord 2026 to force consistent device names
-    # I *guess* I could do match by mac address but, sigh, sigh sigh
-    my $bridge_devname =  $global_conf->{bridge_devname};
-    die "Must set bridge_devname for $tld in global section of $cfile" unless $bridge_devname;
-
-    my $dhcp_devname = $global_conf->{dhcp_devname};
-    die "Must set dhcp_devname for $tld in global section of $cfile" unless $dhcp_devname;
-
-    my $transfer_user = $global_conf->{transfer_user};
-    die "Must set transfer_user in global section of ipmap.cfg.  This is the user which runs trog-provisioner on the HV." unless $transfer_user;
-
-    my $hv_ssh_port;
-    foreach my $line ( eval { File::Slurper::read_lines('/etc/ssh/sshd_config') } ) {
-        next unless $line =~ m{^\s*Port\s+(\d+)};
-        $hv_ssh_port = $1;
-        last;
-    }
-    warn "Could not determine HV ssh port, assuming 22" unless $hv_ssh_port;
-
-    $hv_ssh_port ||= 22;
-    my $fqdn = "$domain.$tld";
-
-    # Override fqdn for addons
-    my $is_addon = 0;
-    my $orig_tld = $tld;
-    if ( ref $addons eq 'HASH' ) {
-        my @addon = keys(%$addons);
-        my ($maybe_fqdn) = grep { $domain eq $_ } @addon;
-        if ($maybe_fqdn) {
-            print "$domain is addon...\n";
-            if ($maybe_fqdn) {
-                $fqdn = $maybe_fqdn;
-                $tld  = $maybe_fqdn;
-            }
-            $is_addon = 1;
-        }
-    }
+    # Every domain is fully qualified, here and in recipes.d.  There is no tld
+    # to append and no separate notion of an addon: a domain that is not under
+    # your usual parent is just a domain, spelled out.
+    my $fqdn = $domain;
+    my ($subdomain, $tld) = split(/\./, $domain, 2);
+    die "'$domain' is not a fully qualified domain name.\n"
+      . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n"
+      . "  new_config $domain.example.com\n"
+      unless defined $tld && length $tld;
 
     # Start parsing the recipe configuration
     my $rconf = clone( get_recipe_config() );
@@ -446,18 +438,34 @@ sub handle_domain {
     die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
         unless exists $rconf->{$domain};
 
+
     my ($dep_dom) = expand_dependent_domains($domain);
 
     my $depends_on;
-    if ( $dep_dom ne $domain ) {
-
-        #XXX wat do if the domain we depend on is *also* an addon?  Probably best to just not do that.
-        $depends_on = "$dep_dom.$orig_tld";
-    }
+    $depends_on = $dep_dom if $dep_dom ne $domain;
 
     # There will always be some global config for a domain which ought be made available to the various modules
     my $global_config = delete $rconf->{$domain}{_global} // {};
     $global_config = { %$base_globals, %$global_config };
+
+    # Which hypervisor is this going on?
+    #
+    # The recipe says how much memory, disk and CPU the guest wants, which is
+    # everything placement needs -- so this is decided here rather than after
+    # provision.conf is written, and provision.conf never has to carry it.
+    #
+    # Required rather than used at the top: reaching a hypervisor over SSH is
+    # not something a run about to fail on a typo should do, and Trog::HV
+    # brings an SSH and a DNS stack with it.
+    $hv //= choose_hypervisor($domain, $global_config, $basedir);
+
+    # The hypervisor answers for itself now.  These used to come out of the
+    # global section and out of this machine's own sshd_config, which was only
+    # ever right because the tool ran on the hypervisor it was building for.
+    my $tld_ip        = $hv->virbr_ip;
+    my $hv_ssh_port   = $hv->sshd_port;
+    my $transfer_user = $global_conf->{transfer_user} // $hv->hv_user;
+    die "Could not work out the transfer user for " . $hv->describe . "\n" unless $transfer_user;
 
     $rconf->{$domain} = Hash::Merge::merge( $base_recipe, $rconf->{$domain} );
 
@@ -544,14 +552,16 @@ sub handle_domain {
         template_dirs   => \@paths,
     );
 
-    foreach my $subdomain ( keys(%$ip_conf) ) {
-        $alias_conf->{$subdomain} = _coerce_arrayref( $alias_conf->{$subdomain} );
-
-        # Basically every single web host is gonna need its own mail/www cnames
-        my @standard_aliases = qw{www mail};
-        @standard_aliases = map { "$_.$subdomain" } @standard_aliases unless $is_addon;
-        push( @{ $alias_conf->{$subdomain} }, @standard_aliases );
-        $alias_conf->{$subdomain} = [ uniq @{ $alias_conf->{$subdomain} } ];
+    # Every web host wants its own www and mail CNAMEs.  This used to have two
+    # spellings -- bare for an addon, prefixed otherwise -- because one of them
+    # had a tld appended afterwards and the other did not.  Both arrived at
+    # www.<fqdn>; with everything spelled out there is only the one way to say
+    # it.  Note this is a different variable from the $subdomain above: it is
+    # every domain in the map, not the one we are building.
+    foreach my $each_domain ( keys(%$ip_conf) ) {
+        $alias_conf->{$each_domain} = _coerce_arrayref( $alias_conf->{$each_domain} );
+        push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
+        $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
 
     $global_config->{hv_ip}           = $hv_internal_ip;
@@ -665,8 +675,9 @@ sub handle_domain {
         my $builder      = $builders{$module};
         my $pconf        = $rconf->{$domain}{$module};
 
-        my $aliases      = $alias_conf->{$domain};
-        my $full_aliases = [ map { "$_.$tld" } @$aliases ];
+        # Aliases are fully qualified in ipmap.cfg as well; nothing is appended.
+        my $aliases      = $alias_conf->{$domain} // [];
+        my $full_aliases = [ @$aliases ];
         if ( $builder->has_global_template() ) {
             $global_fragments{$module} = $builder->render_global(
                 %$global_config,
@@ -805,8 +816,6 @@ sub handle_domain {
         admin_user=$admin_user
         gateway=$gateway
         resolvers=$r_text
-        bridge_devname=$bridge_devname
-        dhcp_devname=$dhcp_devname
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );

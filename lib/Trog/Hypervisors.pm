@@ -271,8 +271,9 @@ The hypervisor for a guest, made current: wherever it already lives, else
 wherever F<provision.conf> pins it with C<hypervisor=>, else wherever it fits
 best.
 
-C<$config> is the guest's F<provision.conf>, read for the C<memory>, C<cpus> and
-C<size> it asks for.
+C<$config> is the guest's F<provision.conf>, or the C<_global> block of its
+recipe as a plain hashref -- either way it is read for the C<memory>, C<cpus>
+and C<size> the guest asks for, and for a C<hypervisor> pin.
 
 =cut
 
@@ -285,9 +286,8 @@ sub select_for {
         return $existing->activate();
     }
 
-    my $pinned = $config->param('hypervisor');
-    $pinned = $pinned->[0] if ref $pinned eq 'ARRAY';
-    if (defined $pinned && length $pinned) {
+    my $pinned = _param($config, 'hypervisor');
+    if (defined $pinned) {
         my $hv = $self->hypervisor($pinned);
         my @reasons = $hv->shortfalls(_needs($config));
         die "$domain is pinned to $pinned, which cannot take it:\n"
@@ -299,14 +299,25 @@ sub select_for {
     return $self->place($domain, _needs($config))->activate();
 }
 
-# What the guest is asking for, out of its provision.conf.
+# What the guest is asking for.  Out of its provision.conf, or out of the
+# _global block of its recipe -- the requirements are the same either way, and
+# new_config knows them before there is a provision.conf to read them from.
 sub _needs {
     my ($config) = @_;
     return (
-        memory_mb  => $config->param('memory'),
-        cpus       => $config->param('cpus'),
-        disk_bytes => $config->param('size'),
+        memory_mb  => _param($config, 'memory'),
+        cpus       => _param($config, 'cpus'),
+        disk_bytes => _param($config, 'size'),
     );
+}
+
+sub _param {
+    my ($config, $key) = @_;
+    return undef unless defined $config;
+
+    my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
+    $value = $value->[0] if ref $value eq 'ARRAY';
+    return (defined $value && length $value) ? $value : undef;
 }
 
 sub _oneline {

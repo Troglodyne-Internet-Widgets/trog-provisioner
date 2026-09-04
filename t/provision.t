@@ -27,6 +27,7 @@ subtest 'the POD documents the interface' => sub {
     like($synopsis, qr/--domaindir/, 'POD documents --domaindir');
     like($synopsis, qr/--existing/,  'POD documents --existing');
     like($synopsis, qr/--dryrun/,    'POD documents --dryrun');
+    like($synopsis, qr/--no-config/, 'POD documents --no-config');
     like($synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument');
 };
 
@@ -57,6 +58,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     my $no_fleet = tempdir(CLEANUP => 1) . '/hypervisors.conf';
 
+    # The config generator runs first now; this test is about what happens
+    # after it, so there is nothing for it to generate from.
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(mkpath      => sub { 1 });
     $hv_mock->redefine(file_exists => sub { 1 });
@@ -85,6 +88,16 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
 # --- Adopting the state a hypervisor already had -----------------------------
 # --- Adopting what libvirt already has ---------------------------------------
+# --- The config generator runs first -----------------------------------------
+subtest 'a domain directory with no recipes is built as it stands' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+
+    my $out = quietly(sub {
+        Trog::Bin::Provisioner::generate_config('vm.example.com', { domain_dir => $dir });
+    });
+    is($out, 0, 'nothing to generate from, so nothing was generated');
+};
+
 # --- The cloud-init seed --------------------------------------------------
 #
 # These three go to Trog::HV::cloudinit_iso as a hash.  Passing it anything
