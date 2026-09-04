@@ -25,10 +25,18 @@ ok( $user_node, "$user has a node on PATH" ) or diag 'nvm did not reach the logi
 isnt( $user_node, $system_node, 'and it is nvm\'s rather than the system one' );
 
 chomp( my $node_path = `sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null` );
-chomp( my $npm_root  = `sudo -u $user /bin/bash -ic 'npm root -g' 2>/dev/null` );
+
+# Both streams, and the path picked out of them.  An interactive shell writes
+# job-control complaints and whatever the profile prints to stderr, and npm adds
+# notices of its own -- and this discarded all of it, so when the comparison
+# below failed the only thing it could say was that one side was empty.
+my $npm_raw = `sudo -u $user /bin/bash -ic 'npm root -g' 2>&1`;
+my ($npm_root) = grep { m{^/} } split m/\n/, ( $npm_raw // '' );
+$npm_root //= '';
 
 like( $node_path, qr{/lib/node_modules$}, 'NODE_PATH set to a global node_modules dir' );
 ok( -d $node_path, "NODE_PATH ($node_path) exists" );
-is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' );
+is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' )
+    or diag "npm root -g said:\n$npm_raw";
 
 done_testing();
