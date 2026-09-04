@@ -6,4 +6,14 @@ use Test::More;
 ok(-f '/etc/dehydrated/domains.d/[% domain %].conf', 'dehydrated domain config exists');
 ok(-f '/etc/dehydrated/hooks/[% domain %].sh', 'dehydrated hook script exists');
 
+# The cert nginx and everything else reads.  The fetcher used to rm this pair
+# and relink to whatever dehydrated had produced -- so when dehydrated failed,
+# and it fails for any domain that cannot answer ACME, what was left was two
+# dangling symlinks and no service that terminates TLS would start.
+foreach my $pem ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
+    ok(-e $pem, "$pem exists");
+    ok(-s $pem, "$pem is readable and not empty")
+        or diag("dangling symlink? " . (-l $pem ? readlink($pem) : 'not a symlink'));
+}
+
 done_testing();
