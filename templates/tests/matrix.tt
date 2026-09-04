@@ -8,4 +8,20 @@ chomp $status;
 is($status, 'active', 'matrix-synapse is running');
 ok(-f '[% install_dir %]/[% domain %]/homeserver.yaml', 'homeserver.yaml exists');
 
+# Everything template_files generates, checked where the recipe puts it.  This
+# used to copy a matrix.nginx.conf that template_files does not generate, so the
+# target died and took the rest of the build with it.
+ok(-f '[% install_dir %]/[% domain %]/log.yaml', 'log.yaml exists');
+ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhost was installed');
+ok(-f '[% install_dir %]/[% domain %]/www/matrix.index.html', 'the chat index page was installed');
+
+# The domain's own vhost belongs to nginxproxy, which this recipe requires
+# rather than writing one of its own beside it.
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
+ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
+    'and matrix did not write a competing one');
+
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
+
 done_testing();

@@ -28,9 +28,10 @@ chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]
 chmod -R 0750 [% install_dir %]/admin.matrix.[% domain %]
 # Setup nginx sites
 mkdir -p /etc/nginx/sites-enabled
-cp matrix.nginx.conf /etc/nginx/sites-enabled/matrix.[% domain %].conf
+# Only the admin vhost: the domain's own is nginxproxy's, which this recipe
+# requires and which already carries the _matrix nocache prefix.  There was a
+# `cp matrix.nginx.conf` here for a file template_files does not generate.
 cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
-chown root:root /etc/nginx/sites-enabled/matrix.[% domain %].conf
 chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
 # Slam in the chat index.html
