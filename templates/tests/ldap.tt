@@ -27,4 +27,22 @@ foreach my $pkg (qw{slapd ldap-utils libldap2}) {
     like($installed, qr/Status: install ok installed/, "$pkg is installed");
 }
 
+# LDAPS, against the certificate every guest has.  The TLS modify used to name
+# dehydrated's output directly, which does not exist until letsencrypt has
+# succeeded -- so on a fresh guest slapd refused it with error 80 and the build
+# stopped there.
+my $tls = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCertificateFile 2>/dev/null`;
+like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
+    'slapd is configured with the certificate the ssl target links') or diag $tls;
+
+ok(-e '/etc/ssl/certs/[% domain %].pem',    'and that certificate is there');
+ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
+
+# slapd has to be able to read the key, which it does as the openldap group.
+my @stat = stat('/etc/ssl/private/[% domain %].pem');
+is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
+
+my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
+like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
+
 done_testing();

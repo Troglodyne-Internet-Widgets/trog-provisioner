@@ -7,10 +7,11 @@ DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd
 sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps:/// ldapi:///"|' /etc/default/slapd
 systemctl restart slapd
 
-# Configure TLS for LDAPS (uses letsencrypt cert)
-# Grant slapd read access to the private key
-chown root:openldap [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem; /bin/true
-chmod 0640 [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem; /bin/true
+# Configure TLS for LDAPS, against the certificate the ssl target links on
+# every guest and the letsencrypt fetcher relinks when it gets a real one.
+# Grant slapd read access to the private key; chown follows the link.
+chown root:openldap /etc/ssl/private/[% domain %].pem
+chmod 0640 /etc/ssl/private/[% domain %].pem
 ldapmodify -Y EXTERNAL -H ldapi:/// -f tls.ldif
 rm -f tls.ldif
 systemctl restart slapd
