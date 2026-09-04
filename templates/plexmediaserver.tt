@@ -1,6 +1,12 @@
+[%# repo.plex.tv, and the v2 signing key.  This pointed at
+    downloads.plex.tv/repos/deb, which Plex has retired: every path under
+    /repos/ there answers 403, and since a missing key on that bucket answers
+    403 rather than 404, it read as the far end refusing us rather than as a
+    URL that is no longer anything.  The key moved too, and it is a different
+    key -- so reaching the old repository would not have been enough either. -%]
 # Add the official Plex apt repository
-curl -sS https://downloads.plex.tv/plex-keys/PlexSign.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
-echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://downloads.plex.tv/repos/deb public main" > /etc/apt/sources.list.d/plexmediaserver.list
+curl -fsS https://downloads.plex.tv/plex-keys/PlexSign.v2.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
+echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://repo.plex.tv/deb/ public main" > /etc/apt/sources.list.d/plexmediaserver.list
 [%# The Plex repository is checked on its own, before the general update, so that
     a repository refusing us fails here saying so.  Rolled into the update of
     everything else it was three lines of apt noise followed by a bare
@@ -9,7 +15,7 @@ echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://downloads.plex.tv/rep
 DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
-  || { echo "plexmediaserver: downloads.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
+  || { echo "plexmediaserver: repo.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
 DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] plexmediaserver
 # Ensure the plex service user exists (created by package but guard anyway)
