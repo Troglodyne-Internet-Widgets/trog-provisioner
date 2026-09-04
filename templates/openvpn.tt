@@ -1,12 +1,31 @@
 	# Set up easy-rsa PKI
 	mkdir -p /etc/openvpn/easy-rsa
 	cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
-	cd /etc/openvpn/easy-rsa && ./easyrsa init-pki
-	cd /etc/openvpn/easy-rsa && echo "[% domain %]" | ./easyrsa build-ca nopass
-	cd /etc/openvpn/easy-rsa && ./easyrsa gen-req server nopass
-	cd /etc/openvpn/easy-rsa && echo yes | ./easyrsa sign-req server server
-	cd /etc/openvpn/easy-rsa && ./easyrsa gen-dh
-	cd /etc/openvpn/easy-rsa && openvpn --genkey secret pki/ta.key
+	# --batch on every one of these.  easyrsa prompts for a Common Name
+	# otherwise, and a make recipe has no terminal to answer from, so gen-req
+	# read EOF and died with "Error making certificate request" -- taking the
+	# whole provision with it.  Piping an answer in only worked for the two that
+	# ask exactly one question.
+	#
+	# Guarded on what each step produces rather than run unconditionally: in
+	# batch mode init-pki erases an existing PKI without asking, and that would
+	# invalidate every client certificate already issued on a re-provision.
+	if [ ! -f /etc/openvpn/easy-rsa/pki/ca.crt ]; then \
+	    cd /etc/openvpn/easy-rsa && \
+	    ./easyrsa --batch init-pki && \
+	    EASYRSA_REQ_CN="[% domain %]" ./easyrsa --batch build-ca nopass; \
+	fi
+	if [ ! -f /etc/openvpn/easy-rsa/pki/issued/server.crt ]; then \
+	    cd /etc/openvpn/easy-rsa && \
+	    ./easyrsa --batch gen-req server nopass && \
+	    ./easyrsa --batch sign-req server server; \
+	fi
+	if [ ! -f /etc/openvpn/easy-rsa/pki/dh.pem ]; then \
+	    cd /etc/openvpn/easy-rsa && ./easyrsa --batch gen-dh; \
+	fi
+	if [ ! -f /etc/openvpn/easy-rsa/pki/ta.key ]; then \
+	    cd /etc/openvpn/easy-rsa && openvpn --genkey secret pki/ta.key; \
+	fi
 	# Copy PKI files into place
 	cp /etc/openvpn/easy-rsa/pki/ca.crt              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/issued/server.crt   /etc/openvpn/server/

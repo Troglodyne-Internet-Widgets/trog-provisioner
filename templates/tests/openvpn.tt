@@ -3,6 +3,30 @@ use strict;
 use warnings;
 use Test::More;
 
+# Every file easyrsa is supposed to produce, checked by name.  easyrsa prompts
+# for a Common Name unless it is told --batch, and a make recipe has no terminal
+# to answer from, so gen-req died on EOF with "Error making certificate request"
+# and the provision stopped there.
+foreach my $pki (qw{
+    pki/ca.crt
+    pki/issued/server.crt
+    pki/private/server.key
+    pki/dh.pem
+    pki/ta.key
+}) {
+    ok(-s "/etc/openvpn/easy-rsa/$pki", "easy-rsa produced $pki");
+}
+
+# And the copies the server actually reads.
+foreach my $file (qw{ca.crt server.crt server.key dh.pem ta.key}) {
+    ok(-s "/etc/openvpn/server/$file", "$file was copied into the server directory");
+}
+
+# The CA is named for the domain; EASYRSA_REQ_CN is how that is passed in batch
+# mode, where the answer used to be piped to a prompt.
+my $subject = `openssl x509 -noout -subject -in /etc/openvpn/easy-rsa/pki/ca.crt 2>/dev/null`;
+like($subject, qr/\Q[% domain %]\E/, 'the CA is named for the domain') or diag $subject;
+
 my $status = `systemctl is-active openvpn-server\@server 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'openvpn server is running');
