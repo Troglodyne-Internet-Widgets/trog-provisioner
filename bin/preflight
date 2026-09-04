@@ -89,6 +89,17 @@ sub main {
         \&check_config,
     );
 
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } (\&note_libguestfs);
+
+    if (@notes) {
+        print "\nNot required, but worth having:\n\n";
+        foreach my $note (@notes) {
+            print "  * $note->{what}\n";
+            print "    $_\n" for split("\n", $note->{fix});
+            print "\n";
+        }
+    }
+
     return 0 unless @failed;
 
     print "\n" . scalar(@failed) . " thing" . (@failed == 1 ? '' : 's') . " to fix first:\n\n";
@@ -246,6 +257,29 @@ sub check_config {
 These are where an installation says which machines exist and what every guest
 gets.  See Trog::Config for where this directory is and how to point it
 somewhere else.
+FIX
+}
+
+# Not a requirement: nothing here needs it to provision anything, and failing a
+# run over its absence would refuse runs that would have worked.  It is the
+# difference between guessing at why a guest will not boot and reading its disk,
+# so it is worth saying it is missing.
+sub note_libguestfs {
+    my ($hv) = @_;
+
+    my ($found) = grep { $hv->run('sh', '-c', "command -v $_ >/dev/null 2>&1") == 0 }
+        qw{virt-cat virt-ls virt-edit};
+
+    return { ok => 1 } if $found;
+
+    return { ok => 0, what => 'No libguestfs on the hypervisor', fix => <<'FIX' };
+Without it, a guest that will not boot can only be looked at through its
+console.  With it, its disk can be read while it is off -- the cloud-init log
+of a guest that never came up, the netplan it was actually given -- and its
+kernel command line can be edited to boot single-user, rather than driving
+GRUB with timed keystrokes.
+
+    sudo apt install libguestfs-tools
 FIX
 }
 

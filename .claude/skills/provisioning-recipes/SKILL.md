@@ -118,6 +118,45 @@ or a failed fetch. A recipe that needs egress it was never given a hole for
 shows up there and nowhere else, and the symptom in its own log will look like
 an unrelated network problem.
 
+## When the guest never comes up at all
+
+`collect_artifacts` needs a guest with a shell. A guest that never boots has no
+lease, no ssh and no logs, and `bin/provision` can only tell you it never asked
+for an address. `scripts/debug_boot` is for that.
+
+**Start with `--console`.** It points the guest's serial port at a file on the
+hypervisor, restarts it, and hands back every line the kernel and systemd
+printed — as text, greppable, from the first line of firmware:
+
+```
+.claude/skills/provisioning-recipes/scripts/debug_boot --console "$DOMAIN"
+```
+
+A hang is the last line before the silence. This beats screenshots, which show
+the last page of an 80x25 console and nothing before it. `--fetch` re-reads the
+capture without another restart; `--shot` grabs the screen as it is now.
+
+**To get inside it**, read the disk directly — the guest does not need to boot,
+or even be running:
+
+```
+debug_boot --cat "$DOMAIN" /var/log/cloud-init.log
+debug_boot --ls  "$DOMAIN" /etc/netplan
+```
+
+**To get a shell on a guest that will not finish booting**, `--single` writes
+`single` onto the kernel command line in the guest's own grub.cfg and starts it,
+so it comes up in rescue mode on its own. The guest must be off first — it is a
+write to its disk. Then `--vnc` prints the ssh tunnel to reach the console.
+
+These three need libguestfs on the hypervisor; `bin/preflight` says whether it
+is there and how to install it. Without it, `--hold` turns on the firmware boot
+menu and `--keys` sends keystrokes, which is holding ESC by hand and about as
+reliable — use it only as the fallback.
+
+**`--restore` puts the domain and the disk back.** Unnecessary before a
+teardown, which is the usual ending, but do it on anything you intend to keep.
+
 ## When you find something, pin it with the guest's own test
 
 Every recipe ships a test that runs **on the guest**, at the end of the

@@ -1,0 +1,432 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::DebugBoot;
+
+#ABSTRACT: Watch a guest boot, and stop it at the boot menu when it will not.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use File::Slurper::Temp();
+use File::Temp();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+debug_boot - watch a guest boot, and stop it at the boot menu when it will not
+
+=head1 SYNOPSIS
+
+    debug_boot --console vm.test      # restart it, capture the whole boot as text
+    debug_boot --fetch   vm.test      # read the capture again without restarting
+    debug_boot --hold    vm.test      # restart it and stop at the boot menu
+    debug_boot --shot    vm.test      # what is on the screen right now
+    debug_boot --vnc     vm.test      # how to get a VNC session to it
+    debug_boot --keys    vm.test KEY_ESC KEY_DOWN KEY_ENTER
+    debug_boot --restore vm.test      # put the domain back how it was
+
+    debug_boot --cat    vm.test /var/log/cloud-init.log   # off its disk, powered off
+    debug_boot --ls     vm.test /etc/netplan
+    debug_boot --single vm.test       # boot it single-user, no keystrokes involved
+
+=head1 DESCRIPTION
+
+A guest that provisions and then misbehaves leaves logs, and
+C<collect_artifacts> fetches them.  A guest that never boots leaves nothing at
+all: no lease, no ssh, no log to collect, and C<bin/provision> can only say that
+it never asked for an address.
+
+This is for that case.
+
+=head2 Start with --console
+
+The single most useful thing here.  It points the guest's serial port at a file
+on the hypervisor, restarts it, and hands back every line the kernel and systemd
+printed -- as text, in a file, greppable.  A hang shows up as the last line
+before the silence.
+
+The alternative is screenshots of an 80x25 console, which shows the last page
+of a boot and nothing before it.
+
+Restarting is the point: the interesting output already happened.  A guest you
+cannot afford to restart is not one to be debugging this way.
+
+=head2 --hold, when you need to be in there
+
+Turns on the firmware boot menu with a timeout and restarts, so the guest stops
+and waits instead of booting past the thing you wanted to change.  From there,
+C<--vnc> gets you a session and C<--keys> sends keystrokes -- which is the same
+thing as holding ESC by hand, and about as reliable.
+
+Prefer C<--single> where the hypervisor has libguestfs, which C<bin/preflight>
+reports on.  It writes C<single> onto the kernel command line in the guest's own
+grub.cfg, so the guest comes up in rescue mode on its own -- no five second
+window to catch, and no keystrokes to get right.
+
+=head2 Reading the disk without booting at all
+
+C<--cat> and C<--ls> reach into the guest's filesystem while it is powered off.
+This is how you read the cloud-init log of a guest that never got far enough to
+have an address, or see what netplan it was actually handed.  Both need
+libguestfs on the hypervisor.
+
+A guest that is running is left running and read anyway: libguestfs opens the
+disk read-only for these, which is safe but can see a moment that has already
+moved on.  C<--single> is the one that insists on the guest being off, because
+it writes.
+
+=head2 Putting it back
+
+C<--console> and C<--hold> both change the domain's definition.  C<--restore>
+undoes both.  Nothing here touches the disk, so a domain that gets torn down
+afterwards -- which is the usual ending -- needs no restoring at all.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--console>, B<--fetch>, B<--hold>, B<--shot>, B<--vnc>, B<--keys>, B<--restore>
+
+=item B<--cat> PATH, B<--ls> PATH, B<--single>
+
+Pick one.  See the synopsis.
+
+=item B<--wait> SECONDS
+
+How long to let it boot before reading the console back.  Default 45.
+
+=item B<--timeout> MS
+
+How long the boot menu waits, with C<--hold>.  Default 30000.
+
+=item B<--into> FILE
+
+Where to put what comes back.  Defaults to a temporary file, whose path is
+printed.
+
+=item B<--connect> URI, B<--hvconf> FILE
+
+Which hypervisor is holding the guest.  Without either, the fleet is asked.
+
+=back
+
+=cut
+
+our $LOG_DIR = '/tmp';
+
+sub main {
+    my @args = @_;
+
+    my %opt = (wait => 45, timeout => 30000);
+    GetOptionsFromArray(\@args, \%opt,
+        qw{console fetch hold shot vnc keys restore cat ls single
+           wait=i timeout=i into=s connect=s hvconf=s help});
+
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $opt{help};
+
+    my $domain = shift @args;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
+
+    my ($action) = grep { $opt{$_} } qw{console fetch hold shot vnc keys restore cat ls single};
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pick one of --console --fetch --hold --shot --vnc --keys --restore --cat --ls --single')
+      unless $action;
+
+    my $hv = hypervisor($domain, $opt{connect}, $opt{hvconf});
+
+    return console($hv, $domain, \%opt)  if $action eq 'console';
+    return fetch($hv, $domain, \%opt)    if $action eq 'fetch';
+    return hold($hv, $domain, \%opt)     if $action eq 'hold';
+    return shot($hv, $domain, \%opt)     if $action eq 'shot';
+    return vnc($hv, $domain)             if $action eq 'vnc';
+    return keys_to($hv, $domain, @args)  if $action eq 'keys';
+    return guest_cat($hv, $domain, \@args, \%opt) if $action eq 'cat';
+    return guest_ls($hv, $domain, \@args)         if $action eq 'ls';
+    return single($hv, $domain)                    if $action eq 'single';
+    return restore($hv, $domain);
+}
+
+sub hypervisor {
+    my ($domain, $uri, $hvconf) = @_;
+
+    return Trog::HV->new(uri => $uri) if $uri;
+
+    my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+    return Trog::HV->new() unless $fleet->configured;
+
+    return $fleet->hosting($domain)
+      || die "No hypervisor in the fleet has $domain.\n"
+      . "Pass --connect if it is somewhere the fleet does not list.\n";
+}
+
+sub log_path { return "$LOG_DIR/$_[0]-console.log" }
+
+# --- Reshaping the domain ------------------------------------------------------
+# Both of these edit the persistent definition and restart, because what is
+# wanted is a boot, and the one that already happened cannot be re-read.
+sub console {
+    my ($hv, $domain, $opt) = @_;
+
+    my $xml = definition($hv, $domain);
+    my $log = log_path($domain);
+
+    die "$domain already logs its console to a file; --fetch reads it,\n"
+      . "and --restore puts it back.\n"
+      if index($xml, q{<serial type='file'}) >= 0;
+
+    # libvirt writes the guest's serial output straight here, so nothing has to
+    # hold a pty open, and the capture starts at the first line of firmware
+    # rather than whenever something managed to attach.
+    $xml =~ s{<serial type='pty'>}{<serial type='file'><source path='$log'/>}
+      or die "$domain has no pty serial port to redirect.\n";
+
+    redefine($hv, $domain, $xml);
+    restart($hv, $domain);
+
+    print {*STDERR} "Letting it boot for $opt->{wait}s...\n";
+    sleep $opt->{wait};
+
+    return fetch($hv, $domain, $opt);
+}
+
+sub hold {
+    my ($hv, $domain, $opt) = @_;
+
+    my $xml = definition($hv, $domain);
+    $xml =~ s{<os>}{<os><bootmenu enable='yes' timeout='$opt->{timeout}'/>}
+      unless index($xml, '<bootmenu') >= 0;
+
+    redefine($hv, $domain, $xml);
+    restart($hv, $domain);
+
+    printf {*STDERR} "%s is holding at the boot menu for %ds.\n", $domain, $opt->{timeout} / 1000;
+    return vnc($hv, $domain);
+}
+
+sub restore {
+    my ($hv, $domain) = @_;
+
+    my $xml = definition($hv, $domain);
+    my $log = log_path($domain);
+
+    # libvirt reformats what it is given, so the file serial comes back as an
+    # element with the source on its own line rather than the one-liner that
+    # went in.  Matched on the log path, which is the part that is ours.
+    $xml =~ s{<serial type='file'>\s*<source path='\Q$log\E'\s*/>}{<serial type='pty'>};
+    $xml =~ s{<bootmenu[^>]*/>}{};
+
+    redefine($hv, $domain, $xml);
+
+    # And the disk, if --single wrote to it.  Only when it is off; a running
+    # guest is left alone rather than corrupted.
+    my $dom = eval { $hv->vmm->get_domain_by_name($domain) };
+    if ($dom && !$dom->is_active()) {
+        my (undef, $rc) = guest_tool($hv, 'virt-edit', '-d', $domain, '/boot/grub/grub.cfg',
+            '-e', 's/^([ \t]*linux[ \t]+[^\n]*?)[ \t]+single[ \t]*$/$1/m');
+        print {*STDERR} "Took single back off the kernel command line.\n" unless $rc;
+    }
+
+    print {*STDERR} "Restored $domain; restart it for that to take effect.\n";
+    return 0;
+}
+
+# --- Reading it back -----------------------------------------------------------
+sub fetch {
+    my ($hv, $domain, $opt) = @_;
+
+    my $log = log_path($domain);
+
+    # Root's, because libvirt wrote it.
+    my $content = $hv->capture("sudo cat '$log'");
+    unless (defined $content && length $content) {
+        print {*STDERR} "Nothing at $log on the hypervisor.\n"
+          . "Was this started with --console?\n";
+        return 1;
+    }
+
+    my $into = $opt->{into} // File::Temp->new(TEMPLATE => "trog-console-$domain-XXXX",
+        TMPDIR => 1, SUFFIX => '.log', UNLINK => 0)->filename;
+    File::Slurper::Temp::write_text($into, $content);
+
+    my @lines = split "\n", $content;
+    print {*STDERR} sprintf("%d lines of console. The last of them:\n\n", scalar @lines);
+    print {*STDERR} "  $_\n" for @lines[-8 .. -1];
+    print {*STDERR} "\nA hang is the last line before the silence.\n\n";
+
+    print "$into\n";
+    return 0;
+}
+
+sub shot {
+    my ($hv, $domain, $opt) = @_;
+
+    my $remote = "$LOG_DIR/$domain-screen.ppm";
+    $hv->run(qw{virsh -c qemu:///system screenshot}, $domain, $remote) == 0
+      or die "Could not screenshot $domain.\n";
+
+    my $into = $opt->{into} // "/tmp/$domain-screen.ppm";
+    $hv->get_file($remote, $into) or die "Could not fetch the screenshot.\n";
+
+    print {*STDERR} "Console of $domain as it is right now.\n";
+    print "$into\n";
+    return 0;
+}
+
+sub vnc {
+    my ($hv, $domain) = @_;
+
+    my $display = $hv->capture("virsh -c qemu:///system domdisplay '$domain'");
+    chomp $display if defined $display;
+    die "$domain has no display to connect to.\n" unless $display;
+
+    my ($port) = $display =~ m/:(\d+)\z/;
+    my $vnc = 5900 + ($port // 0);
+
+    # It listens on the hypervisor's loopback, which is the right place for it
+    # to listen; getting there is a tunnel's job.
+    print {*STDERR} "$domain is on $display, which is the hypervisor's loopback.\n\n";
+    print {*STDERR} "  ssh -N -L $vnc:127.0.0.1:$vnc " . ($hv->ssh_target // 'localhost') . "\n";
+    print {*STDERR} "  then point a VNC client at 127.0.0.1:$vnc\n\n";
+
+    print "$vnc\n";
+    return 0;
+}
+
+sub keys_to {
+    my ($hv, $domain, @keys) = @_;
+
+    @keys = qw{KEY_ESC} unless @keys;
+    print {*STDERR} "Sending @keys to $domain\n";
+
+    $hv->run(qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys) == 0
+      or die "Could not send @keys to $domain.\n";
+
+    return 0;
+}
+
+# --- Reading and writing the disk ----------------------------------------------
+# All of these need libguestfs on the hypervisor; bin/preflight says whether it
+# is there, and says the same thing this does when it is not.
+sub guest_tool {
+    my ($hv, $tool, @args) = @_;
+
+    my $out = $hv->capture(join ' ', 'sudo', $tool, map { _shq($_) } @args);
+    my $rc  = $? >> 8;
+
+    die "$tool is not on " . $hv->describe . ".\n"
+      . "  sudo apt install guestfs-tools\n" if $rc == 127;
+
+    return ($out, $rc);
+}
+
+sub _shq {
+    my ($word) = @_;
+    $word =~ s/'/'\\''/g;
+    return "'$word'";
+}
+
+sub guest_cat {
+    my ($hv, $domain, $args, $opt) = @_;
+
+    my $path = shift @$args
+      or die "--cat wants a path on the guest: --cat $domain /var/log/cloud-init.log\n";
+
+    my ($content, $rc) = guest_tool($hv, 'virt-cat', '-d', $domain, $path);
+    die "Could not read $path out of $domain.\n$content" if $rc;
+
+    my $into = $opt->{into} // File::Temp->new(TEMPLATE => 'trog-guestfile-XXXX',
+        TMPDIR => 1, UNLINK => 0)->filename;
+    File::Slurper::Temp::write_text($into, $content);
+
+    printf {*STDERR} "%s:%s -- %d bytes, read off the disk\n", $domain, $path, length $content;
+    print "$into\n";
+    return 0;
+}
+
+sub guest_ls {
+    my ($hv, $domain, $args) = @_;
+
+    my $path = shift @$args // '/';
+    my ($out, $rc) = guest_tool($hv, qw{virt-ls -l -d}, $domain, $path);
+    die "Could not list $path in $domain.\n$out" if $rc;
+
+    print $out;
+    return 0;
+}
+
+# Single-user without anybody having to catch a five second window.
+#
+# The kernel command line lives in the guest's own grub.cfg, so `single` goes on
+# there and the next boot comes up in rescue mode.  Every menu entry gets it,
+# because which one the firmware picks is not ours to decide.
+sub single {
+    my ($hv, $domain) = @_;
+
+    my $dom = $hv->vmm->get_domain_by_name($domain)
+      or die "No domain called $domain on " . $hv->describe . "\n";
+
+    # Writing to the disk of a running guest corrupts it.  libguestfs would
+    # refuse anyway; saying so first is friendlier than its error.
+    die "$domain is running.  Stop it before writing to its disk:\n"
+      . "  virsh -c " . $hv->uri . " destroy $domain\n" if $dom->is_active();
+
+    # [ \t] and [^\n], never \s or . -- virt-edit hands the expression a line
+    # with its newline still on it, and a trailing \s* eats that, welding the
+    # next line on.  Doing exactly that is how this first welded grub's initrd
+    # directive onto the end of its linux one, leaving a guest that had no
+    # initrd and did not boot at all.
+    my ($out, $rc) = guest_tool($hv, 'virt-edit', '-d', $domain, '/boot/grub/grub.cfg',
+        '-e', 's/^([ \t]*linux[ \t]+\S+[^\n]*?)([ \t]+single)?[ \t]*$/$1 single/m');
+    die "Could not put single on the kernel command line of $domain.\n$out" if $rc;
+
+    $dom->create();
+    print {*STDERR} "$domain is booting single-user.  Undo it with --restore.\n\n";
+
+    return vnc($hv, $domain);
+}
+
+# --- Talking to libvirt --------------------------------------------------------
+sub definition {
+    my ($hv, $domain) = @_;
+
+    my $dom = eval { $hv->vmm->get_domain_by_name($domain) }
+      or die "No domain called $domain on " . $hv->describe . "\n";
+
+    # Inactive, so that what comes back is the definition rather than the
+    # runtime state, which carries allocated ptys and aliases that cannot be
+    # defined back.
+    return $dom->get_xml_description(Sys::Virt::Domain::XML_INACTIVE());
+}
+
+sub redefine {
+    my ($hv, $domain, $xml) = @_;
+    $hv->vmm->define_domain($xml);
+    return 1;
+}
+
+sub restart {
+    my ($hv, $domain) = @_;
+
+    my $dom = $hv->vmm->get_domain_by_name($domain);
+    eval { $dom->destroy(); 1 };    # already off is fine
+    sleep 2;
+    $dom = $hv->vmm->get_domain_by_name($domain);
+    $dom->create();
+
+    print {*STDERR} "Restarted $domain\n";
+    return 1;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
