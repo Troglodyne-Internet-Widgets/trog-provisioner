@@ -122,7 +122,6 @@ sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
         return qw{
-          matrix-synapse-py3
           python3-cryptography
           python3-bcrypt
           python3-pil
@@ -141,7 +140,6 @@ sub deps {
           python3-canonicaljson
           python3-attr
           python3-txacme
-          python3-txredisapi
           python3-matrix-common
           python3-unpaddedbase64
           python3-pymacaroons

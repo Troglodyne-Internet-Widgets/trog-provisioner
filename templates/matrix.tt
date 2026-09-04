@@ -1,3 +1,17 @@
+# matrix-synapse-py3 and python3-txredisapi are matrix.org's packages, not
+# Ubuntu's.  They were listed in deps, which is the list cloud-init installs at
+# first boot -- with no such repository configured, so they were never
+# installed, cloud-init said nothing about it, and every line below this ran
+# against a matrix-synapse user that does not exist.
+install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg -o /usr/share/keyrings/matrix-org-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ $$(. /etc/os-release; echo $$VERSION_CODENAME) main" > /etc/apt/sources.list.d/matrix-org.list
+apt-get update
+# Preseeded, because installing synapse otherwise stops on a debconf prompt for
+# the server name, and a make recipe has no terminal to answer it from.
+echo "matrix-synapse-py3 matrix-synapse/server-name string matrix.[% domain %]" | debconf-set-selections
+echo "matrix-synapse-py3 matrix-synapse/report-stats boolean false" | debconf-set-selections
+DEBIAN_FRONTEND=noninteractive apt-get install -y matrix-synapse-py3 python3-txredisapi
 # Setup directories
 mkdir -p [% install_dir %]/matrix.[% domain %]
 mkdir -p [% install_dir %]/matrix.[% domain %]/media
