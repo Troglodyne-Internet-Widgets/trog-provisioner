@@ -57,6 +57,13 @@ entry for a guest that will not exist by lunchtime.
 Copied, for the C<_base> block: what every guest gets, which is most of what a
 recipe under test will interact with.
 
+=item F<hypervisors.conf>
+
+Copied when there is one.  Without it there is no fleet, and a throwaway guest
+gets built on whatever libvirt this machine has rather than on the hypervisor
+the real ones live on -- which on a workstation means it does not get built at
+all.
+
 =item F<recipes.d/>
 
 B<Not> copied, deliberately.  new_config gathers secrets across every domain it
@@ -116,7 +123,7 @@ sub main {
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir('trog-scratch-XXXXXXXX', TMPDIR => 1);
 
-    my ($password, @refs) = build($source, $dir);
+    my ($password, $has_fleet, @refs) = build($source, $dir);
 
     if ($print_dir) {
         print "$dir\n";
@@ -124,7 +131,10 @@ sub main {
     }
 
     print {*STDERR} "Scratch configuration in $dir\n";
-    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml\n";
+    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml"
+      . ($has_fleet ? ", hypervisors.conf\n" : "\n");
+    print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
+      unless $has_fleet;
     print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
     print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value"
       . (@refs == 1 ? '' : 's') . ":\n";
@@ -149,13 +159,19 @@ sub build {
           or die "Could not copy $source/$file into the scratch config: $!\n";
     }
 
+    # The fleet, when there is one.  Its absence is a legitimate state -- it
+    # means this machine is the hypervisor -- so this is not fatal, but getting
+    # it wrong silently sends the guest to the wrong libvirt.
+    my $fleet = 'hypervisors.conf';
+    my $has_fleet = copy("$source/$fleet", "$dir/$fleet") ? 1 : 0;
+
     my @refs     = secret_refs("$dir/recipes.yaml");
     my $password = File::Temp::tempdir() =~ s{.*/}{}r;    # a throwaway name for a throwaway store
 
     write_kdbx("$dir/secrets.kdbx", $password, @refs);
     chmod 0600, "$dir/secrets.kdbx";
 
-    return ($password, @refs);
+    return ($password, $has_fleet, @refs);
 }
 
 # Every secret: reference in a configuration, wherever it is nested.
