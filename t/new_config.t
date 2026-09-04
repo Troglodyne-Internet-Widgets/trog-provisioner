@@ -16,12 +16,19 @@ use Test::Fatal qw{exception};
 # Because Config::Simple is incompatible with Test::MockFile
 use File::Temp;
 
+# None of the three below are called from this file, and all three have to be
+# here: anything that opens a file has to be compiled before Test::MockFile
+# installs its own open, or it will open the real one at runtime.  Loading them
+# is the point, so the unused-import policy has nothing to go on.
+## no critic (ProhibitUnusedImports)
+
 # Because this slurps in schema defs
 use JSON::Validator::Schema::Troglodyne;
 
 # We have to use any deps of the SUT that actually touch files in BEGIN
 use Text::Xslate;
 use Config::Simple;
+## use critic
 
 
 # It is important to use MockFile last

@@ -830,15 +830,28 @@ sub handle_domain {
     $pconf .= "depends_on=$depends_on" if $depends_on;
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
+    # Both of these live next to this script, not in whatever directory it was
+    # run from.  Anchoring them to the checkout is what lets the generator run
+    # from anywhere -- which it now does, since it no longer runs on the
+    # hypervisor.
+    my $checkout = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/..' );
+
     # Slap in openssl.conf to make self-signed cert work
     print "Copying openssl.conf to $cfg_dir/openssl.conf\n";
-    copy( 'openssl.conf', "$cfg_dir/openssl.conf" );
+    copy( "$checkout/openssl.conf", "$cfg_dir/openssl.conf" )
+      or die "Could not copy openssl.conf into $cfg_dir: $!\n";
+
+    # The guest used to rsync these off the hypervisor, which only worked while
+    # the hypervisor had a checkout at the same path this one is at.  It does
+    # not, so they ride along in the tarball and the Makefile just moves them
+    # into place.
+    my @scripts = pack_scripts( $checkout, $cfg_dir );
 
     # Gzip the Makefile & generated configs
     print "Tarring up Makefile and generated configuration\n";
     unlink "$cfg_dir/data.tar.gz";
 
-    my @members = ( 'Makefile', @generated, 'openssl.conf' );
+    my @members = ( 'Makefile', @generated, 'openssl.conf', @scripts );
     File::Find::find(
         sub {
             my $rel = $File::Find::name;
@@ -861,6 +874,36 @@ sub handle_domain {
     $tar->write( "$cfg_dir/data.tar.gz", Archive::Tar::COMPRESS_GZIP() ) or die "Could not write $cfg_dir/data.tar.gz: " . Archive::Tar->error();
     print "Done.\n";
     return 0;
+}
+
+# Copy the helper scripts into the domain's directory so they get tarred up with
+# everything else.
+#
+# Modes come along deliberately: every one of these is executed on the guest, and
+# File::Copy does not promise to preserve the executable bit.
+sub pack_scripts {
+    my ($checkout, $cfg_dir) = @_;
+
+    my $from = "$checkout/scripts";
+    die "No scripts directory at $from\n" unless -d $from;
+
+    my $to = "$cfg_dir/scripts";
+    remove_tree($to) if -d $to;
+    make_path($to) or die "Could not create $to: $!\n";
+
+    my @packed;
+    opendir(my $dh, $from) or die "Could not read $from: $!\n";
+    foreach my $script (sort grep { !m/\A\.\.?\z/ } readdir $dh) {
+        next unless -f "$from/$script";
+        copy("$from/$script", "$to/$script")
+          or die "Could not copy $script into $to: $!\n";
+        chmod( (stat("$from/$script"))[2] & 07777, "$to/$script" );
+        push @packed, "scripts/$script";
+    }
+    closedir $dh;
+
+    print "Packed " . scalar(@packed) . " scripts from $from\n";
+    return @packed;
 }
 
 sub _get_sftp {
