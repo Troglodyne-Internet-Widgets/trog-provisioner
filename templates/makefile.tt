@@ -80,8 +80,13 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 
 # Make a self-signed cert FIRST, because everybody and their mama needs a damn cert
 [% state_dir %]/ssl:
+	# The domain itself first, then every alias -- new_config appends www and
+	# mail to each domain's aliases, so they are in there.  This named www and
+	# mail explicitly and then joined the aliases straight onto the end with no
+	# separator, and full_aliases was never passed to this template in the first
+	# place: the certificate came out covering www and mail and not the domain.
 	mkdir -p '/etc/letsencrypt/live/[% domain %]'
-	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:www.[% domain %],DNS:mail.[% domain %][% full_aliases.join(',DNS:') %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
+	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:[% domain %][% FOR alias IN full_aliases %],DNS:[% alias %][% END %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
 	# Setup the link to LE certs
 	ln -s /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
 	ln -s /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
