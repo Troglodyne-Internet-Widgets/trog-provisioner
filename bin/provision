@@ -189,6 +189,7 @@ sub main {
             my $guest = Trog::Guest->new(name => $depends, host => $reuse, user => $reuser, key_path => $skey);
             $guest->wait_for_ssh();
             $guest->wait_for_cloud_init($domain);
+            $hv->eject_cdrom($depends);
             $guest->wait_for_makefile($depends);
         }
 
@@ -209,14 +210,14 @@ sub main {
     }
 
     $guest->wait_for_cloud_init($domain);
+
+    # Only now.  The seed ISO has to stay in the drive for as long as cloud-init
+    # might want to read it, which is until it says it is finished; pulling it
+    # out any earlier leaves the guest with no user, no keys and no netplan, and
+    # the pulling-out is only to stop the guest booting off it next time.
+    $hv->eject_cdrom($domain);
+
     $guest->wait_for_makefile($domain);
-
-    # If we don't do this, any subsequent manual tf plan will explode violently
-    sync_tf_state_with_libvirt();
-
-    # Hand the state back, so the hypervisor's own copy is not left behind
-    # describing a world that has moved on without it.
-    return_hypervisor_state($hv);
 
     return 0;
 }
@@ -408,7 +409,12 @@ sub provision_domain {
     # asks for the lease it already had and there is nothing to clean up --
     # which also means we wait for that lease to appear rather than for a
     # different address to.
-    print "Waiting for VM to come live...";
+    # Its MAC is derived from its name, so a rebuilt guest asks for the lease it
+    # already had.  That also means the lease is usually already in the table
+    # before this guest has finished POSTing -- it is the previous boot's, for
+    # the same MAC and the same address.  So this finds the address; it does not
+    # establish that anything is running at it.  wait_for_ssh does that.
+    print "Looking up the address for $domain...";
     my $new_ip = '';
     for (1..30) {
         $new_ip = $hv->lease_ip('default', mac => $nat_mac);
@@ -416,12 +422,9 @@ sub provision_domain {
         print ".";
         sleep 1;
     }
-    die "\nVM never came up!\n" unless $new_ip;
+    die "\n$domain never asked for a lease!\n" unless $new_ip;
 
-    # Eject the CDROM we used for cloud-init
-    $hv->eject_cdrom($domain);
-
-    print "\nAll Done!  The server should be live at $new_ip\n";
+    print "\nDefined and started; $domain should come up at $new_ip\n";
 
     return ($config->param('admin_user'), $hv->guest_ssh_ip($config, $new_ip));
 }

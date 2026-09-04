@@ -219,4 +219,52 @@ sub _pod_section {
     return $text // '';
 }
 
+subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
+    # The guest's MAC is derived from its name, so a rebuilt guest asks for --
+    # and is given -- the lease it had last time.  libvirt's lease table keeps
+    # that across a shutdown, so the address is usually already there before the
+    # new guest has finished POSTing.  Ejecting the seed on the strength of it
+    # pulled the ISO out seconds after start, and the guest came up with no
+    # user, no keys and no netplan.  Order is the whole fix, so it is what this
+    # asserts.
+    my $dir = tempdir(CLEANUP => 1);
+    mkdir "$dir/vm.example.com";
+    write_text("$dir/vm.example.com/provision.conf", "admin_user=ubuntu\nips=203.0.113.10\n");
+    write_text("$dir/vm.example.com/users.yaml", "users: []\n");
+    write_text("$dir/vm.example.com/data.tar.gz", "not really a tarball\n");
+
+    my @order;
+
+    my $hv_mock = Test::MockModule->new('Trog::HV');
+    $hv_mock->redefine(mkpath      => sub { 1 });
+    $hv_mock->redefine(file_exists => sub { 1 });
+    $hv_mock->redefine(domain_dir  => sub { $dir });
+    $hv_mock->redefine(pool_path   => sub { "$dir/disks" });
+    $hv_mock->redefine(eject_cdrom => sub { push @order, 'eject'; 1 });
+
+    my $guest_mock = Test::MockModule->new('Trog::Guest');
+    $guest_mock->redefine(wait_for_ssh        => sub { push @order, 'ssh';      $_[0] });
+    $guest_mock->redefine(wait_for_cloud_init => sub { push @order, 'cloudinit'; 1 });
+    $guest_mock->redefine(wait_for_makefile   => sub { push @order, 'makefile';  1 });
+
+    my $bin_mock = Test::MockModule->new('Trog::Bin::Provisioner', no_auto => 1);
+    $bin_mock->redefine(provision_domain => sub { push @order, 'provision'; return ('ubuntu', '203.0.113.10') });
+
+    Trog::HV->forget();
+    my $no_fleet = tempdir(CLEANUP => 1) . '/hypervisors.conf';
+    my $rc = eval {
+        Trog::Bin::Provisioner::main('--no-config', '--hvconf', $no_fleet,
+            '--domaindir', $dir, 'vm.example.com');
+    };
+    is($@, '', 'main() runs to the end') or diag $@;
+    is($rc, 0, 'and reports success');
+
+    is_deeply(\@order, [qw{provision ssh cloudinit eject makefile}],
+        'the seed comes out after cloud-init is done, not before');
+
+    my ($eject) = grep { $order[$_] eq 'eject' } 0 .. $#order;
+    my ($ci)    = grep { $order[$_] eq 'cloudinit' } 0 .. $#order;
+    ok($eject > $ci, 'and never on the strength of a lease alone');
+};
+
 done_testing;
