@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-package Trog::Skill::Preflight;
+package Trog::Bin::Preflight;
 
 #ABSTRACT: Say whether a throwaway guest can be built at all, before any time is spent trying.
 
@@ -27,8 +27,8 @@ preflight - say whether a throwaway guest can be built, before any time is spent
 
 =head1 SYNOPSIS
 
-    .claude/skills/provisioning-recipes/scripts/preflight
-    .claude/skills/provisioning-recipes/scripts/preflight --connect qemu+ssh://root@hv/system
+    bin/preflight
+    bin/preflight --connect qemu+ssh://root@hv/system
 
 =head1 DESCRIPTION
 
@@ -36,6 +36,12 @@ Provisioning a guest takes minutes and touches a hypervisor.  Every check here
 is one that, if it fails, fails the whole run -- so they all happen up front,
 all of them run even after the first failure, and each one that fails says what
 to do about it.
+
+Worth running against a hypervisor you have not built on before, or after
+changing anything about how you reach one.  The failures it catches are the ones
+that otherwise surface minutes in, as something that reads like an unrelated
+problem: a sudo prompt that hangs the run rather than failing it, a Sys::Virt
+that is a release out of step and so is missing a constant.
 
 Exits 0 when a run is worth starting and 1 when it is not.
 
@@ -237,9 +243,9 @@ sub check_config {
     return report(1, "Configuration to copy from: $dir", q{}) unless @missing;
 
     return report(0, "Missing from $dir: " . join(', ', @missing), <<"FIX");
-scratch_config copies these to build the throwaway configuration, so they have
-to be there to copy.  See Trog::Config for where this directory is and how to
-point it somewhere else.
+These are where an installation says which machines exist and what every guest
+gets.  See Trog::Config for where this directory is and how to point it
+somewhere else.
 FIX
 }
 

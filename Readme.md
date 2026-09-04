@@ -234,6 +234,42 @@ The machinery holding all that at bay got larger than the thing it stood in for.
 The hypervisor needs `xorriso` (or `genisoimage`/`mkisofs`) for the seed ISO, and `curl` to fetch the base image.  Nothing else.
 
 
+### Checking a hypervisor before you build on it
+
+`bin/preflight` asks whether a provision is worth starting. Every check it makes
+is one that, if it fails, fails the whole run — so they happen up front, all of
+them run even after the first failure, and each one that fails says what to do:
+
+```
+$ bin/preflight
+Hypervisor: qemu+ssh://doge@hv1.example.net/system
+
+  ok   Reached doge@hv1.example.net as doge
+FAILED No passwordless sudo for doge on hv1.example.net
+  ok   Cloud-init seed builder: xorriso
+  ok   libvirt answers, running 10.0.0
+  ok   Sys::Virt 10.0.0 matches libvirt 10.0.0 on the hypervisor
+  ok   Configuration to copy from: /etc/trog-provisioner
+```
+
+Exits 0 when a run is worth starting and 1 when it is not, so it works in a
+script. `--connect` checks a particular hypervisor instead of whichever the
+fleet would pick.
+
+Two of these are worth the trouble because of how they fail otherwise:
+
+**Passwordless sudo.** Provisioning writes to the storage pool, defines domains
+and edits the rsyslog config, all through `sudo`. A password prompt in the
+middle of that has nowhere to be answered from, so the run *hangs* rather than
+failing, and you find out by waiting.
+
+**`Sys::Virt` against the hypervisor's libvirt.** `Sys::Virt` is released in
+lockstep with libvirt and binds the API of the release it was built against.
+Talk to a daemon from a different one and the failure does not announce itself
+as a version problem — it is a constant that is not exported, or a call the far
+side does not implement, blamed on whatever was being attempted at the time.
+Compared on major.minor; a patch release apart is fine.
+
 ### Nuking a wedged storage pool
 
 A storage pool can get into a state nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:

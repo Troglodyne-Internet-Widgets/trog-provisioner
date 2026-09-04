@@ -21,7 +21,7 @@ them.
 ## Before anything else
 
 ```
-.claude/skills/provisioning-recipes/scripts/preflight
+bin/preflight
 ```
 
 Exits 0 if a run is worth starting, 1 if not, and prints what to fix. Every
@@ -79,6 +79,18 @@ output — you need it for everything after.
 If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
 left in place stops `new_config` by design.
+
+Every domain gets a `data` recipe, and it rsyncs `/opt/data/$DOMAIN/` off the
+hypervisor. Nothing creates that directory, so for a guest that has never
+existed it is not there and the `data` target fails — taking the rest of the
+Makefile with it, before any recipe you actually came to test has run. Make it
+first:
+
+```
+perl -Ilib -MTrog::Hypervisors -e '
+  my $hv = (Trog::Hypervisors->load(Trog::Hypervisors->default_path())->all)[0];
+  $hv->mkpath("/opt/data/$ARGV[0]") or die "could not make the data dir\n"' "$DOMAIN"
+```
 
 Then:
 
