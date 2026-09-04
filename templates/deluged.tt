@@ -19,9 +19,3 @@ systemctl enable deluge-web
 mv deluged_ufw.conf /etc/ufw/applications.d/deluged
 chown root:root /etc/ufw/applications.d/deluged
 chmod 0644 /etc/ufw/applications.d/deluged
-# Nginx vhost for file serving and web UI proxy
-mkdir -p /etc/nginx/sites-enabled
-mv deluged_nginx.conf /etc/nginx/sites-enabled/files.[% domain %].conf
-chown root:root /etc/nginx/sites-enabled/files.[% domain %].conf
-chmod 0644 /etc/nginx/sites-enabled/files.[% domain %].conf
-[% script_dir %]/queue_postrun_task systemctl reload nginx
