@@ -15,6 +15,8 @@ use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
 
+use Sys::Virt();
+
 use Trog::Config();
 use Trog::HV();
 use Trog::Hypervisors();
@@ -77,6 +79,7 @@ sub main {
         \&check_passwordless_sudo,
         \&check_iso_builder,
         \&check_libvirt,
+        \&check_sys_virt_in_step,
         \&check_config,
     );
 
@@ -176,12 +179,52 @@ sub check_libvirt {
     my ($hv) = @_;
 
     my $version = eval { $hv->vmm->get_library_version() };
-    return report(1, "libvirt answers (version $version)", q{}) if $version;
+    return report(1, 'libvirt answers, running ' . libvirt_version($version), q{}) if $version;
 
     return report(0, 'libvirt did not answer', <<"FIX");
 $@
 The URI is @{[ $hv->uri ]}.  Check libvirtd is running there and that the user
 is in the libvirt group.
+FIX
+}
+
+# Sys::Virt is released in lockstep with libvirt and binds the API of the
+# release it was built against.  Talk to a daemon from a different one and the
+# failures are not "version mismatch": they are a constant that is not exported,
+# or a call the far side does not implement, surfacing as an error about
+# whatever was being attempted at the time.
+sub check_sys_virt_in_step {
+    my ($hv) = @_;
+
+    my $remote = eval { $hv->vmm->get_library_version() };
+    return report(0, 'Could not ask the hypervisor its libvirt version', <<'FIX') unless $remote;
+libvirt did not answer, so this could not be checked.  Fix that first; the
+answer is above.
+FIX
+
+    my $there = libvirt_version($remote);
+    my $here  = Sys::Virt->VERSION;
+
+    my ($here_mm)  = $here  =~ m/\A(\d+\.\d+)/;
+    my ($there_mm) = $there =~ m/\A(\d+\.\d+)/;
+
+    return report(1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{})
+      if defined $here_mm && defined $there_mm && $here_mm eq $there_mm;
+
+    return report(0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX");
+These want to be the same release.  Sys::Virt is versioned to track libvirt and
+binds the API of the one it was built against, so a mismatch does not announce
+itself -- it shows up as a missing constant or an unimplemented call, blamed on
+whatever was being done at the time.
+
+Either bring this machine to $there:
+
+    apt-cache policy libvirt-dev    # what is available here
+    cpanm Sys::Virt\@$there         # once libvirt-dev matches
+
+or provision from a machine whose libvirt already does.  Installing a Sys::Virt
+that does not match the local libvirt-dev will not build.
+
 FIX
 }
 
@@ -198,6 +241,13 @@ scratch_config copies these to build the throwaway configuration, so they have
 to be there to copy.  See Trog::Config for where this directory is and how to
 point it somewhere else.
 FIX
+}
+
+# libvirt packs its version into one integer: major * 1000000 + minor * 1000 +
+# release.
+sub libvirt_version {
+    my ($packed) = @_;
+    return sprintf '%d.%d.%d', int($packed / 1000000), int($packed / 1000) % 1000, $packed % 1000;
 }
 
 sub readable {
