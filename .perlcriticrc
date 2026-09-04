@@ -14,7 +14,12 @@ allow-unsafe = 1
 [Documentation::RequirePod]
 # Security
 [ValuesAndExpressions::PreventSQLInjection]
-[CodeLayout::RequireASCII]
+; [CodeLayout::RequireASCII] is not here on purpose.  Every file declares
+; use 5.041, which turns on source::encoding "ascii" and makes a non-ASCII
+; character in code a compile error -- stricter than the policy, and not
+; skippable.  The policy also applies to POD, where the only thing it ever
+; caught was a contributor's name in the section Dist::Zilla generates, and
+; spelling somebody's name wrong is not a code standard.
 [RegularExpressions::RequireDefault]
 strict = 1
 # PEBCAK catches

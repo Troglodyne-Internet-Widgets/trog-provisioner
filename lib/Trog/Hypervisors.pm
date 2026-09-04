@@ -18,7 +18,8 @@ Trog::Hypervisors - the fleet, and which of them a guest belongs on
 
     use Trog::Hypervisors();
 
-    my $fleet = Trog::Hypervisors->load("$domain_dir/hypervisors.conf");
+    my $fleet  = Trog::Hypervisors->load(Trog::Config->path('hypervisors.conf'));
+    my $config = Config::Simple->new('/opt/domains/vm.example.com/provision.conf');
 
     # Where does this guest already live, or where should it go?
     my $hv = $fleet->select_for('vm.example.com', $config);

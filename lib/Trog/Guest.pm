@@ -19,15 +19,17 @@ Trog::Guest - a VM we have just built, and are now waiting on
 
     use Trog::Guest();
 
+    my $domain = 'vm.example.com';
+
     my $guest = Trog::Guest->new(
-        name     => 'vm.example.com',
-        host     => $ip,
-        user     => $admin_user,
-        key_path => "$domain_dir/$domain/key.rsa",
+        name     => $domain,
+        host     => '203.0.113.10',
+        user     => 'ubuntu',
+        key_path => "/opt/domains/$domain/key.rsa",
     );
 
     $guest->wait_for_ssh() or die "$domain never came up";
-    $guest->put_file($setup, "/root/setup-$domain.sh", sudo => 1, mode => '0755');
+    $guest->put_file('setup.sh', "/root/setup-$domain.sh", sudo => 1, mode => '0755');
     $guest->wait_for_cloud_init();
     $guest->wait_for_makefile();
 

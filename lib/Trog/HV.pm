@@ -21,14 +21,17 @@ Trog::HV - the hypervisor we are provisioning against
 
     use Trog::HV();
 
+    my $config = Config::Simple->new('/opt/domains/vm.example.com/provision.conf');
+    my $uri    = 'qemu+ssh://root@hv1.example.net/system';    # or undef, from --connect
+
     # Once, wherever the config and command line are read:
-    my $hv = Trog::HV->from_config($config, uri => $connect_option);
+    Trog::HV->from_config($config, uri => $uri);
 
     # Everywhere else, in any package, without threading it through:
     my $hv = Trog::HV->new();
 
     $hv->annihilate_domain('vm.example.com');
-    $hv->write_text('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
+    $hv->write_text('/etc/rsyslog.d/10-vm.conf', 'some config', sudo => 1);
     print $hv->pool_path, "\n";
 
 =head1 DESCRIPTION
@@ -294,6 +297,13 @@ sub describe { return 'the hypervisor at ' . $_[0]->uri }
 
 Where the per-domain directories live.  This path has to mean the same thing on
 both ends: the guest pulls its payload from the hypervisor's copy.
+
+=head2 pool_path
+
+Where the storage pool keeps its volumes, asked of libvirt rather than assumed:
+we delete things out of this path, and a pool somebody made somewhere else is
+not a reason to be wrong about it.  Falls back to F</opt/terraform/disks>, which
+is where the volumes on a hypervisor built by the old tool actually are.
 
 =cut
 

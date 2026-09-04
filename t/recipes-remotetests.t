@@ -32,6 +32,7 @@ use File::Touch;
 use File::Copy;
 
 use Test::More;
+use Test::MockModule qw{strict};
 use Test::Fatal qw{exception};
 
 if (!$ENV{AUTHOR_TESTING}) {
@@ -39,6 +40,16 @@ if (!$ENV{AUTHOR_TESTING}) {
 }
 
 require_ok( "$FindBin::Bin/../bin/new_config" ) or die "could not require SUT: $@";
+
+# What this file is about is the recipes: that each renders, and that the
+# generator writes out what the recipe said it would.  The hypervisor is not
+# part of that, and asking a real one means this only runs on a machine that
+# happens to be one -- so the two facts the generator wants off it are answered
+# here instead.
+require Trog::HV;
+my $hv_mock = Test::MockModule->new('Trog::HV');
+$hv_mock->redefine(virbr_ip  => sub { '192.168.122.1' });
+$hv_mock->redefine(sshd_port => sub { 22 });
 
 # test everything available.
 my @available;
@@ -58,8 +69,9 @@ File::Find::find( {
 #XXX hardcoded
 my $test_ip = '192.168.1.40';
 
-my $aliases = join("=data\n", @available).'=data';
-my $ips = join("=$test_ip\n", @available)."=$test_ip";
+my $tld     = 'test.test';
+my $aliases = join(".$tld=data.$tld\n", @available).".$tld=data.$tld";
+my $ips     = join(".$tld=$test_ip\n", @available).".$tld=$test_ip";
 
 # Populate stuff needed by recipes
 my $tmpdir = tempdir( CLEANUP => 1 );
@@ -77,7 +89,6 @@ File::Touch::touch("$tmpdir/dotfiles/test");
 
 # Build the config to pass to tools
     my $ipmap = "[global]
-tld=test.test
 ip=192.168.1.50
 basedir=$tmpdir/domains
 transfer_user=doge
@@ -93,7 +104,7 @@ dhcp_devname=ens3
 addresses=
 cidr=
 [ips]
-data=$test_ip
+data.$tld=$test_ip
 $ips
 [aliases]
 $aliases
@@ -199,8 +210,9 @@ foreach my $key ('data', @available) {
     }
 }
 foreach my $key ('data', @available) {
-    my $data = $recipes_raw{$key} // {};
-    $recipes_raw{$key} = { $key => $data };
+    my $data = delete $recipes_raw{$key} // {};
+    # The domain is fully qualified; the recipe inside it is still the recipe.
+    $recipes_raw{"$key.$tld"} = { $key => $data };
 }
 $recipes_raw{_base} = {
     _global => {
@@ -267,7 +279,7 @@ sub do_provision {
             '--ipmap',   $ipmap_file,
             '--recipes', $recipe_file,
             '--skip_ssh',
-            $recipe,
+            "$recipe.test.test",
         )
     };
     is($result, undef, "new_config ran without issue");

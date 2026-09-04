@@ -21,10 +21,13 @@ Trog::Machine - a machine we reach over SSH and put files on
 
 =head1 SYNOPSIS
 
-    # Not used directly.  See Trog::HV and Trog::Guest.
+    # Not used directly.  See Trog::HV and Trog::Guest, either of which is a
+    # Trog::Machine and answers to all of this.
+    my $machine = Trog::HV->new();
+
     $machine->run_sudo(qw{systemctl restart rsyslog});
-    $machine->write_text('/etc/rsyslog.d/10-vm.conf', $conf, sudo => 1);
-    $machine->put_file($local, '/root/setup.sh', sudo => 1, mode => '0755');
+    $machine->write_text('/etc/rsyslog.d/10-vm.conf', 'some config', sudo => 1);
+    $machine->put_file('setup.sh', '/root/setup.sh', sudo => 1, mode => '0755');
 
 =head1 DESCRIPTION
 
