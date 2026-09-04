@@ -1,0 +1,230 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::CollectArtifacts;
+
+#ABSTRACT: Pull the logs off a guest that say what its recipes actually did.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Config::Simple();
+use File::Path qw{make_path};
+use File::Slurper::Temp();
+use File::Temp();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+
+use Trog::Guest();
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+collect_artifacts - pull the logs off a guest that say what its recipes actually did
+
+=head1 SYNOPSIS
+
+    collect_artifacts vm.test
+    collect_artifacts --into /tmp/evidence vm.test
+
+=head1 DESCRIPTION
+
+A provision either finishes or it does not, and either way what happened is in
+four places on the guest.  This fetches all four, whether or not the run
+succeeded -- a failed run is the case where you want them most, and is exactly
+when the guest is about to be destroyed.
+
+=over 4
+
+=item F</var/log/$domain.setup.log>
+
+The Makefile's output: every recipe's target, in the order they ran, and the
+one that failed if one did.  Start here.
+
+=item F</var/log/cloud-init.log> and F</var/log/cloud-init-output.log>
+
+What happened before the Makefile: the seed being read, the packages, the users,
+the network.  Where to look when the guest never came up far enough to run a
+Makefile at all.
+
+=item F</root/new-outblocked.log>
+
+Egress the firewall stopped, as C<SPT=>/C<DPT=> pairs, written by
+outgoing_blocks.sh.  A recipe that needs to reach something it was never given a
+hole for shows up here rather than in its own log.
+
+=item F</root/post_install.sh>
+
+What was queued to run after the Makefile finished.  Recipes append to this,
+so it is the record of the deferred half of the work.
+
+=back
+
+Missing files are reported, not fatal: which ones are absent is itself the
+finding.  A guest with no setup.log never got as far as the Makefile.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--into> DIR
+
+Where to put them.  Defaults to a fresh temporary directory, whose path is
+printed.
+
+=item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
+
+Override what would otherwise come from the configuration and the lease.
+
+=item B<--connect> URI, B<--hvconf> FILE
+
+Which hypervisor is holding the guest.  Without either, the fleet is asked
+which one has it, the same way C<bin/destroy> finds a guest to destroy.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($into, $user, $key, $host, $uri, $hvconf, $help);
+    GetOptionsFromArray(\@args,
+        'into=s'    => \$into,
+        'user=s'    => \$user,
+        'key=s'     => \$key,
+        'host=s'    => \$host,
+        'connect=s' => \$uri,
+        'hvconf=s'  => \$hvconf,
+        'help'      => \$help,
+    );
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    my $domain = shift @args;
+    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+      unless $domain;
+
+    my $guest = connect_to($domain, $user, $key, $host, $uri, $hvconf);
+
+    $into //= File::Temp::tempdir("trog-artifacts-$domain-XXXXXX", TMPDIR => 1);
+    make_path($into);
+
+    my @results = map { fetch($guest, $domain, $_, $into) } artifacts($domain);
+
+    print {*STDERR} "\n";
+    printf {*STDERR} "%-34s %s\n", $_->{remote},
+        ($_->{ok} ? "-> $_->{local} ($_->{bytes} bytes)" : $_->{why}) for @results;
+
+    my @absent = grep { !$_->{ok} } @results;
+    print {*STDERR} "\n" . scalar(@absent) . " of " . scalar(@results)
+      . " not there, which is itself worth reading something into.\n" if @absent;
+
+    print "$into\n";
+    return 0;
+}
+
+sub artifacts {
+    my ($domain) = @_;
+    return (
+        "/var/log/$domain.setup.log",
+        qw{
+          /var/log/cloud-init.log
+          /var/log/cloud-init-output.log
+          /root/new-outblocked.log
+          /root/post_install.sh
+        },
+    );
+}
+
+# Everything about how to reach the guest, from the configuration that built it.
+sub connect_to {
+    my ($domain, $user, $key, $host, $uri, $hvconf) = @_;
+
+    my $hv         = hypervisor($domain, $uri, $hvconf);
+    my $domain_dir = $hv->domain_dir;
+    my $cfg_dir    = "$domain_dir/$domain";
+
+    $key  //= "$cfg_dir/key.rsa";
+    $user //= admin_user("$cfg_dir/provision.conf");
+
+    # The guest answers on its NAT lease whether or not its static address ever
+    # came up, which is the case that matters when something went wrong.
+    $host //= $hv->lease_ip('default', mac => $hv->guest_mac($domain, 0));
+    die "Could not find a lease for $domain, so there is nothing to connect to.\n"
+      . "Pass --host if you know where it is.\n" unless $host;
+
+    print {*STDERR} "Collecting from $domain at $user\@$host\n";
+
+    my $guest = Trog::Guest->new(name => $domain, host => $host, user => $user, key_path => $key);
+
+    # Prove the connection before reading anything through it.  Without this a
+    # guest that cannot be reached at all reports every artifact as absent,
+    # which reads like a guest that got nowhere rather than a collector that
+    # did -- and those want opposite things done about them.
+    my $whoami = eval { $guest->capture('whoami') };
+    chomp $whoami if defined $whoami;
+    die "Could not get a shell on $user\@$host for $domain.\n"
+      . "  key:  $key\n"
+      . "  host: $host (the NAT lease; --host overrides)\n"
+      . "Try it by hand: ssh -i $key $user\@$host\n"
+      unless defined $whoami && length $whoami;
+
+    return $guest;
+}
+
+# Which machine is holding this guest.  The same question bin/destroy asks, and
+# the same answer: whichever one in the fleet actually has it.
+sub hypervisor {
+    my ($domain, $uri, $hvconf) = @_;
+
+    return Trog::HV->new(uri => $uri) if $uri;
+
+    my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+    return Trog::HV->new() unless $fleet->configured;
+
+    my $hv = $fleet->hosting($domain)
+      or die "No hypervisor in the fleet has $domain.\n"
+      . "Pass --connect if it is somewhere the fleet does not list.\n";
+
+    return $hv;
+}
+
+sub admin_user {
+    my ($path) = @_;
+
+    my $config = eval { Config::Simple->new($path) }
+      or die "No provision.conf at $path to read the admin user out of.\n"
+      . "Pass --user, or point --domaindir somewhere that has one.\n";
+
+    return $config->param('admin_user') // 'root';
+}
+
+# sudo throughout: two of these are root's, and the setup log is written by a
+# Makefile running as root.  The guest's admin user has NOPASSWD, set up by the
+# cloud-init that built it.
+sub fetch {
+    my ($guest, $domain, $remote, $into) = @_;
+
+    # Asked separately from the read, so that "not there" and "there and empty"
+    # are told apart.  An empty new-outblocked.log means the firewall stopped
+    # nothing; an absent one means the cron that writes it never ran.
+    return { remote => $remote, ok => 0, why => 'not there' }
+      unless $guest->file_exists($remote);
+
+    my $content = eval { $guest->capture("sudo cat '$remote'") } // q{};
+
+    my $name  = $remote =~ s{.*/}{}r;
+    my $local = "$into/$name";
+    File::Slurper::Temp::write_text($local, $content);
+
+    return { remote => $remote, ok => 1, local => $local, bytes => length $content };
+}
+
+exit main(@ARGV) unless caller;
+
+1;

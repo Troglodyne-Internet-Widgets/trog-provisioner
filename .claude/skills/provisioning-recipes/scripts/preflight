@@ -1,0 +1,212 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::Preflight;
+
+#ABSTRACT: Say whether a throwaway guest can be built at all, before any time is spent trying.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage qw{pod2usage};
+
+use Trog::Config();
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+preflight - say whether a throwaway guest can be built, before any time is spent trying
+
+=head1 SYNOPSIS
+
+    .claude/skills/provisioning-recipes/scripts/preflight
+    .claude/skills/provisioning-recipes/scripts/preflight --connect qemu+ssh://root@hv/system
+
+=head1 DESCRIPTION
+
+Provisioning a guest takes minutes and touches a hypervisor.  Every check here
+is one that, if it fails, fails the whole run -- so they all happen up front,
+all of them run even after the first failure, and each one that fails says what
+to do about it.
+
+Exits 0 when a run is worth starting and 1 when it is not.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--connect> URI
+
+Check this hypervisor rather than whichever the fleet would pick.
+
+=item B<--hvconf> FILE
+
+The fleet definition.  Defaults to the one under L<Trog::Config>.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ($uri, $hvconf, $help);
+    GetOptionsFromArray(\@args,
+        'connect=s' => \$uri,
+        'hvconf=s'  => \$hvconf,
+        'help'      => \$help,
+    );
+    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+
+    my $hv = hypervisor($uri, $hvconf);
+    return 1 unless $hv;
+
+    print "Hypervisor: " . $hv->uri . "\n\n";
+
+    # Every check runs even once one has failed: being told about the sudo and
+    # then, a fix later, about the missing xorriso is two round trips where one
+    # would do.
+    my @failed = grep { !$_->{ok} } map { $_->($hv) } (
+        \&check_reachable,
+        \&check_passwordless_sudo,
+        \&check_iso_builder,
+        \&check_libvirt,
+        \&check_config,
+    );
+
+    return 0 unless @failed;
+
+    print "\n" . scalar(@failed) . " thing" . (@failed == 1 ? '' : 's') . " to fix first:\n\n";
+    foreach my $failure (@failed) {
+        print "  * $failure->{what}\n";
+        print "    $_\n" for split("\n", $failure->{fix});
+        print "\n";
+    }
+    return 1;
+}
+
+sub hypervisor {
+    my ($uri, $hvconf) = @_;
+
+    my $hv = eval {
+        return Trog::HV->new(uri => $uri) if $uri;
+
+        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+        return Trog::HV->new() unless $fleet->configured;
+
+        my ($name) = $fleet->names();
+        return $fleet->hypervisor($name);
+    };
+
+    print "Could not work out which hypervisor to use: $@" unless $hv;
+    return $hv;
+}
+
+sub report {
+    my ($ok, $what, $fix) = @_;
+    printf "%s %s\n", ($ok ? '  ok  ' : 'FAILED'), $what;
+    return { ok => $ok, what => $what, fix => $fix };
+}
+
+sub check_reachable {
+    my ($hv) = @_;
+
+    return report(1, 'The hypervisor is this machine', q{}) if $hv->is_local;
+
+    my $whoami = eval { $hv->capture('whoami') };
+    chomp $whoami if defined $whoami;
+
+    return report(1, "Reached " . $hv->ssh_target . " as $whoami", q{})
+      if defined $whoami && length $whoami;
+
+    return report(0, 'Cannot reach ' . $hv->describe, <<"FIX");
+ssh -v @{[ $hv->ssh_target ]} and see what it says.  This wants an agent or a
+key already trusted there; nothing here can answer a password prompt.
+FIX
+}
+
+sub check_passwordless_sudo {
+    my ($hv) = @_;
+
+    return report(1, 'Passwordless sudo', q{}) if $hv->run(qw{sudo -n true}) == 0;
+
+    my $user   = $hv->ssh_user // 'you';
+    my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
+
+    return report(0, "No passwordless sudo for $user on $target", <<"FIX");
+Provisioning writes to the storage pool, defines domains, and edits the
+rsyslog config, all through sudo.  A password prompt in the middle of that
+has nowhere to be answered from, and the run hangs rather than failing.
+
+On $target:
+
+    echo '$user ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-$user
+    sudo chmod 0440 /etc/sudoers.d/90-$user
+
+Then check it took:
+
+    ssh @{[ $hv->ssh_target // $user ]} sudo -n true
+
+This is a real grant of root on a hypervisor.  If that is not something you
+want standing, make it, use it, and take it away again afterwards.
+FIX
+}
+
+sub check_iso_builder {
+    my ($hv) = @_;
+
+    my $maker = eval { $hv->iso_maker };
+    return report(1, "Cloud-init seed builder: $maker", q{}) if $maker;
+
+    return report(0, 'No ISO builder on the hypervisor', <<'FIX');
+cloud-init reads its configuration off a small ISO, and something has to make
+it:
+
+    sudo apt install xorriso
+FIX
+}
+
+sub check_libvirt {
+    my ($hv) = @_;
+
+    my $version = eval { $hv->vmm->get_library_version() };
+    return report(1, "libvirt answers (version $version)", q{}) if $version;
+
+    return report(0, 'libvirt did not answer', <<"FIX");
+$@
+The URI is @{[ $hv->uri ]}.  Check libvirtd is running there and that the user
+is in the libvirt group.
+FIX
+}
+
+sub check_config {
+    my ($hv) = @_;
+
+    my $dir = Trog::Config->dir;
+
+    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml};
+    return report(1, "Configuration to copy from: $dir", q{}) unless @missing;
+
+    return report(0, "Missing from $dir: " . join(', ', @missing), <<"FIX");
+scratch_config copies these to build the throwaway configuration, so they have
+to be there to copy.  See Trog::Config for where this directory is and how to
+point it somewhere else.
+FIX
+}
+
+sub readable {
+    my ($path) = @_;
+    open(my $fh, '<', $path) or return 0;
+    close $fh;
+    return 1;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
