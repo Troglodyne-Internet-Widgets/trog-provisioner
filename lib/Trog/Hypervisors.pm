@@ -4,6 +4,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use Config::Simple();
+use Trog::Config();
 use Trog::HV();
 
 =head1 NAME
@@ -26,8 +27,8 @@ go on it, who administers it.  None of that has anything to do with which
 machine ends up running it, and a guest definition that names a hypervisor is a
 guest definition you cannot move.
 
-So the fleet lives in its own file.  F<hypervisors.conf> is an INI file with one
-block per hypervisor, named however you like:
+So the fleet lives in its own file.  F<hypervisors.conf>, in F</etc/trog-provisioner>, is an INI file with one block
+per hypervisor, named however you like:
 
     [hv1]
     libvirt_uri    = qemu+ssh://root@hv1.example.net/system
@@ -104,17 +105,15 @@ sub load {
     return $self;
 }
 
-=head2 default_path($domain_dir)
+=head2 default_path
 
-Where F<hypervisors.conf> lives when nobody said otherwise: beside the domain
-directories, since that is the tree an installation already has.
+Where F<hypervisors.conf> lives when nobody said otherwise: in the
+configuration directory, with the rest of what describes this installation.
+See L<Trog::Config>.
 
 =cut
 
-sub default_path {
-    my ($class, $domain_dir) = @_;
-    return ($domain_dir // '/opt/domains') . '/hypervisors.conf';
-}
+sub default_path { return Trog::Config->path('hypervisors.conf') }
 
 =head2 find($domain, %opts)
 
@@ -137,7 +136,7 @@ sub find {
 
     return Trog::HV->new(uri => $opts{uri}, %paths) if $opts{uri};
 
-    my $fleet = $class->load($opts{hvconf} // $class->default_path($opts{domain_dir}));
+    my $fleet = $class->load($opts{hvconf} // $class->default_path);
     return Trog::HV->from_config($opts{config}, %paths) unless $fleet->configured;
 
     my $hv = $fleet->hosting($domain)

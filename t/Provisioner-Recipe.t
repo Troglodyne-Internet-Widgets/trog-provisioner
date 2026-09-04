@@ -4,6 +4,10 @@ use warnings;
 
 use FindBin;
 use FindBin::libs;
+
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 use File::Temp qw{tempdir};
 use Test::More;
 

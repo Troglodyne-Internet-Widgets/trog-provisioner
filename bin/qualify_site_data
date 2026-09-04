@@ -7,6 +7,7 @@ use warnings FATAL => 'all';
 
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
 use Pod::Usage qw{pod2usage};
 use File::Slurper();
 use File::Copy();
@@ -74,7 +75,7 @@ sub main {
         -message => 'Pass --tld, the parent domain that used to be appended')
       unless $tld;
 
-    $ipmap   //= 'ipmap.cfg';
+    $ipmap   //= Trog::Config->path('ipmap.cfg');
     $recipes //= 'recipes.d';
 
     qualify_ipmap($ipmap, $tld, $dryrun);

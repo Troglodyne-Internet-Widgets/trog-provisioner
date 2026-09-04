@@ -9,6 +9,10 @@ use File::Temp qw{tempfile};
 use FindBin;
 use FindBin::libs;
 
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+
 use_ok( 'Provisioner::IPPool' );
 
 sub write_ipmap {
@@ -111,6 +115,33 @@ END
 
     my $out = exception { Provisioner::IPPool::auto_assign($cfg, 'nopool', $pool, $ip_conf) };
     like $out, qr/ip_pool|pool/i, 'dies with no-pool message';
+};
+
+subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {
+    # A guest handed .0 or .63 of a /26 looks provisioned right up until it
+    # cannot talk to anything.  This is where staging.troglodyne.net=192.168.1.0
+    # came from.
+    my @ips = Provisioner::IPPool::pool_ips({ cidr => '192.168.1.0/26' });
+    is scalar @ips, 62, 'a /26 offers 62 hosts, not 64';
+    is $ips[0],  '192.168.1.1',  'starting after the network address';
+    is $ips[-1], '192.168.1.62', 'and stopping before the broadcast';
+    ok !(grep { $_ eq '192.168.1.0' }  @ips), 'the network address is not on offer';
+    ok !(grep { $_ eq '192.168.1.63' } @ips), 'nor is the broadcast';
+
+    is_deeply [Provisioner::IPPool::pool_ips({ cidr => '10.0.0.0/30' })],
+        ['10.0.0.1', '10.0.0.2'], 'a /30 offers its two hosts';
+
+    # RFC 3021: a /31 is a point to point link and both addresses are usable.
+    is_deeply [Provisioner::IPPool::pool_ips({ cidr => '10.0.0.4/31' })],
+        ['10.0.0.4', '10.0.0.5'], 'a /31 keeps both';
+
+    is_deeply [Provisioner::IPPool::pool_ips({ cidr => '10.0.0.9/32' })],
+        ['10.0.0.9'], 'and a /32 is the one host it names';
+
+    # An explicit address list is taken at its word; if you wrote it down, you
+    # meant it.
+    is_deeply [Provisioner::IPPool::pool_ips({ addresses => '192.168.1.0 192.168.1.5' })],
+        ['192.168.1.0', '192.168.1.5'], 'addresses given by hand are not second-guessed';
 };
 
 done_testing;

@@ -57,7 +57,7 @@ By default the hypervisor is the machine you run `bin/provision` on.  There are 
 
 ### A fleet, in hypervisors.conf
 
-Describe the machines once, in `hypervisors.conf` beside your domain directories (so `/opt/domains/hypervisors.conf` by default).  See `hypervisors.conf.example`; the short version is one `[block]` per machine:
+Describe the machines once, in `/etc/trog-provisioner/hypervisors.conf`.  See `hypervisors.conf.example`; the short version is one `[block]` per machine:
 
 ```
 [hv1]
@@ -85,7 +85,7 @@ Placement compares what the guest asks for -- `memory`, `cpus` and `size` from i
 ```
 $ bin/provision hungry.test
 Nowhere to put hungry.test: it wants 65536MB of memory, 16 CPUs and 500GB of disk,
-and no hypervisor in /opt/domains/hypervisors.conf can spare that.
+and no hypervisor in /etc/trog-provisioner/hypervisors.conf can spare that.
   hv1: needs 65536MB of memory, 24576MB free (65536MB physical, 36864MB committed, 4096MB reserved)
   hv2: needs 500GB of disk, 210GB free in the pool after a 50GB reserve
   hv2: already has 20 guests, and max_guests is 20
@@ -145,6 +145,22 @@ That means:
 `bin/new_config` and `bin/provision` used to live in separate repositories and be run one after the other: generate a domain's configuration, then build the VM.  That held together while the generator could assume it was running *on* the hypervisor it was writing about -- it read the internal IP and the sshd port straight off the local machine.  Once which hypervisor to use became a choice, both halves had to agree on the answer, and the only honest way for them to agree is to be one program.
 
 So `bin/provision` generates the configuration first, and the generator is what picks the hypervisor: the recipe already says how much memory, disk and CPU the guest wants, which is everything placement needs.  `provision.conf` never has to carry it.  `--no-config` skips the generation and builds whatever is already in the domain directory, which is what you want for a domain you wrote by hand.
+
+### Configuration lives in /etc/trog-provisioner
+
+Five files, none of them in the checkout:
+
+| | |
+|---|---|
+| `hypervisors.conf` | the machines you can build on, and what to spare on each |
+| `ipmap.cfg` | addresses, nameservers, the address pool, and who administers it all |
+| `recipes.yaml` | the base recipe every guest gets |
+| `recipes.d/` | one file per guest, named for it |
+| `secrets.kdbx` | the passwords the recipes reach for |
+
+These describe an *installation*, not this software.  They used to sit in the checkout, which meant `.gitignore` was the only thing between a password database and a public repository, and meant every command had to be run from one particular directory to find them.  `.gitignore` still lists them, so an old working copy can't commit one by habit.
+
+`TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--ipmap`, `--recipes` and `--hvconf` individually.
 
 ### Everything is spelled out
 

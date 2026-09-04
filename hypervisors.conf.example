@@ -1,9 +1,8 @@
 ; hypervisors.conf -- the machines we can build guests on.
 ;
-; Copy this to the parent of your domain directories (so /opt/domains by
-; default, beside example.test/) and edit.  While it does not exist there is no
-; fleet: the hypervisor is this machine, or whatever --connect names, exactly as
-; it was before.
+; Copy this to /etc/trog-provisioner/hypervisors.conf and edit.  While it does
+; not exist there is no fleet: the hypervisor is this machine, or whatever
+; --connect names, exactly as it was before.
 ;
 ; One [block] per hypervisor.  The name is yours to pick; it shows up in
 ; placement messages, so make it one you would recognise at 3am.  A block header is required -- keys outside one are an

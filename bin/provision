@@ -11,6 +11,8 @@ use Config::Simple();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Guest();
+use Trog::Config();
+use File::Basename();
 use File::Slurper();
 use YAML::XS();
 use JSON::PP();
@@ -52,17 +54,15 @@ build exactly what is on disk.
 
 =item B<--recipes> FILE
 
-Handed to F<bin/new_config>.  Defaults to F<recipes.yaml> beside the domain
-directories.
+Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/recipes.yaml>.
 
 =item B<--ipmap> FILE
 
-Handed to F<bin/new_config>.  Defaults to F<ipmap.cfg> beside the domain
-directories.
+Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/ipmap.cfg>.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
 When it exists, the hypervisor is chosen from it -- see L<Trog::Hypervisors>.
 When it doesn't, the hypervisor is whatever F<provision.conf> and C<--connect>
 say, which for most people is still this machine.
@@ -234,12 +234,13 @@ sub generate_config {
     my ($domain, $opts) = @_;
 
     my $dir     = $opts->{domain_dir};
-    my $recipes = $opts->{recipes} // "$dir/recipes.yaml";
-    my $ipmap   = $opts->{ipmap}   // "$dir/ipmap.cfg";
+    my $recipes = $opts->{recipes} // Trog::Config->path('recipes.yaml');
+    my $ipmap   = $opts->{ipmap}   // Trog::Config->path('ipmap.cfg');
 
     # No site data, nothing to generate: somebody is provisioning from a domain
     # directory they wrote by hand, which is a supported thing to do.
-    unless (-f $recipes || -d "$dir/recipes.d") {
+    my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
+    unless (-f $recipes || -d $recipe_dir) {
         print "No recipes at $recipes, building from what is already in $dir/$domain\n";
         return 0;
     }
@@ -250,7 +251,8 @@ sub generate_config {
     # choose one; it picks the singleton up from there.
     Trog::HV->new(uri => $opts->{uri}, domain_dir => $dir) if $opts->{uri};
 
-    require "$FindBin::Bin/new_config";    ## no critic (Modules::RequireBarewordIncludes)
+    my $generator = File::Basename::dirname(__FILE__) . '/new_config';
+    require $generator;    ## no critic (Modules::RequireBarewordIncludes)
     my $result = Trog::Provisioner::Config::Generator::main(
         '--recipes', $recipes, '--ipmap', $ipmap, $domain);
 
@@ -272,7 +274,7 @@ sub choose_hypervisor {
     return Trog::HV->new(uri => $opts->{uri}, %paths) if $opts->{uri};
 
     my $fleet = Trog::Hypervisors->load(
-        $opts->{hvconf} // Trog::Hypervisors->default_path($opts->{domain_dir}));
+        $opts->{hvconf} // Trog::Hypervisors->default_path);
     return Trog::HV->from_config($config, %paths) unless $fleet->configured;
 
     warn "hypervisors.conf decides which hypervisor $domain lands on; the "
@@ -526,7 +528,7 @@ sub mongle_domain_xml {
     }
     my $cloudinit = $hv->cloudinit_iso($domain, %$seed);
 
-    my $xml = File::Slurper::read_text("$FindBin::Bin/../domain.xml.tmpl");
+    my $xml = File::Slurper::read_text(File::Basename::dirname(__FILE__) . '/../domain.xml.tmpl');
     my %substitutions = (
         REPLACEME   => $domain,
         MUGUBYTES   => $ram_mb,

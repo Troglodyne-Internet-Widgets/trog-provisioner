@@ -10,11 +10,11 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-use FindBin;
 use FindBin::libs;
 
 use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
 use Cpanel::JSON::XS;
 
 use Provisioner::IPPool;
@@ -46,7 +46,7 @@ which pool IPs are still available for new VMs.
 sub main {
     my @args = @_;
 
-    my $cfile = 'ipmap.cfg';
+    my $cfile = Trog::Config->path('ipmap.cfg');
     my ( $assigned, $available, $json );
 
     GetOptionsFromArray(

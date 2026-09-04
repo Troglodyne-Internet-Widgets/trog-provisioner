@@ -19,6 +19,7 @@ use Text::Xslate::Bridge::TT2;
 use Net::IP;
 use List::Util qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
 use File::Slurper::Temp;
 
 =head1 ipmap2zones
@@ -67,7 +68,7 @@ sub main {
         'output-dir=s' => \$output_dir,
     );
 
-    $cfile      //= 'ipmap.cfg';
+    $cfile      //= Trog::Config->path('ipmap.cfg');
     $output_dir //= '.';
 
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;

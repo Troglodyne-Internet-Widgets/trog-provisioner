@@ -2,12 +2,15 @@
 *.swo
 *.swn
 
-# Site data: whose machines these are, what goes on them, and the passwords.
-# None of it belongs in the repository.
+# Configuration lives in /etc/trog-provisioner now, not here -- see Trog::Config.
+# These are the names it used to go by in the checkout; kept ignored so an old
+# working copy, or a habit, cannot commit an installation's addresses or its
+# password database.
 ipmap.cfg
 recipes.yaml
 recipes.d/
 secrets.kdbx
+hypervisors.conf
 vendor/
 
 # Build leavings

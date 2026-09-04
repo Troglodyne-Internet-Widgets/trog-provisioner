@@ -52,7 +52,7 @@ search described under C<--hvconf> and goes straight there.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F<hypervisors.conf> in the domain directory.
+The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
 When it exists, every hypervisor in it is asked whether it has this guest, and
 the one that does is the one we revert.
 

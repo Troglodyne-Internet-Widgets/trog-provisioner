@@ -3,9 +3,14 @@ use strict;
 use warnings FATAL => 'all';
 
 use Test::More;
+use File::Temp();
 use Test::MockModule qw{strict};
 
 use FindBin::libs;
+
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on, or on what is deployed there.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 use Trog::Guest();
 
 # A guest and a hypervisor reach their far side the same way, so the transport

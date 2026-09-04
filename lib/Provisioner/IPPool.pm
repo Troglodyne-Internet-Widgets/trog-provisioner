@@ -51,10 +51,25 @@ sub pool_ips {
             next unless $cidr =~ /\S/;
             my $net = Net::IP->new($cidr)
                 or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
+
+            my @block;
             do {
-                my $ip = $net->ip();
-                push @ips, $ip unless $seen{$ip}++;
+                push @block, $net->ip();
             } while (++$net);
+
+            # The first and last address of an IPv4 block are the network and
+            # the broadcast; neither belongs to a host.  Handing one out looks
+            # like it worked right up until the guest cannot talk to anything.
+            # A /31 is a point-to-point link where both addresses are usable
+            # (RFC 3021), and a /32 is one host; neither has any to spare.
+            if (@block > 2) {
+                pop @block;
+                shift @block;
+            }
+
+            foreach my $ip (@block) {
+                push @ips, $ip unless $seen{$ip}++;
+            }
         }
     }
 

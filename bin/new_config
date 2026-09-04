@@ -33,6 +33,7 @@ use IO::Interface::Simple();
 use Archive::Tar();
 use File::Path qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
+use Trog::Config();
 use File::Copy qw{copy};
 use Hash::Merge();
 use File::Find();
@@ -61,11 +62,14 @@ Builds a new configuration package for VM(s) to be provisioned by Troglodyne pro
 
 Per-domain Behavior is controlled by:
 
-    recipes.yaml
-    recipes.d/*.yaml
-    ipmap.cfg
+    /etc/trog-provisioner/recipes.yaml
+    /etc/trog-provisioner/recipes.d/*.yaml
+    /etc/trog-provisioner/ipmap.cfg
 
-Both of which will be in the Current working directory, unless you specify the --recipes or --ipmap options.
+These describe your installation rather than this software, so they live outside
+the checkout.  Point C<TROG_PROVISIONER_CONFIG> elsewhere to use another set, or
+name one file at a time with the --recipes and --ipmap options.  See
+L<Trog::Config>.
 
 In the main recipes.yaml, most of what you will want will be in the _base section:
 
@@ -138,7 +142,7 @@ to ipmap.cfg alongside the C<[ips]> section:
 
 Then use C<bin/list_ip_pool> to see assignment status:
 
-    bin/list_ip_pool [--ipmap=ipmap.cfg]
+    bin/list_ip_pool [--ipmap=/etc/trog-provisioner/ipmap.cfg]
 
 Output shows the full pool, which IPs are assigned to which VMs (from the C<[ips]>
 section), and which IPs remain available for new allocations.
@@ -156,7 +160,8 @@ The tests themselves are run on the remote host.
 =head2 SECRETS
 
 Rather than hardcoding various values into a recipe, you can instead store it in a keepass2 (kdbx) file.
-By default we look for secrets.kdbx, but like ipmap you can also pass it as an option.
+By default we look for F</etc/trog-provisioner/secrets.kdbx>, but like ipmap you
+can also pass it as an option.
 
 You will be asked for the unlock password for the DB in the event you use this feature.
 
@@ -327,9 +332,9 @@ sub main {
         'skip_ssh'  => \$skip_ssh,
     );
     $skip_ssh //= 0;
-    $cfile //= 'ipmap.cfg';
-    $sfile //= 'secrets.kdbx';
-    $pfile //= 'recipes.yaml';
+    $cfile //= Trog::Config->path('ipmap.cfg');
+    $sfile //= Trog::Config->path('secrets.kdbx');
+    $pfile //= Trog::Config->path('recipes.yaml');
 
     # Expand the domain list to also create those we depend upon.
     @args = uniq map { expand_dependent_domains($_) } @args;
@@ -344,7 +349,7 @@ sub main {
 # Where does this guest go?  Whichever hypervisor already has it, else
 # whichever has room, else -- with no fleet configured -- this machine.
 sub choose_hypervisor {
-    my ($domain, $requirements, $basedir) = @_;
+    my ($domain, $requirements) = @_;
 
     require Trog::HV;
 
@@ -353,7 +358,7 @@ sub choose_hypervisor {
     return $chosen if $chosen->explicit;
 
     require Trog::Hypervisors;
-    my $fleet = Trog::Hypervisors->load(Trog::Hypervisors->default_path($basedir));
+    my $fleet = Trog::Hypervisors->load(Trog::Hypervisors->default_path());
     return $chosen unless $fleet->configured;
 
     return $fleet->select_for($domain, $requirements);
@@ -391,12 +396,6 @@ sub handle_domain {
       . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
       if @unqualified;
 
-    my $static_ip = $ip_conf->{$domain};
-    unless ($static_ip) {
-        $static_ip = Provisioner::IPPool::auto_assign($cfile, $domain, $pool_conf, $ip_conf);
-        $ip_conf->{$domain} = $static_ip;
-    }
-
     my $gateway = $global_conf->{gateway};
     die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
 
@@ -415,6 +414,18 @@ sub handle_domain {
 
     # Start parsing the recipe configuration
     my $rconf = clone( get_recipe_config() );
+
+    die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
+        unless exists $rconf->{$domain};
+
+    # Only now, with the domain known to be one we have a recipe for, do the
+    # things that cannot be taken back: an address out of the pool, and a prompt
+    # for the password to the secret store.
+    my $static_ip = $ip_conf->{$domain};
+    unless ($static_ip) {
+        $static_ip = Provisioner::IPPool::auto_assign($cfile, $domain, $pool_conf, $ip_conf);
+        $ip_conf->{$domain} = $static_ip;
+    }
 
     # Figure out what secrets need to be replaced by gathering the refs to their strings
     my %to_replace = gather_needed_secrets($rconf);
@@ -435,10 +446,6 @@ sub handle_domain {
     # Figure out if we need to make this recipe depend on another
     my $shared_hosts = delete $rconf->{_shared} // {};
 
-    die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
-        unless exists $rconf->{$domain};
-
-
     my ($dep_dom) = expand_dependent_domains($domain);
 
     my $depends_on;
@@ -457,7 +464,7 @@ sub handle_domain {
     # Required rather than used at the top: reaching a hypervisor over SSH is
     # not something a run about to fail on a typo should do, and Trog::HV
     # brings an SSH and a DNS stack with it.
-    $hv //= choose_hypervisor($domain, $global_config, $basedir);
+    $hv //= choose_hypervisor($domain, $global_config);
 
     # The hypervisor answers for itself now.  These used to come out of the
     # global section and out of this machine's own sshd_config, which was only
