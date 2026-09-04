@@ -244,6 +244,13 @@ exits 255 on none. `t/recipes.t` renders all of them, compiles each, and checks
 each asserts something -- run it after touching one, rather than finding out at
 the end of a provision.
 
+**A binary that is there is not a binary that runs.** `command -v node` answers
+with a path whether or not the thing at the end of it can start, and the node
+builds nvm downloads link against a library Ubuntu does not install -- so node
+was present, unrunnable, and passing every check in its own test. Run the thing:
+`--version` is enough, and it is the difference between checking a filename and
+checking a program.
+
 **Ask whether the test would notice.** Several here passed while the thing they
 named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
 before the config it checks was applied, and asking `systemctl is-active nginx`

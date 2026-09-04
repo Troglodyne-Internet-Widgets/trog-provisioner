@@ -13,7 +13,14 @@ ok(-d "$dir/.git", 'and is a git checkout');
 
 # What the queued postrun task runs to install the application's dependencies.
 # Missing, the task fails after the build has already said it succeeded.
-ok(-x '[% install_dir %]/[% domain %]/bin/cpanm', 'the cpanm the postrun task uses is there');
+my $cpanm = '[% install_dir %]/[% domain %]/bin/cpanm';
+ok(-x $cpanm, 'the cpanm the postrun task uses is there');
+
+# And it runs.  Being there is not the same thing: nvm's node was installed and
+# could not start for want of a shared library, and every check that asked where
+# it was rather than what it did passed regardless.
+my $cpanm_version = `$cpanm --version 2>&1`;
+like($cpanm_version, qr/cpanm|App::cpanminus/i, 'and it runs') or diag $cpanm_version;
 
 # git refuses to operate in a checkout owned by another account, and the service
 # user is not the admin.
