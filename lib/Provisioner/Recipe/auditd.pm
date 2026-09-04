@@ -42,6 +42,29 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            # The account this domain's watch rule is keyed on.  The template
+            # has always used it and nothing declared it, so the key rendered
+            # as "-watch" -- a leading dash, which is not a key auditctl will
+            # take.
+            user => { type => 'string' },
+        },
+    );
+}
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    # Nothing that pulls this recipe in supplies a user, and the admin owns
+    # everything else on the guest.  Same as perl, nvm and mariadb.
+    $opts{user} //= $opts{admin_user};
+
+    return %opts;
+}
+
 sub template_files {
     my ($self) = @_;
 

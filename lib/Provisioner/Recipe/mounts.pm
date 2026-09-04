@@ -55,6 +55,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             disks => {
                 type  => 'array',
                 items => {
@@ -85,6 +89,10 @@ sub args {
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    # Nothing that pulls this recipe in supplies a user, and the admin owns
+    # everything else on the guest.  Same as perl, nvm and mariadb.
+    $opts{user} //= $opts{admin_user};
 
     my $disks = $opts{disks};
     if ($disks) {

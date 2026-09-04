@@ -91,6 +91,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             vhosts     => {
                 type => 'object',
                 description => "vhost vars by port number",
@@ -130,6 +134,10 @@ sub args {
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    # Nothing that pulls this recipe in supplies a user, and the admin owns
+    # everything else on the guest.  Same as perl, nvm and mariadb.
+    $opts{user} //= $opts{admin_user};
 
     # The flat interface: proxy_uri and static_dir at the top level, which the
     # SYNOPSIS says generates 80 redirecting to HTTPS and 443 proxying.  Nothing

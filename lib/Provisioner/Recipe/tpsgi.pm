@@ -73,10 +73,25 @@ sub args {
         type       => 'object',
         required   => [qw{routers}],
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             basedir => { type => 'string' },
             routers => { type => 'array', items => { type => 'string' }, default => [] },
         },
     );
+}
+
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    # Nothing that pulls this recipe in supplies a user, and the admin owns
+    # everything else on the guest.  Same as perl, nvm and mariadb.
+    $opts{user} //= $opts{admin_user};
+
+    return %opts;
 }
 
 sub template_files {

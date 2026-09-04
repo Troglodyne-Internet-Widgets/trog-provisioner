@@ -156,6 +156,10 @@ sub args {
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             server_name               => { type => 'string' },
             # Listed on the guest's index page.  The template used it before
             # anything declared it, and its loop said chan while its body said
@@ -179,6 +183,17 @@ sub args {
 
 sub _seekrit {
     return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 32;
+}
+
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    # Nothing that pulls this recipe in supplies a user, and the admin owns
+    # everything else on the guest.  Same as perl, nvm and mariadb.
+    $opts{user} //= $opts{admin_user};
+
+    return %opts;
 }
 
 sub template_files {
