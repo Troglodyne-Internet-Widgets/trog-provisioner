@@ -1,3 +1,14 @@
-rm [% install_dir %]/[% domain %]/[% key_file %]
+[%# The private half of the backup key does not belong on the guest: the data
+    target syncs the whole domain directory across, so it arrives here and is
+    removed once the public half has been authorised.  -f because a target that
+    dies on an already-absent file makes re-provisioning fail on a guest that
+    is in exactly the state this wanted. -%]
+rm -f [% install_dir %]/[% domain %]/[% key_file %]
 mv rsyncd.conf /root/rsyncd.[% domain %].conf
-echo "command=\"rsync --daemon --server --config=/root/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
+[%# Appended only if it is not already there.  This ran unconditionally, so every
+    re-provision added the same forced-command line to the root
+    authorized_keys file again -- the access does not change, the file just grows a copy each time. -%]
+mkdir -p /root/.ssh; chmod 0700 /root/.ssh
+touch /root/.ssh/authorized_keys; chmod 0600 /root/.ssh/authorized_keys
+grep -qF '[% pubkey %]' /root/.ssh/authorized_keys \
+    || echo "command=\"rsync --daemon --server --config=/root/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
