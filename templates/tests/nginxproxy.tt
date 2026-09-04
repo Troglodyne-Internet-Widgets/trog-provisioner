@@ -6,6 +6,36 @@ use Test::More;
 my $status = `systemctl is-active nginx 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'nginx is running');
-ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginx domain config exists');
+
+my $conf = '/etc/nginx/sites-enabled/[% domain %].conf';
+ok(-f $conf, 'nginx domain config exists');
+
+# `is-active` says nothing about the config on disk: nginx keeps running on the
+# last one it accepted.  This vhost rendered `listen 443 ssl backlog=;` for a
+# while, which nginx refuses outright, and the only sign was a restart failing
+# three targets later.
+my $check = `nginx -t 2>&1`;
+like($check, qr/syntax is ok/, 'nginx accepts the configuration') or diag $check;
+like($check, qr/test is successful/, 'and the whole of it, not just this file');
+
+my $vhost = do { local (@ARGV, $/) = $conf; <> } // '';
+
+# Every directive that takes a value has to have one.  An empty backlog= is
+# what happens when a variable the template uses is not one the recipe declares.
+unlike($vhost, qr/^\s*\S+=\s*;/m, 'no directive was left with an empty value')
+    or diag $vhost;
+
+# A root that does not exist serves 404s and says nothing about it.  This was
+# rendering install_dir/domain twice, one inside the other.
+foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
+    ok(-d $root, "root $root is a directory that exists");
+}
+
+# A redirect vhost redirects; it does not also terminate TLS and proxy.
+foreach my $block (split m/^server \{/m, $vhost) {
+    next unless $block =~ m/return 301/;
+    unlike($block, qr/^\s*listen[^;]*\bssl\b/m, 'the redirect vhost does not claim ssl');
+    unlike($block, qr/proxy_pass/,              'and does not proxy');
+}
 
 done_testing();

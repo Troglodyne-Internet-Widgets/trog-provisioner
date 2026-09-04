@@ -1,10 +1,13 @@
 [% FOR vhost in vhosts.keys() %]
 [% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
-[% IF !ssl && ssl_redirect %]
+[%# Per vhost, and ahead of ssl: a redirect vhost is a redirect vhost whatever
+    else it says.  This read ssl_redirect from the top level, where callers do
+    not put it -- they set it on the vhost, as deluged does for port 80. -%]
+[% IF vhosts.$vhost.ssl_redirect %]
 server {
-    listen [% vhost %];
+    listen [% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
     [% IF ipv6 %]
-    listen [::]:[% vhost %] backlog=[% backlog %];
+    listen [::]:[% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
     server_tokens off;
 
@@ -15,13 +18,14 @@ server {
 [% auth_statics = vhosts.$vhost.auth_statics -%]
 [% auth_uri     = vhosts.$vhost.auth_uri -%]
 [% proxy_uri    = vhosts.$vhost.proxy_uri -%]
-[% static_dir   = vhosts.$vhost.static_dir || install_dir _ '/' _ domain _ '/www' -%]
+[%# Relative: every use below is under install_dir/domain already. -%]
+[% static_dir   = vhosts.$vhost.static_dir || 'www' -%]
 [% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
-    listen [% $vhost %] [% ssl %] backlog=[% backlog %];
+    listen [% $vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% IF ipv6 %]
-    listen [::]:[% vhost %] [% ssl %] backlog=[% backlog %];
+    listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
     server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];

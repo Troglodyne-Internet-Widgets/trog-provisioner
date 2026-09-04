@@ -103,18 +103,46 @@ sub args {
                         auth_uri       => { type => 'string' },
                         public_dir     => { type => 'string' },
                         nocache_prefix => { type => 'string' },
-                        ssl_redirect   => { type => 'boolean', default => 1 },
+                        # No default: a vhost is either the redirect or the
+                        # thing redirected to, and defaulting both this and ssl
+                        # to true made every vhost claim to be both.
+                        ssl_redirect   => { type => 'boolean' },
                         ssl            => { type => 'boolean', default => 1 },
                     },
                 },
             },
             ipv6       => { type => 'boolean', default => 1 },
+            # Declared here as well as in the nginx recipe, because each recipe
+            # renders with its own configuration and nothing else: the split in
+            # 5756b44 moved this to nginx and left the templates here using it,
+            # so it has rendered as `backlog=` -- which nginx refuses -- ever
+            # since.  It has to match nginx's, since somaxconn is set from that
+            # and must be at least this.
+            backlog    => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
 }
 
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    # The flat interface: proxy_uri and static_dir at the top level, which the
+    # SYNOPSIS says generates 80 redirecting to HTTPS and 443 proxying.  Nothing
+    # was generating them, and the whole template is a loop over vhosts -- so a
+    # domain configured this way rendered an empty vhost file and served
+    # nothing.  Both domains using it in production are configured this way.
+    if ( !$opts{vhosts} && ( $opts{proxy_uri} || $opts{static_dir} ) ) {
+        my $ipv6 = $opts{ipv6} // 1;
+        $opts{vhosts} = {
+            80  => { ssl_redirect => 1, ipv6 => $ipv6 },
+            443 => {
+                ssl  => 1,
+                ipv6 => $ipv6,
+                ( $opts{proxy_uri}  ? ( proxy_uri  => $opts{proxy_uri} )  : () ),
+                ( $opts{static_dir} ? ( static_dir => $opts{static_dir} ) : () ),
+            },
+        };
+    }
 
     if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
         # Nested vhosts interface: transform proxy_uri paths where needed.
