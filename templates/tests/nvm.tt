@@ -14,16 +14,18 @@ ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
-# We are running as root, so we will use system node here (if it exists)
-my $system_node = qx{which node};
-my $user_node = qx{sudo -u $user /bin/bash -c which node};
-
-isnt($user_node, $system_node, "User not configured to use system node, but nvm node");
-
 # .bashrc bails early when non-interactive, so -i is needed to get the nvm bits.
-my $node_path = qx{sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null};
-my $npm_root  = qx{sudo -u $user /bin/bash -ic 'npm root -g' 2>/dev/null};
-chomp( $node_path, $npm_root );
+# It is needed for every one of these, not just some: `bash -c which node`
+# passes `which` as the script and `node` as its $0, so that ran which with no
+# arguments and compared two empty strings to each other.
+chomp( my $system_node = `command -v node 2>/dev/null` );
+chomp( my $user_node   = `sudo -u $user /bin/bash -ic 'command -v node' 2>/dev/null` );
+
+ok( $user_node, "$user has a node on PATH" ) or diag 'nvm did not reach the login shell';
+isnt( $user_node, $system_node, 'and it is nvm\'s rather than the system one' );
+
+chomp( my $node_path = `sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null` );
+chomp( my $npm_root  = `sudo -u $user /bin/bash -ic 'npm root -g' 2>/dev/null` );
 
 like( $node_path, qr{/lib/node_modules$}, 'NODE_PATH set to a global node_modules dir' );
 ok( -d $node_path, "NODE_PATH ($node_path) exists" );
