@@ -11,7 +11,7 @@ cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /home/[% admin_user %]/bin/repos_for [% repo.api_url %] '[% repo.token %]' [% entity %]
 [% END -%]
 [% END -%]
-[% packager_invocation %] [% FOR pkg IN extra_pkgs %] [% pkg %][% END %]
+[% packager_invocation | mark_raw %] [% FOR pkg IN extra_pkgs %] [% pkg %][% END %]
 [% IF modules.grep('perl').size() %]
 [% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl [% install_dir %]/[% domain %]/[% basedir %] /root/bin/cpanm"
 [% END -%]

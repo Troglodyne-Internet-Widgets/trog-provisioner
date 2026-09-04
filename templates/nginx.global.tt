@@ -9,4 +9,4 @@ sed -i -E 's/worker_connections\s+[0-9]+/worker_connections [% backlog %]/' /etc
 mv nginx.global.conf /etc/nginx/conf.d/global.conf
 systemctl restart nginx
 # Deal with other demented deps that want apache2
-[% packager_remove_invocation %] apache2
+[% packager_remove_invocation | mark_raw %] apache2

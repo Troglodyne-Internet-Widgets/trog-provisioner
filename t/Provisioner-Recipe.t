@@ -88,4 +88,43 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     like( $domain_out, qr/domain=example\.com/, 'render still renders per-domain template' );
 };
 
+subtest 'schema defaults are filled in, because nothing else fills them' => sub {
+    # JSON::Validator checks data against a schema and fills nothing in, so a
+    # default in args() documented an intention nobody carried out.  chrony
+    # refused to start over a makestep with no arguments after it.
+    my %schema = (
+        type       => 'object',
+        properties => {
+            plain    => { type => 'string',  default => 'a default' },
+            given    => { type => 'string',  default => 'a default' },
+            emptied  => { type => 'string',  default => 'a default' },
+            listed   => { type => 'array',   default => [qw{one two}] },
+            nodefault=> { type => 'string' },
+            nested   => {
+                type       => 'object',
+                properties => { inner => { type => 'string', default => 'inner default' } },
+            },
+        },
+    );
+
+    my %opts = (given => 'mine', emptied => undef, nested => { });
+    Provisioner::Recipe::apply_defaults(\%opts, \%schema);
+
+    is($opts{plain}, 'a default', 'an absent field gets its default');
+    is($opts{given}, 'mine',      'one that was given does not');
+
+    # `makestep:` with nothing after it in YAML is how somebody says "whatever
+    # you think", not "empty".
+    is($opts{emptied}, 'a default', 'and an explicit undef is treated as absent');
+
+    ok(!exists $opts{nodefault}, 'a field with no default is not invented');
+    is_deeply($opts{listed}, [qw{one two}], 'lists come through');
+    is($opts{nested}{inner}, 'inner default', 'and nested objects are filled too');
+
+    my %other;
+    Provisioner::Recipe::apply_defaults(\%other, \%schema);
+    push @{ $opts{listed} }, 'mutated';
+    is_deeply($other{listed}, [qw{one two}], 'a default is copied, not shared between recipes');
+};
+
 done_testing();

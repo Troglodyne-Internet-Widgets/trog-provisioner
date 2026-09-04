@@ -1,5 +1,5 @@
 # Remove competing NTP daemons before installing chrony
-[% packager_remove_invocation %] ntp ntpdate; /bin/true
+[% packager_remove_invocation | mark_raw %] ntp ntpdate; /bin/true
 # Disable systemd-timesyncd if present - chrony replaces it
 systemctl stop systemd-timesyncd; /bin/true
 systemctl disable systemd-timesyncd; /bin/true

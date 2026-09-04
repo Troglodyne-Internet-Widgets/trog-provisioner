@@ -5,7 +5,7 @@ PG_VERSION=[% version %]
 [% ELSE -%]
 PG_VERSION=$(apt-cache search '^postgresql-[0-9]' | awk '{print $1}' | grep -oP '[0-9]+$' | sort -rn | head -1)
 [% END -%]
-[% packager_invocation %] postgresql-client-${PG_VERSION} postgresql-${PG_VERSION} postgresql-server-dev-18 postgresql-plperl-${PG_VERSION}
+[% packager_invocation | mark_raw %] postgresql-client-${PG_VERSION} postgresql-${PG_VERSION} postgresql-server-dev-18 postgresql-plperl-${PG_VERSION}
 systemctl enable postgresql
 [% script_dir %]/queue_postrun_task systemctl restart postgresql
 # Allow local TCP connections with md5 auth

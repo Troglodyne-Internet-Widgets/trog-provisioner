@@ -11,6 +11,7 @@ use re '/aa';
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
+use Clone();
 use Scalar::Util();
 
 use JSON::Validator::Schema::Troglodyne;
@@ -151,12 +152,55 @@ sub validate {
     my ($self, %opts) = @_;
     my %args = $self->args();
 
+    apply_defaults(\%opts, \%args);
+
     my $classname = Scalar::Util::blessed($self);
     my $validator = JSON::Validator::Schema::Troglodyne->new();
     my @errors = $validator->validate(\%opts, \%args);
     die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
 
     return $self->enrich(%opts);
+}
+
+=head3 apply_defaults($opts, $schema)
+
+Fill in whatever the schema says a field defaults to and the configuration did
+not say otherwise about.
+
+JSON::Validator checks data against a schema; it does not fill anything in.  So
+a C<default> in C<args()> documented an intention that nothing carried out, and
+a recipe that declared one got undef instead -- which reaches the template,
+renders as nothing, and produces a configuration file with a directive and no
+argument after it.  That is how chrony ended up refusing to start over a
+C<makestep> with no arguments.
+
+Absent and explicitly undef are treated alike: C<makestep:> with nothing after
+it in YAML is how somebody says "whatever you think", not "empty".
+
+Nested objects are filled in too, where the configuration has the object at all.
+Array items are not: what a default means for the third element of a list nobody
+supplied is not a question with an obvious answer.
+
+=cut
+
+sub apply_defaults {
+    my ($opts, $schema) = @_;
+    return $opts unless ref $opts eq 'HASH' && ref $schema eq 'HASH';
+
+    my $props = $schema->{properties};
+    return $opts unless ref $props eq 'HASH';
+
+    foreach my $key (keys %$props) {
+        my $prop = $props->{$key};
+        next unless ref $prop eq 'HASH';
+
+        $opts->{$key} = Clone::clone($prop->{default})
+          if !defined $opts->{$key} && exists $prop->{default};
+
+        apply_defaults($opts->{$key}, $prop) if ref $opts->{$key} eq 'HASH';
+    }
+
+    return $opts;
 }
 
 =head3 %opts = $recipe->enrich(%opts)
