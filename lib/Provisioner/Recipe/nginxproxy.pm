@@ -111,6 +111,10 @@ sub args {
                         # thing redirected to, and defaulting both this and ssl
                         # to true made every vhost claim to be both.
                         ssl_redirect   => { type => 'boolean' },
+                        # Set by enrich, not by a caller: the socket a
+                        # proxy_uri named, kept so that running enrich again
+                        # over the same hash reaches the same answer.
+                        proxy_socket   => { type => 'string' },
                         # No default here either, for the same reason: this one
                         # was left defaulting to true, so a port 80 vhost that
                         # asked for neither -- tcms and tpsgi both do -- came
@@ -158,24 +162,51 @@ sub enrich {
     }
 
     if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
-        # Nested vhosts interface: transform proxy_uri paths where needed.
+        # A proxy_uri that is not a URL is a unix socket, and those go through
+        # an upstream block rather than into proxy_pass directly.
+        #
+        # There is no spelling of a socket that works inline here.  nginx wants
+        # http://unix:<path>:<uri>, the socket path terminated by a colon with
+        # the URI after it -- and it refuses a proxy_pass carrying a URI part
+        # inside a named location, which is exactly where this is used:
+        #
+        #   "proxy_pass" cannot have URI part in location given by regular
+        #   expression, or inside named location, or inside "if" statement
+        #
+        # Leaving the colon off instead gets "no closing ":" in unix domain
+        # socket".  An upstream has no URI part at all, so neither applies.
+        my %upstreams;
         foreach my $key ( keys %{ $opts{vhosts} } ) {
             next unless $key =~ m/\d+/;
             my $vopts = $opts{vhosts}{$key};
             next if $vopts->{ssl_redirect};
-            my $uri = $vopts->{proxy_uri};
-            die "Must set proxy_uri in [nginxproxy] section" if !$uri;
-            # let's make sure the proxy_uri accepts either a file or an actual uri
-            # nginx wants http://unix:<path>:<uri> -- the socket path is
-            # terminated by a colon and what follows it is the URI.  This built
-            # `http://unix://opt/domains/<dom>/run/app.sock`: install_dir already
-            # begins with a slash, so the path came out doubled, and with no
-            # closing colon nginx refuses the whole file with "no closing \":\"
-            # in unix domain socket".  Every guest proxying to a socket failed
-            # to start nginx.
-            $vopts->{proxy_uri} = "http://unix:$opts{install_dir}/$opts{domain}/$uri:/"
-                if $uri && $uri !~ m/^http/;
+
+            # enrich runs more than once -- once for the recipe's fragment and
+            # again for every template file it renders -- and %opts carries the
+            # same nested vhosts hash each time, so rewriting proxy_uri here is
+            # something the next pass sees.  Remembering the socket is what
+            # makes running twice reach the same answer: without it the second
+            # pass found a proxy_uri already starting with http, skipped it, and
+            # rendered the vhost with no upstream block for it to name.
+            my $socket = $vopts->{proxy_socket};
+            if ( !$socket ) {
+                my $uri = $vopts->{proxy_uri};
+                die "Must set proxy_uri in [nginxproxy] section" if !$uri;
+                next if $uri =~ m/^http/;
+
+                $socket = "$opts{install_dir}/$opts{domain}/$uri";
+                $vopts->{proxy_socket} = $socket;
+            }
+
+            # Named for the socket, so that two vhosts sharing one -- 80 and 443
+            # both proxying to the same app, which is the usual arrangement --
+            # declare one upstream between them rather than two of the same.
+            ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
+
+            $upstreams{$name}   = $socket;
+            $vopts->{proxy_uri} = "http://$name";
         }
+        $opts{upstreams} = \%upstreams;
     }
 
     return %opts;

@@ -1,3 +1,12 @@
+[%# A unix socket reaches nginx through an upstream, never through proxy_pass
+    directly: nginx refuses a proxy_pass with a URI part inside a named
+    location, and the socket form requires one.  One block per socket, at http
+    level, before any server block that names it. -%]
+[% FOR upstream IN upstreams.keys().sort() %]
+upstream [% upstream %] {
+    server unix:[% upstreams.$upstream %];
+}
+[% END -%]
 [% FOR vhost in vhosts.keys() %]
 [% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
 [%# Per vhost, and ahead of ssl: a redirect vhost is a redirect vhost whatever

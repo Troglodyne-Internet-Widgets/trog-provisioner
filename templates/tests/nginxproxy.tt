@@ -46,13 +46,21 @@ foreach my $block (split m/^server \{/m, $vhost) {
 ok(length($vhost) > 0, 'the vhost is not empty');
 like($vhost, qr/^server \{/m, 'and has at least one server block in it');
 
-# nginx wants http://unix:<path>:<uri>.  install_dir already starts with a
-# slash, so this built unix://opt/... with the path doubled and no closing
-# colon, and nginx refused the entire configuration with "no closing \":\" in
-# unix domain socket".
-unlike($vhost, qr{unix://}, 'no doubled slash after unix:');
-foreach my $pass ($vhost =~ m{^\s*proxy_pass\s+(http://unix:\S+);}gm) {
-    like($pass, qr{^http://unix:/[^:]+:\S*$}, "$pass terminates the socket path with a colon");
+# A unix socket reaches nginx through an upstream, never through proxy_pass
+# directly.  nginx wants http://unix:<path>:<uri> and refuses a proxy_pass
+# carrying a URI part inside a named location -- which is where this is used:
+#   "proxy_pass" cannot have URI part in location given by regular expression,
+#   or inside named location, or inside "if" statement
+# and leaving the colon off instead gets "no closing ":" in unix domain socket".
+# There is no inline spelling that works, so there should be no inline socket.
+unlike($vhost, qr{proxy_pass\s+http://unix:}, 'no socket passed to proxy_pass directly');
+unlike($vhost, qr{unix://}, 'and no doubled slash after unix:');
+
+# Every upstream a proxy_pass names has to be declared, or nginx refuses the
+# file with "host not found in upstream".
+my %declared = map { $_ => 1 } $vhost =~ m{^upstream\s+(\S+)\s*\{}gm;
+foreach my $used ($vhost =~ m{^\s*proxy_pass\s+http://([A-Za-z0-9_]+);}gm) {
+    ok($declared{$used}, "upstream $used is declared in this file") or diag $vhost;
 }
 
 # server_name is a space separated list.  Joining the aliases with a comma made
