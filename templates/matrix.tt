@@ -11,7 +11,11 @@ apt-get update
 # the server name, and a make recipe has no terminal to answer it from.
 echo "matrix-synapse-py3 matrix-synapse/server-name string matrix.[% domain %]" | debconf-set-selections
 echo "matrix-synapse-py3 matrix-synapse/report-stats boolean false" | debconf-set-selections
-DEBIAN_FRONTEND=noninteractive apt-get install -y matrix-synapse-py3 python3-txredisapi
+[%# matrix-synapse-py3 only.  The repository ships exactly that and its keyring,
+    and the package carries its own Python dependencies inside it -- its Depends
+    are system libraries and python3 itself -- so txredisapi, which synapse uses
+    for redis, is inside the package and not separately installable anywhere. -%]
+DEBIAN_FRONTEND=noninteractive apt-get install -y matrix-synapse-py3
 # Setup directories
 mkdir -p [% install_dir %]/matrix.[% domain %]
 mkdir -p [% install_dir %]/matrix.[% domain %]/media
