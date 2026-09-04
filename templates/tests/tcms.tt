@@ -3,6 +3,21 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-d '[% install_dir %]/[% domain %]/[% tcms_dir %]', 'tCMS directory exists');
+my $dir = '[% install_dir %]/[% domain %]/tCMS';
+
+# This used to name a tcms_dir that no recipe, module or template ever set, so
+# it rendered empty: the assertion became -d on the domain directory with a
+# trailing slash, and passed whether tCMS had been checked out or not.
+ok(-d $dir, 'the tCMS checkout is there');
+ok(-d "$dir/.git", 'and is a git checkout');
+
+# What the queued postrun task runs to install the application's dependencies.
+# Missing, the task fails after the build has already said it succeeded.
+ok(-x '[% install_dir %]/[% domain %]/bin/cpanm', 'the cpanm the postrun task uses is there');
+
+# git refuses to operate in a checkout owned by another account, and the service
+# user is not the admin.
+my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;
+like($safe, qr{\Q$dir\E}, 'the checkout is registered as a git safe.directory') or diag $safe;
 
 done_testing();
