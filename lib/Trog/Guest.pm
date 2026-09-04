@@ -57,7 +57,14 @@ is what to call this guest in messages.
 
 # How long to wait for things a guest does exactly once, on first boot.
 our $BOOT_TIMEOUT = 300;
-our $SETUP_TIMEOUT = '30m';
+
+# The whole Makefile runs inside this one, not just the waiting: the first wait
+# is on the at queue, and the job sits in that queue for as long as the build
+# takes.  Thirty minutes is less than a source perl build and the CPAN set that
+# follows it, so provisioning the perl recipe died at "Waiting up to 30m for ATD
+# queue to flush" with the setup log still growing and nothing actually wrong.
+# TROG_SETUP_TIMEOUT overrides it for a guest that needs longer still.
+our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
 sub new {
     my ($class, %opts) = @_;
