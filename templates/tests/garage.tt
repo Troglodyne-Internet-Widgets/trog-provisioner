@@ -23,4 +23,16 @@ my $node_id = `garage node id -q 2>/dev/null`;
 chomp $node_id;
 ok($node_id, 'garage node id is available');
 
+# The layout is what makes a garage node able to store anything.  garage_init.sh
+# fed `layout assign` the whole <id>@<host>:<port> that `node id -q` prints,
+# which garage answers with "0 nodes match", so the node came up healthy with no
+# layout and every bucket operation after it failed.
+my $layout = `garage layout show 2>&1`;
+like($layout, qr/\Q[% zone %]\E/, 'the node is assigned to zone [% zone %]') or diag $layout;
+
+foreach my $bucket (qw{[% buckets.join(' ') %]}) {
+    my $info = `garage bucket info '$bucket' 2>&1`;
+    like($info, qr/Bucket:/, "bucket $bucket exists") or diag $info;
+}
+
 done_testing();
