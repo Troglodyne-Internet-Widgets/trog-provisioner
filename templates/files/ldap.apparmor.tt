@@ -1,0 +1,21 @@
+# AppArmor overrides for slapd, included by /etc/apparmor.d/usr.sbin.slapd.
+#
+# slapd is pointed at /etc/ssl/certs/<domain>.pem and /etc/ssl/private/<domain>.pem,
+# which its profile already allows through abstractions/ssl_certs and ssl_keys.
+# Both are symlinks, and AppArmor resolves a symlink to the real path before
+# deciding -- so what it actually sees is a read of
+# /etc/letsencrypt/live/<domain>/privkey.pem, which no part of the profile
+# mentions.
+#
+# The denial is invisible from every direction that looks obvious.  slapd
+# answers the modify with "Other (e.g., implementation specific) error (80)"
+# and, at full debug, "err=80 matched=\"\" text=\"\"" -- no reason given.
+# Checking the file as the openldap user succeeds, because AppArmor confines the
+# slapd executable rather than anything running as that user.  The denial is
+# recorded in the audit log, which on these guests auditd owns, so it is not in
+# the journal either.
+/etc/letsencrypt/live/** r,
+/etc/letsencrypt/archive/** r,
+
+# Where the fetcher points those symlinks once dehydrated has a real certificate.
+/var/lib/dehydrated/certs/** r,

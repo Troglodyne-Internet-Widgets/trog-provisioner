@@ -49,6 +49,20 @@ ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
 my @stat = stat('/etc/ssl/private/[% domain %].pem');
 is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
 
+# AppArmor is what actually decides whether slapd may open the key.  It confines
+# the executable rather than the account, and resolves the symlink out of
+# /etc/ssl into /etc/letsencrypt before deciding -- so checking the file as the
+# openldap user says nothing about it.  Four correct permission fixes went in
+# ahead of this one and none of them was the reason.
+ok(-s '/etc/apparmor.d/local/usr.sbin.slapd', 'the AppArmor override for slapd is installed');
+my $aa = do { local (@ARGV, $/) = '/etc/apparmor.d/local/usr.sbin.slapd'; <> } // '';
+like($aa, qr{/etc/letsencrypt/live/\*\* r}, 'and lets slapd read the certificate directory');
+
+# Nothing denied since boot, which is the only place this failure is recorded.
+my $denials = `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -ac slapd`;
+chomp $denials;
+is($denials + 0, 0, 'and AppArmor has denied slapd nothing') or diag `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -a slapd | tail -3`;
+
 # Owning the file is not the same as reaching it: /etc/ssl/private is
 # 0710 root:ssl-cert, so openldap has to be in that group to traverse it.  When
 # it could not, the TLS modify failed with error 80 and said nothing about why.

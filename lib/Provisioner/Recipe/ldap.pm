@@ -97,6 +97,7 @@ sub deps {
 sub template_files {
     my ($self) = @_;
     return (
+        'ldap.apparmor.tt' => 'slapd.apparmor',
         'ldap.slapd.debconf.tt' => 'slapd.debconf',
         'ldap.seed.ldif.tt'     => 'seed.ldif',
         'ldap.tls.ldif.tt'      => 'tls.ldif',

@@ -15,6 +15,13 @@ systemctl restart slapd
 # is in the group, and what the modify below then reports is
 #   ldap_modify: Other (e.g., implementation specific) error (80)
 # with nothing said about permissions anywhere.
+[%# AppArmor first, because it is what actually decides.  slapd is confined, and
+    the certificate it is pointed at lives behind a symlink out of /etc/ssl into
+    /etc/letsencrypt -- which AppArmor resolves before deciding, and which no
+    part of the shipped profile mentions.  The refusal arrives as error 80 with
+    no text, and is recorded only in the audit log. -%]
+install -m 0644 -o root -g root slapd.apparmor /etc/apparmor.d/local/usr.sbin.slapd
+apparmor_parser -r /etc/apparmor.d/usr.sbin.slapd; /bin/true
 adduser openldap ssl-cert
 # And the key itself, through the symlink: chown and chmod follow it.
 chown root:openldap /etc/ssl/private/[% domain %].pem
