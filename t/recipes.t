@@ -516,5 +516,27 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
     }
 };
 
+# cron runs a job with /bin/sh, which is dash on Ubuntu, and dash reads &> as a
+# background & followed by a redirection.  A cron line written with it runs
+# detached, captures nothing, and reports success to cron the instant it starts
+# -- which is how the nightly apt upgrade and the nightly backup both came to
+# run unlogged and unwatched.
+subtest 'no cron template redirects with &>' => sub {
+    my @crons;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @crons, $File::Find::name if m/cron[^\/]*[.]tt\z/ } },
+        $template_dir,
+    );
+    ok(scalar @crons, 'there are cron templates to check');
+
+    foreach my $tt (sort @crons) {
+        ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
+        foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
+            next if $line =~ m/^\s*#/;      # the comment explaining this rule
+            unlike($line, qr/&>>?/, "$name: no &> in a cron line") or diag $line;
+        }
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
