@@ -3,7 +3,38 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-f '/etc/cron.d/[% domain %]-backups', 'backup destination cron exists');
-ok(-f '[% install_dir %]/[% domain %]/[% key_file %]', 'backup ssh key is in place');
+my $cron = '/etc/cron.d/[% domain %]-backups';
+ok(-f $cron, 'backup destination cron exists');
+
+# cron ignores a file in cron.d that is not root-owned or is group writable, and
+# does not say so.  A backup schedule that cron declines to read is the same as
+# no backup schedule, and looks identical from here.
+my @st = stat $cron;
+is(scalar getpwuid($st[4] // -1), 'root', 'and is owned by root');
+is($st[2] & 022, 0, 'and is not group or world writable');
+
+my $text = do { local (@ARGV, $/) = $cron; <> } // '';
+
+# The redirection has to be one /bin/sh understands.  Written with &>>, dash
+# reads a background & and a redirect: the backup ran detached, wrote nothing,
+# and told cron it had succeeded at the moment it started.
+unlike($text, qr/&>>?/, 'no &> redirection, which dash does not do') or diag $text;
+like($text, qr{>> ?/var/log/backups/\S+\.log 2>&1}, 'output and errors both go to the log');
+
+# Somewhere to write it.  With no directory the redirection fails and the job
+# never runs at all.
+ok(-d '/var/log/backups', 'the backup log directory exists');
+ok(-w '/var/log/backups', 'and is writable');
+
+# The scripts the jobs call, by absolute path in this crontab.
+foreach my $prog ($text =~ m{^\S+ \S+ \S+ \S+ \S+ \S+ (?:command )?(/\S+)}gm) {
+    ok(-x $prog, "$prog is there and executable");
+}
+
+# The key rsync authenticates with.  0600 or ssh refuses to use it.
+my $key = '[% install_dir %]/[% domain %]/[% key_file %]';
+ok(-f $key, 'backup ssh key is in place');
+my @kst = stat $key;
+is($kst[2] & 07777, 0600, 'and is mode 0600, which is what ssh insists on');
 
 done_testing();
