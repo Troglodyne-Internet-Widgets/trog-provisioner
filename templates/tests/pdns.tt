@@ -23,8 +23,14 @@ my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> }
 # One line per configured forward zone, however many times this has been
 # provisioned.  The line used to be appended unconditionally.
 my %seen;
-my @dupes = grep { $seen{$_}++ } ($recursor_conf =~ m/^(forward-zones=.*)$/gm);
+my @dupes = grep { $seen{$_}++ } ($recursor_conf =~ m/^(forward-zones\+?=.*)$/gm);
 is_deeply(\@dupes, [], 'no forward-zone line appears twice') or diag $recursor_conf;
+
+# Every domain appends its own forward zone with += from a file in recursor.d,
+# and the recursor refuses the whole file when there is no plain forward-zones
+# for it to append to -- "could not be parsed", said only to syslog.
+like($recursor_conf, qr/^forward-zones=/m, 'there is a base forward-zones setting to append to')
+    or diag $recursor_conf;
 
 # And nothing left over from somebody checking that recursion worked.
 unlike($recursor_conf, qr/^forward-zones=test\.test=/m,
