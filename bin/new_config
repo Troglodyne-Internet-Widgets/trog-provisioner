@@ -281,6 +281,29 @@ sub choose_hypervisor {
 }
 
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
+# Two recipes that listen on the same port each name a limit for it, and one of
+# them has to win.  The higher one does: a limit says where traffic to that port
+# stops being plausible, and the recipe expecting the most legitimate traffic is
+# the one that knows.  Taking the lower would let any recipe sharing a port
+# throttle another recipe's users, and adding a recipe would quietly break a
+# working one.
+#
+# Hash::Merge cannot do this itself -- it picks a side for a scalar collision --
+# so this runs over the result and puts the higher number back.
+sub merge_rate_limits {
+    my ($merged, $incoming) = @_;
+    return unless ref $merged eq 'HASH' && ref $incoming eq 'HASH';
+
+    my $want = $incoming->{rate_limits};
+    return unless ref $want eq 'HASH';
+
+    my $have = $merged->{rate_limits} //= {};
+    foreach my $port ( keys %$want ) {
+        $have->{$port} = $want->{$port} if ( $want->{$port} // 0 ) > ( $have->{$port} // 0 );
+    }
+    return $have;
+}
+
 sub handle_domain {
     my ($domain, $hv) = @_;
 
@@ -592,10 +615,18 @@ sub handle_domain {
             # As such we have to make sure they get rendered last, and progressively add to their data depth-first.
             push(@modules, $required) unless any {$required eq $_ };
             $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
+            merge_rate_limits( $depmod_conf->{$required}, $cur_args{$required} );
         }
 
         # Merge the configuration provided by all things depending on this.
-        $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $pconf ) if $depmod_conf->{$module};
+        if ( $depmod_conf->{$module} ) {
+            $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $pconf );
+
+            # Same rule on this side of it, so that what an operator writes in
+            # their own ufw block is held against what the recipes asked for and
+            # the higher of the two is what gets applied.
+            merge_rate_limits( $rconf->{$domain}{$module}, $_ ) for ( $depmod_conf->{$module}, $pconf );
+        }
     }
 
     # Deps should be processed after the last thing that dragged them in, and not before.

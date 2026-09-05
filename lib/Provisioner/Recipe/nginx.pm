@@ -37,6 +37,13 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub rate_limits {
+    # What a browser does to one origin on a single page load is dozens of
+    # connections, and a shared NAT multiplies that by everyone behind it.  A
+    # thousand a second from one address is not a visitor.
+    return ( 80 => 1024, 443 => 1024 );
+}
+
 sub args {
     return (
         properties => {

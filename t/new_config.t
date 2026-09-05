@@ -23,6 +23,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Test::More;
 use Test::MockModule qw{strict};
 use Test::Fatal qw{exception};
+use Hash::Merge();
 
 # Because Config::Simple is incompatible with Test::MockFile
 use File::Temp;
@@ -173,5 +174,59 @@ sub _slurp {
     close $fh;
     return $content;
 }
+
+subtest 'rate limits from two recipes sharing a port take the higher' => sub {
+    my $NC = 'Trog::Provisioner::Config::Generator';
+
+    # A limit says where traffic to a port stops being plausible.  Taking the
+    # lower would let a recipe that expects little traffic throttle the users of
+    # one that expects a lot -- so adding a recipe would break a working one.
+    my $merged = { rate_limits => { 443 => 500, 6379 => 512 } };
+    $NC->can('merge_rate_limits')->( $merged, { rate_limits => { 443 => 2000 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'the higher limit wins' );
+
+    $NC->can('merge_rate_limits')->( $merged, { rate_limits => { 443 => 100 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'and a lower one does not lower it' );
+
+    is( $merged->{rate_limits}{6379}, 512, 'a port only one recipe named is left alone' );
+
+    $NC->can('merge_rate_limits')->( $merged, { rate_limits => { 53 => 4096 } } );
+    is( $merged->{rate_limits}{53}, 4096, 'and a port nobody had yet is added' );
+
+    # Recipes that name no limits are most of them.
+    my $empty = {};
+    $NC->can('merge_rate_limits')->( $empty, {} );
+    is_deeply( $empty, {}, 'a recipe with no limits contributes nothing' );
+
+    # The same rule holds against what an operator wrote in their own ufw block,
+    # which is how a limit gets raised for a busier host than the recipe assumed.
+    my $operator = Hash::Merge::merge( { rate_limits => { 443 => 1024 } }, { rate_limits => { 443 => 8192 } } );
+    $NC->can('merge_rate_limits')->( $operator, $_ ) for ( { rate_limits => { 443 => 1024 } }, { rate_limits => { 443 => 8192 } } );
+    is( $operator->{rate_limits}{443}, 8192, 'an operator raising a limit is honoured' );
+};
+
+subtest 'a recipe that names rate limits depends on ufw for them' => sub {
+    require Provisioner::Recipe::redis;
+    require Provisioner::Recipe::ntp;
+    require Provisioner::Recipe::plexmediaserver;
+
+    my %prov = ( template_dirs => ['templates'], output_dir => '/tmp', target_packager => 'deb' );
+
+    my $redis = 'Provisioner::Recipe::redis'->new(%prov);
+    my %req   = $redis->required_recipes( domain => 'd.test' );
+    ok( $req{ufw}, 'redis requires ufw' );
+    is_deeply( { $req{ufw}->() }, { rate_limits => { 6379 => 512 } }, 'and hands it the port it listens on' );
+
+    # Most recipes listen on nothing, or reach the network through nginx.
+    my $ntp = 'Provisioner::Recipe::ntp'->new(%prov);
+    ok( !( $ntp->required_recipes( domain => 'd.test' ) )[0], 'a recipe with no limits requires nothing for them' );
+
+    # plexmediaserver overrides required_recipes, so it has to carry SUPER's
+    # wiring as well or its limits are silently dropped.
+    my $plex = 'Provisioner::Recipe::plexmediaserver'->new(%prov);
+    my %preq = $plex->required_recipes( domain => 'd.test' );
+    ok( $preq{letsencrypt}, 'plexmediaserver keeps the dependency it declared' );
+    ok( $preq{ufw},         'and gains the one its limits imply' );
+};
 
 done_testing();

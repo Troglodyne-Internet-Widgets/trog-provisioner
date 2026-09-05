@@ -140,6 +140,37 @@ This is configured by setting the sub value.
 sub required_recipes {
     my ($self, %opts) = @_;
 
+    my %limits = $self->rate_limits(%opts);
+    return () unless %limits;
+
+    # A recipe that names limits is a recipe that listens, and something has to
+    # apply them.  Saying so here is what makes the dependency explicit rather
+    # than ufw knowing the name of every recipe that might be installed.
+    return ( ufw => sub { return ( rate_limits => \%limits ) } );
+}
+
+=head3 %limits = $recipe->rate_limits(%opts)
+
+The ports this recipe listens on, and the new connections a second from a single
+source each should take before further ones are dropped.
+
+Empty by default: most recipes listen on nothing, or reach the network through
+something that does -- an application behind C<nginxproxy> is covered by
+C<nginx>, not by itself.  A recipe that overrides this gets C<ufw> added to its
+C<required_recipes> and its limits merged into that recipe's, which is where
+they are turned into firewall rules.
+
+The numbers are a threshold for abuse rather than a capacity plan: they want to
+sit well above what a busy legitimate source does, since anything below that
+throttles real users.  Note that this is called before validation, so read
+C<%opts> with the same defaults the schema declares.
+
+Where two recipes name a limit for the same port, the B<higher> is used -- see
+C<merge_rate_limits> in C<bin/new_config>.
+
+=cut
+
+sub rate_limits {
     return ();
 }
 

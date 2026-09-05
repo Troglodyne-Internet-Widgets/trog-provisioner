@@ -46,6 +46,13 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub rate_limits {
+    # A resolver asks over UDP and asks often; a recursor in front of this one
+    # asks on behalf of everybody behind it.  Set high enough that only a
+    # reflection flood reaches it.
+    return ( 53 => 4096 );
+}
+
 sub args {
     return (
         type       => 'object',

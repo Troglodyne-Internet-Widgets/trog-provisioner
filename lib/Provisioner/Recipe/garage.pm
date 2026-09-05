@@ -144,6 +144,12 @@ sub _rpc_secret {
     return $secret;
 }
 
+sub rate_limits {
+    # S3 and admin, RPC between nodes, and the web endpoint.  These are the
+    # ports templates/files/ufw.garage.tt opens.
+    return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
+}
+
 sub args {
     my $self = shift;
     return (

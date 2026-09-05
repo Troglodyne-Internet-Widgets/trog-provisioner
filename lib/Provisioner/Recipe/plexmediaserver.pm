@@ -57,7 +57,10 @@ Returns remote file mappings for backup/restore.
 =cut
 
 sub required_recipes {
-    return ( letsencrypt => sub { () } );
+    my ($self, %opts) = @_;
+    # SUPER carries the ufw dependency that rate_limits above asks for; without
+    # it this override would quietly drop the limits on 32400.
+    return ( letsencrypt => sub { () }, $self->SUPER::required_recipes(%opts) );
 }
 
 sub deps {
@@ -66,6 +69,11 @@ sub deps {
         return qw{curl gnupg};
     }
     die "Unsupported packager";
+}
+
+sub rate_limits {
+    # One client streaming opens a handful; a household opens a few handfuls.
+    return ( 32400 => 1024 );
 }
 
 sub args {
