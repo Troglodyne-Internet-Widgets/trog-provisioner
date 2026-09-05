@@ -8,4 +8,12 @@ chomp $status;
 is($status, 'active', 'openvpn client is running');
 ok(-f '/etc/openvpn/client/client.conf', 'openvpn client config exists');
 
+# The tunnel interface the recipe waits for.  That wait was passing the
+# interface name as a word after `bash -c`, which makes it the inner shell's $0
+# rather than a variable -- so it tested "" against "" and returned success in a
+# hundredth of a second for any interface, including ones that cannot exist.
+# Nothing had ever waited for this.
+my $link = `ip link show tun0 2>&1`;
+like($link, qr/tun0/, 'the tunnel interface exists') or diag $link;
+
 done_testing();
