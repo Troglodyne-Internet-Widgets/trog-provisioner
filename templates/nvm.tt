@@ -1,3 +1,15 @@
+# A shell profile for nvm to install itself into.
+#
+# The installer appends its loader to one of ~/.bashrc, ~/.bash_profile,
+# ~/.zprofile, ~/.zshrc or ~/.profile, and when it finds none it says
+#   Profile not found. Tried ~/.bashrc ...
+# and carries on without wiring anything up.  A service user's home is made by
+# useradd with no skeleton in it, so there is no .bashrc there -- nvm installed
+# fine, node installed fine, and no shell ever loaded either.
+NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
+test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
+test -f "$$NVM_HOME/.bashrc" || { touch "$$NVM_HOME/.bashrc"; chown '[% user %]' "$$NVM_HOME/.bashrc"; }
+
 # Install nvm for [% user %] via the official install script (idempotent)
 su - [% user %] -s /bin/bash -c \
     "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | bash"
@@ -15,8 +27,14 @@ su - [% user %] -s /bin/bash -c \
 # and user defaults to admin_user.  So nvm went into ~/.nvm, courtesy of the
 # `su -` above, and the lines that make it usable went somewhere that shell
 # never looks.
+#
+# The loader is written here too rather than left to the installer: it only
+# appends when it found a profile of its own accord, and a profile this target
+# created a moment ago is not one it will add to twice.
 NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
 test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
+grep -qF 'NVM_DIR' "$$NVM_HOME/.bashrc" 2>/dev/null \
+    || printf '%s\n' 'export NVM_DIR="$$HOME/.nvm"' '[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"' >> "$$NVM_HOME/.bashrc"; \
 grep -qF 'nvm use node &>/dev/null' "$$NVM_HOME/.bashrc" 2>/dev/null \
     || echo 'nvm use node &>/dev/null' >> "$$NVM_HOME/.bashrc"; \
 grep -qF 'export NODE_PATH=' "$$NVM_HOME/.bashrc" 2>/dev/null \

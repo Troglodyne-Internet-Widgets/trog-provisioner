@@ -14,6 +14,14 @@ ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
+# And a profile that loads it.  nvm's installer appends its loader to a shell
+# profile and refuses when it finds none -- "Profile not found. Tried ~/.bashrc
+# ..." -- which is the case for a service user, whose home useradd makes with no
+# skeleton in it.  nvm and node both installed; no shell ever loaded either.
+my $bashrc = do { local (@ARGV, $/) = "$home/.bashrc"; <> } // '';
+like($bashrc, qr/NVM_DIR/, "$home/.bashrc loads nvm") or diag $bashrc;
+like($bashrc, qr{nvm\.sh}, 'by sourcing nvm.sh');
+
 # .bashrc bails early when non-interactive, so -i is needed to get the nvm bits.
 # It is needed for every one of these, not just some: `bash -c which node`
 # passes `which` as the script and `node` as its $0, so that ran which with no
