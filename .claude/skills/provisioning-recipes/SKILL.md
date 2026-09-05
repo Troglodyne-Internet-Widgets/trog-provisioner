@@ -248,6 +248,23 @@ skipped it, and rendered a vhost naming an upstream it no longer declared.
 Write enrich so running it twice reaches the same answer, keeping what it needs
 to do that.
 
+**Find out where the service logs before guessing at it.** Three services here
+send their reasons somewhere systemd never sees, so `systemctl` reports
+`status=1/FAILURE` and the journal has nothing at any level: `gogs` with
+`[log] MODE = file`, `pdns` through syslog into `/var/log/pdns.log`, and
+`fail2ban` into its own log. The collector fetches those two files and reads the
+journal at warning level; when a service still says nothing, change it to log to
+the console rather than keep guessing -- setting gogs to `console, file` turned a
+week of theories into one line naming the wrong config key.
+
+**An assertion that cannot fail is a bug, and so is one that cannot pass.** Both
+happened here in a day. `nvm` compared two empty strings; the perl test compared
+a value with itself, because `$^V` inside backticks is interpolated by the perl
+running the test rather than the one being asked. And `postfix check` warns on a
+perfectly healthy system, so demanding empty output would have failed every
+guest. Write the assertion, then ask what would make it fail, and what would
+make it pass.
+
 **Ask nginx, do not reason about nginx.** `systemctl restart nginx` failing tells
 you nothing; the guest's `nginx -t` tells you exactly what is wrong. Three
 recipes were blocked on one line — a socket in a `proxy_pass` inside
