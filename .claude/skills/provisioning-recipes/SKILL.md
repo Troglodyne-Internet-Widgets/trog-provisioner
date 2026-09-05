@@ -250,24 +250,37 @@ there when listing is denied. Ask for a path you know is missing on the same
 host before concluding anything: `plex-keys/definitely-not-there` also 403'd,
 while the real key returned 200.
 
-**A file `template_files` generates that nothing installs** is dead. `ufw`
-generates the rate limits it means to apply and has never installed them.
+**A file `template_files` generates that nothing installs** is dead, and it is
+one of two things: something that should be installed and is not, or a limb to
+prune. Decide which; do not leave it rendering. `ufw` rendered its real rate
+limits into a `ufw.user.rules` nothing installed -- and nothing could, because
+ufw owns that file and rewrites it whenever a rule changes. They belong in
+`before.rules`, which is where they are now.
 
 **A package name that is not in the archive is never installed and never
 complained about.** Three were wrong here. Ask the archive, do not assume.
 
-**A field cannot be both `required` and filled in by `enrich`** — enrich runs
-after validation. `perl` required a user that only enrich could supply, so
-anything depending on it could not build.
+**A `required` field that nothing fills in is the operator's to supply.**
+enrich runs after validation, so it cannot satisfy one -- but that is the
+mechanism, not the lesson. A field marked required with nothing downstream
+filling it in is saying that the person configuring the domain is meant to
+provide it. Do not quietly default it in `enrich` to make a recipe build;
+**ask**. `perl` required a user, and the answer there happened to be the admin
+user, but that was a decision to put to somebody rather than one to infer.
 
-**`enrich` runs more than once, over the same nested hash.** Once for the
-recipe's fragment and again for every template file it renders, and `%opts`
-carries the same nested references each time — so anything it rewrites in place,
-the next pass sees. `nginxproxy` rewrote a vhost's `proxy_uri` from a socket path
-to an upstream name; the second pass saw something already starting with `http`,
-skipped it, and rendered a vhost naming an upstream it no longer declared.
-Write enrich so running it twice reaches the same answer, keeping what it needs
-to do that.
+(`user` itself now defaults to `admin_user` in `Provisioner::Recipe::validate`,
+so no recipe needs an `enrich` for it. A production host generally names a
+service user; leaving it unset gives you the admin, which is what you want
+while developing and testing.)
+
+**`enrich` must not write into what it was handed.** `validate` deep-copies its
+options first, so enrich may rewrite freely -- but only because of that copy.
+`%opts` is otherwise a shallow copy and everything nested in it belongs to the
+caller: `nginxproxy` rewriting a vhost's `proxy_uri` in place was visible to
+every later render, and the validator coercing `ssl => 1` into a
+`JSON::PP::Boolean` was enough to make the same configuration look like a
+different one. `render_file` goes through the memoized `validated`, so enrich
+runs once per recipe rather than once per template file.
 
 **Find out where the service logs before guessing at it.** Three services here
 send their reasons somewhere systemd never sees, so `systemctl` reports
