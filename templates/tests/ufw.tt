@@ -37,7 +37,7 @@ foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/nul
 my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
 
 [% FOR port IN rate_limits.keys().sort() %]
-like($before, qr/--dport [% port %] .*--hitcount [% rate_limits.$port %]\b/,
+like($before, qr/--dport [% port %] .*--hashlimit-above [% rate_limits.$port %]\/sec/,
     'port [% port %] is rate limited at [% rate_limits.$port %] a second') or diag $before;
 [% END -%]
 
@@ -54,5 +54,23 @@ unlike($lo // '', qr/BEGIN trog-provisioner rate limits/,
 # iptables has to accept the file, which is the question ufw restarting answers.
 my $active = `ufw status 2>/dev/null`;
 like($active, qr/Status:\s*active/, 'ufw is still active after the edit') or diag $active;
+
+# And "active" is not "loaded".  A before.rules that iptables-restore rejects
+# aborts the whole file -- every rule in it, including the loopback and
+# ESTABLISHED accepts -- and ufw goes on reporting itself active with a chain
+# that has one rule in it.  That is what `-m recent --hitcount` above 20 did
+# here, silently, for every guest built with it.
+my $reload = `ufw reload 2>&1`;
+unlike($reload, qr/Problem running|RULE_APPEND failed|iptables-restore/i,
+    'before.rules is actually accepted by iptables, not merely present') or diag $reload;
+
+my $chain = `iptables -L ufw-before-input -n 2>/dev/null`;
+like($chain, qr/^ACCEPT\s+\S+\s+--\s+0\.0\.0\.0\/0\s+0\.0\.0\.0\/0\s*$/m,
+    'the loopback accept survived, so the chain really did load') or diag $chain;
+
+# The thing the above is really protecting: anything talking to a service on
+# this host over loopback.
+my $loopback = system('timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/22" 2>/dev/null');
+is($loopback, 0, 'a loopback connection to an open port is not dropped');
 
 done_testing();
