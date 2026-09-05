@@ -52,6 +52,20 @@ is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
 my $groups = `id -nG openldap 2>/dev/null`;
 like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $groups;
 
+# And the running slapd is in it too.  Group membership applies to a process
+# started after the change, so a slapd restarted before joining the group is one
+# that still cannot read the key -- the same error 80, from a process whose
+# account has the right group and whose process does not.
+my ($pid) = `systemctl show -p MainPID --value slapd 2>/dev/null` =~ m/(\d+)/;
+SKIP: {
+    skip 'slapd is not running', 1 unless $pid;
+    my $procgroups = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
+    my ($gids) = $procgroups =~ m/^Groups:\s*(.*)$/m;
+    my $sslcert = getgrnam('ssl-cert');
+    ok(defined $sslcert && defined $gids && grep({ $_ == $sslcert } split ' ', $gids),
+        'and so is the running slapd process') or diag "slapd groups: $gids";
+}
+
 foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
     my $rc = system("sudo -u openldap test -r '$f'");
     is($rc, 0, "openldap can read $f");

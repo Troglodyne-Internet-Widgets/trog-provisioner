@@ -19,6 +19,13 @@ adduser openldap ssl-cert
 # And the key itself, through the symlink: chown and chmod follow it.
 chown root:openldap /etc/ssl/private/[% domain %].pem
 chmod 0640 /etc/ssl/private/[% domain %].pem
+[%# Restarted after joining the group, and before the modify.  Group membership
+    only applies to a process started afterwards, and slapd was restarted above
+    -- while SLAPD_SERVICES was being set -- so the one being asked to load the
+    key here was still the process that had no business reading it.  That is
+    error 80 again, from a slapd that has the right group name in /etc/group and
+    is not in it. -%]
+systemctl restart slapd
 ldapmodify -Y EXTERNAL -H ldapi:/// -f tls.ldif
 rm -f tls.ldif
 systemctl restart slapd
