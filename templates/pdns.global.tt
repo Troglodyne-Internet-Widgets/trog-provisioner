@@ -12,25 +12,16 @@ cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-pdns-af-unix.patch; /bin
 cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-arbitrary-record-types.patch; /bin/true
 # Run on port 2500 so the recursor can run
 mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
-[%# A base forward-zones setting, which has to exist before anything can append
-    to it: each domain drops a forward-zones+= line into recursor.d, and the
-    recursor refuses the whole file -- "could not be parsed" -- when there is no
-    non-incremental setting for it to add to.
-    That base used to be provided by accident, by a hardcoded
-    forward-zones=test.test=192.168.1.1 that was somebody checking recursion
-    worked, left behind and appended again on every provision.  Removing it took
-    the base with it, so this writes an empty one instead. -%]
-[%# Before include-dir, not merely present.  The recursor reads that directory
-    at the point the include-dir line appears, so a base defined after it is
-    defined too late for the files it just pulled in -- appending to the end of
-    the file left the setting sitting there in plain sight while the recursor
-    went on refusing the per-domain file. -%]
-grep -q '^forward-zones=' /etc/powerdns/recursor.conf || sed -i '0,/^include-dir=/{s|^include-dir=|forward-zones=\ninclude-dir=|}' /etc/powerdns/recursor.conf
-grep -q '^forward-zones=' /etc/powerdns/recursor.conf || echo 'forward-zones=' >> /etc/powerdns/recursor.conf
-[%# And whatever zones are actually configured, appended to it. -%]
+[%# forward-zones-file, which is how the recursor takes a list of zones that
+    many things contribute to: one zone per line, zone=address:port.  Each
+    domain appends its own line in the per-domain target. -%]
+touch /etc/powerdns/forward-zones
+chown root:pdns /etc/powerdns/forward-zones; /bin/true
+chmod 0644 /etc/powerdns/forward-zones
+grep -q '^forward-zones-file=' /etc/powerdns/recursor.conf || echo 'forward-zones-file=/etc/powerdns/forward-zones' >> /etc/powerdns/recursor.conf
+[%# And whatever zones the recipe was configured with, in the same file. -%]
 [% FOR zone IN forward_zones.keys().sort() %]
-grep -qF 'forward-zones+=[% zone %]=[% forward_zones.$zone %]' /etc/powerdns/recursor.conf \
-    || echo "forward-zones+=[% zone %]=[% forward_zones.$zone %]" >> /etc/powerdns/recursor.conf
+grep -qxF '[% zone %]=[% forward_zones.$zone %]' /etc/powerdns/forward-zones || echo '[% zone %]=[% forward_zones.$zone %]' >> /etc/powerdns/forward-zones
 [% END -%]
 # Configure the zone to be loaded into pdns
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf

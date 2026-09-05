@@ -1,5 +1,15 @@
-# Configure the recursor to answer for our domain
-mv pdns-recursor-domain.conf /etc/powerdns/recursor.d/[% domain %].conf
+[%# One line in forward-zones-file, not a config fragment in recursor.d.
+    That fragment said `forward-zones+=<domain>=...`, and the recursor refused
+    the whole file -- "could not be parsed" -- every time.  += needs a plain
+    forward-zones to append to, and giving it one in recursor.conf, ahead of
+    include-dir, did not help either: the documentation claims += for the main
+    configuration and says nothing about files pulled in by include-dir, and the
+    recursor agrees with the silence.
+    forward-zones-file is the mechanism meant for this -- one zone per line,
+    zone=address:port -- and every domain simply adds its line. -%]
+# Point the recursor at our domain, via the forward zones file
+grep -qxF '[% domain %]=127.0.0.1:2500' /etc/powerdns/forward-zones 2>/dev/null     || cat pdns-recursor-domain.conf >> /etc/powerdns/forward-zones
+rm -f pdns-recursor-domain.conf
 # Build the zone database
 mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
 # TODO do this via lexicon instead

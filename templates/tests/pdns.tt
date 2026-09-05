@@ -19,35 +19,33 @@ unlike($version, qr/alpha|beta|rc\d|master/i, 'pdns is a release, not a developm
     or diag $version;
 
 my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';
+my $zones_file    = '/etc/powerdns/forward-zones';
+my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
 
-# One line per configured forward zone, however many times this has been
-# provisioned.  The line used to be appended unconditionally.
+# Zones go in forward-zones-file, one per line, rather than into a fragment in
+# recursor.d.  The fragment said `forward-zones+=<domain>=...` and the recursor
+# refused the whole file, every time: += wants a plain forward-zones to append
+# to, and giving it one in recursor.conf ahead of include-dir did not help --
+# the documentation offers += for the main configuration and says nothing about
+# included files.
+like($recursor_conf, qr{^forward-zones-file=\Q$zones_file\E}m,
+    'the recursor is pointed at a forward zones file') or diag $recursor_conf;
+ok(-f $zones_file, 'and that file exists');
+
+like($zones, qr/^\Q[% domain %]\E=127\.0\.0\.1:2500$/m,
+    'this domain forwards to the authoritative server on 2500') or diag $zones;
+
+# One line per zone, however many times this has been provisioned.
 my %seen;
-my @dupes = grep { $seen{$_}++ } ($recursor_conf =~ m/^(forward-zones\+?=.*)$/gm);
-is_deeply(\@dupes, [], 'no forward-zone line appears twice') or diag $recursor_conf;
-
-# Every domain appends its own forward zone with += from a file in recursor.d,
-# and the recursor refuses the whole file when there is no plain forward-zones
-# for it to append to -- "could not be parsed", said only to syslog.
-like($recursor_conf, qr/^forward-zones=/m, 'there is a base forward-zones setting to append to')
-    or diag $recursor_conf;
-
-# And it comes before include-dir.  The recursor reads that directory where the
-# line appears, so a base after it is too late for the files it pulled in -- the
-# setting was present and the recursor still refused the per-domain file, which
-# is why asserting it exists was not enough.
-my @lines = split m/\n/, $recursor_conf;
-my ($base)    = grep { $lines[$_] =~ m/^forward-zones=/ } 0 .. $#lines;
-my ($include) = grep { $lines[$_] =~ m/^include-dir=/ }   0 .. $#lines;
-SKIP: {
-    skip 'no include-dir in recursor.conf', 1 unless defined $include;
-    ok(defined $base && $base < $include, 'and it comes before include-dir')
-        or diag "forward-zones at line $base, include-dir at line $include";
-}
+my @dupes = grep { $seen{$_}++ } grep { m/\S/ } split m/\n/, $zones;
+is_deeply(\@dupes, [], 'no forward zone is listed twice') or diag $zones;
 
 # And nothing left over from somebody checking that recursion worked.
-unlike($recursor_conf, qr/^forward-zones=test\.test=/m,
-    'no hardcoded test.test forward zone') or diag $recursor_conf;
+unlike($zones, qr/^test\.test=/m, 'no hardcoded test.test forward zone') or diag $zones;
+
+# Nothing should be dropping config fragments into recursor.d any more.
+ok(!-e '/etc/powerdns/recursor.d/[% domain %].conf',
+    'no per-domain fragment in recursor.d');
 
 # The unit configure_pdns rewrites.  It used to end the command line with a
 # bare --chroot, which takes a value and was given none, so pdns_server refused
