@@ -20,6 +20,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
 use File::Temp qw{tempdir};
 use Test::More;
+use Test::Fatal qw{exception};
 
 use_ok('Provisioner::Recipe');
 
@@ -193,6 +194,44 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $three = bless {}, 'Test::Recipe::Memo';
     my %other = $three->validated(domain => 'b.test', flavour => 'third');
     is($other{domain}, 'b.test', 'and so does one built for another domain');
+};
+
+subtest 'reconcile() hands disagreements to the recipe, and dies by default' => sub {
+    my $r = bless {}, 'Provisioner::Recipe';
+
+    # Only what the two actually disagree about: a field one of them never
+    # mentioned is already whatever the merge left.
+    my $merged = { port => 80, name => 'a', nested => { deep => 1, mine => 'kept' } };
+    $r->reconcile( $merged, { port => 80, nested => { deep => 1 } } );
+    is_deeply(
+        $merged,
+        { port => 80, name => 'a', nested => { deep => 1, mine => 'kept' } },
+        'agreeing on everything changes nothing'
+    );
+
+    # Structure belongs to the merge; this only settles scalars.
+    my $lists = { hosts => ['a'], nested => { hosts => ['b'] } };
+    is( exception { $r->reconcile( $lists, { hosts => ['c'], nested => { hosts => ['d'] } } ) },
+        undef, 'arrays are left to the merge rather than fought over' );
+
+    like(
+        exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
+        qr/Two recipes want different things.*port is '80'.*'443'/s,
+        'a scalar two dependants disagree about dies, naming both values'
+    );
+
+    # The path is what somebody has to go and set, so it has to be the whole path.
+    like(
+        exception { $r->reconcile( { tls => { port => 80 } }, { tls => { port => 443 } } ) },
+        qr/tls\.port/,
+        'and names the nested field by its full path'
+    );
+
+    like(
+        exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
+        qr/set port explicitly under/,
+        'and says what to do about it'
+    );
 };
 
 done_testing();

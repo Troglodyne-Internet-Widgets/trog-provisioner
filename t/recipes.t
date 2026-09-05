@@ -302,6 +302,33 @@ subtest 'ufw rejects malformed port_forwards' => sub {
 };
 
 # ----------------------------------------------------------------
+# ufw: two recipes listening on one port
+# ----------------------------------------------------------------
+subtest 'ufw settles rate limits by taking the higher, and nothing else' => sub {
+    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
+
+    # A limit says where traffic to a port stops being plausible, so the recipe
+    # expecting the most legitimate traffic is the one that knows.  The lower
+    # would let a quiet recipe throttle a busy one's users.
+    my $merged = { rate_limits => { 443 => 500, 6379 => 512 } };
+    $r->reconcile( $merged, { rate_limits => { 443 => 2000 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'the higher limit wins' );
+
+    $r->reconcile( $merged, { rate_limits => { 443 => 100 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'and a lower one does not lower it' );
+
+    is( $merged->{rate_limits}{6379}, 512, 'a port only one recipe named is left alone' );
+
+    # Only rate limits.  Anything else two recipes disagree about here is a
+    # misconfiguration somebody has to settle.
+    like(
+        exception { $r->reconcile( { port_forwards => 'a' }, { port_forwards => 'b' } ) },
+        qr/different things from ufw/,
+        'a field it has no rule for dies, named for the recipe to set it under'
+    );
+};
+
+# ----------------------------------------------------------------
 # cron: MAILFROM is a local part, and the templates append the domain
 # ----------------------------------------------------------------
 subtest 'cron addresses: a local part gets the domain, an address does not' => sub {

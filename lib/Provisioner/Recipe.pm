@@ -148,6 +148,83 @@ sub required_recipes {
     return ( ufw => sub { return ( rate_limits => \%limits ) } );
 }
 
+=head3 $merged = $recipe->reconcile($merged, $incoming)
+
+Settle what two dependants disagreed about.
+
+A recipe that several others depend on is configured once, out of whatever each
+of them asked for.  Where two of them ask for the same field and want different
+things, merging picks a side -- silently, and by an ordering nobody chose.  This
+walks the two structures and hands every such collision to C<resolve_conflict>,
+writing back what it decides.
+
+Structure is somebody else's job: this only looks at fields whose values are
+plain scalars in both, so nested hashes are followed into and arrays are left to
+the merge.  Call it with the merged result and the contribution that has just
+arrived; folding it over each contribution in turn reaches the same answer as
+considering them all at once.
+
+=cut
+
+sub reconcile {
+    my ( $self, $merged, $incoming ) = @_;
+    return $merged unless ref $merged eq 'HASH' && ref $incoming eq 'HASH';
+    return $self->_reconcile_into( $merged, $incoming, [] );
+}
+
+sub _reconcile_into {
+    my ( $self, $merged, $incoming, $path ) = @_;
+
+    foreach my $field ( sort keys %$incoming ) {
+        my $theirs = $incoming->{$field};
+        my $mine   = $merged->{$field};
+
+        if ( ref $theirs eq 'HASH' && ref $mine eq 'HASH' ) {
+            $self->_reconcile_into( $mine, $theirs, [ @$path, $field ] );
+            next;
+        }
+
+        # Whatever the merge left is already one of the two, so a field only one
+        # of them named needs nothing done to it.
+        next if !defined $theirs || !defined $mine;
+        next if ref $theirs || ref $mine;
+        next if $theirs eq $mine;
+
+        $merged->{$field} = $self->resolve_conflict( [ @$path, $field ], $mine, $theirs );
+    }
+
+    return $merged;
+}
+
+=head3 $value = $recipe->resolve_conflict($path, $mine, $theirs)
+
+Which of two values a pair of dependants asked for this recipe to use.
+
+C<$path> is the field they disagreed about, as an arrayref of keys from the top
+of the recipe's configuration.
+
+B<Dies by default>, naming the field and both values.  Nothing here can know
+which of two configurations somebody meant, and quietly taking one is how a
+guest ends up built to a configuration nobody wrote.  Overriding this is for the
+cases where the recipe genuinely does know -- see C<Provisioner::Recipe::ufw>,
+where two recipes listening on one port both get the higher of their limits --
+and for those the override should say why it is safe.
+
+=cut
+
+sub resolve_conflict {
+    my ( $self, $path, $mine, $theirs ) = @_;
+
+    my $recipe = Scalar::Util::blessed($self) || $self;
+    $recipe =~ s/\AProvisioner::Recipe:://;
+    my $field = join( '.', @$path );
+
+    die <<"CONFLICT";
+Two recipes want different things from $recipe: $field is '$mine' to one of them and '$theirs' to another.
+Nothing here can tell which you meant, so set $field explicitly under $recipe for this domain.
+CONFLICT
+}
+
 =head3 %limits = $recipe->rate_limits(%opts)
 
 The ports this recipe listens on, and the new connections a second from a single

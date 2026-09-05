@@ -12,7 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use Crypt::PRNG();
 use HTTP::Tiny;
-use JSON::PP;
+use Cpanel::JSON::XS();
 
 # Used when the tag list cannot be reached.  It has to be a version that is
 # actually published, because a version that is not is a 404 on the guest
@@ -111,7 +111,7 @@ sub _latest_garage_version {
         { headers => { 'Accept' => 'application/vnd.github+json' } },
     );
     if ( $res->{success} ) {
-        my $tags = eval { JSON::PP::decode_json( $res->{content} ) };
+        my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
 
         # Newest first, and only the stable ones: the tag list carries -rc,
         # -beta and -internal tags we do not want to put on a guest.

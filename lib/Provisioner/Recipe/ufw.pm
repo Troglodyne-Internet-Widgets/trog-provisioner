@@ -50,6 +50,21 @@ sub enrich {
     return %opts;
 }
 
+sub resolve_conflict {
+    my ( $self, $path, $mine, $theirs ) = @_;
+
+    # Two recipes listening on the same port each name a limit for it, and the
+    # higher one is the safe answer: a limit says where traffic to that port
+    # stops being plausible, and the recipe expecting the most legitimate
+    # traffic is the one that knows.  Taking the lower would let a quiet recipe
+    # throttle a busy one's users, so adding a recipe could break a working one.
+    return $mine > $theirs ? $mine : $theirs
+      if @$path == 2 && $path->[0] eq 'rate_limits';
+
+    # Anything else here is a genuine disagreement, and the base class says so.
+    return $self->SUPER::resolve_conflict( $path, $mine, $theirs );
+}
+
 sub args {
     return (
         type       => 'object',
