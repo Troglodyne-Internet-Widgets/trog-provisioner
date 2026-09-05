@@ -16,6 +16,10 @@ ok(-d '[% mount.mountpoint %]', 'mount point [% mount.mountpoint %] exists');
 my $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted = `findmnt -rn --target '[% mount.mountpoint %]' 2>/dev/null`;
 ok(length $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted, '[% mount.mountpoint %] is actually mounted');
 [% END %]
+[%# A virtiofs mount is a systemd unit named for its mountpoint the way systemd
+    escapes it.  mount_virtiofs built that name with a sed that replaced only
+    the first slash, so anything deeper than one level produced a name with a
+    slash still in it, which is not a unit name at all. -%]
 [% FOREACH mount IN fuse %]
 my $[% mount.servicename.replace('-', '_') %]_status = `systemctl --user is-active [% mount.servicename %] 2>/dev/null`;
 chomp $[% mount.servicename.replace('-', '_') %]_status;

@@ -1,37 +1,58 @@
 #!/bin/bash
+# Mount a virtiofs share from the hypervisor, as a systemd mount + automount.
+set -eu
 
-TARGET=$1
-LINK_NAME=$2
-TYPE=$3
+TARGET=${1:?usage: mount_virtiofs <device-key> <mountpoint> <type>}
+LINK_NAME=${2:?usage: mount_virtiofs <device-key> <mountpoint> <type>}
+TYPE=${3:-virtiofs}
 
-ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F "=" '{print $2}')
-LINK_NAME_REPLACED=$(echo "$LINK_NAME" | sed -e "s|^/||" | sed -e "s|/|-|")
-mkdir -p $LINK_NAME
+[ -f /root/devices.map ] || { echo "mount_virtiofs: no /root/devices.map" >&2; exit 1; }
 
-# Actually mount it
-MNTFILE="/usr/lib/systemd/system/$LINK_NAME_REPLACED.mount"
+ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F '=' '{print $2}')
+[ -n "$ACTUAL_TARGET" ] || {
+    echo "mount_virtiofs: no device for '$TARGET' in /root/devices.map" >&2
+    exit 1
+}
 
-echo "[Unit]" >> $MNTFILE
-echo "Description=Shared dir from HV" >> $MNTFILE
-echo "After=multi-user.target" >> $MNTFILE
-echo "[Mount]" >> $MNTFILE
-echo "What=$ACTUAL_TARGET" >> $MNTFILE
-echo "Where=$LINK_NAME" >> $MNTFILE
-echo "Type=virtiofs" >> $MNTFILE
-echo "[Install]" >> $MNTFILE
-echo "WantedBy=multi-user.target" >> $MNTFILE
+# systemd-escape, not a pair of seds.  A mount unit has to be named for its
+# mountpoint the way systemd escapes it, and the sed here replaced only the
+# first slash -- so /opt/domains/share/data became "opt-domains/share/data",
+# which is not a unit name at all.  Anything one level deep worked and anything
+# deeper did not.
+MNTFILE="/usr/lib/systemd/system/$(systemd-escape -p --suffix=mount "$LINK_NAME")"
+AUTOMNTFILE="/usr/lib/systemd/system/$(systemd-escape -p --suffix=automount "$LINK_NAME")"
 
-AUTOMNTFILE="/usr/lib/systemd/system/$LINK_NAME_REPLACED.automount"
-echo "[Unit]" >> $AUTOMNTFILE
-echo "Description=Automount $LINK_NAME" >> $AUTOMNTFILE
-echo "ConditionPathExists=$LINK_NAME" >> $AUTOMNTFILE
-echo "[Automount]" >> $AUTOMNTFILE
-echo "Where=$LINK_NAME" >> $AUTOMNTFILE
-echo "TimeoutIdleSec=10" >> $AUTOMNTFILE
-echo "[Install]" >> $AUTOMNTFILE
-echo "WantedBy=multi-user.target" >> $AUTOMNTFILE
+mkdir -p "$LINK_NAME"
+
+# Written, not appended.  These were built with >>, so provisioning a guest a
+# second time left a unit file with two of every section in it.
+cat > "$MNTFILE" <<UNIT
+[Unit]
+Description=Shared dir from HV
+After=multi-user.target
+
+[Mount]
+What=$ACTUAL_TARGET
+Where=$LINK_NAME
+Type=$TYPE
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > "$AUTOMNTFILE" <<UNIT
+[Unit]
+Description=Automount $LINK_NAME
+ConditionPathExists=$LINK_NAME
+
+[Automount]
+Where=$LINK_NAME
+TimeoutIdleSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 
 systemctl daemon-reload
-systemctl enable $LINK_NAME_REPLACED.mount
-systemctl start $LINK_NAME_REPLACED.mount
-#mount -t virtiofs $ACTUAL_TARGET $LINK_NAME
+systemctl enable "$(basename "$MNTFILE")"
+systemctl start "$(basename "$MNTFILE")"
