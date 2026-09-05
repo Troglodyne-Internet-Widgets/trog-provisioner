@@ -16,4 +16,20 @@ foreach my $pem ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain 
         or diag("dangling symlink? " . (-l $pem ? readlink($pem) : 'not a symlink'));
 }
 
+# The hook has to be runnable, not merely present -- dehydrated calls it.
+ok(-x '/etc/dehydrated/hooks/[% domain %].sh', 'the hook is executable');
+
+# The certificate covers the domain itself.  The ssl target used to name only
+# www and mail in the SAN, because the alias list it joined was never passed to
+# that template -- so the name almost everything asks for was the one name the
+# certificate did not carry.
+my $san = `openssl x509 -noout -ext subjectAltName -in /etc/ssl/certs/[% domain %].pem 2>&1`;
+like($san, qr/DNS:\Q[% domain %]\E(?![\w.-])/, 'the certificate covers the domain itself')
+    or diag $san;
+like($san, qr/DNS:www\.\Q[% domain %]\E/, 'and www');
+
+# And it parses at all, which a truncated or half-written pem does not.
+my $subject = `openssl x509 -noout -subject -in /etc/ssl/certs/[% domain %].pem 2>&1`;
+like($subject, qr/subject=/, 'the certificate parses') or diag $subject;
+
 done_testing();

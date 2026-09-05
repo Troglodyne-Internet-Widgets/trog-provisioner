@@ -6,4 +6,12 @@ use Test::More;
 ok(-d '[% to %]/[% domain %]', 'data directory exists');
 ok(-r '[% to %]/[% domain %]', 'data directory is readable');
 
+# Owned by the service user, group the admin.  The recipe chowns it to
+# `[% user %]:[% admin_user %]`, and user was undeclared for a long time -- so
+# the command ran as `chown -R :admin`, which is valid, changes only the group,
+# and says nothing at all.
+my @st = stat '[% to %]/[% domain %]';
+is(scalar getpwuid($st[4] // -1), '[% user %]',       'the data directory is owned by [% user %]');
+is(scalar getgrgid($st[5] // -1), '[% admin_user %]', 'and group [% admin_user %]');
+
 done_testing();
