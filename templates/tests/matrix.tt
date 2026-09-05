@@ -13,6 +13,12 @@ ok(-f '[% install_dir %]/[% domain %]/homeserver.yaml', 'homeserver.yaml exists'
 # target died and took the rest of the build with it.
 ok(-f '[% install_dir %]/[% domain %]/log.yaml', 'log.yaml exists');
 ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhost was installed');
+
+# And something behind it.  The admin interface is downloaded from a GitHub
+# release, and synapse-admin was renamed to ketesa -- the old asset URL is a
+# 404, so the vhost was being served an empty directory.
+ok(-s '[% install_dir %]/admin.matrix.[% domain %]/index.html',
+    'the admin interface was downloaded and extracted');
 ok(-f '[% install_dir %]/[% domain %]/www/matrix.index.html', 'the chat index page was installed');
 
 # The domain's own vhost belongs to nginxproxy, which this recipe requires
