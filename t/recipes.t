@@ -305,17 +305,22 @@ subtest 'ufw rejects malformed port_forwards' => sub {
 # cron: MAILFROM is a local part, and the templates append the domain
 # ----------------------------------------------------------------
 subtest 'cron addresses: a local part gets the domain, an address does not' => sub {
-    my $r = 'Provisioner::Recipe::cron'->new(%PROV);
     my $d = $G{domain};
 
-    is(exception { $r->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+    # A fresh recipe per configuration, because that is what new_config builds:
+    # one object per domain, rendered once with the options that domain merged.
+    # validated() memoizes on the object to match, so two configurations through
+    # one object would get the first one's answer twice.
+    my $cron = sub { 'Provisioner::Recipe::cron'->new(%PROV) };
 
-    like($r->render_file('files/cron.root.tt', %G, from => 'cron'),
+    is(exception { $cron->()->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+
+    like($cron->()->render_file('files/cron.root.tt', %G, from => 'cron'),
         qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended');
 
     # Appending to an address gives somebody@example.com@this.domain, which is
     # what the old template did to every value the old schema would accept.
-    like($r->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
+    like($cron->()->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
         qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands');
 };
 

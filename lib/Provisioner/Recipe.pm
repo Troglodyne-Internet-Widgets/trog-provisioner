@@ -13,7 +13,6 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
-use JSON::PP();
 
 use JSON::Validator::Schema::Troglodyne;
 
@@ -173,8 +172,6 @@ C<merge_rate_limits> in C<bin/new_config>.
 sub rate_limits {
     return ();
 }
-
-my $canonical = JSON::PP->new->canonical->allow_blessed->convert_blessed;
 
 =head3 %opts = $recipe->validate(%opts)
 
@@ -410,22 +407,31 @@ A recipe renders its fragment and then every file in C<template_files>, and each
 of those was a fresh C<validate> and so a fresh C<enrich>.  Anything enrich
 rewrote in place, the next call saw already rewritten.
 
-The memo is on the object rather than in a C<state> variable because C<state> in
-a named sub is one variable for the sub, not one per object: a single run
-configures several domains, each with its own recipe objects, so a C<state> hash
-keyed on the class hands the second domain the first one's configuration.
+B<One recipe object is one domain's worth of one recipe>, and the options are
+whatever that domain merged for it.  C<bin/new_config> builds a recipe once per
+domain and renders it once -- C<lastuniq> keeps a module from appearing twice in
+a domain's list, and a dependency pulled in by several recipes accumulates their
+options and is rendered once at the end.  So the first answer is the only answer
+there is, and rendering the fragment, each C<template_files> entry and each test
+asks for it again rather than recomputing it.
 
-It is keyed on the options because one object does get rendered with more than
-one set of them -- C<t/recipes.t> renders cron's root crontab twice, once with a
-bare local part and once with a full address, and expects the two to differ.
+Calling this on one object with B<different> options therefore gives you the
+first set's answer, and is a bug in the caller rather than a case handled here.
+Where a test needs two configurations, it wants two objects, the same as
+C<new_config> would build.
+
+The memo is on the object rather than in a C<state> variable because that is
+where its lifetime belongs.  C<state> in a named sub is one variable for the
+sub, not one per object, so it would outlive the object it describes: a recipe
+built fresh with a configuration that ought to be rejected would be answered
+from the last one that validated, and the die would never happen.
 
 =cut
 
 sub validated {
     my ( $self, %opts ) = @_;
-    my $key = $canonical->encode( \%opts );
-    $self->{_validated}{$key} //= { $self->validate(%opts) };
-    return %{ $self->{_validated}{$key} };
+    $self->{_validated} //= { $self->validate(%opts) };
+    return %{ $self->{_validated} };
 }
 
 =head3 %vars = vars()

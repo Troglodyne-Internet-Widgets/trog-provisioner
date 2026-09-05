@@ -70,21 +70,26 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     print $tt_fh "domain=[% domain %]\n";
     close $tt_fh;
 
-    my $recipe = bless {
-        template        => 'widget.tt',
-        global_template => 'widget.global.tt',
-        template_dirs   => [$tdir],
-        tt              => Text::Xslate->new({
-            path   => [$tdir],
-            syntax => 'TTerse',
-            module => ['Text::Xslate::Bridge::TT2'],
-        }),
-    }, 'Provisioner::Recipe';
+    # One per configuration, as new_config builds them: validated() memoizes on
+    # the object, so the two renders below are two objects rather than one asked
+    # two different things.
+    my $widget = sub {
+        return bless {
+            template        => 'widget.tt',
+            global_template => 'widget.global.tt',
+            template_dirs   => [$tdir],
+            tt              => Text::Xslate->new({
+                path   => [$tdir],
+                syntax => 'TTerse',
+                module => ['Text::Xslate::Bridge::TT2'],
+            }),
+        }, 'Provisioner::Recipe';
+    };
 
-    my $global_out = $recipe->render_global( global_flag => 'yes' );
+    my $global_out = $widget->()->render_global( global_flag => 'yes' );
     like( $global_out, qr/global_setup=yes/, 'render_global renders global template' );
 
-    my $domain_out = $recipe->render( domain => 'example.com' );
+    my $domain_out = $widget->()->render( domain => 'example.com' );
     like( $domain_out, qr/domain=example\.com/, 'render still renders per-domain template' );
 };
 
@@ -163,29 +168,31 @@ subtest 'a recipe gets its declared defaults end to end' => sub {
     }
 }
 
-subtest 'validated() memoizes, per object and per set of options' => sub {
+subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $one = bless {}, 'Test::Recipe::Memo';
     local $Test::Recipe::Memo::enriched = 0;
 
-    my %first  = $one->validated(domain => 'a.test', flavour => 'first');
-    my %again  = $one->validated(domain => 'a.test', flavour => 'first');
-    is($Test::Recipe::Memo::enriched, 1, 'the same options enrich once, however often they are rendered');
-    is($again{seen}, 'first', 'and the second render gets the memoized answer');
+    my %first = $one->validated(domain => 'a.test', flavour => 'first');
+    my %again = $one->validated(domain => 'a.test', flavour => 'first');
+    is($Test::Recipe::Memo::enriched, 1, 'one object enriches once, however often it is rendered');
+    is($again{seen}, 'first', 'and every render after the first gets that answer');
 
-    # Keyed on the options because one object really is rendered with more than
-    # one set: t/recipes.t renders cron's root crontab twice, with a bare local
-    # part and with a full address, and expects the two to differ.  A memo that
-    # ignored its arguments would answer the second with the first.
-    my %other = $one->validated(domain => 'a.test', flavour => 'second');
-    is($other{seen}, 'second', 'different options are validated again');
-    is($Test::Recipe::Memo::enriched, 2, 'so enrich runs a second time for them');
-
-    # On the object, not in a state variable: state in a named sub is one
-    # variable for the sub rather than one per object, and new_config configures
-    # several domains in a single run, each with its own recipe objects.
+    # A recipe object is one domain's worth of one recipe, so its memo has to go
+    # when it does.  A cache that outlived it would answer a configuration that
+    # ought to be rejected from the last one that validated, and the die that
+    # t/recipes.t's rejects_missing is checking for would never happen.
+    # Same class and the same domain as the first, which is the case that tells
+    # an object-scoped memo from a cache keyed on either of those: a rebuilt
+    # recipe has to be validated afresh, not answered from its predecessor.
     my $two = bless {}, 'Test::Recipe::Memo';
-    my %theirs = $two->validated(domain => 'b.test', flavour => 'third');
-    is($theirs{domain}, 'b.test', q{a second object of the same class does not inherit the first one's answer});
+    my %theirs = $two->validated(domain => 'a.test', flavour => 'second');
+    is($theirs{seen}, 'second', q{a second object of the same class and domain gets its own answer});
+    is($Test::Recipe::Memo::enriched, 2, 'and enriches for itself');
+
+    # A third domain, to say the same thing about the axis new_config varies.
+    my $three = bless {}, 'Test::Recipe::Memo';
+    my %other = $three->validated(domain => 'b.test', flavour => 'third');
+    is($other{domain}, 'b.test', 'and so does one built for another domain');
 };
 
 done_testing();
