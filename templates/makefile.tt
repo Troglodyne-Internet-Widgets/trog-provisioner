@@ -14,8 +14,15 @@
 
 .PHONY: all
 all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %]
-	[% script_dir %]/post_install
+	[%# The tests run whether or not the deferred work succeeded, and the build
+	    still fails afterwards if it did not.  post_install failing used to stop
+	    make right there, so a guest with one broken postrun task produced no
+	    test output at all -- which is exactly the guest whose test results you
+	    want to read. -%]
+	rm -f /root/.postrun_failed
+	[% script_dir %]/post_install || touch /root/.postrun_failed
 	$(MAKE) --no-print-directory [% state_dir %]/test
+	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
 
 [% state_dir %]/state:
