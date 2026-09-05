@@ -176,6 +176,12 @@ have each broken a recipe here:
   preferences file to `/Preferences.xml` for it.
 - A command spanning lines needs `\` on every one of them, or make hands the
   shell an unterminated quote. `plexmediaserver` had a seven-line `python3 -c "`.
+- A heredoc cannot work at all. `cat > file <<'EOF'` is one line, so it gets no
+  body, and the lines meant to be the file are handed to sh one at a time as
+  commands -- `matrix` wrote its register-admin script this way and died on
+  `Syntax error: end of file unexpected (expecting "done")` from the `for` loop
+  inside it. Render a script as a `template_files` entry and install it, which
+  is what every other generated script here does.
 - Make runs recipe lines under `/bin/sh`, which is **dash** on Ubuntu, not bash.
   `gogs` made its four directories in one brace expansion and got a single
   directory named `{repos,data,log,custom/conf}`, and wrote `id -u gogs
