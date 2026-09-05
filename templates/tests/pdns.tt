@@ -32,6 +32,19 @@ is_deeply(\@dupes, [], 'no forward-zone line appears twice') or diag $recursor_c
 like($recursor_conf, qr/^forward-zones=/m, 'there is a base forward-zones setting to append to')
     or diag $recursor_conf;
 
+# And it comes before include-dir.  The recursor reads that directory where the
+# line appears, so a base after it is too late for the files it pulled in -- the
+# setting was present and the recursor still refused the per-domain file, which
+# is why asserting it exists was not enough.
+my @lines = split m/\n/, $recursor_conf;
+my ($base)    = grep { $lines[$_] =~ m/^forward-zones=/ } 0 .. $#lines;
+my ($include) = grep { $lines[$_] =~ m/^include-dir=/ }   0 .. $#lines;
+SKIP: {
+    skip 'no include-dir in recursor.conf', 1 unless defined $include;
+    ok(defined $base && $base < $include, 'and it comes before include-dir')
+        or diag "forward-zones at line $base, include-dir at line $include";
+}
+
 # And nothing left over from somebody checking that recursion worked.
 unlike($recursor_conf, qr/^forward-zones=test\.test=/m,
     'no hardcoded test.test forward zone') or diag $recursor_conf;

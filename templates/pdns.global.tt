@@ -20,6 +20,12 @@ mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
     forward-zones=test.test=192.168.1.1 that was somebody checking recursion
     worked, left behind and appended again on every provision.  Removing it took
     the base with it, so this writes an empty one instead. -%]
+[%# Before include-dir, not merely present.  The recursor reads that directory
+    at the point the include-dir line appears, so a base defined after it is
+    defined too late for the files it just pulled in -- appending to the end of
+    the file left the setting sitting there in plain sight while the recursor
+    went on refusing the per-domain file. -%]
+grep -q '^forward-zones=' /etc/powerdns/recursor.conf || sed -i '0,/^include-dir=/{s|^include-dir=|forward-zones=\ninclude-dir=|}' /etc/powerdns/recursor.conf
 grep -q '^forward-zones=' /etc/powerdns/recursor.conf || echo 'forward-zones=' >> /etc/powerdns/recursor.conf
 [%# And whatever zones are actually configured, appended to it. -%]
 [% FOR zone IN forward_zones.keys().sort() %]
