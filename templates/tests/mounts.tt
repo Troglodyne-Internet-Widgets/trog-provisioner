@@ -22,4 +22,16 @@ chomp $[% mount.servicename.replace('-', '_') %]_status;
 is($[% mount.servicename.replace('-', '_') %]_status, 'active', '[% mount.servicename %] fuse mount is active');
 [% END %]
 
+# fstab keeps its comments and gains one line per mount, however many times the
+# guest has been provisioned.  add_to_fstab used to rewrite the whole file --
+# sorting every entry and dropping every comment -- and would write a line
+# beginning with a space when it could not find the device, which is a broken
+# fstab on a machine that has to boot from it.
+my $fstab = do { local (@ARGV, $/) = '/etc/fstab'; <> } // '';
+unlike($fstab, qr/^[ \t]+\S/m, 'no fstab line begins with whitespace');
+
+my %seen;
+my @dupes = grep { $seen{$_}++ } grep { m/\S/ && !m/^\s*#/ } split m/\n/, $fstab;
+is_deeply(\@dupes, [], 'no fstab entry appears twice') or diag $fstab;
+
 done_testing();

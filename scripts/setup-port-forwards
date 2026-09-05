@@ -1,23 +1,36 @@
 #!/bin/bash
+# Port forwards, written into ufw's before.rules as a *nat table.
+#
+# Rewritten between two markers on each run, rather than inserted again.  This
+# used to sed a fresh *nat block in ahead of *filter every time, so a second
+# provision left two of them in the file -- and iptables-restore refuses a table
+# declared twice, which means ufw fails to start on a guest that was working
+# until it was provisioned again.
+set -eu
 
-[ $# -eq 0 ] && exit 0;
+RULES=/etc/ufw/before.rules
+BEGIN='# BEGIN trog-provisioner port forwards'
+END='# END trog-provisioner port forwards'
 
-sed -i '/^\*filter/i *nat' /etc/ufw/before.rules
-sed -i '/^\*filter/i :POSTROUTING ACCEPT [0:0]' /etc/ufw/before.rules
+[ -f "$RULES" ] || { echo "setup-port-forwards: no $RULES" >&2; exit 1; }
 
-for portmap in $@
-do
-    declare -a array
-    for port in $(echo $portmap | tr "=" "\n")
-    do
-        array+=("$port")
-    done
-    FROM=${array[0]}
-    TO=${array[1]}
+# Take out whatever was put there last time, however many times it was put.
+sed -i "\|^$BEGIN\$|,\|^$END\$|d" "$RULES"
 
+# No forwards is a valid answer, and by here the old block is gone.
+if [ "$#" -eq 0 ]; then
+    exit 0
+fi
+
+block="$BEGIN\n*nat\n:POSTROUTING ACCEPT [0:0]\n"
+for portmap in "$@"; do
+    FROM=${portmap%%=*}
+    TO=${portmap##*=}
     echo "Forwarding port $FROM to $TO"
-
-    sed -i "/^\*filter/i -A PREROUTING -p tcp --dport $FROM -j REDIRECT --to-port $TO" /etc/ufw/before.rules
+    block="$block-A PREROUTING -p tcp --dport $FROM -j REDIRECT --to-port $TO\n"
 done
+block="${block}COMMIT\n$END"
 
-sed -i '/^\*filter/i COMMIT\n' /etc/ufw/before.rules
+# Ahead of the filter table, which is where a nat table has to be.
+awk -v b="$block" '/^\*filter/ && !seen { print b; seen = 1 } { print }' "$RULES" > "$RULES.new"
+mv "$RULES.new" "$RULES"
