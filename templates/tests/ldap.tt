@@ -42,6 +42,14 @@ ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
 my @stat = stat('/etc/ssl/private/[% domain %].pem');
 is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
 
+# Owning the file is not the same as reaching it: /etc/ssl/private is
+# 0710 root:ssl-cert, so openldap has to be in that group to traverse it.  When
+# it could not, the TLS modify failed with error 80 and said nothing about why.
+foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
+    my $rc = system("sudo -u openldap test -r '$f'");
+    is($rc, 0, "openldap can read $f");
+}
+
 my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
 like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
 
