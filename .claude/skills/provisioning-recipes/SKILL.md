@@ -207,11 +207,21 @@ spoke TLS on the plain HTTP port. Its neighbour `ssl_redirect` had the default
 removed for exactly this reason and the comment saying so was sitting right
 above it.
 
-**A URL nothing checks is a URL nobody has fetched.** `garage` took both its
-version and its binary from a GitHub repository that is a mirror and has never
-cut a release: the version lookup 404'd on every run and fell back behind a
-warning, and the download 404'd fatally. Fetch the URL yourself before believing
-it.
+**A URL nothing checks is a URL nobody has fetched.** Fetch every literal URL in
+the templates and scripts; it takes a minute and it found three. `garage` took
+its version and its binary from a GitHub mirror that has never cut a release.
+`plexmediaserver` pointed at a host Plex retired, with a signing key that has
+since been replaced by a different one -- so reaching the old host would not
+have been enough either. And matrix's admin interface was still being fetched
+under its old name: `synapse-admin` is `ketesa` now, and the release asset went
+with it, so the admin vhost was serving an empty directory.
+
+**A 403 is not always a refusal.** Every path under plex's old `/repos/` prefix
+answered `403 AccessDenied` -- over IPv4 and IPv6 -- which read as the far end
+blocking us. It was S3, which answers 403 rather than 404 for a key that is not
+there when listing is denied. Ask for a path you know is missing on the same
+host before concluding anything: `plex-keys/definitely-not-there` also 403'd,
+while the real key returned 200.
 
 **A file `template_files` generates that nothing installs** is dead. `ufw`
 generates the rate limits it means to apply and has never installed them.
