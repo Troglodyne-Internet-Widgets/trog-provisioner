@@ -29,11 +29,10 @@ It is your responsibility to make sure the dump file has CREATE DATABSE statemen
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        # No postgresql-common-dev: it is a PGDG package, not an Ubuntu one,
-        # and deps is the list cloud-init installs at first boot -- long before
-        # the global fragment adds the PGDG repository.  It has never installed
-        # and is not needed; the fragment installs the versioned server-dev
-        # package it actually builds against.
+        # deps is the list cloud-init installs at first boot, so it can only
+        # name Ubuntu packages: the PGDG repository is not added until the
+        # global fragment runs, which installs the versioned server-dev package
+        # from it.
         return qw{postgresql-common pigz};
     }
     die "Unsupported packager";

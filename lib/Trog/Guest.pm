@@ -59,18 +59,12 @@ is what to call this guest in messages.
 our $BOOT_TIMEOUT = 300;
 
 # The whole Makefile runs inside this one, not just the waiting: the first wait
-# is on the at queue, and the job sits in that queue for as long as the build
-# takes.
+# is on the at queue, and the job sits there for as long as the build takes.
+# The longest of them is a domain that builds perl from source and installs
+# ninety-odd distributions after it, which takes about twenty minutes.
 #
-# Ninety minutes, from a measurement rather than a guess.  A tpsgi domain --
-# which builds perl from source and then installs ninety-seven distributions,
-# the heaviest thing any recipe here does -- takes twenty minutes on a guest
-# with the scaffold's memory and processors.
-#
-# It looked like hours until the hang detector in Trog::Machine was fixed: that
-# capped every remote command at ten minutes, so this setting did nothing at all
-# and a guest still compiling came back as a failure.  I raised this to 240m on
-# the strength of those timings, which were measuring the cap.
+# Trog::Machine::_unhang has to allow at least this long, or it decides a guest
+# that is still building has hung.
 our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
 sub new {

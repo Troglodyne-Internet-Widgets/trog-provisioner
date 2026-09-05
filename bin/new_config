@@ -715,9 +715,7 @@ sub handle_domain {
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
             modules_ordered  => \@modules_ordered,
-            # The ssl target names every alias in the certificate it makes, and
-            # this was never passed -- so the join rendered as nothing and the
-            # certificate covered neither the aliases nor the domain itself.
+            # The ssl target names each of these in the certificate it makes.
             full_aliases     => $alias_conf->{$fqdn} // [],
             vars             => \%mf_vars,
             packages         => \@pkgs,

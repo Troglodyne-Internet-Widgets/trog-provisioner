@@ -573,14 +573,10 @@ sub _unhang {
     my ($self, $what, $code) = @_;
     return $code->() if $self->is_local;
 
-    # A command that carries its own timeout is telling us how long it may
-    # legitimately take, and this alarm is for commands that should return
-    # promptly and do not.  Without this, waiting for a guest to finish its
-    # Makefile -- `sudo timeout 180m bash -c 'until atq is empty ...'` -- was
-    # killed here after ten minutes however long that timeout said, so raising
-    # it never made any difference and a guest still building looked hung.
-    # Only the remote path reaches this at all, which is why it never showed up
-    # against a local hypervisor.
+    # This alarm is for a command that should return promptly and does not.  A
+    # command carrying its own timeout is saying how long it may legitimately
+    # take, so it gets that long instead -- waiting for a guest to finish its
+    # Makefile is a single command that blocks for the whole build.
     my $limit = _hang_limit($what);
 
     my @result = eval {

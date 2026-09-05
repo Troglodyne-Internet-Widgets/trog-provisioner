@@ -66,10 +66,7 @@ sub args {
             # feature; auth-51 is the released form of the same thing.
             repo_branch   => { type => 'string', default => 'auth-51',
                                pattern => '^auth-[0-9]+$' },
-            # Zones to forward to another resolver, as zone => address.  There
-            # is no default: what used to be here was one hardcoded
-            # test.test=192.168.1.1, appended to the recursor configuration on
-            # every provision.
+            # Zones to forward to another resolver, as zone => address.
             forward_zones => { type => 'object', default => {} },
         },
     );
