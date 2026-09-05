@@ -31,7 +31,10 @@ foreach my $pkg (qw{slapd ldap-utils libldap2}) {
 # dehydrated's output directly, which does not exist until letsencrypt has
 # succeeded -- so on a fresh guest slapd refused it with error 80 and the build
 # stopped there.
+# Unfolded first: LDIF wraps at 78 columns and continues with a leading space,
+# so a path this long arrives split across two lines and matches nothing.
 my $tls = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCertificateFile 2>/dev/null`;
+$tls =~ s/\n //g;
 like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
     'slapd is configured with the certificate the ssl target links') or diag $tls;
 
@@ -41,6 +44,7 @@ ok(-e '/etc/ssl/certs/[% domain %].pem',    'and that certificate is there');
 # self-signed pair the ssl target makes, which carries no basicConstraints and
 # is not a CA -- and slapd refuses a server certificate offered as one.
 my $ca = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCACertificateFile 2>/dev/null`;
+$ca =~ s/\n //g;
 unlike($ca, qr{olcTLSCACertificateFile:\s*/etc/ssl/certs/}, 'the server certificate is not offered as a CA')
     or diag $ca;
 ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');

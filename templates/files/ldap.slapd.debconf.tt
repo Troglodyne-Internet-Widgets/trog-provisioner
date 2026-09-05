@@ -1,5 +1,9 @@
 slapd slapd/no_configuration boolean false
-slapd slapd/domain string [% domain %]
+[%# The domain base_dn describes, not the guest hostname.  slapd builds its real
+    base DN from this, so giving it the hostname while the recipe binds against
+    base_dn leaves the two disagreeing -- and the seed then fails with
+    "ldap_bind: Invalid credentials (49)" into a /bin/true. -%]
+slapd slapd/domain string [% ldap_domain %]
 slapd shared/organization string [% domain %]
 slapd slapd/password1 password [% admin_password %]
 slapd slapd/password2 password [% admin_password %]

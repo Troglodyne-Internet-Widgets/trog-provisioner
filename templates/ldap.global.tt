@@ -41,7 +41,12 @@ systemctl restart slapd
 ufw allow [% port %]/tcp comment 'LDAPS'
 
 # Seed base tree and users (idempotent - errors on existing entries are ignored)
-ldapadd -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif; /bin/true
+[%# Not swallowed.  This ran into a /bin/true, so a bind that failed -- which it
+    did, every time, whenever the base DN slapd built from debconf differed from
+    the one being bound against -- left an empty directory and a provision that
+    reported success.  Entries that already exist are the one error worth
+    ignoring, and ldapadd says so distinctly. -%]
+ldapadd -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
 rm -f seed.ldif
 
 [% script_dir %]/queue_postrun_task systemctl enable slapd

@@ -72,11 +72,24 @@ sub enrich {
     my ( $self, %opts ) = @_;
 
     # Derive base_dn from domain: example.com -> dc=example,dc=com
+    #
+    # split(/\./) and not split('.'): the first argument to split is a pattern,
+    # and '.' as a pattern matches every character -- so this produced no parts
+    # at all and an empty base_dn for any domain that did not set one.
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
-        my @parts = split( '.', $domain );
+        my @parts = split( /\./, $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
+
+    # slapd derives its real base DN from the domain debconf is given, so that
+    # has to be the domain base_dn describes rather than the guest hostname.
+    # Configured separately they drift apart, and then the seed cannot bind:
+    # "ldap_bind: Invalid credentials (49)", swallowed by the /bin/true after
+    # it, leaving a directory with nothing in it.
+    ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
+    $opts{ldap_domain} =~ s/,/./g;
+
     return %opts;
 }
 
