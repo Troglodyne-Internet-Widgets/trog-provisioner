@@ -7,4 +7,31 @@ my $status = `systemctl is-active nginx 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'nginx is running');
 
+# Running says nothing about the configuration on disk: nginx keeps serving the
+# last one it accepted.  Everything this sweep found in a vhost -- an empty
+# backlog=, a socket in a named location, a server_names hash too small for the
+# domain -- was invisible to `is-active` and a single line of `nginx -t`.
+my $check = `nginx -t 2>&1`;
+like($check, qr/syntax is ok/,     'nginx accepts the configuration') or diag $check;
+like($check, qr/test is successful/, 'and every file it includes');
+
+# The global config this recipe installs, and the map the vhosts depend on.
+my $global = '/etc/nginx/conf.d/global.conf';
+ok(-f $global, 'the global config was installed');
+
+my $text = do { local (@ARGV, $/) = $global; <> } // '';
+like($text, qr/map \$http_upgrade \$connection_upgrade/,
+    'it defines connection_upgrade, which every proxy vhost uses');
+
+# Big enough for the names on this guest.  64 is not: a vhost carries the domain
+# plus www, mail and any aliases, and nginx sizes the hash by the longest of
+# them -- over that it refuses to start, saying so only here.
+my ($bucket) = $text =~ m/server_names_hash_bucket_size\s+(\d+)/;
+ok($bucket && $bucket >= 128, "server_names_hash_bucket_size is $bucket") or diag $text;
+
+# worker_connections is raised to match the listen backlog; an unset or default
+# value there quietly caps what the guest can accept.
+my $conf = do { local (@ARGV, $/) = '/etc/nginx/nginx.conf'; <> } // '';
+like($conf, qr/worker_connections\s+\d{4,}/, 'worker_connections was tuned up');
+
 done_testing();
