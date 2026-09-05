@@ -60,11 +60,18 @@ our $BOOT_TIMEOUT = 300;
 
 # The whole Makefile runs inside this one, not just the waiting: the first wait
 # is on the at queue, and the job sits in that queue for as long as the build
-# takes.  Thirty minutes is less than a source perl build and the CPAN set that
-# follows it, so provisioning the perl recipe died at "Waiting up to 30m for ATD
-# queue to flush" with the setup log still growing and nothing actually wrong.
-# TROG_SETUP_TIMEOUT overrides it for a guest that needs longer still.
-our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
+# takes.
+#
+# Four hours because a domain carrying the perl recipe builds perl from source
+# and then installs Perl::Critic, Devel::NYTProf and starman with their test
+# suites -- eighty-odd distributions -- and measured runs did not finish inside
+# three.  Thirty minutes, which this was, and ninety, which I raised it to
+# first, both fail on a guest with nothing wrong with it.
+#
+# The cost of a number this size is that a guest which really has hung takes
+# four hours to say so.  TROG_SETUP_TIMEOUT lowers it for a domain that builds
+# nothing, which is most of them.
+our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '240m';
 
 sub new {
     my ($class, %opts) = @_;
