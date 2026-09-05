@@ -6,6 +6,28 @@ use Test::More;
 my $user_entry = `getent passwd [% admin_user %] 2>/dev/null`;
 chomp $user_entry;
 ok($user_entry, 'admin user exists');
-ok(-d '/home/[% admin_user %]', 'admin user home directory exists');
+
+my $home = ( split m/:/, $user_entry )[5] // '';
+ok($home && -d $home, "admin user home directory exists ($home)")
+    or BAIL_OUT('no home directory to check');
+
+# The recipe rsyncs a skeleton into that home and chowns it.  A home the admin
+# does not own is one ssh will not read a key out of.
+my @st = stat $home;
+is(scalar getpwuid($st[4] // -1), '[% admin_user %]', 'and is owned by the admin');
+
+# How anyone gets in.  ssh ignores an authorized_keys that is group or world
+# writable, or one in a home directory that is -- silently, and the only symptom
+# is a password prompt on a host that has no password.
+my $keys = "$home/.ssh/authorized_keys";
+ok(-s $keys, 'the admin has authorized_keys');
+my @kst = stat $keys;
+is($kst[2] & 022, 0, 'and it is not group or world writable');
+is($st[2] & 022, 0, 'nor is the home directory itself');
+
+# And passwordless sudo, which is not a convenience here: bin/provision drives
+# the whole build over ssh as this user and every command it runs is sudo.
+my $sudo = system("sudo -n -u [% admin_user %] sudo -n true >/dev/null 2>&1");
+is($sudo, 0, 'the admin can sudo without a password');
 
 done_testing();
