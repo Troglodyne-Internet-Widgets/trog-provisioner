@@ -51,7 +51,16 @@ $npm_root //= '';
 
 like( $node_path, qr{/lib/node_modules$}, 'NODE_PATH set to a global node_modules dir' );
 ok( -d $node_path, "NODE_PATH ($node_path) exists" );
-is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' )
-    or diag "npm root -g said:\n$npm_raw";
+SKIP: {
+    # npm redacts anything shaped like a classic auth token in its output, and a
+    # classic npm token is a UUID -- so on a guest whose domain is a UUID, the
+    # path comes back with *** where the domain was.  That is npm being careful,
+    # not the recipe being wrong, and there is nothing left to compare.
+    skip 'npm redacted the path (the domain is shaped like an npm token)', 1
+        if $npm_root =~ m/\Q***\E/;
+
+    is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' )
+        or diag "npm root -g said:\n$npm_raw";
+}
 
 done_testing();
