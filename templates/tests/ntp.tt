@@ -26,3 +26,29 @@ like($conf, qr/^[ \t]*makestep[ \t]+\S+[ \t]+\S+[ \t]*$/m, 'makestep has both of
 ok(scalar(grep { m/^\s*(pool|server)\s+\S+/ } split m/\n/, $conf), 'at least one time source');
 
 done_testing();
+
+# chrony ships /etc/chrony/conf.d and /etc/chrony/sources.d, and they are inert
+# unless chrony.conf says to read them.  This file used to overwrite the
+# vendor's confdir line out of existence, which left the guest with a conf.d
+# directory that looked like it worked and did nothing -- and meant anything
+# adding a time source had to edit a generated file.
+foreach my $dir (qw{/etc/chrony/conf.d /etc/chrony/sources.d}) {
+    ok(-d $dir, "$dir exists");
+}
+
+my $chrony_conf = do { local (@ARGV, $/) = '/etc/chrony/chrony.conf'; <> } // '';
+like($chrony_conf, qr/^confdir \/etc\/chrony\/conf\.d$/m,   'chrony.conf reads its conf.d');
+like($chrony_conf, qr/^sourcedir \/etc\/chrony\/sources\.d$/m, 'and its sources.d');
+
+# And chrony has to accept the result, or the guest has no clock.
+my $parsed = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
+unlike($parsed, qr/(?:error|cannot|invalid)/i, 'chronyd parses the config it was given') or diag $parsed;
+
+# The point of all of the above: a fragment dropped in is actually read.
+my $fragment = '/etc/chrony/conf.d/zzz-provisioner-selftest.conf';
+open(my $fh, '>', $fragment) or die "Could not write $fragment: $!";
+print {$fh} "maxdistance 3.0\n";
+close $fh;
+my $with = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
+unlike($with, qr/(?:error|cannot|invalid)/i, 'and a fragment in conf.d is read without complaint') or diag $with;
+unlink $fragment;

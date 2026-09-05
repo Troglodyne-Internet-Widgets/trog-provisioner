@@ -20,3 +20,14 @@ maxdistance 1.5
 
 # Stop operating as an NTP server (client-only mode)
 port 0
+
+# chrony's own conf.d, which the package ships and this file was overwriting
+# out of existence.  The directories are there on any chrony 4.0 or newer;
+# without these two lines they sit empty and unread, and anything wanting to add
+# a time source or a setting has to edit this generated file -- which the next
+# provision overwrites.
+#
+# Read last on purpose: a fragment is meant to be able to override what is
+# above it.
+confdir /etc/chrony/conf.d
+sourcedir /etc/chrony/sources.d
