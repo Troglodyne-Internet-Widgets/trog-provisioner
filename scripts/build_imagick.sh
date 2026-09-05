@@ -39,7 +39,9 @@ curl -fL --retry 3 --retry-delay 5 \
 cd /tmp/imagick && tar --one-top-level=src --strip-components=1 -xf /tmp/imagick/imagemagick.tar.xz
 cd /tmp/imagick/src
 ./configure --with-perl="$PERL" --with-gslib=yes --with-lzma=yes --with-jxl=yes --with-heic=yes --with-gvc=yes --with-gslib=yes --with-freetype=yes --with-fontconfig=yes --with-djvu=yes --with-zip=yes --with-zstd=yes --with-zlib=yes --with-xml=yes --with-webp=yes --with-tiff=yes --with-png=yes --with-raw=yes --with-pango=yes --with-tcmalloc=yes
-make -j8
+# As many jobs as the guest has processors; it gets two by default, and -j8
+# oversubscribes that fourfold.
+make -j"$(nproc 2>/dev/null || echo 2)"
 make install
 grep -q "/usr/local/lib" /etc/ld.so.conf || echo "/usr/local/lib/" >> /etc/ld.so.conf
 ldconfig

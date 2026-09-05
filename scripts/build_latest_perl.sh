@@ -23,8 +23,13 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$LATEST_TARBALL
     cd src
     ./Configure -des -Dprefix=/opt/perl5/$NICE_PERL_NAME -Duseshrplib
-    make -j8
-    make -j8 install
+    # As many jobs as the guest has processors, not eight regardless.  A guest
+    # gets two by default, so -j8 put four times the work in flight as there
+    # was anything to run it on -- which on a build this size costs time rather
+    # than saving it.
+    JOBS=$(nproc 2>/dev/null || echo 2)
+    make -j"$JOBS"
+    make -j"$JOBS" install
     yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy
 fi
 
