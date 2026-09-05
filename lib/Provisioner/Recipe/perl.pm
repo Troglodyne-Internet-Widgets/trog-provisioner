@@ -35,10 +35,13 @@ sub deps {
     die "Unsupported packager";
 }
 
+
 sub args {
     return (
         type       => 'object',
-        required   => [qw{user}],
+        # user is not required, because enrich fills it in from admin_user and
+        # enrich runs after validation -- a required field cannot be satisfied
+        # by one.  It is always set by the time a template sees it.
         properties => {
             user => { type => 'string' },
         },

@@ -3,6 +3,18 @@ use strict;
 use warnings;
 use Test::More;
 
+# The binary is downloaded rather than packaged, so check it arrived before
+# anything else: the release used to be fetched from the GitHub mirror, which
+# has never published one, and every provision died on a 404 here.
+ok(-x '/usr/local/bin/garage', 'the garage binary is installed and executable');
+
+my $version = `/usr/local/bin/garage --version 2>/dev/null`;
+like($version, qr/\Q[% version %]\E/, 'and is the version this recipe pinned');
+
+# curl writes to .tmp and moves it into place; one left behind means the
+# download half-finished and the guest is running whatever was there before.
+ok(!-e '/usr/local/bin/garage.tmp', 'no half-downloaded binary left behind');
+
 my $status = `systemctl is-active garage 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'garage is running');
@@ -10,5 +22,17 @@ is($status, 'active', 'garage is running');
 my $node_id = `garage node id -q 2>/dev/null`;
 chomp $node_id;
 ok($node_id, 'garage node id is available');
+
+# The layout is what makes a garage node able to store anything.  garage_init.sh
+# fed `layout assign` the whole <id>@<host>:<port> that `node id -q` prints,
+# which garage answers with "0 nodes match", so the node came up healthy with no
+# layout and every bucket operation after it failed.
+my $layout = `garage layout show 2>&1`;
+like($layout, qr/\Q[% zone %]\E/, 'the node is assigned to zone [% zone %]') or diag $layout;
+
+foreach my $bucket (qw{[% buckets.join(' ') %]}) {
+    my $info = `garage bucket info '$bucket' 2>&1`;
+    like($info, qr/Bucket:/, "bucket $bucket exists") or diag $info;
+}
 
 done_testing();

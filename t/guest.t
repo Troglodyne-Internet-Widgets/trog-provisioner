@@ -153,4 +153,28 @@ sub quietly {
     return wantarray ? @result : $result[0];
 }
 
+subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
+    # These are two separate limits on the same wait, and only their
+    # relationship matters.  wait_for_makefile blocks on the at queue for
+    # $SETUP_TIMEOUT; every remote command it uses to do that goes through
+    # Trog::Machine::_unhang, which used to allow ten minutes flat.  The inner
+    # limit won, so SETUP_TIMEOUT did nothing whatever it was set to, and a
+    # guest that was still building was reported as a failed provision.
+    #
+    # Each limit was defensible alone, which is why this survived: the bug is
+    # only visible when the two are considered together.
+    require Trog::Machine;
+
+    my %seconds = (s => 1, m => 60, h => 3600);
+    my ($n, $unit) = $Trog::Guest::SETUP_TIMEOUT =~ m/\A([0-9]+)([smh]?)\z/;
+    ok($n, "SETUP_TIMEOUT parses ($Trog::Guest::SETUP_TIMEOUT)");
+    my $setup = $n * ( $seconds{ $unit || 's' } // 1 );
+
+    # Built the way wait_for_makefile builds it.
+    my $atq = qq{sudo timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
+
+    cmp_ok(Trog::Machine::_hang_limit($atq), '>=', $setup,
+        'the hang detector gives the wait at least as long as the wait asks for');
+};
+
 done_testing;

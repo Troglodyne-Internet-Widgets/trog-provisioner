@@ -1,4 +1,7 @@
 echo "Autorestart"
 [% IF autorestart %]
 mv autorestart_cron /etc/cron.d/[% domain %]-autorestart
+# root-owned, for the same reason as the one above.
+chown root:root /etc/cron.d/[% domain %]-autorestart
+chmod 0644 /etc/cron.d/[% domain %]-autorestart
 [% END -%]

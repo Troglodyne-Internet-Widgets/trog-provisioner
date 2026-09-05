@@ -13,8 +13,16 @@
 [% global_targets.unshift('state') -%]
 
 .PHONY: all
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %] [% state_dir %]/test
-	[% script_dir %]/post_install
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %]
+	[%# The tests run whether or not the deferred work succeeded, and the build
+	    still fails afterwards if it did not.  post_install failing used to stop
+	    make right there, so a guest with one broken postrun task produced no
+	    test output at all -- which is exactly the guest whose test results you
+	    want to read. -%]
+	rm -f /root/.postrun_failed
+	[% script_dir %]/post_install || touch /root/.postrun_failed
+	$(MAKE) --no-print-directory [% state_dir %]/test
+	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
 
 [% state_dir %]/state:
@@ -42,6 +50,9 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	cpanm [% testdeps.join(' ') %]
 	[% END -%]
 
+# Last, and after post_install rather than before it.  Most of what a recipe
+# does to a service it defers -- enable here, start there -- so testing ahead of
+# that asks whether the packaged config works, not whether ours does.
 [% state_dir %]/test:
 	prove -vm
 
@@ -76,11 +87,20 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 
 # Make a self-signed cert FIRST, because everybody and their mama needs a damn cert
 [% state_dir %]/ssl:
+	# The domain itself first, then every alias -- new_config appends www and
+	# mail to each domain's aliases, so they are in there.  This named www and
+	# mail explicitly and then joined the aliases straight onto the end with no
+	# separator, and full_aliases was never passed to this template in the first
+	# place: the certificate came out covering www and mail and not the domain.
 	mkdir -p '/etc/letsencrypt/live/[% domain %]'
-	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:www.[% domain %],DNS:mail.[% domain %][% full_aliases.join(',DNS:') %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
+	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:[% domain %][% FOR alias IN full_aliases %],DNS:[% alias %][% END %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
 	# Setup the link to LE certs
-	ln -s /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
-	ln -s /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
+	# -sf, because these are the two links the letsencrypt fetcher repoints
+	# later: a guest restored from a snapshot and provisioned again already has
+	# them, and a plain ln then fails with "File exists" and takes the ssl
+	# target -- which every other target waits on -- down with it.
+	ln -sf /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
+	ln -sf /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
 	touch $@
 
 # Be explicit about SSH security

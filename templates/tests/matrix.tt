@@ -6,6 +6,66 @@ use Test::More;
 my $status = `systemctl is-active matrix-synapse 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'matrix-synapse is running');
-ok(-f '[% install_dir %]/[% domain %]/homeserver.yaml', 'homeserver.yaml exists');
+ok(-f '/etc/matrix-synapse/homeserver.yaml', 'homeserver.yaml is where synapse reads it');
+
+# Everything template_files generates, checked where the recipe puts it.  This
+# used to copy a matrix.nginx.conf that template_files does not generate, so the
+# target died and took the rest of the build with it -- and then checked for the
+# yaml files somewhere the recipe has never written them.
+ok(-f '/etc/matrix-synapse/log.yaml', 'log.yaml is there too');
+
+# Both are copied into /etc/matrix-synapse, which is where synapse looks.  This
+# checked install_dir/domain for them -- a path the recipe never writes -- and
+# had simply never run this far, because the package install above it had been
+# failing for want of a repository.
+ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhost was installed');
+
+# And something behind it.  The admin interface is downloaded from a GitHub
+# release, and synapse-admin was renamed to ketesa -- the old asset URL is a
+# 404, so the vhost was being served an empty directory.
+ok(-s '[% install_dir %]/admin.matrix.[% domain %]/index.html',
+    'the admin interface was downloaded and extracted');
+ok(-f '[% install_dir %]/[% domain %]/www/matrix.index.html', 'the chat index page was installed');
+
+# The domain's own vhost belongs to nginxproxy, which this recipe requires
+# rather than writing one of its own beside it.
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
+ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
+    'and matrix did not write a competing one');
+
+# The index page lists the channels the recipe was given.  Its loop said chan
+# and its body said channel, so every entry rendered as #@domain.
+my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
+unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
+[% FOREACH chan IN channels %]
+like($index, qr/#\Q[% chan %]\E\@/, 'channel [% chan %] is listed');
+[% END %]
+
+# The packages the recipe asks for.  Nothing fails when one of these does not
+# exist -- the name is simply never installed -- so python3-pillow sat in the
+# list for as long as it did without anybody noticing it is python3-pil here.
+foreach my $pkg (qw{matrix-synapse-py3 python3-pil python3-attr}) {
+    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
+    # variable inside backticks long before dpkg ever sees it.
+    my $installed = `dpkg -s $pkg 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, "$pkg is installed");
+}
+
+# synapse comes from matrix.org, not from Ubuntu.  Both its packages sat in
+# deps -- the list cloud-init installs at first boot, with no such repository
+# configured -- so they were never installed and nothing said so.
+ok(-f '/etc/apt/sources.list.d/matrix-org.list', 'the matrix.org repository is configured');
+ok(-s '/usr/share/keyrings/matrix-org-archive-keyring.gpg', 'and its signing key is installed');
+
+# The admin registration script.  It used to be written by a heredoc in the
+# Makefile, where it could not work: every recipe line runs in its own shell, so
+# the heredoc had no body and the lines meant to be the script were run as
+# commands until one of them was a `for` loop and the build stopped.
+ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is installed');
+my $syntax = `bash -n [% script_dir %]/matrix_register_admin.sh 2>&1`;
+is($syntax, '', 'and is a valid shell script') or diag $syntax;
+
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
 
 done_testing();

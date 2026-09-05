@@ -1,10 +1,21 @@
+[%# The same certificate nginx uses.  The ssl target makes these two links on
+    every guest -- self-signed to begin with -- and the letsencrypt fetcher
+    relinks them when it has a real certificate, so they are correct at every
+    point in a guest's life.  This used to name dehydrated's output directly,
+    which does not exist until letsencrypt has succeeded: on a guest where it
+    had not, slapd refused the whole modify with error 80 and took the build
+    down with it, while the chown and chmod on the same file two lines earlier
+    were written to tolerate its absence. -%]
+[%# No olcTLSCACertificateFile.  The original named the chain.pem dehydrated writes, and
+    on a guest that has never obtained a certificate there is no chain -- only
+    the self-signed pair the ssl target makes, which carries no basicConstraints
+    and is therefore not a CA.  Handing a server certificate to a setting that
+    wants a CA is what slapd was refusing with error 80, and LDAPS does not need
+    it: clients verify against their own trust store. -%]
 dn: cn=config
 changetype: modify
-replace: olcTLSCACertificateFile
-olcTLSCACertificateFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/chain.pem
--
 replace: olcTLSCertificateFile
-olcTLSCertificateFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/fullchain.pem
+olcTLSCertificateFile: /etc/ssl/certs/[% domain %].pem
 -
 replace: olcTLSCertificateKeyFile
-olcTLSCertificateKeyFile: [% install_dir %]/[% domain %]/.letsencrypt/etc-certs/[% domain %]/privkey.pem
+olcTLSCertificateKeyFile: /etc/ssl/private/[% domain %].pem

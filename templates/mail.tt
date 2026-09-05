@@ -107,7 +107,7 @@ postconf -e -- "masquerade_domains=[% domain %][% FOREACH alias IN full_aliases.
 postconf -e -- "smtp_bind_address=[% main_ip %]"
 [% END %]
 # Allow ez-tracing
-postconf -e -- "debugger_command=PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $process_id 2>&1 | logger -p mail.info) & sleep 5" 
+postconf -e -- "debugger_command=PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $$process_id 2>&1 | logger -p mail.info) & sleep 5" 
 # vmailboxen
 postconf -e -- "virtual_mailbox_base=/mail"
 postconf -e -- "virtual_mailbox_domains=[% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %] [% END %]"

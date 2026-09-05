@@ -3,7 +3,41 @@ use strict;
 use warnings;
 use Test::More;
 
-my $perl = `[% install_dir %]/[% domain %]/bin/perl -e 'print 1' 2>/dev/null`;
-is($perl, '1', 'custom perl build is functional');
+my $user = '[% user %]';
+
+# passwd, not install_dir/domain: build_latest_perl.sh symlinks into the home
+# directory of whoever this perl is for, and that is the domain directory only
+# when the domain names a service user.  When it does not, the account is the
+# admin and the home is under /home -- and this test looked in neither place,
+# it looked at a path it assumed.  Same reason nvm's test asks passwd.
+chomp( my $home = `getent passwd $user | cut -d: -f6` );
+ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
+
+# The build itself, before anything that points at it.
+my ($built) = glob('/opt/perl5/*/bin/perl');
+ok($built && -x $built, 'a perl was built under /opt/perl5');
+
+SKIP: {
+    skip 'nothing built under /opt/perl5', 2 unless $built && -x $built;
+
+    # \$^V, escaped: unescaped it is interpolated by the perl running this test
+    # before the shell ever sees it, so both commands below printed the version
+    # of whatever ran the test and compared equal to each other.
+    my $version = `$built -e 'print \$^V' 2>/dev/null`;
+    like($version, qr/^v\d+\.\d+\.\d+$/, "the built perl reports a version ($version)");
+
+    my $system = `/usr/bin/perl -e 'print \$^V' 2>/dev/null`;
+    isnt($version, $system, 'and it is not just the system perl again')
+        or diag "built: $version  system: $system";
+}
+
+# The symlinks the build makes, which is how everything else finds it -- the
+# postrun tasks in tcms and tpsgi call $home/bin/cpanm by name.
+foreach my $tool (qw{perl cpanm prove}) {
+    ok(-e "$home/bin/$tool", "$home/bin/$tool is there for other recipes to use");
+}
+
+my $works = `$home/bin/perl -e 'print 1' 2>/dev/null`;
+is($works, '1', 'and the perl that link points at runs');
 
 done_testing();

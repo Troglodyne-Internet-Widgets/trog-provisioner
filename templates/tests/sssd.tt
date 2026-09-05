@@ -12,4 +12,14 @@ ok(-f '/etc/sssd/sssd.conf', 'sssd config exists');
 my $mode = (stat('/etc/sssd/sssd.conf'))[2];
 is($mode & 0777, 0600, 'sssd.conf has mode 0600');
 
+# Installing sssd is not the same as using it: NSS and PAM have to name it, and
+# that is what pam-auth-update does.  Nothing checked it, so the recipe could
+# look entirely healthy while no login ever consulted sssd.
+my $nsswitch = do { local (@ARGV, $/) = '/etc/nsswitch.conf'; <> } // '';
+like($nsswitch, qr/^passwd:.*\bsss\b/m, 'nsswitch consults sss for passwd') or diag $nsswitch;
+like($nsswitch, qr/^group:.*\bsss\b/m,  'and for group');
+
+my $pam = `grep -rl pam_sss.so /etc/pam.d 2>/dev/null`;
+ok($pam, 'PAM is wired to sss') or diag 'pam-auth-update --enable sss did not take';
+
 done_testing();

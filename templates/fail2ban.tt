@@ -2,4 +2,11 @@ rm /etc/fail2ban/jail.d/[% domain %].conf; /bin/true
 rm /etc/fail2ban/filter.d/[% domain %].conf; /bin/true
 mv jail.cfg   /etc/fail2ban/jail.d/[% domain %].conf
 mv filter.cfg /etc/fail2ban/filter.d/[% domain %].conf
+[%# The jail watches the application log, and fail2ban refuses to start a jail
+    whose log file is not there -- "Have not found any log file for <jail>".
+    This recipe is in the base set, so it lands on guests that will not have
+    written that log yet, or ever.  An empty file matches nothing and the
+    application appends to it when it runs. -%]
+mkdir -p [% install_dir %]/[% domain %]/log
+touch [% install_dir %]/[% domain %]/log/tpsgi.log
 systemctl reload fail2ban

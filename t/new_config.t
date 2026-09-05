@@ -174,4 +174,28 @@ sub _slurp {
     return $content;
 }
 
+subtest 'a recipe that names rate limits depends on ufw for them' => sub {
+    require Provisioner::Recipe::redis;
+    require Provisioner::Recipe::ntp;
+    require Provisioner::Recipe::plexmediaserver;
+
+    my %prov = ( template_dirs => ['templates'], output_dir => '/tmp', target_packager => 'deb' );
+
+    my $redis = 'Provisioner::Recipe::redis'->new(%prov);
+    my %req   = $redis->required_recipes( domain => 'd.test' );
+    ok( $req{ufw}, 'redis requires ufw' );
+    is_deeply( { $req{ufw}->() }, { rate_limits => { 6379 => 512 } }, 'and hands it the port it listens on' );
+
+    # Most recipes listen on nothing, or reach the network through nginx.
+    my $ntp = 'Provisioner::Recipe::ntp'->new(%prov);
+    ok( !( $ntp->required_recipes( domain => 'd.test' ) )[0], 'a recipe with no limits requires nothing for them' );
+
+    # plexmediaserver overrides required_recipes, so it has to carry SUPER's
+    # wiring as well or its limits are silently dropped.
+    my $plex = 'Provisioner::Recipe::plexmediaserver'->new(%prov);
+    my %preq = $plex->required_recipes( domain => 'd.test' );
+    ok( $preq{letsencrypt}, 'plexmediaserver keeps the dependency it declared' );
+    ok( $preq{ufw},         'and gains the one its limits imply' );
+};
+
 done_testing();

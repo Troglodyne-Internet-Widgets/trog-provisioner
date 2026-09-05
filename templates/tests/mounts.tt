@@ -3,13 +3,39 @@ use strict;
 use warnings;
 use Test::More;
 
+# Neither disks nor fuse is required, so a domain can carry this recipe and
+# configure nothing.  Without saying so, this rendered to done_testing() and
+# nothing else -- which Test::More exits 255 on, failing the whole build over a
+# recipe that was asked to do nothing and did it.
+[% IF !disks.size() && !fuse.size() -%]
+plan skip_all => 'no disks or fuse mounts configured for [% domain %]';
+[% END -%]
+
 [% FOREACH mount IN disks %]
 ok(-d '[% mount.mountpoint %]', 'mount point [% mount.mountpoint %] exists');
+my $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted = `findmnt -rn --target '[% mount.mountpoint %]' 2>/dev/null`;
+ok(length $[% mount.mountpoint.replace('[^a-zA-Z0-9]', '_') %]_mounted, '[% mount.mountpoint %] is actually mounted');
 [% END %]
+[%# A virtiofs mount is a systemd unit named for its mountpoint the way systemd
+    escapes it.  mount_virtiofs built that name with a sed that replaced only
+    the first slash, so anything deeper than one level produced a name with a
+    slash still in it, which is not a unit name at all. -%]
 [% FOREACH mount IN fuse %]
 my $[% mount.servicename.replace('-', '_') %]_status = `systemctl --user is-active [% mount.servicename %] 2>/dev/null`;
 chomp $[% mount.servicename.replace('-', '_') %]_status;
 is($[% mount.servicename.replace('-', '_') %]_status, 'active', '[% mount.servicename %] fuse mount is active');
 [% END %]
+
+# fstab keeps its comments and gains one line per mount, however many times the
+# guest has been provisioned.  add_to_fstab used to rewrite the whole file --
+# sorting every entry and dropping every comment -- and would write a line
+# beginning with a space when it could not find the device, which is a broken
+# fstab on a machine that has to boot from it.
+my $fstab = do { local (@ARGV, $/) = '/etc/fstab'; <> } // '';
+unlike($fstab, qr/^[ \t]+\S/m, 'no fstab line begins with whitespace');
+
+my %seen;
+my @dupes = grep { $seen{$_}++ } grep { m/\S/ && !m/^\s*#/ } split m/\n/, $fstab;
+is_deeply(\@dupes, [], 'no fstab entry appears twice') or diag $fstab;
 
 done_testing();

@@ -1,2 +1,4 @@
 local-address=127.0.0.1
 local-port=2500
+# Inside the chroot; the recipe makes /var/spool/powerdns/run/pdns for it.
+socket-dir=/run/pdns

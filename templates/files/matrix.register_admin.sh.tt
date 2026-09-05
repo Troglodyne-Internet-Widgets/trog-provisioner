@@ -1,0 +1,26 @@
+#!/bin/bash
+# Register the admin user once synapse is answering.
+#
+# A file rendered into the payload and installed, not a heredoc in the Makefile.
+# Every line of a make recipe runs in its own shell, so `cat > file <<'EOF'` got
+# no body at all and the lines meant to be the script were run as commands --
+# which is how the build died on
+#   /bin/sh: 1: Syntax error: end of file unexpected (expecting "done")
+# from the `for` loop below.
+
+# Wait for Matrix Synapse to be ready
+for i in $(seq 1 30); do
+    if curl -s http://127.0.0.1:8008/_matrix/client/versions > /dev/null 2>&1; then
+        echo "Matrix Synapse is ready"
+        break
+    fi
+    echo "Waiting for Matrix Synapse to start... ($i/30)"
+    sleep 2
+done
+
+# Register admin user if not exists
+if ! su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] -p [% admin_password %] --admin 2>&1" | grep -q "User ID already taken"; then
+    echo "Admin user registered successfully"
+else
+    echo "Admin user already exists"
+fi

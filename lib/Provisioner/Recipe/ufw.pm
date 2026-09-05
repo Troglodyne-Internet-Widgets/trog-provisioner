@@ -38,10 +38,63 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub enrich {
+    my ($self, %opts) = @_;
+
+    # The hypervisor is always one, whether or not anybody said so: it is what
+    # the guest fetches its payload from, over ssh, repeatedly.
+    my @nets = @{ $opts{admin_networks} // [] };
+    unshift @nets, $opts{hv_ip} if $opts{hv_ip} && !grep { $_ eq $opts{hv_ip} } @nets;
+    $opts{admin_networks} = \@nets;
+
+    return %opts;
+}
+
+sub resolve_conflict {
+    my ( $self, $path, $mine, $theirs ) = @_;
+
+    # Two recipes listening on the same port each name a limit for it, and the
+    # higher one is the safe answer: a limit says where traffic to that port
+    # stops being plausible, and the recipe expecting the most legitimate
+    # traffic is the one that knows.  Taking the lower would let a quiet recipe
+    # throttle a busy one's users, so adding a recipe could break a working one.
+    return $mine > $theirs ? $mine : $theirs
+      if @$path == 2 && $path->[0] eq 'rate_limits';
+
+    # Anything else here is a genuine disagreement, and the base class says so.
+    return $self->SUPER::resolve_conflict( $path, $mine, $theirs );
+}
+
 sub args {
     return (
         type       => 'object',
         properties => {
+            # New connections a second a single source may open to a port
+            # before it is dropped.  ufw's own `limit` is six in thirty seconds,
+            # which is right for ssh and rate limits real visitors off a web
+            # server -- so setup-ufw-rules limits only OpenSSH and these are the
+            # real limits.
+            #
+            # Only ssh is named here, because ssh is the one port every guest
+            # has whether or not any recipe asked for it.  The rest arrive from
+            # the recipes that actually listen, through their rate_limits: see
+            # Provisioner::Recipe::rate_limits.  Setting a port here still wins
+            # if it is higher, which is how an operator raises one.
+            rate_limits => {
+                type    => 'object',
+                default => { 22 => 64 },
+            },
+            # Networks allowed in without ufw's rate limit.  Its limit denies a
+            # source that opens six connections in thirty seconds, and a
+            # provision opens far more than that -- so without an exemption the
+            # provisioner throttles itself out of the guest partway through
+            # building it, and everything after that fails as "connection
+            # refused" on an address that worked a minute earlier.
+            admin_networks => {
+                type    => 'array',
+                items   => { type => 'string' },
+                default => [],
+            },
             port_forwards => {
                 type  => 'array',
                 items => {
@@ -78,7 +131,6 @@ sub template_files {
     my %ret = (
         'ufw.rsyslog.tt' => 'ufw/rsyslog',
         'ufw.http.tt'    => 'ufw/http',
-        'ufw.user.rules.tt' => 'ufw.user.rules',
     );
 
     return %ret unless @recipes;

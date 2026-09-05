@@ -1,6 +1,21 @@
+[%# repo.plex.tv, and the v2 signing key.  This pointed at
+    downloads.plex.tv/repos/deb, which Plex has retired: every path under
+    /repos/ there answers 403, and since a missing key on that bucket answers
+    403 rather than 404, it read as the far end refusing us rather than as a
+    URL that is no longer anything.  The key moved too, and it is a different
+    key -- so reaching the old repository would not have been enough either. -%]
 # Add the official Plex apt repository
-curl -sS https://downloads.plex.tv/plex-keys/PlexSign.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
-echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://downloads.plex.tv/repos/deb public main" > /etc/apt/sources.list.d/plexmediaserver.list
+curl -fsS https://downloads.plex.tv/plex-keys/PlexSign.v2.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
+echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://repo.plex.tv/deb/ public main" > /etc/apt/sources.list.d/plexmediaserver.list
+[%# The Plex repository is checked on its own, before the general update, so that
+    a repository refusing us fails here saying so.  Rolled into the update of
+    everything else it was three lines of apt noise followed by a bare
+    "Error 100" from the install, which names neither the repository nor the
+    reason. -%]
+DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
+    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
+  || { echo "plexmediaserver: repo.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
 DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] plexmediaserver
 # Ensure the plex service user exists (created by package but guard anyway)
@@ -21,24 +36,31 @@ mkdir -p '[% dir %]'
 chown plex:[% admin_user %] '[% dir %]'
 chmod 0750 '[% dir %]'
 [% END %]
-# Configure Plex Preferences.xml with SSL cert and account info
-PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'
-mkdir -p "$PREFS_DIR"
+# Configure Plex Preferences.xml with SSL cert and account info.
+#
+# One logical line, and one line of python.  Make runs each recipe line in its
+# own shell, so PREFS_DIR set on its own line was empty everywhere it was used
+# -- and the preferences file went to /Preferences.xml rather than into Plex's
+# library.  The python was worse: a "-c" string spanning several lines with no
+# continuations, so make handed the shell a quote it never closed.
+[%# Plex has to be stopped while its preferences are edited.  Installing the
+    package starts it, and a running Plex owns that file: it writes its own copy
+    back out, so everything set below was overwritten before the guest had
+    finished provisioning -- the file ended up carrying the MachineIdentifier Plex wrote and
+    none of the certificate or account settings.  It is started again in the
+    postrun tasks at the end of this target. -%]
+systemctl stop plexmediaserver; /bin/true
+PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
+mkdir -p "$$PREFS_DIR"; \
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
 PLEX_USER='[% plex_login_name %]' \
 PLEX_MAIL='[% admin_mail %]' \
-PREFS_PATH="$PREFS_DIR/Preferences.xml" \
-python3 -c "
-import xml.etree.ElementTree as ET, os
-p = os.environ['PREFS_PATH']
-root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences')
-root.set('customCertificatePath', os.environ['PLEX_CERT'])
-root.set('PlexOnlineUsername', os.environ['PLEX_USER'])
-root.set('PlexOnlineMail', os.environ['PLEX_MAIL'])
-ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)
-"
-chown -R plex:[% admin_user %] "$PREFS_DIR"
-chmod 0640 "$PREFS_DIR/Preferences.xml"
+PREFS_PATH="$$PREFS_DIR/Preferences.xml" \
+python3 -c "import xml.etree.ElementTree as ET, os; p = os.environ['PREFS_PATH']; root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences'); root.set('customCertificatePath', os.environ['PLEX_CERT']); root.set('PlexOnlineUsername', os.environ['PLEX_USER']); root.set('PlexOnlineMail', os.environ['PLEX_MAIL']); ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)"; \
+chown -R plex:[% admin_user %] "$$PREFS_DIR"; \
+chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
-[% script_dir %]/queue_postrun_task systemctl start plexmediaserver
+[%# restart, not start: if anything left it running, start is a no-op and Plex
+    goes on using the preferences it had in memory. -%]
+[% script_dir %]/queue_postrun_task systemctl restart plexmediaserver

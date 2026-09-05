@@ -3,6 +3,50 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-f '/etc/cron.d/[% domain %]', 'crontab file exists');
+my $file = '/etc/cron.d/[% domain %]';
+ok(-f $file, 'crontab file exists');
+
+# cron ignores a file in cron.d that is not owned by root or is group or world
+# writable, and says nothing about it.  Installed wrong, everything below would
+# be correct and never run.
+my @st = stat $file;
+is(scalar getpwuid($st[4] // -1), 'root', 'and is owned by root');
+is($st[2] & 022, 0, 'and is not group or world writable');
+
+my $text = do { local (@ARGV, $/) = $file; <> } // '';
+
+like($text, qr/^MAILTO="[^"]+"/m, 'it sets MAILTO, so failures reach somebody');
+like($text, qr/^PATH="[^"]+"/m,   'and a PATH for the jobs to find their commands in');
+
+# Every command the jobs run, looked up in the PATH the file itself declares.
+# These are called by bare name, so a script that is not installed is a job that
+# mails a "command not found" every time it fires and works perfectly otherwise.
+my ($path) = $text =~ m/^PATH="([^"]+)"/m;
+my @dirs = split m/:/, ( $path // '' );
+
+foreach my $line ( split m/\n/, $text ) {
+    next if $line =~ m/^\s*(#|$)/ || $line =~ m/^[A-Z_]+=/;
+
+    # minute hour dom mon dow user command...
+    my @f = split ' ', $line, 7;
+    next unless @f == 7;
+
+    my $cmd = $f[6];
+    $cmd =~ s/^command\s+//;          # a shell builtin, not the program
+    my ($prog) = split ' ', $cmd;
+    next unless defined $prog && length $prog;
+    next if $prog =~ m/^[\[\(]/;
+
+    if ( $prog =~ m{^/} ) {
+        ok(-x $prog, "$prog is there and executable");
+    }
+    else {
+        my $found = grep { -x "$_/$prog" } @dirs;
+        ok($found, "$prog is somewhere on the crontab PATH") or diag $line;
+    }
+}
+
+my $status = `systemctl is-active cronie 2>/dev/null || systemctl is-active cron 2>/dev/null`;
+like($status, qr/active/, 'cron is running');
 
 done_testing();

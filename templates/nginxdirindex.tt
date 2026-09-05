@@ -1,6 +1,10 @@
 # Setup the dirindex vhost
 mv nginxdirindex.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
-systemctl restart nginx
+# Queued for the same reason nginxproxy queues it: nginx is a dependency of this
+# recipe and dependencies run after the thing that dragged them in, so
+# conf.d/global.conf is not there yet.  This vhost happens not to use anything
+# that file defines, which is the only reason restarting here has worked.
+[% script_dir %]/queue_postrun_task systemctl restart nginx
 # Ensure the root directory exists and is browsable by nginx
 mkdir -p [% install_dir %]/[% domain %]; /bin/true
 chown root:www-data [% install_dir %]/[% domain %]

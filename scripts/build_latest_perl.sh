@@ -23,16 +23,31 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$LATEST_TARBALL
     cd src
     ./Configure -des -Dprefix=/opt/perl5/$NICE_PERL_NAME -Duseshrplib
-    make -j8
-    make -j8 install
+    # As many jobs as the guest has processors, not eight regardless.  A guest
+    # gets two by default, so -j8 put four times the work in flight as there
+    # was anything to run it on -- which on a build this size costs time rather
+    # than saving it.
+    JOBS=$(nproc 2>/dev/null || echo 2)
+    make -j"$JOBS"
+    make -j"$JOBS" install
     yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy
 fi
 
 CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
 
-if [ ! -d $CLIENT_HOMEDIR ]; then
-	echo "Can't get client's homedir!";
-	exit 255;
+if [ -z "$CLIENT_HOMEDIR" ]; then
+	echo "build_latest_perl.sh: no such account '$CLIENT'" >&2
+	exit 255
+fi
+
+# Named, because "Can't get client's homedir!" says neither which account nor
+# which directory, and the answer is usually that the account is not the one the
+# domain meant: a service user has the domain directory as its home and that is
+# made by the service_user target, but an account like www-data has /var/www,
+# which only exists if something else created it.
+if [ ! -d "$CLIENT_HOMEDIR" ]; then
+	echo "build_latest_perl.sh: home directory '$CLIENT_HOMEDIR' for '$CLIENT' does not exist" >&2
+	exit 255
 fi
 
 # Build some symlinks to the perl for use by other? setup scripts

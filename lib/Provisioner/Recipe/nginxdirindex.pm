@@ -41,6 +41,13 @@ sub args {
     return (
         properties => {
             ipv6 => { type => 'boolean', default => 1 },
+            # Declared here as well as in the nginx recipe, because each recipe
+            # renders with its own configuration and nothing else: the split in
+            # 5756b44 moved this to nginx and left the templates here using it,
+            # so it has rendered as `backlog=` -- which nginx refuses -- ever
+            # since.  It has to match nginx's, since somaxconn is set from that
+            # and must be at least this.
+            backlog    => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
 }

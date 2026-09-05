@@ -3,7 +3,40 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-d '[% install_dir %]/[% domain %]/[% basedir %]', 'code directory exists');
+my $code = '[% install_dir %]/[% domain %]/[% basedir %]';
+ok(-d $code, 'code directory exists');
 ok(-d '/home/[% admin_user %]/bin', 'admin bin directory exists');
+
+# The admin has to own both, or nothing it runs as that user can write to them.
+foreach my $dir ($code, '/home/[% admin_user %]/bin') {
+    my @st = stat $dir;
+    is(scalar getpwuid($st[4] // -1), '[% admin_user %]', "$dir is owned by the admin");
+}
+
+# The helper the recipe copies in and then calls by absolute path, once per
+# configured repository.  Copied without a mode, it is whatever the payload had.
+ok(-x '/home/[% admin_user %]/bin/repos_for', 'repos_for is installed and executable');
+
+# What it was asked to check out.  A clone that failed leaves the directory
+# there and empty, and the recipe does not stop for it.
+[% FOR repo IN repos_from %]
+[% FOR entity IN repo.repos_for %]
+{
+    opendir(my $dh, $code) or last;
+    my @found = grep { !m/^[.]/ } readdir $dh;
+    closedir $dh;
+    ok(scalar @found, 'repositories were checked out for [% entity %]')
+        or diag "$code is empty";
+}
+[% END -%]
+[% END -%]
+
+# The extra packages the recipe was configured with.
+[% FOR pkg IN extra_pkgs %]
+{
+    my $installed = `dpkg -s [% pkg %] 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, '[% pkg %] is installed');
+}
+[% END -%]
 
 done_testing();

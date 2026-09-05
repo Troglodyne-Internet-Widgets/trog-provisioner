@@ -12,7 +12,12 @@ use parent qw{Provisioner::Recipe};
 
 use Crypt::PRNG();
 use HTTP::Tiny;
-use JSON::PP;
+use Cpanel::JSON::XS();
+
+# Used when the tag list cannot be reached.  It has to be a version that is
+# actually published, because a version that is not is a 404 on the guest
+# halfway through the provision rather than an older garage.
+our $FALLBACK_VERSION = 'v1.0.1';
 
 =head1 Provisioner::Recipe::garage
 
@@ -97,16 +102,26 @@ sub deps {
 }
 
 sub _latest_garage_version {
+
+    # Tags rather than releases: the GitHub repository is a mirror and has never
+    # cut a release, so /releases/latest answers 404 every time and this fell
+    # back to v1.0.1 on every run.
     my $res = HTTP::Tiny->new( timeout => 10 )->get(
-        'https://api.github.com/repos/deuxfleurs-org/garage/releases/latest',
+        'https://api.github.com/repos/deuxfleurs-org/garage/tags',
         { headers => { 'Accept' => 'application/vnd.github+json' } },
     );
     if ( $res->{success} ) {
-        my $data = eval { JSON::PP::decode_json( $res->{content} ) };
-        return $data->{tag_name} if $data && $data->{tag_name};
+        my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
+
+        # Newest first, and only the stable ones: the tag list carries -rc,
+        # -beta and -internal tags we do not want to put on a guest.
+        foreach my $tag ( @{ $tags || [] } ) {
+            next unless ref $tag eq 'HASH' && defined $tag->{name};
+            return $tag->{name} if $tag->{name} =~ m{\Av[0-9]+[.][0-9]+[.][0-9]+\z};
+        }
     }
-    warn "garage: could not fetch latest release version from GitHub, falling back to v1.0.1\n";
-    return 'v1.0.1';
+    warn "garage: could not fetch latest release tag from GitHub, falling back to $FALLBACK_VERSION\n";
+    return $FALLBACK_VERSION;
 }
 
 sub _rpc_secret {
@@ -127,6 +142,12 @@ sub _rpc_secret {
     close $fh;
     chmod 0600, $secret_file;
     return $secret;
+}
+
+sub rate_limits {
+    # S3 and admin, RPC between nodes, and the web endpoint.  These are the
+    # ports templates/files/ufw.garage.tt opens.
+    return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
 }
 
 sub args {

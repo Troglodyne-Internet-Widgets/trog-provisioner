@@ -1,6 +1,6 @@
 server {
-    listen 443 ssl backlog=[% backlog %];
-[% IF ipv6 %]    listen [::]:443 ssl backlog=[% backlog %];
+    listen 443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
+[% IF ipv6 %]    listen [::]:443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
     server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
@@ -21,8 +21,8 @@ server {
 }
 
 server {
-    listen 80 backlog=[% backlog %];
-[% IF ipv6 %]    listen [::]:80 backlog=[% backlog %];
+    listen 80[% IF backlog %] backlog=[% backlog %][% END %];
+[% IF ipv6 %]    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
     server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];

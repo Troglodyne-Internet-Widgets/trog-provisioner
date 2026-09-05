@@ -122,10 +122,9 @@ sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
         return qw{
-          matrix-synapse-py3
           python3-cryptography
           python3-bcrypt
-          python3-pillow
+          python3-pil
           python3-twisted
           python3-yaml
           python3-jsonschema
@@ -139,9 +138,8 @@ sub deps {
           python3-service-identity
           python3-signedjson
           python3-canonicaljson
-          python3-attrs
+          python3-attr
           python3-txacme
-          python3-txredisapi
           python3-matrix-common
           python3-unpaddedbase64
           python3-pymacaroons
@@ -156,7 +154,15 @@ sub args {
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             server_name               => { type => 'string' },
+            # Listed on the guest's index page.  The template used it before
+            # anything declared it, and its loop said chan while its body said
+            # channel, so every suggestion came out as #@domain.
+            channels                  => { type => 'array', items => { type => 'string' }, default => [] },
             admin_user                => { type => 'string', default => 'admin' },
             admin_password            => { type => 'string' },
             smtp_host                 => { type => 'string' },
@@ -177,10 +183,13 @@ sub _seekrit {
     return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 32;
 }
 
+
+
 sub template_files {
     my ($self) = @_;
 
     return (
+        'matrix.register_admin.sh.tt' => 'matrix_register_admin.sh',
         'matrix.homeserver.yaml.tt' => 'homeserver.yaml',
         'matrix.log.yaml.tt'        => 'log.yaml',
         'matrix.admin.nginx.tt'     => 'matrix-admin.nginx.conf',

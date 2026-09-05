@@ -46,6 +46,12 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub rate_limits {
+    # Clients hold connections open rather than opening one per operation, so
+    # even a busy application opens few a second.
+    return ( 6379 => 512 );
+}
+
 sub args {
     return (
         type       => 'object',

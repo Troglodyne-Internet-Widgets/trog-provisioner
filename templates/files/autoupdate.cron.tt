@@ -1,1 +1,5 @@
-0 0 * * * root command apt-get update && apt-get upgrade -y && apt-get autoremove -y &> /var/log/autoupdate.log
+# > file 2>&1, not &>.  cron runs a job with /bin/sh, which is dash here, and
+# dash reads &> as a background & followed by a redirection -- so this whole
+# chain ran detached, wrote nothing to the log, and returned to cron
+# immediately as a success whatever it went on to do.
+0 0 * * * root command apt-get update && apt-get upgrade -y && apt-get autoremove -y > /var/log/autoupdate.log 2>&1

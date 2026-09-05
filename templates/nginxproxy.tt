@@ -1,6 +1,22 @@
 # Setup the domain and its aliases
 mv nginx.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
-systemctl restart nginx
+# Queued, not immediate.  The nginx recipe is a dependency of this one, and a
+# dependency is ordered after the thing that dragged it in -- so at this point
+# conf.d/global.conf is not installed yet, and this vhost's proxy block refers
+# to $connection_upgrade, which that file's map defines.  Restarting here fails
+# on `unknown "connection_upgrade" variable` every time.
+[% script_dir %]/queue_postrun_task systemctl restart nginx
+[%# The document root of every vhost this writes.  nginx does not create a root
+    and does not refuse to start without one -- it serves 404 for everything
+    under it, which looks like an application fault rather than a missing
+    directory.  Only .well_known was being made, so a vhost with a static_dir
+    of its own had a root that did not exist. -%]
+[% FOR vhost IN vhosts.keys().sort() %]
+[% IF !vhosts.$vhost.ssl_redirect %]
+mkdir -p '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir || 'www' %]'
+chown [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir || 'www' %]'
+[% END -%]
+[% END -%]
 # Get ready for ACME
 mkdir -p [% install_dir %]/[% domain %]/www/.well_known; /bin/true
 chown [% user %]:www-data [% install_dir %]/[% domain %]/www/.well_known

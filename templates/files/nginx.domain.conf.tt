@@ -1,30 +1,53 @@
+[%# A unix socket reaches nginx through an upstream, never through proxy_pass
+    directly: nginx refuses a proxy_pass with a URI part inside a named
+    location, and the socket form requires one.  One block per socket, at http
+    level, before any server block that names it. -%]
+[% FOR upstream IN upstreams.keys().sort() %]
+upstream [% upstream %] {
+    server unix:[% upstreams.$upstream %];
+}
+[% END -%]
 [% FOR vhost in vhosts.keys() %]
 [% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
-[% IF !ssl && ssl_redirect %]
+[%# Per vhost, and ahead of ssl: a redirect vhost is a redirect vhost whatever
+    else it says.  This read ssl_redirect from the top level, where callers do
+    not put it -- they set it on the vhost, as deluged does for port 80. -%]
+[% IF vhosts.$vhost.ssl_redirect %]
 server {
-    listen [% vhost %];
+    listen [% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
     [% IF ipv6 %]
-    listen [::]:[% vhost %] backlog=[% backlog %];
+    listen [::]:[% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
     server_tokens off;
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+[%# Space separated, and no www of its own: server_name is a space separated
+    list, so joining with a comma made a server name with a comma stuck to it
+    that matches nothing, and new_config already appends www and mail to
+    the aliases of every domain -- so naming www here as well made nginx report a
+    conflicting server name and ignore the second one. -%]
+    server_name [% domain %] [% full_aliases.join(' ') %];
     return 301 https://$host$request_uri;
 }
 [% ELSE -%]
 [% auth_statics = vhosts.$vhost.auth_statics -%]
 [% auth_uri     = vhosts.$vhost.auth_uri -%]
 [% proxy_uri    = vhosts.$vhost.proxy_uri -%]
-[% static_dir   = vhosts.$vhost.static_dir || install_dir _ '/' _ domain _ '/www' -%]
+[%# Relative: every use below is under install_dir/domain already. -%]
+[% static_dir   = vhosts.$vhost.static_dir || 'www' -%]
 [% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
-    listen [% $vhost %] [% ssl %] backlog=[% backlog %];
+    listen [% $vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% IF ipv6 %]
-    listen [::]:[% vhost %] [% ssl %] backlog=[% backlog %];
+    listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+[%# Space separated, and no www of its own: server_name is a space separated
+    list, so joining with a comma made a server name with a comma stuck to it
+    that matches nothing, and new_config already appends www and mail to
+    the aliases of every domain -- so naming www here as well made nginx report a
+    conflicting server name and ignore the second one. -%]
+    server_name [% domain %] [% full_aliases.join(' ') %];
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;

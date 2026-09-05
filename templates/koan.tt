@@ -43,10 +43,14 @@ done
 
 # Drop in the rendered configs.  All three live inside KOAN_ROOT so
 # python-dotenv + koan's instance/ lookup find them with no fuss.
-install -o koan -g '[% user %]' -m 0640 koan.env             '[% install_dir %]/[% domain %]/koan/.env'
-install -o koan -g '[% user %]' -m 0640 koan.config.yaml     '[% install_dir %]/[% domain %]/koan/instance/config.yaml'
+[%# Owned by the service user, not by a hardcoded koan.  The account is
+    whatever the domain names and is created by the service_user target under
+    that name -- this worked only because the one domain running koan happens
+    to call it koan, and any other would get "install: invalid user". -%]
+install -o '[% user %]' -g '[% user %]' -m 0640 koan.env         '[% install_dir %]/[% domain %]/koan/.env'
+install -o '[% user %]' -g '[% user %]' -m 0640 koan.config.yaml '[% install_dir %]/[% domain %]/koan/instance/config.yaml'
 # Don't overwrite one if we salvaged it from a prior run
-test ! -f '[% install_dir %]/[% domain %]/koan/projects.yaml' && install -o koan -g '[% user %]' -m 0640 koan.projects.yaml   '[% install_dir %]/[% domain %]/koan/projects.yaml'
+test ! -f '[% install_dir %]/[% domain %]/koan/projects.yaml' && install -o '[% user %]' -g '[% user %]' -m 0640 koan.projects.yaml   '[% install_dir %]/[% domain %]/koan/projects.yaml'
 
 # Build the virtualenv as the service user (no shell required for python -m venv).
 # Kept outside KOAN_ROOT so `git reset --hard` doesn't blow it away.

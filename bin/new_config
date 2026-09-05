@@ -592,10 +592,24 @@ sub handle_domain {
             # As such we have to make sure they get rendered last, and progressively add to their data depth-first.
             push(@modules, $required) unless any {$required eq $_ };
             $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
+
+            # Hash::Merge picks a side where two dependants disagree.  The recipe
+            # being depended on is the only thing that knows whether either side
+            # is right, so it gets asked -- and dies if it does not know.
+            if (!Provisioner::Utils::already_required("Provisioner/Recipe/$required.pm")) {
+                require "Provisioner/Recipe/$required.pm" or die "Could not load provisioner recipe $required";
+            }
+            "Provisioner::Recipe::$required"->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
         }
 
         # Merge the configuration provided by all things depending on this.
-        $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $pconf ) if $depmod_conf->{$module};
+        if ( $depmod_conf->{$module} ) {
+            $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $pconf );
+
+            # Same on this side of it: what an operator wrote for this recipe is
+            # held against what the recipes depending on it asked for.
+            $builder->reconcile( $rconf->{$domain}{$module}, $_ ) for ( $depmod_conf->{$module}, $pconf );
+        }
     }
 
     # Deps should be processed after the last thing that dragged them in, and not before.
@@ -715,6 +729,8 @@ sub handle_domain {
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
             modules_ordered  => \@modules_ordered,
+            # The ssl target names each of these in the certificate it makes.
+            full_aliases     => $alias_conf->{$fqdn} // [],
             vars             => \%mf_vars,
             packages         => \@pkgs,
             state_dir        => "/etc/provisioner/state/$fqdn",

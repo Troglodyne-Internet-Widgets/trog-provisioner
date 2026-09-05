@@ -1,4 +1,8 @@
-[Init]
-datepattern=%%Y-%%m-%%dT%%H:%%M:%%SZ
-[Definition]
-failregex=^ \[INFO\]: RequestId [\d\w-]+ From <HOST> \|nobody\| \w+ 4\d{2} http
+[ [% domain %] ]
+enabled = true
+port = http,https
+filter = [% domain %]
+logpath = [% install_dir %]/[% domain %]/log/tpsgi.log
+maxretry = 5
+findtime = 60
+bantime  = 600

@@ -302,20 +302,52 @@ subtest 'ufw rejects malformed port_forwards' => sub {
 };
 
 # ----------------------------------------------------------------
+# ufw: two recipes listening on one port
+# ----------------------------------------------------------------
+subtest 'ufw settles rate limits by taking the higher, and nothing else' => sub {
+    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
+
+    # A limit says where traffic to a port stops being plausible, so the recipe
+    # expecting the most legitimate traffic is the one that knows.  The lower
+    # would let a quiet recipe throttle a busy one's users.
+    my $merged = { rate_limits => { 443 => 500, 6379 => 512 } };
+    $r->reconcile( $merged, { rate_limits => { 443 => 2000 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'the higher limit wins' );
+
+    $r->reconcile( $merged, { rate_limits => { 443 => 100 } } );
+    is( $merged->{rate_limits}{443}, 2000, 'and a lower one does not lower it' );
+
+    is( $merged->{rate_limits}{6379}, 512, 'a port only one recipe named is left alone' );
+
+    # Only rate limits.  Anything else two recipes disagree about here is a
+    # misconfiguration somebody has to settle.
+    like(
+        exception { $r->reconcile( { port_forwards => 'a' }, { port_forwards => 'b' } ) },
+        qr/different things from ufw/,
+        'a field it has no rule for dies, named for the recipe to set it under'
+    );
+};
+
+# ----------------------------------------------------------------
 # cron: MAILFROM is a local part, and the templates append the domain
 # ----------------------------------------------------------------
 subtest 'cron addresses: a local part gets the domain, an address does not' => sub {
-    my $r = 'Provisioner::Recipe::cron'->new(%PROV);
     my $d = $G{domain};
 
-    is(exception { $r->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+    # A fresh recipe per configuration, because that is what new_config builds:
+    # one object per domain, rendered once with the options that domain merged.
+    # validated() memoizes on the object to match, so two configurations through
+    # one object would get the first one's answer twice.
+    my $cron = sub { 'Provisioner::Recipe::cron'->new(%PROV) };
 
-    like($r->render_file('files/cron.root.tt', %G, from => 'cron'),
+    is(exception { $cron->()->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+
+    like($cron->()->render_file('files/cron.root.tt', %G, from => 'cron'),
         qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended');
 
     # Appending to an address gives somebody@example.com@this.domain, which is
     # what the old template did to every value the old schema would accept.
-    like($r->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
+    like($cron->()->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
         qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands');
 };
 
@@ -418,6 +450,125 @@ subtest 'matrix homeserver.yaml includes redis password when redis_password is s
 };
 
 # TODO more stuff with optional fields - probably need to make Provisioner::Recipe insist you enumerate required/optional fields and validate automatically
+
+# Xslate lexes the inside of a directive, comments included, so an apostrophe in
+# a [%# ... %] block opens a string that runs to whatever quote comes next.
+# Everything between is swallowed, and what comes out is a shorter file, or an
+# empty one, with no error anywhere -- a comment reading "every domain's
+# aliases" emptied the whole nginx vhost.
+subtest 'no template comment leaves a quote open' => sub {
+    my @templates;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @templates, $File::Find::name if m/[.]tt\z/ } },
+        $template_dir,
+    );
+    ok(scalar @templates, 'there are templates to check');
+
+    foreach my $tt (sort @templates) {
+        my $body = File::Slurper::read_text($tt);
+        ( my $name = $tt ) =~ s/^\Q$template_dir\E\///;
+
+        # Every [%# ... %] block, which may span lines.
+        while ( $body =~ m/(\[%#.*?%\])/gs ) {
+            my $comment = $1;
+
+            # A comment ends at the first %] there is, so a directive written
+            # inside one closes it early and the rest of the prose becomes part
+            # of the template.  A comment saying `[% user %]` in passing put
+            # ", not by a hardcoded koan.  The account is whatever the" into a
+            # Makefile, where make read it as a command.
+            ok( index( $comment, '[%', 2 ) < 0,
+                "$name: no directive inside a comment" )
+              or diag $comment;
+            foreach my $quote ( q{'}, q{"} ) {
+                my $count = () = $comment =~ m/\Q$quote\E/g;
+                ok( $count % 2 == 0, "$name: a comment closes every $quote it opens" )
+                  or diag $comment;
+            }
+        }
+    }
+};
+
+# A guest test is a template that becomes a Perl script, and nothing checked it
+# was one until it ran on a guest -- at the end of a provision, which is a slow
+# way to find a syntax error.  Test::More also exits 255 when a script makes no
+# assertions at all, so a test that renders to nothing fails the whole build for
+# a recipe that was asked to do nothing.
+subtest 'every guest test renders to a Perl script that says something' => sub {
+    my $xslate = Text::Xslate->new(
+        path     => [$template_dir],
+        syntax   => 'TTerse',
+        module   => [qw{Text::Xslate::Bridge::TT2}],
+        function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+    );
+
+    # Enough of a configuration for any of them to render.  What matters is that
+    # the result is Perl and has assertions in it, not what it would assert.
+    my %vars = (
+        %G,
+        domain      => 'd.test',      install_dir => '/opt/domains',
+        admin_user  => 'doge',        user        => 'svc',
+        script_dir  => '/root/bin',   version     => '1.2.3-4',
+        zone        => 'dc1',         buckets     => ['a'],
+        channels    => ['x'],         disks       => [],
+        fuse        => [],            gogs_admin  => 'git',
+        key_file    => 'key.rsa',     pubkey      => 'ssh-rsa AAAA',
+        admin_email => 'a@b.test',    base_dn     => 'dc=d,dc=test',
+        full_aliases => ['www.d.test'], modules   => ['perl'],
+        vhosts      => {},            upstreams   => {},
+        tcms_dir    => 'tCMS',        basedir     => 'code',
+        port        => 636,           users       => [],
+    );
+
+    my $dir = tempdir(CLEANUP => 1);
+    my @tests;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @tests, $File::Find::name if m/[.]tt\z/ } },
+        "$template_dir/tests",
+    );
+    ok(scalar @tests, 'there are guest tests to check');
+
+    foreach my $tt (sort @tests) {
+        ( my $name = $tt ) =~ s{.*/}{};
+
+        my $rendered = eval { $xslate->render("tests/$name", \%vars) };
+        ok(defined $rendered, "$name renders") or do { diag $@; next };
+
+        # It has to be Perl.
+        my $file = "$dir/" . ( $name =~ s/[.]tt\z/.t/r );
+        File::Slurper::write_text($file, $rendered);
+
+        my ($out, $err) = (q{}, q{});
+        IPC::Run3::run3([$^X, '-c', $file], \undef, \$out, \$err);
+        is($? >> 8, 0, "$name compiles") or diag $err;
+
+        # And it has to assert something, or Test::More exits 255 on it.
+        ok($rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
+            "$name makes at least one assertion or says why it is not");
+    }
+};
+
+# cron runs a job with /bin/sh, which is dash on Ubuntu, and dash reads &> as a
+# background & followed by a redirection.  A cron line written with it runs
+# detached, captures nothing, and reports success to cron the instant it starts
+# -- which is how the nightly apt upgrade and the nightly backup both came to
+# run unlogged and unwatched.
+subtest 'no cron template redirects with &>' => sub {
+    my @crons;
+    File::Find::find(
+        { no_chdir => 1, wanted => sub { push @crons, $File::Find::name if m/cron[^\/]*[.]tt\z/ } },
+        $template_dir,
+    );
+    ok(scalar @crons, 'there are cron templates to check');
+
+    foreach my $tt (sort @crons) {
+        ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
+        foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
+            next if $line =~ m/^\s*#/;      # the comment explaining this rule
+            unlike($line, qr/&>>?/, "$name: no &> in a cron line") or diag $line;
+        }
+    }
+};
 
 Test::NoWarnings::had_no_warnings();
 done_testing();

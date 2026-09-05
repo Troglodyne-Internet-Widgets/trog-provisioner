@@ -1,0 +1,49 @@
+#!/bin/bash
+# Per-service connection rate limits, written into ufw's before.rules.
+#
+# Arguments are PORT=HITS pairs: the number of new connections a single source
+# may open to that port in a second before it is dropped.
+#
+# ufw's own `limit` is six connections in thirty seconds, which is right for ssh
+# and absurd for a web server -- it rate limited real visitors off the site when
+# it was applied to every application profile.  setup-ufw-rules therefore limits
+# only OpenSSH and allows the rest, and the real limits are these.
+#
+# In before.rules with our own chain, not in user.rules: ufw owns user.rules and
+# rewrites it whenever a rule changes, and the ufw-user-limit chains it defines
+# there do not exist yet while before.rules is being read.
+set -eu
+
+RULES=/etc/ufw/before.rules
+BEGIN='# BEGIN trog-provisioner rate limits'
+END='# END trog-provisioner rate limits'
+
+[ -f "$RULES" ] || { echo "setup-ufw-ratelimits: no $RULES" >&2; exit 1; }
+
+# Take out whatever was put there last time, however many times.
+sed -i "\|^$BEGIN\$|,\|^$END\$|d" "$RULES"
+
+if [ "$#" -eq 0 ]; then
+    exit 0
+fi
+
+block="$BEGIN\n"
+for pair in "$@"; do
+    port=${pair%%=*}
+    hits=${pair##*=}
+    echo "Rate limiting port $port at $hits new connections a second"
+    # A separate recent list per port, or they share one another's counts.
+    block="$block-A ufw-before-input -p tcp --dport $port -m conntrack --ctstate NEW -m recent --set --name trog$port\n"
+    block="$block-A ufw-before-input -p tcp --dport $port -m conntrack --ctstate NEW -m recent --update --seconds 1 --hitcount $hits --name trog$port -j DROP\n"
+done
+block="$block$END"
+
+# At the end of the filter table, not the start of it.  These match new
+# connections, and ufw's own rules ahead of them accept loopback and anything
+# already established -- put first, this would count both.
+awk -v b="$block" '
+    /^\*filter/                  { infilter = 1 }
+    infilter && /^COMMIT/        { print b; infilter = 0 }
+                                 { print }
+' "$RULES" > "$RULES.new"
+mv "$RULES.new" "$RULES"

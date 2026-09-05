@@ -2,13 +2,25 @@
 
 #XXX it is VERY VERY BAD that the DOMAINS_D field does NOTHING WHATSOEVER!
 dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --cron
+fetched=$?
 
-# Fix the symlinks to the domain's cert.
-echo "Fixing Symlinks to certs for [% domain %]..."
-rm /etc/ssl/certs/[% domain %].pem
-rm /etc/ssl/private/[% domain %].pem
-ln -s /var/lib/dehydrated/certs/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
-ln -s /var/lib/dehydrated/certs/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
+# Only touch the symlinks if dehydrated actually produced something to point
+# them at.
+#
+# This used to rm the existing pair and relink unconditionally.  When dehydrated
+# fails -- no route to ACME, a rate limit, DNS that is not ready, or a domain
+# that was never going to validate -- that deleted the working self-signed cert
+# the ssl target made and left two dangling symlinks, and nginx will not start
+# without a certificate it can read.  A cert we could not renew is still better
+# than no cert at all.
+live=/var/lib/dehydrated/certs/[% domain %]
+if [ -s "$live/fullchain.pem" ] && [ -s "$live/privkey.pem" ]; then
+    echo "Fixing Symlinks to certs for [% domain %]..."
+    ln -sf "$live/fullchain.pem" /etc/ssl/certs/[% domain %].pem
+    ln -sf "$live/privkey.pem"   /etc/ssl/private/[% domain %].pem
+else
+    echo "dehydrated left no certificate for [% domain %]; keeping the one already in place." >&2
+fi
 
 # Fix ownership so that the admin can schlep certs
 echo "Fixing cert/account ownership...";
@@ -18,7 +30,10 @@ sudo chown -R root:[% admin_user %] /var/lib/dehydrated/certs
 sudo chmod -R 0755 /etc/dehydrated/certs
 sudo chmod -R 0750 /etc/dehydrated/accounts
 sudo chmod -R 0755 /var/lib/dehydrated/certs
-sudo chmod 0770 /etc/dehydrated/certs/[% domain %]/priv*
-sudo chmod 0770 /var/lib/dehydrated/certs/[% domain %]/priv*
+for d in /etc/dehydrated/certs/[% domain %] "$live"; do
+    [ -d "$d" ] || continue
+    sudo find "$d" -maxdepth 1 -name 'priv*' -exec chmod 0770 {} +
+done
 
 echo "Done."
+exit "$fetched"

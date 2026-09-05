@@ -43,10 +43,21 @@ sub args {
             root_pw  => { type => 'string' },
             dumpfile => { type => 'string' },
             # TODO fetch latest mariadb version by default
-            version  => { type => 'string' },
+            # A full release, not a series: archive.mariadb.org publishes a
+            # bintar per release, so "10.11" is a 404 that only shows up as tar
+            # refusing the error page curl saved in its place.
+            version  => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+$' },
+            # The group /opt/mysql is chowned to, so the admin can read it.
+            # The template has always used this and nothing ever declared it,
+            # so it rendered empty -- and an empty word is no word at all to a
+            # shell, so install_mariadb.sh got the version as its $client, the
+            # dump path as its $version, and fetched
+            # archive.mariadb.org/mariadb-/opt/domains/<dom>/dump.sql/...
+            user     => { type => 'string' },
         },
     );
 }
+
 
 sub template_files {
     my ($self) = @_;

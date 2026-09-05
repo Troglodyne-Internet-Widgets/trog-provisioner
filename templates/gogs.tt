@@ -1,7 +1,13 @@
 # Create gogs system user
-id -u [% gogs_admin %] &>/dev/null || useradd -r -s /bin/bash -d [% install_dir %]/git.[% domain %] [% gogs_admin %]
+# >/dev/null 2>&1 rather than &>: dash reads &> as a background & followed by a
+# redirection, so this ran id in the background, succeeded on the empty
+# redirection that was left, and never reached useradd at all.
+id -u [% gogs_admin %] >/dev/null 2>&1 || useradd -r -s /bin/bash -d [% install_dir %]/git.[% domain %] [% gogs_admin %]
 # Create data directories
-mkdir -p [% install_dir %]/git.[% domain %]/{repos,data,log,custom/conf}
+# Spelled out rather than brace-expanded: make runs recipe lines under /bin/sh,
+# which is dash here and does not expand braces.  It made one directory named
+# {repos,data,log,custom/conf} and app.ini then had nowhere to be installed.
+mkdir -p [% install_dir %]/git.[% domain %]/repos [% install_dir %]/git.[% domain %]/data [% install_dir %]/git.[% domain %]/log [% install_dir %]/git.[% domain %]/custom/conf
 # Download and install gogs binary
 INSTALLED_VER=$$(/usr/local/bin/gogs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
 if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
@@ -19,9 +25,10 @@ chown [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]/custo
 # Set ownership on data directories
 chown -R [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]
 chmod -R 0750 [% install_dir %]/git.[% domain %]
-# Deploy nginx vhost
-mkdir -p /etc/nginx/sites-enabled
-install -m 0644 gogs.nginx.conf /etc/nginx/sites-enabled/git.[% domain %].conf
+# No vhost here.  This installed a gogs.nginx.conf that template_files does not
+# generate and never has, so the target died on "cannot stat" and took the rest
+# of the build with it.  The vhost belongs to nginxproxy, which this recipe
+# requires and configures to proxy to gogs on port 3000.
 # Deploy systemd service
 install -m 0644 gogs.service /etc/systemd/system/gogs.service
 systemctl daemon-reload

@@ -9,7 +9,7 @@ MAILFROM="[% from %]"
 0,10,20,30,40,50 * * * * root command gather_sar.sh
 
 # Security scans
-0    0 * * *  root command rkhunter --update &>/dev/null
+0    0 * * *  root command rkhunter --update >/dev/null 2>&1
 5    0 * * *  root command rkhunter --rwo --nomow -l /root/rkhunter.log --check
 */5  * * * *  root command segfaults.sh
 */5  * * * *  root command escalations.sh [% admin_user %]

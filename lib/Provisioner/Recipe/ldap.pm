@@ -72,18 +72,37 @@ sub enrich {
     my ( $self, %opts ) = @_;
 
     # Derive base_dn from domain: example.com -> dc=example,dc=com
+    #
+    # split(/[.]/) and not split('.'): the first argument to split is a pattern,
+    # and '.' as a pattern matches every character -- so this produced no parts
+    # at all and an empty base_dn for any domain that did not set one.
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
-        my @parts = split( '.', $domain );
+        my @parts = split( /[.]/, $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
+
+    # slapd derives its real base DN from the domain debconf is given, so that
+    # has to be the domain base_dn describes rather than the guest hostname.
+    # Configured separately they drift apart, and then the seed cannot bind:
+    # "ldap_bind: Invalid credentials (49)", swallowed by the /bin/true after
+    # it, leaving a directory with nothing in it.
+    ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
+    $opts{ldap_domain} =~ tr/,/./;
+
     return %opts;
 }
 
+# ssl-cert is here for its group, not for a certificate: it owns
+# /etc/ssl/private, which Ubuntu ships 0710 root:ssl-cert, and slapd has to be
+# in that group to read the key through it.  Without the package the group does
+# not exist at all and `adduser openldap ssl-cert` fails outright.
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
-        return qw{slapd ldap-utils libldap-2.5-0};
+        # libldap2, not libldap-2.5-0: the soname is in the package name on
+        # some distros and not on Ubuntu 24.04, where the archive has libldap2.
+        return qw{slapd ldap-utils libldap2 ssl-cert};
     }
     die "Unsupported packager";
 }
@@ -91,6 +110,7 @@ sub deps {
 sub template_files {
     my ($self) = @_;
     return (
+        'ldap.apparmor.tt' => 'slapd.apparmor',
         'ldap.slapd.debconf.tt' => 'slapd.debconf',
         'ldap.seed.ldif.tt'     => 'seed.ldif',
         'ldap.tls.ldif.tt'      => 'tls.ldif',

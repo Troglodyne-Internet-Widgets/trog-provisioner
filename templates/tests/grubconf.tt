@@ -3,6 +3,32 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-f '/etc/default/grub.d/00-grub.conf', 'grub config fragment exists');
+my $frag = '/etc/default/grub.d/00-grub.conf';
+ok(-f $frag, 'grub config fragment exists');
+
+my $text = do { local (@ARGV, $/) = $frag; <> } // '';
+ok(length $text, 'and is not empty') or BAIL_OUT('nothing to check against');
+
+# What the fragment sets has to have reached the generated configuration.  The
+# recipe drops the file in and runs update-grub, and a fragment that update-grub
+# never read is a boot setting that looks configured and is not -- which for
+# something like net.ifnames or ipv6.disable is only discovered on the next
+# reboot, when the interface names change or do not.
+my $cfg = do { local (@ARGV, $/) = '/boot/grub/grub.cfg'; <> } // '';
+ok(length $cfg, 'the generated grub.cfg is readable');
+
+foreach my $line ( split m/\n/, $text ) {
+    next if $line =~ m/^\s*(#|$)/;
+    my ($key, $value) = $line =~ m/^\s*([A-Z_]+)\s*=\s*"?([^"]*)"?\s*$/ or next;
+    next unless length $value;
+
+    # GRUB_CMDLINE_LINUX and friends end up on the kernel command line.
+    if ( $key =~ m/^GRUB_CMDLINE/ ) {
+        foreach my $opt ( split ' ', $value ) {
+            like($cfg, qr/\Q$opt\E/, "$opt reached the kernel command line")
+                or diag "set in $frag as $key, absent from grub.cfg";
+        }
+    }
+}
 
 done_testing();

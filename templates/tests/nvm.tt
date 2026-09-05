@@ -4,23 +4,63 @@ use warnings;
 use Test::More;
 
 my $user = '[% user %]';
-my $home = "/home/$user";
+
+# passwd, not /home/$user: a service user's home is the domain directory and the
+# admin user's is under /home, and this recipe is used with both.  Guessing is
+# how the recipe itself came to write its .bashrc lines somewhere nothing read
+# them.
+chomp(my $home = `getent passwd $user | cut -d: -f6`);
+ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
 ok(-d "$home/.nvm", 'nvm directory exists');
 
-# We are running as root, so we will use system node here (if it exists)
-my $system_node = qx{which node};
-my $user_node = qx{sudo -u $user /bin/bash -c which node};
-
-isnt($user_node, $system_node, "User not configured to use system node, but nvm node");
+# And a profile that loads it.  nvm's installer appends its loader to a shell
+# profile and refuses when it finds none -- "Profile not found. Tried ~/.bashrc
+# ..." -- which is the case for a service user, whose home useradd makes with no
+# skeleton in it.  nvm and node both installed; no shell ever loaded either.
+my $bashrc = do { local (@ARGV, $/) = "$home/.bashrc"; <> } // '';
+like($bashrc, qr/NVM_DIR/, "$home/.bashrc loads nvm") or diag $bashrc;
+like($bashrc, qr{nvm\.sh}, 'by sourcing nvm.sh');
 
 # .bashrc bails early when non-interactive, so -i is needed to get the nvm bits.
-my $node_path = qx{sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null};
-my $npm_root  = qx{sudo -u $user /bin/bash -ic 'npm root -g' 2>/dev/null};
-chomp( $node_path, $npm_root );
+# It is needed for every one of these, not just some: `bash -c which node`
+# passes `which` as the script and `node` as its $0, so that ran which with no
+# arguments and compared two empty strings to each other.
+chomp( my $system_node = `command -v node 2>/dev/null` );
+chomp( my $user_node   = `sudo -u $user /bin/bash -ic 'command -v node' 2>/dev/null` );
+
+ok( $user_node, "$user has a node on PATH" ) or diag 'nvm did not reach the login shell';
+isnt( $user_node, $system_node, 'and it is nvm\'s rather than the system one' );
+
+# Running it, not just finding it.  The builds nvm downloads link against
+# libatomic.so.1, which Ubuntu does not install by default, so node was present
+# and unrunnable -- and `command -v node` answers with a path either way, so
+# every check above this one passed on a node that could not start.
+my $node_version = `sudo -u $user /bin/bash -ic 'node --version' 2>&1`;
+like( $node_version, qr/^v\d+\.\d+\.\d+$/m, 'and it runs' ) or diag $node_version;
+
+chomp( my $node_path = `sudo -u $user /bin/bash -ic 'echo \$NODE_PATH' 2>/dev/null` );
+
+# Both streams, and the path picked out of them.  An interactive shell writes
+# job-control complaints and whatever the profile prints to stderr, and npm adds
+# notices of its own -- and this discarded all of it, so when the comparison
+# below failed the only thing it could say was that one side was empty.
+my $npm_raw = `sudo -u $user /bin/bash -ic 'npm root -g' 2>&1`;
+my ($npm_root) = grep { m{^/} } split m/\n/, ( $npm_raw // '' );
+$npm_root //= '';
 
 like( $node_path, qr{/lib/node_modules$}, 'NODE_PATH set to a global node_modules dir' );
 ok( -d $node_path, "NODE_PATH ($node_path) exists" );
-is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' );
+SKIP: {
+    # npm redacts anything shaped like a classic auth token in its output, and a
+    # classic npm token is a UUID -- so on a guest whose domain is a UUID, the
+    # path comes back with *** where the domain was.  That is npm being careful,
+    # not the recipe being wrong, and there is nothing left to compare.
+    skip 'npm redacted the path (the domain is shaped like an npm token)', 1
+        if $npm_root =~ m/\Q***\E/;
+
+    is( $node_path, $npm_root, 'NODE_PATH matches the active node install global module root' )
+        or diag "npm root -g said:\n$npm_raw";
+}
 
 done_testing();

@@ -714,4 +714,24 @@ subtest 'sync_domain_dir is sync_dir on the domain directory' => sub {
     is_deeply(\@synced, ['/opt/domains/vm.example.com'], 'derived from domain_dir');
 };
 
+subtest 'a command that names its own timeout is not called hung before it' => sub {
+    # _unhang exists to notice a command that should return promptly and does
+    # not.  wait_for_makefile's is `sudo timeout 180m bash -c 'until atq is
+    # empty ...'`, which is meant to block for as long as the guest takes to
+    # build -- and the ten minute alarm killed it regardless, so every setup
+    # timeout above ten minutes was decorative and a guest still compiling came
+    # back as a failure.  Only the remote path reaches _unhang, which is why
+    # this never appeared against a local hypervisor.
+    is(Trog::Machine::_hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,
+        'an ordinary command gets the default');
+
+    is(Trog::Machine::_hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),
+        180 * 60 + 60, 'one that says 180m gets 180m and a minute');
+
+    is(Trog::Machine::_hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,
+        'and one shorter than the default does not lower it');
+
+    is(Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default');
+};
+
 done_testing;

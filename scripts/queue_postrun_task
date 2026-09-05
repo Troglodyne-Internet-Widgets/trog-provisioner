@@ -1,4 +1,7 @@
 #!/bin/bash
 
-# Queue up stuff to get run by atd after we are done
-echo $* >> /root/post_install.sh
+# Queue up stuff to get run by post_install once the makefile is done.
+#
+# "$*" rather than $*: a task is one line, and unquoted it would be split and
+# glob-expanded on the way in.
+echo "$*" >> /root/post_install.sh

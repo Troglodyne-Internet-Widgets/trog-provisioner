@@ -7,4 +7,52 @@ my $ufw_status = `ufw status 2>/dev/null | head -1`;
 chomp $ufw_status;
 like($ufw_status, qr/active/i, 'ufw is active');
 
+# ufw's limit denies a source that opens six connections in thirty seconds, and
+# a provision opens far more than that.  Without an exemption the provisioner
+# throttles itself out of the guest it is building, and every step after that
+# fails as "connection refused" on an address that worked a minute earlier.
+my $rules = `ufw status verbose 2>/dev/null`;
+like($rules, qr/OpenSSH/, 'ssh is allowed at all') or diag $rules;
+
+[% FOREACH net IN admin_networks %]
+like($rules, qr{\Q[% net %]\E}, 'ssh from [% net %] is not rate limited');
+[% END %]
+
+# ufw's limit is six connections in thirty seconds.  That is the right setting
+# for ssh and the wrong one for anything a browser talks to -- one page load
+# opens more than six -- and it was applied to every application profile there
+# was, so a site rate limited its own visitors off itself.
+foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/null`) {
+    $web =~ s/^\s+|\s+$//g;
+    next unless length $web;
+    unlike($rules, qr/^\s*\Q$web\E\s+LIMIT/mi, "$web is not rate limited");
+}
+
+# The real rate limits.  ufw's own `limit` is six connections in thirty seconds
+# -- right for ssh, and it rate limited real visitors off the site when it was
+# applied to every application profile -- so setup-ufw-rules limits only OpenSSH
+# and these carry the actual numbers.  They were rendered into a
+# ufw.user.rules that nothing installed, and could not have been: ufw owns
+# user.rules and rewrites it whenever a rule changes.
+my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
+
+[% FOR port IN rate_limits.keys().sort() %]
+like($before, qr/--dport [% port %] .*--hitcount [% rate_limits.$port %]\b/,
+    'port [% port %] is rate limited at [% rate_limits.$port %] a second') or diag $before;
+[% END -%]
+
+# Once, however many times this guest has been provisioned.
+my $blocks = () = $before =~ m/^# BEGIN trog-provisioner rate limits$/gm;
+is($blocks, 1, 'the rate limit block appears exactly once');
+
+# And after the rules that accept loopback and established traffic, or it would
+# be counting both.
+my ($lo) = $before =~ m/\A(.*?)-A ufw-before-input -i lo/s;
+unlike($lo // '', qr/BEGIN trog-provisioner rate limits/,
+    'and comes after the loopback accept, not before it');
+
+# iptables has to accept the file, which is the question ufw restarting answers.
+my $active = `ufw status 2>/dev/null`;
+like($active, qr/Status:\s*active/, 'ufw is still active after the edit') or diag $active;
+
 done_testing();

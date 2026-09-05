@@ -16,4 +16,18 @@ if ($pg_hba && -f $pg_hba) {
     like($hba_content, qr/host all all 127\.0\.0\.1\/32 md5/, 'local TCP md5 auth configured');
 }
 
+# The version-matched packages.  PG_VERSION is a shell expansion in a make
+# recipe, and make ate the $ -- so this asked apt for `postgresql-client-`,
+# which is how apt spells "remove that package".  Nothing installed, nothing
+# complained, and the only clue was a line in the log saying it was not
+# installed so it was not removed.
+my $ver = `pg_config --version 2>/dev/null` || `psql --version 2>/dev/null`;
+my ($major) = $ver =~ m/(\d+)/;
+ok($major, 'postgres reports a version') or diag "got: $ver";
+
+foreach my $pkg (map { "$_$major" } qw{postgresql- postgresql-client- postgresql-server-dev-}) {
+    my $installed = `dpkg -s $pkg 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, "$pkg is installed");
+}
+
 done_testing();

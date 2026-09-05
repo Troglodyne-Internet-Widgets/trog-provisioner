@@ -17,4 +17,86 @@ ok($ldaps, 'LDAPS port 636 is listening');
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
 like($search, qr/dn:\s*[% base_dn %]/i, 'base DN is searchable');
 
+# A package name that does not exist in the archive is not an error anywhere:
+# it is simply never installed.  libldap-2.5-0 was in this list, and on Ubuntu
+# 24.04 the archive has libldap2.
+foreach my $pkg (qw{slapd ldap-utils libldap2}) {
+    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
+    # variable inside backticks long before dpkg ever sees it.
+    my $installed = `dpkg -s $pkg 2>/dev/null`;
+    like($installed, qr/Status: install ok installed/, "$pkg is installed");
+}
+
+# LDAPS, against the certificate every guest has.  The TLS modify used to name
+# dehydrated's output directly, which does not exist until letsencrypt has
+# succeeded -- so on a fresh guest slapd refused it with error 80 and the build
+# stopped there.
+# Unfolded first: LDIF wraps at 78 columns and continues with a leading space,
+# so a path this long arrives split across two lines and matches nothing.
+my $tls = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCertificateFile 2>/dev/null`;
+$tls =~ s/\n //g;
+like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
+    'slapd is configured with the certificate the ssl target links') or diag $tls;
+
+ok(-e '/etc/ssl/certs/[% domain %].pem',    'and that certificate is there');
+
+# No CA file is configured: on a fresh guest the only certificate is the
+# self-signed pair the ssl target makes, which carries no basicConstraints and
+# is not a CA -- and slapd refuses a server certificate offered as one.
+my $ca = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCACertificateFile 2>/dev/null`;
+$ca =~ s/\n //g;
+unlike($ca, qr{olcTLSCACertificateFile:\s*/etc/ssl/certs/}, 'the server certificate is not offered as a CA')
+    or diag $ca;
+ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
+
+# slapd has to be able to read the key, which it does as the openldap group.
+my @stat = stat('/etc/ssl/private/[% domain %].pem');
+is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
+
+# AppArmor is what actually decides whether slapd may open the key.  It confines
+# the executable rather than the account, and resolves the symlink out of
+# /etc/ssl into /etc/letsencrypt before deciding -- so checking the file as the
+# openldap user says nothing about it.  Four correct permission fixes went in
+# ahead of this one and none of them was the reason.
+ok(-s '/etc/apparmor.d/local/usr.sbin.slapd', 'the AppArmor override for slapd is installed');
+my $aa = do { local (@ARGV, $/) = '/etc/apparmor.d/local/usr.sbin.slapd'; <> } // '';
+like($aa, qr{/etc/letsencrypt/live/\*\* r}, 'and lets slapd read the certificate directory');
+
+# Nothing denied since boot, which is the only place this failure is recorded.
+my $denials = `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -ac slapd`;
+chomp $denials;
+is($denials + 0, 0, 'and AppArmor has denied slapd nothing') or diag `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -a slapd | tail -3`;
+
+# Owning the file is not the same as reaching it: /etc/ssl/private is
+# 0710 root:ssl-cert, so openldap has to be in that group to traverse it.  When
+# it could not, the TLS modify failed with error 80 and said nothing about why.
+# The group that makes /etc/ssl/private traversable at all.  It comes from the
+# ssl-cert package, and without that package it does not exist -- `adduser
+# openldap ssl-cert` then fails with "The group `ssl-cert' does not exist" and
+# takes the target with it.
+my $groups = `id -nG openldap 2>/dev/null`;
+like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $groups;
+
+# And the running slapd is in it too.  Group membership applies to a process
+# started after the change, so a slapd restarted before joining the group is one
+# that still cannot read the key -- the same error 80, from a process whose
+# account has the right group and whose process does not.
+my ($pid) = `systemctl show -p MainPID --value slapd 2>/dev/null` =~ m/(\d+)/;
+SKIP: {
+    skip 'slapd is not running', 1 unless $pid;
+    my $procgroups = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
+    my ($gids) = $procgroups =~ m/^Groups:\s*(.*)$/m;
+    my $sslcert = getgrnam('ssl-cert');
+    ok(defined $sslcert && defined $gids && grep({ $_ == $sslcert } split ' ', $gids),
+        'and so is the running slapd process') or diag "slapd groups: $gids";
+}
+
+foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
+    my $rc = system("sudo -u openldap test -r '$f'");
+    is($rc, 0, "openldap can read $f");
+}
+
+my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
+like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
+
 done_testing();

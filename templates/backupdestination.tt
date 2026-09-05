@@ -1,2 +1,7 @@
 mv backupdestination.cron /etc/cron.d/[% domain %]-backups
+# root-owned, or cron ignores it: a file moved out of the payload keeps the
+# transfer user as its owner, and cron applies owner restrictions to cron.d.
+# The backup schedule was installed and never read.
+chown root:root /etc/cron.d/[% domain %]-backups
+chmod 0644 /etc/cron.d/[% domain %]-backups
 chmod 0600 "[% install_dir %]/[% domain %]/[% key_file %]"

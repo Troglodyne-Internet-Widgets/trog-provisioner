@@ -13,4 +13,17 @@ is($web, 'active', 'deluge-web is running');
 
 ok(-d '[% install_dir %]/[% domain %]/torrents', 'torrent storage directory exists');
 
+# Everything this recipe puts in place, checked where it was put.  The recipe
+# used to move a deluged_nginx.conf that template_files never generated, so the
+# target died partway and left the rest of this undone.
+ok(-f '/var/lib/deluged/config/core.conf', 'the core config was installed');
+ok(-f '/etc/ufw/applications.d/deluged',   'and the ufw application profile');
+
+# The web UI is served through nginxproxy, which this recipe requires rather
+# than writing a vhost of its own.  A second vhost here would be one this recipe
+# invented, and there was one.
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the vhost');
+ok(!-e '/etc/nginx/sites-enabled/files.[% domain %].conf',
+    'and deluged did not write a competing one');
+
 done_testing();

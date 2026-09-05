@@ -159,6 +159,197 @@ reliable — use it only as the fallback.
 **`--restore` puts the domain and the disk back.** Unnecessary before a
 teardown, which is the usual ending, but do it on anything you intend to keep.
 
+## When a provision "times out"
+
+A timeout is a claim about elapsed time, and there are layers of them in play on
+every remote provision. Establish *which* one fired before concluding anything
+about the guest.
+
+**Check the elapsed time against the setting.** If a provision fails after a
+suspiciously round interval -- ten minutes, exactly -- and raising the setting
+changes nothing, the number you are configuring is not the number doing the
+killing, and you need to look for the actually relevant timeout.
+
+**Beware guards that only one path reaches.** `_unhang` returns early when the
+hypervisor is local, so this never appeared against a local one. A guard on one
+path means two code paths with different behaviour and only one of them getting
+daily use.
+
+**Do not conclude "it is just slow" from a truncated measurement.**
+Such a conclusion requires evidence, and a performance analysis with specific
+testable recommendations.  If such interventions fall short of fixing code that
+is timing out, something is still wrong - you can't just conclude "it's slow".
+
+## What tends to be wrong
+
+Every one of these came out of provisioning a recipe and reading what happened.
+Most are cheap to check statically, before spending ten minutes on a guest.
+
+**A recipe fragment is a Makefile, not a shell script.** Everything a recipe's
+`.tt` emits becomes a make recipe line, and that has three consequences that
+have each broken a recipe here:
+
+- Make eats a single `$` before the shell sees it, so shell expansions need
+  `$$`. `postgres` asked apt for `postgresql-client-` this way, and a trailing
+  dash is how apt spells *remove*.
+- Each line runs in its own shell, so a variable set on one line is gone by the
+  next. That is the same postgres bug, and `plexmediaserver` wrote its
+  preferences file to `/Preferences.xml` for it.
+- A command spanning lines needs `\` on every one of them, or make hands the
+  shell an unterminated quote. `plexmediaserver` had a seven-line `python3 -c "`.
+- A heredoc cannot work at all. `cat > file <<'EOF'` is one line, so it gets no
+  body, and the lines meant to be the file are handed to sh one at a time as
+  commands -- `matrix` wrote its register-admin script this way and died on
+  `Syntax error: end of file unexpected (expecting "done")` from the `for` loop
+  inside it. Render a script as a `template_files` entry and install it, which
+  is what every other generated script here does.
+- Make runs recipe lines under `/bin/sh`, which is **dash** on Ubuntu, not bash.
+  `gogs` made its four directories in one brace expansion and got a single
+  directory named `{repos,data,log,custom/conf}`, and wrote `id -u gogs
+  &>/dev/null || useradd` — dash reads `&>` as a background `&` and a
+  redirection, so the guard always succeeded and the `useradd` was dead code.
+  Do not "fix" this by setting `SHELL := /bin/bash`: `makefile.tt` relies on
+  dash's `echo` expanding `\n` when it writes sendmail's config.
+
+**A template that moves a file `template_files` does not generate** kills the
+target and everything after it. `deluged` and `matrix` both moved an nginx vhost
+that no template produced — in both cases the vhost was `nginxproxy`'s, which
+they already require.
+
+**A template that uses a variable the recipe does not declare** renders it
+empty. `nginxproxy` emitted `listen 443 ssl backlog=;`, which nginx refuses
+outright.
+
+**An apostrophe inside a `[%# ... %]` comment empties the rest of the file.**
+Xslate lexes the inside of a directive, comments included, so `every domain's
+aliases` opens a string that runs to the next quote and swallows everything
+between — silently, with no error and a zero exit. The nginx vhost came out two
+bytes long. `t/recipes.t` checks every template comment closes its quotes; run
+it after editing one.
+
+**A default on a field that is only true sometimes is wrong for everything
+else.** `nginxproxy` defaulted `ssl` to true for every vhost, so a port 80 vhost
+that asked for neither `ssl` nor `ssl_redirect` came out `listen 80 ssl` and
+spoke TLS on the plain HTTP port. Its neighbour `ssl_redirect` had the default
+removed for exactly this reason and the comment saying so was sitting right
+above it.
+
+**A URL nothing checks is a URL nobody has fetched.** Fetch every literal URL in
+the templates and scripts; it takes a minute and it found three. `garage` took
+its version and its binary from a GitHub mirror that has never cut a release.
+`plexmediaserver` pointed at a host Plex retired, with a signing key that has
+since been replaced by a different one -- so reaching the old host would not
+have been enough either. And matrix's admin interface was still being fetched
+under its old name: `synapse-admin` is `ketesa` now, and the release asset went
+with it, so the admin vhost was serving an empty directory.
+
+**A 403 is not always a refusal.** Every path under plex's old `/repos/` prefix
+answered `403 AccessDenied` -- over IPv4 and IPv6 -- which read as the far end
+blocking us. It was S3, which answers 403 rather than 404 for a key that is not
+there when listing is denied. Ask for a path you know is missing on the same
+host before concluding anything: `plex-keys/definitely-not-there` also 403'd,
+while the real key returned 200.
+
+**A file `template_files` generates that nothing installs** is dead, and it is
+one of two things: something that should be installed and is not, or a limb to
+prune. Decide which; do not leave it rendering. `ufw` rendered its real rate
+limits into a `ufw.user.rules` nothing installed -- and nothing could, because
+ufw owns that file and rewrites it whenever a rule changes. They belong in
+`before.rules`, which is where they are now.
+
+**A package name that is not in the archive is never installed and never
+complained about.** Three were wrong here. Ask the archive, do not assume.
+
+**A `required` field that nothing fills in is the operator's to supply.**
+enrich runs after validation, so it cannot satisfy one -- but that is the
+mechanism, not the lesson. A field marked required with nothing downstream
+filling it in is saying that the person configuring the domain is meant to
+provide it. Do not quietly default it in `enrich` to make a recipe build;
+**ask**. `perl` required a user, and the answer there happened to be the admin
+user, but that was a decision to put to somebody rather than one to infer.
+
+(`user` itself now defaults to `admin_user` in `Provisioner::Recipe::validate`,
+so no recipe needs an `enrich` for it. A production host generally names a
+service user; leaving it unset gives you the admin, which is what you want
+while developing and testing.)
+
+**`enrich` must not write into what it was handed.** `validate` deep-copies its
+options first, so enrich may rewrite freely -- but only because of that copy.
+`%opts` is otherwise a shallow copy and everything nested in it belongs to the
+caller: `nginxproxy` rewriting a vhost's `proxy_uri` in place was visible to
+every later render, and the validator coercing `ssl => 1` into a
+`JSON::PP::Boolean` was enough to make the same configuration look like a
+different one. `render_file` goes through the memoized `validated`, so enrich
+runs once per recipe rather than once per template file.
+
+**Find out where the service logs before guessing at it.** Three services here
+send their reasons somewhere systemd never sees, so `systemctl` reports
+`status=1/FAILURE` and the journal has nothing at any level: `gogs` with
+`[log] MODE = file`, `pdns` through syslog into `/var/log/pdns.log`, and
+`fail2ban` into its own log. The collector fetches those two files and reads the
+journal at warning level; when a service still says nothing, change it to log to
+the console rather than keep guessing -- setting gogs to `console, file` turned a
+week of theories into one line naming the wrong config key.
+
+**An assertion that cannot fail is a bug, and so is one that cannot pass.** Both
+happened here in a day. `nvm` compared two empty strings; the perl test compared
+a value with itself, because `$^V` inside backticks is interpolated by the perl
+running the test rather than the one being asked. And `postfix check` warns on a
+perfectly healthy system, so demanding empty output would have failed every
+guest. Write the assertion, then ask what would make it fail, and what would
+make it pass.
+
+**Ask nginx, do not reason about nginx.** `systemctl restart nginx` failing tells
+you nothing; the guest's `nginx -t` tells you exactly what is wrong. Three
+recipes were blocked on one line — a socket in a `proxy_pass` inside
+`location @default`, which nginx refuses because a named location may not carry
+a URI part, while the socket form requires one. No amount of reading the
+template would have produced that sentence. Keep a guest and ask it.
+
+**A guest test that renders no assertions fails the build**, because Test::More
+exits 255 on none. `t/recipes.t` renders all of them, compiles each, and checks
+each asserts something -- run it after touching one, rather than finding out at
+the end of a provision.
+
+**A binary that is there is not a binary that runs.** `command -v node` answers
+with a path whether or not the thing at the end of it can start, and the node
+builds nvm downloads link against a library Ubuntu does not install -- so node
+was present, unrunnable, and passing every check in its own test. Run the thing:
+`--version` is enough, and it is the difference between checking a filename and
+checking a program.
+
+**Ask whether the test would notice.** Several here passed while the thing they
+named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
+before the config it checks was applied, and asking `systemctl is-active nginx`
+says nothing about a config file nginx has not read yet — `nginx -t` does.
+
+## Two things about the harness
+
+**Never edit a script while it is running.** bash reads a script incrementally,
+by byte offset, so editing one mid-run resumes it somewhere meaningless. Editing
+`run_one` while a sweep was using it killed the run that was in flight and left
+an orphaned guest behind. Copy the harness to a new directory for the next batch
+instead.
+
+**Give the scratch guest a service user.** Every real domain sets one in its
+`_global`, and several recipes only line up when it exists: the `service_user`
+target gives that account the domain directory as its home, and
+`build_latest_perl.sh` symlinks `cpanm` into that home -- which is exactly where
+`tcms` and `tpsgi` look for it. Without one, the sweep falls back to the admin
+user, whose home is under `/home`, and those paths disagree for reasons that
+have nothing to do with the recipe.
+
+**A dummy value that is no longer needed is worse than none.** `perl.user` was
+pinned to `www-data` back when the field was required. It is filled in from the
+service user now, so the dummy did nothing but override it -- and `/var/www`
+does not exist on a guest with no web server, so the perl build stopped and
+`imagemagick`, which builds against that perl, had nothing to build against.
+Re-read the dummies when the schema they were written for changes.
+
+**Do not edit templates while a sweep is provisioning either** — the run picks up
+whatever is on disk when it generates its configuration, so a batch started
+before a change and finished after it tells you nothing you can attribute.
+
 ## When you find something, pin it with the guest's own test
 
 Every recipe ships a test that runs **on the guest**, at the end of the

@@ -8,4 +8,25 @@ chomp $status;
 is($status, 'active', 'redis-server is running');
 ok(-f '/etc/redis/redis.conf', 'redis config exists');
 
+# Running and answering are different questions, and only the second one is any
+# use to the things that depend on redis -- matrix asks for it by name.
+my $ping = `redis-cli ping 2>&1`;
+like($ping, qr/PONG/, 'redis answers') or diag $ping;
+
+# On the socket or address it was configured with, rather than wherever it
+# happened to come up.
+my $conf = do { local (@ARGV, $/) = '/etc/redis/redis.conf'; <> } // '';
+my ($port) = $conf =~ m/^port\s+(\d+)/m;
+SKIP: {
+    skip 'no port in redis.conf', 1 unless defined $port;
+    if ($port == 0) {
+        my ($sock) = $conf =~ m/^unixsocket\s+(\S+)/m;
+        ok($sock && -S $sock, 'the configured unix socket is there') or diag $conf;
+    }
+    else {
+        my $listening = `ss -lnt 2>/dev/null`;
+        like($listening, qr/:$port\b/, "redis is listening on port $port") or diag $listening;
+    }
+}
+
 done_testing();

@@ -6,6 +6,23 @@ use Test::More;
 my $status = `systemctl is-active auditd 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'auditd is running');
-ok(-f '/etc/audit/rules.d/[% domain %].rules', 'audit rules file exists');
+
+my $file = '/etc/audit/rules.d/[% domain %].rules';
+ok(-f $file, 'audit rules file exists');
+
+my $text = do { local (@ARGV, $/) = $file; <> } // '';
+
+# The key the rule is filed under.  This is built from the recipe's user, which
+# nothing declared for a long time -- so the rule was written `-k -watch`, with
+# a key beginning with a dash, which is not a key auditctl will take.
+like($text, qr/-k\s+\S+-watch/, 'the rule has a key') or diag $text;
+unlike($text, qr/-k\s+-/,       'and the key does not begin with a dash') or diag $text;
+
+# Loaded, not merely written.  Rules go in through augenrules when the service
+# starts, and one it will not parse is one it drops -- leaving a rules file on
+# disk that audits nothing.
+my $loaded = `auditctl -l 2>&1`;
+like($loaded, qr{\Q[% install_dir %]/[% domain %]\E}, 'the domain rule is loaded')
+    or diag $loaded;
 
 done_testing();

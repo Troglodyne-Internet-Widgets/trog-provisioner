@@ -46,6 +46,13 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub rate_limits {
+    # A resolver asks over UDP and asks often; a recursor in front of this one
+    # asks on behalf of everybody behind it.  Set high enough that only a
+    # reflection flood reaches it.
+    return ( 53 => 4096 );
+}
+
 sub args {
     return (
         type       => 'object',
@@ -53,6 +60,21 @@ sub args {
         properties => {
             api_key       => { type => 'string' },
             extra_records => { type => 'string' },
+            # Which repo.powerdns.com train to install from.  This asked for
+            # auth-master, which is the development branch: guests came up with
+            # 5.1.0~alpha1+master.380 on them.  A release train, so an upgrade
+            # is a decision rather than whatever landed on master that morning.
+            # auth-51, not auth-49: the API is configured on a unix socket --
+            # deliberately, there is a lexicon patch in this repository for
+            # talking to one -- and webserver-address only accepts a socket path
+            # from PowerDNS 5.0.0 onwards.  On 4.9 pdns_server refuses to start
+            # at all, with "Unable to convert presentation address".  This
+            # recipe used auth-master, which was 5.1.0~alpha and had the
+            # feature; auth-51 is the released form of the same thing.
+            repo_branch   => { type => 'string', default => 'auth-51',
+                               pattern => '^auth-[0-9]+$' },
+            # Zones to forward to another resolver, as zone => address.
+            forward_zones => { type => 'object', default => {} },
         },
     );
 }

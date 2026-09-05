@@ -32,13 +32,23 @@ sub deps {
     die "Unsupported packager";
 }
 
+# The bindings are built against the perl the perl recipe installs under
+# /opt/perl5.  Nothing said so, so on a guest that did not happen to have one
+# build_imagick.sh ran everything against "/opt/perl5//bin/perl".
+sub required_recipes {
+    return ( perl => sub { () } );
+}
+
 sub args {
     return (
         type       => 'object',
         required   => [qw{version}],
         properties => {
             # TODO default to the latest imagemagick version available on github releases
-            version => { type => 'string' },
+            # A full release including the patch number, which is how the
+            # archive names its tarballs: "7.1.0" is a 404, and without -f curl
+            # saved the error page for tar to fall over.
+            version => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+-[0-9]+$' },
         },
     );
 }

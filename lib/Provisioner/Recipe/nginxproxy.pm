@@ -91,6 +91,10 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            # The account that owns this domain's files.  Every template using
+            # it did so bare, and nothing declared it, so it rendered empty --
+            # `chown -R :group`, which quietly changes only the group.
+            user     => { type => 'string' },
             vhosts     => {
                 type => 'object',
                 description => "vhost vars by port number",
@@ -103,12 +107,27 @@ sub args {
                         auth_uri       => { type => 'string' },
                         public_dir     => { type => 'string' },
                         nocache_prefix => { type => 'string' },
-                        ssl_redirect   => { type => 'boolean', default => 1 },
-                        ssl            => { type => 'boolean', default => 1 },
+                        # No default: a vhost is either the redirect or the
+                        # thing redirected to, and defaulting both this and ssl
+                        # to true made every vhost claim to be both.
+                        ssl_redirect   => { type => 'boolean' },
+                        # No default here either, for the same reason: this one
+                        # was left defaulting to true, so a port 80 vhost that
+                        # asked for neither -- tcms and tpsgi both do -- came
+                        # out as `listen 80 ssl` and spoke TLS on the plain HTTP
+                        # port.  Every recipe that wants it says so.
+                        ssl            => { type => 'boolean' },
                     },
                 },
             },
             ipv6       => { type => 'boolean', default => 1 },
+            # Declared here as well as in the nginx recipe, because each recipe
+            # renders with its own configuration and nothing else: the split in
+            # 5756b44 moved this to nginx and left the templates here using it,
+            # so it has rendered as `backlog=` -- which nginx refuses -- ever
+            # since.  It has to match nginx's, since somaxconn is set from that
+            # and must be at least this.
+            backlog    => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
 }
@@ -116,18 +135,58 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
+    # The flat interface: proxy_uri and static_dir at the top level, which the
+    # SYNOPSIS says generates 80 redirecting to HTTPS and 443 proxying.  Nothing
+    # was generating them, and the whole template is a loop over vhosts -- so a
+    # domain configured this way rendered an empty vhost file and served
+    # nothing.  Both domains using it in production are configured this way.
+    if ( !$opts{vhosts} && ( $opts{proxy_uri} || $opts{static_dir} ) ) {
+        my $ipv6 = $opts{ipv6} // 1;
+        $opts{vhosts} = {
+            80  => { ssl_redirect => 1, ipv6 => $ipv6 },
+            443 => {
+                ssl  => 1,
+                ipv6 => $ipv6,
+                ( $opts{proxy_uri}  ? ( proxy_uri  => $opts{proxy_uri} )  : () ),
+                ( $opts{static_dir} ? ( static_dir => $opts{static_dir} ) : () ),
+            },
+        };
+    }
+
     if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
-        # Nested vhosts interface: transform proxy_uri paths where needed.
+        # A proxy_uri that is not a URL is a unix socket, and those go through
+        # an upstream block rather than into proxy_pass directly.
+        #
+        # There is no spelling of a socket that works inline here.  nginx wants
+        # http://unix:<path>:<uri>, the socket path terminated by a colon with
+        # the URI after it -- and it refuses a proxy_pass carrying a URI part
+        # inside a named location, which is exactly where this is used:
+        #
+        #   "proxy_pass" cannot have URI part in location given by regular
+        #   expression, or inside named location, or inside "if" statement
+        #
+        # Leaving the colon off instead gets "no closing ":" in unix domain
+        # socket".  An upstream has no URI part at all, so neither applies.
+        my %upstreams;
         foreach my $key ( keys %{ $opts{vhosts} } ) {
             next unless $key =~ m/\d+/;
             my $vopts = $opts{vhosts}{$key};
             next if $vopts->{ssl_redirect};
+
             my $uri = $vopts->{proxy_uri};
             die "Must set proxy_uri in [nginxproxy] section" if !$uri;
-            # let's make sure the proxy_uri accepts either a file or an actual uri
-            $vopts->{proxy_uri} = "http://unix:/$opts{install_dir}/$opts{domain}/$uri"
-                if $uri && $uri !~ m/^http/;
+            next if $uri =~ m/^http/;
+
+            # Named for the socket, so that two vhosts sharing one -- 80 and 443
+            # both proxying to the same app, which is the usual arrangement --
+            # declare one upstream between them rather than two of the same.
+            my $socket = "$opts{install_dir}/$opts{domain}/$uri";
+            ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
+
+            $upstreams{$name}   = $socket;
+            $vopts->{proxy_uri} = "http://$name";
         }
+        $opts{upstreams} = \%upstreams;
     }
 
     return %opts;

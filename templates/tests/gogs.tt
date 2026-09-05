@@ -8,4 +8,49 @@ chomp $status;
 is($status, 'active', 'gogs is running');
 ok(-f '[% install_dir %]/git.[% domain %]/custom/conf/app.ini', 'gogs config exists');
 
+# These four are made in one brace expansion, which is bash and not POSIX sh.
+# Make ran recipe lines under /bin/sh -- dash, here -- until the Makefile said
+# otherwise, and dash made one directory named after the whole brace list, so
+# none of these existed and app.ini had nowhere to be installed.
+foreach my $dir (qw{repos data log custom/conf}) {
+    ok(-d "[% install_dir %]/git.[% domain %]/$dir", "the $dir directory was created");
+}
+ok(!-d '[% install_dir %]/git.[% domain %]/{repos,data,log,custom/conf}',
+    'and none was created with the braces taken literally');
+
+# The account gogs runs as.  Its useradd sat behind an `id -u ... &>/dev/null ||`
+# guard, and dash reads &> as a background & -- so the guard always succeeded
+# and the account was never created on a guest that did not already have one.
+my $passwd = `getent passwd [% gogs_admin %] 2>/dev/null`;
+ok($passwd, 'the [% gogs_admin %] account exists');
+like($passwd, qr{:\Q[% install_dir %]/git.[% domain %]\E:}, 'with the home directory the recipe asked for');
+
+# The vhost belongs to nginxproxy, which this recipe requires and points at
+# gogs on port 3000.  gogs used to install one of its own from a template that
+# does not exist, which killed the target outright.
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
+ok(!-e '/etc/nginx/sites-enabled/git.[% domain %].conf',
+    'and gogs did not write a competing one');
+
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
+
+# The database it was actually configured with.  gogs renamed this key from
+# DB_TYPE to TYPE and ignores the one it does not know, so it fell back to its
+# postgres defaults and died on every start -- while app.ini said sqlite3 and
+# the journal said only "status=1/FAILURE".
+my $ini = do { local (@ARGV, $/) = '[% install_dir %]/git.[% domain %]/custom/conf/app.ini'; <> } // '';
+like($ini, qr/^TYPE\s*=\s*sqlite3/m, 'the database type is set with the key gogs reads');
+unlike($ini, qr/^DB_TYPE\s*=/m, 'and not with the one it ignores');
+
+# console as well as file, so a gogs that will not start says why where systemd
+# can see it.
+like($ini, qr/^MODE\s*=\s*console/m, 'gogs logs to the console as well as its own file');
+
+ok(-s '[% install_dir %]/git.[% domain %]/data/gogs.db', 'the sqlite database was created');
+
+my $port = `ss -lntp 2>/dev/null | grep -c ':3000 '`;
+chomp $port;
+ok($port >= 1, 'gogs is listening on port 3000');
+
 done_testing();

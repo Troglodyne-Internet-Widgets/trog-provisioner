@@ -10,4 +10,23 @@ is($status, 'active', 'koan service is running');
 ok(-d '[% install_dir %]/[% domain %]/koan', 'koan repo directory exists');
 ok(-d '[% install_dir %]/[% domain %]/.venv', 'python virtualenv exists');
 
+# root, group the service user, mode 0640 -- which is what the recipe sets these
+# to at the end and what the comment at the top of it describes: the bot reads
+# its secrets, and does not get to rewrite them.
+#
+# They are installed with -o [% user %] first.  That used to be a hardcoded
+# `-o koan`, which is the account name only because the one domain running this
+# recipe happens to use it; any other got "install: invalid user 'koan'" and
+# lost the target there.
+foreach my $file (
+    '[% install_dir %]/[% domain %]/koan/.env',
+    '[% install_dir %]/[% domain %]/koan/instance/config.yaml',
+) {
+    next unless -e $file;
+    my @st = stat $file;
+    is(scalar getpwuid($st[4]), 'root',      "$file is owned by root");
+    is(scalar getgrgid($st[5]), '[% user %]', "and group [% user %]");
+    is($st[2] & 07777, 0640,                 "and mode 0640");
+}
+
 done_testing();

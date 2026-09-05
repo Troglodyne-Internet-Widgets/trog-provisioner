@@ -20,7 +20,7 @@ use File::Slurper();
 use IPC::Run3();
 use File::Slurper::Temp();
 use YAML::XS();
-use JSON::PP();
+use Cpanel::JSON::XS();
 use List::Util qw{any uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage qw{pod2usage};
@@ -824,6 +824,9 @@ sub mongle_cloud_init {
     inject_admin_key($config->param('admin_user'), $domain, $userdefs, $pubkey);
 
     #TODO Figure out apt-secure with the mirror
+    # The name of YAML::XS's boolean mode, not a choice of JSON module:
+    # it takes "JSON::PP" or "boolean" and nothing else.  Both it and
+    # Cpanel::JSON::XS::true below give the same JSON::PP::Boolean objects.
     $YAML::XS::Boolean = "JSON::PP";
     my $clown_config = {
         runcmd => [
@@ -870,32 +873,32 @@ APT {
                 path        => "/root/.ssh/id_rsa",
                 owner       => "root:root",
                 permissions => '0600',
-                defer       => $JSON::PP::true,
+                defer       => Cpanel::JSON::XS::true(),
             },
             {
                 content     => File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub"),
                 path        => "/root/.ssh/id_rsa.pub",
                 owner       => "root:root",
                 permissions => '0600',
-                defer       => $JSON::PP::true,
+                defer       => Cpanel::JSON::XS::true(),
             },
             {
                 content     => File::Slurper::read_text("$domain_dir/$domain/setup.sh"),
                 path        => "/root/setup.sh",
                 owner       => "root:root",
                 permissions => "0775",
-                defer       => $JSON::PP::true,
+                defer       => Cpanel::JSON::XS::true(),
             },
             {
                 content     => "http://$hv_ip/ubuntu\tpriority:1\nhttp://archive.ubuntu.com/ubuntu\tpriority:2\nhttp://security.ubuntu.com/ubuntu\tpriority:3\n",
                 path        => "/etc/apt/mirrorlist",
                 permissions => "0644",
                 owner       => "root:root",
-                defer       => $JSON::PP::false,
+                defer       => Cpanel::JSON::XS::false(),
             },
         ],
         rsyslog => {
-            install_rsyslog => $JSON::PP::true,
+            install_rsyslog => Cpanel::JSON::XS::true(),
             config_dir => '/etc/rsyslog.d',
             configs => [{
                 filename => '10-ship_logs_to_hv.conf',

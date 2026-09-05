@@ -1,1 +1,7 @@
 mv autoupdate_cron /etc/cron.d/autoupdate
+# root-owned, or cron will not read it.  A file moved out of the payload keeps
+# the ownership it had there, which is the transfer user -- and cron applies
+# owner and mode restrictions to everything in cron.d unless it was started with
+# -p, so the job was installed, correct, and never run.
+chown root:root /etc/cron.d/autoupdate
+chmod 0644 /etc/cron.d/autoupdate

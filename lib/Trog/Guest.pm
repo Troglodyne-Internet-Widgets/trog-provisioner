@@ -57,7 +57,15 @@ is what to call this guest in messages.
 
 # How long to wait for things a guest does exactly once, on first boot.
 our $BOOT_TIMEOUT = 300;
-our $SETUP_TIMEOUT = '30m';
+
+# The whole Makefile runs inside this one, not just the waiting: the first wait
+# is on the at queue, and the job sits there for as long as the build takes.
+# The longest of them is a domain that builds perl from source and installs
+# ninety-odd distributions after it, which takes about twenty minutes.
+#
+# Trog::Machine::_unhang has to allow at least this long, or it decides a guest
+# that is still building has hung.
+our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
 sub new {
     my ($class, %opts) = @_;

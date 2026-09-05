@@ -11,6 +11,7 @@ use re '/aa';
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
+use Clone qw{clone};
 use Scalar::Util();
 
 use JSON::Validator::Schema::Troglodyne;
@@ -138,6 +139,114 @@ This is configured by setting the sub value.
 sub required_recipes {
     my ($self, %opts) = @_;
 
+    my %limits = $self->rate_limits(%opts);
+    return () unless %limits;
+
+    # A recipe that names limits is a recipe that listens, and something has to
+    # apply them.  Saying so here is what makes the dependency explicit rather
+    # than ufw knowing the name of every recipe that might be installed.
+    return ( ufw => sub { return ( rate_limits => \%limits ) } );
+}
+
+=head3 $merged = $recipe->reconcile($merged, $incoming)
+
+Settle what two dependants disagreed about.
+
+A recipe that several others depend on is configured once, out of whatever each
+of them asked for.  Where two of them ask for the same field and want different
+things, merging picks a side -- silently, and by an ordering nobody chose.  This
+walks the two structures and hands every such collision to C<resolve_conflict>,
+writing back what it decides.
+
+Structure is somebody else's job: this only looks at fields whose values are
+plain scalars in both, so nested hashes are followed into and arrays are left to
+the merge.  Call it with the merged result and the contribution that has just
+arrived; folding it over each contribution in turn reaches the same answer as
+considering them all at once.
+
+=cut
+
+sub reconcile {
+    my ( $self, $merged, $incoming ) = @_;
+    return $merged unless ref $merged eq 'HASH' && ref $incoming eq 'HASH';
+    return $self->_reconcile_into( $merged, $incoming, [] );
+}
+
+sub _reconcile_into {
+    my ( $self, $merged, $incoming, $path ) = @_;
+
+    foreach my $field ( sort keys %$incoming ) {
+        my $theirs = $incoming->{$field};
+        my $mine   = $merged->{$field};
+
+        if ( ref $theirs eq 'HASH' && ref $mine eq 'HASH' ) {
+            $self->_reconcile_into( $mine, $theirs, [ @$path, $field ] );
+            next;
+        }
+
+        # Whatever the merge left is already one of the two, so a field only one
+        # of them named needs nothing done to it.
+        next if !defined $theirs || !defined $mine;
+        next if ref $theirs || ref $mine;
+        next if $theirs eq $mine;
+
+        $merged->{$field} = $self->resolve_conflict( [ @$path, $field ], $mine, $theirs );
+    }
+
+    return $merged;
+}
+
+=head3 $value = $recipe->resolve_conflict($path, $mine, $theirs)
+
+Which of two values a pair of dependants asked for this recipe to use.
+
+C<$path> is the field they disagreed about, as an arrayref of keys from the top
+of the recipe's configuration.
+
+B<Dies by default>, naming the field and both values.  Nothing here can know
+which of two configurations somebody meant, and quietly taking one is how a
+guest ends up built to a configuration nobody wrote.  Overriding this is for the
+cases where the recipe genuinely does know -- see C<Provisioner::Recipe::ufw>,
+where two recipes listening on one port both get the higher of their limits --
+and for those the override should say why it is safe.
+
+=cut
+
+sub resolve_conflict {
+    my ( $self, $path, $mine, $theirs ) = @_;
+
+    my $recipe = Scalar::Util::blessed($self) || $self;
+    $recipe =~ s/\AProvisioner::Recipe:://;
+    my $field = join( '.', @$path );
+
+    die <<"CONFLICT";
+Two recipes want different things from $recipe: $field is '$mine' to one of them and '$theirs' to another.
+Nothing here can tell which you meant, so set $field explicitly under $recipe for this domain.
+CONFLICT
+}
+
+=head3 %limits = $recipe->rate_limits(%opts)
+
+The ports this recipe listens on, and the new connections a second from a single
+source each should take before further ones are dropped.
+
+Empty by default: most recipes listen on nothing, or reach the network through
+something that does -- an application behind C<nginxproxy> is covered by
+C<nginx>, not by itself.  A recipe that overrides this gets C<ufw> added to its
+C<required_recipes> and its limits merged into that recipe's, which is where
+they are turned into firewall rules.
+
+The numbers are a threshold for abuse rather than a capacity plan: they want to
+sit well above what a busy legitimate source does, since anything below that
+throttles real users.  Note that this is called before validation, so read
+C<%opts> with the same defaults the schema declares.
+
+Where two recipes name a limit for the same port, the B<higher> is used -- see
+C<merge_rate_limits> in C<bin/new_config>.
+
+=cut
+
+sub rate_limits {
     return ();
 }
 
@@ -145,11 +254,24 @@ sub required_recipes {
 
 Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
 
+C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
+to get one.  On a production host you generally want to set it: the service user
+owns the domain's files and is what the application runs as.  When developing and
+testing it is useful to have the admin and the service user be the same account,
+and that is what leaving it unset gives you.
+
 =cut
 
 sub validate {
     my ($self, %opts) = @_;
     my %args = $self->args();
+
+    # On a copy, all the way down.  %opts is a shallow copy, so everything
+    # nested in it belongs to the caller -- and both the coercion below and any
+    # enrich write through to it.  The validator turning a vhost's `ssl => 1`
+    # into a JSON::PP::Boolean was enough to make the same configuration look
+    # like a different one on the next render.
+    %opts = %{ clone( \%opts ) };
 
     forget_undefs(\%opts, \%args);
 
@@ -168,6 +290,8 @@ sub validate {
     $validator->coerce({ %{ $validator->coerce }, defaults => 1 });
     my @errors = $validator->validate(\%opts, \%args);
     die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
+
+    $opts{user} //= $opts{admin_user};
 
     return $self->enrich(%opts);
 }
@@ -269,11 +393,6 @@ sub makefile_vars {
 }
 
 # Global parameter validation
-my $validate = sub {
-    my %params = @_;
-    return %params;
-};
-
 =head3 @tests = $recipe->tests()
 
 Array of (templated) tests to run on the remote when finished provisioning.
@@ -353,16 +472,43 @@ Render specified template file.
 
 sub render_file {
     my ( $self, $file ) = ( shift, shift );
-    my %vars = $self->validate(
-
-        # Sane defaults
-        $self->vars(),
-
-        # Config overrides
-        @_,
-    );
-    %vars = $validate->(%vars);
+    my %vars = $self->validated( $self->vars(), @_ );
     return $self->{tt}->render( $file, \%vars );
+}
+
+=head3 %vars = $recipe->validated(%opts)
+
+C<validate>, B<memoized> for the life of the recipe object.
+
+A recipe renders its fragment and then every file in C<template_files>, and each
+of those was a fresh C<validate> and so a fresh C<enrich>.  Anything enrich
+rewrote in place, the next call saw already rewritten.
+
+B<One recipe object is one domain's worth of one recipe>, and the options are
+whatever that domain merged for it.  C<bin/new_config> builds a recipe once per
+domain and renders it once -- C<lastuniq> keeps a module from appearing twice in
+a domain's list, and a dependency pulled in by several recipes accumulates their
+options and is rendered once at the end.  So the first answer is the only answer
+there is, and rendering the fragment, each C<template_files> entry and each test
+asks for it again rather than recomputing it.
+
+Calling this on one object with B<different> options therefore gives you the
+first set's answer, and is a bug in the caller rather than a case handled here.
+Where a test needs two configurations, it wants two objects, the same as
+C<new_config> would build.
+
+The memo is on the object rather than in a C<state> variable because that is
+where its lifetime belongs.  C<state> in a named sub is one variable for the
+sub, not one per object, so it would outlive the object it describes: a recipe
+built fresh with a configuration that ought to be rejected would be answered
+from the last one that validated, and the die would never happen.
+
+=cut
+
+sub validated {
+    my ( $self, %opts ) = @_;
+    $self->{_validated} //= { $self->validate(%opts) };
+    return %{ $self->{_validated} };
 }
 
 =head3 %vars = vars()

@@ -11,4 +11,81 @@ my $recursor = `systemctl is-active pdns-recursor 2>/dev/null`;
 chomp $recursor;
 is($recursor, 'active', 'pdns-recursor is running');
 
+# The release train the recipe asked for.  This used to install from
+# auth-master, PowerDNS's development branch, so guests ended up running
+# 5.1.0~alpha1+master.380 -- whatever had landed on master that morning.
+my $version = `pdns_server --version 2>&1`;
+unlike($version, qr/alpha|beta|rc\d|master/i, 'pdns is a release, not a development build')
+    or diag $version;
+
+# And new enough for the API socket.  webserver-address takes a unix socket path
+# only from 5.0.0; on 4.9 pdns_server will not start at all, saying "Unable to
+# convert presentation address" -- to its own log, which is not the journal.
+my ($major) = $version =~ m/(\d+)\.\d+\.\d+/;
+ok($major && $major >= 5, "pdns is 5.x or newer, which the socket API needs (got $major)")
+    or diag $version;
+
+# Chrooted, with every path it opens named relative to that root.  The unit was
+# given a bare --chroot, which takes a directory and had none, so pdns_server
+# exited before logging anywhere.
+my $exec = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
+like($exec, qr{--chroot=/var/spool/powerdns\b}, 'pdns chroots into its spool directory')
+    or diag $exec;
+
+my $domain_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/sqlite.conf'; <> } // '';
+like($domain_conf, qr{^gsqlite3-database=/zones\.db$}m,
+    'the database is named relative to the chroot') or diag $domain_conf;
+
+# And it is where that resolves to from outside.
+ok(-s '/var/spool/powerdns/zones.db', 'which is /var/spool/powerdns/zones.db on the host');
+
+# The socket itself, which is what lexicon talks to.
+my $api = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/api.conf'; <> } // '';
+my ($sock) = $api =~ m/^webserver-address=(\S+)/m;
+SKIP: {
+    skip 'the API is not on a unix socket', 1 unless $sock && $sock =~ m{^/};
+    # Named inside the chroot, so it appears under the spool from out here.
+    my $onhost = $sock =~ m{^/var/spool/powerdns/} ? $sock : "/var/spool/powerdns$sock";
+    ok(-S $onhost, "the API socket is at $onhost") or diag $api;
+}
+
+my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';
+my $zones_file    = '/etc/powerdns/forward-zones';
+my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
+
+# Zones go in forward-zones-file, one per line, rather than into a fragment in
+# recursor.d.  The fragment said `forward-zones+=<domain>=...` and the recursor
+# refused the whole file, every time: += wants a plain forward-zones to append
+# to, and giving it one in recursor.conf ahead of include-dir did not help --
+# the documentation offers += for the main configuration and says nothing about
+# included files.
+like($recursor_conf, qr{^forward-zones-file=\Q$zones_file\E}m,
+    'the recursor is pointed at a forward zones file') or diag $recursor_conf;
+ok(-f $zones_file, 'and that file exists');
+
+like($zones, qr/^\Q[% domain %]\E=127\.0\.0\.1:2500$/m,
+    'this domain forwards to the authoritative server on 2500') or diag $zones;
+
+# One line per zone, however many times this has been provisioned.
+my %seen;
+my @dupes = grep { $seen{$_}++ } grep { m/\S/ } split m/\n/, $zones;
+is_deeply(\@dupes, [], 'no forward zone is listed twice') or diag $zones;
+
+# And nothing left over from somebody checking that recursion worked.
+unlike($zones, qr/^test\.test=/m, 'no hardcoded test.test forward zone') or diag $zones;
+
+# Nothing should be dropping config fragments into recursor.d any more.
+ok(!-e '/etc/powerdns/recursor.d/[% domain %].conf',
+    'no per-domain fragment in recursor.d');
+
+# The unit configure_pdns rewrites.  It used to end the command line with a
+# bare --chroot, which takes a value and was given none, so pdns_server refused
+# to start every time and the only thing said out loud was systemd's "Failed to
+# start pdns.service".
+my $execstart = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
+like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or diag $execstart;
+unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
+    or diag $execstart;
+
+
 done_testing();

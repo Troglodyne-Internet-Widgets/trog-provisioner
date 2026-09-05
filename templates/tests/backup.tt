@@ -6,4 +6,24 @@ use Test::More;
 ok(-f '/root/.ssh/authorized_keys', 'authorized_keys exists');
 ok(-f '/root/rsyncd.[% domain %].conf', 'rsync daemon config exists');
 
+my $authorized = do { local (@ARGV, $/) = '/root/.ssh/authorized_keys'; <> } // '';
+
+# Once, not once per provision.  The line used to be appended unconditionally,
+# so re-provisioning a guest grew the file a copy at a time -- the access never
+# changed, which is why nothing ever noticed.
+my $key = '[% pubkey %]';
+my $times = () = $authorized =~ m/\Q$key\E/g;
+is($times, 1, 'the backup key is authorized exactly once') or diag $authorized;
+
+# And with the restrictions that make it a backup key rather than a login.
+like($authorized, qr/command="rsync --daemon --server[^"]*rsyncd\.\Q[% domain %]\E\.conf/,
+    'behind a forced rsync command');
+foreach my $restriction (qw{no-agent-forwarding no-port-forwarding no-pty no-user-rc no-X11-forwarding}) {
+    like($authorized, qr/\Q$restriction\E/, "and $restriction");
+}
+
+# The private half arrives with the domain's data and has no business staying.
+ok(!-e '[% install_dir %]/[% domain %]/[% key_file %]',
+    'the private key was removed from the guest');
+
 done_testing();

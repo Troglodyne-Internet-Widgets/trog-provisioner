@@ -5,4 +5,23 @@ use Test::More;
 
 ok(-f '/etc/cron.d/autoupdate', 'autoupdate cron exists');
 
+# cron ignores a file in cron.d that is not root-owned or is group writable, and
+# says nothing about it.
+my @st = stat '/etc/cron.d/autoupdate';
+is(scalar getpwuid($st[4] // -1), 'root', 'and is owned by root');
+is($st[2] & 022, 0, 'and is not group or world writable');
+
+# The redirection has to be one /bin/sh understands.  Written with &>, dash
+# reads a background & and a redirection: the upgrade ran detached, wrote
+# nothing to the log, and told cron it had succeeded before it had done
+# anything.
+my $text = do { local (@ARGV, $/) = '/etc/cron.d/autoupdate'; <> } // '';
+# Comment lines excluded: the file carries a comment explaining this very
+# rule, and matching against the whole text found the explanation rather
+# than any command.
+my $commands = join "\n", grep { !m/^\s*#/ } split m/\n/, $text;
+unlike($commands, qr/&>>?/, 'no &> redirection, which dash does not do');
+like($text, qr{> ?/var/log/autoupdate\.log 2>&1}, 'output and errors both go to the log')
+    or diag $text;
+
 done_testing();

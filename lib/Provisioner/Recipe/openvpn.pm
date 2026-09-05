@@ -52,6 +52,14 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub rate_limits {
+    my ($self, %opts) = @_;
+    # Called before validation, so the schema default is not in %opts yet; it
+    # has to be repeated rather than read.  A client opens one tunnel and keeps
+    # it, so anything opening hundreds a second is not a client.
+    return ( ( $opts{port} // 1194 ) => 256 );
+}
+
 sub args {
     return (
         properties => {

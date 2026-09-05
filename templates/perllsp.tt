@@ -15,5 +15,8 @@ chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vim
 # Drop the perllsp vimrc snippet into ~/.vim/ and source it from ~/.vimrc
 install -m 0644 -o [% admin_user %] -g [% admin_user %] perllsp.vim /home/[% admin_user %]/.vim/perllsp.vim
 
-echo "source ~/.vim/perllsp.vim" >> /home/[% admin_user %]/.vimrc
+[%# Only if it is not already sourced.  Unconditional, this added another
+    identical source line to the vimrc on every re-provision. -%]
+grep -qF 'source ~/.vim/perllsp.vim' /home/[% admin_user %]/.vimrc 2>/dev/null \
+    || echo "source ~/.vim/perllsp.vim" >> /home/[% admin_user %]/.vimrc
 chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vimrc

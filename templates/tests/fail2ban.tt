@@ -6,6 +6,37 @@ use Test::More;
 my $status = `systemctl is-active fail2ban 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'fail2ban is running');
-ok(-f '/etc/fail2ban/jail.d/[% domain %].conf', 'fail2ban jail config exists');
 
+my $jail   = '/etc/fail2ban/jail.d/[% domain %].conf';
+my $filter = '/etc/fail2ban/filter.d/[% domain %].conf';
+ok(-f $jail,   'fail2ban jail config exists');
+ok(-f $filter, 'fail2ban filter config exists');
+
+# Each file has to hold what its directory expects.  These two templates had
+# their contents the wrong way round: jail.d got a [Definition] with a failregex
+# and filter.d got a jail with enabled and logpath.  fail2ban stayed up and the
+# file was where it should be, so a test asking only those two questions passed
+# on a guest that was banning nobody.
+my $jail_text   = do { local (@ARGV, $/) = $jail;   <> } // '';
+my $filter_text = do { local (@ARGV, $/) = $filter; <> } // '';
+
+like($jail_text, qr/^\s*\[\s*\Q[% domain %]\E\s*\]/m, 'the jail names this domain');
+like($jail_text, qr/^enabled\s*=\s*true/m,            'and is enabled');
+like($jail_text, qr/^filter\s*=/m,                    'and names a filter');
+unlike($jail_text, qr/failregex/,                     'and is not a filter definition');
+
+like($filter_text, qr/^\s*\[Definition\]/m, 'the filter has a [Definition]');
+like($filter_text, qr/^failregex\s*=/m,     'with a failregex');
+unlike($filter_text, qr/^enabled\s*=/m,     'and is not a jail definition');
+
+# fail2ban will say whether it can read all of that, which is a different
+# question from whether it is running.
+my $check = `fail2ban-client -t 2>&1`;
+like($check, qr/OK/i, 'fail2ban accepts its configuration') or diag $check;
+
+# And the jail is actually loaded.  A jail whose log file does not exist is one
+# fail2ban refuses to start, and this recipe is in the base set, so it lands on
+# guests that have never written the application log it watches.
+my $jails = `fail2ban-client status 2>&1`;
+like($jails, qr/\Q[% domain %]\E/, 'the jail for this domain is loaded') or diag $jails;
 done_testing();

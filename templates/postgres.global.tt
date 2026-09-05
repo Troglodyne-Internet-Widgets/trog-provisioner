@@ -1,12 +1,24 @@
 yes | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
-# Determine version: use configured value or detect latest available from PGDG
+# Determine the version and install against it, on one logical line.
+#
+# Two things had to be right here and neither was.  Make eats a single $ before
+# the shell sees it, so every expansion needs $$ -- with PG_VERSION empty this
+# asked apt for `postgresql-client-`, and a trailing - is how apt spells
+# "remove", so it uninstalled postgres rather than installing it.  And make runs
+# each recipe line in its own shell, so setting the variable on one line and
+# using it on the next left it empty however well it was escaped: hence the
+# backslashes.  server-dev was pinned to 18 while everything beside it followed
+# the detected version, which is why it was the only one that installed.
 [% IF version -%]
-PG_VERSION=[% version %]
+PG_VERSION='[% version %]'; \
 [% ELSE -%]
-PG_VERSION=$(apt-cache search '^postgresql-[0-9]' | awk '{print $1}' | grep -oP '[0-9]+$' | sort -rn | head -1)
+PG_VERSION=$$(apt-cache search '^postgresql-[0-9]' | awk '{print $$1}' | grep -oP '[0-9]+$$' | sort -rn | head -1); \
 [% END -%]
-[% packager_invocation | mark_raw %] postgresql-client-${PG_VERSION} postgresql-${PG_VERSION} postgresql-server-dev-18 postgresql-plperl-${PG_VERSION}
+test -n "$$PG_VERSION" || { echo "could not work out a postgres version" >&2; exit 1; }; \
+[% packager_invocation | mark_raw %] postgresql-client-$${PG_VERSION} postgresql-$${PG_VERSION} postgresql-server-dev-$${PG_VERSION} postgresql-plperl-$${PG_VERSION}
 systemctl enable postgresql
 [% script_dir %]/queue_postrun_task systemctl restart postgresql
 # Allow local TCP connections with md5 auth
-for f in /etc/postgresql/*/main/pg_hba.conf; do grep -qF 'host all all 127.0.0.1/32 md5' "$f" || echo 'host all all 127.0.0.1/32 md5' >> "$f"; done
+# $$f, not $f: this is a make recipe line, and make eats a single $ before the
+# shell ever sees it -- which left `grep ... ""` and appended to nothing.
+for f in /etc/postgresql/*/main/pg_hba.conf; do grep -qF 'host all all 127.0.0.1/32 md5' "$$f" || echo 'host all all 127.0.0.1/32 md5' >> "$$f"; done

@@ -1,22 +1,42 @@
 #!/bin/bash
+# Add one mount to /etc/fstab and mount it.
+set -eu
 
-TARGET=$1
-LINK_NAME=$2
-TYPE=$3
-OPTIONS=$4
-PARTITION=$5
+TARGET=${1:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partition]}
+LINK_NAME=${2:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partition]}
+TYPE=${3:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partition]}
+OPTIONS=${4:?usage: add_to_fstab <device-key> <mountpoint> <type> <options> [partition]}
+PARTITION=${5:-1}
 
-ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F "=" '{print $2}')
-[[ -z $PARTITION ]] && PARTITION=1
-[[ $PARTITION = 'NONE' ]] && PARTITION=''
+[ -f /root/devices.map ] || { echo "add_to_fstab: no /root/devices.map to look '$TARGET' up in" >&2; exit 1; }
+
+ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F '=' '{print $2}')
+
+# An unknown device used to be written into fstab regardless, as a line
+# beginning with a space: a broken fstab, and a guest that may not come back
+# from a reboot.  Refuse instead.
+[ -n "$ACTUAL_TARGET" ] || {
+    echo "add_to_fstab: no device for '$TARGET' in /root/devices.map" >&2
+    exit 1
+}
+
+if [ "$PARTITION" = 'NONE' ]; then
+    PARTITION=''
+fi
 ACTUAL_TARGET="$ACTUAL_TARGET$PARTITION"
 
-# Mount things inside a chroot
-mkdir -p $LINK_NAME
-cp /etc/fstab /tmp/fstab.new
-echo "$ACTUAL_TARGET $LINK_NAME $TYPE $OPTIONS 0 0" >> /tmp/fstab.new
-sort < /tmp/fstab.new | uniq | grep -o '^[^#]*' > /tmp/fstab.newer
-chown root:root /tmp/fstab.newer
-mv /etc/fstab /etc/fstab.bak
-mv /tmp/fstab.newer /etc/fstab
-mount $LINK_NAME
+mkdir -p "$LINK_NAME"
+
+LINE="$ACTUAL_TARGET $LINK_NAME $TYPE $OPTIONS 0 0"
+
+# Appended only when it is not already there.  What was here rewrote the whole
+# file every run -- sorting every entry into a different order and dropping
+# every comment along the way -- to achieve the same thing.
+if ! grep -qxF "$LINE" /etc/fstab; then
+    cp /etc/fstab /etc/fstab.bak
+    printf '%s\n' "$LINE" >> /etc/fstab
+fi
+
+if ! mountpoint -q "$LINK_NAME"; then
+    mount "$LINK_NAME"
+fi

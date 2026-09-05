@@ -1,3 +1,21 @@
+# matrix-synapse-py3 and python3-txredisapi are matrix.org's packages, not
+# Ubuntu's.  They were listed in deps, which is the list cloud-init installs at
+# first boot -- with no such repository configured, so they were never
+# installed, cloud-init said nothing about it, and every line below this ran
+# against a matrix-synapse user that does not exist.
+install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg -o /usr/share/keyrings/matrix-org-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ $$(. /etc/os-release; echo $$VERSION_CODENAME) main" > /etc/apt/sources.list.d/matrix-org.list
+apt-get update
+# Preseeded, because installing synapse otherwise stops on a debconf prompt for
+# the server name, and a make recipe has no terminal to answer it from.
+echo "matrix-synapse-py3 matrix-synapse/server-name string matrix.[% domain %]" | debconf-set-selections
+echo "matrix-synapse-py3 matrix-synapse/report-stats boolean false" | debconf-set-selections
+[%# matrix-synapse-py3 only.  The repository ships exactly that and its keyring,
+    and the package carries its own Python dependencies inside it -- its Depends
+    are system libraries and python3 itself -- so txredisapi, which synapse uses
+    for redis, is inside the package and not separately installable anywhere. -%]
+DEBIAN_FRONTEND=noninteractive apt-get install -y matrix-synapse-py3
 # Setup directories
 mkdir -p [% install_dir %]/matrix.[% domain %]
 mkdir -p [% install_dir %]/matrix.[% domain %]/media
@@ -28,9 +46,10 @@ chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]
 chmod -R 0750 [% install_dir %]/admin.matrix.[% domain %]
 # Setup nginx sites
 mkdir -p /etc/nginx/sites-enabled
-cp matrix.nginx.conf /etc/nginx/sites-enabled/matrix.[% domain %].conf
+# Only the admin vhost: the domain's own is nginxproxy's, which this recipe
+# requires and which already carries the _matrix nocache prefix.  There was a
+# `cp matrix.nginx.conf` here for a file template_files does not generate.
 cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
-chown root:root /etc/nginx/sites-enabled/matrix.[% domain %].conf
 chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
 # Slam in the chat index.html
@@ -43,24 +62,7 @@ systemctl enable matrix-synapse
 [% script_dir %]/queue_postrun_task systemctl start matrix-synapse
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 # Create script to register admin user after service is running
-cat > [% script_dir %]/matrix_register_admin.sh <<'EOF'
-#!/bin/bash
-# Wait for Matrix Synapse to be ready
-for i in {1..30}; do
-    if curl -s http://127.0.0.1:8008/_matrix/client/versions > /dev/null 2>&1; then
-        echo "Matrix Synapse is ready"
-        break
-    fi
-    echo "Waiting for Matrix Synapse to start... ($i/30)"
-    sleep 2
-done
-# Register admin user if not exists
-if ! su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] -p [% admin_password %] --admin 2>&1" | grep -q "User ID already taken"; then
-    echo "Admin user registered successfully"
-else
-    echo "Admin user already exists"
-fi
-EOF
+install -m 0750 matrix_register_admin.sh [% script_dir %]/matrix_register_admin.sh
 chmod +x [% script_dir %]/matrix_register_admin.sh
 # Queue admin user creation for postrun
 [% script_dir %]/queue_postrun_task [% script_dir %]/matrix_register_admin.sh

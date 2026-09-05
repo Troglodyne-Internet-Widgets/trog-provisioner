@@ -45,9 +45,8 @@ nobody else has and a TLD reserved for exactly this (RFC 2606).
 
 =item B<--memory> MB, B<--cpus> N, B<--size> BYTES
 
-What to ask the hypervisor for.  Defaults are small on purpose: 2048MB, 2
-CPUs, 20GB.  These are what placement reads to decide where the guest fits, so
-a guest that needs more should say so here.
+What to ask the hypervisor for.  Defaults to 8092MB, 4 CPUs and 20GB.  These are
+what placement reads to decide where the guest fits.
 
 =item B<--user> NAME
 
@@ -201,8 +200,8 @@ sub build {
     my ($hostname, $recipes, $opts) = @_;
 
     my %global = (
-        memory => $opts->{memory} // 2048,
-        cpus   => $opts->{cpus}   // 2,
+        memory => $opts->{memory} // 8092,
+        cpus   => $opts->{cpus}   // 4,
         size   => $opts->{size}   // 20 * 1024 * 1024 * 1024,
     );
     $global{user} = $opts->{user} if defined $opts->{user};
