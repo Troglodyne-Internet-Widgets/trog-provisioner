@@ -35,4 +35,22 @@ ok(!-e '/etc/nginx/sites-enabled/git.[% domain %].conf',
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
 
+# The database it was actually configured with.  gogs renamed this key from
+# DB_TYPE to TYPE and ignores the one it does not know, so it fell back to its
+# postgres defaults and died on every start -- while app.ini said sqlite3 and
+# the journal said only "status=1/FAILURE".
+my $ini = do { local (@ARGV, $/) = '[% install_dir %]/git.[% domain %]/custom/conf/app.ini'; <> } // '';
+like($ini, qr/^TYPE\s*=\s*sqlite3/m, 'the database type is set with the key gogs reads');
+unlike($ini, qr/^DB_TYPE\s*=/m, 'and not with the one it ignores');
+
+# console as well as file, so a gogs that will not start says why where systemd
+# can see it.
+like($ini, qr/^MODE\s*=\s*console/m, 'gogs logs to the console as well as its own file');
+
+ok(-s '[% install_dir %]/git.[% domain %]/data/gogs.db', 'the sqlite database was created');
+
+my $port = `ss -lntp 2>/dev/null | grep -c ':3000 '`;
+chomp $port;
+ok($port >= 1, 'gogs is listening on port 3000');
+
 done_testing();

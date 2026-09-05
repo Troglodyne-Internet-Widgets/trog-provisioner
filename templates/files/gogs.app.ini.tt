@@ -2,7 +2,12 @@ RUN_USER = [% gogs_admin %]
 RUN_MODE = prod
 
 [database]
-DB_TYPE = sqlite3
+; TYPE, not DB_TYPE.  gogs renamed this key, and an unrecognised one is simply
+; ignored -- so it fell through to its own defaults, which are postgres, and
+; every start died on
+;   failed to connect to `host=127.0.0.1 user=gogs database=gogs`
+; while the configuration plainly said sqlite3.
+TYPE = sqlite3
 PATH    = [% install_dir %]/git.[% domain %]/data/gogs.db
 
 [repository]
@@ -30,7 +35,11 @@ PROVIDER_CONFIG = [% install_dir %]/git.[% domain %]/data/sessions
 
 [log]
 ROOT_PATH = [% install_dir %]/git.[% domain %]/log
-MODE      = file
+; console as well as file, so that systemd gets it.  On file alone a gogs that
+; refuses to start says so only inside its own log directory: the journal shows
+; "Main process exited, code=exited, status=1/FAILURE" and nothing else, which
+; is not enough to act on.
+MODE      = console, file
 LEVEL     = Info
 
 [security]
