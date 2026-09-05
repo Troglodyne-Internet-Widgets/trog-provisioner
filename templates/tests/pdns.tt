@@ -18,6 +18,21 @@ my $version = `pdns_server --version 2>&1`;
 unlike($version, qr/alpha|beta|rc\d|master/i, 'pdns is a release, not a development build')
     or diag $version;
 
+# And new enough for the API socket.  webserver-address takes a unix socket path
+# only from 5.0.0; on 4.9 pdns_server will not start at all, saying "Unable to
+# convert presentation address" -- to its own log, which is not the journal.
+my ($major) = $version =~ m/(\d+)\.\d+\.\d+/;
+ok($major && $major >= 5, "pdns is 5.x or newer, which the socket API needs (got $major)")
+    or diag $version;
+
+# The socket itself, which is what lexicon talks to.
+my $api = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/api.conf'; <> } // '';
+my ($sock) = $api =~ m/^webserver-address=(\S+)/m;
+SKIP: {
+    skip 'the API is not on a unix socket', 1 unless $sock && $sock =~ m{^/};
+    ok(-S $sock, "the API socket $sock is there") or diag $api;
+}
+
 my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';
 my $zones_file    = '/etc/powerdns/forward-zones';
 my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
