@@ -16,7 +16,11 @@ is($st[2] & 022, 0, 'and is not group or world writable');
 # nothing to the log, and told cron it had succeeded before it had done
 # anything.
 my $text = do { local (@ARGV, $/) = '/etc/cron.d/autoupdate'; <> } // '';
-unlike($text, qr/&>>?/, 'no &> redirection, which dash does not do');
+# Comment lines excluded: the file carries a comment explaining this very
+# rule, and matching against the whole text found the explanation rather
+# than any command.
+my $commands = join "\n", grep { !m/^\s*#/ } split m/\n/, $text;
+unlike($commands, qr/&>>?/, 'no &> redirection, which dash does not do');
 like($text, qr{> ?/var/log/autoupdate\.log 2>&1}, 'output and errors both go to the log')
     or diag $text;
 
