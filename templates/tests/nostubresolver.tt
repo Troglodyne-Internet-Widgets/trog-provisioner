@@ -3,7 +3,27 @@ use strict;
 use warnings;
 use Test::More;
 
-ok(-f '/etc/systemd/resolved.conf.d/10-disable-stub-resolver.conf',
-    'stub resolver config exists');
+my $conf = '/etc/systemd/resolved.conf.d/10-disable-stub-resolver.conf';
+ok(-f $conf, 'stub resolver config exists');
+
+my $text = do { local (@ARGV, $/) = $conf; <> } // '';
+like($text, qr/^DNSStubListener\s*=\s*no/m, 'and it turns the stub listener off');
+
+# Which is the whole point: the stub holds 127.0.0.53:53, and a real resolver on
+# this guest cannot have port 53 until it lets go.  The file being present says
+# nothing about resolved having read it -- it is applied by a restart queued for
+# the end of the run.
+my $listening = `ss -lntu 2>/dev/null`;
+unlike($listening, qr/127\.0\.0\.53:53\b/, 'nothing is listening on the stub address')
+    or diag $listening;
+
+my $status = `systemctl is-active systemd-resolved 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'systemd-resolved is still running');
+
+# And name resolution still works, because turning the stub off is only safe
+# when something else is answering.
+my $resolved = `getent hosts localhost 2>/dev/null`;
+ok($resolved, 'names still resolve');
 
 done_testing();
