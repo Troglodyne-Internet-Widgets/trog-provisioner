@@ -552,13 +552,40 @@ behaved when the far side refused a write.  Nothing should ever reach it.
 
 =cut
 
+# How long to let one command run before calling it hung: the default, or the
+# command's own timeout plus a minute if it names a longer one.
+sub _hang_limit {
+    my ($what) = @_;
+    return $HANG_TIMEOUT unless defined $what;
+
+    my %seconds = ('' => 1, s => 1, m => 60, h => 3600, d => 86400);
+    my $limit   = $HANG_TIMEOUT;
+
+    while ( $what =~ m/\btimeout\s+(\d+)([smhd]?)\b/g ) {
+        my $own = $1 * $seconds{ $2 // '' };
+        $limit = $own + 60 if $own + 60 > $limit;
+    }
+
+    return $limit;
+}
+
 sub _unhang {
     my ($self, $what, $code) = @_;
     return $code->() if $self->is_local;
 
+    # A command that carries its own timeout is telling us how long it may
+    # legitimately take, and this alarm is for commands that should return
+    # promptly and do not.  Without this, waiting for a guest to finish its
+    # Makefile -- `sudo timeout 180m bash -c 'until atq is empty ...'` -- was
+    # killed here after ten minutes however long that timeout said, so raising
+    # it never made any difference and a guest still building looked hung.
+    # Only the remote path reaches this at all, which is why it never showed up
+    # against a local hypervisor.
+    my $limit = _hang_limit($what);
+
     my @result = eval {
         local $SIG{ALRM} = sub { die "__TROG_HUNG__\n" };
-        alarm $HANG_TIMEOUT;
+        alarm $limit;
         my @r = $code->();
         alarm 0;
         @r;
@@ -566,7 +593,7 @@ sub _unhang {
     my $error = $@;
     alarm 0;
 
-    die 'Gave up on ' . $self->describe . " after ${HANG_TIMEOUT}s: $what\n"
+    die 'Gave up on ' . $self->describe . " after ${limit}s: $what\n"
       . "Nothing came back and nothing failed, which usually means a permission\n"
       . "problem the far side declined to report.  Check that "
       . ($self->ssh_user // 'the login user')

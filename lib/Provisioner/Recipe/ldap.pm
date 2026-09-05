@@ -73,12 +73,12 @@ sub enrich {
 
     # Derive base_dn from domain: example.com -> dc=example,dc=com
     #
-    # split(/\./) and not split('.'): the first argument to split is a pattern,
+    # split(/[.]/) and not split('.'): the first argument to split is a pattern,
     # and '.' as a pattern matches every character -- so this produced no parts
     # at all and an empty base_dn for any domain that did not set one.
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
-        my @parts = split( /\./, $domain );
+        my @parts = split( /[.]/, $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
 
@@ -88,7 +88,7 @@ sub enrich {
     # "ldap_bind: Invalid credentials (49)", swallowed by the /bin/true after
     # it, leaving a directory with nothing in it.
     ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
-    $opts{ldap_domain} =~ s/,/./g;
+    $opts{ldap_domain} =~ tr/,/./;
 
     return %opts;
 }
