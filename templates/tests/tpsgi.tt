@@ -9,4 +9,14 @@ my $status = `systemctl is-active [% domain %] 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'tpsgi service is running');
 
+# The socket nginx proxies to.  nginx reaches it through an upstream declared in
+# the vhost, and a service that is up without its socket is one every request
+# gets a 502 from.
+my $sock = '[% install_dir %]/[% domain %]/run/tpsgi.sock';
+ok(-S $sock, 'the application socket is there') or diag "no socket at $sock";
+
+# And nginx is pointed at that exact path.
+my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
+like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
+
 done_testing();

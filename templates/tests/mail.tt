@@ -11,4 +11,23 @@ my $dovecot = `systemctl is-active dovecot 2>/dev/null`;
 chomp $dovecot;
 is($dovecot, 'active', 'dovecot is running');
 
+# What postfix makes of its configuration, which running says nothing about --
+# it keeps serving whatever it last accepted.
+my $check = `postfix check 2>&1`;
+is($check, '', 'postfix accepts its configuration') or diag $check;
+
+# And dovecot, the same question.
+my $doveconf = `doveconf -n >/dev/null 2>&1; echo $?`;
+chomp $doveconf;
+is($doveconf, '0', 'dovecot accepts its configuration');
+
+# The aliases map, which newaliases builds from /etc/aliases.  A malformed line
+# there is one sendmail and postfix both refuse: this file was generated with an
+# undeclared user, so it carried a line beginning with a bare colon.
+my $aliases = do { local (@ARGV, $/) = '/etc/aliases'; <> } // '';
+unlike($aliases, qr/^\s*:/m, 'no alias line begins with a colon') or diag $aliases;
+like($aliases, qr/^root:/m,  'root has an alias, so its mail goes somewhere');
+
+ok(-s '/etc/aliases.db', 'newaliases built the alias database');
+
 done_testing();
