@@ -62,16 +62,16 @@ our $BOOT_TIMEOUT = 300;
 # is on the at queue, and the job sits in that queue for as long as the build
 # takes.
 #
-# Four hours because a domain carrying the perl recipe builds perl from source
-# and then installs Perl::Critic, Devel::NYTProf and starman with their test
-# suites -- eighty-odd distributions -- and measured runs did not finish inside
-# three.  Thirty minutes, which this was, and ninety, which I raised it to
-# first, both fail on a guest with nothing wrong with it.
+# Ninety minutes, from a measurement rather than a guess.  A tpsgi domain --
+# which builds perl from source and then installs ninety-seven distributions,
+# the heaviest thing any recipe here does -- takes twenty minutes on a guest
+# with the scaffold's memory and processors.
 #
-# The cost of a number this size is that a guest which really has hung takes
-# four hours to say so.  TROG_SETUP_TIMEOUT lowers it for a domain that builds
-# nothing, which is most of them.
-our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '240m';
+# It looked like hours until the hang detector in Trog::Machine was fixed: that
+# capped every remote command at ten minutes, so this setting did nothing at all
+# and a guest still compiling came back as a failure.  I raised this to 240m on
+# the strength of those timings, which were measuring the cap.
+our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
 sub new {
     my ($class, %opts) = @_;
