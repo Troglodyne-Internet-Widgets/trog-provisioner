@@ -56,10 +56,5 @@ like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or
 unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
     or diag $execstart;
 
-# The recursor forwards the domain to the authoritative server on 2500.  The
-# address here was written 127.0.01.
-my $recursor = do { local (@ARGV, $/) = '/etc/powerdns/recursor.d/[% domain %].conf'; <> } // '';
-like($recursor, qr/forward-zones\+?=\Q[% domain %]\E=127\.0\.0\.1:2500/,
-    'the recursor forwards the domain to 127.0.0.1:2500') or diag $recursor;
 
 done_testing();

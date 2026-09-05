@@ -58,6 +58,13 @@ Egress the firewall stopped, as C<SPT=>/C<DPT=> pairs, written by
 outgoing_blocks.sh.  A recipe that needs to reach something it was never given a
 hole for shows up here rather than in its own log.
 
+=item F</var/log/pdns.log>, F</var/log/autoupdate.log>
+
+Logs recipes deliberately route away from the journal.  pdns is told to log
+through syslog and rsyslog puts it here, so a pdns that refuses to start says
+why in this file and nothing anywhere else -- systemd reports only
+C<status=1/FAILURE>.
+
 =item F<failed-units.log>, F<journal-errors.log>, F<nginx-t.log>
 
 Not files off the guest but answers to questions put to it: which units failed,
@@ -153,6 +160,9 @@ sub artifacts {
           /var/log/cloud-init-output.log
           /root/new-outblocked.log
           /root/post_install.sh
+
+          /var/log/pdns.log
+          /var/log/autoupdate.log
         },
     );
 }
