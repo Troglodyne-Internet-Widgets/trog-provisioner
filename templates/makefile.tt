@@ -95,8 +95,12 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	mkdir -p '/etc/letsencrypt/live/[% domain %]'
 	openssl req -x509 -config openssl.conf -nodes -newkey rsa:4096 -subj '/CN=[% domain %]' -addext 'subjectAltName=DNS:[% domain %][% FOR alias IN full_aliases %],DNS:[% alias %][% END %]' -keyout '/etc/letsencrypt/live/[% domain %]/privkey.pem' -out '/etc/letsencrypt/live/[% domain %]/fullchain.pem' -days 365
 	# Setup the link to LE certs
-	ln -s /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
-	ln -s /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
+	# -sf, because these are the two links the letsencrypt fetcher repoints
+	# later: a guest restored from a snapshot and provisioned again already has
+	# them, and a plain ln then fails with "File exists" and takes the ssl
+	# target -- which every other target waits on -- down with it.
+	ln -sf /etc/letsencrypt/live/[% domain %]/fullchain.pem /etc/ssl/certs/[% domain %].pem
+	ln -sf /etc/letsencrypt/live/[% domain %]/privkey.pem /etc/ssl/private/[% domain %].pem
 	touch $@
 
 # Be explicit about SSH security

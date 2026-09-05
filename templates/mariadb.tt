@@ -1,9 +1,9 @@
 mkdir -p /opt/mysql; /bin/true
 mv mariadb.service /opt/mysql
 mv my.cnf /opt/mysql
-ln -s /opt/mysql /opt/mariadb
+ln -sfn /opt/mysql /opt/mariadb
 # Install global schema for the recipe
-useradd -s /usr/sbin/nologin -d /opt/mariadb mysql
+id -u mysql >/dev/null 2>&1 || useradd -s /usr/sbin/nologin -d /opt/mariadb mysql
 [%# Quoted, so a variable that renders empty stays an argument.  Unquoted, an
     empty user shifted every argument left: the script read the version as its
     client and the dump path as its version, and asked archive.mariadb.org for
