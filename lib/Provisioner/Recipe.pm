@@ -35,6 +35,87 @@ Provisioner::Recipe - Base class for the recipes: what every one of them can do,
 Provides a framework for building deployment makefiles via templated fragments.
 Supports recipes that depend on other recipes, autoconfiguration and more.
 
+A recipe is one installable thing -- a web server, a mail stack, a language
+runtime -- and it answers two questions: what packages does this need, and what
+does the guest have to run to end up with it configured.  C<bin/new_config>
+turns the recipes named for a domain into a makefile, and C<bin/provision>
+builds a guest and runs it.  What an operator writes to ask for one is described
+in L<docs/CONFIGURATION.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/CONFIGURATION.md>.
+
+=head3 Naming
+
+The last component of the package name must be lowercase --
+C<Provisioner::Recipe::nginx>, never C<::Nginx>.  The makefile has uppercase
+targets of its own, and the case is what keeps a recipe from colliding with one.
+
+=head3 The fragment is a makefile, not a shell script
+
+Each recipe renders C<templates/E<lt>nameE<gt>.tt> into a fragment of the
+makefile that runs on the guest.  Write it with no leading tab; that is added
+for you.  Everything else about it is make's rules rather than a shell's, and
+the differences bite:
+
+=over 4
+
+=item * Make eats a single C<$> before the shell sees it, so a shell expansion
+needs C<< $$ >>.
+
+=item * Every line runs in its own shell, so a variable set on one line is gone
+by the next, and a command spanning lines needs a C<\> on each of them.  A
+heredoc cannot work at all -- render the script through C<template_files> and
+install it.
+
+=item * Recipe lines run under C</bin/sh>, which is dash on Ubuntu rather than
+bash.  No brace expansion, and C<&E<gt>> is a background job and a redirect, not
+a redirect of both streams.
+
+=back
+
+Fragments must be re-entrant, because the makefile is run with C<make -j>.  That
+is what C<deps> is for: everything that has to happen before anything else is
+declared up front and installed in one pass, rather than each target racing to
+install its own.
+
+=head3 Global and per-domain parts
+
+A guest can host several domains, and some of what a recipe does is per domain
+while some of it happens once for the machine.  A recipe with a
+C<templates/E<lt>nameE<gt>.global.tt> gets that fragment run once no matter how
+many domains are provisioned into the guest; the per-domain fragment runs for
+each.  Configuration for a service with no C<conf.d> directory tends to belong
+in the global half, since two domains cannot each rewrite the same file.
+
+=head3 Conventions a recipe is expected to keep
+
+=over 4
+
+=item * Everything the domain owns lives under C<install_dir>, so that backing
+it up is one directory.  Prepend C<install_dir> to any path a fragment names,
+and symlink into it when software insists on a path of its own.
+
+=item * Files and directories are C<0750 user:admin_user>.  C<user> is the
+service account the application runs as, and defaults to the admin user -- see
+C<validate>.
+
+=item * Anything involved enough to want a shell script goes in C<scripts/>,
+which is copied to the guest whole, rather than into the fragment.
+
+=back
+
+=head3 Order
+
+The C<data> recipe runs first, and the rest in lexical order.  A recipe that
+genuinely has to come earlier says so with an C<order> in its configuration, but
+that is for things like repairing networking before anything needs it.  For
+"this needs that to exist first", use C<[% script_dir %]/queue_postrun_task>
+rather than ordering, which does not survive C<make -j>.
+
+=head3 Recipes you do not intend to publish
+
+A C<vendor/> directory in the checkout is gitignored; point the C<libdir>
+parameter of a domain's configuration at it and recipes there are found like any
+other.  See C<bin/new_config> for the search path.
+
 =cut
 
 =head2 STATIC METHODS
@@ -351,7 +432,10 @@ sub enrich {
 
 =head3 @dirs = $recipe->datadirs()
 
-Define data directories to create.
+Directories under the domain's C<install_dir> this recipe needs to exist.
+
+Made before the fragment runs, owned the way everything else the domain owns is
+owned, so a fragment does not have to open with a run of C<mkdir -p>.
 
 =cut
 
@@ -361,7 +445,16 @@ sub datadirs {
 
 =head3 %path_map = $recipe->remote_files($install_dir, $domain)
 
-Define files to backup/restore between deployments.
+What to salvage off a guest that is already running this recipe, as a map of the
+path on the guest to where it lands in the data directory.
+
+This is how a recipe survives the guest being rebuilt: state that was generated
+rather than configured -- a database dump, keys somebody accepted, a spool --
+comes back down into the data directory, and goes back up when the guest is
+built again.  Anything a recipe can regenerate does not belong here.
+
+C<bin/new_config> on a cron, tarring up what it collects, is a backup strategy;
+see L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/BACKUPS.md>.
 
 =cut
 
@@ -372,7 +465,18 @@ sub remote_files {
 
 =head3 @files = $recipe->template_files(@loaded_recipes)
 
-Define template files to process.
+Files this recipe generates, as a map of the template under C<templates/files/>
+to where it is installed relative to the domain's configuration directory.
+
+A name that does not end in C<.tt> is copied rather than rendered, which is what
+you want for something with no variables in it.  The loaded recipes are passed
+in so that a recipe generating something per-service -- ufw's application
+profiles, say -- can generate only what this guest actually needs.
+
+Every file named here has to be installed by the fragment.  One that nothing
+installs is dead: either it should be installed and is not, or it is a limb to
+prune, and rendering it either way just leaves a file on the hypervisor that
+nothing reads.
 
 =cut
 
@@ -383,8 +487,12 @@ sub template_files {
 
 =head3 %vars = $recipe->makefile_vars()
 
-Define global makefile variables.
-You should override this if you need makefile vars in your recipe's makefile fragment.
+Variables set at the top of the generated makefile, for the whole run rather
+than for this recipe's fragment.
+
+Override this when a fragment needs a value that make itself has to expand.  Do
+not reach for it to pass configuration to your own templates -- that is what
+C<args> and the template variables are for.
 
 =cut
 
@@ -395,7 +503,17 @@ sub makefile_vars {
 # Global parameter validation
 =head3 @tests = $recipe->tests()
 
-Array of (templated) tests to run on the remote when finished provisioning.
+Templates under C<templates/tests/> to render and run on the guest once
+provisioning has finished.
+
+These are the recipe's own account of whether it worked, and they run on the
+guest because that is the only place the answer is: that the service is
+listening, that the config it was given is the config it loaded, that the thing
+it is supposed to serve is served.  Assert what the recipe promises rather than
+what it wrote -- a test that only checks a file exists passes on a guest where
+nothing started.
+
+See L<t/TESTING.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/t/TESTING.md>.
 
 =cut
 

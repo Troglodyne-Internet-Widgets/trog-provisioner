@@ -1,4 +1,4 @@
-# Backups in Provisioners
+# Backups
 
 We use a standardized approach to handling data persistence and backups across deployments through the `remote_files` subroutine in provisioner recipes.
 

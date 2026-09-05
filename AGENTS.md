@@ -96,7 +96,7 @@ Templates generate makefile fragments:
 ## File Organization
 
 ```
-provisioners/
+trog-provisioner/
 ├── bin/              # Executable scripts
 ├── lib/              # Perl modules
 │   └── Provisioner/

@@ -1,6 +1,6 @@
 # Example Usage
 
-Herein lie some examples of provisioners usage.
+Herein lie some examples of trog-provisioner usage.
 
 ## Deploy a tCMS site
 
