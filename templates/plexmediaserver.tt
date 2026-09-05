@@ -43,6 +43,13 @@ chmod 0750 '[% dir %]'
 # -- and the preferences file went to /Preferences.xml rather than into Plex's
 # library.  The python was worse: a "-c" string spanning several lines with no
 # continuations, so make handed the shell a quote it never closed.
+[%# Plex has to be stopped while its preferences are edited.  Installing the
+    package starts it, and a running Plex owns that file: it writes its own copy
+    back out, so everything set below was overwritten before the guest had
+    finished provisioning -- the file ended up carrying the MachineIdentifier Plex wrote and
+    none of the certificate or account settings.  It is started again in the
+    postrun tasks at the end of this target. -%]
+systemctl stop plexmediaserver; /bin/true
 PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
 mkdir -p "$$PREFS_DIR"; \
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
@@ -54,4 +61,6 @@ chown -R plex:[% admin_user %] "$$PREFS_DIR"; \
 chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
-[% script_dir %]/queue_postrun_task systemctl start plexmediaserver
+[%# restart, not start: if anything left it running, start is a no-op and Plex
+    goes on using the preferences it had in memory. -%]
+[% script_dir %]/queue_postrun_task systemctl restart plexmediaserver
