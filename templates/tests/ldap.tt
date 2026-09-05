@@ -45,6 +45,13 @@ is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
 # Owning the file is not the same as reaching it: /etc/ssl/private is
 # 0710 root:ssl-cert, so openldap has to be in that group to traverse it.  When
 # it could not, the TLS modify failed with error 80 and said nothing about why.
+# The group that makes /etc/ssl/private traversable at all.  It comes from the
+# ssl-cert package, and without that package it does not exist -- `adduser
+# openldap ssl-cert` then fails with "The group `ssl-cert' does not exist" and
+# takes the target with it.
+my $groups = `id -nG openldap 2>/dev/null`;
+like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $groups;
+
 foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
     my $rc = system("sudo -u openldap test -r '$f'");
     is($rc, 0, "openldap can read $f");

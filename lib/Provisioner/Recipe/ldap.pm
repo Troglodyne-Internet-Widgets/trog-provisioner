@@ -80,12 +80,16 @@ sub enrich {
     return %opts;
 }
 
+# ssl-cert is here for its group, not for a certificate: it owns
+# /etc/ssl/private, which Ubuntu ships 0710 root:ssl-cert, and slapd has to be
+# in that group to read the key through it.  Without the package the group does
+# not exist at all and `adduser openldap ssl-cert` fails outright.
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
         # libldap2, not libldap-2.5-0: the soname is in the package name on
         # some distros and not on Ubuntu 24.04, where the archive has libldap2.
-        return qw{slapd ldap-utils libldap2};
+        return qw{slapd ldap-utils libldap2 ssl-cert};
     }
     die "Unsupported packager";
 }
