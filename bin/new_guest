@@ -45,9 +45,16 @@ nobody else has and a TLD reserved for exactly this (RFC 2606).
 
 =item B<--memory> MB, B<--cpus> N, B<--size> BYTES
 
-What to ask the hypervisor for.  Defaults are small on purpose: 2048MB, 2
-CPUs, 20GB.  These are what placement reads to decide where the guest fits, so
-a guest that needs more should say so here.
+What to ask the hypervisor for.  Defaults are 8092MB, 4 CPUs, 20GB, which is
+what the domains here actually run with.  These are what placement reads to
+decide where the guest fits, so a guest that needs less can say so here.
+
+They used to default to 2048MB and 2 CPUs.  A domain carrying the perl recipe
+builds perl from source and then installs Perl::Critic, Devel::NYTProf and
+starman with their test suites, and in 2GB that thrashes rather than fails --
+no error, no OOM, just everything taking hours, with the fork-heavy tests
+worst.  Scaffolding a guest that cannot comfortably build what it is being
+asked to build is a poor default.
 
 =item B<--user> NAME
 
@@ -201,8 +208,8 @@ sub build {
     my ($hostname, $recipes, $opts) = @_;
 
     my %global = (
-        memory => $opts->{memory} // 2048,
-        cpus   => $opts->{cpus}   // 2,
+        memory => $opts->{memory} // 8092,
+        cpus   => $opts->{cpus}   // 4,
         size   => $opts->{size}   // 20 * 1024 * 1024 * 1024,
     );
     $global{user} = $opts->{user} if defined $opts->{user};

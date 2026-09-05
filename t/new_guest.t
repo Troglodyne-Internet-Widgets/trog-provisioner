@@ -59,12 +59,16 @@ subtest 'a default hostname is unique, and under a TLD reserved for this' => sub
     isnt($one, $two, 'and a different one each time');
 };
 
-subtest 'the domain block asks the hypervisor for something modest' => sub {
+subtest 'the domain block asks the hypervisor for enough to build with' => sub {
     my ($config) = Trog::Bin::NewGuest::build('vm.test', ['ntp'], {});
     my $global = $config->{'vm.test'}{_global};
 
-    is($global->{memory}, 2048,              'memory');
-    is($global->{cpus},   2,                 'cpus');
+    # 8092 and 4, not the 2048 and 2 this scaffolded before.  A domain carrying
+    # the perl recipe builds perl from source and installs Perl::Critic and
+    # friends with their test suites; in 2GB that thrashes rather than fails,
+    # and a provision takes hours with nothing in any log to say why.
+    is($global->{memory}, 8092,              'memory');
+    is($global->{cpus},   4,                 'cpus');
     is($global->{size},   20 * 1024**3,      'and 20GB of disk');
     ok(!exists $global->{user}, 'no service account unless asked for: a scratch guest wants none');
 
