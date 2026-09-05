@@ -138,4 +138,54 @@ subtest 'a recipe gets its declared defaults end to end' => sub {
     is($u{makestep}, '1.0 3', 'and an explicitly empty one still gets it');
 };
 
+{
+    # Counts what validate() actually did, since the point of a memo is the
+    # work it does not do.
+    package Test::Recipe::Memo;
+    our @ISA = ('Provisioner::Recipe');
+    our $enriched = 0;
+
+    sub args {
+        return (
+            type       => 'object',
+            properties => {
+                domain  => { type => 'string' },
+                flavour => { type => 'string' },
+            },
+        );
+    }
+
+    sub enrich {
+        my ($self, %opts) = @_;
+        $enriched++;
+        $opts{seen} = $opts{flavour};
+        return %opts;
+    }
+}
+
+subtest 'validated() memoizes, per object and per set of options' => sub {
+    my $one = bless {}, 'Test::Recipe::Memo';
+    local $Test::Recipe::Memo::enriched = 0;
+
+    my %first  = $one->validated(domain => 'a.test', flavour => 'first');
+    my %again  = $one->validated(domain => 'a.test', flavour => 'first');
+    is($Test::Recipe::Memo::enriched, 1, 'the same options enrich once, however often they are rendered');
+    is($again{seen}, 'first', 'and the second render gets the memoized answer');
+
+    # Keyed on the options because one object really is rendered with more than
+    # one set: t/recipes.t renders cron's root crontab twice, with a bare local
+    # part and with a full address, and expects the two to differ.  A memo that
+    # ignored its arguments would answer the second with the first.
+    my %other = $one->validated(domain => 'a.test', flavour => 'second');
+    is($other{seen}, 'second', 'different options are validated again');
+    is($Test::Recipe::Memo::enriched, 2, 'so enrich runs a second time for them');
+
+    # On the object, not in a state variable: state in a named sub is one
+    # variable for the sub rather than one per object, and new_config configures
+    # several domains in a single run, each with its own recipe objects.
+    my $two = bless {}, 'Test::Recipe::Memo';
+    my %theirs = $two->validated(domain => 'b.test', flavour => 'third');
+    is($theirs{domain}, 'b.test', q{a second object of the same class does not inherit the first one's answer});
+};
+
 done_testing();

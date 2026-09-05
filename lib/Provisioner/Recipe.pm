@@ -143,6 +143,8 @@ sub required_recipes {
     return ();
 }
 
+my $canonical = JSON::PP->new->canonical->allow_blessed->convert_blessed;
+
 =head3 %opts = $recipe->validate(%opts)
 
 Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
@@ -286,11 +288,6 @@ sub makefile_vars {
 }
 
 # Global parameter validation
-my $validate = sub {
-    my %params = @_;
-    return %params;
-};
-
 =head3 @tests = $recipe->tests()
 
 Array of (templated) tests to run on the remote when finished provisioning.
@@ -376,22 +373,27 @@ sub render_file {
 
 =head3 %vars = $recipe->validated(%opts)
 
-C<validate> for the same options, done once.
+C<validate>, B<memoized> for the life of the recipe object.
 
 A recipe renders its fragment and then every file in C<template_files>, and each
 of those was a fresh C<validate> and so a fresh C<enrich>.  Anything enrich
 rewrote in place, the next call saw already rewritten.
 
+The memo is on the object rather than in a C<state> variable because C<state> in
+a named sub is one variable for the sub, not one per object: a single run
+configures several domains, each with its own recipe objects, so a C<state> hash
+keyed on the class hands the second domain the first one's configuration.
+
+It is keyed on the options because one object does get rendered with more than
+one set of them -- C<t/recipes.t> renders cron's root crontab twice, once with a
+bare local part and once with a full address, and expects the two to differ.
+
 =cut
 
 sub validated {
     my ( $self, %opts ) = @_;
-
-    my $key = eval { JSON::PP->new->canonical->allow_nonref->allow_blessed->convert_blessed->encode( \%opts ) }
-      // Scalar::Util::refaddr($self);
-
-    $self->{_validated}{$key} //= { $validate->( $self->validate(%opts) ) };
-
+    my $key = $canonical->encode( \%opts );
+    $self->{_validated}{$key} //= { $self->validate(%opts) };
     return %{ $self->{_validated}{$key} };
 }
 
