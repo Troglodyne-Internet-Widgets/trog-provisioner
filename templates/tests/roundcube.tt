@@ -7,4 +7,24 @@ ok(-d '[% install_dir %]/webmail.[% domain %]', 'roundcube directory exists');
 ok(-f '[% install_dir %]/webmail.[% domain %]/config/config.inc.php', 'roundcube config exists');
 ok(-f '/etc/nginx/sites-enabled/webmail.[% domain %].conf', 'roundcube nginx vhost exists');
 
+# The vhost file existing says nothing about nginx accepting it, and a failed
+# restart says only that it failed.  This guest could not start nginx at all:
+# server_names_hash_bucket_size was 64, which webmail.<domain> overflows once
+# the domain is any length, and the sentence saying so appears only here.
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
+
+my $status = `systemctl is-active nginx 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'and nginx is running');
+
+# php-fpm is what serves it, through the socket the vhost names.
+my $pool = `ls /etc/php/*/fpm/pool.d/roundcube-[% domain %].ini 2>/dev/null`;
+ok($pool, 'the php-fpm pool for this domain is installed') or diag $pool;
+
+# An empty user in a pool file is one php-fpm refuses to start on.
+my $conf = `cat /etc/php/*/fpm/pool.d/roundcube-[% domain %].ini 2>/dev/null`;
+like($conf, qr/^user\s*=\s*\S+/m,  'the pool names a user');
+like($conf, qr/^group\s*=\s*\S+/m, 'and a group');
+
 done_testing();

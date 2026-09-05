@@ -1,5 +1,13 @@
-# Oh how we love packagers that ship things broken out of the box
-server_names_hash_bucket_size 64;
+# Oh how we love packagers that ship things broken out of the box.
+#
+# 64 is not enough room for a long domain.  nginx sizes this hash by the
+# longest server_name it is given, and every vhost here carries the domain plus
+# www, mail and whatever aliases it has -- so a domain that is merely longish
+# makes nginx refuse to start with
+#   could not build server_names_hash, you should increase
+#   server_names_hash_bucket_size: 64
+# which appears nowhere except in `nginx -t`: the restart just fails.
+server_names_hash_bucket_size [% server_names_hash_bucket_size %];
 
 # Allow doing ws upgrades rite
 map $http_upgrade $connection_upgrade {

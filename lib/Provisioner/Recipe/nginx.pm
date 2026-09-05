@@ -41,6 +41,12 @@ sub args {
     return (
         properties => {
             backlog => { type => 'integer', default => 32768, minimum => 0 },
+            # Room for the longest server_name on the guest.  This was 64,
+            # which a domain of any length overflows once www, mail and the
+            # aliases are added to it -- and nginx then refuses to start,
+            # saying so only to `nginx -t`.
+            server_names_hash_bucket_size =>
+                { type => 'integer', default => 128, minimum => 32 },
         },
     );
 }
