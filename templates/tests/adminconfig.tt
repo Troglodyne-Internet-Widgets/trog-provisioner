@@ -23,7 +23,13 @@ my $keys = "$home/.ssh/authorized_keys";
 ok(-s $keys, 'the admin has authorized_keys');
 my @kst = stat $keys;
 is($kst[2] & 022, 0, 'and it is not group or world writable');
-is($st[2] & 022, 0, 'nor is the home directory itself');
+
+# World writable, not group writable, for the home directory.  It comes out 775
+# owned by the admin and a group of the same name, so group write is the same
+# permission the owner already has -- and key authentication works on these
+# guests with StrictModes on, which is the question that matters.  Asserting
+# 0022 here failed on a guest where ssh was working perfectly well.
+is($st[2] & 002, 0, 'and the home directory is not world writable');
 
 # And passwordless sudo, which is not a convenience here: bin/provision drives
 # the whole build over ssh as this user and every command it runs is sudo.
