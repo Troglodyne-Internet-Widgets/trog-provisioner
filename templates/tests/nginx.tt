@@ -23,11 +23,11 @@ my $text = do { local (@ARGV, $/) = $global; <> } // '';
 like($text, qr/map \$http_upgrade \$connection_upgrade/,
     'it defines connection_upgrade, which every proxy vhost uses');
 
-# Big enough for the names on this guest.  64 is not: a vhost carries the domain
-# plus www, mail and any aliases, and nginx sizes the hash by the longest of
-# them -- over that it refuses to start, saying so only here.
+# Big enough for any name there can be.  A domain name is at most 253
+# characters; this was 64, which nginx refuses to start over and says so only
+# here.
 my ($bucket) = $text =~ m/server_names_hash_bucket_size\s+(\d+)/;
-ok($bucket && $bucket >= 128, "server_names_hash_bucket_size is $bucket") or diag $text;
+ok($bucket && $bucket >= 253, "server_names_hash_bucket_size is $bucket") or diag $text;
 
 # worker_connections is raised to match the listen backlog; an unset or default
 # value there quietly caps what the guest can accept.

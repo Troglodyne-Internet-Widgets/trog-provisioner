@@ -35,18 +35,6 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub enrich {
-    my ($self, %opts) = @_;
-
-    # Whose perl this is.  Required, and nothing that pulls this recipe in
-    # supplies it -- tpsgi requires it with an empty configuration -- so a
-    # domain that never set a service user could not build at all.  The admin
-    # user is who owns everything else in that case, and is what nvm does with
-    # the same field.
-    $opts{user} //= $opts{admin_user};
-
-    return %opts;
-}
 
 sub args {
     return (

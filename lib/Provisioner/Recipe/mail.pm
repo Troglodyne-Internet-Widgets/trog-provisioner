@@ -122,15 +122,6 @@ sub args {
 }
 
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    # Nothing that pulls this recipe in supplies a user, and the admin owns
-    # everything else on the guest.  Same as perl, nvm and mariadb.
-    $opts{user} //= $opts{admin_user};
-
-    return %opts;
-}
 
 sub template_files {
     my ( $self, @recipes ) = @_;

@@ -11,7 +11,9 @@ use re '/aa';
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
+use Clone qw{clone};
 use Scalar::Util();
+use JSON::PP();
 
 use JSON::Validator::Schema::Troglodyne;
 
@@ -145,11 +147,24 @@ sub required_recipes {
 
 Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
 
+C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
+to get one.  On a production host you generally want to set it: the service user
+owns the domain's files and is what the application runs as.  When developing and
+testing it is useful to have the admin and the service user be the same account,
+and that is what leaving it unset gives you.
+
 =cut
 
 sub validate {
     my ($self, %opts) = @_;
     my %args = $self->args();
+
+    # On a copy, all the way down.  %opts is a shallow copy, so everything
+    # nested in it belongs to the caller -- and both the coercion below and any
+    # enrich write through to it.  The validator turning a vhost's `ssl => 1`
+    # into a JSON::PP::Boolean was enough to make the same configuration look
+    # like a different one on the next render.
+    %opts = %{ clone( \%opts ) };
 
     forget_undefs(\%opts, \%args);
 
@@ -168,6 +183,8 @@ sub validate {
     $validator->coerce({ %{ $validator->coerce }, defaults => 1 });
     my @errors = $validator->validate(\%opts, \%args);
     die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
+
+    $opts{user} //= $opts{admin_user};
 
     return $self->enrich(%opts);
 }
@@ -353,16 +370,29 @@ Render specified template file.
 
 sub render_file {
     my ( $self, $file ) = ( shift, shift );
-    my %vars = $self->validate(
-
-        # Sane defaults
-        $self->vars(),
-
-        # Config overrides
-        @_,
-    );
-    %vars = $validate->(%vars);
+    my %vars = $self->validated( $self->vars(), @_ );
     return $self->{tt}->render( $file, \%vars );
+}
+
+=head3 %vars = $recipe->validated(%opts)
+
+C<validate> for the same options, done once.
+
+A recipe renders its fragment and then every file in C<template_files>, and each
+of those was a fresh C<validate> and so a fresh C<enrich>.  Anything enrich
+rewrote in place, the next call saw already rewritten.
+
+=cut
+
+sub validated {
+    my ( $self, %opts ) = @_;
+
+    my $key = eval { JSON::PP->new->canonical->allow_nonref->allow_blessed->convert_blessed->encode( \%opts ) }
+      // Scalar::Util::refaddr($self);
+
+    $self->{_validated}{$key} //= { $validate->( $self->validate(%opts) ) };
+
+    return %{ $self->{_validated}{$key} };
 }
 
 =head3 %vars = vars()

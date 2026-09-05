@@ -111,10 +111,6 @@ sub args {
                         # thing redirected to, and defaulting both this and ssl
                         # to true made every vhost claim to be both.
                         ssl_redirect   => { type => 'boolean' },
-                        # Set by enrich, not by a caller: the socket a
-                        # proxy_uri named, kept so that running enrich again
-                        # over the same hash reaches the same answer.
-                        proxy_socket   => { type => 'string' },
                         # No default here either, for the same reason: this one
                         # was left defaulting to true, so a port 80 vhost that
                         # asked for neither -- tcms and tpsgi both do -- came
@@ -138,10 +134,6 @@ sub args {
 
 sub enrich {
     my ( $self, %opts ) = @_;
-
-    # Nothing that pulls this recipe in supplies a user, and the admin owns
-    # everything else on the guest.  Same as perl, nvm and mariadb.
-    $opts{user} //= $opts{admin_user};
 
     # The flat interface: proxy_uri and static_dir at the top level, which the
     # SYNOPSIS says generates 80 redirecting to HTTPS and 443 proxying.  Nothing
@@ -181,26 +173,14 @@ sub enrich {
             my $vopts = $opts{vhosts}{$key};
             next if $vopts->{ssl_redirect};
 
-            # enrich runs more than once -- once for the recipe's fragment and
-            # again for every template file it renders -- and %opts carries the
-            # same nested vhosts hash each time, so rewriting proxy_uri here is
-            # something the next pass sees.  Remembering the socket is what
-            # makes running twice reach the same answer: without it the second
-            # pass found a proxy_uri already starting with http, skipped it, and
-            # rendered the vhost with no upstream block for it to name.
-            my $socket = $vopts->{proxy_socket};
-            if ( !$socket ) {
-                my $uri = $vopts->{proxy_uri};
-                die "Must set proxy_uri in [nginxproxy] section" if !$uri;
-                next if $uri =~ m/^http/;
-
-                $socket = "$opts{install_dir}/$opts{domain}/$uri";
-                $vopts->{proxy_socket} = $socket;
-            }
+            my $uri = $vopts->{proxy_uri};
+            die "Must set proxy_uri in [nginxproxy] section" if !$uri;
+            next if $uri =~ m/^http/;
 
             # Named for the socket, so that two vhosts sharing one -- 80 and 443
             # both proxying to the same app, which is the usual arrangement --
             # declare one upstream between them rather than two of the same.
+            my $socket = "$opts{install_dir}/$opts{domain}/$uri";
             ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
 
             $upstreams{$name}   = $socket;
