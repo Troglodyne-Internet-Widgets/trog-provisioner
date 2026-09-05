@@ -4,5 +4,6 @@ chown root:root /etc/ufw/applications.d/*
 [% script_dir %]/queue_postrun_task systemctl restart ufw
 [% script_dir %]/setup-ufw-rules[% FOR net IN admin_networks %] '[% net %]'[% END %]
 [% script_dir %]/setup-port-forwards [% FOR f IN port_forwards %] '[% f.from %]=[% f.to %]' [% END %]
+[% script_dir %]/setup-ufw-ratelimits[% FOR port IN rate_limits.keys().sort() %] '[% port %]=[% rate_limits.$port %]'[% END %]
 # In the event this is an outgoing-only sendmail box, enable outbound 25
 test -f /etc/mail/sendmail.conf && ufw allow out 25; /bin/true

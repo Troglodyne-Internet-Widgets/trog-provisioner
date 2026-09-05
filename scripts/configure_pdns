@@ -14,7 +14,7 @@ use Config::Simple;
 
 =head2 DESCRIPTION
 
-Point the PowerDNS unit at the spool directory it keeps its data in.
+Point the PowerDNS unit at the spool directory it chroots into.
 
 =cut
 my $service_file = "/usr/lib/systemd/system/pdns.service";
@@ -23,13 +23,14 @@ die "Can't find service file $service_file" unless -f $service_file;
 my $cfg = Config::Simple->new($service_file);
 
 $cfg->param("Service.WorkingDirectory", "/var/spool/powerdns");
-# No --chroot.  It was passed with no value at all, which is not a flag
-# pdns_server takes -- and every path this recipe configures is absolute and
-# outside any chroot anyway: the sqlite database at
-# /var/spool/powerdns/zones.db and the API socket at
-# /var/spool/powerdns/api.sock would both have to be rewritten relative to the
-# root for chrooting to mean anything.  WorkingDirectory already points there.
-my $invocation = "/usr/sbin/pdns_server --guardian=no --daemon=no --logging-facility=1 --log-timestamp=yes --write-pid=no";
+# --chroot with the directory it chroots to.  It was passed bare, which is not
+# something pdns_server accepts -- "Unable to convert presentation address" and
+# an exit before it logs anywhere.  Everything it opens afterwards is named
+# relative to this root: the sqlite database, the API socket and the control
+# socket are all configured as paths inside it, so on the host they land under
+# /var/spool/powerdns where the rest of the recipe expects them.
+my $chroot     = '/var/spool/powerdns';
+my $invocation = "/usr/sbin/pdns_server --guardian=no --daemon=no --logging-facility=1 --log-timestamp=yes --write-pid=no --chroot=$chroot";
 $cfg->param("Service.ExecStart", $invocation);
 
 File::Copy::copy($service_file, "$service_file.bak");

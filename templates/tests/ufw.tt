@@ -28,4 +28,31 @@ foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/nul
     unlike($rules, qr/^\s*\Q$web\E\s+LIMIT/mi, "$web is not rate limited");
 }
 
+# The real rate limits.  ufw's own `limit` is six connections in thirty seconds
+# -- right for ssh, and it rate limited real visitors off the site when it was
+# applied to every application profile -- so setup-ufw-rules limits only OpenSSH
+# and these carry the actual numbers.  They were rendered into a
+# ufw.user.rules that nothing installed, and could not have been: ufw owns
+# user.rules and rewrites it whenever a rule changes.
+my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
+
+[% FOR port IN rate_limits.keys().sort() %]
+like($before, qr/--dport [% port %] .*--hitcount [% rate_limits.$port %]\b/,
+    'port [% port %] is rate limited at [% rate_limits.$port %] a second') or diag $before;
+[% END -%]
+
+# Once, however many times this guest has been provisioned.
+my $blocks = () = $before =~ m/^# BEGIN trog-provisioner rate limits$/gm;
+is($blocks, 1, 'the rate limit block appears exactly once');
+
+# And after the rules that accept loopback and established traffic, or it would
+# be counting both.
+my ($lo) = $before =~ m/\A(.*?)-A ufw-before-input -i lo/s;
+unlike($lo // '', qr/BEGIN trog-provisioner rate limits/,
+    'and comes after the loopback accept, not before it');
+
+# iptables has to accept the file, which is the question ufw restarting answers.
+my $active = `ufw status 2>/dev/null`;
+like($active, qr/Status:\s*active/, 'ufw is still active after the edit') or diag $active;
+
 done_testing();

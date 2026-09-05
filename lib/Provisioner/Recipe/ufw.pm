@@ -54,6 +54,17 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            # New connections a second a single source may open to a port
+            # before it is dropped.  ufw's own `limit` is six in thirty seconds,
+            # which is right for ssh and rate limits real visitors off a web
+            # server -- so setup-ufw-rules limits only OpenSSH and these are the
+            # real limits.  A thousand resources in a second is abuse; sixty-four
+            # new ssh connections in a second is too, and a provision opens far
+            # more than six.
+            rate_limits => {
+                type    => 'object',
+                default => { 80 => 1024, 443 => 1024, 22 => 64 },
+            },
             # Networks allowed in without ufw's rate limit.  Its limit denies a
             # source that opens six connections in thirty seconds, and a
             # provision opens far more than that -- so without an exemption the
@@ -101,7 +112,6 @@ sub template_files {
     my %ret = (
         'ufw.rsyslog.tt' => 'ufw/rsyslog',
         'ufw.http.tt'    => 'ufw/http',
-        'ufw.user.rules.tt' => 'ufw.user.rules',
     );
 
     return %ret unless @recipes;
