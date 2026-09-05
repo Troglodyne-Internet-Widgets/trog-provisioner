@@ -36,6 +36,13 @@ like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
     'slapd is configured with the certificate the ssl target links') or diag $tls;
 
 ok(-e '/etc/ssl/certs/[% domain %].pem',    'and that certificate is there');
+
+# No CA file is configured: on a fresh guest the only certificate is the
+# self-signed pair the ssl target makes, which carries no basicConstraints and
+# is not a CA -- and slapd refuses a server certificate offered as one.
+my $ca = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCACertificateFile 2>/dev/null`;
+unlike($ca, qr{olcTLSCACertificateFile:\s*/etc/ssl/certs/}, 'the server certificate is not offered as a CA')
+    or diag $ca;
 ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
 
 # slapd has to be able to read the key, which it does as the openldap group.

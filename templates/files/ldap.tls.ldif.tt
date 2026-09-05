@@ -6,11 +6,14 @@
     had not, slapd refused the whole modify with error 80 and took the build
     down with it, while the chown and chmod on the same file two lines earlier
     were written to tolerate its absence. -%]
+[%# No olcTLSCACertificateFile.  The original named the chain.pem dehydrated writes, and
+    on a guest that has never obtained a certificate there is no chain -- only
+    the self-signed pair the ssl target makes, which carries no basicConstraints
+    and is therefore not a CA.  Handing a server certificate to a setting that
+    wants a CA is what slapd was refusing with error 80, and LDAPS does not need
+    it: clients verify against their own trust store. -%]
 dn: cn=config
 changetype: modify
-replace: olcTLSCACertificateFile
-olcTLSCACertificateFile: /etc/ssl/certs/[% domain %].pem
--
 replace: olcTLSCertificateFile
 olcTLSCertificateFile: /etc/ssl/certs/[% domain %].pem
 -
