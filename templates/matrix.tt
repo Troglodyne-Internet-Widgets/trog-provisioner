@@ -62,24 +62,7 @@ systemctl enable matrix-synapse
 [% script_dir %]/queue_postrun_task systemctl start matrix-synapse
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 # Create script to register admin user after service is running
-cat > [% script_dir %]/matrix_register_admin.sh <<'EOF'
-#!/bin/bash
-# Wait for Matrix Synapse to be ready
-for i in {1..30}; do
-    if curl -s http://127.0.0.1:8008/_matrix/client/versions > /dev/null 2>&1; then
-        echo "Matrix Synapse is ready"
-        break
-    fi
-    echo "Waiting for Matrix Synapse to start... ($$i/30)"
-    sleep 2
-done
-# Register admin user if not exists
-if ! su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] -p [% admin_password %] --admin 2>&1" | grep -q "User ID already taken"; then
-    echo "Admin user registered successfully"
-else
-    echo "Admin user already exists"
-fi
-EOF
+install -m 0750 matrix_register_admin.sh [% script_dir %]/matrix_register_admin.sh
 chmod +x [% script_dir %]/matrix_register_admin.sh
 # Queue admin user creation for postrun
 [% script_dir %]/queue_postrun_task [% script_dir %]/matrix_register_admin.sh

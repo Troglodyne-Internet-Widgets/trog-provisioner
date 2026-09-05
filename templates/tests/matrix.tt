@@ -51,6 +51,14 @@ foreach my $pkg (qw{matrix-synapse-py3 python3-pil python3-attr}) {
 ok(-f '/etc/apt/sources.list.d/matrix-org.list', 'the matrix.org repository is configured');
 ok(-s '/usr/share/keyrings/matrix-org-archive-keyring.gpg', 'and its signing key is installed');
 
+# The admin registration script.  It used to be written by a heredoc in the
+# Makefile, where it could not work: every recipe line runs in its own shell, so
+# the heredoc had no body and the lines meant to be the script were run as
+# commands until one of them was a `for` loop and the build stopped.
+ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is installed');
+my $syntax = `bash -n [% script_dir %]/matrix_register_admin.sh 2>&1`;
+is($syntax, '', 'and is a valid shell script') or diag $syntax;
+
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
 

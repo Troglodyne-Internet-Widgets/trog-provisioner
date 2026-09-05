@@ -198,6 +198,7 @@ sub template_files {
     my ($self) = @_;
 
     return (
+        'matrix.register_admin.sh.tt' => 'matrix_register_admin.sh',
         'matrix.homeserver.yaml.tt' => 'homeserver.yaml',
         'matrix.log.yaml.tt'        => 'log.yaml',
         'matrix.admin.nginx.tt'     => 'matrix-admin.nginx.conf',
