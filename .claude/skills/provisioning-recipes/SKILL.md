@@ -161,38 +161,24 @@ teardown, which is the usual ending, but do it on anything you intend to keep.
 
 ## When a provision "times out"
 
-A timeout is a claim about elapsed time, and there are two of them in play on
-every remote provision. Establish which one fired before concluding anything
+A timeout is a claim about elapsed time, and there are layers of them in play on
+every remote provision. Establish *which* one fired before concluding anything
 about the guest.
 
 **Check the elapsed time against the setting.** If a provision fails after a
 suspiciously round interval -- ten minutes, exactly -- and raising the setting
 changes nothing, the number you are configuring is not the number doing the
-killing. That is the whole diagnosis, and it is available from a wristwatch.
-`SETUP_TIMEOUT` in `Trog::Guest` was decorative for the entire life of the
-remote path: `Trog::Machine::_unhang` wraps every remote command in
-`$HANG_TIMEOUT` seconds, `wait_for_makefile`'s command is
-`sudo timeout 180m bash -c 'until atq is empty ...'`, and the alarm killed it at
-ten minutes whatever the timeout said. Guests quietly compiling perl came back
-as failures, for hours of investigation, and the recipes were never at fault.
-
-**A wait wrapped in a shorter wait is a bug.** `_hang_limit` now reads the
-timeout a command carries and allows it that long plus a minute; anything
-without one keeps the default. If you add a guard around remote commands, or a
-command that legitimately blocks for a long time, check the relationship between
-the layers -- not each layer on its own, which is how this passed review.
-`t/hv.t` asserts it.
+killing, and you need to look for the actually relevant timeout.
 
 **Beware guards that only one path reaches.** `_unhang` returns early when the
 hypervisor is local, so this never appeared against a local one. A guard on one
 path means two code paths with different behaviour and only one of them getting
-daily use; the quiet one is where this kind of thing lives.
+daily use.
 
-**Do not conclude "it is just slow" from a truncated measurement.** Every timing
-in the sweep that produced this note was the cap, not a build. With the cap
-fixed, a tpsgi domain -- perl from source plus ninety-seven distributions, the
-heaviest thing here -- provisions in twenty minutes. Measure one guest, alone,
-with realistic memory and processors, before believing any number.
+**Do not conclude "it is just slow" from a truncated measurement.**
+Such a conclusion requires evidence, and a performance analysis with specific
+testable recommendations.  If such interventions fall short of fixing code that
+is timing out, something is still wrong - you can't just conclude "it's slow".
 
 ## What tends to be wrong
 
