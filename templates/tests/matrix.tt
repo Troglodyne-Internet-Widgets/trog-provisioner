@@ -6,12 +6,18 @@ use Test::More;
 my $status = `systemctl is-active matrix-synapse 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'matrix-synapse is running');
-ok(-f '[% install_dir %]/[% domain %]/homeserver.yaml', 'homeserver.yaml exists');
+ok(-f '/etc/matrix-synapse/homeserver.yaml', 'homeserver.yaml is where synapse reads it');
 
 # Everything template_files generates, checked where the recipe puts it.  This
 # used to copy a matrix.nginx.conf that template_files does not generate, so the
-# target died and took the rest of the build with it.
-ok(-f '[% install_dir %]/[% domain %]/log.yaml', 'log.yaml exists');
+# target died and took the rest of the build with it -- and then checked for the
+# yaml files somewhere the recipe has never written them.
+ok(-f '/etc/matrix-synapse/log.yaml', 'log.yaml is there too');
+
+# Both are copied into /etc/matrix-synapse, which is where synapse looks.  This
+# checked install_dir/domain for them -- a path the recipe never writes -- and
+# had simply never run this far, because the package install above it had been
+# failing for want of a repository.
 ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhost was installed');
 
 # And something behind it.  The admin interface is downloaded from a GitHub
