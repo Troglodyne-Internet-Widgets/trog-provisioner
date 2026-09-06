@@ -91,13 +91,14 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
-            vhosts     => {
-                type => 'object',
-                description => "vhost vars by port number",
+            user   => { type => 'string' },
+            vhosts => {
+                type                 => 'object',
+                description          => "vhost vars by port number",
                 additionalProperties => {
                     type       => 'object',
                     properties => {
@@ -107,27 +108,30 @@ sub args {
                         auth_uri       => { type => 'string' },
                         public_dir     => { type => 'string' },
                         nocache_prefix => { type => 'string' },
+
                         # No default: a vhost is either the redirect or the
                         # thing redirected to, and defaulting both this and ssl
                         # to true made every vhost claim to be both.
-                        ssl_redirect   => { type => 'boolean' },
+                        ssl_redirect => { type => 'boolean' },
+
                         # No default here either, for the same reason: this one
                         # was left defaulting to true, so a port 80 vhost that
                         # asked for neither -- tcms and tpsgi both do -- came
                         # out as `listen 80 ssl` and spoke TLS on the plain HTTP
                         # port.  Every recipe that wants it says so.
-                        ssl            => { type => 'boolean' },
+                        ssl => { type => 'boolean' },
                     },
                 },
             },
-            ipv6       => { type => 'boolean', default => 1 },
+            ipv6 => { type => 'boolean', default => 1 },
+
             # Declared here as well as in the nginx recipe, because each recipe
             # renders with its own configuration and nothing else: the split in
             # 5756b44 moved this to nginx and left the templates here using it,
             # so it has rendered as `backlog=` -- which nginx refuses -- ever
             # since.  It has to match nginx's, since somaxconn is set from that
             # and must be at least this.
-            backlog    => { type => 'integer', default => 32768, minimum => 0 },
+            backlog => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
 }
@@ -154,6 +158,7 @@ sub enrich {
     }
 
     if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
+
         # A proxy_uri that is not a URL is a unix socket, and those go through
         # an upstream block rather than into proxy_pass directly.
         #
@@ -175,7 +180,7 @@ sub enrich {
 
             my $uri = $vopts->{proxy_uri};
             die "Must set proxy_uri in [nginxproxy] section" if !$uri;
-            next if $uri =~ m/^http/;
+            next                                             if $uri =~ m/^http/;
 
             # Named for the socket, so that two vhosts sharing one -- 80 and 443
             # both proxying to the same app, which is the usual arrangement --
@@ -183,7 +188,7 @@ sub enrich {
             my $socket = "$opts{install_dir}/$opts{domain}/$uri";
             ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
 
-            $upstreams{$name}   = $socket;
+            $upstreams{$name} = $socket;
             $vopts->{proxy_uri} = "http://$name";
         }
         $opts{upstreams} = \%upstreams;
@@ -196,7 +201,7 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.domain.conf.tt'  => 'nginx.domain.conf',
+        'nginx.domain.conf.tt' => 'nginx.domain.conf',
     );
 }
 

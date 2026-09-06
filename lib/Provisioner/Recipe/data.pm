@@ -43,20 +43,19 @@ sub deps {
 
 sub args {
     return (
-        type => "object",
-        required => [qw{from to}],
+        type       => "object",
+        required   => [qw{from to}],
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
+            user => { type => 'string' },
             from => { type => "string" },
             to   => { type => "string" },
         },
     );
 }
-
-
 
 sub tests {
     return qw{data.tt};

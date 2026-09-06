@@ -96,10 +96,11 @@ sub args {
     return (
         required   => [qw{version}],
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
+            user    => { type => 'string' },
             version => { type => 'string' },
             ipv6    => { type => 'boolean', default => 1 },
         },

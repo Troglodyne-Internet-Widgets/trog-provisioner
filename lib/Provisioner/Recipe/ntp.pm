@@ -52,6 +52,7 @@ sub deps {
 
 sub dep_conflicts {
     my ($self) = @_;
+
     # Remove anything that conflicts with chrony
     return qw{ntp ntpdate systemd-timesyncd};
 }

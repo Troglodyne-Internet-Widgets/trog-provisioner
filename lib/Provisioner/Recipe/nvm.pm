@@ -65,6 +65,7 @@ Check L<https://github.com/nvm-sh/nvm/releases> for available versions.
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
+
         # libatomic1 because the node builds nvm downloads link against
         # libatomic.so.1, which Ubuntu does not install by default.  Without it
         # node is present and unrunnable -- "error while loading shared
@@ -78,7 +79,8 @@ sub deps {
 sub args {
     return (
         properties => {
-            user        => { type => 'string' },
+            user => { type => 'string' },
+
             # TODO fetch latest version automatically
             nvm_version => { type => 'string', default => 'v0.40.3' },
         },
@@ -87,7 +89,7 @@ sub args {
 
 sub enrich {
     my ( $self, %opts ) = @_;
-    $opts{user}        //= $opts{admin_user};
+    $opts{user} //= $opts{admin_user};
     return %opts;
 }
 

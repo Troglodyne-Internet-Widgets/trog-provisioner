@@ -47,6 +47,7 @@ sub deps {
 }
 
 sub rate_limits {
+
     # Clients hold connections open rather than opening one per operation, so
     # even a busy application opens few a second.
     return ( 6379 => 512 );
@@ -56,17 +57,19 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            bind   => { type => 'string', default => '127.0.0.1' },
-            port   => { type => 'integer', minimum => 1024, default => 6379 },
-            save   => { type => 'boolean', default => 1 },
+            bind             => { type => 'string',  default => '127.0.0.1' },
+            port             => { type => 'integer', minimum => 1024, default => 6379 },
+            save             => { type => 'boolean', default => 1 },
             requirepass      => { type => 'string' },
             maxmemory        => { type => 'string' },
             maxmemory_policy => {
                 type => 'string',
-                enum => [qw{
-                    noeviction allkeys-lru volatile-lru allkeys-random
-                    volatile-random volatile-ttl allkeys-lfu volatile-lfu
-                }],
+                enum => [
+                    qw{
+                      noeviction allkeys-lru volatile-lru allkeys-random
+                      volatile-random volatile-ttl allkeys-lfu volatile-lfu
+                    }
+                ],
             },
         },
     );

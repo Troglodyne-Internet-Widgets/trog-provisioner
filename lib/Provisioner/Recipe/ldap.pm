@@ -44,17 +44,17 @@ Requires the C<letsencrypt> recipe for TLS certificates.
 
 sub args {
     return (
-        type     => 'object',
-        required => [qw{admin_password}],
+        type       => 'object',
+        required   => [qw{admin_password}],
         properties => {
             admin_password => { type => 'string' },
             base_dn        => { type => 'string' },
             port           => { type => 'integer', default => 636 },
             users          => {
-                type => 'array',
+                type    => 'array',
                 default => [],
-                items => {
-                    type => 'object',
+                items   => {
+                    type       => 'object',
                     properties => {
                         gecos         => { type => 'string' },
                         name          => { type => 'string' },
@@ -78,7 +78,7 @@ sub enrich {
     # at all and an empty base_dn for any domain that did not set one.
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
-        my @parts = split( /[.]/, $domain );
+        my @parts  = split( /[.]/, $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
 
@@ -100,6 +100,7 @@ sub enrich {
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
+
         # libldap2, not libldap-2.5-0: the soname is in the package name on
         # some distros and not on Ubuntu 24.04, where the archive has libldap2.
         return qw{slapd ldap-utils libldap2 ssl-cert};
@@ -110,7 +111,7 @@ sub deps {
 sub template_files {
     my ($self) = @_;
     return (
-        'ldap.apparmor.tt' => 'slapd.apparmor',
+        'ldap.apparmor.tt'      => 'slapd.apparmor',
         'ldap.slapd.debconf.tt' => 'slapd.debconf',
         'ldap.seed.ldif.tt'     => 'seed.ldif',
         'ldap.tls.ldif.tt'      => 'tls.ldif',

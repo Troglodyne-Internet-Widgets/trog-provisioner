@@ -13,7 +13,7 @@ use re '/aa';
 use FindBin::libs;
 
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 
 use Sys::Virt();
 
@@ -64,15 +64,16 @@ The fleet definition.  Defaults to the one under L<Trog::Config>.
 sub main {
     my @args = @_;
 
-    my ($uri, $hvconf, $help);
-    GetOptionsFromArray(\@args,
+    my ( $uri, $hvconf, $help );
+    GetOptionsFromArray(
+        \@args,
         'connect=s' => \$uri,
         'hvconf=s'  => \$hvconf,
         'help'      => \$help,
     );
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    my $hv = hypervisor($uri, $hvconf);
+    my $hv = hypervisor( $uri, $hvconf );
     return 1 unless $hv;
 
     print "Hypervisor: " . $hv->uri . "\n\n";
@@ -89,35 +90,35 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } (\&note_libguestfs, \&note_swtpm);
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm );
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
         foreach my $note (@notes) {
             print "  * $note->{what}\n";
-            print "    $_\n" for split("\n", $note->{fix});
+            print "    $_\n" for split( "\n", $note->{fix} );
             print "\n";
         }
     }
 
     return 0 unless @failed;
 
-    print "\n" . scalar(@failed) . " thing" . (@failed == 1 ? '' : 's') . " to fix first:\n\n";
+    print "\n" . scalar(@failed) . " thing" . ( @failed == 1 ? '' : 's' ) . " to fix first:\n\n";
     foreach my $failure (@failed) {
         print "  * $failure->{what}\n";
-        print "    $_\n" for split("\n", $failure->{fix});
+        print "    $_\n" for split( "\n", $failure->{fix} );
         print "\n";
     }
     return 1;
 }
 
 sub hypervisor {
-    my ($uri, $hvconf) = @_;
+    my ( $uri, $hvconf ) = @_;
 
     my $hv = eval {
-        return Trog::HV->new(uri => $uri) if $uri;
+        return Trog::HV->new( uri => $uri ) if $uri;
 
-        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+        my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
         return Trog::HV->new() unless $fleet->configured;
 
         my ($name) = $fleet->names();
@@ -129,23 +130,23 @@ sub hypervisor {
 }
 
 sub report {
-    my ($ok, $what, $fix) = @_;
-    printf "%s %s\n", ($ok ? '  ok  ' : 'FAILED'), $what;
+    my ( $ok, $what, $fix ) = @_;
+    printf "%s %s\n", ( $ok ? '  ok  ' : 'FAILED' ), $what;
     return { ok => $ok, what => $what, fix => $fix };
 }
 
 sub check_reachable {
     my ($hv) = @_;
 
-    return report(1, 'The hypervisor is this machine', q{}) if $hv->is_local;
+    return report( 1, 'The hypervisor is this machine', q{} ) if $hv->is_local;
 
     my $whoami = eval { $hv->capture('whoami') };
     chomp $whoami if defined $whoami;
 
-    return report(1, "Reached " . $hv->ssh_target . " as $whoami", q{})
+    return report( 1, "Reached " . $hv->ssh_target . " as $whoami", q{} )
       if defined $whoami && length $whoami;
 
-    return report(0, 'Cannot reach ' . $hv->describe, <<"FIX");
+    return report( 0, 'Cannot reach ' . $hv->describe, <<"FIX" );
 ssh -v @{[ $hv->ssh_target ]} and see what it says.  This wants an agent or a
 key already trusted there; nothing here can answer a password prompt.
 FIX
@@ -154,12 +155,12 @@ FIX
 sub check_passwordless_sudo {
     my ($hv) = @_;
 
-    return report(1, 'Passwordless sudo', q{}) if $hv->run(qw{sudo -n true}) == 0;
+    return report( 1, 'Passwordless sudo', q{} ) if $hv->run(qw{sudo -n true}) == 0;
 
     my $user   = $hv->ssh_user // 'you';
     my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
 
-    return report(0, "No passwordless sudo for $user on $target", <<"FIX");
+    return report( 0, "No passwordless sudo for $user on $target", <<"FIX" );
 Provisioning writes to the storage pool, defines domains, and edits the
 rsyslog config, all through sudo.  A password prompt in the middle of that
 has nowhere to be answered from, and the run hangs rather than failing.
@@ -182,9 +183,9 @@ sub check_iso_builder {
     my ($hv) = @_;
 
     my $maker = eval { $hv->iso_maker };
-    return report(1, "Cloud-init seed builder: $maker", q{}) if $maker;
+    return report( 1, "Cloud-init seed builder: $maker", q{} ) if $maker;
 
-    return report(0, 'No ISO builder on the hypervisor', <<'FIX');
+    return report( 0, 'No ISO builder on the hypervisor', <<'FIX' );
 cloud-init reads its configuration off a small ISO, and something has to make
 it:
 
@@ -196,9 +197,9 @@ sub check_libvirt {
     my ($hv) = @_;
 
     my $version = eval { $hv->vmm->get_library_version() };
-    return report(1, 'libvirt answers, running ' . libvirt_version($version), q{}) if $version;
+    return report( 1, 'libvirt answers, running ' . libvirt_version($version), q{} ) if $version;
 
-    return report(0, 'libvirt did not answer', <<"FIX");
+    return report( 0, 'libvirt did not answer', <<"FIX" );
 $@
 The URI is @{[ $hv->uri ]}.  Check libvirtd is running there and that the user
 is in the libvirt group.
@@ -214,7 +215,7 @@ sub check_sys_virt_in_step {
     my ($hv) = @_;
 
     my $remote = eval { $hv->vmm->get_library_version() };
-    return report(0, 'Could not ask the hypervisor its libvirt version', <<'FIX') unless $remote;
+    return report( 0, 'Could not ask the hypervisor its libvirt version', <<'FIX' ) unless $remote;
 libvirt did not answer, so this could not be checked.  Fix that first; the
 answer is above.
 FIX
@@ -225,10 +226,10 @@ FIX
     my ($here_mm)  = $here  =~ m/\A(\d+\.\d+)/;
     my ($there_mm) = $there =~ m/\A(\d+\.\d+)/;
 
-    return report(1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{})
+    return report( 1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{} )
       if defined $here_mm && defined $there_mm && $here_mm eq $there_mm;
 
-    return report(0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX");
+    return report( 0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX" );
 These want to be the same release.  Sys::Virt is versioned to track libvirt and
 binds the API of the one it was built against, so a mismatch does not announce
 itself -- it shows up as a missing constant or an unimplemented call, blamed on
@@ -251,9 +252,9 @@ sub check_config {
     my $dir = Trog::Config->dir;
 
     my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml};
-    return report(1, "Configuration to copy from: $dir", q{}) unless @missing;
+    return report( 1, "Configuration to copy from: $dir", q{} ) unless @missing;
 
-    return report(0, "Missing from $dir: " . join(', ', @missing), <<"FIX");
+    return report( 0, "Missing from $dir: " . join( ', ', @missing ), <<"FIX" );
 These are where an installation says which machines exist and what every guest
 gets.  See Trog::Config for where this directory is and how to point it
 somewhere else.
@@ -267,8 +268,7 @@ FIX
 sub note_libguestfs {
     my ($hv) = @_;
 
-    my ($found) = grep { $hv->run('sh', '-c', "command -v $_ >/dev/null 2>&1") == 0 }
-        qw{virt-cat virt-ls virt-edit};
+    my ($found) = grep { $hv->run( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
 
     return { ok => 1 } if $found;
 
@@ -291,8 +291,8 @@ FIX
 sub note_swtpm {
     my ($hv) = @_;
 
-    return { ok => 1 } unless $hv->run('sh', '-c', 'test -c /dev/tpmrm0') == 0;
-    return { ok => 1 } if $hv->run('sh', '-c', 'command -v swtpm >/dev/null 2>&1') == 0;
+    return { ok => 1 } unless $hv->run( 'sh', '-c', 'test -c /dev/tpmrm0' ) == 0;
+    return { ok => 1 } if $hv->run( 'sh', '-c', 'command -v swtpm >/dev/null 2>&1' ) == 0;
 
     return { ok => 0, what => 'This machine has a TPM, and no swtpm to share it out', fix => <<'FIX' };
 Guests built here get an emulated TPM when swtpm is installed, which is what lets
@@ -307,12 +307,12 @@ FIX
 # release.
 sub libvirt_version {
     my ($packed) = @_;
-    return sprintf '%d.%d.%d', int($packed / 1000000), int($packed / 1000) % 1000, $packed % 1000;
+    return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
 }
 
 sub readable {
     my ($path) = @_;
-    open(my $fh, '<', $path) or return 0;
+    open( my $fh, '<', $path ) or return 0;
     close $fh;
     return 1;
 }

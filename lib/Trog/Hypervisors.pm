@@ -81,7 +81,7 @@ spelled.
 =cut
 
 sub load {
-    my ($class, $path) = @_;
+    my ( $class, $path ) = @_;
 
     my $self = bless { path => $path, order => [], blocks => {} }, $class;
     return $self unless defined $path;
@@ -94,7 +94,7 @@ sub load {
     # names, so recover them in the order the file lists them.
     my %vars = $config->vars();
     my %seen;
-    foreach my $key (sort keys %vars) {
+    foreach my $key ( sort keys %vars ) {
         my ($block) = $key =~ m/\A([^.]+)\./ or next;
         next if $seen{$block}++;
         push @{ $self->{order} }, $block;
@@ -105,7 +105,7 @@ sub load {
     # file that forgot its headers looks like one hypervisor of that name.
     # Say so rather than provisioning onto a machine nobody meant to name.
     die "$path names no hypervisors; every one needs a [name] header of its own\n"
-      if !@{ $self->{order} } || (@{ $self->{order} } == 1 && $self->{order}[0] eq 'default');
+      if !@{ $self->{order} } || ( @{ $self->{order} } == 1 && $self->{order}[0] eq 'default' );
 
     return $self;
 }
@@ -135,18 +135,17 @@ C<Trog::HV::from_config>, which is where the hypervisor used to come from.
 =cut
 
 sub find {
-    my ($class, $domain, %opts) = @_;
+    my ( $class, $domain, %opts ) = @_;
 
     my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
 
-    return Trog::HV->new(uri => $opts{uri}, %paths) if $opts{uri};
+    return Trog::HV->new( uri => $opts{uri}, %paths ) if $opts{uri};
 
-    my $fleet = $class->load($opts{hvconf} // $class->default_path);
-    return Trog::HV->from_config($opts{config}, %paths) unless $fleet->configured;
+    my $fleet = $class->load( $opts{hvconf} // $class->default_path );
+    return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
 
     my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n"
-      . "Looked on: " . join(', ', $fleet->names) . "\n";
+      or die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n";
 
     $hv->activate();
     $hv->{$_} = $paths{$_} for keys %paths;
@@ -178,18 +177,18 @@ somewhere else.
 =cut
 
 sub hypervisor {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
 
     my $block = $self->{blocks}{$name}
-      or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join(', ', $self->names) . "\n";
+      or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
     return $self->{built}{$name} //= Trog::HV->candidate(
-        name     => $name,
-        uri      => $block->{libvirt_uri},
-            map { $_ => $block->{$_} }
+        name => $name,
+        uri  => $block->{libvirt_uri},
+        map { $_ => $block->{$_} }
           grep { defined $block->{$_} }
           qw{pool_path domain_dir bridge_device virbr_device
-             reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
+          reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
     );
 }
 
@@ -215,11 +214,11 @@ for maintenance is worse than one that says so and carries on.
 =cut
 
 sub hosting {
-    my ($self, $domain) = @_;
+    my ( $self, $domain ) = @_;
 
-    foreach my $hv ($self->all) {
+    foreach my $hv ( $self->all ) {
         my $has = eval { $hv->domain_exists($domain) };
-        unless (defined $has) {
+        unless ( defined $has ) {
             warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $@";
             next;
         }
@@ -238,10 +237,10 @@ can.
 =cut
 
 sub place {
-    my ($self, $domain, %needs) = @_;
+    my ( $self, $domain, %needs ) = @_;
 
-    my (@fits, @why_not);
-    foreach my $hv ($self->all) {
+    my ( @fits, @why_not );
+    foreach my $hv ( $self->all ) {
         my @reasons = eval { $hv->shortfalls(%needs) };
         if ($@) {
             push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline($@);
@@ -253,19 +252,22 @@ sub place {
             next;
         }
 
-        push @fits, [$hv, $hv->headroom(%needs)];
+        push @fits, [ $hv, $hv->headroom(%needs) ];
     }
 
-    die "Nowhere to put $domain: it wants "
-      . sprintf("%dMB of memory, %d CPUs and %dGB of disk, and no hypervisor in %s can spare that.\n",
-        $needs{memory_mb} // 0, $needs{cpus} // 0,
-        ($needs{disk_bytes} // 0) / (1024 * 1024 * 1024), $self->{path})
-      . join("\n", @why_not) . "\n"
+    die "Nowhere to put $domain: it wants " . sprintf(
+        "%dMB of memory, %d CPUs and %dGB of disk, and no hypervisor in %s can spare that.\n",
+        $needs{memory_mb} // 0,                               $needs{cpus} // 0,
+        ( $needs{disk_bytes} // 0 ) / ( 1024 * 1024 * 1024 ), $self->{path}
+      )
+      . join( "\n", @why_not ) . "\n"
       unless @fits;
 
     my ($best) = map { $_->[0] } sort { $b->[1] <=> $a->[1] } @fits;
-    printf("Placing %s on %s (%s), the roomiest of %d that fit\n",
-        $domain, $best->name, $best->uri, scalar @fits);
+    printf(
+        "Placing %s on %s (%s), the roomiest of %d that fit\n",
+        $domain, $best->name, $best->uri, scalar @fits
+    );
     return $best;
 }
 
@@ -282,7 +284,7 @@ and C<size> the guest asks for, and for a C<hypervisor> pin.
 =cut
 
 sub select_for {
-    my ($self, $domain, $config) = @_;
+    my ( $self, $domain, $config ) = @_;
 
     my $existing = $self->hosting($domain);
     if ($existing) {
@@ -290,17 +292,16 @@ sub select_for {
         return $existing->activate();
     }
 
-    my $pinned = _param($config, 'hypervisor');
-    if (defined $pinned) {
-        my $hv = $self->hypervisor($pinned);
-        my @reasons = $hv->shortfalls(_needs($config));
-        die "$domain is pinned to $pinned, which cannot take it:\n"
-          . join('', map { "  $_\n" } @reasons)
+    my $pinned = _param( $config, 'hypervisor' );
+    if ( defined $pinned ) {
+        my $hv      = $self->hypervisor($pinned);
+        my @reasons = $hv->shortfalls( _needs($config) );
+        die "$domain is pinned to $pinned, which cannot take it:\n" . join( '', map { "  $_\n" } @reasons )
           unless !@reasons;
         return $hv->activate();
     }
 
-    return $self->place($domain, _needs($config))->activate();
+    return $self->place( $domain, _needs($config) )->activate();
 }
 
 # What the guest is asking for.  Out of its provision.conf, or out of the
@@ -309,19 +310,19 @@ sub select_for {
 sub _needs {
     my ($config) = @_;
     return (
-        memory_mb  => _param($config, 'memory'),
-        cpus       => _param($config, 'cpus'),
-        disk_bytes => _param($config, 'size'),
+        memory_mb  => _param( $config, 'memory' ),
+        cpus       => _param( $config, 'cpus' ),
+        disk_bytes => _param( $config, 'size' ),
     );
 }
 
 sub _param {
-    my ($config, $key) = @_;
+    my ( $config, $key ) = @_;
     return undef unless defined $config;
 
     my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
     $value = $value->[0] if ref $value eq 'ARRAY';
-    return (defined $value && length $value) ? $value : undef;
+    return ( defined $value && length $value ) ? $value : undef;
 }
 
 sub _oneline {

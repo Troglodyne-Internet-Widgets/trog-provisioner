@@ -17,7 +17,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal qw{exception};
@@ -33,13 +33,15 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
         template        => 'widget.tt',
         global_template => 'widget.global.tt',
         template_dirs   => [$tdir],
-    }, 'Provisioner::Recipe';
+      },
+      'Provisioner::Recipe';
 
     my $without_global = bless {
         template        => 'noglobal.tt',
         global_template => 'noglobal.global.tt',
         template_dirs   => [$tdir],
-    }, 'Provisioner::Recipe';
+      },
+      'Provisioner::Recipe';
 
     # has_global_template - no .global.tt yet
     ok( !$with_global->has_global_template(),    'has_global_template false when file absent' );
@@ -62,8 +64,9 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $multi_dir = bless {
         template        => 'other.tt',
         global_template => 'other.global.tt',
-        template_dirs   => [$tdir, $tdir2],
-    }, 'Provisioner::Recipe';
+        template_dirs   => [ $tdir, $tdir2 ],
+      },
+      'Provisioner::Recipe';
     ok( $multi_dir->has_global_template(), 'has_global_template searches all template_dirs' );
 
     # Rendering tests - need a full recipe object via new()
@@ -79,12 +82,15 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
             template        => 'widget.tt',
             global_template => 'widget.global.tt',
             template_dirs   => [$tdir],
-            tt              => Text::Xslate->new({
-                path   => [$tdir],
-                syntax => 'TTerse',
-                module => ['Text::Xslate::Bridge::TT2'],
-            }),
-        }, 'Provisioner::Recipe';
+            tt              => Text::Xslate->new(
+                {
+                    path   => [$tdir],
+                    syntax => 'TTerse',
+                    module => ['Text::Xslate::Bridge::TT2'],
+                }
+            ),
+          },
+          'Provisioner::Recipe';
     };
 
     my $global_out = $widget->()->render_global( global_flag => 'yes' );
@@ -95,6 +101,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
 };
 
 subtest 'schema defaults are filled in' => sub {
+
     # JSON::Validator does this itself, at Schema.pm:758 -- but only under
     # coerce('defaults'), and OpenAPIv3 coerces booleans, numbers and strings
     # without it.  Nothing turned it on, so every default in every args()
@@ -112,43 +119,45 @@ subtest 'schema defaults are filled in' => sub {
         },
     );
 
-    my %opts = (given => 'mine', emptied => undef, blank => undef);
-    Provisioner::Recipe::forget_undefs(\%opts, \%schema);
+    my %opts = ( given => 'mine', emptied => undef, blank => undef );
+    Provisioner::Recipe::forget_undefs( \%opts, \%schema );
 
     # The validator fills a default in when the key is absent, which is the
     # right rule for JSON and the wrong one for YAML: "emptied:" with nothing
     # after it means "whatever you think", not "empty".
-    ok(!exists $opts{emptied}, 'a field named and left empty is dropped, so the default can land');
-    ok(exists $opts{blank} && !defined $opts{blank},
-        'one with no default to land is left alone, since unset may mean something');
+    ok( !exists $opts{emptied}, 'a field named and left empty is dropped, so the default can land' );
+    ok(
+        exists $opts{blank} && !defined $opts{blank},
+        'one with no default to land is left alone, since unset may mean something'
+    );
 
     my $validator = JSON::Validator::Schema::Troglodyne->new->coerce('defaults');
-    $validator->validate(\%opts, \%schema);
+    $validator->validate( \%opts, \%schema );
 
-    is($opts{plain},   'a default', 'an absent field gets its default');
-    is($opts{emptied}, 'a default', 'and so does one that was emptied');
-    is($opts{given},   'mine',      'one that was given does not');
-    ok(!exists $opts{nodefault}, 'a field with no default is not invented');
-    is_deeply($opts{listed}, [qw{one two}], 'lists come through');
+    is( $opts{plain},   'a default', 'an absent field gets its default' );
+    is( $opts{emptied}, 'a default', 'and so does one that was emptied' );
+    is( $opts{given},   'mine',      'one that was given does not' );
+    ok( !exists $opts{nodefault}, 'a field with no default is not invented' );
+    is_deeply( $opts{listed}, [qw{one two}], 'lists come through' );
 };
 
 subtest 'a recipe gets its declared defaults end to end' => sub {
     require Provisioner::Recipe::ntp;
-    my $r = 'Provisioner::Recipe::ntp'->new(template_dirs => ['templates'], output_dir => '/tmp');
+    my $r = 'Provisioner::Recipe::ntp'->new( template_dirs => ['templates'], output_dir => '/tmp' );
 
-    my %v = $r->validate(domain => 'd.test');
-    is($v{makestep}, '1.0 3', 'through validate(), which is what render_file calls');
-    ok(scalar @{ $v{servers} }, 'including the list of time sources');
+    my %v = $r->validate( domain => 'd.test' );
+    is( $v{makestep}, '1.0 3', 'through validate(), which is what render_file calls' );
+    ok( scalar @{ $v{servers} }, 'including the list of time sources' );
 
-    my %u = $r->validate(domain => 'd.test', makestep => undef);
-    is($u{makestep}, '1.0 3', 'and an explicitly empty one still gets it');
+    my %u = $r->validate( domain => 'd.test', makestep => undef );
+    is( $u{makestep}, '1.0 3', 'and an explicitly empty one still gets it' );
 };
 
 {
     # Counts what validate() actually did, since the point of a memo is the
     # work it does not do.
     package Test::Recipe::Memo;
-    our @ISA = ('Provisioner::Recipe');
+    our @ISA      = ('Provisioner::Recipe');
     our $enriched = 0;
 
     sub args {
@@ -162,7 +171,7 @@ subtest 'a recipe gets its declared defaults end to end' => sub {
     }
 
     sub enrich {
-        my ($self, %opts) = @_;
+        my ( $self, %opts ) = @_;
         $enriched++;
         $opts{seen} = $opts{flavour};
         return %opts;
@@ -173,10 +182,10 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $one = bless {}, 'Test::Recipe::Memo';
     local $Test::Recipe::Memo::enriched = 0;
 
-    my %first = $one->validated(domain => 'a.test', flavour => 'first');
-    my %again = $one->validated(domain => 'a.test', flavour => 'first');
-    is($Test::Recipe::Memo::enriched, 1, 'one object enriches once, however often it is rendered');
-    is($again{seen}, 'first', 'and every render after the first gets that answer');
+    my %first = $one->validated( domain => 'a.test', flavour => 'first' );
+    my %again = $one->validated( domain => 'a.test', flavour => 'first' );
+    is( $Test::Recipe::Memo::enriched, 1,       'one object enriches once, however often it is rendered' );
+    is( $again{seen},                  'first', 'and every render after the first gets that answer' );
 
     # A recipe object is one domain's worth of one recipe, so its memo has to go
     # when it does.  A cache that outlived it would answer a configuration that
@@ -185,15 +194,15 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     # Same class and the same domain as the first, which is the case that tells
     # an object-scoped memo from a cache keyed on either of those: a rebuilt
     # recipe has to be validated afresh, not answered from its predecessor.
-    my $two = bless {}, 'Test::Recipe::Memo';
-    my %theirs = $two->validated(domain => 'a.test', flavour => 'second');
-    is($theirs{seen}, 'second', q{a second object of the same class and domain gets its own answer});
-    is($Test::Recipe::Memo::enriched, 2, 'and enriches for itself');
+    my $two    = bless {}, 'Test::Recipe::Memo';
+    my %theirs = $two->validated( domain => 'a.test', flavour => 'second' );
+    is( $theirs{seen},                 'second', q{a second object of the same class and domain gets its own answer} );
+    is( $Test::Recipe::Memo::enriched, 2,        'and enriches for itself' );
 
     # A third domain, to say the same thing about the axis new_config varies.
     my $three = bless {}, 'Test::Recipe::Memo';
-    my %other = $three->validated(domain => 'b.test', flavour => 'third');
-    is($other{domain}, 'b.test', 'and so does one built for another domain');
+    my %other = $three->validated( domain => 'b.test', flavour => 'third' );
+    is( $other{domain}, 'b.test', 'and so does one built for another domain' );
 };
 
 subtest 'reconcile() hands disagreements to the recipe, and dies by default' => sub {
@@ -211,8 +220,10 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
 
     # Structure belongs to the merge; this only settles scalars.
     my $lists = { hosts => ['a'], nested => { hosts => ['b'] } };
-    is( exception { $r->reconcile( $lists, { hosts => ['c'], nested => { hosts => ['d'] } } ) },
-        undef, 'arrays are left to the merge rather than fought over' );
+    is(
+        exception { $r->reconcile( $lists, { hosts => ['c'], nested => { hosts => ['d'] } } ) },
+        undef, 'arrays are left to the merge rather than fought over'
+    );
 
     like(
         exception { $r->reconcile( { port => 80 }, { port => 443 } ) },

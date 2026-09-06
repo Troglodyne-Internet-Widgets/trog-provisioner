@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use re '/aa';
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -62,8 +62,9 @@ snapshot command that quietly did nothing is worse than one that failed.
 sub main {
     my @args = @_;
 
-    my ($name, $uri, $domain_dir, $hvconf);
-    GetOptionsFromArray(\@args,
+    my ( $name, $uri, $domain_dir, $hvconf );
+    GetOptionsFromArray(
+        \@args,
         'name=s'      => \$name,
         'connect=s'   => \$uri,
         'domaindir=s' => \$domain_dir,
@@ -71,16 +72,18 @@ sub main {
     );
 
     my $domain = shift @args;
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $hv = Trog::Hypervisors->find($domain,
-        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir);
+    my $hv = Trog::Hypervisors->find(
+        $domain,
+        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir
+    );
 
     my $before = $hv->snapshot_current_name($domain);
 
     print "Creating snapshot for $domain...\n";
-    die "Failed to create snapshot for $domain\n" unless $hv->create_snapshot($domain, $name);
+    die "Failed to create snapshot for $domain\n" unless $hv->create_snapshot( $domain, $name );
 
     my $after = $hv->snapshot_current_name($domain);
     die "No current snapshot found after create\n" unless defined $after && length $after;

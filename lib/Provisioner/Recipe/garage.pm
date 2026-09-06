@@ -145,6 +145,7 @@ sub _rpc_secret {
 }
 
 sub rate_limits {
+
     # S3 and admin, RPC between nodes, and the web endpoint.  These are the
     # ports templates/files/ufw.garage.tt opens.
     return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
@@ -169,9 +170,9 @@ sub args {
             capacity           => { type => 'string',  default => '1G' },
             nofile_limit       => { type => 'integer', default => '65536' },
             buckets            => {
-                type  => 'array',
+                type    => 'array',
                 default => [],
-                items => { type => 'string' },
+                items   => { type => 'string' },
             },
         },
     );
@@ -187,6 +188,7 @@ sub template_files {
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
+
     # data_dir and metadata_dir are user-configurable; fall back to defaults.
     # Operators using non-default paths must add them to backup targets manually.
     my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';

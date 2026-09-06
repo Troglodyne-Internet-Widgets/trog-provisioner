@@ -10,7 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-
 =head1 Provisioner::Recipe::plexmediaserver
 
 =head2 SYNOPSIS
@@ -57,7 +56,8 @@ Returns remote file mappings for backup/restore.
 =cut
 
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
+
     # SUPER carries the ufw dependency that rate_limits above asks for; without
     # it this override would quietly drop the limits on 32400.
     return ( letsencrypt => sub { () }, $self->SUPER::required_recipes(%opts) );
@@ -72,6 +72,7 @@ sub deps {
 }
 
 sub rate_limits {
+
     # One client streaming opens a handful; a household opens a few handfuls.
     return ( 32400 => 1024 );
 }

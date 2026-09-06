@@ -68,7 +68,7 @@ our $BOOT_TIMEOUT = 300;
 our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
 sub new {
-    my ($class, %opts) = @_;
+    my ( $class, %opts ) = @_;
 
     die "A guest needs a host to connect to\n" unless defined $opts{host} && length $opts{host};
     return $class->SUPER::new(%opts);
@@ -109,11 +109,11 @@ is not one we can do anything with.
 =cut
 
 sub wait_for_ssh {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     my $timeout = $opts{timeout} // $BOOT_TIMEOUT;
 
     print 'Waiting for ' . $self->ssh_host . ":22 to come live...\n";
-    Net::EmptyPort::wait_port({ host => $self->ssh_host, port => 22, max_wait => $timeout })
+    Net::EmptyPort::wait_port( { host => $self->ssh_host, port => 22, max_wait => $timeout } )
       or die 'SSH port on ' . $self->describe . " never came up after ${timeout}s\n";
 
     # Opening it is the actual test; the port being up only means something is
@@ -134,30 +134,29 @@ will otherwise decline on the grounds that it has already done it.
 =cut
 
 sub wait_for_cloud_init {
-    my ($self, $domain, %opts) = @_;
+    my ( $self, $domain, %opts ) = @_;
     my $timeout = $opts{timeout} // $SETUP_TIMEOUT;
     $domain //= $self->name;
 
     print "Waiting up to $timeout for Cloud-init to finish...\n";
-    my $rc = $self->run(
-        qq{sudo timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
+    my $rc = $self->run(qq{sudo timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
     print "Done!\n";
     die 'Cloud init reported failure on ' . $self->describe . ", investigate the machine\n" if $rc;
 
     # See if we got a lying exit code above.
-    my $raw = $self->capture('sudo cloud-init analyze dump');
-    my $parsed = eval { JSON::MaybeXS->new(utf8 => 1)->decode($raw) };
+    my $raw    = $self->capture('sudo cloud-init analyze dump');
+    my $parsed = eval { JSON::MaybeXS->new( utf8 => 1 )->decode($raw) };
     die "cloud-init analyze dump on " . $self->describe . " did not return a JSON array\n"
       unless ref $parsed eq 'ARRAY';
 
-    foreach my $fail (grep { ($_->{result} // '') eq 'FAIL' } @$parsed) {
-        my ($module, $mtarget) = split('/', $fail->{name});
+    foreach my $fail ( grep { ( $_->{result} // '' ) eq 'FAIL' } @$parsed ) {
+        my ( $module, $mtarget ) = split( '/', $fail->{name} );
         next unless $mtarget;
-        my ($stage, $target) = split('-', $mtarget);
+        my ( $stage, $target ) = split( '-', $mtarget );
         next unless $target;
 
         print "$target failed during $stage, re-running...\n";
-        $self->run_sudo(qw{rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target");
+        $self->run_sudo( qw{rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target" );
         print $self->capture("sudo cloud-init single --name $target") . "\n\n";
     }
     return 1;
@@ -175,7 +174,7 @@ queue more work of its own.
 =cut
 
 sub wait_for_makefile {
-    my ($self, $domain, %opts) = @_;
+    my ( $self, $domain, %opts ) = @_;
     my $timeout = $opts{timeout} // $SETUP_TIMEOUT;
     $domain //= $self->name;
 
@@ -194,7 +193,7 @@ sub wait_for_makefile {
     print "Waiting up to $timeout for any makefile queued ATD jobs to flush...\n";
     $self->run($atq);
 
-    print "Last log:\n" . ($self->capture("sudo tail $log") // '') . "\n";
+    print "Last log:\n" . ( $self->capture("sudo tail $log") // '' ) . "\n";
     print "\nDone!\n";
     return 1;
 }

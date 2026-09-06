@@ -42,7 +42,7 @@ Returns BOOLEAN.
 =cut
 
 sub already_required {
-    my $module = shift;
+    my $module    = shift;
     my @available = keys(%INC);
     return 1 if any { m/\Q$module\E/ } @available;
     return 0;
@@ -59,10 +59,10 @@ Returns ARRAY.
 sub lastuniq {
     my @input = @_;
     my %hashed;
-    @hashed{@input} = 0..@input;
+    @hashed{@input} = 0 .. @input;
     my @out;
-    for my $idx (sort { $a <=> $b } values(%hashed)) {
-        push(@out, $input[$idx]);
+    for my $idx ( sort { $a <=> $b } values(%hashed) ) {
+        push( @out, $input[$idx] );
     }
     return @out;
 }

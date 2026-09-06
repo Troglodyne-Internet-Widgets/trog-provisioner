@@ -33,6 +33,7 @@ TODO: allow specification of specific SHA to check out.
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
+
         # The libtool/seccomp/autotools stuff is all for inotify, which will move to tPSGI eventually
         return qw{sqlite3 libsqlite3-dev libmagic-dev git libxml2-dev libexpat1-dev libssl-dev zlib1g-dev g++ inkscape};
     }
@@ -40,7 +41,7 @@ sub deps {
 }
 
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     return (
         nginxproxy => sub {
             my (%opts) = @_;
@@ -52,7 +53,7 @@ sub required_recipes {
                         auth_uri       => "/authenticated",
                     },
                     443 => {
-                        nocache_prefix =>  "/secure",
+                        nocache_prefix => "/secure",
                         auth_statics   => "assets/private",
                         auth_uri       => "/authenticated",
                     },
@@ -60,8 +61,14 @@ sub required_recipes {
             );
         },
         tpsgi => sub {
-            routers => [qq{tCMS/lib/TCMS.pm}],
-            basedir => 'tCMS',
+
+            # Explicit, like nginxproxy above.  It was an implicit return of a
+            # comma expression, which is the same list and which perltidy cannot
+            # tell from a block it should be putting statements in.
+            return (
+                routers => [qq{tCMS/lib/TCMS.pm}],
+                basedir => 'tCMS',
+            );
         },
     );
 }
@@ -76,7 +83,6 @@ sub remote_files {
         "$install_dir/$domain/tCMS/data/"       => "tCMS/data",
     );
 }
-
 
 # tCMS/config/ comes down whole, and one thing in it must not.
 #

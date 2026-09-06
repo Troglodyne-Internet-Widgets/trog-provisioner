@@ -39,7 +39,7 @@ sub deps {
 }
 
 sub enrich {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
 
     # The hypervisor is always one, whether or not anybody said so: it is what
     # the guest fetches its payload from, over ssh, repeatedly.
@@ -69,6 +69,7 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # New connections a second a single source may open to a port
             # before it is dropped.  ufw's own `limit` is six in thirty seconds,
             # which is right for ssh and rate limits real visitors off a web
@@ -84,6 +85,7 @@ sub args {
                 type    => 'object',
                 default => { 22 => 64 },
             },
+
             # Networks allowed in without ufw's rate limit.  Its limit denies a
             # source that opens six connections in thirty seconds, and a
             # provision opens far more than that -- so without an exemption the

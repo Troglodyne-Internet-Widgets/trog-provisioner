@@ -53,7 +53,8 @@ sub deps {
 }
 
 sub rate_limits {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
+
     # Called before validation, so the schema default is not in %opts yet; it
     # has to be repeated rather than read.  A client opens one tunnel and keeps
     # it, so anything opening hundreds a second is not a client.
@@ -63,16 +64,17 @@ sub rate_limits {
 sub args {
     return (
         properties => {
-            port      => { type => 'integer', minimum => 1024, default => 1194 },
-            proto     => { type => 'string', enum => [qw{udp tcp}], default => 'udp' },
+            port  => { type => 'integer', minimum => 1024,          default => 1194 },
+            proto => { type => 'string',  enum    => [qw{udp tcp}], default => 'udp' },
+
             # An address is a string with a format, not a type of its own.  As a
             # type these were never checked -- the validator has no
             # _validate_type_ipv4 and never reached one, because the fields were
             # always absent until defaults started being applied.
-            subnet    => { type => 'string', format => 'ipv4', default => '10.8.0.0' },
-            netmask   => { type => 'string', format => 'ipv4', default => '255.255.255.0' },
+            subnet    => { type => 'string', format  => 'ipv4', default => '10.8.0.0' },
+            netmask   => { type => 'string', format  => 'ipv4', default => '255.255.255.0' },
             cipher    => { type => 'string', default => 'AES-256-GCM' },
-            dns       => { type => 'array', items => { type => 'string' } },
+            dns       => { type => 'array',  items   => { type => 'string' } },
             interface => { type => 'string' },
         },
     );

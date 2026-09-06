@@ -51,8 +51,8 @@ TODO: gather this data from something secure, such as keepass or vault.
 
 =cut
 
-use UUID qw{uuid};
-use MIME::Base64 qw{encode_base64};
+use UUID                  qw{uuid};
+use MIME::Base64          qw{encode_base64};
 use Crypt::Digest::SHA512 qw{sha512};
 
 sub deps {
@@ -75,10 +75,11 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
+            user  => { type => 'string' },
             names => {
                 type                 => 'object',
                 additionalProperties => {
@@ -91,9 +92,9 @@ sub args {
                 },
             },
             mail_aliases => {
-                type  => 'array',
+                type    => 'array',
                 default => [],
-                items => {
+                items   => {
                     type       => 'object',
                     required   => [qw{from to}],
                     properties => {
@@ -102,26 +103,25 @@ sub args {
                     },
                 },
             },
-            relay  => {
+            relay => {
                 type       => "object",
-                default => {},
+                default    => {},
                 properties => {
                     host => { type => "string" },
                     port => { type => "integer", minimum => 0 },
                 },
             },
+
             # Built for us by bin/new_config from the ipmap
             full_aliases => {
-                type  => 'array',
+                type    => 'array',
                 default => [],
-                items => { type => 'string' },
+                items   => { type => 'string' },
             },
             ipv6 => { type => 'boolean', default => 1 },
         },
     );
 }
-
-
 
 sub template_files {
     my ( $self, @recipes ) = @_;

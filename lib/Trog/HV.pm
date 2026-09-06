@@ -92,7 +92,7 @@ pass unset command line options straight through.
 =cut
 
 sub new {
-    my ($class, %opts) = @_;
+    my ( $class, %opts ) = @_;
 
     # Drop the options that weren't actually given, so an unset --connect
     # doesn't look like a request for a different hypervisor.
@@ -125,10 +125,10 @@ sub activate {
 }
 
 sub candidate {
-    my ($class, %opts) = @_;
+    my ( $class, %opts ) = @_;
 
-    my %given = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
-    my $uri = $given{uri};
+    my %given    = map { $_ => $opts{$_} } grep { defined $opts{$_} && length $opts{$_} } keys %opts;
+    my $uri      = $given{uri};
     my $explicit = defined($uri) ? 1 : 0;
     $uri = $DEFAULT_URI unless $explicit;
 
@@ -145,10 +145,7 @@ sub candidate {
     # A remote hypervisor we can't get a shell on is only half usable, and the
     # half that's missing (files, bridge detection) isn't optional.  Say so now
     # rather than three minutes into a provision run.
-    die "The hypervisor at $uri is remote, but its transport gives us no shell.\n"
-      . "Use an ssh transport instead, e.g. qemu+ssh://root\@"
-      . ($self->{host} // 'hypervisor')
-      . "/system, so we can reach its filesystem.\n"
+    die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
       if !$self->is_local && !defined $self->ssh_host;
 
     return $self;
@@ -167,22 +164,22 @@ C<bridge_device> and C<virbr_device> under their own names.
 
 # Constructor option => the provision.conf key it reads.
 my %CONFIG_KEY = (
-    uri      => 'libvirt_uri',
+    uri => 'libvirt_uri',
     map { $_ => $_ } qw{pool_path domain_dir bridge_device virbr_device},
 );
 
 sub from_config {
-    my ($class, $config, %override) = @_;
+    my ( $class, $config, %override ) = @_;
 
     my $param = sub {
         my ($key) = @_;
         return undef unless $config;
         my $val = $config->param($key);
         $val = $val->[0] if ref $val eq 'ARRAY';
-        return (defined $val && length $val) ? $val : undef;
+        return ( defined $val && length $val ) ? $val : undef;
     };
 
-    return $class->new(map { $_ => $override{$_} // $param->($CONFIG_KEY{$_}) } keys %CONFIG_KEY);
+    return $class->new( map { $_ => $override{$_} // $param->( $CONFIG_KEY{$_} ) } keys %CONFIG_KEY );
 }
 
 =head2 forget()
@@ -205,20 +202,20 @@ sub forget {
 sub _parse_uri {
     my ($uri) = @_;
 
-    my ($scheme, $authority, $path) = URI::Split::uri_split($uri);
+    my ( $scheme, $authority, $path ) = URI::Split::uri_split($uri);
     return undef unless defined $scheme && length $scheme;
 
-    my ($driver, $transport) = split(quotemeta('+'), $scheme, 2);
+    my ( $driver, $transport ) = split( quotemeta('+'), $scheme, 2 );
     return undef unless defined $driver && length $driver;
 
-    my $server = (defined $authority && length $authority) ? URI->new("ssh://$authority") : undef;
+    my $server = ( defined $authority && length $authority ) ? URI->new("ssh://$authority") : undef;
 
     return {
         driver    => $driver,
         transport => $transport,
-        user      => $server ? $server->user : undef,
-        host      => ($server && defined $server->host && length $server->host) ? $server->host : undef,
-        port      => $server ? $server->port : undef,
+        user      => $server                                                      ? $server->user : undef,
+        host      => ( $server && defined $server->host && length $server->host ) ? $server->host : undef,
+        port      => $server                                                      ? $server->port : undef,
         path      => $path,
     };
 }
@@ -307,8 +304,7 @@ is where the volumes on a hypervisor built by the old tool actually are.
 
 =cut
 
-
-sub domain_dir    { return $_[0]->{domain_dir} // '/opt/domains' }
+sub domain_dir { return $_[0]->{domain_dir} // '/opt/domains' }
 
 sub pool_path {
     my ($self) = @_;
@@ -319,7 +315,7 @@ sub pool_path {
     # reason to be wrong about it.  The name and the default are historical --
     # terraform chose both -- and are kept because that is where the volumes on
     # a hypervisor built by the old tool actually live.
-    return $self->{_pool_path} //= ($self->pool_target('tf_disks') // '/opt/terraform/disks');
+    return $self->{_pool_path} //= ( $self->pool_target('tf_disks') // '/opt/terraform/disks' );
 }
 
 =head2 pool_target($name)
@@ -330,7 +326,7 @@ undef if there is no such pool to ask about.
 =cut
 
 sub pool_target {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     $name //= 'tf_disks';
 
     my $xml = eval {
@@ -370,7 +366,7 @@ The unprivileged user the guest will scp its payload back from.
 sub hv_user {
     my ($self) = @_;
     return scalar getpwuid($<) if $self->is_local;
-    return $self->ssh_user if defined $self->ssh_user;
+    return $self->ssh_user     if defined $self->ssh_user;
 
     my $who = $self->capture('id -un');
     chomp $who if defined $who;
@@ -396,7 +392,7 @@ sub vmm {
     # An unasked-for URI means "whatever libvirt would pick", which is what
     # virsh with no -c did before any of this was configurable.
     my $uri = $self->explicit ? $self->uri : '';
-    $self->{vmm} = eval { Sys::Virt->new(uri => $uri, readonly => 0) }
+    $self->{vmm} = eval { Sys::Virt->new( uri => $uri, readonly => 0 ) }
       or die "Could not connect to libvirt at " . $self->uri . ": $@\n";
     return $self->{vmm};
 }
@@ -405,7 +401,7 @@ sub vmm {
 # anywhere we ask.  Opening the connection happens outside the eval, so a
 # hypervisor we can't reach at all doesn't get reported as "no such domain".
 sub _domain {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     my $vmm = $self->vmm;
     return eval { $vmm->get_domain_by_name($name) };
 }
@@ -424,11 +420,11 @@ The domain's XML description, or undef if there is no such domain.
 
 =cut
 
-sub domain_exists     { return defined $_[0]->_domain($_[1]) ? 1 : 0 }
-sub domain_is_running { my $d = $_[0]->_domain($_[1]); return $d && $d->is_active ? 1 : 0 }
+sub domain_exists     { return defined $_[0]->_domain( $_[1] )                      ? 1 : 0 }
+sub domain_is_running { my $d = $_[0]->_domain( $_[1] ); return $d && $d->is_active ? 1 : 0 }
 
 sub domain_xml {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return undef;
     return $domain->get_xml_description();
 }
@@ -444,16 +440,17 @@ Returns true if there was something there to remove.
 =cut
 
 sub annihilate_domain {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
 
     # A domain that is already shut off can't be destroyed, and that's the
     # normal case here rather than a problem.
     eval { $domain->destroy() };
     eval {
-        $domain->undefine(Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA());
+        $domain->undefine( Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA() );
         1;
     } or do {
+
         # Older libvirt without nvram support for this domain type.
         eval { $domain->undefine() };
     };
@@ -473,20 +470,21 @@ the MAC; C<guest_mac> exists so there always is one.
 =cut
 
 sub lease_ip {
-    my ($self, $network, %opts) = @_;
+    my ( $self, $network, %opts ) = @_;
 
     my $vmm = $self->vmm;
     my $net = eval { $vmm->get_network_by_name($network) } or return undef;
 
     # get_dhcp_leases filters by MAC on the far side, so with one we ask a
     # precise question rather than sifting the answer.
-    my @leases = eval { $net->get_dhcp_leases($opts{mac}) };
+    my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
     return undef unless @leases;
 
     foreach my $lease (@leases) {
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
-        next if defined $opts{hostname}
-          && !(defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/);
+        next
+          if defined $opts{hostname}
+          && !( defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/ );
         next if defined $opts{exclude} && $lease->{ipaddr} eq $opts{exclude};
         return $lease->{ipaddr};
     }
@@ -505,18 +503,17 @@ helper on the hypervisor.
 =cut
 
 sub release_dhcp_lease {
-    my ($self, $ip, $bridge) = @_;
+    my ( $self, $ip, $bridge ) = @_;
     return 0 unless defined $ip && length $ip;
     $bridge //= $self->virbr_device;
 
-    my ($helper) = grep { $self->file_exists($_) }
-      qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
+    my ($helper) = grep { $self->file_exists($_) } qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
     unless ($helper) {
         warn "No libvirt lease helper found on the hypervisor, leaving the lease for $ip alone\n";
         return 0;
     }
 
-    return $self->run_sudo("VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip) == 0 ? 1 : 0;
+    return $self->run_sudo( "VIR_BRIDGE_NAME=$bridge", $helper, qw{del ip}, $ip ) == 0 ? 1 : 0;
 }
 
 =head2 eject_cdrom($domain, $target)
@@ -532,14 +529,14 @@ out earlier leaves the guest with no user, no keys and no netplan.
 =cut
 
 sub eject_cdrom {
-    my ($self, $name, $target) = @_;
+    my ( $self, $name, $target ) = @_;
     $target //= 'sda';
 
     my $domain = $self->_domain($name) or return 0;
     my $xml    = qq{<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><target dev='$target' bus='sata'/><readonly/></disk>};
 
     my $flags = Sys::Virt::Domain::DEVICE_MODIFY_LIVE() | Sys::Virt::Domain::DEVICE_MODIFY_CONFIG();
-    my $ok    = eval { $domain->update_device($xml, $flags); 1 };
+    my $ok    = eval { $domain->update_device( $xml, $flags ); 1 };
     warn "Could not eject the cloud-init cdrom from $name: $@" unless $ok;
     return $ok ? 1 : 0;
 }
@@ -553,11 +550,11 @@ itself into a state nothing else will get it out of.
 =cut
 
 sub nuke_pool {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
 
     # The directory goes first: pool-delete on a pool whose backing store is
     # already gone is a no-op, but the reverse leaves files libvirt still owns.
-    $self->run_sudo(qw{rm -rf}, $self->pool_path);
+    $self->run_sudo( qw{rm -rf}, $self->pool_path );
 
     my $vmm  = $self->vmm;
     my $pool = eval { $vmm->get_storage_pool_by_name($name) };
@@ -592,7 +589,7 @@ to start with the host.  C<$name> defaults to C<tf_disks>.
 =cut
 
 sub pool {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     $name //= 'tf_disks';
     return $self->{_pools}{$name} if $self->{_pools}{$name};
 
@@ -609,7 +606,7 @@ sub pool {
   <target><path>$path</path></target>
 </pool>
 XML
-        eval { $pool->build(Sys::Virt::StoragePool::BUILD_NEW()) };
+        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ) };
         $pool->set_autostart(1);
     }
 
@@ -628,13 +625,13 @@ Where that volume's file actually is, which is what a domain's disk needs.
 =cut
 
 sub volume {
-    my ($self, $name, $pool) = @_;
+    my ( $self, $name, $pool ) = @_;
     return eval { $self->pool($pool)->get_volume_by_name($name) };
 }
 
 sub volume_path {
-    my ($self, $name, $pool) = @_;
-    my $volume = $self->volume($name, $pool) or return undef;
+    my ( $self, $name, $pool ) = @_;
+    my $volume = $self->volume( $name, $pool ) or return undef;
     return eval { $volume->get_path() };
 }
 
@@ -650,7 +647,7 @@ followed by a refresh so libvirt notices.
 =cut
 
 sub base_image {
-    my ($self, $url, $name) = @_;
+    my ( $self, $url, $name ) = @_;
     $name //= 'baseimage-qcow2';
 
     my $path = $self->volume_path($name);
@@ -665,10 +662,10 @@ sub base_image {
     # To a partial name first: a half-downloaded file that libvirt has already
     # noticed is worse than no file at all.
     my $partial = "$path.partial";
-    $self->run(qw{curl -fL --retry 3 -o}, $partial, $url) == 0
+    $self->run( qw{curl -fL --retry 3 -o}, $partial, $url ) == 0
       or die "Could not fetch $url onto " . $self->describe . "\n";
 
-    $self->run('mv', $partial, $path) == 0 or die "Could not put the base image in place\n";
+    $self->run( 'mv', $partial, $path ) == 0 or die "Could not put the base image in place\n";
     $self->refresh_pool();
 
     return $self->volume_path($name) // $path;
@@ -683,7 +680,7 @@ Returns the path.
 =cut
 
 sub create_disk {
-    my ($self, $name, %opts) = @_;
+    my ( $self, $name, %opts ) = @_;
 
     my $existing = $self->volume_path($name);
     return $existing if $existing;
@@ -691,11 +688,12 @@ sub create_disk {
     my $capacity = $opts{capacity} or die "No size given for the disk $name\n";
     my $backing  = $opts{backing};
 
-    my $backing_xml = $backing
+    my $backing_xml =
+      $backing
       ? "<backingStore><path>" . _xml_escape($backing) . "</path><format type='qcow2'/></backingStore>"
       : '';
 
-    print "Creating disk $name ($capacity bytes)" . ($backing ? " over $backing" : '') . "\n";
+    print "Creating disk $name ($capacity bytes)" . ( $backing ? " over $backing" : '' ) . "\n";
 
     my $volume = $self->pool->create_volume(<<"XML");
 <volume>
@@ -721,14 +719,14 @@ in it that libvirt did not put there.
 =cut
 
 sub delete_volume {
-    my ($self, $name, $pool) = @_;
-    my $volume = $self->volume($name, $pool) or return 0;
+    my ( $self, $name, $pool ) = @_;
+    my $volume = $self->volume( $name, $pool ) or return 0;
     eval { $volume->delete(0); 1 } or do { warn "Could not delete the volume $name: $@"; return 0 };
     return 1;
 }
 
 sub refresh_pool {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     eval { $self->pool($name)->refresh() };
     return 1;
 }
@@ -744,15 +742,15 @@ cloud-init will not look at it.
 =cut
 
 sub cloudinit_iso {
-    my ($self, $domain, %files) = @_;
+    my ( $self, $domain, %files ) = @_;
 
     my $name    = "$domain-cloudinit.iso";
     my $workdir = "/tmp/trog-cloudinit-$domain-$$";
     my $path    = $self->pool_path . "/$name";
 
     $self->mkpath($workdir) or die "Could not make $workdir on " . $self->describe . "\n";
-    foreach my $file (sort keys %files) {
-        $self->write_text("$workdir/$file", $files{$file})
+    foreach my $file ( sort keys %files ) {
+        $self->write_text( "$workdir/$file", $files{$file} )
           or die "Could not write $file for $domain on " . $self->describe . "\n";
     }
 
@@ -760,11 +758,13 @@ sub cloudinit_iso {
     print "Building the cloud-init seed for $domain with $maker\n";
 
     # -volid cidata is not decoration: NoCloud finds its seed by that label.
-    my @cmd = $maker eq 'xorriso' ? ($maker, '-as', 'mkisofs') : ($maker);
-    my $rc = $self->run(@cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
-        map { "$workdir/$_" } sort keys %files);
+    my @cmd = $maker eq 'xorriso' ? ( $maker, '-as', 'mkisofs' ) : ($maker);
+    my $rc  = $self->run(
+        @cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
+        map { "$workdir/$_" } sort keys %files
+    );
 
-    $self->run(qw{rm -rf}, $workdir);
+    $self->run( qw{rm -rf}, $workdir );
     die "Could not build the cloud-init seed for $domain\n" if $rc;
 
     $self->refresh_pool();
@@ -782,12 +782,11 @@ sub iso_maker {
     return $self->{_iso_maker} if $self->{_iso_maker};
 
     foreach my $maker (qw{xorriso genisoimage mkisofs}) {
-        next if $self->run('sh', '-c', "command -v $maker >/dev/null 2>&1");
+        next if $self->run( 'sh', '-c', "command -v $maker >/dev/null 2>&1" );
         return $self->{_iso_maker} = $maker;
     }
 
-    die 'No ISO builder on ' . $self->describe . ": install xorriso or genisoimage.\n"
-      . "cloud-init reads its configuration off a small ISO, and something has to make it.\n";
+    die 'No ISO builder on ' . $self->describe . ": install xorriso or genisoimage.\n" . "cloud-init reads its configuration off a small ISO, and something has to make it.\n";
 }
 
 =head2 define_domain($xml, %opts)
@@ -798,7 +797,7 @@ with the host, which is what every guest here wants.
 =cut
 
 sub define_domain {
-    my ($self, $xml, %opts) = @_;
+    my ( $self, $xml, %opts ) = @_;
 
     my $domain = $self->vmm->define_domain($xml);
     eval { $domain->set_autostart(1) } if $opts{autostart} // 1;
@@ -834,14 +833,14 @@ C<ens3> and C<ens4> rather than whatever this month's device ordering implies.
 =cut
 
 sub guest_mac {
-    my ($self, $domain, $index) = @_;
+    my ( $self, $domain, $index ) = @_;
     $index //= 0;
 
     my $digest = Digest::SHA::sha256_hex("$domain/$index");
-    return join(':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/);
+    return join( ':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/ );
 }
 
-sub nic_slots { return (3, 4) }
+sub nic_slots { return ( 3, 4 ) }
 
 =head1 SNAPSHOTS
 
@@ -868,36 +867,36 @@ success.
 =cut
 
 sub snapshot_names {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return ();
 
     my @snaps = eval { $domain->list_all_snapshots() };
     return () unless @snaps;
 
     my @dated = map { { name => $_->get_name(), created => _snapshot_created($_) } } @snaps;
-    return map  { $_->{name} }
-           sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
-           grep { defined $_->{name} && length $_->{name} } @dated;
+    return map { $_->{name} }
+      sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
+      grep { defined $_->{name} && length $_->{name} } @dated;
 }
 
 # <creationTime> is seconds since the epoch.  A snapshot without one sorts to
 # the front, which is where an unknown age belongs.
 sub _snapshot_created {
-    my ($snap) = @_;
-    my $xml = eval { $snap->get_xml_description() } // '';
+    my ($snap)    = @_;
+    my $xml       = eval { $snap->get_xml_description() } // '';
     my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
     return $created // 0;
 }
 
 sub snapshot_current_name {
-    my ($self, $name) = @_;
-    my $domain = $self->_domain($name) or return undef;
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name)                or return undef;
     my $snap   = eval { $domain->current_snapshot() } or return undef;
     return $snap->get_name();
 }
 
 sub create_snapshot {
-    my ($self, $name, $snapname) = @_;
+    my ( $self, $name, $snapname ) = @_;
     my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
 
     my $xml = '<domainsnapshot>';
@@ -910,17 +909,17 @@ sub create_snapshot {
     # one that isn't.
     $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
 
-    my $ok = eval { $domain->create_snapshot($xml, $flags); 1 };
+    my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
     warn "Snapshot of $name failed: $@" unless $ok;
     return $ok ? 1 : 0;
 }
 
 sub revert_snapshot {
-    my ($self, $name, $snapname) = @_;
-    my $domain = $self->_domain($name) or return 0;
+    my ( $self, $name, $snapname ) = @_;
+    my $domain = $self->_domain($name)                             or return 0;
     my $snap   = eval { $domain->get_snapshot_by_name($snapname) } or return 0;
 
-    my $ok = eval { $snap->revert_to(Sys::Virt::DomainSnapshot::REVERT_RUNNING()); 1 };
+    my $ok = eval { $snap->revert_to( Sys::Virt::DomainSnapshot::REVERT_RUNNING() ); 1 };
     warn "Revert of $name to $snapname failed: $@" unless $ok;
     return $ok ? 1 : 0;
 }
@@ -988,7 +987,7 @@ sub has_tpm {
     my $answer = $self->capture(q{test -c /dev/tpmrm0 && command -v swtpm > /dev/null && echo yes});
     chomp $answer if defined $answer;
 
-    return $self->{has_tpm} = (($answer // '') eq 'yes') ? 1 : 0;
+    return $self->{has_tpm} = ( ( $answer // '' ) eq 'yes' ) ? 1 : 0;
 }
 
 sub bridge_device {
@@ -997,8 +996,7 @@ sub bridge_device {
 
     my $device = $self->capture(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
-    die "Could not determine outbound bridge device on " . $self->uri . "!\n"
-      . "Set bridge_device in provision.conf if autodetection can't find it.\n"
+    die "Could not determine outbound bridge device on " . $self->uri . "!\n" . "Set bridge_device in provision.conf if autodetection can't find it.\n"
       unless $device;
 
     return $self->{bridge_device} = $device;
@@ -1010,8 +1008,7 @@ sub virbr_device {
 
     my $device = $self->capture(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
-    die "Could not determine libvirt network device on " . $self->uri . "!\n"
-      . "Set virbr_device in provision.conf if autodetection can't find it.\n"
+    die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in provision.conf if autodetection can't find it.\n"
       unless $device;
 
     return $self->{virbr_device} = $device;
@@ -1038,7 +1035,7 @@ sub sshd_port {
     chomp $port if defined $port;
     warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
 
-    return $self->{sshd_port} = ($port || 22);
+    return $self->{sshd_port} = ( $port || 22 );
 }
 
 =head1 CAPACITY
@@ -1063,11 +1060,11 @@ cap, and 4.
 
 =cut
 
-sub reserve_memory  { return $_[0]->{reserve_memory}  // 2048 }
-sub reserve_cpus    { return $_[0]->{reserve_cpus}    // 1 }
-sub reserve_disk    { return $_[0]->{reserve_disk}    // 10 * 1024 * 1024 * 1024 }
-sub max_guests      { return $_[0]->{max_guests}      // 0 }
-sub cpu_overcommit  { return $_[0]->{cpu_overcommit}  // 4 }
+sub reserve_memory { return $_[0]->{reserve_memory} // 2048 }
+sub reserve_cpus   { return $_[0]->{reserve_cpus}   // 1 }
+sub reserve_disk   { return $_[0]->{reserve_disk}   // 10 * 1024 * 1024 * 1024 }
+sub max_guests     { return $_[0]->{max_guests}     // 0 }
+sub cpu_overcommit { return $_[0]->{cpu_overcommit} // 4 }
 
 =head2 capacity
 
@@ -1092,20 +1089,20 @@ sub capacity {
     my ($self) = @_;
     return $self->{capacity} if $self->{capacity};
 
-    my $node = $self->vmm->get_node_info();
+    my $node    = $self->vmm->get_node_info();
     my @domains = $self->vmm->list_all_domains();
 
-    my ($memory_committed, $cpus_committed) = (0, 0);
+    my ( $memory_committed, $cpus_committed ) = ( 0, 0 );
     foreach my $domain (@domains) {
         my $info = eval { $domain->get_info() } or next;
 
         # maxMem is what the guest may grow into, and is what we have to hold
         # against the host whether or not it is using it yet.
-        $memory_committed += ($info->{maxMem} // 0) / 1024;
-        $cpus_committed   += ($info->{nrVirtCpu} // 0) if eval { $domain->is_active() };
+        $memory_committed += ( $info->{maxMem}    // 0 ) / 1024;
+        $cpus_committed   += ( $info->{nrVirtCpu} // 0 ) if eval { $domain->is_active() };
     }
 
-    my $memory_mb        = ($node->{memory} // 0) / 1024;
+    my $memory_mb        = ( $node->{memory} // 0 ) / 1024;
     my $cpus             = $node->{cpus} // 0;
     my $cpus_allocatable = $cpus * $self->cpu_overcommit;
 
@@ -1130,12 +1127,12 @@ nothing has built yet has no space in it, which is the honest answer.
 =cut
 
 sub pool_free {
-    my ($self, $name) = @_;
+    my ( $self, $name ) = @_;
     $name //= 'tf_disks';
 
     my $vmm  = $self->vmm;
     my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return 0;
-    my $info = eval { $pool->get_info() } or return 0;
+    my $info = eval { $pool->get_info() }                     or return 0;
     return $info->{available} // 0;
 }
 
@@ -1147,32 +1144,35 @@ and C<disk_bytes>, in words a person can act on.  An empty list means it fits.
 =cut
 
 sub shortfalls {
-    my ($self, %needs) = @_;
+    my ( $self, %needs ) = @_;
 
     my $have = $self->capacity;
     my @reasons;
 
-    push @reasons, sprintf('needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
-        $needs{memory_mb}, $have->{memory_free},
-        $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory)
-      if ($needs{memory_mb} // 0) > $have->{memory_free};
+    push @reasons, sprintf(
+        'needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
+        $needs{memory_mb},  $have->{memory_free},
+        $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory
+    ) if ( $needs{memory_mb} // 0 ) > $have->{memory_free};
 
-    push @reasons, sprintf('needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
-        $needs{cpus}, $have->{cpus_free},
-        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus)
-      if ($needs{cpus} // 0) > $have->{cpus_free};
+    push @reasons, sprintf(
+        'needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
+        $needs{cpus},  $have->{cpus_free},
+        $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus
+    ) if ( $needs{cpus} // 0 ) > $have->{cpus_free};
 
-    push @reasons, sprintf('needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
-        _gb($needs{disk_bytes}), _gb($have->{disk_free}), _gb($self->reserve_disk))
-      if ($needs{disk_bytes} // 0) > $have->{disk_free};
+    push @reasons, sprintf(
+        'needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
+        _gb( $needs{disk_bytes} ), _gb( $have->{disk_free} ), _gb( $self->reserve_disk )
+    ) if ( $needs{disk_bytes} // 0 ) > $have->{disk_free};
 
-    push @reasons, sprintf('already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests)
+    push @reasons, sprintf( 'already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests )
       if $self->max_guests && $have->{guests} >= $self->max_guests;
 
     return @reasons;
 }
 
-sub _gb { return int(($_[0] // 0) / (1024 * 1024 * 1024)) }
+sub _gb { return int( ( $_[0] // 0 ) / ( 1024 * 1024 * 1024 ) ) }
 
 =head2 headroom(%needs)
 
@@ -1184,21 +1184,21 @@ its disk while the fleet still has plenty of RAM.
 =cut
 
 sub headroom {
-    my ($self, %needs) = @_;
+    my ( $self, %needs ) = @_;
 
     my $have = $self->capacity;
     my @fractions;
 
-    push @fractions, _fraction($have->{memory_free} - ($needs{memory_mb}  // 0), $have->{memory_mb});
-    push @fractions, _fraction($have->{cpus_free}   - ($needs{cpus}       // 0), $have->{cpus_allocatable});
-    push @fractions, _fraction($have->{disk_free}   - ($needs{disk_bytes} // 0), $have->{disk_free} + ($needs{disk_bytes} // 0));
+    push @fractions, _fraction( $have->{memory_free} - ( $needs{memory_mb} // 0 ), $have->{memory_mb} );
+    push @fractions, _fraction( $have->{cpus_free} - ( $needs{cpus}        // 0 ), $have->{cpus_allocatable} );
+    push @fractions, _fraction( $have->{disk_free} - ( $needs{disk_bytes} // 0 ), $have->{disk_free} + ( $needs{disk_bytes} // 0 ) );
 
     my ($tightest) = sort { $a <=> $b } @fractions;
     return $tightest;
 }
 
 sub _fraction {
-    my ($left, $total) = @_;
+    my ( $left, $total ) = @_;
     return 0 if !$total;
     my $fraction = $left / $total;
     return $fraction < 0 ? 0 : $fraction;
@@ -1222,8 +1222,8 @@ cost of the hypervisor being the machine the guest fetches from.
 =cut
 
 sub sync_domain_dir {
-    my ($self, $domain) = @_;
-    return $self->sync_dir($self->domain_dir . "/$domain");
+    my ( $self, $domain ) = @_;
+    return $self->sync_dir( $self->domain_dir . "/$domain" );
 }
 
 =head2 sync_dir($path)
@@ -1239,13 +1239,13 @@ directory there, not an absent one.
 =cut
 
 sub sync_dir {
-    my ($self, $path) = @_;
+    my ( $self, $path ) = @_;
     return 1 if $self->is_local;
 
     return $self->mkpath($path) ? 1 : 0 unless -d $path;
 
     print "Shipping $path to the hypervisor...\n";
-    $self->put_dir($path, $path)
+    $self->put_dir( $path, $path )
       or die "Could not copy $path to the hypervisor\n";
     return 1;
 }
@@ -1261,14 +1261,11 @@ the guest's bridged static address instead, and there is no way to guess it.
 =cut
 
 sub guest_ssh_ip {
-    my ($self, $config, $lease_ip) = @_;
+    my ( $self, $config, $lease_ip ) = @_;
     return $lease_ip if $self->is_local;
 
     my ($ip) = grep { defined $_ && length $_ } $config->param('ips');
-    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n"
-      . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease ("
-      . ($lease_ip // 'none')
-      . ") is only\nreachable from the hypervisor itself.\n"
+    die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is only\nreachable from the hypervisor itself.\n"
       unless $ip;
     return $ip;
 }

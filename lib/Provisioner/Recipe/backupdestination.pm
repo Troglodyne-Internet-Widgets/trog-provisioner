@@ -70,7 +70,7 @@ sub args {
                 type  => 'array',
                 items => { type => 'string' },
             },
-            targets  => {
+            targets => {
                 type  => 'array',
                 items => { type => 'string' },
             },
@@ -87,7 +87,7 @@ sub enrich {
     @$hosts = map {
         my $host = $_;
         my $port;
-        ($host, $port) = split(':', $host);
+        ( $host, $port ) = split( ':', $host );
         $port ||= 22;
         $host_port_map{$host} = $port;
         $host

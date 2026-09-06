@@ -11,7 +11,7 @@ use re '/aa';
 use FindBin::libs;
 use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 use Trog::Guest();
 use Trog::Hypervisors();
 
@@ -72,8 +72,9 @@ unreachable VM is reported as a failure rather than a success.
 sub main {
     my @args = @_;
 
-    my ($latest, $oldest, $name, $domain_dir, $uri, $hvconf);
-    GetOptionsFromArray(\@args,
+    my ( $latest, $oldest, $name, $domain_dir, $uri, $hvconf );
+    GetOptionsFromArray(
+        \@args,
         'latest'      => \$latest,
         'oldest'      => \$oldest,
         'name=s'      => \$name,
@@ -83,13 +84,14 @@ sub main {
     );
 
     my $domain = shift @args;
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $modes = grep { defined $_ } ($latest, $oldest, $name);
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'Pass exactly one of --latest, --oldest or --name')
-      unless $modes == 1;
+    my $modes = grep { defined $_ } ( $latest, $oldest, $name );
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass exactly one of --latest, --oldest or --name'
+    ) unless $modes == 1;
 
     # We need to know which hypervisor to ask about snapshots before we ask.
     # With a fleet configured that is whichever one has the guest; without one
@@ -97,7 +99,8 @@ sub main {
     # mandatory is enforced further down, where it always was.
     $domain_dir //= '/opt/domains';
     my $cfile = "$domain_dir/$domain/provision.conf";
-    my $hv = Trog::Hypervisors->find($domain,
+    my $hv    = Trog::Hypervisors->find(
+        $domain,
         uri        => $uri,
         hvconf     => $hvconf,
         domain_dir => $domain_dir,
@@ -111,28 +114,32 @@ sub main {
     my $snapname;
     if ($latest) {
         $snapname = $snaps[-1];
-    } elsif ($oldest) {
+    }
+    elsif ($oldest) {
         $snapname = $snaps[0];
-    } else {
+    }
+    else {
         $snapname = $name;
         die "Snapshot '$snapname' not found for $domain\n"
-            unless grep { $_ eq $snapname } @snaps;
+          unless grep { $_ eq $snapname } @snaps;
     }
 
     print "Reverting $domain to snapshot '$snapname'...\n";
-    die "Failed to revert $domain to '$snapname'\n" unless $hv->revert_snapshot($domain, $snapname);
+    die "Failed to revert $domain to '$snapname'\n" unless $hv->revert_snapshot( $domain, $snapname );
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
     my $config = eval { Config::Simple->new($cfile) }
       or die "No provision.conf to read at $cfile: $Config::Simple::errstr\n";
-    my $user   = $config->param('admin_user') // 'root';
-    my $ips    = $config->param('ips');
-    my ($ip)   = ref $ips ? @$ips : split /[\s,]+/, ($ips // '');
+    my $user = $config->param('admin_user') // 'root';
+    my $ips  = $config->param('ips');
+    my ($ip) = ref $ips ? @$ips : split /[\s,]+/, ( $ips // '' );
     die "Could not determine IP for $domain from provision.conf\n" unless $ip;
 
-    Trog::Guest->new(name => $domain, host => $ip, user => $user,
-        key_path => "$domain_dir/$domain/key.rsa")->wait_for_ssh();
+    Trog::Guest->new(
+        name     => $domain, host => $ip, user => $user,
+        key_path => "$domain_dir/$domain/key.rsa"
+    )->wait_for_ssh();
 
     print "SSH verified. $domain is up at $ip.\n";
     return 0;

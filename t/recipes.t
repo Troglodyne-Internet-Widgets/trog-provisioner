@@ -5,7 +5,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-
 =head1 NAME
 
 t/recipes.t - every recipe renders, and refuses what it should
@@ -24,12 +23,12 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
-use File::Temp qw(tempdir);
+use File::Temp  qw(tempdir);
 use IPC::Run3();
 use File::Find();
 use File::Slurper();
@@ -53,7 +52,7 @@ my %G = (
     hv_ip                      => '192.168.122.1',
     hv_ssh_port                => 22,
     transfer_user              => 'transfer',
-    aliases                    => { test => ['www.test', 'mail.test'] },
+    aliases                    => { test => [ 'www.test', 'mail.test' ] },
     full_aliases               => ['www.test.test.test'],
     modules                    => [],
     ipmap                      => { test => '192.168.1.100' },
@@ -63,7 +62,7 @@ my %G = (
     packager_remove_invocation => 'apt-get remove -y',
     local_dns_access_token     => '',
     users                      => [
-        { name => 'admin', gecos => 'Admin User', shell => '/bin/bash' },
+        { name => 'admin', gecos => 'Admin User',  shell => '/bin/bash' },
         { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
     ],
 );
@@ -84,19 +83,20 @@ sub renders_ok {
         my $r;
         my $res = exception { $r = "Provisioner::Recipe::$name"->new(%PROV) };
         is( $res, undef, "$name->new() succeeds" );
+
         # We may or may not have global/domain specific templates, but we need at least one.
         my $has_template;
-        if (-f "$template_dir/$name.tt") {
+        if ( -f "$template_dir/$name.tt" ) {
             $res = exception { $r->render( %G, %$extra ) };
             is( $@, '', "$name->render() succeeds" );
             $has_template++;
         }
-        if (-f "$template_dir/$name.global.tt") {
+        if ( -f "$template_dir/$name.global.tt" ) {
             $res = exception { $r->render_global( %G, %$extra ) };
             is( $@, '', "$name->render_global() succeeds" );
             $has_template++;
         }
-        ok($has_template, "Has either a global or domain specific template");
+        ok( $has_template, "Has either a global or domain specific template" );
     };
 }
 
@@ -116,24 +116,24 @@ sub rejects_missing {
 }
 
 # Needed by backup recipes
-my $tmp = tempdir( CLEANUP => 1 );
+my $tmp  = tempdir( CLEANUP => 1 );
 my $ddir = "$tmp/test.test.test";
 mkdir $ddir;
-IPC::Run3::run3([qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, '', qw{-q}], \undef, \undef, undef);
+IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, '', qw{-q} ], \undef, \undef, undef );
 
 # Build list of known modules with required input data
 my %required_config = (
-    data => { from => '/opt/data', to => '/opt/domains' },
-    imagemagick =>  { version => '7.1.0' },
-    mariadb => {
+    data        => { from    => '/opt/data', to => '/opt/domains' },
+    imagemagick => { version => '7.1.0' },
+    mariadb     => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
         version  => '10.11',
     },
-    tpsgi => { routers => ['app.psgi'] },
-    tcms =>  { tcms_dir => 'tcms' },
-    adminconfig => { skel => '/opt/dotfiles' },
-    admincode => {
+    tpsgi       => { routers  => ['app.psgi'] },
+    tcms        => { tcms_dir => 'tcms' },
+    adminconfig => { skel     => '/opt/dotfiles' },
+    admincode   => {
         repos_from => [],
         basedir    => 'Code',
     },
@@ -148,7 +148,7 @@ my %required_config = (
     letsencrypt => {
         registrar => { type => 'route53', user => 'foo', key => 'bar' },
     },
-    pdns => { api_key => 'test-api-key' },
+    pdns   => { api_key => 'test-api-key' },
     matrix => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -196,15 +196,17 @@ my %required_config = (
 
 # test everything available.
 my @available;
-File::Find::find( {
-    wanted => sub {
-        my $object = $_;
-        return unless (-f $object && $object =~ m/\.pm$/);
-        my ($name) = $object =~ m/(.+)\.pm$/;
-        push(@available, $name);
+File::Find::find(
+    {
+        wanted => sub {
+            my $object = $_;
+            return unless ( -f $object && $object =~ m/\.pm$/ );
+            my ($name) = $object =~ m/(.+)\.pm$/;
+            push( @available, $name );
+        },
     },
-},
-"lib/Provisioner/Recipe/");
+    "lib/Provisioner/Recipe/"
+);
 
 #
 # Crank dat minimum viable case
@@ -222,72 +224,81 @@ foreach my $recipe (@available) {
 subtest 'every rsync off the hypervisor names it' => sub {
     my %seen;
     foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
-        foreach my $tt ("$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt") {
+        foreach my $tt ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" ) {
             next unless -f $tt;
+
             # Configured the way new_config configures it, bridge and all;
             # a bare Xslate cannot render the ones using TT2 vmethods.
             my $xslate = Text::Xslate->new(
                 path     => [$template_dir],
                 syntax   => 'TTerse',
                 module   => [qw{Text::Xslate::Bridge::TT2}],
-                function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+                function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
             );
-            my $out = $xslate->render_string(
-                File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
-            next unless index($out, 'rsync') >= 0;
+            my $out = $xslate->render_string( File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
+            next unless index( $out, 'rsync' ) >= 0;
             $seen{$recipe}++;
-            unlike($out, qr/\@:/,   "$recipe: no empty host between the user and the path");
-            like($out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}");
+            unlike( $out, qr/\@:/, "$recipe: no empty host between the user and the path" );
+            like( $out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}" );
         }
     }
-    ok(scalar keys %seen, 'and there were rsyncing recipes to check');
+    ok( scalar keys %seen, 'and there were rsyncing recipes to check' );
 };
 
 # ----------------------------------------------------------------
 # Validate: required fields cause die
 # ----------------------------------------------------------------
-rejects_missing( 'mariadb', { dumpfile => 'd.sql', version => '10' }, 'root_pw' );
-rejects_missing( 'mariadb', { root_pw => 'x', version => '10'     }, 'dumpfile' );
-rejects_missing( 'mariadb', { root_pw => 'x', dumpfile => 'd.sql' }, 'version'  );
+rejects_missing( 'mariadb', { dumpfile => 'd.sql', version  => '10' },    'root_pw' );
+rejects_missing( 'mariadb', { root_pw  => 'x',     version  => '10' },    'dumpfile' );
+rejects_missing( 'mariadb', { root_pw  => 'x',     dumpfile => 'd.sql' }, 'version' );
 
-rejects_missing( 'adminconfig', {},                              'skel'    );
-rejects_missing( 'imagemagick', {},                              'version'  );
-rejects_missing( 'pdns',        {},                              'api_key'  );
+rejects_missing( 'adminconfig', {}, 'skel' );
+rejects_missing( 'imagemagick', {}, 'version' );
+rejects_missing( 'pdns',        {}, 'api_key' );
 
-rejects_missing( 'koan', {
-    koan_email         => 'k@test.test',
-    messaging_provider => 'telegram',
-    telegram_token     => 'tok',
-    telegram_chat_id   => 1,
-    cli_provider       => 'local',
-    github_user        => 'bot',
-    github_token       => 'ghp_x',
-}, 'user' );
+rejects_missing(
+    'koan',
+    {
+        koan_email         => 'k@test.test',
+        messaging_provider => 'telegram',
+        telegram_token     => 'tok',
+        telegram_chat_id   => 1,
+        cli_provider       => 'local',
+        github_user        => 'bot',
+        github_token       => 'ghp_x',
+    },
+    'user'
+);
 
-rejects_missing( 'matrix', {
-    server_name => 'test.test.test',
-    smtp_host   => 'mail.test.test',
-    smtp_user   => 'n@test.test',
-    smtp_pass   => 'p',
-    smtp_domain => 'test.test',
-    modules     => ['nginxproxy'],
-}, 'admin_password', 'matrix rejects missing admin_password' );
+rejects_missing(
+    'matrix',
+    {
+        server_name => 'test.test.test',
+        smtp_host   => 'mail.test.test',
+        smtp_user   => 'n@test.test',
+        smtp_pass   => 'p',
+        smtp_domain => 'test.test',
+        modules     => ['nginxproxy'],
+    },
+    'admin_password',
+    'matrix rejects missing admin_password'
+);
 
 rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
-rejects_missing( 'sssd', { base_dn => 'dc=test,dc=test' }, 'ldap_uri', 'sssd rejects missing ldap_uri' );
-rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn', 'sssd rejects missing base_dn' );
+rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },          'ldap_uri', 'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn',  'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints
 # ----------------------------------------------------------------
 subtest 'ntp rejects empty server list' => sub {
-    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
+    my $r   = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => [] ) };
     ok( $res, 'ntp dies with empty servers list' );
 };
 
 subtest 'ntp rejects non-array servers' => sub {
-    my $r = 'Provisioner::Recipe::ntp'->new(%PROV);
+    my $r   = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => 'not-an-array' ) };
     ok( $res, 'ntp dies when servers is not an ARRAY' );
 };
@@ -296,7 +307,7 @@ subtest 'ntp rejects non-array servers' => sub {
 # ufw: validate enforces port_forward structure
 # ----------------------------------------------------------------
 subtest 'ufw rejects malformed port_forwards' => sub {
-    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
+    my $r   = 'Provisioner::Recipe::ufw'->new(%PROV);
     my $res = exception { $r->render( %G, port_forwards => [ { from => 80 } ] ) };
     ok( $res, 'ufw dies when port_forward entry missing to' );
 };
@@ -340,57 +351,74 @@ subtest 'cron addresses: a local part gets the domain, an address does not' => s
     # one object would get the first one's answer twice.
     my $cron = sub { 'Provisioner::Recipe::cron'->new(%PROV) };
 
-    is(exception { $cron->()->render(%G, from => 'cron') }, undef, 'a bare local part is accepted');
+    is( exception { $cron->()->render( %G, from => 'cron' ) }, undef, 'a bare local part is accepted' );
 
-    like($cron->()->render_file('files/cron.root.tt', %G, from => 'cron'),
-        qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended');
+    like(
+        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'cron' ),
+        qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended'
+    );
 
     # Appending to an address gives somebody@example.com@this.domain, which is
     # what the old template did to every value the old schema would accept.
-    like($cron->()->render_file('files/cron.root.tt', %G, from => 'someone@example.com'),
-        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands');
+    like(
+        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.com' ),
+        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands'
+    );
 };
 
 subtest 'cron MAILTO per script' => sub {
     my $r   = 'Provisioner::Recipe::cron'->new(%PROV);
     my $d   = $G{domain};
-    my @out = split("\n", $r->render_file('files/cron.root.domain.tt', %G,
-        root_scripts => [
-            { interval => '0 0 * * *',   cmd => '/silent.pl' },
-            { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
-            { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
-            { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
-        ]));
+    my @out = split(
+        "\n",
+        $r->render_file(
+            'files/cron.root.domain.tt', %G,
+            root_scripts => [
+                { interval => '0 0 * * *',   cmd => '/silent.pl' },
+                { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
+                { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
+                { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
+            ]
+        )
+    );
 
     # The MAILTO in force for a line is the last one before it.
     my %to;
     my $current = '';
     foreach my $line (@out) {
-        $current = $1 if $line =~ m/^MAILTO="([^"]*)"$/;
+        $current = $1       if $line =~ m/^MAILTO="([^"]*)"$/;
         $to{$1}  = $current if $line =~ m{command (/\S+)};
     }
 
-    is($to{'/silent.pl'}, $G{admin_email},
-        'a script that says nothing about mail has not been thought about, so the admin gets it');
-    is($to{'/none.pl'}, '',
-        q{and one that says 'none' does not want it, which cron spells as an empty MAILTO});
-    is($to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone');
-    is($to{'/local.pl'},     "ops\@$d",            'a local part gets the domain');
+    is(
+        $to{'/silent.pl'}, $G{admin_email},
+        'a script that says nothing about mail has not been thought about, so the admin gets it'
+    );
+    is(
+        $to{'/none.pl'}, '',
+        q{and one that says 'none' does not want it, which cron spells as an empty MAILTO}
+    );
+    is( $to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone' );
+    is( $to{'/local.pl'},     "ops\@$d",             'a local part gets the domain' );
 };
 
 #
 # Render stuff with optional fields
 #
-renders_ok( 'mail', {
-    ipv6 => 0,
-}, 'mail with ipv6 disabled' );
+renders_ok(
+    'mail',
+    {
+        ipv6 => 0,
+    },
+    'mail with ipv6 disabled'
+);
 
 # ----------------------------------------------------------------
 # matrix: homeserver.yaml.tt includes redis block when redis is loaded
 # ----------------------------------------------------------------
 subtest 'matrix homeserver.yaml includes redis section when redis recipe is loaded' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -400,21 +428,21 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
         smtp_domain    => 'test.test',
         redis_host     => '127.0.0.1',
         redis_port     => 6379,
-        modules        => ['nginxproxy', 'redis'],
+        modules        => [ 'nginxproxy', 'redis' ],
     );
     my $out;
     my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
     is( $err, undef, 'render_file succeeds with redis in modules' );
-    like( $out, qr/redis:/, 'homeserver.yaml contains redis block' );
-    like( $out, qr/enabled:\s*true/, 'redis block has enabled: true' );
+    like( $out, qr/redis:/,                 'homeserver.yaml contains redis block' );
+    like( $out, qr/enabled:\s*true/,        'redis block has enabled: true' );
     like( $out, qr/host:\s*"127\.0\.0\.1"/, 'redis host defaults to 127.0.0.1' );
-    like( $out, qr/port:\s*6379/, 'redis port defaults to 6379' );
+    like( $out, qr/port:\s*6379/,           'redis port defaults to 6379' );
     unlike( $out, qr/^\s+password: "/m, 'no redis password field when redis_password is not set' );
 };
 
 subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loaded' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -432,7 +460,7 @@ subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loa
 
 subtest 'matrix homeserver.yaml includes redis password when redis_password is set' => sub {
     use_ok('Provisioner::Recipe::matrix');
-    my $r = 'Provisioner::Recipe::matrix'->new(%PROV);
+    my $r          = 'Provisioner::Recipe::matrix'->new(%PROV);
     my %matrix_cfg = (
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -441,7 +469,7 @@ subtest 'matrix homeserver.yaml includes redis password when redis_password is s
         smtp_pass      => 'smtp-pass',
         smtp_domain    => 'test.test',
         redis_password => 'supersecret',
-        modules        => ['nginxproxy', 'redis'],
+        modules        => [ 'nginxproxy', 'redis' ],
     );
     my $out;
     my $err = exception { $out = $r->render_file( 'files/matrix.homeserver.yaml.tt', %G, %matrix_cfg ) };
@@ -462,9 +490,9 @@ subtest 'no template comment leaves a quote open' => sub {
         { no_chdir => 1, wanted => sub { push @templates, $File::Find::name if m/[.]tt\z/ } },
         $template_dir,
     );
-    ok(scalar @templates, 'there are templates to check');
+    ok( scalar @templates, 'there are templates to check' );
 
-    foreach my $tt (sort @templates) {
+    foreach my $tt ( sort @templates ) {
         my $body = File::Slurper::read_text($tt);
         ( my $name = $tt ) =~ s/^\Q$template_dir\E\///;
 
@@ -477,9 +505,10 @@ subtest 'no template comment leaves a quote open' => sub {
             # of the template.  A comment saying `[% user %]` in passing put
             # ", not by a hardcoded koan.  The account is whatever the" into a
             # Makefile, where make read it as a command.
-            ok( index( $comment, '[%', 2 ) < 0,
-                "$name: no directive inside a comment" )
-              or diag $comment;
+            ok(
+                index( $comment, '[%', 2 ) < 0,
+                "$name: no directive inside a comment"
+            ) or diag $comment;
             foreach my $quote ( q{'}, q{"} ) {
                 my $count = () = $comment =~ m/\Q$quote\E/g;
                 ok( $count % 2 == 0, "$name: a comment closes every $quote it opens" )
@@ -499,52 +528,54 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
         path     => [$template_dir],
         syntax   => 'TTerse',
         module   => [qw{Text::Xslate::Bridge::TT2}],
-        function => { tabinate => Text::Xslate::html_builder(sub { $_[0] }) },
+        function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
     );
 
     # Enough of a configuration for any of them to render.  What matters is that
     # the result is Perl and has assertions in it, not what it would assert.
     my %vars = (
         %G,
-        domain      => 'd.test',      install_dir => '/opt/domains',
-        admin_user  => 'doge',        user        => 'svc',
-        script_dir  => '/root/bin',   version     => '1.2.3-4',
-        zone        => 'dc1',         buckets     => ['a'],
-        channels    => ['x'],         disks       => [],
-        fuse        => [],            gogs_admin  => 'git',
-        key_file    => 'key.rsa',     pubkey      => 'ssh-rsa AAAA',
-        admin_email => 'a@b.test',    base_dn     => 'dc=d,dc=test',
-        full_aliases => ['www.d.test'], modules   => ['perl'],
-        vhosts      => {},            upstreams   => {},
-        tcms_dir    => 'tCMS',        basedir     => 'code',
-        port        => 636,           users       => [],
+        domain       => 'd.test',       install_dir => '/opt/domains',
+        admin_user   => 'doge',         user        => 'svc',
+        script_dir   => '/root/bin',    version     => '1.2.3-4',
+        zone         => 'dc1',          buckets     => ['a'],
+        channels     => ['x'],          disks       => [],
+        fuse         => [],             gogs_admin  => 'git',
+        key_file     => 'key.rsa',      pubkey      => 'ssh-rsa AAAA',
+        admin_email  => 'a@b.test',     base_dn     => 'dc=d,dc=test',
+        full_aliases => ['www.d.test'], modules     => ['perl'],
+        vhosts       => {},             upstreams   => {},
+        tcms_dir     => 'tCMS',         basedir     => 'code',
+        port         => 636,            users       => [],
     );
 
-    my $dir = tempdir(CLEANUP => 1);
+    my $dir = tempdir( CLEANUP => 1 );
     my @tests;
     File::Find::find(
         { no_chdir => 1, wanted => sub { push @tests, $File::Find::name if m/[.]tt\z/ } },
         "$template_dir/tests",
     );
-    ok(scalar @tests, 'there are guest tests to check');
+    ok( scalar @tests, 'there are guest tests to check' );
 
-    foreach my $tt (sort @tests) {
+    foreach my $tt ( sort @tests ) {
         ( my $name = $tt ) =~ s{.*/}{};
 
-        my $rendered = eval { $xslate->render("tests/$name", \%vars) };
-        ok(defined $rendered, "$name renders") or do { diag $@; next };
+        my $rendered = eval { $xslate->render( "tests/$name", \%vars ) };
+        ok( defined $rendered, "$name renders" ) or do { diag $@; next };
 
         # It has to be Perl.
         my $file = "$dir/" . ( $name =~ s/[.]tt\z/.t/r );
-        File::Slurper::write_text($file, $rendered);
+        File::Slurper::write_text( $file, $rendered );
 
-        my ($out, $err) = (q{}, q{});
-        IPC::Run3::run3([$^X, '-c', $file], \undef, \$out, \$err);
-        is($? >> 8, 0, "$name compiles") or diag $err;
+        my ( $out, $err ) = ( q{}, q{} );
+        IPC::Run3::run3( [ $^X, '-c', $file ], \undef, \$out, \$err );
+        is( $? >> 8, 0, "$name compiles" ) or diag $err;
 
         # And it has to assert something, or Test::More exits 255 on it.
-        ok($rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
-            "$name makes at least one assertion or says why it is not");
+        ok(
+            $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
+            "$name makes at least one assertion or says why it is not"
+        );
     }
 };
 
@@ -559,42 +590,43 @@ subtest 'no cron template redirects with &>' => sub {
         { no_chdir => 1, wanted => sub { push @crons, $File::Find::name if m/cron[^\/]*[.]tt\z/ } },
         $template_dir,
     );
-    ok(scalar @crons, 'there are cron templates to check');
+    ok( scalar @crons, 'there are cron templates to check' );
 
-    foreach my $tt (sort @crons) {
+    foreach my $tt ( sort @crons ) {
         ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
         foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
-            next if $line =~ m/^\s*#/;      # the comment explaining this rule
-            unlike($line, qr/&>>?/, "$name: no &> in a cron line") or diag $line;
+            next if $line =~ m/^\s*#/;    # the comment explaining this rule
+            unlike( $line, qr/&>>?/, "$name: no &> in a cron line" ) or diag $line;
         }
     }
 };
 
-Test::NoWarnings::had_no_warnings();
 subtest 'what a rebuild is not allowed to carry over' => sub {
     require Provisioner::Recipe;
     require Provisioner::Recipe::tcms;
 
-    is_deeply([Provisioner::Recipe->remote_skip()], [], 'a recipe salvages everything it names by default');
+    is_deeply( [ Provisioner::Recipe->remote_skip() ], [], 'a recipe salvages everything it names by default' );
 
     # tCMS's config directory comes down whole, and the key that makes a stolen
     # auth.db useless is in it when the install is not run under systemd.  That
     # key is supposed to die with its machine: carried over it would outlive the
     # machine it was made for, and in a backup beside the database it protects it
     # would not be protecting anything.
-    my %files = Provisioner::Recipe::tcms->remote_files('/opt/domains', 'test.test.test');
+    my %files = Provisioner::Recipe::tcms->remote_files( '/opt/domains', 'test.test.test' );
     my ($config) = grep { m{/tCMS/config/$} } keys(%files);
-    ok($config, 'tCMS salvages its config directory');
+    ok( $config, 'tCMS salvages its config directory' );
 
     my @skip = Provisioner::Recipe::tcms->remote_skip();
-    ok(scalar(@skip), 'and says something in it must stay behind');
-    ok((grep { "${config}secrets.key" =~ $_ } @skip), 'which is the vault key');
+    ok( scalar(@skip),                                   'and says something in it must stay behind' );
+    ok( ( grep { "${config}secrets.key" =~ $_ } @skip ), 'which is the vault key' );
 
     # And nothing else out of that directory, since the rest of it is the state
     # the salvage exists for.
     foreach my $keep (qw{auth.db main.cfg has_users}) {
-        ok(!(grep { "$config$keep" =~ $_ } @skip), "$keep still comes over");
+        ok( !( grep { "$config$keep" =~ $_ } @skip ), "$keep still comes over" );
     }
 };
+
+Test::NoWarnings::had_no_warnings();
 
 done_testing();

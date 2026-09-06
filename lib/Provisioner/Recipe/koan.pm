@@ -243,6 +243,7 @@ sub deps {
           make
           build-essential
         };
+
         # libolm is only strictly required when messaging_provider=matrix
         # with E2EE on, but it's small and the host is single-purpose
         # always include so the pip install of matrix-nio[e2e] never
@@ -255,19 +256,21 @@ sub deps {
 
 sub args {
     return (
-        type     => 'object',
-        required => [qw{user koan_email github_user github_token}],
+        type       => 'object',
+        required   => [qw{user koan_email github_user github_token}],
         properties => {
+
             # Generally set in _base._global
-            user                    => { type => 'string' },
-            koan_email              => { type => 'email' },
-            repo_url                => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
+            user       => { type => 'string' },
+            koan_email => { type => 'email' },
+            repo_url   => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
+
             # Default to the troglodyne fork  it carries the Megolm/Olm E2EE
             # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
             # helper.  Upstream koan (sukria/koan) explicitly excludes E2EE.
             # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
             repo_branch             => { type => 'string', default => 'add_matrix_e2ee' },
-            messaging_provider      => { type => 'string', enum => [qw{telegram slack matrix}], default => 'telegram' },
+            messaging_provider      => { type => 'string', enum    => [qw{telegram slack matrix}], default => 'telegram' },
             telegram_token          => { type => 'string' },
             telegram_chat_id        => { type => 'string' },
             slack_bot_token         => { type => 'string' },
@@ -286,18 +289,18 @@ sub args {
             github_user             => { type => 'string' },
             github_token            => { type => 'string' },
             github_nickname         => { type => 'string' },
-            github_authorized_users => { type => 'array',  items => { type => 'string' }, default => [] },
+            github_authorized_users => { type => 'array', items => { type => 'string' }, default => [] },
             github_ssh_privkey      => { type => 'string' },
             max_runs_per_day        => { type => 'integer', default => 10 },
             interval_seconds        => { type => 'integer', default => 60 },
             start_on_pause          => { type => 'integer', default => 1 },
             focus                   => { type => 'integer', default => 0 },
             projects                => {
-                type    => 'object',
-                default => {},
+                type                 => 'object',
+                default              => {},
                 additionalProperties => {
-                    type => 'object',
-                    required => [qw{github_url}],
+                    type       => 'object',
+                    required   => [qw{github_url}],
                     properties => {
                         cli_provider => { type => 'string', enum => [qw{claude codex copilot local}], default => 'claude' },
                         github_url   => { type => 'string' },
@@ -305,13 +308,14 @@ sub args {
                     }
                 },
             },
+
             # TODO: Don't know how to make these all require one another other than setting them behind an object.
             # should probably rework to be such.
-            smtp_host               => { type => 'string' },
-            smtp_port               => { type => 'integer' },
-            smtp_user               => { type => 'string' },
-            smtp_password           => { type => 'string' },
-            email_to                => { type => 'string' },
+            smtp_host     => { type => 'string' },
+            smtp_port     => { type => 'integer' },
+            smtp_user     => { type => 'string' },
+            smtp_password => { type => 'string' },
+            email_to      => { type => 'string' },
         },
     );
 }
@@ -319,7 +323,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{github_nickname}         //= $opts{github_user};
+    $opts{github_nickname} //= $opts{github_user};
 
     if ( $opts{cli_provider} eq 'telegram' ) {
         die "Must set telegram_token in [koan] section"   unless $opts{telegram_token};
@@ -348,10 +352,10 @@ sub enrich {
         my $have_token = !!$opts{matrix_access_token};
         my $have_pw    = !!$opts{matrix_password};
         die "matrix needs exactly one of: matrix_access_token (+matrix_device_id), or matrix_password"
-            unless $have_token xor $have_pw;
+          unless $have_token xor $have_pw;
         if ($have_token) {
             die "matrix_device_id is required when matrix_access_token is set"
-                if $opts{matrix_e2ee} && !$opts{matrix_device_id};
+              if $opts{matrix_e2ee} && !$opts{matrix_device_id};
         }
 
         # Auto-generate a pickle key if E2EE is on and none supplied.  This
@@ -360,31 +364,31 @@ sub enrich {
         # own to keep it stable across re-deploys.
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {
             $opts{matrix_pickle_key} = join '',
-                map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand( 16 ) ] } 1 .. 64;
+              map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand(16) ] } 1 .. 64;
         }
     }
 
     die "Must set claude_oauth_token in [koan] section when cli_provider=claude"
-        if $opts{cli_provider} eq 'claude' && !$opts{claude_oauth_token};
+      if $opts{cli_provider} eq 'claude' && !$opts{claude_oauth_token};
 
     # Optional ssh key for git push + commit signing.  Surface common
     # mistakes early (wrong format, accidentally pasted a pubkey, an
     # encrypted privkey we can't unlock unattended).
     if ( $opts{github_ssh_privkey} ) {
         die "github_ssh_privkey doesn't look like an OpenSSH private key (expected -----BEGIN ... PRIVATE KEY-----)"
-            unless $opts{github_ssh_privkey} =~ /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+          unless $opts{github_ssh_privkey} =~ /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
         die "github_ssh_privkey is passphrase-encrypted; the bot runs unattended, supply a passphrase-less key"
-            if $opts{github_ssh_privkey} =~ /^Proc-Type:.*ENCRYPTED/m
-            || $opts{github_ssh_privkey} =~ /DEK-Info:/m;
+          if $opts{github_ssh_privkey} =~ /^Proc-Type:.*ENCRYPTED/m
+          || $opts{github_ssh_privkey} =~ /DEK-Info:/m;
     }
 
     # SMTP block is optional but must be all-or-nothing
     if ( $opts{smtp_host} || $opts{smtp_user} || $opts{email_to} ) {
         die "smtp_host, smtp_user, smtp_password and email_to must all be set together"
-            unless $opts{smtp_host}
-            && $opts{smtp_user}
-            && $opts{smtp_password}
-            && $opts{email_to};
+          unless $opts{smtp_host}
+          && $opts{smtp_user}
+          && $opts{smtp_password}
+          && $opts{email_to};
         $opts{smtp_port} //= 587;
     }
 
@@ -393,17 +397,19 @@ sub enrich {
 
 sub template_files {
     return (
-        'koan.env.tt'             => 'koan.env',
-        'koan.config.yaml.tt'     => 'koan.config.yaml',
-        'koan.projects.yaml.tt'   => 'koan.projects.yaml',
-        'koan.service.tt'         => 'koan.service',
-        'koan-awake.service.tt'   => 'koan-awake.service',
+        'koan.env.tt'           => 'koan.env',
+        'koan.config.yaml.tt'   => 'koan.config.yaml',
+        'koan.projects.yaml.tt' => 'koan.projects.yaml',
+        'koan.service.tt'       => 'koan.service',
+        'koan-awake.service.tt' => 'koan-awake.service',
+
         # Always rendered; empty when github_ssh_privkey is unset.  The
         # makefile fragment skips installing it in that case.
-        'koan-ssh-privkey.tt'     => 'koan-ssh-privkey',
+        'koan-ssh-privkey.tt' => 'koan-ssh-privkey',
+
         # Pre-seeds gh CLI's auth state so the bot can run `gh` without
         # ever needing an interactive `gh auth login`.
-        'koan-gh-hosts.yml.tt'    => 'koan-gh-hosts.yml',
+        'koan-gh-hosts.yml.tt' => 'koan-gh-hosts.yml',
     );
 }
 
@@ -418,10 +424,11 @@ sub remote_files {
         "$install_dir/$domain/koan/logs/"         => 'koan/logs/',
         "$install_dir/$domain/koan/workspace/"    => 'koan/workspace/',
         "$install_dir/$domain/koan/projects.yaml" => 'koan/projects.yaml',
+
         # Preserve Claude Code auth state across re-provisions.
         # Claude writes account metadata and session state here on first use;
         # losing it forces interactive re-auth on the next deploy.
-        "$install_dir/$domain/.claude.json"       => '.claude.json',
+        "$install_dir/$domain/.claude.json" => '.claude.json',
     );
 }
 

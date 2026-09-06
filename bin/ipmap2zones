@@ -17,7 +17,7 @@ use Config::Simple;
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Net::IP;
-use List::Util qw{uniq};
+use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
 use File::Slurper::Temp;
@@ -73,21 +73,21 @@ sub main {
 
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;
 
-    my $c           = Config::Simple->new($cfile);
+    my $c = Config::Simple->new($cfile);
     die "$Config::Simple::errstr\n" unless $c;
     my $global_conf = $c->param( -block => 'global' );
     my $ip_conf     = $c->param( -block => 'ips' );
-    my $alias_conf  = $c->param( -block => 'aliases' ) // {};
+    my $alias_conf  = $c->param( -block => 'aliases' )     // {};
     my $ns_conf     = $c->param( -block => 'nameservers' ) // {};
 
     die "Must set admin_email in global section of $cfile\n"
-        unless $global_conf->{admin_email};
+      unless $global_conf->{admin_email};
 
     my @domains = @args ? @args : sort keys(%$ip_conf);
     die "No domains defined in [ips] section of $cfile\n" unless @domains;
 
     my $template_dir = "$FindBin::Bin/../templates";
-    my $tt = Text::Xslate->new(
+    my $tt           = Text::Xslate->new(
         {
             path     => [$template_dir],
             syntax   => 'TTerse',
@@ -98,7 +98,7 @@ sub main {
 
     foreach my $domain (@domains) {
         die "No IP defined for '$domain' in [ips] section of $cfile\n"
-            unless $ip_conf->{$domain};
+          unless $ip_conf->{$domain};
 
         my $aliases = _coerce_arrayref( $alias_conf->{$domain} );
         push( @$aliases, "www.$domain", "mail.$domain" );

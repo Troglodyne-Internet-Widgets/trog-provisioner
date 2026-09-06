@@ -10,7 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-
 =head1 Provisioner::Recipe::nginx
 
 =head2 SYNOPSIS
@@ -38,6 +37,7 @@ sub deps {
 }
 
 sub rate_limits {
+
     # What a browser does to one origin on a single page load is dozens of
     # connections, and a shared NAT multiplies that by everyone behind it.  A
     # thousand a second from one address is not a visitor.
@@ -48,12 +48,12 @@ sub args {
     return (
         properties => {
             backlog => { type => 'integer', default => 32768, minimum => 0 },
+
             # Room for the longest server_name there can be.  A domain name
             # is at most 253 characters, so 256 -- the next multiple of the
             # cache line nginx wants this aligned to -- always fits and never
             # needs thinking about again.
-            server_names_hash_bucket_size =>
-                { type => 'integer', default => 256, minimum => 32 },
+            server_names_hash_bucket_size => { type => 'integer', default => 256, minimum => 32 },
         },
     );
 }
@@ -62,8 +62,9 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'nginx.global.conf.tt'  => 'nginx.global.conf',
-        'nginx.sysctl.conf.tt'  => 'nginx.sysctl.conf',
+        'nginx.global.conf.tt' => 'nginx.global.conf',
+        'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
+
         #XXX TODO this needs to be in the MAIN target, NOT here
         'openssl.tt' => 'openssl.conf',
     );

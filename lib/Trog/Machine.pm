@@ -77,7 +77,7 @@ our $TIMEOUT = 120;
 our $HANG_TIMEOUT = 600;
 
 sub new {
-    my ($class, %opts) = @_;
+    my ( $class, %opts ) = @_;
     return bless {%opts}, $class;
 }
 
@@ -108,8 +108,8 @@ sub is_local { return 0 }
 
 sub ssh_target {
     my ($self) = @_;
-    my $host = $self->ssh_host or return undef;
-    my $user = $self->ssh_user;
+    my $host   = $self->ssh_host or return undef;
+    my $user   = $self->ssh_user;
     return defined $user ? "$user\@$host" : $host;
 }
 
@@ -126,15 +126,15 @@ when the machine is us and there is nothing to connect to.
 
 sub ssh {
     my ($self) = @_;
-    return undef if $self->is_local;
+    return undef        if $self->is_local;
     return $self->{ssh} if $self->{ssh};
 
     $self->{ssh} = eval {
         Net::OpenSSH::More->new(
             host => $self->ssh_host,
             port => $self->ssh_port,
-            (defined $self->ssh_user ? (user     => $self->ssh_user) : ()),
-            (defined $self->ssh_key  ? (key_path => $self->ssh_key)  : ()),
+            ( defined $self->ssh_user ? ( user     => $self->ssh_user ) : () ),
+            ( defined $self->ssh_key  ? ( key_path => $self->ssh_key )  : () ),
 
             # Our commands are one-shot, and some of them are pipelines the
             # persistent Expect shell would rather we didn't send it.
@@ -160,24 +160,25 @@ side's shell instead, which is how you write a pipeline.
 =cut
 
 sub capture {
-    my ($self, $cmd) = @_;
-    if ($self->is_local) {
+    my ( $self, $cmd ) = @_;
+    if ( $self->is_local ) {
+
         # A string still reaches a shell, which is the documented contract here
         # -- callers write pipelines.  What run3 buys is stdin closed rather
         # than inherited, so a command that decides to read one cannot sit there
         # waiting on a terminal that is busy elsewhere.
-        IPC::Run3::run3($cmd, \undef, \my $out, undef);
+        IPC::Run3::run3( $cmd, \undef, \my $out, undef );
         return $out;
     }
 
-    return $self->_unhang($cmd, sub { ($self->ssh->cmd($cmd))[0] });
+    return $self->_unhang( $cmd, sub { ( $self->ssh->cmd($cmd) )[0] } );
 }
 
 sub run {
-    my ($self, @argv) = @_;
+    my ( $self, @argv ) = @_;
     return system(@argv) >> 8 if $self->is_local;
 
-    return $self->_unhang(join(' ', @argv), sub { $self->ssh->cmd_exit_code(@argv) });
+    return $self->_unhang( join( ' ', @argv ), sub { $self->ssh->cmd_exit_code(@argv) } );
 }
 
 =head1 SUDO
@@ -233,16 +234,10 @@ sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
 sub _ask_for_sudo_password {
     my ($self) = @_;
 
-    die 'sudo on ' . $self->describe . " wants a password, and there is no terminal to ask at.\n"
-      . 'Either run this where it can ask, or give '
-      . ($self->ssh_user // 'the login user')
-      . " passwordless sudo there:\n"
-      . '    ' . ($self->ssh_user // 'youruser') . " ALL=(ALL) NOPASSWD: ALL\n"
-      . "in /etc/sudoers.d/, via visudo.\n"
+    die 'sudo on ' . $self->describe . " wants a password, and there is no terminal to ask at.\n" . 'Either run this where it can ask, or give ' . ( $self->ssh_user // 'the login user' ) . " passwordless sudo there:\n" . '    ' . ( $self->ssh_user // 'youruser' ) . " ALL=(ALL) NOPASSWD: ALL\n" . "in /etc/sudoers.d/, via visudo.\n"
       unless $self->_have_terminal();
 
-    my $password = Trog::Secrets->prompt(
-        '[sudo] password for ' . ($self->ssh_user // 'you') . ' on ' . $self->describe . ':');
+    my $password = Trog::Secrets->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':' );
 
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 
@@ -270,37 +265,40 @@ one.  Returns the exit code, like C<run>.
 =cut
 
 sub run_sudo {
-    my ($self, @argv) = @_;
+    my ( $self, @argv ) = @_;
 
     # A local sudo has our own terminal to ask at, so let it.
-    return $self->run('sudo', @argv) if $self->is_local;
-    return $self->_run_sudo_attempt(0, @argv);
+    return $self->run( 'sudo', @argv ) if $self->is_local;
+    return $self->_run_sudo_attempt( 0, @argv );
 }
 
 sub _run_sudo_attempt {
-    my ($self, $attempts, @argv) = @_;
+    my ( $self, $attempts, @argv ) = @_;
 
     my $password = $self->sudo_password;
-    my @sudo  = defined $password ? (qw{sudo -S -p}, q{}) : (qw{sudo -n});
-    my %stdin = defined $password ? (stdin_data => "$password\n") : ();
+    my @sudo     = defined $password ? ( qw{sudo -S -p}, q{} )         : (qw{sudo -n});
+    my %stdin    = defined $password ? ( stdin_data => "$password\n" ) : ();
 
-    my ($out, $err) = $self->_unhang(join(' ', 'sudo', @argv), sub {
-        $self->ssh->capture2({ timeout => $TIMEOUT, %stdin }, @sudo, @argv);
-    });
+    my ( $out, $err ) = $self->_unhang(
+        join( ' ', 'sudo', @argv ),
+        sub {
+            $self->ssh->capture2( { timeout => $TIMEOUT, %stdin }, @sudo, @argv );
+        }
+    );
     my $rc = $? >> 8;
     return 0 unless $rc;
 
-    my $said = ($out // '') . ($err // '');
+    my $said = ( $out // '' ) . ( $err // '' );
     return $rc unless _wants_password($said) || _wrong_password($said);
 
     # Three goes at typing it, then give up rather than loop.
     die 'Could not authenticate sudo on ' . $self->describe . "\n" if $attempts >= 3;
 
-    print {*STDERR} "Sorry, try again.\n" if _wrong_password($said);
+    print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);
     delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
     $self->_ask_for_sudo_password();
 
-    return $self->_run_sudo_attempt($attempts + 1, @argv);
+    return $self->_run_sudo_attempt( $attempts + 1, @argv );
 }
 
 =head1 FILES
@@ -342,46 +340,46 @@ The other direction, for one file.
 =cut
 
 sub file_exists {
-    my ($self, $path) = @_;
-    if ($self->is_local) {
-        open(my $fh, '<', $path) or return 0;
+    my ( $self, $path ) = @_;
+    if ( $self->is_local ) {
+        open( my $fh, '<', $path ) or return 0;
         close $fh;
         return 1;
     }
-    return $self->run(qw{test -f}, $path) == 0 ? 1 : 0;
+    return $self->run( qw{test -f}, $path ) == 0 ? 1 : 0;
 }
 
 sub mkpath {
-    my ($self, @paths) = @_;
-    if ($self->is_local) {
+    my ( $self, @paths ) = @_;
+    if ( $self->is_local ) {
         File::Path::make_path(@paths);
         return 1;
     }
 
     foreach my $path (@paths) {
-        next if $self->run(qw{mkdir -p}, $path) == 0;
+        next if $self->run( qw{mkdir -p}, $path ) == 0;
 
         # Somewhere above it belongs to root.  Make it anyway, then hand it to
         # the login user, who is the one that will be writing into it.
         my $user = $self->ssh_user // $self->capture('id -un');
         chomp $user if defined $user;
-        return 0 if $self->run_sudo(qw{mkdir -p}, $path);
-        $self->run_sudo('chown', "$user:", $path);
+        return 0    if $self->run_sudo( qw{mkdir -p}, $path );
+        $self->run_sudo( 'chown', "$user:", $path );
     }
     return 1;
 }
 
 sub remove {
-    my ($self, @paths) = @_;
-    if ($self->is_local) {
+    my ( $self, @paths ) = @_;
+    if ( $self->is_local ) {
         unlink @paths;
         return 1;
     }
-    return $self->run(qw{rm -f}, @paths) == 0;
+    return $self->run( qw{rm -f}, @paths ) == 0;
 }
 
 sub read_text {
-    my ($self, $path) = @_;
+    my ( $self, $path ) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
 
     # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
@@ -391,55 +389,58 @@ sub read_text {
     # last error from anything on this connection -- so a command that failed
     # earlier on purpose, like the sudo -n probe, would make a cat that worked
     # perfectly well look like a failure.
-    my $content = $self->_unhang("cat $path",
-        sub { $self->ssh->capture({ timeout => $TIMEOUT }, 'cat', $path) });
+    my $content = $self->_unhang(
+        "cat $path",
+        sub { $self->ssh->capture( { timeout => $TIMEOUT }, 'cat', $path ) }
+    );
 
     return $? >> 8 ? undef : $content;
 }
 
 sub write_text {
-    my ($self, $path, $content, %opts) = @_;
-    return $self->_write_local($path, $content, %opts) if $self->is_local;
-    return $self->_pour({ stdin_data => $content }, $path, %opts);
+    my ( $self, $path, $content, %opts ) = @_;
+    return $self->_write_local( $path, $content, %opts ) if $self->is_local;
+    return $self->_pour( { stdin_data => $content }, $path, %opts );
 }
 
 sub put_file {
-    my ($self, $local, $remote, %opts) = @_;
+    my ( $self, $local, $remote, %opts ) = @_;
 
-    if ($self->is_local) {
+    if ( $self->is_local ) {
+
         # Copy it ourselves if we can; sudo is the fallback, not the forecast.
-        return 1 if File::Copy::copy($local, $remote);
-        return $self->run_sudo(qw{cp}, $local, $remote) == 0 ? 1 : 0 if $opts{sudo};
+        return 1                                                       if File::Copy::copy( $local, $remote );
+        return $self->run_sudo( qw{cp}, $local, $remote ) == 0 ? 1 : 0 if $opts{sudo};
         return 0;
     }
 
-    return $self->_pour({ stdin_file => $local }, $remote, %opts);
+    return $self->_pour( { stdin_file => $local }, $remote, %opts );
 }
 
 sub put_dir {
-    my ($self, $local, $remote) = @_;
+    my ( $self, $local, $remote ) = @_;
     return 1 if $self->is_local;
     $self->mkpath($remote) or return 0;
 
     # Pack locally, then unpack on the far side out of the same stdin stream
     # everything else here uses.  One round trip, modes preserved, and a real
     # exit status at the end of it.
-    my $tarball = File::Temp->new(SUFFIX => '.tar.gz', UNLINK => 1);
+    my $tarball = File::Temp->new( SUFFIX => '.tar.gz', UNLINK => 1 );
     close $tarball;
-    return 0 if system('tar', '-C', $local, '-czf', "$tarball", '.');
+    return 0 if system( 'tar', '-C', $local, '-czf', "$tarball", '.' );
 
-    return $self->_run({ stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-');
+    return $self->_run( { stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-' );
 }
 
 sub get_file {
-    my ($self, $remote, $local) = @_;
-    return File::Copy::copy($remote, $local) ? 1 : 0 if $self->is_local;
+    my ( $self, $remote, $local ) = @_;
+    return File::Copy::copy( $remote, $local ) ? 1 : 0 if $self->is_local;
 
-    return $self->_run({ stdout_file => $local }, 'cat', $remote);
+    return $self->_run( { stdout_file => $local }, 'cat', $remote );
 }
 
 sub append_line {
-    my ($self, $path, $line) = @_;
+    my ( $self, $path, $line ) = @_;
     chomp $line;
 
     # Append.  Never read-modify-write.
@@ -449,12 +450,12 @@ sub append_line {
     # that came back empty, for any reason at all, rewrote the file with one key
     # in it and locked its owner out of their own machine.  There is no version
     # of that which is worth the tidier code.
-    $self->mkpath(_parent_dir($path));
+    $self->mkpath( _parent_dir($path) );
 
-    if ($self->is_local) {
+    if ( $self->is_local ) {
         my $existing = eval { File::Slurper::read_text($path) };
-        return 1 if defined $existing && grep { $_ eq $line } split("\n", $existing);
-        open(my $fh, '>>', $path) or die "Could not open $path: $!";
+        return 1 if defined $existing && grep { $_ eq $line } split( "\n", $existing );
+        open( my $fh, '>>', $path ) or die "Could not open $path: $!";
         print {$fh} "$line\n";
         close($fh);
         return 1;
@@ -462,35 +463,36 @@ sub append_line {
 
     # grep decides whether it is already there, on the far side, so the file
     # never has to make the trip.
-    return 1 if $self->run(qw{grep -qxF --}, $line, $path) == 0;
+    return 1 if $self->run( qw{grep -qxF --}, $line, $path ) == 0;
 
-    return $self->_pour({ stdin_data => "$line\n" }, $path, append => 1);
+    return $self->_pour( { stdin_data => "$line\n" }, $path, append => 1 );
 }
 
 # Write a stream to a path on the far side.  See "Why none of this uses sftp"
 # and "SUDO": the content and the sudo password both want stdin, so a
 # privileged write is two commands and never one.
 sub _pour {
-    my ($self, $stdin, $path, %opts) = @_;
+    my ( $self, $stdin, $path, %opts ) = @_;
 
     my @tee = $opts{append} ? (qw{tee -a}) : ('tee');
 
-    unless ($opts{sudo}) {
-        return $self->_run({ %$stdin, stdout_discard => 1 }, @tee, $path);
+    unless ( $opts{sudo} ) {
+        return $self->_run( { %$stdin, stdout_discard => 1 }, @tee, $path );
     }
 
-    return $self->_sudo_append($stdin, $path) if $opts{append};
+    return $self->_sudo_append( $stdin, $path ) if $opts{append};
 
     my $staged = $self->_staging_path or return 0;
-    $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $staged) or do {
+    $self->_run( { %$stdin, stdout_discard => 1 }, 'tee', $staged ) or do {
         $self->remove($staged);
         return 0;
     };
 
     my $mode = $opts{mode} // '0644';
-    my $ok = !$self->run_sudo('mv', $staged, $path)
-      && !$self->run_sudo('chown', 'root:root', $path)
-      && !$self->run_sudo('chmod', $mode, $path);
+    my $ok =
+         !$self->run_sudo( 'mv',    $staged,     $path )
+      && !$self->run_sudo( 'chown', 'root:root', $path )
+      && !$self->run_sudo( 'chmod', $mode,       $path );
 
     $self->remove($staged) unless $ok;
     return $ok ? 1 : 0;
@@ -500,11 +502,11 @@ sub _pour {
 # file rather than add to it -- and the content cannot ride on stdin beside a
 # sudo password, so it is staged and then concatenated on.
 sub _sudo_append {
-    my ($self, $stdin, $path) = @_;
+    my ( $self, $stdin, $path ) = @_;
 
     my $staged = $self->_staging_path or return 0;
-    my $ok = $self->_run({ %$stdin, stdout_discard => 1 }, 'tee', $staged)
-      && !$self->run_sudo(qw{sh -c}, sprintf('cat %s >> %s', _shq($staged), _shq($path)));
+    my $ok     = $self->_run( { %$stdin, stdout_discard => 1 }, 'tee', $staged )
+      && !$self->run_sudo( qw{sh -c}, sprintf( 'cat %s >> %s', _shq($staged), _shq($path) ) );
 
     $self->remove($staged);
     return $ok ? 1 : 0;
@@ -523,7 +525,7 @@ sub _staging_path {
     my ($self) = @_;
 
     my $path = $self->capture('mktemp');
-    chomp $path if defined $path;
+    chomp $path  if defined $path;
     return $path if defined $path && length $path && $path =~ m{\A/};
 
     warn 'Could not make a staging file on ' . $self->describe . "\n";
@@ -531,12 +533,14 @@ sub _staging_path {
 }
 
 sub _run {
-    my ($self, $opts, @cmd) = @_;
+    my ( $self, $opts, @cmd ) = @_;
 
-    my $ok = $self->_unhang(join(' ', @cmd),
-        sub { $self->ssh->system({ timeout => $TIMEOUT, %$opts }, @cmd) });
+    my $ok = $self->_unhang(
+        join( ' ', @cmd ),
+        sub { $self->ssh->system( { timeout => $TIMEOUT, %$opts }, @cmd ) }
+    );
 
-    warn 'Remote ' . join(' ', @cmd) . ' failed: ' . ($self->ssh->error // 'unknown') . "\n" unless $ok;
+    warn 'Remote ' . join( ' ', @cmd ) . ' failed: ' . ( $self->ssh->error // 'unknown' ) . "\n" unless $ok;
     return $ok ? 1 : 0;
 }
 
@@ -558,7 +562,7 @@ sub _hang_limit {
     my ($what) = @_;
     return $HANG_TIMEOUT unless defined $what;
 
-    my %seconds = ('' => 1, s => 1, m => 60, h => 3600, d => 86400);
+    my %seconds = ( '' => 1, s => 1, m => 60, h => 3600, d => 86400 );
     my $limit   = $HANG_TIMEOUT;
 
     while ( $what =~ m/\btimeout\s+(\d+)([smhd]?)\b/g ) {
@@ -570,7 +574,7 @@ sub _hang_limit {
 }
 
 sub _unhang {
-    my ($self, $what, $code) = @_;
+    my ( $self, $what, $code ) = @_;
     return $code->() if $self->is_local;
 
     # This alarm is for a command that should return promptly and does not.  A
@@ -589,11 +593,7 @@ sub _unhang {
     my $error = $@;
     alarm 0;
 
-    die 'Gave up on ' . $self->describe . " after ${limit}s: $what\n"
-      . "Nothing came back and nothing failed, which usually means a permission\n"
-      . "problem the far side declined to report.  Check that "
-      . ($self->ssh_user // 'the login user')
-      . " can write where this was going.\n"
+    die 'Gave up on ' . $self->describe . " after ${limit}s: $what\n" . "Nothing came back and nothing failed, which usually means a permission\n" . "problem the far side declined to report.  Check that " . ( $self->ssh_user // 'the login user' ) . " can write where this was going.\n"
       if $error eq "__TROG_HUNG__\n";
 
     die $error if $error;
@@ -607,16 +607,16 @@ sub _unhang {
 # act on it, and it cannot see an immutable bit, a full disk or a read-only
 # mount -- all of which say "no" to a write that -w said yes to.
 sub _write_local {
-    my ($self, $path, $content, %opts) = @_;
+    my ( $self, $path, $content, %opts ) = @_;
 
-    return 1 if eval { File::Slurper::Temp::write_text($path, $content); 1 };
+    return 1 if eval { File::Slurper::Temp::write_text( $path, $content ); 1 };
     die $@ unless $opts{sudo};
 
-    my $tmp = File::Temp->new(UNLINK => 1);
+    my $tmp = File::Temp->new( UNLINK => 1 );
     print {$tmp} $content;
     close $tmp;
-    my $ok = $self->run_sudo(qw{cp}, "$tmp", $path) == 0;
-    $self->run_sudo('chmod', ($opts{mode} // '0644'), $path) if $ok;
+    my $ok = $self->run_sudo( qw{cp}, "$tmp", $path ) == 0;
+    $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $path ) if $ok;
     return $ok ? 1 : 0;
 }
 

@@ -44,6 +44,7 @@ sub args {
         type       => 'object',
         required   => [qw{version}],
         properties => {
+
             # TODO default to the latest imagemagick version available on github releases
             # A full release including the patch number, which is how the
             # archive names its tarballs: "7.1.0" is a 404, and without -f curl

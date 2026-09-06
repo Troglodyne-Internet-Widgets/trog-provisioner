@@ -47,6 +47,7 @@ tunnel (e.g. C<order: A>).
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
+
         # It fetches its certificates off the hypervisor, so it needs what does
         # the fetching as much as it needs openvpn.
         return qw{openvpn openssh-client rsync};
@@ -60,9 +61,9 @@ sub args {
         properties => {
             server   => { type => 'string' },
             cert_dir => { type => 'string' },
-            port     => { type => 'integer', minimum => 1024, default => 1194 },
-            proto    => { type => 'string', enum => [qw{udp tcp}], default => 'udp' },
-            cipher   => { type => 'string', default => 'AES-256-GCM' },
+            port     => { type => 'integer', minimum => 1024,          default => 1194 },
+            proto    => { type => 'string',  enum    => [qw{udp tcp}], default => 'udp' },
+            cipher   => { type => 'string',  default => 'AES-256-GCM' },
         },
     );
 }

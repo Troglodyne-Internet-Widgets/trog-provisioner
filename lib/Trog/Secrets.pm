@@ -60,7 +60,7 @@ C<apply> reads to find its way back.
 =cut
 
 sub needed {
-    my ($class, $config) = @_;
+    my ( $class, $config ) = @_;
     return () unless ref $config eq 'HASH';
 
     my %found;
@@ -74,16 +74,16 @@ sub needed {
         my $path = shift @paths;
         my $type = ref $node;
 
-        if ($type eq 'HASH') {
+        if ( $type eq 'HASH' ) {
             push @nodes, values %$node;
             push @paths, map { "$path/$_" } keys %$node;
         }
-        elsif ($type eq 'ARRAY') {
+        elsif ( $type eq 'ARRAY' ) {
             push @nodes, @$node;
             push @paths, map { "$path/$_" } 0 .. $#$node;
         }
-        elsif (!$type) {
-            $found{$path} = $node if defined $node && index($node, 'secret:') == 0;
+        elsif ( !$type ) {
+            $found{$path} = $node if defined $node && index( $node, 'secret:' ) == 0;
         }
 
         # Anything else cannot be a reference.  It is YAML.
@@ -103,13 +103,13 @@ when sudo on the far side turns out to need a password.
 =cut
 
 sub prompt {
-    my ($class, $message) = @_;
+    my ( $class, $message ) = @_;
     $message //= 'Enter password:';
 
     # IO::Prompter and IO::Prompt fall out with each other over @ARGV unless it
     # is flattened first.
     local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
-    return IO::Prompter::prompt($message, -echo => '*');
+    return IO::Prompter::prompt( $message, -echo => '*' );
 }
 
 =head2 read($file, $password, %needed)
@@ -124,29 +124,29 @@ as an empty password.
 =cut
 
 sub read {
-    my ($class, $file, $password, %needed) = @_;
+    my ( $class, $file, $password, %needed ) = @_;
 
     die "Nothing to look up.\n" unless %needed;
 
     # Grouped so the database is walked once per group rather than once per
     # reference.
     my %by_group;
-    foreach my $path (keys %needed) {
-        my ($group, $title, $field) = $class->parse($needed{$path});
+    foreach my $path ( keys %needed ) {
+        my ( $group, $title, $field ) = $class->parse( $needed{$path} );
         push @{ $by_group{$group} }, { path => $path, title => $title, field => $field };
     }
 
-    my $kdbx = File::KeePass::KDBX->load_db($file, $password)
+    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
       or die "Could not open $file\n";
     $kdbx->unlock() or die "Could not unlock $file\n";
 
     my %values;
-    foreach my $group (keys %by_group) {
-        my $g = $kdbx->find_group({ title => $group })
+    foreach my $group ( keys %by_group ) {
+        my $g = $kdbx->find_group( { title => $group } )
           or die "No group '$group' in $file\n";
 
-        foreach my $want (@{ $by_group{$group} }) {
-            my $entry = $kdbx->find_entry({ group => $g->{gid}, title => $want->{title} })
+        foreach my $want ( @{ $by_group{$group} } ) {
+            my $entry = $kdbx->find_entry( { group => $g->{gid}, title => $want->{title} } )
               or die "No entry '$want->{title}' in group '$group' of $file\n";
 
             die "Entry '$want->{title}' in '$group' has no $want->{field}\n"
@@ -167,10 +167,10 @@ Put the answers back where the references were.
 =cut
 
 sub apply {
-    my ($class, $config, %values) = @_;
+    my ( $class, $config, %values ) = @_;
 
-    foreach my $path (keys %values) {
-        my @steps = split('/', $path);
+    foreach my $path ( keys %values ) {
+        my @steps = split( '/', $path );
         my $leaf  = pop @steps;
 
         # Walked rather than built into a string and eval'd, which is what this
@@ -182,8 +182,8 @@ sub apply {
             die "Could not follow '$path' back to where the secret was\n" unless ref $at;
         }
 
-        if (looks_like_number($leaf)) { $at->[$leaf] = $values{$path} }
-        else                          { $at->{$leaf} = $values{$path} }
+        if   ( looks_like_number($leaf) ) { $at->[$leaf] = $values{$path} }
+        else                              { $at->{$leaf} = $values{$path} }
     }
 
     return $config;
@@ -199,23 +199,22 @@ is the caller's business, not this module's.
 =cut
 
 sub write {
-    my ($class, $file, $password, %value_by_ref) = @_;
+    my ( $class, $file, $password, %value_by_ref ) = @_;
 
     my $kdbx = File::KeePass::KDBX->new;
-    $kdbx->add_group({ title => 'Root' });
+    $kdbx->add_group( { title => 'Root' } );
 
     my %groups;
-    foreach my $ref (sort keys %value_by_ref) {
-        my ($group, $title, $field) = $class->parse($ref);
+    foreach my $ref ( sort keys %value_by_ref ) {
+        my ( $group, $title, $field ) = $class->parse($ref);
 
-        $groups{$group} //= $kdbx->add_group({ title => $group });
-        my $entry = $kdbx->find_entry({ group => $groups{$group}{gid}, title => $title })
-          // $kdbx->add_entry({ group => $groups{$group}{gid}, title => $title });
+        $groups{$group} //= $kdbx->add_group( { title => $group } );
+        my $entry = $kdbx->find_entry( { group => $groups{$group}{gid}, title => $title } ) // $kdbx->add_entry( { group => $groups{$group}{gid}, title => $title } );
 
         $entry->{$field} = $value_by_ref{$ref};
     }
 
-    $kdbx->save_db($file, $password);
+    $kdbx->save_db( $file, $password );
     return $file;
 }
 
@@ -226,18 +225,21 @@ The group, entry and field a reference names.
 =cut
 
 sub parse {
-    my ($class, $reference) = @_;
+    my ( $class, $reference ) = @_;
 
-    die "Malformed secret '" . ($reference // '') . "': must start with secret:\n"
-      unless defined $reference && index($reference, 'secret:') == 0;
+    die "Malformed secret '" . ( $reference // '' ) . "': must start with secret:\n"
+      unless defined $reference && index( $reference, 'secret:' ) == 0;
 
-    my ($group, $title, $field) = split('/', substr($reference, length 'secret:'));
+    my ( $group, $title, $field ) = split( '/', substr( $reference, length 'secret:' ) );
     die "Malformed secret '$reference': wanted secret:group/entry/field\n"
-      unless defined $group && length $group
-      && defined $title && length $title
-      && defined $field && length $field;
+      unless defined $group
+      && length $group
+      && defined $title
+      && length $title
+      && defined $field
+      && length $field;
 
-    return ($group, $title, $field);
+    return ( $group, $title, $field );
 }
 
 =head1 SEE ALSO

@@ -38,19 +38,19 @@ so that C<files.[domain]> is covered by the SSL certificate.
 =cut
 
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     my $port = $opts{web_port} // 8112;
-    my $ipv6 = $opts{ipv6} // 1;
+    my $ipv6 = $opts{ipv6}     // 1;
     return (
-        nginxproxy  => sub {
+        nginxproxy => sub {
             (
                 vhosts => {
                     80  => { ssl_redirect => 1, ipv6 => 1 },
                     443 => {
-                        ssl => 1,
-                        proxy_uri => "http://127.0.0.1:$port",
+                        ssl        => 1,
+                        proxy_uri  => "http://127.0.0.1:$port",
                         public_dir => 'torrents',
-                        ipv6 => $ipv6,
+                        ipv6       => $ipv6,
                     },
                 },
             )

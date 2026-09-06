@@ -15,7 +15,7 @@ t/snapshot.t - bin/snapshot: taking one, and naming it
 use Test::More;
 use IPC::Run3();
 use Test::MockModule qw{strict};
-use File::Temp qw{tempdir};
+use File::Temp       qw{tempdir};
 use Pod::Usage();
 
 use FindBin;
@@ -25,108 +25,108 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 require_ok("$FindBin::Bin/../bin/snapshot")
   or BAIL_OUT('bin/snapshot does not load; the install is incomplete');
 
 # Point --hvconf at nothing, so these never read the fleet file of whatever
 # machine the suite happens to be running on.
-my $NO_FLEET = tempdir(CLEANUP => 1) . '/hypervisors.conf';
-sub main_snapshot { return Trog::Bin::Snapshot::main('--hvconf', $NO_FLEET, @_) }
+my $NO_FLEET = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
+sub main_snapshot { return Trog::Bin::Snapshot::main( '--hvconf', $NO_FLEET, @_ ) }
 
 # The interface is documented in POD now, and pod2usage prints that.
-my $synopsis = _pod_section("$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS');
-like($synopsis, qr/--name/,   'POD documents --name');
-like($synopsis, qr/--connect/,'POD documents --connect');
-like($synopsis, qr/DOMAIN/,   'POD documents the DOMAIN argument');
+my $synopsis = _pod_section( "$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS' );
+like( $synopsis, qr/--name/,    'POD documents --name' );
+like( $synopsis, qr/--connect/, 'POD documents --connect' );
+like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 
 # No domain -> usage, non-zero exit.  This one has to be a real run, since
 # pod2usage exits rather than dying.
-my ($out, $rc) = _run("$FindBin::Bin/../bin/snapshot");
-isnt($rc, 0, 'no arguments exits non-zero');
-like($out, qr/No domain passed/, 'saying what was missing');
-like($out, qr/Usage:/,           'and printing the usage out of the POD');
+my ( $out, $rc ) = _run("$FindBin::Bin/../bin/snapshot");
+isnt( $rc, 0, 'no arguments exits non-zero' );
+like( $out, qr/No domain passed/, 'saying what was missing' );
+like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 
 # libvirt refuses to snapshot -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot        => sub { 0 });
-    $hv_mock->redefine(snapshot_current_name  => sub { undef });
+    $hv_mock->redefine( create_snapshot       => sub { 0 } );
+    $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
     eval { main_snapshot('myvm.lan') };
-    like($@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails');
+    like( $@, qr/Failed to create snapshot/, 'main() dies when the snapshot fails' );
 }
 
 # No current snapshot after create -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot       => sub { 1 });
-    $hv_mock->redefine(snapshot_current_name => sub { undef });
+    $hv_mock->redefine( create_snapshot       => sub { 1 } );
+    $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
     eval { main_snapshot('myvm.lan') };
-    like($@, qr/No current snapshot/, 'main() dies when no snapshot is current after create');
+    like( $@, qr/No current snapshot/, 'main() dies when no snapshot is current after create' );
 }
 
 # Current snapshot unchanged -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot       => sub { 1 });
-    $hv_mock->redefine(snapshot_current_name => sub { 'same-snap' });
+    $hv_mock->redefine( create_snapshot       => sub { 1 } );
+    $hv_mock->redefine( snapshot_current_name => sub { 'same-snap' } );
 
     eval { main_snapshot('myvm.lan') };
-    like($@, qr/unchanged after create/, 'main() dies when the current snapshot does not change');
+    like( $@, qr/unchanged after create/, 'main() dies when the current snapshot does not change' );
 }
 
 # Happy path -- nothing was current before
 {
-    my $call = 0;
+    my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot       => sub { 1 });
-    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' });
+    $hv_mock->redefine( create_snapshot       => sub { 1 } );
+    $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' } );
 
     my $rc;
     eval { $rc = main_snapshot('myvm.lan') };
-    is($@,  '', 'no exception on success when nothing was current before');
-    is($rc, 0,  'main() returns 0 on success');
+    is( $@,  '', 'no exception on success when nothing was current before' );
+    is( $rc, 0,  'main() returns 0 on success' );
 }
 
 # Happy path -- before differs from after
 {
-    my $call = 0;
+    my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot       => sub { 1 });
-    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' });
+    $hv_mock->redefine( create_snapshot       => sub { 1 } );
+    $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' } );
 
     my $rc;
     eval { $rc = main_snapshot('myvm.lan') };
-    is($@,  '', 'no exception when before differs from after');
-    is($rc, 0,  'main() returns 0');
+    is( $@,  '', 'no exception when before differs from after' );
+    is( $rc, 0,  'main() returns 0' );
 }
 
 # --name reaches libvirt
 {
     my @captured;
-    my $call = 0;
+    my $call    = 0;
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine(create_snapshot       => sub { @captured = @_; return 1 });
-    $hv_mock->redefine(snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' });
+    $hv_mock->redefine( create_snapshot       => sub { @captured = @_; return 1 } );
+    $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' } );
 
     main_snapshot(qw{myvm.lan --name mysnap});
-    is($captured[1], 'myvm.lan', 'domain forwarded');
-    is($captured[2], 'mysnap',   '--name value forwarded');
+    is( $captured[1], 'myvm.lan', 'domain forwarded' );
+    is( $captured[2], 'mysnap',   '--name value forwarded' );
 }
 
 sub _run {
     my (@cmd) = @_;
     my $out = q{};
-    IPC::Run3::run3([$^X, @cmd], \undef, \$out, \$out);
-    return ($out, $?);
+    IPC::Run3::run3( [ $^X, @cmd ], \undef, \$out, \$out );
+    return ( $out, $? );
 }
 
 sub _pod_section {
-    my ($file, $sections) = @_;
-    open(my $fh, '>', \my $text) or die $!;
+    my ( $file, $sections ) = @_;
+    open( my $fh, '>', \my $text ) or die $!;
     Pod::Usage::pod2usage(
         -input    => $file,
         -output   => $fh,

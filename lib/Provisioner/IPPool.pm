@@ -37,32 +37,32 @@ Return ordered list of IPs from an ip_pool config block in ipmap.cfg.
 
 sub pool_ips {
     my ($pool) = @_;
-    my (%seen, @ips);
+    my ( %seen, @ips );
 
-    if (my $addrs = $pool->{addresses}) {
-        for my $ip (split /\s+/, $addrs) {
+    if ( my $addrs = $pool->{addresses} ) {
+        for my $ip ( split /\s+/, $addrs ) {
             next unless $ip =~ /\S/;
             push @ips, $ip unless $seen{$ip}++;
         }
     }
 
-    if (my $cidrs = $pool->{cidr}) {
-        for my $cidr (split /\s+/, $cidrs) {
+    if ( my $cidrs = $pool->{cidr} ) {
+        for my $cidr ( split /\s+/, $cidrs ) {
             next unless $cidr =~ /\S/;
             my $net = Net::IP->new($cidr)
-                or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
+              or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
 
             my @block;
             do {
                 push @block, $net->ip();
-            } while (++$net);
+            } while ( ++$net );
 
             # The first and last address of an IPv4 block are the network and
             # the broadcast; neither belongs to a host.  Handing one out looks
             # like it worked right up until the guest cannot talk to anything.
             # A /31 is a point-to-point link where both addresses are usable
             # (RFC 3021), and a /32 is one host; neither has any to spare.
-            if (@block > 2) {
+            if ( @block > 2 ) {
                 pop @block;
                 shift @block;
             }
@@ -85,14 +85,14 @@ Dies if the pool is unconfigured or exhausted.
 =cut
 
 sub auto_assign {
-    my ($cfile, $domain, $pool, $ip_conf) = @_;
+    my ( $cfile, $domain, $pool, $ip_conf ) = @_;
 
     my @pool_ips = pool_ips($pool);
     die "No [ip_pool] section or no IPs found in pool: cannot auto-assign IP for $domain\n"
-        unless @pool_ips;
+      unless @pool_ips;
 
     my %assigned;
-    for my $d (keys %$ip_conf) {
+    for my $d ( keys %$ip_conf ) {
         my $ip = $ip_conf->{$d};
         $ip =~ s|/\d+$||;
         $assigned{$ip} = $d;
@@ -102,7 +102,7 @@ sub auto_assign {
     die "IP pool exhausted: no IPs available for $domain\n" unless $chosen;
 
     my $c = Config::Simple->new($cfile);
-    $c->param("ips.$domain", $chosen);
+    $c->param( "ips.$domain", $chosen );
     $c->save($cfile);
 
     print "Auto-assigned IP $chosen to $domain (written to $cfile)\n";

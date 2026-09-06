@@ -10,7 +10,7 @@ use warnings FATAL => 'all';
 use re '/aa';
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 use Trog::HV();
 use Trog::Hypervisors();
 
@@ -66,32 +66,34 @@ so this is a bigger hammer than it looks.
 sub main {
     my @args = @_;
 
-    my ($uri, $pool, $pool_path, $name, $hvconf, $domain_dir);
-    GetOptionsFromArray(\@args,
+    my ( $uri, $pool, $pool_path, $name, $hvconf, $domain_dir );
+    GetOptionsFromArray(
+        \@args,
         'connect=s'    => \$uri,
         'pool=s'       => \$pool,
         'poolpath=s'   => \$pool_path,
         'hypervisor=s' => \$name,
         'hvconf=s'     => \$hvconf,
         'domaindir=s'  => \$domain_dir,
-    ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'Pass --connect or --hypervisor, not both')
-      if $uri && $name;
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass --connect or --hypervisor, not both'
+    ) if $uri && $name;
 
     my $hv;
     if ($name) {
-        my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path);
+        my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path );
         die "No hypervisors are configured, so --hypervisor has nothing to name\n"
           unless $fleet->configured;
         $hv = $fleet->hypervisor($name)->activate();
     }
     else {
-        $hv = Trog::HV->new(uri => $uri, pool_path => $pool_path);
+        $hv = Trog::HV->new( uri => $uri, pool_path => $pool_path );
     }
     $hv->{pool_path} = $pool_path if defined $pool_path;
-    $hv->nuke_pool($pool // 'tf_disks');
+    $hv->nuke_pool( $pool // 'tf_disks' );
     return 0;
 }
 

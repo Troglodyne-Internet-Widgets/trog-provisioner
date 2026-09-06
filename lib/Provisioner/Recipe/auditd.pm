@@ -46,6 +46,7 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # The account this domain's watch rule is keyed on.  The template
             # has always used it and nothing declared it, so the key rendered
             # as "-watch" -- a leading dash, which is not a key auditctl will
@@ -54,7 +55,6 @@ sub args {
         },
     );
 }
-
 
 sub template_files {
     my ($self) = @_;

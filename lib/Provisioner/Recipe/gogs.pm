@@ -92,17 +92,17 @@ Returns remote file mappings for backup/restore.
 =cut
 
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     my $ipv6 = $opts{ipv6} // 1;
     return (
-        nginxproxy  => sub {
+        nginxproxy => sub {
             (
                 vhosts => {
                     80  => { ssl_redirect => 1, ipv6 => 1 },
                     443 => {
-                        ssl => 1,
+                        ssl       => 1,
                         proxy_uri => 'http://127.0.0.1:3000',
-                        ipv6 => $ipv6,
+                        ipv6      => $ipv6,
                     },
                 },
             )
@@ -129,14 +129,14 @@ sub args {
             github_orgs     => { type => 'array',  default => [], items => { type => 'string' } },
             github_token    => { type => 'string' },
             mirror_interval => { type => 'integer', minimum => 1, maximum => 23, default => 6 },
-            secret_key      => { type => 'string', default => _seekrit() },
+            secret_key      => { type => 'string',  default => _seekrit() },
             ipv6            => { type => 'boolean', default => 1 },
         },
     );
 }
 
 sub _seekrit {
-    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 64;
+    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand(62) ] } 1 .. 64;
 }
 
 sub template_files {

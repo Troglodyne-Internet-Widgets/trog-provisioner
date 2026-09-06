@@ -79,13 +79,13 @@ used to be the wrong way round.
 =cut
 
 sub enrich {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
 
-    $opts{from} = _qualify($opts{from}, $opts{domain});
+    $opts{from} = _qualify( $opts{from}, $opts{domain} );
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';
-        $opts{$key} = [map { _with_mailto($_, \%opts) } @{ $opts{$key} }];
+        $opts{$key} = [ map { _with_mailto( $_, \%opts ) } @{ $opts{$key} } ];
     }
 
     return %opts;
@@ -93,7 +93,7 @@ sub enrich {
 
 # A local part becomes one; an address stays one.
 sub _qualify {
-    my ($value, $domain) = @_;
+    my ( $value, $domain ) = @_;
 
     return $value unless defined $value && length $value;
     return $value if Data::Validate::Email::is_email($value);
@@ -104,16 +104,16 @@ sub _qualify {
 # Copied rather than edited in place: render_file runs once per template, and
 # the recipe config it is handed belongs to the caller.
 sub _with_mailto {
-    my ($script, $opts) = @_;
+    my ( $script, $opts ) = @_;
     return $script unless ref $script eq 'HASH';
 
     my %out = %$script;
     my $to  = $out{mailto};
 
     $out{mailto} =
-        !defined $to    ? $opts->{admin_email}
-      : $to eq 'none'   ? ''
-      :                   _qualify($to, $opts->{domain});
+        !defined $to  ? $opts->{admin_email}
+      : $to eq 'none' ? ''
+      :                 _qualify( $to, $opts->{domain} );
 
     return \%out;
 }
@@ -122,11 +122,12 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # A local part, not an address: the templates write
             # MAILFROM="[% from %]@[% domain %]" and supply the domain
             # themselves.  This was declared as an email, which asked for
             # exactly the value that would render as user@host@domain.
-            from => { type => 'string' },
+            from         => { type => 'string' },
             user_scripts => {
                 type  => 'array',
                 items => {

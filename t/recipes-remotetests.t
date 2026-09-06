@@ -4,7 +4,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-
 =head1 NAME
 
 t/recipes-remotetests.t - the recipes, against a real guest (AUTHOR_TESTING only)
@@ -23,7 +22,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use YAML::XS();
 use File::Find;
 use File::Temp qw{tempdir tempfile};
@@ -33,13 +32,13 @@ use File::Copy;
 
 use Test::More;
 use Test::MockModule qw{strict};
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
 
-if (!$ENV{AUTHOR_TESTING}) {
+if ( !$ENV{AUTHOR_TESTING} ) {
     plan skip_all => 'Test must be run under AUTHOR_TESTING';
 }
 
-require_ok( "$FindBin::Bin/../bin/new_config" ) or die "could not require SUT: $@";
+require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
 # What this file is about is the recipes: that each renders, and that the
 # generator writes out what the recipe said it would.  The hypervisor is not
@@ -48,20 +47,22 @@ require_ok( "$FindBin::Bin/../bin/new_config" ) or die "could not require SUT: $
 # here instead.
 require Trog::HV;
 my $hv_mock = Test::MockModule->new('Trog::HV');
-$hv_mock->redefine(virbr_ip  => sub { '192.168.122.1' });
-$hv_mock->redefine(sshd_port => sub { 22 });
+$hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
+$hv_mock->redefine( sshd_port => sub { 22 } );
 
 # test everything available.
 my @available;
-File::Find::find( {
-    wanted => sub {
-        my $object = $_;
-        return unless (-f $object && $object =~ m/\.pm$/);
-        my ($name) = $object =~ m/(.+)\.pm$/;
-        push(@available, $name);
+File::Find::find(
+    {
+        wanted => sub {
+            my $object = $_;
+            return unless ( -f $object && $object =~ m/\.pm$/ );
+            my ($name) = $object =~ m/(.+)\.pm$/;
+            push( @available, $name );
+        },
     },
-},
-"$FindBin::Bin/../lib/Provisioner/Recipe/");
+    "$FindBin::Bin/../lib/Provisioner/Recipe/"
+);
 
 # Treat 'data' as special
 @available = grep { $_ ne 'data' } @available;
@@ -70,8 +71,8 @@ File::Find::find( {
 my $test_ip = '192.168.1.40';
 
 my $tld     = 'test.test';
-my $aliases = join(".$tld=data.$tld\n", @available).".$tld=data.$tld";
-my $ips     = join(".$tld=$test_ip\n", @available).".$tld=$test_ip";
+my $aliases = join( ".$tld=data.$tld\n", @available ) . ".$tld=data.$tld";
+my $ips     = join( ".$tld=$test_ip\n",  @available ) . ".$tld=$test_ip";
 
 # Populate stuff needed by recipes
 my $tmpdir = tempdir( CLEANUP => 1 );
@@ -82,13 +83,13 @@ mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
 mkdir "$tmpdir/data/backup.test.test";
 mkdir "$tmpdir/data/backupdestination.test.test";
-IPC::Run3::run3([qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", qw{-N}, '', qw{-q}], \undef, \undef, undef);
+IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", qw{-N}, '', qw{-q} ], \undef, \undef, undef );
 die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
-File::Copy::copy("$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa");
+File::Copy::copy( "$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa" );
 File::Touch::touch("$tmpdir/dotfiles/test");
 
 # Build the config to pass to tools
-    my $ipmap = "[global]
+my $ipmap = "[global]
 ip=192.168.1.50
 basedir=$tmpdir/domains
 transfer_user=doge
@@ -114,19 +115,20 @@ ns2=ns2.test.test";
 
 #XXX hate having to hardcode this, should really make this a toplevel thing in recipes
 my %recipes_raw = (
+
     # Both of these are full releases on purpose.  The archives they come from
     # publish one artifact per release, so a series like 7.1.0 or 10.11 is a
     # 404 the recipe cannot do anything useful with -- which is why both
     # recipes now insist on the whole version, and why these fixtures have to
     # look like the real thing.
-    imagemagick =>  { version => '7.1.0-48' },
-    mariadb => {
+    imagemagick => { version => '7.1.0-48' },
+    mariadb     => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
         version  => '10.11.6',
     },
-    tpsgi => { routers => ['app.psgi'] },
-    tcms =>  { tcms_dir => 'tcms' },
+    tpsgi       => { routers  => ['app.psgi'] },
+    tcms        => { tcms_dir => 'tcms' },
     adminconfig => {
         skel => "/$tmpdir/dotfiles",
     },
@@ -145,7 +147,7 @@ my %recipes_raw = (
     letsencrypt => {
         registrar => { type => 'route53', user => 'foo', key => 'bar' },
     },
-    pdns => { api_key => 'test-api-key' },
+    pdns   => { api_key => 'test-api-key' },
     matrix => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
@@ -186,14 +188,14 @@ my %recipes_raw = (
     },
     plexmediaserver => {
         plex_login_name => 'bogus',
-        admin_mail => 'bogus@test.test',
+        admin_mail      => 'bogus@test.test',
     },
     gogs => {
-        version => 'bogus',
+        version        => 'bogus',
         admin_password => 'bogus',
     },
     openvpnclient => {
-        server => 'bogus.test',
+        server   => 'bogus.test',
         cert_dir => '/bogus',
     },
     ldap => {
@@ -204,24 +206,27 @@ my %recipes_raw = (
         ldap_uri => 'ldap://test.test',
     },
 );
+
 # Make each so-named domain to provision do nothing but provision its own stuff
-foreach my $key ('data', @available) {
+foreach my $key ( 'data', @available ) {
+
     # XXX ALSO re-do things such that recipes can inform their dependent recipes of what their required values are gonna be
-    if (ref $recipes_raw{$key}{modules} eq 'ARRAY') {
+    if ( ref $recipes_raw{$key}{modules} eq 'ARRAY' ) {
         my $modules = delete $recipes_raw{$key}{modules};
         foreach my $module (@$modules) {
             $recipes_raw{$key}{$module} = $recipes_raw{$module} // {};
         }
     }
 }
-foreach my $key ('data', @available) {
+foreach my $key ( 'data', @available ) {
     my $data = delete $recipes_raw{$key} // {};
+
     # The domain is fully qualified; the recipe inside it is still the recipe.
     $recipes_raw{"$key.$tld"} = { $key => $data };
 }
 $recipes_raw{_base} = {
     _global => {
-        user => 'test',
+        user      => 'test',
         registrar => {
             type => "bogus",
             user => "bogus",
@@ -231,13 +236,13 @@ $recipes_raw{_base} = {
     data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };
 
-my $recipes = YAML::XS::Dump(\%recipes_raw);
+my $recipes = YAML::XS::Dump( \%recipes_raw );
 
-my ($ih, $ipmap_file)  = tempfile();
+my ( $ih, $ipmap_file ) = tempfile();
 print $ih $ipmap;
 close $ih;
 
-my ($rh, $recipe_file) = tempfile();
+my ( $rh, $recipe_file ) = tempfile();
 print $rh $recipes;
 close $rh;
 
@@ -251,9 +256,10 @@ done_testing();
 
 sub test_recipe {
     my $recipe = shift;
-    require_ok( "$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm" ) unless Provisioner::Utils::already_required("Provisioner/Recipe/$recipe.pm");
+    require_ok("$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm") unless Provisioner::Utils::already_required("Provisioner/Recipe/$recipe.pm");
 
     my %opt = (
+
         # Some recipes like ufw use this
         output_dir => $tmpdir,
     );
@@ -262,11 +268,11 @@ sub test_recipe {
     my $r = "Provisioner::Recipe::$recipe"->new(%opt);
 
     my @tests = $r->tests();
-    ok(@tests, "$recipe recipe Has tests");
+    ok( @tests, "$recipe recipe Has tests" );
 
     my %files = $r->template_files();
 
-    do_provision($recipe, $ipmap_file, $recipe_file, \@tests, %files);
+    do_provision( $recipe, $ipmap_file, $recipe_file, \@tests, %files );
 
     # TODO Actually run trog-provisioner.
 
@@ -275,7 +281,7 @@ sub test_recipe {
 }
 
 sub do_provision {
-    my ($recipe, $ipmap_file, $recipe_file, $tests, %files) = @_;
+    my ( $recipe, $ipmap_file, $recipe_file, $tests, %files ) = @_;
 
     my $provisioner_bin = '/opt/trog-provisioner/bin/provision';
 
@@ -287,19 +293,19 @@ sub do_provision {
             "$recipe.test.test",
         )
     };
-    is($result, undef, "new_config ran without issue");
+    is( $result, undef, "new_config ran without issue" );
     my $ddir = "$tmpdir/domains/$recipe.test.test";
-    ok(-f "$ddir/Makefile", "Makefile generated");
-    ok(-f "$ddir/data.tar.gz", "data.tar.gz generated");
-    ok(-f "$ddir/provision.conf", "provision.conf generated");
-    ok(-f "$ddir/users.yaml", "users.yaml generated");
-    foreach my $file (values(%files)) {
-        ok(-f "$ddir/$file", "$file generated in datadir");
+    ok( -f "$ddir/Makefile",       "Makefile generated" );
+    ok( -f "$ddir/data.tar.gz",    "data.tar.gz generated" );
+    ok( -f "$ddir/provision.conf", "provision.conf generated" );
+    ok( -f "$ddir/users.yaml",     "users.yaml generated" );
+    foreach my $file ( values(%files) ) {
+        ok( -f "$ddir/$file", "$file generated in datadir" );
     }
 
     foreach my $test (@$tests) {
         my $tname = $test;
         $tname =~ s/tt$/t/;
-        ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname") or die "nothing generated in $ddir";
+        ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname" ) or die "nothing generated in $ddir";
     }
 }

@@ -218,7 +218,7 @@ This is configured by setting the sub value.
 =cut
 
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
 
     my %limits = $self->rate_limits(%opts);
     return () unless %limits;
@@ -268,7 +268,7 @@ sub _reconcile_into {
         # Whatever the merge left is already one of the two, so a field only one
         # of them named needs nothing done to it.
         next if !defined $theirs || !defined $mine;
-        next if ref $theirs || ref $mine;
+        next if ref $theirs      || ref $mine;
         next if $theirs eq $mine;
 
         $merged->{$field} = $self->resolve_conflict( [ @$path, $field ], $mine, $theirs );
@@ -344,7 +344,7 @@ and that is what leaving it unset gives you.
 =cut
 
 sub validate {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     my %args = $self->args();
 
     # On a copy, all the way down.  %opts is a shallow copy, so everything
@@ -354,7 +354,7 @@ sub validate {
     # like a different one on the next render.
     %opts = %{ clone( \%opts ) };
 
-    forget_undefs(\%opts, \%args);
+    forget_undefs( \%opts, \%args );
 
     my $classname = Scalar::Util::blessed($self);
 
@@ -368,9 +368,9 @@ sub validate {
     # 1` into "Expected boolean - got number", the default failing the check it
     # was written to satisfy.
     my $validator = JSON::Validator::Schema::Troglodyne->new;
-    $validator->coerce({ %{ $validator->coerce }, defaults => 1 });
-    my @errors = $validator->validate(\%opts, \%args);
-    die "Had errors validating your recipe:\n".join("\n", map { "$classname$_" } @errors) if @errors;
+    $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
+    my @errors = $validator->validate( \%opts, \%args );
+    die "Had errors validating your recipe:\n" . join( "\n", map { "$classname$_" } @errors ) if @errors;
 
     $opts{user} //= $opts{admin_user};
 
@@ -399,20 +399,20 @@ something a recipe cares about.
 =cut
 
 sub forget_undefs {
-    my ($opts, $schema) = @_;
+    my ( $opts, $schema ) = @_;
     return $opts unless ref $opts eq 'HASH' && ref $schema eq 'HASH';
 
     my $props = $schema->{properties};
     return $opts unless ref $props eq 'HASH';
 
-    foreach my $key (keys %$props) {
+    foreach my $key ( keys %$props ) {
         my $prop = $props->{$key};
         next unless ref $prop eq 'HASH';
 
         delete $opts->{$key}
           if exists $opts->{$key} && !defined $opts->{$key} && exists $prop->{default};
 
-        forget_undefs($opts->{$key}, $prop) if ref $opts->{$key} eq 'HASH';
+        forget_undefs( $opts->{$key}, $prop ) if ref $opts->{$key} eq 'HASH';
     }
 
     return $opts;
@@ -425,7 +425,7 @@ Additionally setup args based on other args passed.
 =cut
 
 sub enrich {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
 
     return %opts;
 }
@@ -526,6 +526,7 @@ sub makefile_vars {
 }
 
 # Global parameter validation
+
 =head3 @tests = $recipe->tests()
 
 Templates under C<templates/tests/> to render and run on the guest once
@@ -593,7 +594,6 @@ sub has_template {
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return !!any { -f "$_/$self->{template}" } @{ $self->{template_dirs} };
 }
-
 
 =head3 $output = $recipe->render_global(%template_vars)
 

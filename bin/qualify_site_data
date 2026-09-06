@@ -67,37 +67,40 @@ it is assumed to be qualified already and is left alone.
 sub main {
     my @args = @_;
 
-    my ($tld, $ipmap, $recipes, $dryrun);
-    GetOptionsFromArray(\@args,
+    my ( $tld, $ipmap, $recipes, $dryrun );
+    GetOptionsFromArray(
+        \@args,
         'tld=s'     => \$tld,
         'ipmap=s'   => \$ipmap,
         'recipes=s' => \$recipes,
         'dryrun'    => \$dryrun,
-    ) or pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__);
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'Pass --tld, the parent domain that used to be appended')
-      unless $tld;
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Pass --tld, the parent domain that used to be appended'
+    ) unless $tld;
 
     $ipmap   //= Trog::Config->path('ipmap.cfg');
     $recipes //= 'recipes.d';
 
-    qualify_ipmap($ipmap, $tld, $dryrun);
-    qualify_recipes($recipes, $tld, $dryrun);
+    qualify_ipmap( $ipmap, $tld, $dryrun );
+    qualify_recipes( $recipes, $tld, $dryrun );
 
     print $dryrun ? "\nDry run; nothing was written.\n" : "\nDone.\n";
     return 0;
 }
 
 sub qualify_ipmap {
-    my ($path, $tld, $dryrun) = @_;
+    my ( $path, $tld, $dryrun ) = @_;
+
     # Reading it is the test.  A -f first would answer for a moment that has
     # passed by the time we read, and would not tell us whether we may.
     my $text = eval { File::Slurper::read_text($path) };
     return 0 unless defined $text;
 
-    my @lines = split("\n", $text, -1);
-    my ($block, @out, $changed) = ('');
+    my @lines = split( "\n", $text, -1 );
+    my ( $block, @out, $changed ) = ('');
 
     # A short name and a qualified one can both be in there meaning the same
     # machine -- `mysql` and `mysql.troglodyne.net` -- with different addresses.
@@ -110,23 +113,27 @@ sub qualify_ipmap {
         $current = $1 if $line =~ m/\A\s*\[(\w+)\]/;
         next unless $current eq 'ips';
         next unless $line =~ m/\A\s*([^=\s]+)\s*=\s*(.*?)\s*\z/;
-        my ($key, $value) = ($1, $2);
-        push @{ $claims{ index($key, q{.}) >= 0 ? $key : "$key.$tld" } }, "$key = $value";
+        my ( $key, $value ) = ( $1, $2 );
+        push @{ $claims{ index( $key, q{.} ) >= 0 ? $key : "$key.$tld" } }, "$key = $value";
     }
 
     my @collisions = grep { @{ $claims{$_} } > 1 } sort keys %claims;
-    die "Qualifying $path would collapse these into one entry each:\n"
-      . join('', map { "  $_\n" . join('', map { "      $_\n" } @{ $claims{$_} }) } @collisions)
+    die "Qualifying $path would collapse these into one entry each:\n" . join(
+        '',
+        map {
+            "  $_\n" . join( '', map { "      $_\n" } @{ $claims{$_} } )
+        } @collisions
+      )
       . "\nOne address per domain.  Delete whichever is not the live one and run this again.\n"
       if @collisions;
 
     foreach my $line (@lines) {
-        if ($line =~ m/\A\s*\[(\w+)\]/) {
+        if ( $line =~ m/\A\s*\[(\w+)\]/ ) {
             $block = $1;
 
             # addons was how a domain said it was not under the tld.  Every
             # domain says that for itself now.
-            if ($block eq 'addons') {
+            if ( $block eq 'addons' ) {
                 print "Dropping the [addons] block\n";
                 $changed = 1;
             }
@@ -135,21 +142,21 @@ sub qualify_ipmap {
         }
         next if $block eq 'addons';
 
-        if ($block eq 'global' && $line =~ m/\A\s*tld\s*=/) {
+        if ( $block eq 'global' && $line =~ m/\A\s*tld\s*=/ ) {
             print "Dropping tld= from [global]\n";
             $changed = 1;
             next;
         }
 
-        if (($block eq 'ips' || $block eq 'aliases') && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(.*)\z/) {
-            my ($lead, $key, $eq, $value) = ($1, $2, $3, $4);
-            my $new_key = index($key, q{.}) >= 0 ? $key : "$key.$tld";
+        if ( ( $block eq 'ips' || $block eq 'aliases' ) && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(.*)\z/ ) {
+            my ( $lead, $key, $eq, $value ) = ( $1, $2, $3, $4 );
+            my $new_key = index( $key, q{.} ) >= 0 ? $key : "$key.$tld";
 
             # Alias values are domains too.
-            my @values = map { index($_, q{.}) >= 0 ? $_ : "$_.$tld" } split(/\s*,\s*/, $value);
-            my $new_value = join(', ', @values);
+            my @values    = map { index( $_, q{.} ) >= 0 ? $_ : "$_.$tld" } split( /\s*,\s*/, $value );
+            my $new_value = join( ', ', @values );
 
-            if ("$new_key$new_value" ne "$key$value") {
+            if ( "$new_key$new_value" ne "$key$value" ) {
                 print "  $key -> $new_key\n" if $new_key ne $key;
                 $changed = 1;
             }
@@ -163,36 +170,36 @@ sub qualify_ipmap {
     return print "$path is already fully qualified\n" unless $changed;
     return 1 if $dryrun;
 
-    File::Copy::copy($path, "$path.bak") or die "Could not back up $path: $!\n";
-    File::Slurper::Temp::write_text($path, join("\n", @out));
+    File::Copy::copy( $path, "$path.bak" ) or die "Could not back up $path: $!\n";
+    File::Slurper::Temp::write_text( $path, join( "\n", @out ) );
     print "Rewrote $path (old copy at $path.bak)\n";
     return 1;
 }
 
 sub qualify_recipes {
-    my ($dir, $tld, $dryrun) = @_;
+    my ( $dir, $tld, $dryrun ) = @_;
     return 0 unless -d $dir;
 
-    foreach my $file (sort glob("$dir/*.yaml")) {
+    foreach my $file ( sort glob("$dir/*.yaml") ) {
         my $text = File::Slurper::read_text($file);
 
         # The top-level key is the domain; everything under it is indented.
         my $changed = 0;
-        my @out = map {
+        my @out     = map {
             my $line = $_;
-            if ($line =~ m/\A([A-Za-z0-9_-]+):\s*\z/ && $1 ne '_base' && $1 ne '_shared') {
+            if ( $line =~ m/\A([A-Za-z0-9_-]+):\s*\z/ && $1 ne '_base' && $1 ne '_shared' ) {
                 print "  $file: $1 -> $1.$tld\n";
                 $changed = 1;
                 "$1.$tld:";
             }
             else { $line }
-        } split("\n", $text, -1);
+        } split( "\n", $text, -1 );
 
         next unless $changed;
         next if $dryrun;
 
-        File::Copy::copy($file, "$file.bak") or die "Could not back up $file: $!\n";
-        File::Slurper::Temp::write_text($file, join("\n", @out));
+        File::Copy::copy( $file, "$file.bak" ) or die "Could not back up $file: $!\n";
+        File::Slurper::Temp::write_text( $file, join( "\n", @out ) );
         print "Rewrote $file (old copy at $file.bak)\n";
     }
     return 1;

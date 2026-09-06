@@ -60,7 +60,7 @@ sub main {
     # Just give us everything if nothing is passed
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
 
-    my $c    = Config::Simple->new($cfile);
+    my $c = Config::Simple->new($cfile);
     die "$Config::Simple::errstr\n" unless $c;
     my $ips  = $c->param( -block => 'ips' )     // {};
     my $pool = $c->param( -block => 'ip_pool' ) // {};

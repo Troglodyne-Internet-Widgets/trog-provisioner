@@ -29,6 +29,7 @@ It is your responsibility to make sure the dump file has CREATE DATABSE statemen
 sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
+
         # deps is the list cloud-init installs at first boot, so it can only
         # name Ubuntu packages: the PGDG repository is not added until the
         # global fragment runs, which installs the versioned server-dev package
@@ -43,7 +44,7 @@ sub args {
         type       => 'object',
         properties => {
             dumps => {
-                type => 'array',
+                type  => 'array',
                 items => { type => "string" },
             },
         },

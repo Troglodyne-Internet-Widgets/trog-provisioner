@@ -64,14 +64,15 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            registrar              => {
-                type => 'object',
+            registrar => {
+                type       => 'object',
                 properties => {
                     type => { type => "string" },
                     user => { type => "string" },
                     key  => { type => "string" },
                 },
             },
+
             #TODO If this isn't true, registrar is required.
             # Not sure how to encode that in openapi spec here.
             prefer_local_dns       => { type => 'boolean', default => 0 },
@@ -90,8 +91,7 @@ sub enrich {
         die "Must have at least one dns provider recipe used" if !any {
             my $mod = $_;
             grep { $mod eq $_ } qw{pdns}
-        }
-        @{ $params{modules} };
+        } @{ $params{modules} };
         $params{registrar} = {
             type => 'powerdns',
             user => '',

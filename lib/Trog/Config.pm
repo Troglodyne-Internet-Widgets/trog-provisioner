@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+
 =head1 NAME
 
 Trog::Config - where this installation keeps its configuration
@@ -48,7 +49,7 @@ our $DIR = $ENV{TROG_PROVISIONER_CONFIG} // '/etc/trog-provisioner';
 sub dir { return $ENV{TROG_PROVISIONER_CONFIG} // $DIR }
 
 sub path {
-    my ($class, $name) = @_;
+    my ( $class, $name ) = @_;
     return $class->dir . "/$name";
 }
 

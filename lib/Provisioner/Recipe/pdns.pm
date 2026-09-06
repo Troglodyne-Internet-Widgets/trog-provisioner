@@ -47,6 +47,7 @@ sub deps {
 }
 
 sub rate_limits {
+
     # A resolver asks over UDP and asks often; a recursor in front of this one
     # asks on behalf of everybody behind it.  Set high enough that only a
     # reflection flood reaches it.
@@ -60,6 +61,7 @@ sub args {
         properties => {
             api_key       => { type => 'string' },
             extra_records => { type => 'string' },
+
             # Which repo.powerdns.com train to install from.  This asked for
             # auth-master, which is the development branch: guests came up with
             # 5.1.0~alpha1+master.380 on them.  A release train, so an upgrade
@@ -71,8 +73,11 @@ sub args {
             # at all, with "Unable to convert presentation address".  This
             # recipe used auth-master, which was 5.1.0~alpha and had the
             # feature; auth-51 is the released form of the same thing.
-            repo_branch   => { type => 'string', default => 'auth-51',
-                               pattern => '^auth-[0-9]+$' },
+            repo_branch => {
+                type    => 'string', default => 'auth-51',
+                pattern => '^auth-[0-9]+$'
+            },
+
             # Zones to forward to another resolver, as zone => address.
             forward_zones => { type => 'object', default => {} },
         },
@@ -84,7 +89,7 @@ sub enrich {
 
     my $extras = $opts{extra_records} // '';
     if ($extras) {
-        my $is_abs_path = index($extras, '/') == 0;
+        my $is_abs_path = index( $extras, '/' ) == 0;
         $extras = "$opts{data_source}/$opts{domain}/$extras" unless $is_abs_path;
         $opts{extra_records} = File::Slurper::read_text($extras);
     }

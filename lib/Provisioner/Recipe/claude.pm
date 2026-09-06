@@ -10,7 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-
 =head1 Provisioner::Recipe::claude
 
 =head2 SYNOPSIS
@@ -43,7 +42,7 @@ sub template_files {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        "$install_dir/$domain/.claude.json"       => '.claude.json',
+        "$install_dir/$domain/.claude.json" => '.claude.json',
     );
 }
 

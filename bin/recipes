@@ -14,7 +14,7 @@ use FindBin::libs;
 
 use Cpanel::JSON::XS();
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 
 use Provisioner::Cookbook();
 
@@ -61,37 +61,40 @@ recipe.
 sub main {
     my @args = @_;
 
-    my ($json, $scaffold, $all, $help);
-    GetOptionsFromArray(\@args,
+    my ( $json, $scaffold, $all, $help );
+    GetOptionsFromArray(
+        \@args,
         'json'     => \$json,
         'scaffold' => \$scaffold,
         'all'      => \$all,
         'help'     => \$help,
     );
 
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $encoder = Cpanel::JSON::XS->new->pretty->canonical;
 
     my $name = shift @args;
-    return list($encoder, $json) unless defined $name;
+    return list( $encoder, $json ) unless defined $name;
 
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'One recipe at a time') if @args;
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'One recipe at a time'
+    ) if @args;
 
     # Dies naming the recipe and pointing at the listing, which is the whole
     # reason to go through the Cookbook rather than requiring it here.
-    my $spec = describe($name, $scaffold, $all);
+    my $spec = describe( $name, $scaffold, $all );
     print $encoder->encode($spec);
     return 0;
 }
 
 # What to print for one recipe: its schema, or the config we would write for it.
 sub describe {
-    my ($name, $scaffold, $all) = @_;
+    my ( $name, $scaffold, $all ) = @_;
 
     if ($scaffold) {
-        my ($config, @todo) = Provisioner::Cookbook->scaffold($name, all => $all);
+        my ( $config, @todo ) = Provisioner::Cookbook->scaffold( $name, all => $all );
         return {
             recipe        => $name,
             configuration => { $name => $config },
@@ -105,14 +108,12 @@ sub describe {
 }
 
 sub list {
-    my ($encoder, $json) = @_;
+    my ( $encoder, $json ) = @_;
 
     my @names = Provisioner::Cookbook->names();
 
     if ($json) {
-        print $encoder->encode([
-            map { { name => $_, abstract => Provisioner::Cookbook->abstract($_) } } @names
-        ]);
+        print $encoder->encode( [ map { { name => $_, abstract => Provisioner::Cookbook->abstract($_) } } @names ] );
         return 0;
     }
 

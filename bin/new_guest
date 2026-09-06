@@ -17,8 +17,8 @@ use File::Path qw{make_path};
 use File::Slurper();
 use File::Slurper::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
-use UUID::Tiny qw{create_uuid_as_string UUID_V4};
+use Pod::Usage   qw{pod2usage};
+use UUID::Tiny   qw{create_uuid_as_string UUID_V4};
 use YAML::XS();
 
 use Provisioner::Cookbook();
@@ -100,8 +100,9 @@ our $DEFAULT_TLD = 'test';
 sub main {
     my @args = @_;
 
-    my ($hostname, $memory, $cpus, $size, $user, $all, $output, $stdout, $force, $help);
-    GetOptionsFromArray(\@args,
+    my ( $hostname, $memory, $cpus, $size, $user, $all, $output, $stdout, $force, $help );
+    GetOptionsFromArray(
+        \@args,
         'hostname=s' => \$hostname,
         'memory=i'   => \$memory,
         'cpus=i'     => \$cpus,
@@ -114,56 +115,59 @@ sub main {
         'help'       => \$help,
     );
 
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'Name at least one recipe') unless @args;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => 'Name at least one recipe'
+    ) unless @args;
 
     my @recipes = unique(@args);
 
     # Every one of them, before writing anything: finding out about the second
     # typo after the file is on disk is worse than finding out about both now.
     my @unknown = grep { !Provisioner::Cookbook->has($_) } @recipes;
-    die "No recipe named " . join(', ', map { "'$_'" } @unknown) . ".\n"
-      . "Try `bin/recipes` for the ones there are.\n" if @unknown;
+    die "No recipe named " . join( ', ', map { "'$_'" } @unknown ) . ".\n" . "Try `bin/recipes` for the ones there are.\n" if @unknown;
 
     $hostname //= default_hostname();
-    die "'$hostname' is not a fully qualified domain name.\n"
-      . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
+    die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
       unless $hostname =~ m/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\z/i;
 
-    my ($config, @todo) = build($hostname, \@recipes, {
-        all    => $all,
-        memory => $memory,
-        cpus   => $cpus,
-        size   => $size,
-        user   => $user,
-        base   => base_config(),
-    });
+    my ( $config, @todo ) = build(
+        $hostname,
+        \@recipes,
+        {
+            all    => $all,
+            memory => $memory,
+            cpus   => $cpus,
+            size   => $size,
+            user   => $user,
+            base   => base_config(),
+        }
+    );
 
     my $yaml = YAML::XS::Dump($config);
 
     if ($stdout) {
         print $yaml;
-        report($hostname, undef, \@recipes, \@todo);
+        report( $hostname, undef, \@recipes, \@todo );
         return 0;
     }
 
     $output //= Trog::Config->path("recipes.d/$hostname.yaml");
-    if (!$force && readable($output)) {
-        die "$output is already there.\n"
-          . "Pick another --hostname, or pass --force if you meant to replace it.\n";
+    if ( !$force && readable($output) ) {
+        die "$output is already there.\n" . "Pick another --hostname, or pass --force if you meant to replace it.\n";
     }
 
-    make_path(File::Basename::dirname($output));
-    File::Slurper::Temp::write_text($output, $yaml);
+    make_path( File::Basename::dirname($output) );
+    File::Slurper::Temp::write_text( $output, $yaml );
 
-    report($hostname, $output, \@recipes, \@todo);
+    report( $hostname, $output, \@recipes, \@todo );
     return 0;
 }
 
 # A name nobody else has, under the TLD reserved for exactly this (RFC 2606).
 sub default_hostname {
-    return lc(create_uuid_as_string(UUID_V4)) . ".$DEFAULT_TLD";
+    return lc( create_uuid_as_string(UUID_V4) ) . ".$DEFAULT_TLD";
 }
 
 sub unique {
@@ -174,7 +178,7 @@ sub unique {
 
 sub readable {
     my ($path) = @_;
-    open(my $fh, '<', $path) or return 0;
+    open( my $fh, '<', $path ) or return 0;
     close $fh;
     return 1;
 }
@@ -197,7 +201,7 @@ sub base_config {
 # The domain block: what the hypervisor is being asked for, then one entry per
 # recipe.
 sub build {
-    my ($hostname, $recipes, $opts) = @_;
+    my ( $hostname, $recipes, $opts ) = @_;
 
     my %global = (
         memory => $opts->{memory} // 8092,
@@ -214,10 +218,11 @@ sub build {
     my @wanted = @$recipes;
     push @wanted, 'data' unless grep { $_ eq 'data' } @wanted or exists $base->{data};
 
-    my %domain = (_global => \%global);
+    my %domain = ( _global => \%global );
     my @todo;
     foreach my $recipe (@wanted) {
-        my ($config, @needed) = Provisioner::Cookbook->scaffold($recipe,
+        my ( $config, @needed ) = Provisioner::Cookbook->scaffold(
+            $recipe,
             all      => $opts->{all},
             provided => $base->{$recipe},
         );
@@ -225,11 +230,11 @@ sub build {
         push @todo, @needed;
     }
 
-    return ({ $hostname => \%domain }, @todo);
+    return ( { $hostname => \%domain }, @todo );
 }
 
 sub report {
-    my ($hostname, $output, $recipes, $todo) = @_;
+    my ( $hostname, $output, $recipes, $todo ) = @_;
 
     # The document goes to stdout and this goes to stderr, so that --stdout can
     # be redirected into a file without any of this ending up in it.  Flush
@@ -238,14 +243,15 @@ sub report {
 
     print {*STDERR} "\n";
     print {*STDERR} "Wrote $output\n" if defined $output;
-    print {*STDERR} sprintf("%s: %d recipe%s (%s)\n",
-        $hostname, scalar @$recipes, (@$recipes == 1 ? '' : 's'), join(', ', @$recipes));
+    print {*STDERR} sprintf(
+        "%s: %d recipe%s (%s)\n",
+        $hostname, scalar @$recipes, ( @$recipes == 1 ? '' : 's' ), join( ', ', @$recipes )
+    );
 
     if (@$todo) {
         print {*STDERR} "\nFill these in before provisioning:\n";
         print {*STDERR} "  $_\n" for @$todo;
-        print {*STDERR} "\nA CHANGEME left in place fails validation naming the key,\n"
-          . "so nothing gets provisioned half-configured.\n";
+        print {*STDERR} "\nA CHANGEME left in place fails validation naming the key,\n" . "so nothing gets provisioned half-configured.\n";
     }
     else {
         print {*STDERR} "\nNothing to fill in.\n";

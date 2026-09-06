@@ -45,20 +45,20 @@ If your repos have binary deps, add them to the list of deps you can install in 
 
 sub args {
     return (
-        type => 'object',
-        required => [qw{repos_from basedir}],
+        type       => 'object',
+        required   => [qw{repos_from basedir}],
         properties => {
             basedir    => { type => "string" },
             repos_from => {
-                type => "array",
+                type  => "array",
                 items => {
-                    type => "object",
-                    required => [qw{api_url token repos_for}],
+                    type       => "object",
+                    required   => [qw{api_url token repos_for}],
                     properties => {
                         api_url   => { type => "string" },
                         token     => { type => "string" },
                         repos_for => {
-                            type => "array",
+                            type  => "array",
                             items => { type => "string" },
                         },
                     },

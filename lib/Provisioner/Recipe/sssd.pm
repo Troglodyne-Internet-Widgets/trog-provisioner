@@ -42,8 +42,8 @@ Set C<ldap_uri> to the LDAPS URI of your LDAP server (from the C<ldap> recipe).
 
 sub args {
     return (
-        type     => 'object',
-        required => [qw{ldap_uri base_dn}],
+        type       => 'object',
+        required   => [qw{ldap_uri base_dn}],
         properties => {
             ldap_uri      => { type => 'string' },
             base_dn       => { type => 'string' },

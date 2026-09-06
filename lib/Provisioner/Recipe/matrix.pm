@@ -99,18 +99,18 @@ Returns remote file mappings for backup/restore.
 
 # XXX this probably does not work in isolation!
 sub required_recipes {
-    my ($self, %opts) = @_;
+    my ( $self, %opts ) = @_;
     my $ipv6 = $opts{ipv6} // 1;
     return (
-        nginxproxy  => sub {
+        nginxproxy => sub {
             (
                 vhosts => {
                     80  => { ssl_redirect => 1, ipv6 => 1 },
                     443 => {
-                        ssl => 1,
-                        proxy_uri => 'http://127.0.0.1:8008',
+                        ssl            => 1,
+                        proxy_uri      => 'http://127.0.0.1:8008',
                         nocache_prefix => '^~ /(_matrix|_synapse/client)/',
-                        ipv6 => $ipv6,
+                        ipv6           => $ipv6,
                     },
                 },
             )
@@ -154,47 +154,47 @@ sub args {
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
-            server_name               => { type => 'string' },
+            user        => { type => 'string' },
+            server_name => { type => 'string' },
+
             # Listed on the guest's index page.  The template used it before
             # anything declared it, and its loop said chan while its body said
             # channel, so every suggestion came out as #@domain.
-            channels                  => { type => 'array', items => { type => 'string' }, default => [] },
-            admin_user                => { type => 'string', default => 'admin' },
-            admin_password            => { type => 'string' },
-            smtp_host                 => { type => 'string' },
-            smtp_port                 => { type => 'integer', default => 465, minimum => 0 },
-            smtp_user                 => { type => 'string' },
-            smtp_pass                 => { type => 'string' },
-            smtp_domain               => { type => 'string' },
+            channels                   => { type => 'array',  items   => { type => 'string' }, default => [] },
+            admin_user                 => { type => 'string', default => 'admin' },
+            admin_password             => { type => 'string' },
+            smtp_host                  => { type => 'string' },
+            smtp_port                  => { type => 'integer', default => 465, minimum => 0 },
+            smtp_user                  => { type => 'string' },
+            smtp_pass                  => { type => 'string' },
+            smtp_domain                => { type => 'string' },
             require_transport_security => { type => 'boolean', default => 1 },
-            registration_shared_secret => { type => 'string', default => _seekrit() },
-            ipv6                      => { type => 'boolean', default => 1 },
-            redis_host                => { type => 'string', default => '127.0.0.1' },
-            redis_port                => { type => 'integer', minimum => 1024, default => 6379 },
+            registration_shared_secret => { type => 'string',  default => _seekrit() },
+            ipv6                       => { type => 'boolean', default => 1 },
+            redis_host                 => { type => 'string',  default => '127.0.0.1' },
+            redis_port                 => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
 }
 
 sub _seekrit {
-    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand( 62 ) ] } 1 .. 32;
+    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand(62) ] } 1 .. 32;
 }
-
-
 
 sub template_files {
     my ($self) = @_;
 
     return (
         'matrix.register_admin.sh.tt' => 'matrix_register_admin.sh',
-        'matrix.homeserver.yaml.tt' => 'homeserver.yaml',
-        'matrix.log.yaml.tt'        => 'log.yaml',
-        'matrix.admin.nginx.tt'     => 'matrix-admin.nginx.conf',
-        'matrix.synapse.service.tt' => 'matrix-synapse.service',
-        'matrix.index.html.tt'      => 'matrix.index.html',
+        'matrix.homeserver.yaml.tt'   => 'homeserver.yaml',
+        'matrix.log.yaml.tt'          => 'log.yaml',
+        'matrix.admin.nginx.tt'       => 'matrix-admin.nginx.conf',
+        'matrix.synapse.service.tt'   => 'matrix-synapse.service',
+        'matrix.index.html.tt'        => 'matrix.index.html',
     );
 }
 

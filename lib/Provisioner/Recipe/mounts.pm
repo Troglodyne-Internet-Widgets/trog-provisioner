@@ -55,26 +55,27 @@ sub args {
     return (
         type       => 'object',
         properties => {
+
             # The account that owns this domain's files.  Every template using
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
-            user     => { type => 'string' },
+            user  => { type => 'string' },
             disks => {
                 type  => 'array',
                 items => {
-                    type => 'object',
+                    type       => 'object',
                     properties => {
                         type       => { type => 'string' },
                         options    => { type => 'string' },
                         mountpoint => { type => 'string' },
                         device     => { type => 'string' },
                     },
-                 },
+                },
             },
             fuse => {
                 type  => 'array',
                 items => {
-                    type => 'object',
+                    type       => 'object',
                     properties => {
                         type       => { type => 'string' },
                         options    => { type => 'string' },
@@ -99,9 +100,10 @@ sub enrich {
             $disk->{pool} = 'dir' if -d $disk->{device};
             $disk->{pool} //= 'tf_disks';
 
-            if (-d $disk->{device}) {
-                $disk->{type} = 'virtiofs';
+            if ( -d $disk->{device} ) {
+                $disk->{type}      = 'virtiofs';
                 $disk->{partition} = 'NONE';
+
                 #XXX It is more important to boot than have this fail
                 $disk->{options} = 'default,nofail';
             }

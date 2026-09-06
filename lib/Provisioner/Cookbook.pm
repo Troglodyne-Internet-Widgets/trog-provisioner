@@ -64,7 +64,7 @@ sub names {
     my ($class) = @_;
 
     my $dir = $class->recipe_dir;
-    opendir(my $dh, $dir) or die "Could not read $dir: $!\n";
+    opendir( my $dh, $dir ) or die "Could not read $dir: $!\n";
     my @names = sort map { m/\A(\w+)\.pm\z/ ? $1 : () } readdir $dh;
     closedir $dh;
 
@@ -78,10 +78,10 @@ Whether there is a recipe by that name.
 =cut
 
 sub has {
-    my ($class, $name) = @_;
+    my ( $class, $name ) = @_;
     return 0 unless defined $name && $name =~ m/\A\w+\z/;
 
-    open(my $fh, '<', $class->recipe_dir . "/$name.pm") or return 0;
+    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return 0;
     close $fh;
     return 1;
 }
@@ -95,10 +95,9 @@ be calling it.
 =cut
 
 sub load {
-    my ($class, $name) = @_;
+    my ( $class, $name ) = @_;
 
-    die "No recipe named '" . ($name // '') . "'.\n"
-      . "Try `bin/recipes` for the ones there are.\n"
+    die "No recipe named '" . ( $name // '' ) . "'.\n" . "Try `bin/recipes` for the ones there are.\n"
       unless $class->has($name);
 
     my $module = "Provisioner::Recipe::$name";
@@ -119,10 +118,10 @@ and 42 opens instead of 42 module loads.
 =cut
 
 sub abstract {
-    my ($class, $name) = @_;
+    my ( $class, $name ) = @_;
 
-    open(my $fh, '<', $class->recipe_dir . "/$name.pm") or return undef;
-    while (my $line = <$fh>) {
+    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return undef;
+    while ( my $line = <$fh> ) {
         next unless $line =~ m/\A\s*#\s*ABSTRACT:\s*(.+?)\s*\z/;
         close $fh;
         return $1;
@@ -150,14 +149,14 @@ makes a network request and takes as long as that does.
 =cut
 
 sub spec {
-    my ($class, $name, %opts) = @_;
+    my ( $class, $name, %opts ) = @_;
 
     my $module = $class->load($name);
 
     state $scratch;
-    $opts{output_dir} //= ($scratch //= File::Temp::tempdir(CLEANUP => 1));
+    $opts{output_dir} //= ( $scratch //= File::Temp::tempdir( CLEANUP => 1 ) );
 
-    return bless(\%opts, $module)->args();
+    return bless( \%opts, $module )->args();
 }
 
 =head2 properties($spec)
@@ -177,7 +176,7 @@ have the misspelling show up as an empty schema.
 =cut
 
 sub properties {
-    my ($class, $spec) = @_;
+    my ( $class, $spec ) = @_;
     return {} unless ref $spec eq 'HASH';
     return ref $spec->{properties} eq 'HASH' ? $spec->{properties} : {};
 }
@@ -220,25 +219,25 @@ already spell it: a bare C<nosnap:> with nothing under it.
 =cut
 
 sub scaffold {
-    my ($class, $name, %opts) = @_;
+    my ( $class, $name, %opts ) = @_;
 
-    my %spec = $class->spec($name, output_dir => $opts{output_dir});
-    my ($config, @todo) = $class->_scaffold_object(\%spec, $name, \%opts);
+    my %spec = $class->spec( $name, output_dir => $opts{output_dir} );
+    my ( $config, @todo ) = $class->_scaffold_object( \%spec, $name, \%opts );
 
-    return (undef, @todo) unless ref $config eq 'HASH' && %$config;
-    return ($config, @todo);
+    return ( undef,   @todo ) unless ref $config eq 'HASH' && %$config;
+    return ( $config, @todo );
 }
 
 sub _scaffold_object {
-    my ($class, $spec, $path, $opts) = @_;
+    my ( $class, $spec, $path, $opts ) = @_;
 
     my $props    = $class->properties($spec);
     my %required = map { $_ => 1 } @{ $spec->{required} // [] };
 
     my $provided = ref $opts->{provided} eq 'HASH' ? $opts->{provided} : {};
 
-    my (%out, @todo);
-    foreach my $key (sort keys %$props) {
+    my ( %out, @todo );
+    foreach my $key ( sort keys %$props ) {
         my $prop = $props->{$key};
         next unless ref $prop eq 'HASH';
 
@@ -247,40 +246,43 @@ sub _scaffold_object {
         my $wanted = $required{$key} || $opts->{all};
         next unless $wanted;
 
-        my ($value, @sub) = $class->_scaffold_value($prop, "$path.$key",
-            { %$opts, provided => $provided->{$key} });
+        my ( $value, @sub ) = $class->_scaffold_value(
+            $prop, "$path.$key",
+            { %$opts, provided => $provided->{$key} }
+        );
         next unless defined $value;
 
         $out{$key} = $value;
         push @todo, @sub;
     }
 
-    return (\%out, @todo);
+    return ( \%out, @todo );
 }
 
 sub _scaffold_value {
-    my ($class, $prop, $path, $opts) = @_;
+    my ( $class, $prop, $path, $opts ) = @_;
 
-    return (clone($prop->{default}), ()) if exists $prop->{default};
+    return ( clone( $prop->{default} ), () ) if exists $prop->{default};
 
     my $type = $prop->{type} // '';
 
-    if ($type eq 'object') {
+    if ( $type eq 'object' ) {
+
         # An object with a shape gets that shape; one that is just a bag of
         # whatever (additionalProperties) has nothing to scaffold, so it is
         # left out rather than guessed at.
-        my ($sub, @todo) = $class->_scaffold_object($prop, $path, $opts);
-        return (undef, ()) unless %$sub;
-        return ($sub, @todo);
+        my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
+        return ( undef, () ) unless %$sub;
+        return ( $sub,  @todo );
     }
 
-    if ($type eq 'array') {
-        my ($item, @todo) = $class->_scaffold_value($prop->{items} // {}, "$path\[0]", $opts);
-        return ([], ()) unless defined $item;
-        return ([$item], @todo);
+    if ( $type eq 'array' ) {
+        my ( $item, @todo ) = $class->_scaffold_value( $prop->{items} // {}, "$path\[0]", $opts );
+        return ( [],      () ) unless defined $item;
+        return ( [$item], @todo );
     }
 
-    return ($class->PLACEHOLDER, $path);
+    return ( $class->PLACEHOLDER, $path );
 }
 
 =head2 placeholders_in($config, $path)
@@ -295,17 +297,17 @@ they look with.
 =cut
 
 sub placeholders_in {
-    my ($class, $config, $path) = @_;
+    my ( $class, $config, $path ) = @_;
     $path //= '';
 
     my $ref = ref $config;
 
-    if ($ref eq 'HASH') {
-        return map { $class->placeholders_in($config->{$_}, $path eq '' ? $_ : "$path.$_") }
-            sort keys %$config;
+    if ( $ref eq 'HASH' ) {
+        return map { $class->placeholders_in( $config->{$_}, $path eq '' ? $_ : "$path.$_" ) }
+          sort keys %$config;
     }
-    if ($ref eq 'ARRAY') {
-        return map { $class->placeholders_in($config->[$_], "$path\[$_]") } 0 .. $#$config;
+    if ( $ref eq 'ARRAY' ) {
+        return map { $class->placeholders_in( $config->[$_], "$path\[$_]" ) } 0 .. $#$config;
     }
 
     return ($path) if defined $config && !$ref && $config eq $class->PLACEHOLDER;

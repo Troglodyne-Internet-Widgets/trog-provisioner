@@ -35,8 +35,8 @@ Optionally add in packages for the administrator to use on the provisioned host.
 
 sub args {
     return (
-        type     => 'object',
-        required => [qw{skel}],
+        type       => 'object',
+        required   => [qw{skel}],
         properties => {
             skel => { type => 'string' },
             pkgs => {

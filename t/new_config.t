@@ -18,11 +18,11 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(CLEANUP => 1) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Test::More;
 use Test::MockModule qw{strict};
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
 
 # Because Config::Simple is incompatible with Test::MockFile
 use File::Temp;
@@ -41,11 +41,10 @@ use Text::Xslate;
 use Config::Simple;
 ## use critic
 
-
 # It is important to use MockFile last
 use Test::MockFile();
 
-require_ok( "$FindBin::Bin/../bin/new_config" ) or die "could not require SUT: $@";
+require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
 my $basedir = '/bogus';
 
@@ -76,17 +75,18 @@ RECIPES
 
     # Setup fake files/dirs
     ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-    my $td_mock  = Test::MockFile->new_dir($basedir, { mode => 0755 } );
+    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
     ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-    my $tdd_mock = Test::MockFile->new_dir("$basedir/recipes.d", { mode => 0755 });
-    my $recipe_mock = Test::MockFile->file("$basedir/recipes.yaml", $recipe);
+    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
+    my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     # XXX Config::Simple is not compatible with Test::MockFile due to using bareword filehandles.
     my ( $fh, $ipmap_file ) = File::Temp::tempfile();
     print $fh $ipmap;
     close $fh;
+
     # However we still have to mock it to prevent explosions in our own code!
-    my $ipmap_mock  = Test::MockFile->file($ipmap_file, $ipmap);
+    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
@@ -106,6 +106,7 @@ RECIPES
 };
 
 subtest "a domain with no recipe costs nothing" => sub {
+
     # auto_assign writes to ipmap.cfg and takes an address out of the pool for
     # good; get_secrets opens the password database and prompts.  Neither
     # should happen on the way to telling somebody they typed the name wrong.
@@ -136,15 +137,15 @@ RECIPES
 
     ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
 
-    my $td_mock     = Test::MockFile->new_dir($basedir, { mode => 0755 } );
+    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
     ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-    my $tdd_mock    = Test::MockFile->new_dir("$basedir/recipes.d", { mode => 0755 });
-    my $recipe_mock = Test::MockFile->file("$basedir/recipes.yaml", $recipe);
+    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
+    my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     my ( $fh, $ipmap_file ) = File::Temp::tempfile();
     print $fh $ipmap;
     close $fh;
-    my $ipmap_mock = Test::MockFile->file($ipmap_file, $ipmap);
+    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
 
     my $before = _slurp($ipmap_file);
 
@@ -157,9 +158,11 @@ RECIPES
         )
     };
 
-    like($result, qr/No recipe configuration/i, 'it says the recipe is missing');
-    is(_slurp($ipmap_file), $before,
-        'and ipmap.cfg is untouched, so the typo cost no address');
+    like( $result, qr/No recipe configuration/i, 'it says the recipe is missing' );
+    is(
+        _slurp($ipmap_file), $before,
+        'and ipmap.cfg is untouched, so the typo cost no address'
+    );
 };
 
 # Plain open, not File::Slurper: loading that here would put it in memory ahead
@@ -167,7 +170,7 @@ RECIPES
 # files for real.
 sub _slurp {
     my ($path) = @_;
-    open(my $fh, '<', $path) or die "Could not read $path: $!";
+    open( my $fh, '<', $path ) or die "Could not read $path: $!";
     local $/;
     my $content = <$fh>;
     close $fh;
