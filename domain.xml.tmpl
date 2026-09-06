@@ -41,7 +41,11 @@
          the pool happens to live.  The backing store is baked into the qcow2
          at creation; libvirt reports it back but we do not declare it. -->
     <disk type='volume' device='disk'>
-      <driver name='qemu' type='qcow2'/>
+      <!-- io_uring rather than qemu's default threadpool: one ring shared with
+           the kernel instead of a worker thread and a syscall per request.
+           Production code in qemu since 5.0, and unlike io='native' it carries
+           no requirement about the cache mode. -->
+      <driver name='qemu' type='qcow2' io='io_uring'/>
       <source pool='%POOLNAME%' volume='%DISKVOLUME%'/>
       <target dev='vda' bus='virtio'/>
       <boot order='1'/>

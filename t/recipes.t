@@ -884,6 +884,73 @@ subtest 'tmpfs refuses a size the kernel would not take' => sub {
     }
 };
 
+# ----------------------------------------------------------------
+# iouring: who may ask the kernel for an io_uring
+# ----------------------------------------------------------------
+subtest 'iouring gates on the group by default, because otherwise the group is decoration' => sub {
+    my $r = 'Provisioner::Recipe::iouring'->new(%PROV);
+
+    # 0 is the kernel's own default, so a recipe that sets it does nothing at
+    # all on a stock guest -- and kernel.io_uring_group only takes effect at 1.
+    my %opts = $r->validate( %G, modules => [] );
+    is( $opts{mode},  1,          'mode defaults to 1' );
+    is( $opts{group}, 'io_uring', 'with a group to gate on' );
+
+    foreach my $bad ( 3, -1, 'yes' ) {
+        my $fresh = 'Provisioner::Recipe::iouring'->new(%PROV);
+        ok( exception { $fresh->render_global( %G, mode => $bad ) }, "mode $bad is refused" );
+    }
+};
+
+subtest 'iouring collects the accounts of the recipes actually present' => sub {
+    my $users = sub {
+        my (@modules) = @_;
+        my %opts = 'Provisioner::Recipe::iouring'->new(%PROV)->validate( %G, modules => \@modules );
+        return $opts{members};
+    };
+
+    # Nothing is added for a recipe that is not on this guest, so a guest with no
+    # database gets a group with nobody in it and an io_uring nothing can reach.
+    # `users` is a global template variable holding the guest's accounts, so an
+    # arg of that name gets handed those instead -- which is what this recipe's
+    # first cut was called, and how it was caught.
+    is_deeply( $users->(),          [],        'a guest running nothing that uses io_uring gets nobody' );
+    is_deeply( $users->('nginx'),   [],        'nor does one running something that cannot use it' );
+    is_deeply( $users->('mariadb'), ['mysql'], 'mariadb brings its own account' );
+
+    # And what an operator wrote is kept alongside, deduplicated.
+    my %opts = 'Provisioner::Recipe::iouring'->new(%PROV)->validate( %G, modules => ['mariadb'], members => [ 'mysql', 'someservice' ] );
+    is_deeply( $opts{members}, [ 'mysql', 'someservice' ], 'named accounts join them, said once' );
+};
+
+subtest 'iouring defers group membership past the makefile' => sub {
+    my $out = 'Provisioner::Recipe::iouring'->new(%PROV)->render_global( %G, modules => ['mariadb'] );
+
+    like( $out, qr/groupadd --system 'io_uring'/, 'the group is made up front' );
+
+    # mysql belongs to mariadb, whose target has not run yet -- iouring sorts
+    # ahead of it.
+    like( $out, qr/queue_postrun_task .*usermod -aG 'io_uring' 'mysql'/, 'and membership waits for the accounts to exist' );
+    unlike( $out, qr/^usermod/m, 'rather than being attempted during the build' );
+
+    # A gid is only knowable on the guest, and the sysctl takes the number.
+    like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );
+};
+
+subtest 'the guest disks ask qemu for the io_uring backend' => sub {
+
+    # The other half of the issue.  io='io_uring' rather than qemu's default
+    # thread pool; unlike io='native' it carries no requirement about caching.
+    my $xml = File::Slurper::read_text("$FindBin::Bin/../domain.xml.tmpl");
+    like( $xml, qr/<driver name='qemu' type='qcow2' io='io_uring'\/>/, 'the root disk does' );
+
+    # And so do the extra disks, which bin/provision builds rather than the
+    # template -- both shapes of them.
+    my $provision = File::Slurper::read_text("$FindBin::Bin/../bin/provision");
+    like( $provision, qr/<driver name='qemu' type='raw' io='io_uring'\/>/,   'a raw block extra disk does' );
+    like( $provision, qr/<driver name='qemu' type='qcow2' io='io_uring'\/>/, 'and a file-backed one' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

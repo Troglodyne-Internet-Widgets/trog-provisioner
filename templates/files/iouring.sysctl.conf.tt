@@ -1,0 +1,13 @@
+# io_uring, and who may ask the kernel for one.
+#
+# 0 lets every process create io_uring instances, which is the kernel's own
+# default.  1 refuses unprivileged processes outside the group below.  2 refuses
+# everybody, CAP_SYS_ADMIN included.
+#
+# The group only bites at 1.  At 0 and 2 it is inert, and is written anyway so
+# that changing the mode is a one-line edit rather than a two-line one.
+#
+# %IO_URING_GID% is filled in by the makefile fragment: a group's gid is only
+# knowable on the guest, and this setting takes the number rather than the name.
+kernel.io_uring_disabled = [% mode %]
+kernel.io_uring_group = %IO_URING_GID%

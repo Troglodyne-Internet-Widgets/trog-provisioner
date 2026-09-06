@@ -1,0 +1,16 @@
+# The group first: the sysctl below names it by gid, and there is no gid until
+# it exists.
+getent group '[% group %]' >/dev/null || groupadd --system '[% group %]'
+sed -i "s/%IO_URING_GID%/$$(getent group '[% group %]' | cut -d: -f3)/" io_uring.conf
+install -m 0644 -o root -g root io_uring.conf /etc/sysctl.d/60-io_uring.conf
+sysctl -p /etc/sysctl.d/60-io_uring.conf
+# Applied and written are not the same thing.  Tightening this at runtime works;
+# loosening it may not, and a kernel that kept its own value would otherwise
+# leave a guest quietly more restricted than its configuration says.  The file
+# is right either way, so this is a warning and not a failure.
+[ "$$(sysctl -n kernel.io_uring_disabled)" = "[% mode %]" ] || echo "iouring: the running kernel kept kernel.io_uring_disabled=$$(sysctl -n kernel.io_uring_disabled) rather than taking [% mode %]; the sysctl.d file is in place and the next boot will apply it"
+[% FOR account IN members -%]
+# After the makefile rather than during it: [% account %] belongs to another
+# recipe, and this one sorts ahead of most of them.
+[% script_dir %]/queue_postrun_task "id -u '[% account %]' >/dev/null 2>&1 && usermod -aG '[% group %]' '[% account %]' || echo 'iouring: no account [% account %] to put in [% group %]'"
+[% END -%]
