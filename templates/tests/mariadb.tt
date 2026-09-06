@@ -3,27 +3,104 @@ use strict;
 use warnings;
 use Test::More;
 
-# The server is a tarball off archive.mariadb.org, not a package, so check it
-# arrived and is the release asked for before checking anything runs.  The
-# recipe passed install_mariadb.sh an undeclared -- and so empty -- user, which
-# shifted every argument along: the script took the version for its client and
-# the dump path for its version, and fetched a URL with a filesystem path in the
-# middle of it.  curl saved the 404 and tar was the first thing to complain.
-ok(-x '/opt/mysql/bin/mariadbd', 'the mariadb server binary is installed');
+# From MariaDB's own apt repository at the exact release, not the generic
+# bintar.  The version is the whole point -- binlogs restore only onto the one
+# that wrote them -- so check the package, which is the thing apt pinned.
+my $installed = `dpkg-query -W -f='\${Version}' mariadb-server 2>/dev/null`;
+chomp $installed;
+like($installed, qr/\Q[% version %]\E/, 'mariadb-server is the release this recipe pinned')
+    or diag "installed: '$installed'";
 
-my $version = `/opt/mysql/bin/mariadbd --version 2>/dev/null`;
-like($version, qr/\Q[% version %]\E/, 'and is the version this recipe pinned');
-
-# Owned by mysql, group the recipe's user, which is what the chown that got
-# `mysql:10.11` as its group was meant to do.
-my @stat = stat('/opt/mysql');
-my $group = $stat[5] // -1;
-is(scalar getgrgid($group), '[% user %]', '/opt/mysql is group [% user %]');
+# And that it came from the pin rather than from Ubuntu, which ships its own
+# and would win on version order for any release older than theirs.
+my $origin = `apt-cache policy mariadb-server 2>/dev/null`;
+like($origin, qr/archive\.mariadb\.org/, 'and came from the pinned repository') or diag $origin;
 
 my $status = `systemctl is-active mariadb 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'mariadb is running');
-ok(-d '/opt/mysql', 'mysql data directory exists');
-ok(-d '/opt/mysql/data', 'and it was initialised');
+
+# The packaged layout, rather than the /opt/mysql the bintar needed.
+ok(-d '/var/lib/mysql', 'the packaged data directory exists');
+ok(-f '/var/lib/mysql/ibdata1', 'and was initialised');
+ok(!-e '/opt/mysql', 'and nothing was hand-rolled under /opt') or diag `ls -la /opt`;
+
+# Our configuration went in as a drop-in the packaged server reads, and it read
+# it -- a drop-in in the wrong directory is a setting that looks applied.
+ok(-f '/etc/mysql/mariadb.conf.d/60-provisioner.cnf', 'the config drop-in is in place');
+my $binlog = `mariadb -sN -e "SELECT \@\@log_bin" 2>/dev/null`;
+chomp $binlog;
+is($binlog, '1', 'and the server read it: binlogs are on, which the pinning exists for')
+    or diag "log_bin=$binlog";
+
+# The drop-in has to be in place before the schema loads, or the dump goes in
+# under the package's sql_mode and outside the binlog.  Asking the running
+# server proves the first half; that the recipe orders it that way is t/recipes.t's.
+my $sqlmode = `mariadb -sN -e "SELECT \@\@sql_mode" 2>/dev/null`;
+like($sqlmode, qr/NO_ENGINE_SUBSTITUTION/, 'and the sql_mode the dump loaded under is ours')
+    or diag "sql_mode=$sqlmode";
+
+# root over the socket, which is how everything here connects and what the
+# secure-installation SQL was careful to keep.
+my $whoami = `mariadb -sN -e "SELECT CURRENT_USER()" 2>/dev/null`;
+chomp $whoami;
+like($whoami, qr/^root\@localhost$/, 'root still authenticates over the unix socket');
+
+# The dump the recipe was given actually loaded.
+my $dbs = `mariadb -sN -e "SHOW DATABASES" 2>/dev/null`;
+ok(length $dbs, 'the server answers a query') or diag $dbs;
+
+# The credentials files.  Clients read ~/.my.cnf without being told to, and
+# recipes outside this repository point --defaults-file at one -- which replaces
+# the defaults rather than adding to them, so the file has to carry the socket
+# as well as the account.  Run as the owner, or unix_socket auth answers for the
+# wrong identity and the test passes for the wrong reason.
+sub connects_as {
+    my ($who, $sql) = @_;
+    my @pw = getpwnam($who) or return;
+    my $out = `setpriv --reuid=$pw[2] --regid=$pw[3] --clear-groups mariadb --defaults-file='$pw[7]/.my.cnf' -sN -e '$sql' 2>&1`;
+    chomp $out;
+    return $out;
+}
+
+# root and the admin: full access, which is what their credentials are for.
+foreach my $who (qw{root [% admin_user %]}) {
+    my @pw = getpwnam($who) or do { fail("no $who account"); next };
+    my $cnf = "$pw[7]/.my.cnf";
+
+    ok(-f $cnf, "$who has a .my.cnf") or next;
+    is(sprintf('%04o', (stat $cnf)[2] & 07777), '0600', 'and it is 0600');
+    is((stat $cnf)[4], $pw[2], "and owned by $who");
+    is(connects_as($who, 'SELECT CURRENT_USER()'), 'root@localhost', "and $who connects with full access")
+        or diag connects_as($who, 'SELECT 1');
+}
+
+[% IF user != admin_user %]
+# The service account is deliberately not granted anything here -- that is the
+# dump's business, or another recipe's.  So what this checks is that the file is
+# well formed and reaches the server as the right account: access denied for
+# [% user %] means mariadb parsed it, found the socket and tried.  A malformed
+# file fails differently, and that is the failure worth catching.
+my @svc = getpwnam('[% user %]');
+ok(scalar @svc, 'there is a [% user %] account');
+SKIP: {
+    skip 'no [% user %] account', 4 unless @svc;
+    my $cnf = "$svc[7]/.my.cnf";
+
+    ok(-f $cnf, '[% user %] has a .my.cnf');
+    is(sprintf('%04o', (stat $cnf)[2] & 07777), '0600', 'and it is 0600');
+    is((stat $cnf)[4], $svc[2], 'and owned by [% user %]');
+
+    my $out = connects_as('[% user %]', 'SELECT 1') // '';
+    ok($out eq '1' || $out =~ m/Access denied for user '\Q[% user %]\E'/,
+       'and it reaches the server as [% user %], granted or not')
+        or diag $out;
+}
+[% END %]
+
+# The reason for moving off the bintar: this build can use io_uring, where the
+# generic tarball is linked against libaio and never could.
+my $lib = `ldd \$(command -v mariadbd || echo /usr/sbin/mariadbd) 2>/dev/null`;
+like($lib, qr/liburing/, 'mariadbd is linked against liburing') or diag $lib;
 
 done_testing();
