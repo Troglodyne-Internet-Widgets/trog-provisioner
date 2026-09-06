@@ -34,6 +34,28 @@ root on the box> -- an application, or an operator who has a shell as somebody
 else. Being root on the guest needs no password at all, which is what the backup
 cron and everything else here relies on.
 
+=head3 Who can connect, and with what
+
+A C<.my.cnf> is written for three accounts, because clients read C<~/.my.cnf>
+without being told to and because recipes outside this repository point
+C<--defaults-file> at one:
+
+=over 4
+
+=item * C<root> and the admin user get full access, as the database's C<root>
+with C<root_pw>. The admin has sudo and could reach it over the socket anyway;
+this is what makes C<--defaults-file> work for them.
+
+=item * The service user gets the socket and its own name and B<no password>.
+What that account may do is the dump's business, or another recipe's -- this
+only gives whatever grants it later somewhere to land.
+
+=back
+
+All three are 0600 and owned by the account they belong to. Every section names
+the socket, because C<--defaults-file> replaces the defaults rather than adding
+to them.
+
 =head3 Where it comes from
 
 MariaDB's own apt repository for that exact release,
@@ -88,6 +110,10 @@ sub enrich {
     # error on a good day and something else on a bad one.
     ( $opts{root_pw_sql} = $opts{root_pw} // q{} ) =~ s/(['\\])/\\$1/g;
 
+    # And again for an option file, where the rules are its own: the value is
+    # double-quoted, so a double quote or a backslash is what ends it early.
+    ( $opts{root_pw_cnf} = $opts{root_pw} // q{} ) =~ s/(["\\])/\\$1/g;
+
     return %opts;
 }
 
@@ -95,10 +121,12 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'mysql.secure_installation.tt' => 'secure_installation.sql',
-        'mariadb.provisioner.cnf.tt'   => 'mariadb-provisioner.cnf',
-        'mariadb.backup.sh.tt'         => 'mariadb-backup.sh',
-        'mariadb.backup.cron.tt'       => 'mariadb-backup.cron',
+        'mysql.secure_installation.tt'  => 'secure_installation.sql',
+        'mariadb.provisioner.cnf.tt'    => 'mariadb-provisioner.cnf',
+        'mariadb.client.cnf.tt'         => 'mariadb-client.cnf',
+        'mariadb.client.service.cnf.tt' => 'mariadb-client-service.cnf',
+        'mariadb.backup.sh.tt'          => 'mariadb-backup.sh',
+        'mariadb.backup.cron.tt'        => 'mariadb-backup.cron',
     );
 }
 

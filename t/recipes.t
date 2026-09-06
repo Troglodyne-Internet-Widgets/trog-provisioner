@@ -994,6 +994,51 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     is_deeply( [ grep { index( $_, 'maria' ) >= 0 } @deps ], [], 'the mariadb packages are not cloud-init deps' );
 };
 
+subtest 'mariadb writes credentials the accounts that need them can use' => sub {
+    my $r = 'Provisioner::Recipe::mariadb'->new(%PROV);
+
+    # Clients read ~/.my.cnf without being told to, and recipes outside this
+    # repository point --defaults-file at one.  The bintar layout had a single
+    # /opt/mysql/my.cnf carrying these; dropping it broke them.
+    my $out = $r->render( %G, %{ $required_config{mariadb} } );
+    like( $out, qr{mariadb-client\.cnf /root/\.my\.cnf},                    'root gets one' );
+    like( $out, qr{-o \Q$G{admin_user}\E .*mariadb-client\.cnf.*\.my\.cnf}, 'and so does the admin' );
+    like( $out, qr{install -m 0600 },                                       'both 0600, since they carry the password' );
+
+    like( $out, qr{mariadb-client-service\.cnf.*\Q$G{user}\E}, 'and the service user gets its own' );
+
+    # Unless it is the admin, where one file per home means the service one
+    # would land on top of theirs.
+    my $same = 'Provisioner::Recipe::mariadb'->new(%PROV)->render( %G, %{ $required_config{mariadb} }, user => $G{admin_user} );
+    unlike( $same, qr{mariadb-client-service\.cnf}, 'not when the service user is the admin' );
+
+    # --defaults-file replaces the defaults rather than adding to them, so a
+    # file used that way has to name the socket itself.
+    my $cnf      = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.cnf.tt', %G, %{ $required_config{mariadb} } );
+    my @sections = $cnf =~ m/^\[(\w[\w-]*)\]$/gm;
+    ok( scalar @sections, 'the credentials file has sections' );
+    foreach my $section (@sections) {
+        my ($body) = $cnf =~ m/^\[\Q$section\E\]\n(.*?)(?=^\[|\z)/ms;
+        like( $body, qr/^socket = /m, "[$section] names the socket" );
+    }
+
+    # And the service user's has no password: what that account may do is the
+    # dump's business.
+    my $service = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.service.cnf.tt', %G, %{ $required_config{mariadb} }, user => 'www-data' );
+    unlike( $service, qr/^\s*password\s*=/m, 'the service account gets no password' );
+    like( $service, qr/^user = www-data$/m, 'just the socket and who to be' );
+};
+
+subtest 'a changed root password re-runs the securing' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/install_mariadb.sh");
+
+    # A bare "has this ever run" marker leaves the database on the old password
+    # while every .my.cnf claims the new one, and the first thing to notice is a
+    # backup that stopped working.
+    like( $script, qr/sha256sum < "\$SECURE_SQL"/, 'the marker is keyed on the SQL, not on having run' );
+    unlike( $script, qr/touch .*\.secured/, 'rather than a bare touch' );
+};
+
 subtest 'the installer configures the server before anything uses it' => sub {
     my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/install_mariadb.sh");
 
@@ -1047,6 +1092,18 @@ subtest 'the root password survives being put in a SQL string' => sub {
     # unix_socket has to survive: it is how root connects from this machine, and
     # everything the recipe runs afterwards depends on it.
     like( $sql->('plain'), qr/IDENTIFIED VIA unix_socket OR mysql_native_password/, 'socket auth is kept alongside the password' );
+
+    # An option file has its own rules: the value is double-quoted there, so a
+    # double quote ends it early where a single one is harmless.
+    my $cnf = sub {
+        my ($pw)   = @_;
+        my $out    = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.cnf.tt', %G, %{ $required_config{mariadb} }, root_pw => $pw );
+        my ($line) = $out =~ m/^password = (.*)$/m;
+        return $line // q{};
+    };
+    is( $cnf->(q{pa"ss}),  q{"pa\\"ss"},  'a double quote is escaped for the option file' );
+    is( $cnf->(q{pa\\ss}), q{"pa\\\\ss"}, 'and so is a backslash' );
+    unlike( $cnf->(q{pa'ss}), qr/&#39;/, 'and nothing is HTML-escaped on the way' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -113,9 +113,16 @@ mariadb -e 'SELECT 1' >/dev/null 2>&1 || { echo "install_mariadb.sh: mariadb nev
 # run where securing has already been done and it is never read.
 trap 'rm -f "$SECURE_SQL"' EXIT
 
-if [ ! -f /etc/mysql/.secured ]; then
+# Keyed on the SQL rather than merely "has this ever run", so that changing
+# root_pw re-runs it.  A bare marker would leave the database on the old
+# password while every .my.cnf this recipe writes claims the new one, and the
+# first thing to notice would be a backup that stopped working.
+SECURED=/etc/mysql/.secured
+WANT=$(sha256sum < "$SECURE_SQL" | cut -d' ' -f1)
+if [ "$(cat "$SECURED" 2>/dev/null || true)" != "$WANT" ]; then
     mariadb < "$SECURE_SQL"
-    touch /etc/mysql/.secured
+    printf '%s\n' "$WANT" > "$SECURED"
+    chmod 0600 "$SECURED"
 fi
 
 mariadb < "$SCHEMA"

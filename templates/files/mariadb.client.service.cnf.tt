@@ -1,0 +1,13 @@
+# Client credentials for [% user %], the account the application runs as.
+#
+# No password: what this account may do, and how it proves who it is, is the
+# dump's business or another recipe's.  What is here is the part this recipe
+# knows -- where the socket is and who to connect as -- so that whatever grants
+# it later has somewhere to land.
+[client]
+socket = /run/mysqld/mysqld.sock
+user = [% user %]
+
+[mariadb-dump]
+socket = /run/mysqld/mysqld.sock
+user = [% user %]

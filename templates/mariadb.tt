@@ -1,6 +1,14 @@
 [%# Every argument quoted, so one that renders empty stays an argument rather
     than shifting the ones after it along. -%]
 [% script_dir %]/install_mariadb.sh "[% version %]" "mariadb-provisioner.cnf" "secure_installation.sql" "[% install_dir %]/[% domain %]/[% dumpfile %]"
+# Clients read ~/.my.cnf without being told to, and recipes outside this repo
+# point --defaults-file at one.  Homes by getent rather than ~name: the service
+# user's is the domain directory, not /home.
+install -m 0600 -o root -g root mariadb-client.cnf /root/.my.cnf
+install -m 0600 -o [% admin_user %] -g "$$(id -gn [% admin_user %])" mariadb-client.cnf "$$(getent passwd [% admin_user %] | cut -d: -f6)/.my.cnf"
+[% IF user != admin_user -%]
+install -m 0600 -o [% user %] -g "$$(id -gn [% user %])" mariadb-client-service.cnf "$$(getent passwd [% user %] | cut -d: -f6)/.my.cnf"
+[% END -%]
 install -m 0750 mariadb-backup.sh /usr/local/sbin/mariadb-backup.sh
 install -m 0644 mariadb-backup.cron /etc/cron.d/mariadb-backup
 mkdir -p /var/backups/mysql

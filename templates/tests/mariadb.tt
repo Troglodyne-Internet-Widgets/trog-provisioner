@@ -50,6 +50,54 @@ like($whoami, qr/^root\@localhost$/, 'root still authenticates over the unix soc
 my $dbs = `mariadb -sN -e "SHOW DATABASES" 2>/dev/null`;
 ok(length $dbs, 'the server answers a query') or diag $dbs;
 
+# The credentials files.  Clients read ~/.my.cnf without being told to, and
+# recipes outside this repository point --defaults-file at one -- which replaces
+# the defaults rather than adding to them, so the file has to carry the socket
+# as well as the account.  Run as the owner, or unix_socket auth answers for the
+# wrong identity and the test passes for the wrong reason.
+sub connects_as {
+    my ($who, $sql) = @_;
+    my @pw = getpwnam($who) or return;
+    my $out = `setpriv --reuid=$pw[2] --regid=$pw[3] --clear-groups mariadb --defaults-file='$pw[7]/.my.cnf' -sN -e '$sql' 2>&1`;
+    chomp $out;
+    return $out;
+}
+
+# root and the admin: full access, which is what their credentials are for.
+foreach my $who (qw{root [% admin_user %]}) {
+    my @pw = getpwnam($who) or do { fail("no $who account"); next };
+    my $cnf = "$pw[7]/.my.cnf";
+
+    ok(-f $cnf, "$who has a .my.cnf") or next;
+    is(sprintf('%04o', (stat $cnf)[2] & 07777), '0600', 'and it is 0600');
+    is((stat $cnf)[4], $pw[2], "and owned by $who");
+    is(connects_as($who, 'SELECT CURRENT_USER()'), 'root@localhost', "and $who connects with full access")
+        or diag connects_as($who, 'SELECT 1');
+}
+
+[% IF user != admin_user %]
+# The service account is deliberately not granted anything here -- that is the
+# dump's business, or another recipe's.  So what this checks is that the file is
+# well formed and reaches the server as the right account: access denied for
+# [% user %] means mariadb parsed it, found the socket and tried.  A malformed
+# file fails differently, and that is the failure worth catching.
+my @svc = getpwnam('[% user %]');
+ok(scalar @svc, 'there is a [% user %] account');
+SKIP: {
+    skip 'no [% user %] account', 4 unless @svc;
+    my $cnf = "$svc[7]/.my.cnf";
+
+    ok(-f $cnf, '[% user %] has a .my.cnf');
+    is(sprintf('%04o', (stat $cnf)[2] & 07777), '0600', 'and it is 0600');
+    is((stat $cnf)[4], $svc[2], 'and owned by [% user %]');
+
+    my $out = connects_as('[% user %]', 'SELECT 1') // '';
+    ok($out eq '1' || $out =~ m/Access denied for user '\Q[% user %]\E'/,
+       'and it reaches the server as [% user %], granted or not')
+        or diag $out;
+}
+[% END %]
+
 # The reason for moving off the bintar: this build can use io_uring, where the
 # generic tarball is linked against libaio and never could.
 my $lib = `ldd \$(command -v mariadbd || echo /usr/sbin/mariadbd) 2>/dev/null`;
