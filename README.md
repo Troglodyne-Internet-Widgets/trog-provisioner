@@ -320,9 +320,28 @@ bin/nuke_pool
 bin/nuke_pool --connect qemu+ssh://root@hv1.example.net/system
 ```
 
+## TPMs
+
+A guest gets an emulated TPM if, and only if, the hypervisor has a real one and
+`swtpm` is installed to share it out.  `bin/preflight` says when you have the
+first and not the second.
+
+The condition is the point.  An emulated TPM keeps its state in a file on the
+hypervisor, so a guest that seals a key to it has sealed that key to a file
+sitting beside its own disk image -- whoever takes the disk takes the TPM with
+it.  That is worth having when the hypervisor's disk is protected by hardware of
+its own, and worth nothing when it is not, and a TPM that cannot keep a secret is
+worse than no TPM: something on the guest will use it and believe it.
+
+So guests on a hypervisor with no TPM are built without one, and anything on them
+that wants to seal a secret does without and says so.  `systemd-creds` falls back
+to its host key, and tPSGI's vault key with it.
+
 ## UBUNTU DEPS
 
 virt-manager bridge-utils apt-mirror nginx
+
+`swtpm swtpm-tools` as well, on a hypervisor with a TPM -- see above.
 
 Expects the HV to be an apt-mirror obviously.
 

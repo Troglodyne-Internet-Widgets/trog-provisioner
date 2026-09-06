@@ -658,6 +658,7 @@ sub handle_domain {
         if ($target_is_up) {
             print "Backing up $module files from $fqdn\n";
             my %tg = $builder->remote_files( $data_config->{to}, $fqdn );
+            my @skip = $builder->remote_skip();
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Writing remote file $to_fetch as $data_config->{from}/$fqdn/$tg{$to_fetch}\n";
                 # XXX deal with connection drops
@@ -665,7 +666,21 @@ sub handle_domain {
                 my $num_copied = $ssh->rget(
                     $to_fetch,
                     "$data_config->{from}/$fqdn/$tg{$to_fetch}",
-                    wanted => sub { 1 },
+                    # These are directories, and a recipe can have something in one
+                    # that is meant to stay on the machine it was made on -- see
+                    # remote_skip in Provisioner::Recipe.  Left behind rather than
+                    # fetched and deleted: this runs against a live guest, and the
+                    # guest still wants it.
+                    wanted => sub {
+                        my (undef, $entry) = @_;
+                        my $path = $entry->{filename} // '';
+                        foreach my $pattern (@skip) {
+                            next unless $path =~ $pattern;
+                            print "Leaving $path where it is\n";
+                            return 0;
+                        }
+                        return 1;
+                    },
 
                     #XXX most of the 'errors' here are literally normal operation, so who cares lol
                     on_error   => sub { print $ssh->error() . "\n" },

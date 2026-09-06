@@ -254,6 +254,34 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     ok(Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor');
 };
 
+# --- has_tpm ------------------------------------------------------------------
+subtest 'a guest gets a TPM only where one means something' => sub {
+    my ($asked, $answer);
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine(capture => sub { $asked = $_[1]; return $answer });
+
+    # Both halves: hardware here, and swtpm to emulate one there.  The command
+    # says yes or says nothing, so anything that is not yes is no.
+    foreach my $case (["yes\n", 1, 'both halves'], ['', 0, 'neither'], [undef, 0, 'a command that said nothing at all']) {
+        my ($said, $expected, $what) = @$case;
+        Trog::HV->forget();
+        my $hv = Trog::HV->new();
+        $answer = $said;
+        is($hv->has_tpm, $expected, "$what: has_tpm is $expected");
+    }
+
+    like($asked, qr{/dev/tpmrm0}, 'asks the hypervisor for its own TPM');
+    like($asked, qr{swtpm},       'and for something to emulate one with');
+
+    # Asked once: this is a shell out to the hypervisor, per guest built.
+    Trog::HV->forget();
+    my $hv = Trog::HV->new();
+    $answer = "yes\n";
+    $hv->has_tpm;
+    $answer = '';
+    is($hv->has_tpm, 1, 'and the answer is remembered rather than asked again');
+};
+
 # --- Remote path, exercised against a mocked connection -----------------------
 #
 # Net::OpenSSH::More connects in its constructor, so there is no way to build a

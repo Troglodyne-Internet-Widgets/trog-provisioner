@@ -128,6 +128,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     my %got;
     my $hv_mock = Test::MockModule->new('Trog::HV');
     $hv_mock->redefine(bridge_device => sub { 'br0' });
+    $hv_mock->redefine(has_tpm       => sub { 0 });
     $hv_mock->redefine(pool          => sub { 1 });
     $hv_mock->redefine(base_image    => sub { '/pool/baseimage-qcow2' });
     $hv_mock->redefine(create_disk   => sub { '/pool/vm.example.com-qcow2' });
@@ -155,6 +156,17 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     like($xml, qr{<name>vm\.example\.com</name>},     'which is named after the guest');
     like($xml, qr{<source bridge='br0'/>},            'on the outbound bridge');
     unlike($xml, qr/%[A-Z_]+%/,                       'with every placeholder substituted');
+    unlike($xml, qr/<tpm/,                            'and no TPM, the hypervisor having none to make one mean anything');
+
+    # An emulated TPM keeps its state in a file beside the disk image, so a guest
+    # is only given one where the hypervisor has hardware of its own to make that
+    # file worth trusting.  See Trog::HV::has_tpm.
+    $hv_mock->redefine(has_tpm => sub { 1 });
+    my ($with_tpm) = quietly(sub { Trog::Bin::Provisioner::mongle_domain_xml($config, \%seed) });
+    like($with_tpm, qr{<tpm model='tpm-crb'>},                      'a hypervisor with a TPM gives its guests one');
+    like($with_tpm, qr{<backend type='emulator' version='2\.0'/>},  'emulated, and 2.0');
+    unlike($with_tpm, qr/%[A-Z_]+%/,                                'still with every placeholder substituted');
+    $hv_mock->redefine(has_tpm => sub { 0 });
 
     foreach my $missing (qw{user-data meta-data network-config}) {
         my %partial = %seed;

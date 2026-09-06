@@ -549,6 +549,7 @@ sub mongle_domain_xml {
     $hv->create_disk($disk_volume, backing => $base, capacity => $disk_size);
 
     my ($extra_disks, $filesystems) = mongle_extra_disks($config);
+    my $tpm = mongle_tpm($hv);
 
     # NoCloud wants all three, and cloud-init will not look at a seed that is
     # missing any of them.
@@ -572,12 +573,41 @@ sub mongle_domain_xml {
         BRIDGENAME  => $bridge_device,
         EXTRADISKS  => $extra_disks,
         FILESYSTEMS => $filesystems,
+        TPM         => $tpm,
     );
     $xml =~ s/%$_%/$substitutions{$_}/gmx for keys %substitutions;
 
     my $file = "$domain_dir/$domain/domain.xml";
     File::Slurper::Temp::write_text($file, $xml);
     return ($xml, $file);
+}
+
+# A TPM for the guest, when the hypervisor has one to justify it.
+#
+# swtpm, so the guest's TPM is emulated -- a process per domain, with its state in
+# a file on the hypervisor.  See Trog::HV::has_tpm for why that file existing on a
+# machine with no hardware TPM of its own means the guest is better off without
+# one: a key sealed to a file beside the disk image is sealed to whatever takes
+# the disk image.
+#
+# tpm-crb rather than tpm-tis: crb is the interface a TPM 2.0 is meant to present,
+# and what a current guest kernel looks for first.
+sub mongle_tpm {
+    my ($hv) = @_;
+
+    if (!$hv->has_tpm) {
+        print "No hardware TPM on the hypervisor, so this guest gets none either\n";
+        return '';
+    }
+
+    print "Hypervisor has a TPM; giving the guest an emulated one\n";
+    return <<'XML';
+    <!-- Emulated, and here because the hypervisor has a real one to make the
+         state file worth trusting.  See mongle_tpm in bin/provision. -->
+    <tpm model='tpm-crb'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+XML
 }
 
 # Whatever mounts.txt asks for, as libvirt device XML.

@@ -430,6 +430,27 @@ sub enrich {
     return %opts;
 }
 
+=head3 @patterns = $recipe->remote_skip()
+
+Regexes for paths under C<remote_files> which must not come down, whatever
+directory they are inside.
+
+C<remote_files> salvages directories, not files, so a directory that is mostly
+state worth keeping can still hold something that is not.  A key which exists so
+that a stolen database is useless is the example: carried onto the next guest it
+would be a key that outlives the machine it was made for, and sitting in a backup
+beside the database it protects it would be no key at all.
+
+Anything matching is left where it is.  The guest keeps it, and the rebuilt guest
+makes a new one -- which is the point, and is what whatever generated it is
+expected to cope with.
+
+=cut
+
+sub remote_skip {
+    return ();
+}
+
 =head3 @dirs = $recipe->datadirs()
 
 Directories under the domain's C<install_dir> this recipe needs to exist.
@@ -455,6 +476,10 @@ built again.  Anything a recipe can regenerate does not belong here.
 
 C<bin/new_config> on a cron, tarring up what it collects, is a backup strategy;
 see L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/BACKUPS.md>.
+
+Which is also the reason C<remote_skip> exists: a directory salvaged wholesale is
+a directory that ends up in that tarball, and some of what lives in one is meant
+to stay on the machine it was made on.
 
 =cut
 

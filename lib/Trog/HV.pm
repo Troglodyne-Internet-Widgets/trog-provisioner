@@ -957,7 +957,39 @@ and ships its logs to.
 The port the hypervisor's sshd listens on.  Read out of C<sshd_config> rather
 than off the wire, since there may be several sshd instances running.
 
+=head2 has_tpm
+
+Whether guests built here should be given a TPM.
+
+Both halves have to be true.  C<swtpm> has to be installed, because the guest's
+TPM is emulated -- a process per domain, and libvirt cannot start one that is not
+there.  And the hypervisor has to have a real TPM of its own, which is the part
+that is not obvious.
+
+An emulated TPM keeps its state in a file on the hypervisor.  A guest that seals
+a key to it has sealed that key to a file sitting next to its own disk image,
+which is not sealing it to anything: whoever takes the disk takes the TPM with
+it.  That is worth having where the hypervisor's own disk is protected by
+hardware, and worth nothing where it is not -- and offering a guest a TPM that
+cannot keep a secret is worse than offering none, because something on the guest
+will use it and believe it.
+
+So: hardware here, or nothing there.
+
 =cut
+
+sub has_tpm {
+    my ($self) = @_;
+    return $self->{has_tpm} if defined $self->{has_tpm};
+
+    # tpmrm0 rather than tpm0: the resource manager is what anything on a modern
+    # kernel actually opens, and its absence on a machine that has tpm0 means the
+    # kernel did not bring the TPM up properly anyway.
+    my $answer = $self->capture(q{test -c /dev/tpmrm0 && command -v swtpm > /dev/null && echo yes});
+    chomp $answer if defined $answer;
+
+    return $self->{has_tpm} = (($answer // '') eq 'yes') ? 1 : 0;
+}
 
 sub bridge_device {
     my ($self) = @_;

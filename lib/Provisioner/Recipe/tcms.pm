@@ -78,6 +78,25 @@ sub remote_files {
 }
 
 
+# tCMS/config/ comes down whole, and one thing in it must not.
+#
+# config/secrets.key is what tCMS seals its users' stored secrets with, and it is
+# deliberately not backed up and deliberately not carried anywhere: the point of
+# it is that a stolen config/auth.db is ciphertext, which stops being true the
+# moment the key travels in the same tarball as the database.  It lives and dies
+# with the machine it was made on.
+#
+# So a rebuilt guest comes up without it, every stored secret reads as unreadable,
+# and each user stores theirs again -- which tCMS is built to do quietly rather
+# than to fall over on.  That is the cost, and it is the cheaper half of the trade.
+#
+# tCMS installs run by tPSGI under systemd do not have this file at all; the key
+# is a systemd credential there and was never inside the guest's filesystem to
+# salvage.  This is for the ones using bin/tcms-vault-key --file.
+sub remote_skip {
+    return (qr{/tCMS/config/secrets\.key$});
+}
+
 sub tests {
     return qw{tcms.tt};
 }

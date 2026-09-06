@@ -571,4 +571,30 @@ subtest 'no cron template redirects with &>' => sub {
 };
 
 Test::NoWarnings::had_no_warnings();
+subtest 'what a rebuild is not allowed to carry over' => sub {
+    require Provisioner::Recipe;
+    require Provisioner::Recipe::tcms;
+
+    is_deeply([Provisioner::Recipe->remote_skip()], [], 'a recipe salvages everything it names by default');
+
+    # tCMS's config directory comes down whole, and the key that makes a stolen
+    # auth.db useless is in it when the install is not run under systemd.  That
+    # key is supposed to die with its machine: carried over it would outlive the
+    # machine it was made for, and in a backup beside the database it protects it
+    # would not be protecting anything.
+    my %files = Provisioner::Recipe::tcms->remote_files('/opt/domains', 'test.test.test');
+    my ($config) = grep { m{/tCMS/config/$} } keys(%files);
+    ok($config, 'tCMS salvages its config directory');
+
+    my @skip = Provisioner::Recipe::tcms->remote_skip();
+    ok(scalar(@skip), 'and says something in it must stay behind');
+    ok((grep { "${config}secrets.key" =~ $_ } @skip), 'which is the vault key');
+
+    # And nothing else out of that directory, since the rest of it is the state
+    # the salvage exists for.
+    foreach my $keep (qw{auth.db main.cfg has_users}) {
+        ok(!(grep { "$config$keep" =~ $_ } @skip), "$keep still comes over");
+    }
+};
+
 done_testing();

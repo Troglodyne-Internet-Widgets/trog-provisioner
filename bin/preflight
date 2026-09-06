@@ -89,7 +89,7 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } (\&note_libguestfs);
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } (\&note_libguestfs, \&note_swtpm);
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -280,6 +280,26 @@ kernel command line can be edited to boot single-user, rather than driving
 GRUB with timed keystrokes.
 
     sudo apt install libguestfs-tools
+FIX
+}
+
+# A hypervisor with a TPM of its own can give its guests emulated ones worth
+# having, and swtpm is what emulates them.  Only worth saying where there is
+# hardware to make it mean something: on a machine with no TPM, installing swtpm
+# would buy a guest a TPM sealed to a file next to its disk image, which is why
+# bin/provision does not give it one.  Nothing to fix there, so nothing said.
+sub note_swtpm {
+    my ($hv) = @_;
+
+    return { ok => 1 } unless $hv->run('sh', '-c', 'test -c /dev/tpmrm0') == 0;
+    return { ok => 1 } if $hv->run('sh', '-c', 'command -v swtpm >/dev/null 2>&1') == 0;
+
+    return { ok => 0, what => 'This machine has a TPM, and no swtpm to share it out', fix => <<'FIX' };
+Guests built here get an emulated TPM when swtpm is installed, which is what lets
+anything on them seal a secret to the machine -- systemd-creds, LUKS, tPSGI's
+vault key.  Without it they are built without one and do without.
+
+    sudo apt install swtpm swtpm-tools
 FIX
 }
 
