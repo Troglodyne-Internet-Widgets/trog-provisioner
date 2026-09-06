@@ -1,0 +1,17 @@
+# Who may put what in MAIL FROM, for [% domain %].
+#
+# smtpd_sender_login_maps, enforced by reject_authenticated_sender_login_mismatch
+# in smtpd_sender_restrictions.  An authenticated client whose MAIL FROM address
+# is not owned by its SASL login name is rejected -- and an address missing from
+# here has no owner at all, so it is rejected too.  That is why this is built
+# from the accounts and the aliases together rather than by hand.
+#
+# The login name is the full address: that is what the dovecot passwd file this
+# pairs with is keyed on.
+#
+# Unauthenticated senders are not checked against this.  They come in on port 25
+# claiming to be anybody, and deciding what to do about that is DMARC's job, not
+# a table's.
+[% FOR login IN sender_logins %]
+[% login.address %] [% login.owner %]
+[%- END %]

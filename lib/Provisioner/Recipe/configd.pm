@@ -123,7 +123,13 @@ sub args {
                 # from configuration rather than from a recipe.
                 items => { type => 'string', pattern => '^\w+$' },
             },
-            version => { type => 'string', default => '0.001' },
+
+            # 0.002 accumulates smtpd_sender_login_maps.  Not a nicety: on
+            # 0.001 a guest with two mail domains gets one domain's table named
+            # there, and reject_authenticated_sender_login_mismatch then refuses
+            # every other domain's users when they send.  install_configd fails
+            # the build rather than quietly installing an older one.
+            version => { type => 'string', default => '0.002' },
         },
     );
 }

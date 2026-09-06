@@ -10,7 +10,7 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-use Data::Validate::Email();
+use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::cron
 
@@ -81,7 +81,7 @@ used to be the wrong way round.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{from} = _qualify( $opts{from}, $opts{domain} );
+    $opts{from} = Provisioner::Utils::qualify_address( $opts{from}, $opts{domain} );
 
     foreach my $key (qw{root_scripts user_scripts}) {
         next unless ref $opts{$key} eq 'ARRAY';
@@ -89,16 +89,6 @@ sub enrich {
     }
 
     return %opts;
-}
-
-# A local part becomes one; an address stays one.
-sub _qualify {
-    my ( $value, $domain ) = @_;
-
-    return $value unless defined $value && length $value;
-    return $value if Data::Validate::Email::is_email($value);
-    return $value unless defined $domain && length $domain;
-    return "$value\@$domain";
 }
 
 # Copied rather than edited in place: render_file runs once per template, and
@@ -113,7 +103,7 @@ sub _with_mailto {
     $out{mailto} =
         !defined $to  ? $opts->{admin_email}
       : $to eq 'none' ? ''
-      :                 _qualify( $to, $opts->{domain} );
+      :                 Provisioner::Utils::qualify_address( $to, $opts->{domain} );
 
     return \%out;
 }

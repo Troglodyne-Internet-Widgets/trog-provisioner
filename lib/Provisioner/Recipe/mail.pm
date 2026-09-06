@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Utils();
+
 =head1 Provisioner::Recipe::mail
 
 =head2 SYNOPSIS
@@ -70,21 +72,57 @@ twice.
 
 =item * C</etc/postfix/main.cf.d/50-E<lt>domainE<gt>> and
 C</etc/opendmarc.conf.d/50-E<lt>domainE<gt>>, per domain -- the parts that
-actually name it. C<mydestination>, C<masquerade_domains>,
-C<virtual_mailbox_domains> and C<header_checks> are joined across domains, so
-each of them gets what it asked for.
+actually name it. C<masquerade_domains>, C<virtual_mailbox_domains> and every
+parameter naming a lookup table are joined across domains, so each of them gets
+what it asked for.
 
 =item * C</etc/opendkim.conf.d/40-mail>, from the global half, since nothing in
 it is per domain.
 
+=item * C</etc/postfix/domains/E<lt>domainE<gt>/>, which is not a configd
+fragment directory at all but this domain's lookup tables -- the virtual maps,
+the transport and relay maps, the header checks, the sender-login map. Each is
+named from that domain's main.cf fragment, and postfix searches the list, so a
+second domain adds tables where it used to overwrite them.
+
 =back
 
-Not everything comes apart. The virtual maps, the transport map and the
-recipient access table are still one file per guest written by whichever domain
-provisioned last, and C<myhostname> and the TLS certificate can only have one
-value because postfix has one of each. Those are visible disagreements now --
-C<configd status postfix> lists the fragments and who wrote them -- rather than
-a silent overwrite.
+=head3 Address classes, and the access table that is gone
+
+The alias names C<www.> and C<mail.> used to be in both C<mydestination> and
+C<virtual_mailbox_domains>, which postfix's C<VIRTUAL_README> says never to do:
+"NEVER list a virtual MAILBOX domain name as a mydestination domain!"  A domain
+in two address classes has no defined answer to which recipients are valid
+there, and a C<check_recipient_access> pcre table existed to paper over it --
+one file, per-domain content, ending in a catch-all reject, so the second domain
+provisioned took the first one's inbound mail with it.
+
+The overlap is gone and so is the table. C<virtual_mailbox_domains> is the
+domain itself, C<mydestination> is C<$myhostname> and C<localhost>, and postfix
+makes the check by itself: a recipient absent from C<virtual_mailbox_maps> is
+rejected with "User unknown in virtual mailbox table".
+
+=head3 Who may send as whom
+
+C<smtpd_sender_login_maps> names this domain's C<sender_login> table and
+C<reject_authenticated_sender_login_mismatch> enforces it, placed ahead of
+C<permit_sasl_authenticated> because a restriction list stops at the first
+permit. One authenticated user can therefore no longer send as another.
+
+The consequence to know about: an authenticated client whose C<MAIL FROM> is
+B<absent> from that table is refused too, because an address with no owner is
+owned by nobody. The table is generated from the accounts and the mail aliases
+together for exactly that reason, and an address a user really sends from that
+neither mentions is mail that stops going out. Unauthenticated senders are not
+checked against it -- deciding what to believe about those is DMARC's job.
+
+=head3 What still cannot come apart
+
+C<myhostname> and the TLS certificate can only have one value, because postfix
+has one of each, and C</etc/aliases> is likewise one file; the last domain
+provisioned wins all three. Those are visible disagreements now -- C<configd
+status postfix> lists the fragments and who wrote them -- rather than a silent
+overwrite.
 
 =cut
 
@@ -184,7 +222,7 @@ sub template_files {
         'mail.virtual_aliases.tt'        => 'virtual_aliases',
         'mail.transport_maps.tt'         => 'transport_maps',
         'mail.sdd_relay_maps.tt'         => 'sdd_relay_maps',
-        'mail.recipient_access_pcre.tt'  => 'recipient_access_pcre',
+        'mail.sender_login.tt'           => 'sender_login',
         'mail.dovecot.tt'                => 'dovecot.conf',
         'mail.dovecot.domain.tt'         => 'dovecot.domain.conf',
         'mail.passwd.tt'                 => 'mailpasswd',
@@ -203,6 +241,35 @@ sub template_files {
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',
         'mail.cron.tt'                   => 'mailcron',
     );
+}
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    # Every address an authenticated user of this domain may put in MAIL FROM,
+    # and which login owns it.  smtpd_sender_login_maps rejects an authenticated
+    # sender whose address is not in here at all, so an address a user really
+    # sends from and that this misses is mail that stops going out -- which is
+    # why it is built from the same two things the accounts and the aliases are.
+    #
+    # The SASL login name is the full address, because that is what the dovecot
+    # passwd file this pairs with is keyed on.
+    my @logins = map { { address => "$_\@$opts{domain}", owner => "$_\@$opts{domain}" } }
+      sort keys %{ $opts{names} // {} };
+
+    # An alias is owned by whoever it delivers to.  `to` is written as a local
+    # part most of the time and as a full address when it leaves the domain, and
+    # appending the domain to one of those gives an owner nobody can ever be.
+    push @logins, map {
+        {
+            address => "$_->{from}\@$opts{domain}",
+            owner   => Provisioner::Utils::qualify_address( $_->{to}, $opts{domain} ),
+        }
+    } @{ $opts{mail_aliases} // [] };
+
+    $opts{sender_logins} = \@logins;
+
+    return %opts;
 }
 
 sub formatters {

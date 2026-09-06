@@ -15,12 +15,30 @@
 mydomain = [% domain %]
 myhostname = mail.[% domain %]
 myorigin = $mydomain
-mydestination = [% FOREACH alias IN full_aliases.sort() %][% alias %], [% END %]
 masquerade_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
-virtual_mailbox_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
 
-# Header checks
-header_checks = regexp:/etc/postfix/header_checks/[% domain %]
+# Only the domain itself, and nothing added to mydestination.
+#
+# www. and mail. used to be in both mydestination and virtual_mailbox_domains,
+# which postfix's own VIRTUAL_README says never to do: "NEVER list a virtual
+# MAILBOX domain name as a mydestination domain!"  A domain in two address
+# classes has no defined answer to "who are the valid recipients here", and the
+# check_recipient_access table that used to be in smtpd_recipient_restrictions
+# existed to paper over it -- at the cost of being one file two domains fought
+# over.  With the overlap gone postfix rejects mail to an alias name by itself,
+# and mail for a name this guest does not host never reaches the question.
+virtual_mailbox_domains = [% domain %]
+
+# This domain's lookup tables.  Each of these parameters is a list postfix
+# searches in order and configd joins across fragments, so every domain names
+# its own file and none of them overwrite each other -- which is what the shared
+# /etc/postfix/virtual/maps used to do every time a second domain was built.
+virtual_mailbox_maps = hash:/etc/postfix/domains/[% domain %]/virtual_maps
+virtual_alias_maps = hash:/etc/postfix/domains/[% domain %]/virtual_aliases
+transport_maps = hash:/etc/postfix/domains/[% domain %]/transport_maps
+sender_dependent_relayhost_maps = hash:/etc/postfix/domains/[% domain %]/sdd_relay_maps
+smtpd_sender_login_maps = hash:/etc/postfix/domains/[% domain %]/sender_login
+header_checks = regexp:/etc/postfix/domains/[% domain %]/header_checks
 
 # Sometimes when you are behind NAT this can trip you up -- not all routers are
 # created equal.  Generally you will want to set this on if in a DC.  That's

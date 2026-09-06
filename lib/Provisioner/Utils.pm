@@ -11,6 +11,8 @@ use re '/aa';
 use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
+use Data::Validate::Email();
+
 # Named as strings in the dispatch table below, never as code, so nothing static
 # can see that loading them is the whole point.
 ## no critic (ProhibitUnusedImports)
@@ -65,6 +67,29 @@ sub lastuniq {
         push( @out, $input[$idx] );
     }
     return @out;
+}
+
+=head3 qualify_address($value, $domain)
+
+A local part becomes an address in C<$domain>; an address is left exactly as it
+stands.
+
+Two recipes need this and it is easy to get wrong in the direction that only
+shows up in a mail log: appending the domain to something that is already an
+address gives C<somebody@example.com@this.domain>, which postfix and cron both
+accept and neither delivers.
+
+Returns STRING, or C<$value> unchanged when there is nothing to qualify it with.
+
+=cut
+
+sub qualify_address {
+    my ( $value, $domain ) = @_;
+
+    return $value unless defined $value && length $value;
+    return $value if Data::Validate::Email::is_email($value);
+    return $value unless defined $domain && length $domain;
+    return "$value\@$domain";
 }
 
 =head3 ssh_pubkey_from_private($path)

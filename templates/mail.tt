@@ -56,39 +56,28 @@ mv aliases /etc/aliases
 chown root:root /etc/aliases
 chown root:root /etc/aliases.db
 newaliases
-mkdir -p /etc/postfix/header_checks
-mkdir -p /etc/postfix/virtual
-chmod 0755 /etc/postfix/virtual
-chmod 0755 /etc/postfix/header_checks
-# header shenanigans
-mv header_checks /etc/postfix/header_checks/[% domain %]
-chown -R root:root /etc/postfix/header_checks
-chown root:root /etc/postfix/virtual
-# user maps
-mv virtual_maps    /etc/postfix/virtual/maps
-chown root:root /etc/postfix/virtual/maps
-postmap /etc/postfix/virtual/maps
-# aliases
-mv virtual_aliases /etc/postfix/virtual/aliases
-chown root:root /etc/postfix/virtual/aliases
-postmap /etc/postfix/virtual/aliases
-# Relay maps
-mv sdd_relay_maps /etc/postfix
-chown root:root /etc/postfix/sdd_relay_maps
-postmap /etc/postfix/sdd_relay_maps
-# who relays where
-mv transport_maps /etc/postfix/transport_maps
-chown root:root /etc/postfix/transport_maps
-postmap /etc/postfix/transport_maps
-# Recipient access checks
-mv recipient_access_pcre /etc/postfix/recipient_access_pcre
-chown root:root /etc/postfix/recipient_access_pcre
-# Fix perms
-chmod -R 0600 /etc/postfix/virtual
-chmod -R 0600 /etc/postfix/header_checks
-chmod 0600 /etc/postfix/sdd_relay_maps
-chmod 0600 /etc/postfix/recipient_access_pcre
-chmod 0600 /etc/postfix/transport_maps
+# This domain's lookup tables, in a directory of its own.
+#
+# Every one of these used to be a single file at a fixed path that each domain
+# overwrote in turn, so a guest hosting two domains delivered mail for whichever
+# one provisioned last and rejected the other's -- the same failure adopting
+# main.cf was meant to end, one level down.  main.cf names these per domain now
+# and postfix searches the list in order, so a second domain adds tables rather
+# than replacing them.
+install -d -m 0755 -o root -g root /etc/postfix/domains
+install -d -m 0755 -o root -g root /etc/postfix/domains/[% domain %]
+install -m 0600 -o root -g root virtual_maps    /etc/postfix/domains/[% domain %]/virtual_maps
+install -m 0600 -o root -g root virtual_aliases /etc/postfix/domains/[% domain %]/virtual_aliases
+install -m 0600 -o root -g root transport_maps  /etc/postfix/domains/[% domain %]/transport_maps
+install -m 0600 -o root -g root sdd_relay_maps  /etc/postfix/domains/[% domain %]/sdd_relay_maps
+install -m 0600 -o root -g root sender_login    /etc/postfix/domains/[% domain %]/sender_login
+install -m 0600 -o root -g root header_checks   /etc/postfix/domains/[% domain %]/header_checks
+# header_checks is regexp:, which postfix reads as text; the rest are hash:.
+postmap /etc/postfix/domains/[% domain %]/virtual_maps
+postmap /etc/postfix/domains/[% domain %]/virtual_aliases
+postmap /etc/postfix/domains/[% domain %]/transport_maps
+postmap /etc/postfix/domains/[% domain %]/sdd_relay_maps
+postmap /etc/postfix/domains/[% domain %]/sender_login
 # main.cf, as this domain's fragment rather than as a run of `postconf -e`.
 # postconf sets a parameter; it cannot add to one, so provisioning a second
 # domain onto this guest used to replace the first domain's mydestination and
@@ -97,9 +86,9 @@ chmod 0600 /etc/postfix/transport_maps
 # main.cf is 40-mail, written by the global fragment.
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d
 install -m 0644 -o root -g root main.cf.domain /etc/postfix/main.cf.d/50-[% domain %]
-# Fix any bad postmap perms
-chmod 0644 /etc/postfix/virtual/*.db
-chmod 0644 /etc/postfix/*.db
+# postmap makes the .db as restrictive as the source it read, and the daemons
+# that open these are not root.
+chmod 0644 /etc/postfix/domains/[% domain %]/*.db
 # Fix postfix's dumbass resolver copy grabbing a broken out of the box config (thank you systemd-resolved)
 [% script_dir %]/queue_postrun_task "cat /etc/resolv.conf > /var/spool/postfix/resolv.conf"
 [% script_dir %]/queue_postrun_task systemctl restart postfix

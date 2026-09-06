@@ -33,4 +33,50 @@ like($aliases, qr/^root:/m,  'root has an alias, so its mail goes somewhere');
 
 ok(-s '/etc/aliases.db', 'newaliases built the alias database');
 
+# The address classes, which is what a check_recipient_access table used to be
+# papering over.  postfix will not have a domain in two of them: local delivery
+# wins the tie, and mail for a virtual mailbox domain also listed in
+# mydestination stops reaching anybody's mailbox.  This guest's hostname is the
+# domain it hosts, so the package's own main.cf starts out with exactly that
+# overlap and the configuration has to take it back out again.
+my %local_domains = map { $_ => 1 } grep { length } split(m/[,\s]+/, `postconf -h mydestination 2>/dev/null` // '');
+my @virtual_domains = grep { length } split(m/[,\s]+/, `postconf -h virtual_mailbox_domains 2>/dev/null` // '');
+my @in_both = grep { $local_domains{$_} } @virtual_domains;
+is(scalar @in_both, 0, 'no domain is both a local and a virtual mailbox domain')
+    or diag "in both: @in_both";
+ok(scalar @virtual_domains, 'and there are virtual mailbox domains to have checked');
+
+# Every table main.cf names has to exist, or postfix logs an open failure and
+# the lookup quietly misses.  These are one per domain now, so there are several.
+foreach my $param (qw{virtual_mailbox_maps virtual_alias_maps smtpd_sender_login_maps}) {
+    my @tables = grep { length } split(m/[,\s]+/, `postconf -h $param 2>/dev/null` // '');
+    ok(scalar @tables, "$param names at least one table");
+    foreach my $table (@tables) {
+        my ($path) = $table =~ m{^[a-z]+:(/.*)$} or next;
+        ok(-f $path, "$param: $path is there");
+    }
+}
+
+# An authenticated user may only send as an address it owns, and the check has
+# to sit ahead of the permit that would otherwise end the list.
+my $sender_list = `postconf -h smtpd_sender_restrictions 2>/dev/null` // '';
+my @sender_order = grep { length } split(m/[,\s]+/, $sender_list);
+my ($mismatch) = grep { $sender_order[$_] eq 'reject_authenticated_sender_login_mismatch' } 0 .. $#sender_order;
+my ($sasl_permit) = grep { $sender_order[$_] eq 'permit_sasl_authenticated' } 0 .. $#sender_order;
+ok(defined $mismatch, 'authenticated senders are checked against smtpd_sender_login_maps') or diag $sender_list;
+ok(defined $sasl_permit && defined $mismatch && $mismatch < $sasl_permit,
+   'ahead of the permit that would otherwise end the list') or diag $sender_list;
+
+# And the map answers for this domain's accounts, since an address it misses is
+# one its owner can no longer send from.
+my $login_maps = `postconf -h smtpd_sender_login_maps 2>/dev/null` // '';
+chomp $login_maps;
+[% FOR name IN names.keys().sort() %]
+SKIP: {
+    skip 'no sender login map', 1 unless $login_maps;
+    my $owner = `postmap -q '[% name %]\@[% domain %]' $login_maps 2>&1`;
+    chomp $owner;
+    is($owner, '[% name %]@[% domain %]', '[% name %]@[% domain %] owns its own address') or diag $owner;
+}
+[% END %]
 done_testing();

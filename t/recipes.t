@@ -693,6 +693,14 @@ subtest 'mail writes fragments rather than editing the files' => sub {
     like( $out, qr{main\.cf\.d/50-\Q$G{domain}\E},        'main.cf gets a fragment named for the domain' );
     like( $out, qr{opendmarc\.conf\.d/50-\Q$G{domain}\E}, 'and so does opendmarc.conf' );
 
+    # Every one of these was a single file at a fixed path that the next domain
+    # overwrote, taking the previous one's mail with it.
+    foreach my $table (qw{virtual_maps virtual_aliases transport_maps sdd_relay_maps sender_login header_checks}) {
+        like( $out, qr{/etc/postfix/domains/\Q$G{domain}\E/$table\b}, "$table is this domain's own file" );
+    }
+    unlike( $out, qr{/etc/postfix/virtual/maps\b}, 'nothing writes the shared virtual map any more' );
+    unlike( $out, qr{recipient_access_pcre},       'and the recipient access table is gone entirely' );
+
     # Overwriting a file configd generates works until the next restart, and
     # then silently does not.
     unlike( $out, qr{mv \S* /etc/opendkim\.conf},  'nothing overwrites /etc/opendkim.conf' );
@@ -739,6 +747,65 @@ subtest 'redis writes a fragment and keeps the packaged config underneath' => su
     my $off = 'Provisioner::Recipe::redis'->new(%PROV)->render_file( 'files/redis.conf.tt', %G, save => 0 );
     like( $off, qr/^save ""$/m, 'save: 0 clears every snapshot point named before it' );
     unlike( $off, qr/^save \d/m, 'and names none of its own' );
+};
+
+subtest 'the address classes do not overlap' => sub {
+    my $r = 'Provisioner::Recipe::mail'->new(%PROV);
+
+    # postfix's VIRTUAL_README: "NEVER list a virtual MAILBOX domain name as a
+    # mydestination domain!"  www. and mail. were in both, which is what the
+    # check_recipient_access table existed to paper over.
+    my $domain = $r->render_file( 'files/mail.postfix.main.tt',        %G );
+    my $guest  = $r->render_file( 'files/mail.postfix.main.global.tt', %G );
+
+    is( ( $domain =~ m/^virtual_mailbox_domains = (.*)$/m )[0], $G{domain}, 'the domain is a virtual mailbox domain' );
+    unlike( $domain, qr/^mydestination/m, 'and the per-domain half adds nothing to mydestination' );
+
+    # The guest's hostname is the domain it hosts, so the postfix package's own
+    # main.cf names that domain in mydestination and accumulation can only add
+    # to it.  Without the reset, local delivery wins the tie and the domain's
+    # mail stops reaching anybody's mailbox.
+    like( $guest, qr/^mydestination =$/m,                         'the guest-wide half resets mydestination' );
+    like( $guest, qr/^mydestination = \$myhostname, localhost$/m, 'before naming what is actually local' );
+
+    # The check it used to make, postfix makes by itself.
+    unlike( $guest, qr/^[^#]*check_recipient_access/m, 'no recipient access table in the restriction list' );
+};
+
+subtest 'an authenticated sender must own the address' => sub {
+    my $r     = 'Provisioner::Recipe::mail'->new(%PROV);
+    my $guest = $r->render_file( 'files/mail.postfix.main.global.tt', %G );
+
+    my ($senders) = $guest =~ m/^smtpd_sender_restrictions = (.*)$/m;
+    ok( $senders, 'there is a sender restriction list' ) or return;
+
+    # A restriction list stops at the first permit, so behind
+    # permit_sasl_authenticated the check would never run and one user could
+    # send as another.
+    my @order    = split( m/,\s*/, $senders );
+    my ($check)  = grep { $order[$_] eq 'reject_authenticated_sender_login_mismatch' } 0 .. $#order;
+    my ($permit) = grep { $order[$_] eq 'permit_sasl_authenticated' } 0 .. $#order;
+    ok( defined $check,                      'which enforces sender ownership' );
+    ok( defined $permit && $check < $permit, 'ahead of the permit that would otherwise end the list' );
+};
+
+subtest 'the sender login map covers every address a user sends from' => sub {
+
+    # An address absent from it has no owner, and an authenticated client using
+    # one is refused -- so a user this misses is mail that stops going out.
+    my $r   = 'Provisioner::Recipe::mail'->new(%PROV);
+    my $map = $r->render_file(
+        'files/mail.sender_login.tt', %G,
+        names        => { me => { gecos => 'Me', password => 'x' } },
+        mail_aliases => [ { from => 'sales', to => 'me' }, { from => 'help', to => 'someone@elsewhere.test' } ],
+    );
+
+    like( $map, qr/^me\@\Q$G{domain}\E me\@\Q$G{domain}\E$/m,    'an account owns its own address' );
+    like( $map, qr/^sales\@\Q$G{domain}\E me\@\Q$G{domain}\E$/m, 'an alias is owned by who it delivers to' );
+
+    # Appending the domain to an address that already has one gives an owner
+    # nobody can ever log in as.
+    like( $map, qr/^help\@\Q$G{domain}\E someone\@elsewhere\.test$/m, 'and an alias out of the domain keeps its address' );
 };
 
 Test::NoWarnings::had_no_warnings();

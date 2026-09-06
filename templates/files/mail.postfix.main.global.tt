@@ -17,9 +17,17 @@
 [% UNLESS ipv6 %]
 inet_protocols = ipv4
 [% END %]
-# What is always local, whatever domains this guest ends up hosting.  Each
-# domain's fragment adds its own names to this rather than restating these two,
-# because configd joins the list and restating them puts them in three times.
+# What is always local, whatever domains this guest ends up hosting -- and
+# nothing else, which is what the empty line above it is for.
+#
+# The guest's hostname is the domain it hosts (bin/provision sets local-hostname
+# to it), so the postfix package's own main.cf puts that domain in mydestination.
+# It has to be a virtual mailbox domain instead: postfix refuses to have a domain
+# in both address classes, local delivery wins the tie, and mail for the domain
+# stops being delivered to anybody's mailbox.  An empty value resets what
+# 00-original had rather than adding to it -- accumulation can otherwise only
+# grow a parameter, and this one arrives wrong rather than short.
+mydestination =
 mydestination = $myhostname, localhost
 
 # Allow ez-tracing
@@ -28,18 +36,19 @@ debugger_command = PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $process_id 
 # vmailboxen.  %DOVECOT_UID% is filled in by the makefile fragment, because the
 # account only exists on the guest.  The group gets the same value, which is
 # what the mail passwd file this pairs with uses too.
+#
+# The tables themselves are named per domain, not here: postfix searches a list
+# of lookup tables in order, and configd joins the parameters that name them, so
+# each domain owns its own file under /etc/postfix/domains/<domain>/ and nobody
+# overwrites anybody.
 virtual_mailbox_base = /mail
-virtual_mailbox_maps = hash:/etc/postfix/virtual/maps
-virtual_alias_maps = hash:/etc/postfix/virtual/aliases
 virtual_uid_maps = static:%DOVECOT_UID%
 virtual_gid_maps = static:%DOVECOT_UID%
 
-# We are not a relay
+# We are not a relay.  Reset first for the same reason: the package names the
+# same three, and joined onto them this reads as six.
+mynetworks =
 mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
-
-# In case we use a relay
-sender_dependent_relayhost_maps = hash:/etc/postfix/sdd_relay_maps
-transport_maps = hash:/etc/postfix/transport_maps
 
 # Prevent SMTP smuggling
 smtpd_forbid_bare_newline = normalize
@@ -57,12 +66,21 @@ smtpd_data_restrictions = reject_unauth_pipelining, permit
 # Reject bad HELO
 smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname, permit
 # Don't accept mail that is FROM obviously bogus addrs when incoming.
-smtpd_sender_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
+#
+# reject_authenticated_sender_login_mismatch is ahead of permit_sasl_authenticated
+# on purpose: a restriction list stops at the first permit, so behind it the
+# check would never run and one authenticated user could send as another.  It
+# fires only for clients that authenticated -- an unauthenticated sender on port
+# 25 is claiming to be anybody and that is DMARC's problem, not this list's.
+smtpd_sender_restrictions = permit_mynetworks, reject_authenticated_sender_login_mismatch, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
 # Don't accept mail which is TO things that are either bogus or not on here when incoming.
-smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, check_recipient_access pcre:/etc/postfix/recipient_access_pcre, permit
-
-# Tell SASL what accounts are on the server.
-smtpd_sender_login_maps = hash:/etc/postfix/virtual/maps
+# No check_recipient_access table here any more.  It held a per-domain DUNNO and
+# a catch-all 550, which meant the second domain provisioned onto a guest
+# overwrote the first one's and took its inbound mail with it.  It was only ever
+# needed because the alias domains were in two address classes at once; with
+# that fixed postfix makes the same check itself, rejecting a recipient absent
+# from virtual_mailbox_maps with "User unknown in virtual mailbox table".
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, permit
 
 # milters, ldas etc
 mailbox_transport = lmtp:unix:private/dovecot-lmtp
