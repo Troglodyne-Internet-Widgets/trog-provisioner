@@ -14,3 +14,11 @@ sysctl -p /etc/sysctl.d/60-io_uring.conf
 # recipe, and this one sorts ahead of most of them.
 [% script_dir %]/queue_postrun_task "id -u '[% account %]' >/dev/null 2>&1 && usermod -aG '[% group %]' '[% account %]' || echo 'iouring: no account [% account %] to put in [% group %]'"
 [% END -%]
+[% FOR unit IN restart_units -%]
+# And then restart it, because a process reads its groups when it starts and
+# not again.  [% unit %] was started by its own recipe during the makefile, so
+# without this it runs its whole first life outside the group it was just put
+# in -- and at mode 1 that is the difference between using io_uring and being
+# refused it.  try-restart, so a unit that is not running stays that way.
+[% script_dir %]/queue_postrun_task systemctl try-restart '[% unit %]'
+[% END -%]

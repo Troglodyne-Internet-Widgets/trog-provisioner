@@ -108,6 +108,17 @@ Membership is applied after the makefile rather than during it, because the
 accounts belong to other recipes and this one sorts ahead of most of them:
 C<mariadb> creates C<mysql> in its own target, which has not run yet.
 
+And then the service is restarted, because a process reads its supplementary
+groups when it starts and not again. C<mariadb> is started by its own recipe
+during the makefile, so C<usermod> alone would leave it running its whole first
+life outside the group it had just been put into -- correct only from the next
+reboot, and wrong in a way nothing announces. C<try-restart>, so a unit that was
+not running stays that way.
+
+That only covers the services named in the table below. An account added by hand
+through C<members> has no unit here to name, so restart it yourself if it was
+already up.
+
 =head3 A value that will not go down
 
 C<kernel.io_uring_disabled> is written to F</etc/sysctl.d/> B<and> applied with
@@ -150,8 +161,12 @@ than anything it asked for.
 # that never asked for it.  A recipe absent from this guest contributes nothing.
 # Nothing here actually uses io_uring on a stock guest yet -- see the POD, which
 # says what was measured and why mysql is listed anyway.
-my %SERVICE_USERS = (
-    mariadb => ['mysql'],
+#
+# The units matter as much as the accounts.  A group is read at process start,
+# so a service already running when its account joins the group is a service
+# still outside it, and this recipe runs before the ones that start these.
+my %SERVICES = (
+    mariadb => { users => ['mysql'], units => ['mariadb'] },
 );
 
 sub args {
@@ -174,13 +189,20 @@ sub enrich {
 
     my @modules = @{ $opts{modules} // [] };
     my @members = @{ $opts{members} // [] };
+    my @units;
 
-    foreach my $recipe ( sort keys %SERVICE_USERS ) {
+    foreach my $recipe ( sort keys %SERVICES ) {
         next unless any { $_ eq $recipe } @modules;
-        push @members, @{ $SERVICE_USERS{$recipe} };
+        push @members, @{ $SERVICES{$recipe}{users} };
+        push @units,   @{ $SERVICES{$recipe}{units} };
     }
 
     $opts{members} = [ sort( uniq(@members) ) ];
+
+    # Only the units this recipe knows the accounts of.  An account named in
+    # `members` by hand has no unit here to name, which is why the POD says to
+    # restart it yourself.
+    $opts{restart_units} = [ sort( uniq(@units) ) ];
 
     return %opts;
 }

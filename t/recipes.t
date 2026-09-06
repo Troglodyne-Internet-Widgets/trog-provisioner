@@ -921,6 +921,10 @@ subtest 'iouring collects the accounts of the recipes actually present' => sub {
     # And what an operator wrote is kept alongside, deduplicated.
     my %opts = 'Provisioner::Recipe::iouring'->new(%PROV)->validate( %G, modules => ['mariadb'], members => [ 'mysql', 'someservice' ] );
     is_deeply( $opts{members}, [ 'mysql', 'someservice' ], 'named accounts join them, said once' );
+
+    # But only the recipes this one knows about contribute a unit to restart:
+    # an account named by hand has none here to name.
+    is_deeply( $opts{restart_units}, ['mariadb'], 'and only the known services get restarted' );
 };
 
 subtest 'iouring defers group membership past the makefile' => sub {
@@ -932,6 +936,17 @@ subtest 'iouring defers group membership past the makefile' => sub {
     # ahead of it.
     like( $out, qr/queue_postrun_task .*usermod -aG 'io_uring' 'mysql'/, 'and membership waits for the accounts to exist' );
     unlike( $out, qr/^usermod/m, 'rather than being attempted during the build' );
+
+    # A process reads its groups at start and not again, and mariadb was started
+    # by its own recipe during the makefile -- so without a restart it runs its
+    # whole first life outside the group it was just put in.
+    like( $out, qr/queue_postrun_task systemctl try-restart 'mariadb'/, 'and the service is restarted so it picks the group up' );
+
+    # In that order: postrun tasks run in the order they were queued, and a
+    # restart ahead of the usermod would restart it back out of the group.
+    my ($usermod) = $out =~ m/\A(.*?)usermod -aG/s;
+    my ($restart) = $out =~ m/\A(.*?)try-restart/s;
+    ok( length($usermod) < length($restart), 'with the membership queued first' );
 
     # A gid is only knowable on the guest, and the sysctl takes the number.
     like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );

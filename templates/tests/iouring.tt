@@ -50,6 +50,25 @@ SKIP: {
 ok(1, 'no service on this guest asked for io_uring');
 [% END %]
 
+# And that the services which were put in the group are actually running with
+# it.  A process reads its supplementary groups when it starts and not again, so
+# usermod alone leaves a service that was already up still outside -- which is
+# the whole reason the recipe queues a restart behind the usermod.  Asking the
+# running process is the only thing that tells them apart.
+[% FOR unit IN restart_units %]
+SKIP: {
+    my $pid = `systemctl show -p MainPID --value '[% unit %]' 2>/dev/null`;
+    chomp $pid;
+    skip '[% unit %] is not running', 1 unless $pid && $pid =~ m/^\d+$/ && $pid > 0;
+
+    my $status = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
+    my ($groups) = $status =~ m/^Groups:\s*(.*)$/m;
+    my %has = map { $_ => 1 } split ' ', ($groups // '');
+    ok($has{$gid}, '[% unit %] is running with the group, not merely listed in it')
+        or diag "pid $pid has groups: " . ($groups // '(none)') . ", wanted $gid";
+}
+[% END %]
+
 # The guest's own disks, which is the other half of the issue: qemu was asked
 # for the io_uring block backend rather than its default thread pool.  Visible
 # from in here because virtio-blk reports the host's queue setup.
