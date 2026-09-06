@@ -976,20 +976,44 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     # cannot use io_uring however the guest is configured.  The repository
     # builds are Debian's and depend on liburing2.
     like( $out, qr{install_mariadb\.sh "11\.4\.4"}, 'the installer gets the version it was given' );
-    unlike( $out, qr{/opt/mysql}, 'and nothing hand-rolls a layout under /opt any more' );
+    unlike( $out, qr{/opt/mysql}, 'and nothing hand-rolls a layout under /opt' );
 
-    # A drop-in the packaged server already reads, rather than a my.cnf of ours
-    # replacing the distribution's.
-    like( $out, qr{/etc/mysql/mariadb\.conf\.d/60-provisioner\.cnf}, 'our config goes in as a drop-in' );
-
-    # root_pw ends up in a file on the guest, so it must not be world-readable.
-    like( $out, qr{install -m 0600 [^\n]*secure_installation\.sql}, 'the secure-installation sql is 0600' );
-    like( $out, qr{rm -f secure_installation\.sql},                 'and is removed either way' );
+    # The fragment asks for the install; how to do it is the script's.  It used
+    # to spell out the secure-installation dance here, which put the file
+    # holding root_pw in /etc/mysql and left it there when the SQL failed.
+    like(
+        $out, qr{install_mariadb\.sh "[^"]+" "mariadb-provisioner\.cnf" "secure_installation\.sql"},
+        'the config and the secure-installation sql are handed to it'
+    );
+    unlike( $out, qr{mariadb <},            'the fragment runs no SQL of its own' );
+    unlike( $out, qr{/etc/mysql/\.secured}, 'nor keeps the marker for it' );
 
     # Asking for the mariadb packages up front would have cloud-init install
     # Ubuntu's before the makefile runs, only for the pin to downgrade them.
     my @deps = $r->deps();
-    is_deeply( [ grep { m/maria/ } @deps ], [], 'the mariadb packages are not cloud-init deps' );
+    is_deeply( [ grep { index( $_, 'maria' ) >= 0 } @deps ], [], 'the mariadb packages are not cloud-init deps' );
+};
+
+subtest 'the installer configures the server before anything uses it' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/install_mariadb.sh");
+
+    # Order is the whole of it.  The drop-in carries sql_mode and log_bin, so a
+    # schema loaded before it is applied is a schema loaded under the package's
+    # defaults and absent from the binlog the pinning exists to protect.
+    my $config = index( $script, '/etc/mysql/mariadb.conf.d/60-provisioner.cnf' );
+    my $secure = index( $script, 'mariadb < "$SECURE_SQL"' );
+    my $schema = index( $script, 'mariadb < "$SCHEMA"' );
+
+    ok( $config > 0 && $secure > 0 && $schema > 0, 'it does all three' );
+    ok( $config < $secure,                         'the configuration is in place before the server is secured' );
+    ok( $secure < $schema,                         'and the schema loads last' );
+
+    # The password is in that file, so it does not survive the SQL failing.
+    # Including on the run that skips securing, since the file holds root_pw
+    # whether or not anything reads it.
+    my ($trap) = $script =~ m/\A(.*?)trap 'rm -f "\$SECURE_SQL"' EXIT/s;
+    ok( defined $trap,                            'the secure-installation sql is removed on the way out' );
+    ok( defined $trap && length($trap) < $secure, 'from before the run that would use it, not inside it' );
 };
 
 subtest 'install_mariadb.sh keeps the version it was handed' => sub {

@@ -25,29 +25,28 @@ use parent qw{Provisioner::Recipe};
 Set up the specified mariadb version and install the provided dump.
 Secures the DB and sets the root pw as specified.
 
-=head3 Where it comes from, and why not the bintar
+=head3 What C<root_pw> is for
 
-From MariaDB's own apt repository for that exact release --
-C<archive.mariadb.org/mariadb-E<lt>versionE<gt>/repo/ubuntu> -- pinned above
-1000 so apt will downgrade to it where Ubuntu ships something newer.
+Not remote access: the drop-in sets C<skip_networking>, so the server listens on
+nothing but its socket. Root is C<unix_socket OR mysql_native_password>, so the
+password is how something authenticates as root over that socket B<without being
+root on the box> -- an application, or an operator who has a shell as somebody
+else. Being root on the guest needs no password at all, which is what the backup
+cron and everything else here relies on.
 
-It used to be the generic Linux bintar from the same archive, which pins just as
-exactly and costs something that is not obvious from reading it: that tarball is
-built against libaio, so InnoDB cannot use io_uring however the guest is
-configured. Measured on a guest -- no C<liburing> in C<mariadbd>'s C<NEEDED>, no
-io_uring descriptors while running. It is also why the installer used to symlink
-C<libaio.so.1t64> to C<libaio.so.1>, a soname noble renamed in the 64-bit
-C<time_t> transition and the bintar still asks for.
+=head3 Where it comes from
 
-The repository builds are Debian's, so C<mariadb-server-core> there depends on
-C<liburing2>, and the packaging brings its own datadir, unit and socket rather
-than this recipe hand-rolling a layout under F</opt>.
+MariaDB's own apt repository for that exact release,
+C<archive.mariadb.org/mariadb-E<lt>versionE<gt>/repo/ubuntu>, pinned above 1000
+so apt will downgrade to it where Ubuntu ships something newer. The datadir,
+unit and socket are the package's; this recipe adds a drop-in under
+F</etc/mysql/mariadb.conf.d> and nothing else.
 
-B<The constraint that comes with it>: a per-release repository exists only for
-distributions that existed when that release was made. C<11.4.4> and C<10.11.10>
-have C<noble>; C<10.11.7> and older do not. C<install_mariadb.sh> checks before
-it commits and fails naming the distributions that release does have, rather
-than letting C<apt-get update> 404 three steps later.
+B<A release only has a repository for the distributions that existed when it was
+made.> C<11.4.4> and C<10.11.10> have C<noble>; C<10.11.7> and older do not, and
+asking for one of those on a noble guest fails the build naming what that
+release does have. There is no fallback: an approximate version would restore no
+binlogs, which is what the pinning is for.
 
 =cut
 
@@ -55,10 +54,10 @@ sub deps {
     my ($self) = @_;
     if ( $self->{target_packager} eq 'deb' ) {
 
-        # Not the mariadb packages: cloud-init installs these before the
-        # makefile runs, so asking for them here gets Ubuntu's version
-        # installed and then downgraded.  install_mariadb.sh takes the whole
-        # set from the pinned repository in one go.  pigz is the backup
+        # The mariadb packages are deliberately absent: cloud-init installs
+        # deps before the makefile runs, so naming them here would install
+        # Ubuntu's and leave the pin to downgrade them.  install_mariadb.sh
+        # takes the set from the pinned repository instead.  pigz is the backup
         # script's.
         return qw{pigz};
     }
@@ -74,15 +73,9 @@ sub args {
             dumpfile => { type => 'string' },
 
             # TODO fetch latest mariadb version by default
-            # A full release, not a series: archive.mariadb.org publishes a
-            # bintar per release, so "10.11" is a 404 that only shows up as tar
-            # refusing the error page curl saved in its place.
+            # A full release, not a series: the repository is published per
+            # release, so "10.11" names nothing.
             version => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+$' },
-
-            # No `user` here any more.  It existed to name the group
-            # /opt/mysql was chowned to so the admin could read the datadir;
-            # the packaged datadir is 0700 mysql:mysql, which is right, and
-            # anybody who needs the database has sudo and the socket.
         },
     );
 }
@@ -103,7 +96,7 @@ sub template_files {
 
     return (
         'mysql.secure_installation.tt' => 'secure_installation.sql',
-        'my.cnf.tt'                    => 'mariadb-provisioner.cnf',
+        'mariadb.provisioner.cnf.tt'   => 'mariadb-provisioner.cnf',
         'mariadb.backup.sh.tt'         => 'mariadb-backup.sh',
         'mariadb.backup.cron.tt'       => 'mariadb-backup.cron',
     );

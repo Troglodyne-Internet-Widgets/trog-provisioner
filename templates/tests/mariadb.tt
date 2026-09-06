@@ -33,6 +33,13 @@ chomp $binlog;
 is($binlog, '1', 'and the server read it: binlogs are on, which the pinning exists for')
     or diag "log_bin=$binlog";
 
+# The drop-in has to be in place before the schema loads, or the dump goes in
+# under the package's sql_mode and outside the binlog.  Asking the running
+# server proves the first half; that the recipe orders it that way is t/recipes.t's.
+my $sqlmode = `mariadb -sN -e "SELECT \@\@sql_mode" 2>/dev/null`;
+like($sqlmode, qr/NO_ENGINE_SUBSTITUTION/, 'and the sql_mode the dump loaded under is ours')
+    or diag "sql_mode=$sqlmode";
+
 # root over the socket, which is how everything here connects and what the
 # secure-installation SQL was careful to keep.
 my $whoami = `mariadb -sN -e "SELECT CURRENT_USER()" 2>/dev/null`;

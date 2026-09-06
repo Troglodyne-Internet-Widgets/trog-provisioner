@@ -5,11 +5,8 @@
 set -euo pipefail
 
 # No --defaults-file: this runs as root out of cron, and root authenticates over
-# the unix socket.  It used to name /opt/mysql/my.cnf, which was the bintar
-# layout and the [client] password in it; the packaged server has neither.
-#
-# The mariadb-* names rather than the mysql-* ones, which are compatibility
-# symlinks from a package this recipe does not install.
+# the unix socket.  The mariadb-* names rather than the mysql-* ones, which are
+# compatibility symlinks from a package this recipe does not install.
 MYSQL="mariadb"
 MYSQLDUMP="mariadb-dump --single-transaction=true --lock-tables=false"
 DUMP_BASE=/var/backups/mysql
