@@ -98,6 +98,13 @@ the normal case rather than a mistake.
 The minimum Configd to accept. A guest that already has it does not go to CPAN
 at all, so this is also what makes re-provisioning cheap.
 
+=item source
+
+Where to get it, if not CPAN: anything C<cpanm> takes in place of a module name,
+so a tarball on the guest or a URL. For a build that has not been released yet,
+and for a guest with no route to CPAN. Whatever it installs is still held to
+C<version>, because a source is not asked what it is until it is unpacked.
+
 =back
 
 =cut
@@ -130,6 +137,12 @@ sub args {
             # every other domain's users when they send.  install_configd fails
             # the build rather than quietly installing an older one.
             version => { type => 'string', default => '0.002' },
+
+            # Anything cpanm takes in place of a module name: a tarball on the
+            # guest, or a URL.  For a build that is not on CPAN yet, and for a
+            # guest that cannot reach CPAN.  What it installs is still held to
+            # C<version>.
+            source => { type => 'string' },
         },
     );
 }

@@ -1,0 +1,67 @@
+#!/usr/bin/env perl
+
+package Trog::Skill::AskGuest;
+
+#ABSTRACT: Run a command on a guest that is still up, and print what it said.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Config::Simple();
+use Trog::Guest();
+use Trog::HV();
+use Trog::Hypervisors();
+
+=head1 NAME
+
+ask_guest - ask a live guest a question, rather than reasoning about it
+
+=head1 SYNOPSIS
+
+    ask_guest vm.test 'postconf -h mydestination'
+    ask_guest vm.test 'configd status postfix'
+
+=head1 DESCRIPTION
+
+C<collect_artifacts> fetches the four logs and then the guest is usually torn
+down.  This is for the part in between, where the guest is still up and the
+question is one only it can answer: what postfix made of its configuration, what
+is actually in a generated file, whether a port answers.
+
+Runs as root, because everything worth asking here is.
+
+=cut
+
+exit main(@ARGV) unless caller;
+
+sub main {
+    my ( $domain, @command ) = @_;
+    die "Usage: ask_guest DOMAIN COMMAND...\n" unless $domain && @command;
+
+    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $hv    = $fleet->configured ? $fleet->hosting($domain) : Trog::HV->new();
+    die "No hypervisor in the fleet has $domain.\n" unless $hv;
+
+    my $cfg_dir = $hv->domain_dir . "/$domain";
+    my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
+    my $user    = $config ? ( $config->param('admin_user') // 'root' ) : 'root';
+    my $host    = $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) )
+      or die "Could not find a lease for $domain, so there is nothing to ask.\n";
+
+    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => "$cfg_dir/key.rsa" );
+
+    # Quoted the same way collect_artifacts does, so a command containing an
+    # awk program does not close the quoting early and get answered with a
+    # syntax error.
+    ( my $quoted = join( q{ }, @command ) ) =~ s/'/'\\''/g;
+    print $guest->capture("sudo sh -c '$quoted'") // q{};
+
+    return 0;
+}
+
+1;

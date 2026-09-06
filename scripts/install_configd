@@ -8,10 +8,16 @@
 # distribution's perl is enough -- and there are three separate ways to end up
 # installing into the wrong one, so each of them is closed below.
 #
-# Usage: install_configd [minimum-version]
+# Usage: install_configd [minimum-version] [source]
+#
+# A source is anything cpanm takes in place of a module name -- a tarball on the
+# guest, or a URL.  It is for a build that is not on CPAN yet, and for a guest
+# that cannot reach CPAN at all.  The version check still runs against what ends
+# up installed, so a stale tarball fails here rather than three recipes later.
 set -eu
 
 WANTED=${1:-0.001}
+SOURCE=${2:-}
 
 PERL=/usr/bin/perl
 CPANM=/usr/bin/cpanm
@@ -33,7 +39,19 @@ else
     # Two: the shebang on cpanm, and the cpanm the perl recipe leaves on root's
     # PATH pointing into /opt/perl5.  Whichever perl cpanm runs under is the one
     # it installs for, so name both.
-    "$PERL" "$CPANM" --notest "Configd~>=$WANTED"
+    if [ -n "$SOURCE" ]; then
+        echo "install_configd: installing Configd from $SOURCE"
+        "$PERL" "$CPANM" --notest "$SOURCE"
+    else
+        "$PERL" "$CPANM" --notest "Configd~>=$WANTED"
+    fi
+
+    # A source is not asked for a version before it is unpacked, so ask what it
+    # turned out to be.  Installing something older than the recipes need is how
+    # a guest ends up with one domain's sender login map and every other
+    # domain's users refused.
+    "$PERL" -e "require Configd; Configd->VERSION(q{$WANTED})" \
+      || { echo "install_configd: what got installed is older than $WANTED" >&2; exit 1; }
 fi
 
 SCRIPT="$("$PERL" -MConfig -e 'print $Config{installsitescript} || $Config{installsitebin}')/configd"

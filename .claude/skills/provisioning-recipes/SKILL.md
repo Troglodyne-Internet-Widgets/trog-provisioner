@@ -120,6 +120,26 @@ or a failed fetch. A recipe that needs egress it was never given a hole for
 shows up there and nowhere else, and the symptom in its own log will look like
 an unrelated network problem.
 
+## Ask the guest, while you still have one
+
+```
+.claude/skills/provisioning-recipes/scripts/ask_guest "$DOMAIN" 'postconf -h mydestination'
+```
+
+Runs a command on the guest as root and prints what it said. `collect_artifacts`
+gets the four logs and then the guest is usually destroyed; this is for the part
+in between, where the question is one only a running service can answer. What
+postfix made of its configuration, what is actually in a generated file, whether
+a port answers -- `postconf -h`, `configd status`, `nginx -t`, `ss -lnt`. It is
+the same "ask nginx, do not reason about nginx" rule with somewhere to put it.
+
+**Batch the questions into one call.** Every invocation is a fresh SSH
+connection, and ufw's `OpenSSH LIMIT` rule rejects a source that opens six in
+thirty seconds -- so a run of small questions locks you out of the guest, and it
+looks exactly like the guest dying: `Connection refused` on 22 while every other
+port still answers. Wait it out, or put your workstation in `admin_networks`,
+which is what that setting is for.
+
 ## When the guest never comes up at all
 
 `collect_artifacts` needs a guest with a shell. A guest that never boots has no
