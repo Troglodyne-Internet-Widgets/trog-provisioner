@@ -31,6 +31,7 @@ use Archive::Tar();
 use File::Path   qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
+use Trog::Credentials();
 use Trog::Secrets();
 use File::Copy qw{copy};
 use Hash::Merge();
@@ -243,13 +244,19 @@ sub expand_dependent_domains {
 sub main {
     my @args = @_;
 
+    my $credentials;
     GetOptionsFromArray(
         \@args,
-        'ipmap=s'   => \$cfile,
-        'secrets=s' => \$sfile,
-        'recipes=s' => \$pfile,
-        'skip_ssh'  => \$skip_ssh,
+        'ipmap=s'     => \$cfile,
+        'secrets=s'   => \$sfile,
+        'recipes=s'   => \$pfile,
+        'skip_ssh'    => \$skip_ssh,
+        'credentials' => \$credentials,
     );
+
+    # The passphrase to the secrets database, for a run with no terminal to ask
+    # for it at.  Only when asked: see Trog::Credentials.
+    Trog::Credentials->load() if $credentials;
     $skip_ssh //= 0;
     $cfile    //= Trog::Config->path('ipmap.cfg');
     $sfile    //= Trog::Config->path('secrets.kdbx');
@@ -345,7 +352,7 @@ sub handle_domain {
     # A recipe carries a note saying where a password is, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
     if (%to_replace) {
-        my %secrets = Trog::Secrets->read( $sfile, Trog::Secrets->prompt, %to_replace );
+        my %secrets = Trog::Secrets->read( $sfile, Trog::Secrets->prompt( 'Enter password:', 'keepass' ), %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
     }

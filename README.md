@@ -8,6 +8,7 @@ Automatically build and host pretty much any website
 |---|---|
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | the files in `/etc/trog-provisioner`, and what a guest's recipes look like |
 | `perldoc Provisioner::Recipe` | writing a recipe: fragments, generated files, dependencies, tests |
+| `perldoc Trog::Credentials` | handing passwords to a run that has nobody to ask |
 | [docs/APPROACH.md](docs/APPROACH.md) | the choices a recipe is expected to make |
 | [docs/BACKUPS.md](docs/BACKUPS.md) | how state survives a guest being rebuilt |
 | [EXAMPLE.md](EXAMPLE.md) | a worked deployment, end to end |
@@ -319,6 +320,36 @@ A storage pool can get into a state nothing else will get it out of.  `bin/nuke_
 bin/nuke_pool
 bin/nuke_pool --connect qemu+ssh://root@hv1.example.net/system
 ```
+
+## RUNNING THIS WITHOUT A TERMINAL
+
+Two passwords get asked for: the passphrase to `secrets.kdbx`, and the sudo
+password on the hypervisor if the login there has not been given passwordless
+sudo.  Both are fine when a person is sitting in front of it and neither works at
+all when something else is driving -- tCMS's reprovision button, a cron, CI --
+because there is no terminal to ask at.  The run dies several minutes in, on a
+prompt nobody will ever see.
+
+So hand them in first, on standard input, with `--credentials`:
+
+    printf 'keepass: %s\nsudo: %s\n\n' "$PASSPHRASE" "$SUDO" \
+      | bin/provision --credentials vm.example.com
+
+One `name: value` per line, read until a blank line.  The flag is not optional
+sugar: nothing reads standard input unless you ask it to, because a caller that
+is not a terminal, meant to hand nothing over, and never closes its end would
+otherwise block here forever -- which is the same hang, moved earlier.
+
+A name you leave out is one you get asked for, so handing in the sudo password
+and typing the passphrase works, if somebody is there to type it.  The names are
+`keepass` and `sudo`, and one it does not know is an error rather than something
+to ignore -- a misspelled `keypass` that quietly meant "prompt for it" is exactly
+the hang this avoids.  See `perldoc Trog::Credentials`.
+
+Giving the login passwordless sudo on the hypervisor is still the better answer
+where you control it:
+
+    youruser ALL=(ALL) NOPASSWD: ALL
 
 ## TPMs
 

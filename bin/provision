@@ -15,6 +15,7 @@ use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Guest();
 use Trog::Config();
+use Trog::Credentials();
 use File::Basename();
 use File::Slurper();
 use IPC::Run3();
@@ -49,6 +50,12 @@ F<hypervisors.conf> entirely: no placement, no capacity check, build it there.
 A remote hypervisor has to be named with an ssh transport
 (C<qemu+ssh://user@host/system>), since we need its filesystem as well as its
 libvirt.
+
+=item B<--credentials>
+
+Read the passwords this run needs from standard input before anything starts,
+rather than asking for them.  For a run with no terminal to ask at: tCMS's
+reprovision button, a cron.  See L<Trog::Credentials> for the format.
 
 =item B<--no-config>
 
@@ -132,7 +139,7 @@ sub main {
     ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
-    my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap );
+    my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials );
     GetOptionsFromArray(
         \@args,
         'existing=s'  => \$reuse,
@@ -143,7 +150,12 @@ sub main {
         'no-config'   => \$no_config,
         'recipes=s'   => \$recipes,
         'ipmap=s'     => \$ipmap,
+        'credentials' => \$credentials,
     );
+
+    # Before anything that could want one, and only when asked: see
+    # Trog::Credentials, which will not read a handle nobody offered it.
+    Trog::Credentials->load() if $credentials;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )

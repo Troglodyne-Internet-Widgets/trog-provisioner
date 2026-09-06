@@ -13,6 +13,7 @@ use File::Slurper();
 use IPC::Run3();
 use File::Slurper::Temp();
 use Net::OpenSSH::More();
+use Trog::Credentials();
 use Trog::Secrets();
 
 =head1 NAME
@@ -193,6 +194,11 @@ failure rather than a wait on a terminal that will never appear.  If that is
 what happened, ask for the password once, remember it for the rest of the run,
 and carry on.
 
+When there is nobody to ask -- a run driven by tCMS's reprovision button, or a
+cron -- the password can be handed in before anything starts.  See
+L<Trog::Credentials>.  Without that, such a run fails here rather than hanging,
+which is the right way round but is still a run that did not happen.
+
 The password never travels with the data.  C<sudo -S> reads it from standard
 input, which is where C<put_file> and C<write_text> are already sending the
 file, and sudo reading ahead into the content is not a thing to leave to
@@ -234,10 +240,23 @@ sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
 sub _ask_for_sudo_password {
     my ($self) = @_;
 
-    die 'sudo on ' . $self->describe . " wants a password, and there is no terminal to ask at.\n" . 'Either run this where it can ask, or give ' . ( $self->ssh_user // 'the login user' ) . " passwordless sudo there:\n" . '    ' . ( $self->ssh_user // 'youruser' ) . " ALL=(ALL) NOPASSWD: ALL\n" . "in /etc/sudoers.d/, via visudo.\n"
+    # Handed to us up front, by whatever is driving a run that has nobody to ask.
+    # Asked for before the terminal test rather than after it, because the whole
+    # point is that there is no terminal.
+    return $self->_remember( Trog::Credentials->get('sudo') ) if Trog::Credentials->have('sudo');
+
+    die 'sudo on '
+      . $self->describe
+      . " wants a password, and there is no terminal to ask at.\n"
+      . 'Either run this where it can ask, give '
+      . ( $self->ssh_user // 'the login user' )
+      . " passwordless sudo there:\n" . '    '
+      . ( $self->ssh_user // 'youruser' )
+      . " ALL=(ALL) NOPASSWD: ALL\n"
+      . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n"
       unless $self->_have_terminal();
 
-    my $password = Trog::Secrets->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':' );
+    my $password = Trog::Secrets->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo' );
 
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 
