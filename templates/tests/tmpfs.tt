@@ -1,0 +1,60 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $unit = '/etc/systemd/system/tmp.mount';
+ok(-f $unit, 'tmp.mount is where systemd will look for it');
+
+# A unit systemd will not parse is a /tmp that quietly stays on the disk.
+my $verify = `systemd-analyze verify $unit 2>&1`;
+is($verify, '', 'systemd parses it without complaint') or diag $verify;
+
+my $enabled = `systemctl is-enabled tmp.mount 2>&1`;
+chomp $enabled;
+is($enabled, 'enabled', 'it is enabled, so it survives a reboot') or diag $enabled;
+
+# And mounted now, which is the thing the recipe actually promises.  Enabled and
+# not mounted is not a state a running system stays in -- the next restart of
+# anything re-pulls local-fs.target -- so the recipe mounts it itself and this
+# asserts it did.
+my $active = `systemctl is-active tmp.mount 2>&1`;
+chomp $active;
+is($active, 'active', 'and mounted now, not just on the next boot') or diag $active;
+
+my $fstype = `findmnt -no FSTYPE /tmp 2>/dev/null`;
+chomp $fstype;
+is($fstype, 'tmpfs', '/tmp is a tmpfs') or diag `findmnt /tmp 2>&1`;
+
+my $options = `findmnt -no OPTIONS /tmp 2>/dev/null`;
+chomp $options;
+foreach my $opt (qw{nosuid nodev}) {
+    like($options, qr/\b$opt\b/, "mounted $opt, which is most of why this is worth doing") or diag $options;
+}
+
+# /tmp has to stay world-writable and sticky or everything that uses it breaks.
+# The kernel does not report mode= in the options, so ask the directory.
+my $mode = (stat '/tmp')[2] & 07777;
+is(sprintf('%04o', $mode), '1777', 'and still world-writable and sticky') or diag sprintf('%04o', $mode);
+
+# The size it was actually given, which is the configurable part and the only
+# way to know the %% in the unit came back out as a single %.
+my $bytes = `findmnt -nb -o SIZE /tmp 2>/dev/null`;
+chomp $bytes;
+[% IF size.match('%') %]
+# A percentage is of MemTotal, so the guest's own memory says what to expect.
+my ($kb) = (do { local (@ARGV, $/) = '/proc/meminfo'; <> } // '') =~ m/^MemTotal:\s+(\d+) kB/m;
+my $want = $kb ? int($kb * 1024 * [% size.replace('%', '') %] / 100) : 0;
+ok($want && abs($bytes - $want) < $want * 0.02, 'sized at [% size %] of RAM')
+    or diag "got $bytes bytes, expected about $want";
+[% ELSE %]
+ok($bytes > 0, 'and has a size') or diag "got '$bytes'";
+[% END %]
+
+# The build unpacks into /var/tmp precisely so that mounting over /tmp cannot
+# take it away.  If that ever moves back, this is where it shows up.
+my $payload = `findmnt -no TARGET --target /var/tmp 2>/dev/null`;
+chomp $payload;
+isnt($payload, '/tmp', 'the build payload does not live on the filesystem we just covered over');
+
+done_testing();

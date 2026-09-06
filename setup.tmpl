@@ -18,16 +18,25 @@ User root
 EOF
 chmod 0600 /root/.ssh/config
 
-# Transfer over the data
-scp -P %PORT% -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /tmp
+# Transfer over the data.
+#
+# /var/tmp, not /tmp.  A recipe may put /tmp on a tmpfs while this is running --
+# that is what the tmpfs recipe does -- and mounting over /tmp would take the
+# payload and this script's own working directory with it: make carries on,
+# because its cwd is a directory it already holds open, but the tarball and the
+# build tree are then unreachable by path and the rm below silently removes
+# nothing.  /var/tmp is where the FHS puts a working directory that has to
+# outlive that sort of thing anyway.
+scp -P %PORT% -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /var/tmp
 
-cd /tmp
+cd /var/tmp
 mkdir domainsetup_%DOMAIN%
-tar -zxf data.tar.gz -C /tmp/domainsetup_%DOMAIN%
+tar -zxf data.tar.gz -C /var/tmp/domainsetup_%DOMAIN%
 
-cd /tmp/domainsetup_%DOMAIN%
+cd /var/tmp/domainsetup_%DOMAIN%
 
 # Run the makefile
 make 2>&1 | tee /var/log/%DOMAIN%.setup.log
 
-rm -rf /tmp/domainsetup_%DOMAIN%
+cd /
+rm -rf /var/tmp/domainsetup_%DOMAIN% /var/tmp/data.tar.gz

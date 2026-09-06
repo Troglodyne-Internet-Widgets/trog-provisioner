@@ -1,0 +1,16 @@
+# Debian and Ubuntu ship tmp.mount in /usr/share/systemd, which is how they ship
+# it turned off -- systemd cannot enable a unit it cannot see.  Ours goes where
+# systemd looks, which is also the only place its size can be set.
+install -m 0644 -o root -g root tmp.mount /etc/systemd/system/tmp.mount
+systemctl daemon-reload
+# --now, and here in the makefile rather than deferred to a postrun task.
+#
+# Enabling it without starting it is not a thing that stays true: tmp.mount is
+# WantedBy=local-fs.target, and the next `systemctl restart` of anything with
+# default dependencies re-pulls that target and mounts it.  On the guest this
+# was written against, nostubresolver restarting systemd-resolved did it, in the
+# middle of the postrun queue.  So the choice is not whether it mounts during
+# the build but whether we know when -- and doing it here, synchronously, means
+# every recipe after this one sees the same /tmp, and a mount that fails fails
+# the build instead of turning up later.
+systemctl enable --now tmp.mount
