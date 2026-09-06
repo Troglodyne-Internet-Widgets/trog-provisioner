@@ -2,6 +2,14 @@
 
 Use `perltidy` on your perl code when done editing, we have a .perltidyrc
 
+There is a git hook which does it for you on the way in.  Install it once:
+
+    cp git-hooks/pre-commit .git/hooks/
+
+Without it the tree drifts out of tidy, and then the first person to run
+perltidy on a file they were only changing three lines of gets a hundred line
+diff for their trouble -- which is how it drifted in the first place.
+
 ## Characters and UTF-8
 
 Never use any kind of character but ASCII in perl source files, nor in templates.
