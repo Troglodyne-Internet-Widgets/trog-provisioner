@@ -9,8 +9,15 @@ use warnings FATAL => 'all';
 use re '/aa';
 
 use Clone qw{clone};
+use Cwd();
 use File::Basename();
+use File::Find();
+use File::Slurper();
 use File::Temp();
+use Hash::Merge();
+use YAML::XS();
+
+use Trog::Config();
 
 =head1 NAME
 
@@ -313,6 +320,76 @@ sub placeholders_in {
     return ($path) if defined $config && !$ref && $config eq $class->PLACEHOLDER;
     return ();
 }
+
+=head2 configuration($path)
+
+The recipe configuration an installation is running on: F<recipes.yaml> with
+every F<recipes.d/*.yaml> beside it merged into it, keyed by domain.  C<$path>
+defaults to the F<recipes.yaml> in L<Trog::Config>'s directory, and an absent
+one is an empty configuration rather than an error.
+
+A domain's own file adds to what the main file says rather than overruling it:
+a key both of them carry keeps the value F<recipes.yaml> gave it.  C<_base> and
+C<_shared> are dropped from the per-domain files outright, since what every
+guest gets is not something one guest gets to say.
+
+Read once per file and remembered, on the grounds that nobody edits the
+configuration underneath a command that is already running on it.
+
+=cut
+
+# Keyed by resolved path: a run that reads two installations gets two answers,
+# and one that reads the same file twice does the work once.
+my %CONFIGURATION;
+
+sub configuration {
+    my ( $class, $path ) = @_;
+    $path //= Trog::Config->path('recipes.yaml');
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    return {} unless -f $path;
+
+    my $key = Cwd::abs_path($path);
+    return $CONFIGURATION{$key} if $CONFIGURATION{$key};
+
+    my $conf = YAML::XS::Load( File::Slurper::read_binary($path) );
+
+    # An explicit behaviour rather than the process-wide one: this answer should
+    # not depend on what else the caller has loaded.  STORAGE_PRECEDENT is what
+    # bin/new_config has always merged these with, and is why a domain file adds
+    # to recipes.yaml rather than overriding it.
+    my $merger = Hash::Merge->new('STORAGE_PRECEDENT');
+
+    my $extra = File::Basename::dirname($key) . '/recipes.d';
+    File::Find::find(
+        {
+            wanted => sub {
+                my $file = $_;
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+                return unless -f $file && $file =~ m/\.yaml$/;
+
+                my $domain = YAML::XS::Load( File::Slurper::read_binary($file) );
+                delete $domain->{$_} for qw{_base _shared};
+
+                $conf = $merger->merge( $conf, $domain );
+            },
+            no_chdir => 1,
+            bydepth  => 1,
+        },
+        $extra
+    ) if -d $extra;
+
+    return $CONFIGURATION{$key} = $conf;
+}
+
+=head2 forget()
+
+Drop what C<configuration> remembers.  For a test that writes a configuration,
+reads it, and writes it again.
+
+=cut
+
+sub forget { %CONFIGURATION = (); return 1 }
 
 =head1 SEE ALSO
 

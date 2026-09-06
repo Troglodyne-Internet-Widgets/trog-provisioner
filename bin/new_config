@@ -10,7 +10,6 @@ use strict;
 use warnings FATAL => 'all';
 
 no warnings qw{experimental};
-use feature qw{state};
 use re '/aa';
 
 use FindBin::libs;
@@ -194,35 +193,7 @@ sub get_config {
 # XXX Regrettably needs a touch() of eval()
 
 sub get_recipe_config {
-    state $c;
-    return $c if $c;
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    return {} unless -f $pfile;
-    $c = YAML::XS::Load( File::Slurper::read_binary($pfile) );
-
-    # Make sure we always look for recipes.d next to the recipes.yaml
-    my $loc = File::Basename::dirname( Cwd::abs_path($pfile) );
-
-    File::Find::find(
-        {
-            wanted => sub {
-                my $object = $_;
-                ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-                return unless ( -f $object && $object =~ m/\.yaml$/ );
-                my $config = YAML::XS::Load( File::Slurper::read_binary($object) );
-
-                # You have to put global things in the base recipes.yaml
-                delete $config->{_base};
-                delete $config->{_shared};
-                $c = Hash::Merge::merge( $c, $config );
-            },
-            no_chdir => 1,
-            bydepth  => 1,
-        },
-        "$loc/recipes.d/"
-    ) if -d "$loc/recipes.d";
-
-    return $c;
+    return Provisioner::Cookbook->configuration($pfile);
 }
 
 sub expand_dependent_domains {

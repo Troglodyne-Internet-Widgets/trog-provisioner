@@ -14,12 +14,11 @@ use FindBin::libs;
 
 use File::Basename();
 use File::Path();
-use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
 use IPC::Run3();
 use Pod::Usage qw{pod2usage};
-use YAML::XS();
 
+use Provisioner::Cookbook();
 use Trog::Config();
 use Trog::HV();
 use Trog::Hypervisors();
@@ -54,12 +53,9 @@ anything fetched off the last guest into it, and ships the whole thing to the
 hypervisor for the guest to pull its payload out of.  Neither copy belongs to
 anyone once the guest is gone.
 
-They are small and they are quiet, so they pile up a pair at a time: a hundred
-and fifty six on the workstation and seventy two on the hypervisor when this was
-written, each named after a UUID that stopped meaning anything the moment its
-guest was destroyed.  And they are not empty: a guest built with the C<backup>
-recipe leaves the private half of its backup key in there, which is the one file
-that recipe goes out of its way to delete from the guest itself.
+They are not empty either: a guest built with the C<backup> recipe leaves the
+private half of its backup key in there, which is the one file that recipe goes
+out of its way to delete from the guest itself.
 
 So teardown removes it, on both sides, C<--keep-data> to keep it.  Only when
 the configuration in play is a scratch one: a real domain's data directory is
@@ -211,7 +207,7 @@ nothing says.
 sub data_root {
     my ($domain) = @_;
 
-    my $conf = recipes_conf();
+    my $conf = Provisioner::Cookbook->configuration();
 
     # Defined only when there is a domain to ask about: the sweep has none, and
     # a hash lookup on undef is fatal here rather than merely empty.
@@ -221,30 +217,6 @@ sub data_root {
       unless $from;
 
     return $from;
-}
-
-=head2 recipes_conf()
-
-The recipe configuration in play: F<recipes.yaml> with F<recipes.d/> laid over
-it, the way C<bin/new_config> reads it.  Only the shape matters here -- which
-domains are named, and where the data source is -- so this merges shallowly
-rather than dragging in the dependency resolution that goes with the real thing.
-
-=cut
-
-sub recipes_conf {
-    my $dir  = Trog::Config->dir;
-    my $file = "$dir/recipes.yaml";
-
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    my %conf = %{ -f $file ? YAML::XS::Load( File::Slurper::read_binary($file) ) : {} };
-
-    foreach my $extra ( sort glob "$dir/recipes.d/*.yaml" ) {
-        my $loaded = eval { YAML::XS::Load( File::Slurper::read_binary($extra) ) } // {};
-        %conf = ( %conf, %$loaded );
-    }
-
-    return \%conf;
 }
 
 =head2 purge_data_dir($dir, $hv, $dryrun)
@@ -264,7 +236,10 @@ sub purge_data_dir {
 
     print "Purging data directory $dir\n";
     File::Path::remove_tree($dir) if -d $dir;
-    $hv->run( qw{rm -rf}, $dir )  if $hv && !$hv->is_local;
+
+    # The hypervisor holds a copy: new_config ships the whole thing over for the
+    # guest to pull its payload out of.
+    $hv->remove_tree($dir) if $hv && !$hv->is_local;
 
     return;
 }
@@ -287,7 +262,7 @@ sub sweep_orphans {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
 
-    my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ recipes_conf() };
+    my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
     foreach my $hv (@hvs) {
         my @names = eval {
             map { $_->get_name } $hv->vmm->list_all_domains();
@@ -302,8 +277,7 @@ sub sweep_orphans {
 
     foreach my $hv (@hvs) {
         next if $hv->is_local;
-        my $listing = $hv->capture("ls -1 $root 2>/dev/null") // '';
-        push @{ $found{$_}{on} }, $hv for grep { substr( $_, -length '.test' ) eq '.test' } split( "\n", $listing );
+        push @{ $found{$_}{on} }, $hv for grep { substr( $_, -length '.test' ) eq '.test' } $hv->list_dir($root);
     }
 
     my @orphans = sort grep { !$spoken_for{$_} } keys %found;
@@ -325,7 +299,7 @@ sub sweep_orphans {
 
     foreach my $name (@orphans) {
         File::Path::remove_tree("$root/$name") if $found{$name}{here};
-        $_->run( qw{rm -rf}, "$root/$name" ) for @{ $found{$name}{on} // [] };
+        $_->remove_tree("$root/$name") for @{ $found{$name}{on} // [] };
     }
 
     print 'Removed ' . scalar(@orphans) . " data directories.\n";

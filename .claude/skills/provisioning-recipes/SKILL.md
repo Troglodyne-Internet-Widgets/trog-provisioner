@@ -434,12 +434,10 @@ It also takes the guest's directory out of the data source, on this machine and
 on the hypervisor. That is the one nothing else would ever notice: `new_config`
 makes `$data_source/$domain` for the datadirs the recipes ask for and ships a
 copy over for the guest to pull its payload out of, and neither is anybody's
-once the guest is destroyed. They are small and they are quiet, so 182 of
-them had piled up across the two machines before anyone looked — and they are not empty: a guest
-built with the `backup` recipe leaves the private half of its backup key in
-there, which is the one file that recipe goes out of its way to delete from the
-guest itself. `--keep-data` when the next run should start from what this one
-produced.
+once the guest is destroyed. They are not empty, either: a guest built with the
+`backup` recipe leaves the private half of its backup key in there, which is the
+one file that recipe goes out of its way to delete from the guest itself.
+`--keep-data` when the next run should start from what this one produced.
 
 **If a run ended without one — a killed session, a provision that died — sweep
 for what it left:**
