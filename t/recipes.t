@@ -884,6 +884,74 @@ subtest 'tmpfs refuses a size the kernel would not take' => sub {
     }
 };
 
+# ----------------------------------------------------------------
+# iouring: who may ask the kernel for an io_uring
+# ----------------------------------------------------------------
+subtest 'iouring gates on the group by default, because otherwise the group is decoration' => sub {
+    my $r = 'Provisioner::Recipe::iouring'->new(%PROV);
+
+    # 0 is the kernel's own default, so a recipe that sets it does nothing at
+    # all on a stock guest -- and kernel.io_uring_group only takes effect at 1.
+    my %opts = $r->validate( %G, modules => [] );
+    is( $opts{mode},  1,          'mode defaults to 1' );
+    is( $opts{group}, 'io_uring', 'with a group to gate on' );
+
+    foreach my $bad ( 3, -1, 'yes' ) {
+        my $fresh = 'Provisioner::Recipe::iouring'->new(%PROV);
+        ok( exception { $fresh->render_global( %G, mode => $bad ) }, "mode $bad is refused" );
+    }
+};
+
+subtest 'iouring collects the accounts of the recipes actually present' => sub {
+    my $users = sub {
+        my (@modules) = @_;
+        my %opts = 'Provisioner::Recipe::iouring'->new(%PROV)->validate( %G, modules => \@modules );
+        return $opts{members};
+    };
+
+    # Nothing is added for a recipe that is not on this guest, so a guest with no
+    # database gets a group with nobody in it and an io_uring nothing can reach.
+    # `users` is a global template variable holding the guest's accounts, so an
+    # arg of that name gets handed those instead -- which is what this recipe's
+    # first cut was called, and how it was caught.
+    is_deeply( $users->(),          [],        'a guest running nothing that uses io_uring gets nobody' );
+    is_deeply( $users->('nginx'),   [],        'nor does one running something that cannot use it' );
+    is_deeply( $users->('mariadb'), ['mysql'], 'mariadb brings its own account' );
+
+    # And what an operator wrote is kept alongside, deduplicated.
+    my %opts = 'Provisioner::Recipe::iouring'->new(%PROV)->validate( %G, modules => ['mariadb'], members => [ 'mysql', 'someservice' ] );
+    is_deeply( $opts{members}, [ 'mysql', 'someservice' ], 'named accounts join them, said once' );
+
+    # But only the recipes this one knows about contribute a unit to restart:
+    # an account named by hand has none here to name.
+    is_deeply( $opts{restart_units}, ['mariadb'], 'and only the known services get restarted' );
+};
+
+subtest 'iouring defers group membership past the makefile' => sub {
+    my $out = 'Provisioner::Recipe::iouring'->new(%PROV)->render_global( %G, modules => ['mariadb'] );
+
+    like( $out, qr/groupadd --system 'io_uring'/, 'the group is made up front' );
+
+    # mysql belongs to mariadb, whose target has not run yet -- iouring sorts
+    # ahead of it.
+    like( $out, qr/queue_postrun_task .*usermod -aG 'io_uring' 'mysql'/, 'and membership waits for the accounts to exist' );
+    unlike( $out, qr/^usermod/m, 'rather than being attempted during the build' );
+
+    # A process reads its groups at start and not again, and mariadb was started
+    # by its own recipe during the makefile -- so without a restart it runs its
+    # whole first life outside the group it was just put in.
+    like( $out, qr/queue_postrun_task systemctl try-restart 'mariadb'/, 'and the service is restarted so it picks the group up' );
+
+    # In that order: postrun tasks run in the order they were queued, and a
+    # restart ahead of the usermod would restart it back out of the group.
+    my ($usermod) = $out =~ m/\A(.*?)usermod -aG/s;
+    my ($restart) = $out =~ m/\A(.*?)try-restart/s;
+    ok( length($usermod) < length($restart), 'with the membership queued first' );
+
+    # A gid is only knowable on the guest, and the sysctl takes the number.
+    like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

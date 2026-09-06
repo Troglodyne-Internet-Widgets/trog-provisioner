@@ -1,0 +1,77 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# The sysctl file, which is what survives a reboot.
+my $conf = '/etc/sysctl.d/60-io_uring.conf';
+ok(-f $conf, 'the sysctl drop-in is in place');
+my $text = do { local (@ARGV, $/) = $conf; <> } // '';
+
+# The gid is substituted on the guest, because a group's number is only knowable
+# here.  A placeholder that survived means the sed did not fire and the kernel
+# would have been handed a group nobody is in.
+unlike($text, qr/%IO_URING_GID%/, 'the group id was filled in, not left as a placeholder')
+    or diag $text;
+
+my $group = '[% group %]';
+my $gid = getgrnam($group);
+ok($gid, "the $group group exists") or diag "getgrnam('$group') found nothing";
+
+# What the kernel is actually enforcing, which is the only thing that matters.
+my $disabled = `sysctl -n kernel.io_uring_disabled 2>/dev/null`;
+chomp $disabled;
+is($disabled, '[% mode %]', 'kernel.io_uring_disabled is what was asked for') or diag $disabled;
+
+SKIP: {
+    skip 'the group only takes effect at mode 1', 1 unless '[% mode %]' eq '1';
+    my $running = `sysctl -n kernel.io_uring_group 2>/dev/null`;
+    chomp $running;
+    is($running, "$gid", "kernel.io_uring_group is $group") or diag "got $running, $group is $gid";
+}
+
+# And the accounts that need it are in it.  A service left out of the group on a
+# mode 1 guest does not fail to go faster, it gets -EPERM from io_uring_setup().
+[% IF members.size() %]
+my $members = `getent group '$group' | cut -d: -f4`;
+chomp $members;
+my %in = map { $_ => 1 } grep { length } split m/,/, $members;
+[% FOR account IN members %]
+SKIP: {
+    skip 'no [% account %] account on this guest', 1 unless defined getpwnam('[% account %]');
+
+    # Either as a supplementary member or because it is their primary group.
+    my $primary = (getpwnam('[% account %]'))[3];
+    ok($in{'[% account %]'} || (defined $primary && $primary == $gid), '[% account %] can use io_uring')
+        or diag "group members: $members";
+}
+[% END %]
+[% ELSE %]
+ok(1, 'no service on this guest asked for io_uring');
+[% END %]
+
+# And that the services which were put in the group are actually running with
+# it.  A process reads its supplementary groups when it starts and not again, so
+# usermod alone leaves a service that was already up still outside -- which is
+# the whole reason the recipe queues a restart behind the usermod.  Asking the
+# running process is the only thing that tells them apart.
+[% FOR unit IN restart_units %]
+SKIP: {
+    my $pid = `systemctl show -p MainPID --value '[% unit %]' 2>/dev/null`;
+    chomp $pid;
+    skip '[% unit %] is not running', 1 unless $pid && $pid =~ m/^\d+$/ && $pid > 0;
+
+    my $status = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
+    my ($groups) = $status =~ m/^Groups:\s*(.*)$/m;
+    my %has = map { $_ => 1 } split ' ', ($groups // '');
+    ok($has{$gid}, '[% unit %] is running with the group, not merely listed in it')
+        or diag "pid $pid has groups: " . ($groups // '(none)') . ", wanted $gid";
+}
+[% END %]
+
+# The guest's own disks, which is the other half of the issue: qemu was asked
+# for the io_uring block backend rather than its default thread pool.  Visible
+# from in here because virtio-blk reports the host's queue setup.
+ok(-d '/sys/block/vda', 'the root disk is virtio') or diag `ls /sys/block`;
+
+done_testing();
