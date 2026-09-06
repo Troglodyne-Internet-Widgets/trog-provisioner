@@ -622,6 +622,106 @@ subtest 'a disk is an overlay on the base image' => sub {
     is( scalar @created, 1, 'and nothing new was created' );
 };
 
+# --- What the hypervisor will actually take -----------------------------------
+subtest 'a feature needs its libvirt, its qemu, and sometimes its qemu-img' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( libvirt_version  => sub { 10_000_000 } );                                 # 10.0.0
+    $mock->redefine( qemu_version     => sub { 8_002_000 } );                                  # 8.2.0, which noble ships
+    $mock->redefine( qemu_img_options => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
+
+    ok( $hv->supports('discard'),          'discard, on a libvirt long past 1.0.6' );
+    ok( $hv->supports('discard_no_unref'), 'discard_no_unref, whose qemu 8.1 this qemu is past' );
+    ok( $hv->supports('extended_l2'),      'extended_l2, which this qemu-img offers' );
+
+    # The whole reason both halves are asked: libvirt 10 parses the mapping
+    # quite happily and qemu 8.2 has no idea what to do with it, and the domain
+    # defines and then will not start.
+    ok( !$hv->supports('iothread_mapping'), 'but not queue mapping, which wants a qemu 9.0 this is not' );
+
+    # A libvirt too old to pass the option along is a reason not to pay for the
+    # probe at all, which is why the version is checked first.
+    my $asked = 0;
+    $mock->redefine( libvirt_version  => sub { 7_000_000 } );
+    $mock->redefine( qemu_img_options => sub { $asked++; return {} } );
+    $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+    ok( !$hv->supports('extended_l2'), 'a libvirt older than 8.0 does not get extended_l2' );
+    is( $asked, 0, 'and qemu-img was not asked, the answer being decided before the command' );
+};
+
+subtest 'an unanswerable hypervisor is assumed to support nothing' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( vmm => sub { die "no libvirt here\n" } );
+
+    is( $hv->libvirt_version, 0, 'a connection that will not answer is a zero' );
+    is( $hv->qemu_version,    0, 'for both of them' );
+    ok( !$hv->supports('discard'), 'and nothing is emitted on the strength of it' );
+};
+
+subtest 'how big a qcow2 has to be before its layout changes' => sub {
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( libvirt_version  => sub { 10_000_000 } );
+    $mock->redefine( qemu_version     => sub { 9_000_000 } );
+    $mock->redefine( qemu_img_options => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
+
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    # Subclusters are the point of the exercise: every guest disk is an overlay
+    # on the shared base image, and without them a 4K write into a hole rewrites
+    # a whole cluster out of the backing file.  Size has nothing to do with it.
+    my %small = $hv->qcow2_shape( 40 * 1024**3 );
+    ok( $small{extended_l2}, 'a 40G overlay gets subcluster allocation' );
+    is( $small{cluster_size},   undef, 'at the default cluster size' );
+    is( $small{metadata_cache}, undef, 'and qemu is left to size its own metadata cache' );
+
+    # 128 GiB is where the default 32 MiB of metadata cache stops covering the
+    # whole image once extended L2 entries have doubled in width.
+    my %edge = $hv->qcow2_shape( 128 * 1024**3 );
+    is( $edge{cluster_size}, undef, 'the last size the default cluster still covers is left alone' );
+
+    my %large = $hv->qcow2_shape( 200 * 1024**3 );
+    is( $large{cluster_size},   1024 * 1024, 'past it, 1M clusters buy the coverage back' );
+    is( $large{metadata_cache}, undef,       'which is enough on its own, so the cache is still qemu default' );
+
+    # And past what even that covers, the cache is raised rather than the
+    # clusters made coarser again.
+    my %huge = $hv->qcow2_shape( 8 * 1024**4 );
+    is( $huge{cluster_size},   1024 * 1024,       '8T keeps the 1M clusters' );
+    is( $huge{metadata_cache}, 128 * 1024 * 1024, 'and asks for the metadata cache it actually needs' );
+
+    # Host memory, held for as long as the domain runs, and not counted by
+    # anything in Trog::Hypervisors.  So there is a ceiling on it.
+    my %vast = $hv->qcow2_shape( 64 * 1024**4 );
+    is( $vast{metadata_cache}, 256 * 1024 * 1024, 'up to a limit, past which it stops asking' );
+};
+
+subtest 'the disk is created in the shape that was decided for it' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my @created;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( volume_path => sub { undef } );
+    $mock->redefine( pool        => sub { FakeBuildPool->new( \@created ) } );
+    $mock->redefine( qcow2_shape => sub { ( extended_l2 => 1, cluster_size => 1048576 ) } );
+
+    quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ) } );
+
+    like( $created[0], qr{<clusterSize unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
+    like( $created[0], qr{<features><extended_l2/></features>},             'and so does subcluster allocation' );
+
+    # Neither is retrofittable: both are properties of the image as created, so
+    # a disk that already exists stays exactly as it is.  It is a filesystem.
+    $mock->redefine( volume_path => sub { '/opt/terraform/disks/big-qcow2' } );
+    is(
+        $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ),
+        '/opt/terraform/disks/big-qcow2', 'an existing disk is not remade to suit a new opinion'
+    );
+    is( scalar @created, 1, 'and nothing new was created' );
+};
+
 subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 

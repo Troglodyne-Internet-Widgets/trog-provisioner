@@ -1,0 +1,11 @@
+# The guest's block layer, told what it is actually talking to.
+#
+# ENV{DEVTYPE}=="disk" keeps this off the partitions: vda1 has no queue/ of its
+# own, and writing to one that is not there is a udev error nobody reads.
+#
+# add|change rather than add alone, so that `udevadm trigger --action=change`
+# can apply this to disks that were added before the rule existed -- which is
+# every disk on the guest the first time this recipe runs.
+[% FOR device IN devices -%]
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="[% device %]", ATTR{queue/scheduler}="[% scheduler %]", ATTR{queue/read_ahead_kb}="[% read_ahead_kb %]"
+[% END -%]

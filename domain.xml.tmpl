@@ -5,6 +5,7 @@
   <memory unit='MiB'>%MUGUBYTES%</memory>
   <currentMemory unit='MiB'>%MUGUBYTES%</currentMemory>
   <vcpu placement='static'>%NUMCPUS%</vcpu>
+%IOTHREADS%
 
   <!-- i440fx, not q35: every guest on these hypervisors is i440fx, and the
        machine type decides the PCI topology a guest's kernel already knows.
@@ -41,10 +42,13 @@
          the pool happens to live.  The backing store is baked into the qcow2
          at creation; libvirt reports it back but we do not declare it. -->
     <disk type='volume' device='disk'>
-      <driver name='qemu' type='qcow2'/>
-      <source pool='%POOLNAME%' volume='%DISKVOLUME%'/>
+      <!-- Assembled rather than written out, because half of it depends on what
+           the hypervisor's libvirt and qemu will actually accept: cache mode,
+           the discard path, iothreads, virtqueues, the qcow2 metadata cache.
+           bin/provision's disk_driver_xml decides, Trog::HV::supports gates. -->
+%DISKDRIVER%      <source pool='%POOLNAME%' volume='%DISKVOLUME%'/>
       <target dev='vda' bus='virtio'/>
-      <boot order='1'/>
+%DISKTUNE%      <boot order='1'/>
     </disk>
 %EXTRADISKS%
     <disk type='file' device='cdrom'>

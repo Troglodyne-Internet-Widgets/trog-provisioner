@@ -96,6 +96,19 @@ tickle.test.test:
 See [EXAMPLE.md](../EXAMPLE.md) for a worked one, and each recipe's own POD
 (`perldoc Provisioner::Recipe::nginxproxy`) for what it takes.
 
+`_global` also carries the settings that describe how the **hypervisor** builds
+the guest rather than what goes on it: `size`, `memory` and `cpus`, and
+optionally `cpu_mode` and the `disk_*` keys. Those are copied into the guest's
+`provision.conf`, which is where `bin/provision` reads them; every one of them is
+commented in [example.test/provision.conf](../example.test/provision.conf), which
+is the reference for what each does.
+
+The `disk_*` ones are all optional and none of them are emitted blind --
+`bin/provision` asks the hypervisor's libvirt and qemu what they will accept and
+leaves out anything they will not, so the same `recipes.yaml` builds on a machine
+that has not been reinstalled since 20.04 and on one that has. The guest's own
+side of the same disk is the `diskqueue` recipe.
+
 A password is never written here. `secret:GROUP/ENTRY/FIELD` names an entry in
 `secrets.kdbx` and is resolved when the configuration is read -- see
 `Trog::Secrets`.

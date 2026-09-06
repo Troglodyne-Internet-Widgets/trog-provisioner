@@ -272,6 +272,19 @@ sub main {
     return 0;
 }
 
+# Settings that describe how the hypervisor should build the guest rather than
+# what goes on it, and so belong in provision.conf rather than in a template.
+# Every one of them is optional; see example.test/provision.conf for what each
+# does and docs/CONFIGURATION.md for where to put them.
+my @HV_SETTINGS = qw{
+  cpu_mode
+  disk_cache disk_io disk_detect_zeroes
+  disk_iothreads disk_queues
+  disk_logical_block_size disk_physical_block_size
+  disk_total_bytes_sec disk_read_bytes_sec disk_write_bytes_sec
+  disk_total_iops_sec  disk_read_iops_sec  disk_write_iops_sec
+};
+
 # Where does this guest go?  Whichever hypervisor already has it, else
 # whichever has room, else -- with no fleet configured -- this machine.
 sub choose_hypervisor {
@@ -789,6 +802,16 @@ sub handle_domain {
         resolvers=$r_text
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
+
+    # The optional settings for the hypervisor side of the build, passed through
+    # from _global when they are there.  None of them get a default here: what
+    # this hypervisor's libvirt and qemu will take is worked out in
+    # bin/provision, and a key that is absent means "whatever it decides".
+    #
+    # Absent rather than empty, because Config::Simple hands back an empty string
+    # for a bare `key=` and an empty string is not the same as no answer.
+    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { defined $global_config->{$_} && length $global_config->{$_} } @HV_SETTINGS );
+
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
     # Both of these live next to this script, not in whatever directory it was

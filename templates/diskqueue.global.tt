@@ -1,0 +1,12 @@
+# 99- so it lands after the distribution's own 60-block-scheduler.rules, which
+# is the thing whose answer we are overriding.
+install -m 0644 -o root -g root diskqueue.rules /etc/udev/rules.d/99-diskqueue.rules
+udevadm control --reload-rules
+# The rule fires on add and change; the guest's disks were added long before
+# this file existed, so nothing has matched it yet.  This is what makes the
+# setting true on the running guest rather than only on the next boot.
+udevadm trigger --subsystem-match=block --action=change
+udevadm settle
+# Applied and taken are not the same thing, and the difference is worth saying
+# out loud rather than leaving in a udev log; see the script.
+[% script_dir %]/verify_disk_queue '[% scheduler %]' '[% read_ahead_kb %]' [% FOR device IN devices %]/sys/block/[% device %]/queue [% END %]

@@ -677,6 +677,11 @@ A qcow2 volume backed by the base image, made if it is not already there.
 C<backing> is the path to lay it over and C<capacity> its size in bytes.
 Returns the path.
 
+How it is laid out inside comes from C<qcow2_shape>, which is where the
+reasoning lives.  Nothing it decides is retrofittable: cluster size and
+subcluster allocation are properties of the image as created, so a disk that
+already exists is left exactly as it is -- it is a guest's filesystem.
+
 =cut
 
 sub create_disk {
@@ -695,11 +700,24 @@ sub create_disk {
 
     print "Creating disk $name ($capacity bytes)" . ( $backing ? " over $backing" : '' ) . "\n";
 
+    my %shape  = $self->qcow2_shape($capacity);
+    my $target = "<format type='qcow2'/>";
+
+    if ( $shape{cluster_size} ) {
+        print "  ...with $shape{cluster_size} byte clusters, so qemu's metadata cache still covers a disk this size\n";
+        $target .= "<clusterSize unit='bytes'>$shape{cluster_size}</clusterSize>";
+    }
+
+    if ( $shape{extended_l2} ) {
+        print "  ...with subcluster allocation, so a small write into this overlay does not rewrite a whole cluster\n";
+        $target .= '<features><extended_l2/></features>';
+    }
+
     my $volume = $self->pool->create_volume(<<"XML");
 <volume>
   <name>@{[ _xml_escape($name) ]}</name>
   <capacity unit='bytes'>$capacity</capacity>
-  <target><format type='qcow2'/></target>
+  <target>$target</target>
   $backing_xml
 </volume>
 XML
@@ -988,6 +1006,226 @@ sub has_tpm {
     chomp $answer if defined $answer;
 
     return $self->{has_tpm} = ( ( $answer // '' ) eq 'yes' ) ? 1 : 0;
+}
+
+=head2 libvirt_version
+
+=head2 qemu_version
+
+What the hypervisor is running, encoded the way libvirt encodes a version:
+C<major * 1_000_000 + minor * 1_000 + release>.  Both are asked of the
+connection rather than of this machine, so a remote hypervisor answers for
+itself and a fleet of mixed vintages gets a different answer per machine.
+
+Zero when the connection will not say.  Every capability check below reads that
+as "assume not", so a hypervisor we cannot interrogate gets the plain domain it
+would have got before any of this, rather than XML it may refuse.
+
+=cut
+
+sub libvirt_version {
+    my ($self) = @_;
+    return $self->{libvirt_version} //= eval { $self->vmm->get_library_version() } || 0;
+}
+
+sub qemu_version {
+    my ($self) = @_;
+    return $self->{qemu_version} //= eval { $self->vmm->get_version() } || 0;
+}
+
+# Every disk tuning knob we know how to emit, and what it takes to accept one.
+#
+# The numbers are the ones libvirt's own formatdomain and formatstorage
+# documentation gives for that attribute -- so this table can be checked against
+# the documentation rather than against a changelog, and a wrong entry is a
+# thing somebody can look up.
+#
+# libvirt and qemu are asked separately because they are separate failures.
+# XML libvirt cannot parse is a domain that will not define, and we find out at
+# once.  XML libvirt parses and passes to a qemu that has no such feature is a
+# domain that defines and then will not start, which is found out later and
+# somewhere less convenient.
+my %DISK_FEATURE = (
+    io_uring         => { libvirt => '6.3.0', qemu => '5.0.0' },
+    discard          => { libvirt => '1.0.6' },
+    detect_zeroes    => { libvirt => '2.0.0' },
+    discard_no_unref => { libvirt => '9.5.0',  qemu => '8.1.0' },
+    iothread         => { libvirt => '1.2.8',  qemu => '2.1.0' },
+    iothread_mapping => { libvirt => '10.0.0', qemu => '9.0.0' },
+    queues           => { libvirt => '3.9.0' },
+    metadata_cache   => { libvirt => '7.0.0' },
+    blockio          => { libvirt => '0.10.2' },
+    iotune           => { libvirt => '0.9.8' },
+    cluster_size     => { libvirt => '7.4.0', qemu_img => 'cluster_size' },
+    extended_l2      => { libvirt => '8.0.0', qemu_img => 'extended_l2' },
+);
+
+=head2 supports($feature)
+
+Whether this hypervisor will take one of the disk tuning knobs named in
+C<%DISK_FEATURE> above.  Memoised, since a build asks the same handful of
+questions once per disk.
+
+C<cache> is not in the table: every libvirt that can define a domain at all
+takes it, so there is nothing to check.  Whether the pool's filesystem can serve
+the mode being asked for is a different question, and C<pool_fstype> is the one
+that answers it.
+
+=cut
+
+sub supports {
+    my ( $self, $feature ) = @_;
+    my $needs = $DISK_FEATURE{$feature} or die "No such disk feature as '$feature'\n";
+
+    return $self->{supports}{$feature} //= $self->_meets($needs);
+}
+
+# In this order on purpose: the qemu-img probe costs a command on the far side,
+# and there is no point paying for it to find out that the libvirt in front of
+# it would not have passed the option along anyway.
+sub _meets {
+    my ( $self, $needs ) = @_;
+
+    return 0 if $self->libvirt_version < _version_number( $needs->{libvirt} );
+    return 0 if $needs->{qemu}     && $self->qemu_version < _version_number( $needs->{qemu} );
+    return 0 if $needs->{qemu_img} && !$self->qemu_img_options->{ $needs->{qemu_img} };
+    return 1;
+}
+
+# libvirt's own encoding, so the versions quoted from its documentation can be
+# compared against what the connection reports without converting either.
+sub _version_number {
+    my ($version) = @_;
+
+    # A character class rather than an escape: split takes a pattern whatever it
+    # is handed, so '.' here would split on every character, and m/\./ is a
+    # simple substring match as far as perlcritic is concerned.
+    my ( $major, $minor, $release ) = split( m/[.]/, $version );
+    return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + ( $release // 0 );
+}
+
+=head2 qemu_img_options
+
+The qcow2 creation options this hypervisor's C<qemu-img> understands, as a set.
+
+libvirt makes qcow2 volumes by running C<qemu-img create>, and hands it whatever
+the volume XML asked for.  An option this qemu has never heard of is therefore a
+volume that fails to create, not a volume that quietly comes back without the
+feature -- and the volume XML has been able to carry these for longer than qemu
+has implemented them, so the libvirt version does not answer the question on its
+own.
+
+An empty set when there is no qemu-img to ask, which reads as "none of them" and
+gets the disk made the way it was made before.
+
+=cut
+
+sub qemu_img_options {
+    my ($self) = @_;
+    return $self->{qemu_img_options} if $self->{qemu_img_options};
+
+    # -o help lists the options for the format and exits; it wants no filename.
+    my $help    = $self->capture('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
+    my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gmx );
+
+    print "Could not ask qemu-img on " . $self->describe . " which qcow2 options it takes,\n" . "so this disk gets none of the optional ones.\n"
+      unless %options;
+
+    return $self->{qemu_img_options} = \%options;
+}
+
+=head2 pool_fstype
+
+The filesystem the storage pool sits on, as C<stat -f> names it.
+
+Which matters here for one thing: whether C<cache='none'> can work.  That mode
+opens the disk image C<O_DIRECT>, and on a filesystem with no O_DIRECT the open
+fails -- so the domain defines cleanly and then refuses to start, which is the
+worst place to find out.
+
+=cut
+
+sub pool_fstype {
+    my ($self) = @_;
+    return $self->{pool_fstype} if defined $self->{pool_fstype};
+
+    # Single-quoted rather than handed to run(): capture() takes a shell string
+    # by contract, and a pool path is the one thing here that came from a
+    # configuration file rather than from us.
+    ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
+
+    my $type = $self->capture("stat -f -c %T '$quoted' 2>/dev/null") // '';
+    chomp $type;
+
+    return $self->{pool_fstype} = $type;
+}
+
+# qemu's default cluster, and the one worth moving to on a disk large enough to
+# have outgrown the metadata cache.
+my $QCOW2_DEFAULT_CLUSTER = 64 * 1024;
+my $QCOW2_LARGE_CLUSTER   = 1024 * 1024;
+
+# What qemu will spend on qcow2 metadata by default, and the most we are willing
+# to ask it to spend instead.  Both are per running domain and both are host
+# memory, which is memory Trog::Hypervisors is not counting.
+my $QCOW2_METADATA_DEFAULT = 32 * 1024 * 1024;
+my $QCOW2_METADATA_CAP     = 256 * 1024 * 1024;
+
+# Above this the default metadata cache stops covering the whole image.  See
+# qcow2_shape for where the number comes from.
+my $QCOW2_LARGE_DISK = 128 * 1024 * 1024 * 1024;
+
+=head2 qcow2_shape($capacity)
+
+How a qcow2 of this size should be laid out on this hypervisor: the cluster size
+to make it with, whether it gets subcluster allocation, and how much metadata
+cache the domain should ask for.  Returns those three as a hash, with anything
+we have no opinion about left out.
+
+Two facts decide it, and they pull against each other.
+
+The first is that every guest disk here is an overlay on the shared base image,
+and without C<extended_l2> the smallest thing an overlay can allocate is a whole
+cluster.  A 4K write into a 64K hole means reading 64K out of the backing file,
+merging, and writing 64K back -- for the life of the disk, on every guest,
+because every guest is an overlay.  Subclusters cut the allocation unit to a
+32nd of a cluster and the read-modify-write goes with it.  So it is on wherever
+qemu will take it: it is the single biggest thing available to a layout like
+ours, and it costs nothing to have.
+
+The second is that it is not free after all, at size.  An extended L2 entry is
+twice the width, so the metadata cache covers half as much image -- qemu's
+default 32 MiB reaches 256 GiB of image at the default 64 KiB cluster, and
+128 GiB once entries are doubled.  Past that, random I/O starts paying for L2
+reads that used to be cached, which is exactly the workload the subclusters were
+bought for.
+
+Larger clusters buy the coverage back, sixteenfold at 1 MiB, for a coarser
+allocation unit -- 32 KiB subclusters rather than 2 KiB.  That is a trade worth
+making only on a disk big enough to need it, so it is made only there, and the
+metadata cache is raised on top for the rare disk that outgrows even that.
+
+=cut
+
+sub qcow2_shape {
+    my ( $self, $capacity ) = @_;
+
+    my %shape = ( extended_l2 => $self->supports('extended_l2') ? 1 : 0 );
+
+    # One L2 entry per cluster, twice as wide when it also carries the
+    # subcluster allocation bitmap.
+    my $entry = $shape{extended_l2} ? 16 : 8;
+
+    $shape{cluster_size} = $QCOW2_LARGE_CLUSTER
+      if $capacity > $QCOW2_LARGE_DISK && $self->supports('cluster_size');
+
+    my $cluster = $shape{cluster_size} // $QCOW2_DEFAULT_CLUSTER;
+    my $wanted  = int( $capacity / $cluster ) * $entry;
+
+    return %shape unless $wanted > $QCOW2_METADATA_DEFAULT && $self->supports('metadata_cache');
+
+    $shape{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
+    return %shape;
 }
 
 sub bridge_device {

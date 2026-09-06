@@ -1,0 +1,37 @@
+#!/bin/bash
+# Usage: verify_disk_queue <scheduler> <read_ahead_kb> <sysfs queue dir>...
+#
+# What the udev rule asked for and what the kernel took are not the same thing.
+# A scheduler the running kernel has no module for is a write that fails, and
+# udev logs that somewhere nobody is looking -- so the guest ends up quietly on
+# a different scheduler than its configuration says, with nothing to say so.
+#
+# The rule file is correct either way and the next boot with a kernel that has
+# the scheduler will apply it, so a disagreement is reported and not fatal.
+# Exits 0 regardless; the provisioning test asserts the end state.
+
+WANT_SCHEDULER="${1:?Usage: verify_disk_queue <scheduler> <read_ahead_kb> <queue dir>...}"
+WANT_READAHEAD="${2:?Usage: verify_disk_queue <scheduler> <read_ahead_kb> <queue dir>...}"
+shift 2
+
+for queue in "$@"; do
+    # An unmatched glob arrives as itself, and a partition has no queue of its
+    # own; either way there is nothing here to check.
+    [ -e "$queue/scheduler" ] || continue
+    disk=$(basename "$(dirname "$queue")")
+
+    # The file reads `[none] mq-deadline` where the kernel offers a choice and
+    # `none` where it does not.  Both mean it took.
+    scheduler=$(cat "$queue/scheduler")
+    case "$scheduler" in
+        *"[$WANT_SCHEDULER]"*) ;;
+        "$WANT_SCHEDULER") ;;
+        *) echo "diskqueue: $disk is on '$scheduler' rather than $WANT_SCHEDULER; the udev rule is in place and the next boot will apply it" ;;
+    esac
+
+    readahead=$(cat "$queue/read_ahead_kb")
+    [ "$readahead" = "$WANT_READAHEAD" ] ||
+        echo "diskqueue: $disk reads ahead ${readahead}KiB rather than the ${WANT_READAHEAD}KiB it was given"
+done
+
+exit 0
