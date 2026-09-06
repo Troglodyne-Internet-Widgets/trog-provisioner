@@ -1,17 +1,17 @@
-mkdir -p /opt/mysql; /bin/true
-mv mariadb.service /opt/mysql
-mv my.cnf /opt/mysql
-ln -sfn /opt/mysql /opt/mariadb
-# Install global schema for the recipe
-id -u mysql >/dev/null 2>&1 || useradd -s /usr/sbin/nologin -d /opt/mariadb mysql
-[%# Quoted, so a variable that renders empty stays an argument.  Unquoted, an
-    empty user shifted every argument left: the script read the version as its
-    client and the dump path as its version, and asked archive.mariadb.org for
-    mariadb-/opt/domains/<domain>/dump.sql. -%]
-[% script_dir %]/install_mariadb.sh "[% user %]" "[% version %]" "[% install_dir %]/[% domain %]/[% dumpfile %]"
-# Secure the mysql install (run once - root_pw is baked into the sql file)
-[ -f /opt/mysql/.secured ] || (mv secure_installation.sql /opt/mysql && mysql --defaults-file=/opt/mariadb/my.cnf -sfu root < /opt/mysql/secure_installation.sql && touch /opt/mysql/.secured)
-rm -f secure_installation.sql /opt/mysql/secure_installation.sql
+# MariaDB from its own apt repository, pinned to the exact release.  See
+# install_mariadb.sh for why not the bintar, and for the check that fails early
+# when a release has no repository for this distribution.
+[%# Quoted, so a variable that renders empty stays an argument rather than
+    shifting the ones after it along. -%]
+[% script_dir %]/install_mariadb.sh "[% version %]" "[% install_dir %]/[% domain %]/[% dumpfile %]"
+# Our half of the configuration, as a drop-in the packaged server already reads.
+install -m 0644 -o root -g root mariadb-provisioner.cnf /etc/mysql/mariadb.conf.d/60-provisioner.cnf
+[% script_dir %]/queue_postrun_task systemctl restart mariadb
+# Secure the install (run once - root_pw is baked into the sql file, so it goes
+# in 0600 and is removed either way).
+install -m 0600 -o root -g root secure_installation.sql /etc/mysql/secure_installation.sql
+[ -f /etc/mysql/.secured ] || ( mariadb < /etc/mysql/secure_installation.sql && touch /etc/mysql/.secured )
+rm -f secure_installation.sql /etc/mysql/secure_installation.sql
 # Install nightly logical backup script and cron job
 install -m 0750 mariadb-backup.sh /usr/local/sbin/mariadb-backup.sh
 install -m 0644 mariadb-backup.cron /etc/cron.d/mariadb-backup

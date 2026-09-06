@@ -70,6 +70,12 @@ my %G = (
 my %PROV = (
     target_packager => 'deb',
     template_dirs   => [$template_dir],
+
+    # bin/new_config always sets this and nothing here did, so a recipe reading
+    # it got undef: garage interpolated it into a path and died on the warning,
+    # and ufw's template_files calls rmtree on "$output_dir/ufw" -- which
+    # without one is rmtree('/ufw').
+    output_dir => tempdir( CLEANUP => 1 ),
 );
 
 # Test that a recipe renders without error given %G merged with $extra.
@@ -85,15 +91,19 @@ sub renders_ok {
         is( $res, undef, "$name->new() succeeds" );
 
         # We may or may not have global/domain specific templates, but we need at least one.
+        #
+        # Asserting on $res, not on $@.  exception{} catches, so $@ is empty
+        # whether or not the render threw -- which made this pass for every
+        # recipe including the one whose minimum viable input did not validate.
         my $has_template;
         if ( -f "$template_dir/$name.tt" ) {
             $res = exception { $r->render( %G, %$extra ) };
-            is( $@, '', "$name->render() succeeds" );
+            is( $res, undef, "$name->render() succeeds" );
             $has_template++;
         }
         if ( -f "$template_dir/$name.global.tt" ) {
             $res = exception { $r->render_global( %G, %$extra ) };
-            is( $@, '', "$name->render_global() succeeds" );
+            is( $res, undef, "$name->render_global() succeeds" );
             $has_template++;
         }
         ok( $has_template, "Has either a global or domain specific template" );
@@ -124,16 +134,19 @@ IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, ''
 # Build list of known modules with required input data
 my %required_config = (
     data        => { from    => '/opt/data', to => '/opt/domains' },
-    imagemagick => { version => '7.1.0' },
+    imagemagick => { version => '7.1.1-47' },
     mariadb     => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
-        version  => '10.11',
+        version  => '11.4.4',
     },
-    tpsgi       => { routers  => ['app.psgi'] },
-    tcms        => { tcms_dir => 'tcms' },
-    adminconfig => { skel     => '/opt/dotfiles' },
-    admincode   => {
+    tpsgi           => { routers         => ['app.psgi'] },
+    gogs            => { version         => '0.13.0',        admin_password => 's3cr3t' },
+    plexmediaserver => { plex_login_name => 'plexuser',      admin_mail     => 'admin@test.test' },
+    openvpnclient   => { server          => 'vpn.test.test', cert_dir       => '/opt/domains/test.test.test/vpn' },
+    tcms            => { tcms_dir        => 'tcms' },
+    adminconfig     => { skel            => '/opt/dotfiles' },
+    admincode       => {
         repos_from => [],
         basedir    => 'Code',
     },
@@ -950,6 +963,66 @@ subtest 'iouring defers group membership past the makefile' => sub {
 
     # A gid is only knowable on the guest, and the sysctl takes the number.
     like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );
+};
+
+# ----------------------------------------------------------------
+# mariadb: from the pinned apt repository, not the bintar
+# ----------------------------------------------------------------
+subtest 'mariadb installs from its own repository at the exact release' => sub {
+    my $r   = 'Provisioner::Recipe::mariadb'->new(%PROV);
+    my $out = $r->render( %G, %{ $required_config{mariadb} } );
+
+    # The bintar pins exactly too, and is built against libaio -- so InnoDB
+    # cannot use io_uring however the guest is configured.  The repository
+    # builds are Debian's and depend on liburing2.
+    like( $out, qr{install_mariadb\.sh "11\.4\.4"}, 'the installer gets the version it was given' );
+    unlike( $out, qr{/opt/mysql}, 'and nothing hand-rolls a layout under /opt any more' );
+
+    # A drop-in the packaged server already reads, rather than a my.cnf of ours
+    # replacing the distribution's.
+    like( $out, qr{/etc/mysql/mariadb\.conf\.d/60-provisioner\.cnf}, 'our config goes in as a drop-in' );
+
+    # root_pw ends up in a file on the guest, so it must not be world-readable.
+    like( $out, qr{install -m 0600 [^\n]*secure_installation\.sql}, 'the secure-installation sql is 0600' );
+    like( $out, qr{rm -f secure_installation\.sql},                 'and is removed either way' );
+
+    # Asking for the mariadb packages up front would have cloud-init install
+    # Ubuntu's before the makefile runs, only for the pin to downgrade them.
+    my @deps = $r->deps();
+    is_deeply( [ grep { m/maria/ } @deps ], [], 'the mariadb packages are not cloud-init deps' );
+};
+
+subtest 'install_mariadb.sh keeps the version it was handed' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/install_mariadb.sh");
+
+    # /etc/os-release defines VERSION -- and NAME, and ID -- so sourcing it into
+    # the script's own scope renamed the release we were asked for to
+    # "24.04.4 LTS (Noble Numbat)" and sent it looking for a repository under
+    # that.  A guest found this; nothing here could have.
+    unlike( $script, qr/^\s*[.] \/etc\/os-release\s*$/m, 'os-release is not sourced into the script scope' );
+    like( $script, qr/CODENAME=\$\(\. \/etc\/os-release/, 'the codename is read in a subshell instead' );
+    unlike( $script, qr/^VERSION=/m, 'and the version it was handed is not named VERSION' );
+};
+
+subtest 'the root password survives being put in a SQL string' => sub {
+    my $sql = sub {
+        my ($pw)   = @_;
+        my $out    = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mysql.secure_installation.tt', %G, %{ $required_config{mariadb} }, root_pw => $pw );
+        my ($line) = $out =~ m/^(ALTER USER.*)$/m;
+        return $line // q{};
+    };
+
+    # Xslate escapes for HTML by default, and this is SQL: without mark_raw an
+    # apostrophe becomes &#39; and the account gets a password nobody typed.
+    unlike( $sql->(q{pa'ss}), qr/&#39;/, 'no HTML escaping reaches the SQL' );
+
+    # And a quote or a backslash would otherwise end the literal early.
+    like( $sql->(q{pa'ss}),  qr/PASSWORD\('pa\\'ss'\)/,  'a quote is escaped for the SQL literal' );
+    like( $sql->(q{pa\\ss}), qr/PASSWORD\('pa\\\\ss'\)/, 'and so is a backslash' );
+
+    # unix_socket has to survive: it is how root connects from this machine, and
+    # everything the recipe runs afterwards depends on it.
+    like( $sql->('plain'), qr/IDENTIFIED VIA unix_socket OR mysql_native_password/, 'socket auth is kept alongside the password' );
 };
 
 Test::NoWarnings::had_no_warnings();
