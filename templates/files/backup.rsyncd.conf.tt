@@ -1,4 +1,9 @@
 port = 40404
+[%# Told nothing, rsyncd hands its messages back down the ssh connection to
+    whoever asked for them and keeps none here, so the machine being copied off
+    had no record of a module that failed to open or a transfer that stopped
+    halfway.  Rotated by /etc/logrotate.d/rsyncd-backup. -%]
+log file = /var/log/rsyncd/[% domain %].log
 [% FOR target IN targets.keys() %]
 [[% target %]]
 use chroot = yes

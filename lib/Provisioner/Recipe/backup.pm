@@ -41,6 +41,13 @@ Ideally your recipes describe all such things sufficiently, but sometimes you ha
 
 Backups are implemented via SSH authorized key read-only restricted execution of an ephemeral & chrooted instance of rsyncd as root on port 40404.
 
+The daemon's configuration is written to /etc/rsyncd.$DOMAIN.conf, and the forced command on the backup key names it there.
+It used to live in /root, which some builds of rsync decline to read a config out of.
+
+What that daemon has to say goes to /var/log/rsyncd/$DOMAIN.log, rotated weekly by /etc/logrotate.d/rsyncd-backup and kept for a quarter.
+Told no log file, rsyncd says it down the ssh connection instead and the machine being copied off keeps nothing: a module that fails to open, or a transfer that stops halfway, is then only visible to the destination.
+Transfer logging is left off, since the destination already records what it asked for in /var/log/backups/$HOST.log; what this is for is the half of a failed backup that the destination cannot see.
+
 TODO: Make this module consult all the other loaded recipes to know what uid/gid ought we do it as
 
 =cut
@@ -91,6 +98,7 @@ sub enrich {
 sub template_files {
     return (
         "backup.rsyncd.conf.tt" => "rsyncd.conf",
+        "backup.logrotate.tt"   => "backup.logrotate",
     );
 }
 
