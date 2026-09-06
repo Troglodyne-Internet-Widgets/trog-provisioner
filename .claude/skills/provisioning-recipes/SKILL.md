@@ -29,6 +29,25 @@ bin/preflight
 Exits 0 if a run is worth starting, 1 if not, and prints what to fix. Every
 check that fails still runs the rest, so you get the whole list in one go.
 
+**Run it before concluding there is no hypervisor.** There is usually no libvirt
+and no qemu on the machine this runs from, and that fact says nothing at all
+about whether a guest can be built: the hypervisor is normally somewhere else.
+`/etc/trog-provisioner/hypervisors.conf` is where the fleet is declared, and
+`bin/preflight` with no arguments loads it, picks one and prints which -- so
+`Hypervisor: qemu+ssh://...` on the first line of its output is the answer to
+"do we have one", and `virsh`, `qemu-img` or `/var/run/libvirt` not existing
+locally is not.
+
+So: do not check for a local libvirt, and do not report "no hypervisor
+available" on the strength of one being absent here. Run preflight and read what
+it says. If the fleet genuinely is not configured it falls back to this machine
+and the checks fail against it, which is a different message and a real one.
+
+(`TROG_PROVISIONER_CONFIG` moves where it looks, which is what the scratch
+configuration below sets. The fleet is copied into the scratch directory with
+everything else, so a scratch run builds on the same hypervisor a real one
+would.)
+
 **If it reports no passwordless sudo, stop.** Print its guidance to the user and
 go no further. Provisioning writes to the storage pool, defines domains and
 edits the rsyslog config, all through sudo — a password prompt in the middle of
