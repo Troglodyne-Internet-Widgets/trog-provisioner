@@ -40,13 +40,43 @@ latency.
 C<none> is the scheduler that does none of that: submit in order and let the
 layer that can see the hardware sort it out.
 
-This may well be what the guest already does. The kernel picks C<none> by
-default for a multiqueue device, and virtio-blk is one -- but the pick is
-udev's, from F</usr/lib/udev/rules.d/60-block-scheduler.rules>, and it is
-conditional on what the device reports about itself. A virtio-blk that comes up
-claiming to rotate gets C<mq-deadline>, which is an elevator seeking a disk that
-is not there. Rather than depend on which way that went, this pins it, and says
-so when the kernel disagrees.
+Whether a guest was already doing that has no fixed answer, and the reason is
+worth knowing because it couples this recipe to the far side of the same disk.
+
+Ubuntu chooses no scheduler for a virtio disk. There is no udev rule for it --
+the only rule on the guest that mentions the setting is C<64-btrfs-zoned.rules>,
+for host-managed zoned devices, which a virtio-blk is not. So the choice is the
+kernel's own, and the kernel makes it from the number of hardware queues: one
+gets C<mq-deadline>, more than one gets nothing, which is C<none>.
+
+The number of hardware queues is the C<queues> attribute on the domain's disk.
+Measured on a guest, with this recipe's rule taken away and nothing else
+changed:
+
+=over 4
+
+=item one virtqueue
+
+C<[mq-deadline]>, with C<rotational=1> -- an elevator seeking a disk that is not
+there.
+
+=item four virtqueues
+
+C<[none]>.
+
+=back
+
+Which means C<mongle_disk_tuning> asking for one virtqueue per vcpu already
+moves most guests off C<mq-deadline> before this recipe is anywhere near them --
+and that a guest set back to C<disk_queues: 1>, or built on a libvirt too old
+for the attribute at all (before 3.9), quietly goes back to an elevator. Every
+guest here was on one, until the domain started asking for more.
+
+So the scheduler line is a pin rather than the thing doing the moving, on a
+guest whose domain is current. It is still worth pinning: it makes the answer
+independent of a number set on the other side of the disk, and it says so when
+the kernel disagrees. The readahead below is the half that changes something on
+its own.
 
 =head3 Readahead, and why the default here changes nothing
 

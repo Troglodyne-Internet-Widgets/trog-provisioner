@@ -6,9 +6,9 @@ use Test::More;
 my $rules = '/etc/udev/rules.d/99-diskqueue.rules';
 ok(-f $rules, 'the udev rule is where udev will look for it');
 
-# 99- matters: the distribution's own 60-block-scheduler.rules is what this is
-# overriding, and a rule that sorts before it loses.
-like($rules, qr{/99-}, 'and sorts after the distribution rules it overrides');
+# 99- matters: udev applies rules in filename order and the last write wins, so
+# a rule that sorts early is one anything else can overrule.
+like($rules, qr{/99-}, 'and sorts last, so nothing dropped in later overrules it');
 
 my $text = do { local (@ARGV, $/) = $rules; <> } // '';
 like($text, qr/ENV\{DEVTYPE\}=="disk"/, 'scoped to whole disks, not partitions that have no queue of their own');

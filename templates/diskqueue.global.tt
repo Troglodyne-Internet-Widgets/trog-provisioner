@@ -1,5 +1,7 @@
-# 99- so it lands after the distribution's own 60-block-scheduler.rules, which
-# is the thing whose answer we are overriding.
+# 99- so this is the last word.  Ubuntu picks no scheduler for a virtio disk
+# itself -- the kernel does, from the virtqueue count -- but a rule that sorts
+# early is one anything dropped in later can quietly overrule, and the whole
+# point of this file is to be the thing that decided.
 install -m 0644 -o root -g root diskqueue.rules /etc/udev/rules.d/99-diskqueue.rules
 udevadm control --reload-rules
 # The rule fires on add and change; the guest's disks were added long before
