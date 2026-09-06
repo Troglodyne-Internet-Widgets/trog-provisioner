@@ -1,0 +1,35 @@
+# main.cf for [% domain %], as a fragment.
+#
+# One domain's half of main.cf.  configd merges every file in
+# /etc/postfix/main.cf.d when postfix starts or reloads: 00-original is what the
+# guest arrived with, 40-mail is the guest's own mail stack, and this is what
+# this domain adds.  The list parameters here -- mydestination,
+# virtual_mailbox_domains, masquerade_domains, header_checks -- are joined
+# across fragments rather than replaced, which is what lets a second domain be
+# provisioned onto this guest without the first one's mail quietly stopping
+# being delivered.
+#
+# These comments stay in this file.  They do not reach the generated main.cf,
+# because a comment describes the setting under it and once several fragments
+# have merged there may no longer be one.
+mydomain = [% domain %]
+myhostname = mail.[% domain %]
+myorigin = $mydomain
+mydestination = [% FOREACH alias IN full_aliases.sort() %][% alias %], [% END %]
+masquerade_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
+virtual_mailbox_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
+
+# Header checks
+header_checks = regexp:/etc/postfix/header_checks/[% domain %]
+
+# Sometimes when you are behind NAT this can trip you up -- not all routers are
+# created equal.  Generally you will want to set this on if in a DC.  That's
+# because you don't get put on RBLs for sending from multiple IPs.
+[% IF bind_mainip %]
+smtp_bind_address = [% main_ip %]
+[% END %]
+# SSL.  Not a list: a second domain provisioned onto this guest replaces these
+# rather than adding to them, because postfix has one certificate for the
+# smtpd it answers on and cannot have two.
+smtpd_tls_cert_file = /etc/ssl/certs/[% domain %].pem
+smtpd_tls_key_file = /etc/ssl/private/[% domain %].pem

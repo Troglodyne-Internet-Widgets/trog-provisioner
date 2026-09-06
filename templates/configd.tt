@@ -1,0 +1,5 @@
+[% script_dir %]/install_configd '[% version %]'
+[% FOR language IN languages -%]
+/usr/bin/configd adopt --no-restart '[% language %]'
+[% script_dir %]/queue_postrun_task /usr/bin/configd adopt '[% language %]'
+[% END -%]

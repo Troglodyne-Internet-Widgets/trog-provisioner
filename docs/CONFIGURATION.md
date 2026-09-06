@@ -183,9 +183,17 @@ Two the old documentation carried, both still true:
   account to import from (`gh:someone`) rather than a key. A raw public key has
   no way in here; put it in the domain's `users.yaml`, which takes
   `ssh_authorized_keys`.
-* A few recipes -- `mail` most of all -- are not idempotent the way the global
+* A few recipes -- `mail` most of all -- were not idempotent the way the global
   fragment mechanism wants, because the software they configure has no `conf.d`
-  directory and the config file has to be edited rather than added to.
+  directory and the config file had to be edited rather than added to. The
+  `configd` recipe closes most of this: postfix, opendkim, opendmarc and redis
+  now get a fragment directory each, so `mail` and `redis` write a file named
+  for the domain instead of rewriting the service's config. What is left is the
+  settings that genuinely cannot have two values -- postfix's `myhostname` and
+  its TLS certificate, opendmarc's `AuthservID` -- and the postfix map files,
+  which are still one per guest written by whichever domain provisioned last.
+  Those are visible now (`configd status postfix` lists the fragments and who
+  wrote them) rather than silent.
 
 ## Writing a recipe
 

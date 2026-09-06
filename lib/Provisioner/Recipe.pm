@@ -85,6 +85,13 @@ many domains are provisioned into the guest; the per-domain fragment runs for
 each.  Configuration for a service with no C<conf.d> directory tends to belong
 in the global half, since two domains cannot each rewrite the same file.
 
+L<Provisioner::Recipe::configd> is how that stops being true for the software it
+covers: it gives such a file a fragment directory, and a recipe writes into it
+per domain like any other C<conf.d>.  What stays in the global half there is
+what is a fact about the guest rather than about a domain -- see the way
+C<mail> splits main.cf, where saying the milters per domain would have postfix
+run each of them twice.
+
 =head3 Conventions a recipe is expected to keep
 
 =over 4

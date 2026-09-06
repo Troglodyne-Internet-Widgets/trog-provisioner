@@ -2,6 +2,12 @@
 # service type  private unpriv  chroot  wakeup  maxproc command + args
 #               (yes)   (yes)   (yes)   (never) (100)
 # ==========================================================================
+# This is a fragment: configd merges it over the master.cf the package shipped,
+# keyed on each service's name and its type together.  So a row here has to name
+# the same type the package's row does, or postfix ends up running both -- and
+# two queue managers arguing over one queue is not a subtle failure.  pickup and
+# qmgr are unix-domain rather than fifo for exactly that reason; postfix has
+# shipped them that way since 3.0 and the fifo spelling was ours alone.
 # Port 25, incoming untrusted mail only.
 smtp       inet  n       -       y       -       -       smtpd
   	-o smtpd_sasl_auth_enable=no
@@ -15,9 +21,9 @@ submission inet  n       -       y       -       -       smtpd
 smtps      inet  n       -       y       -       -       smtpd
     -o smtpd_tls_wrappermode=yes
     -o smtpd_sasl_auth_enable=no
-pickup     fifo  n       -       y       60      1       pickup
+pickup     unix  n       -       y       60      1       pickup
 cleanup    unix  n       -       y       -       0       cleanup
-qmgr      fifo  n       -       n       300     1       qmgr
+qmgr      unix  n       -       n       300     1       qmgr
 #qmgr     fifo  n       -       -       300     1       oqmgr
 tlsmgr     unix  -       -       y       1000?   1       tlsmgr
 rewrite    unix  -       -       y       -       -       trivial-rewrite

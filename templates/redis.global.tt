@@ -2,9 +2,19 @@ mkdir -p /etc/redis
 mkdir -p /var/log/redis
 chown redis:redis /var/log/redis
 chmod 0750 /var/log/redis
-cp redis.conf /etc/redis/redis.conf
-chown root:redis /etc/redis/redis.conf
-chmod 0640 /etc/redis/redis.conf
+# redis has an `include` and no conf.d -- the included file has to be named from
+# the file doing the including, and a glob is a fatal error -- so configd
+# generates redis.conf from /etc/redis/redis.conf.d instead.  Writing a fragment
+# rather than the whole file is also what keeps the distribution's redis.conf:
+# it becomes 00-original, and everything we have no opinion about goes on
+# working the way the package intended.
+#
+# The directory is made here as well as by `configd adopt`, with the mode adopt
+# would give it, because the makefile does not promise which of us runs first.
+install -d -m 0750 -o root -g redis /etc/redis/redis.conf.d
+# 0600 root:root: the fragment can hold requirepass, and the only thing that
+# reads it is configd, running as root out of the unit's ExecStartPre.
+install -m 0600 -o root -g root redis.conf /etc/redis/redis.conf.d/50-provisioner
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable redis-server
 [% script_dir %]/queue_postrun_task systemctl restart redis-server

@@ -1,0 +1,81 @@
+# main.cf for this guest's mail stack, as a fragment.
+#
+# The half of main.cf that is about the machine rather than about a domain:
+# where mailboxes live, which maps and milters postfix runs, what it will and
+# will not accept.  It is installed once per guest by the global half of the
+# mail recipe, and every domain's own fragment sits beside it as 50-<domain>.
+#
+# The split is not tidiness.  configd joins the list parameters across fragments
+# instead of replacing them, which is what lets two domains both be in
+# mydestination -- and that is exactly wrong for smtpd_milters, where two
+# domains each naming opendkim would have postfix run it twice and sign every
+# message twice over.  Anything that is a fact about the guest is said once,
+# here.
+#
+# What the guest arrived with is 00-original and still applies wherever nothing
+# here has an opinion.
+[% UNLESS ipv6 %]
+inet_protocols = ipv4
+[% END %]
+# What is always local, whatever domains this guest ends up hosting.  Each
+# domain's fragment adds its own names to this rather than restating these two,
+# because configd joins the list and restating them puts them in three times.
+mydestination = $myhostname, localhost
+
+# Allow ez-tracing
+debugger_command = PATH=/bin:/usr/bin:/usr/local/bin; (strace -f -p $process_id 2>&1 | logger -p mail.info) & sleep 5
+
+# vmailboxen.  %DOVECOT_UID% is filled in by the makefile fragment, because the
+# account only exists on the guest.  The group gets the same value, which is
+# what the mail passwd file this pairs with uses too.
+virtual_mailbox_base = /mail
+virtual_mailbox_maps = hash:/etc/postfix/virtual/maps
+virtual_alias_maps = hash:/etc/postfix/virtual/aliases
+virtual_uid_maps = static:%DOVECOT_UID%
+virtual_gid_maps = static:%DOVECOT_UID%
+
+# We are not a relay
+mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+
+# In case we use a relay
+sender_dependent_relayhost_maps = hash:/etc/postfix/sdd_relay_maps
+transport_maps = hash:/etc/postfix/transport_maps
+
+# Prevent SMTP smuggling
+smtpd_forbid_bare_newline = normalize
+
+# The restriction lists.  configd deliberately does not join these across
+# fragments even though they are lists: the order is the meaning, and a permit_
+# landing ahead of a check that was supposed to run first is an open relay.
+# They are the guest's policy rather than a domain's, so they live here where
+# there is only one of them.
+#
+# Don't even talk to people we can't resolve or that are on RBLs
+smtpd_client_restrictions = permit_mynetworks, reject_unknown_reverse_client_hostname, reject_unknown_client_hostname, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, permit
+# Prevent abusive behavior w/data
+smtpd_data_restrictions = reject_unauth_pipelining, permit
+# Reject bad HELO
+smtpd_helo_restrictions = permit_mynetworks, reject_invalid_helo_hostname, reject_non_fqdn_helo_hostname, permit
+# Don't accept mail that is FROM obviously bogus addrs when incoming.
+smtpd_sender_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unknown_sender_domain, reject_invalid_hostname, reject_unknown_reverse_client_hostname, permit
+# Don't accept mail which is TO things that are either bogus or not on here when incoming.
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain, check_recipient_access pcre:/etc/postfix/recipient_access_pcre, permit
+
+# Tell SASL what accounts are on the server.
+smtpd_sender_login_maps = hash:/etc/postfix/virtual/maps
+
+# milters, ldas etc
+mailbox_transport = lmtp:unix:private/dovecot-lmtp
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+content_filter = smtp-amavis:[127.0.0.1]:10024, spamassassin
+milter_default_action = accept
+smtpd_milters = local:opendkim/opendkim.sock, local:opendmarc/opendmarc.sock
+non_smtpd_milters = $smtpd_milters
+
+# SASL
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = $myhostname
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination

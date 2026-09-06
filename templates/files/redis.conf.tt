@@ -1,3 +1,17 @@
+# redis.conf for this guest, as a fragment.
+#
+# configd merges every file in /etc/redis/redis.conf.d into redis.conf when
+# redis-server starts or reloads.  What the package shipped is 00-original and
+# still applies wherever nothing here has an opinion, so this only has to say
+# what the provisioner actually decided.
+#
+# These comments stay in this file rather than reaching the generated one, where
+# they could only describe settings something later has since replaced.
+#
+# A second bind line rather than a replaced one: configd keeps every occurrence
+# of the directives redis means more than once, and bind is one of them.  redis
+# reads them in order and each replaces the last, so this one -- which sorts
+# after 00-original's -- is the one that counts.
 bind [% bind %]
 port [% port %]
 daemonize no
@@ -6,10 +20,17 @@ loglevel notice
 logfile /var/log/redis/redis-server.log
 dir /var/lib/redis
 [% IF save %]
+# Snapshot points add to whatever the package chose rather than replacing them:
+# redis means every save line it is given, and configd keeps them all, except
+# that two saying exactly the same thing collapse into one.  So this is more
+# frequent snapshots than the distribution asked for, never fewer.
 save 900 1
 save 300 10
 save 60 10000
 [% ELSE %]
+# An empty save clears every snapshot point named before it, which is every one
+# in 00-original -- this fragment sorts after it, and that is what turns RDB
+# persistence off rather than merely declining to add to it.
 save ""
 [% END %]
 [% IF requirepass %]

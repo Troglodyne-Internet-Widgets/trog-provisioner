@@ -1,0 +1,57 @@
+#!/bin/bash
+# Install Configd from CPAN against the perl the guest already has.
+#
+# Not the one the perl recipe builds into /opt/perl5.  configd runs from a
+# systemd ExecStartPre, so it stands between a service and starting: it has to
+# work on a guest where that perl was never built, and it has to keep working if
+# somebody rebuilds or removes it.  Everything Configd needs is core, so the
+# distribution's perl is enough -- and there are three separate ways to end up
+# installing into the wrong one, so each of them is closed below.
+#
+# Usage: install_configd [minimum-version]
+set -eu
+
+WANTED=${1:-0.001}
+
+PERL=/usr/bin/perl
+CPANM=/usr/bin/cpanm
+
+# One: the environment.  local::lib's variables point at a library path that is
+# not system perl's, and anything inheriting them installs there instead.
+unset PERL5LIB PERL_LOCAL_LIB_ROOT PERL_MB_OPT PERL_MM_OPT
+
+[ -x "$PERL" ] || { echo "install_configd: no system perl at $PERL" >&2; exit 1; }
+
+# Only reach for the network when there is something to fetch.  This runs on
+# every provision of every domain on the guest, and one that already has it
+# should not be waiting on CPAN to be told so.
+if "$PERL" -e "require Configd; Configd->VERSION(q{$WANTED})" 2>/dev/null; then
+    echo "install_configd: Configd $WANTED or newer is already installed"
+else
+    [ -x "$CPANM" ] || { echo "install_configd: no $CPANM -- is cpanminus installed?" >&2; exit 1; }
+
+    # Two: the shebang on cpanm, and the cpanm the perl recipe leaves on root's
+    # PATH pointing into /opt/perl5.  Whichever perl cpanm runs under is the one
+    # it installs for, so name both.
+    "$PERL" "$CPANM" --notest "Configd~>=$WANTED"
+fi
+
+SCRIPT="$("$PERL" -MConfig -e 'print $Config{installsitescript} || $Config{installsitebin}')/configd"
+[ -f "$SCRIPT" ] || { echo "install_configd: Configd is installed but there is no configd at $SCRIPT" >&2; exit 1; }
+
+# Three: the shebang on configd itself.  It ships as `#!/usr/bin/env perl`,
+# which ExtUtils::MakeMaker leaves alone -- it only rewrites a shebang that
+# already names a perl -- so the installed program runs whichever perl is first
+# on PATH.  On a guest that also has the perl recipe that can be /opt/perl5's,
+# which has none of this installed, and the failure is "Can't locate Configd.pm"
+# from a program that is plainly right there.
+head -n 1 "$SCRIPT" | grep -qxF "#!$PERL" || sed -i "1s|^#!.*|#!$PERL|" "$SCRIPT"
+
+# systemd refuses a relative path in ExecStartPre, and /usr/bin/configd is the
+# one the generated drop-in names unless it is told otherwise.
+[ "$SCRIPT" = /usr/bin/configd ] || ln -sf "$SCRIPT" /usr/bin/configd
+
+# Say what the guest can adopt.  This is also the only proof that matters: that
+# the program compiles and finds its own library under the perl that will be
+# running it from ExecStartPre.
+echo "install_configd: Configd $("$PERL" -MConfigd -e 'print Configd->VERSION') knows: $(/usr/bin/configd languages | tr '\n' ' ')"

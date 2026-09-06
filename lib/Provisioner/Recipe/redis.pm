@@ -36,6 +36,13 @@ Optional parameters:
 - maxmemory_policy: eviction policy when maxmemory is hit (default: noeviction)
 - save: set to 0 to disable RDB persistence (pure cache mode)
 
+Configuration goes in as a fragment under C</etc/redis/redis.conf.d>, which
+C<configd> merges into C<redis.conf> every time redis-server starts or reloads.
+The package's own C<redis.conf> becomes C<00-original> and keeps applying
+wherever nothing above says otherwise, so anything this recipe has no opinion
+about is still whatever Debian chose rather than absent. The C<configd> recipe
+is pulled in for that; see L<Provisioner::Recipe::configd>.
+
 =cut
 
 sub deps {
@@ -44,6 +51,20 @@ sub deps {
         return qw{redis-server};
     }
     die "Unsupported packager";
+}
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    # redis.conf has no conf.d, and its `include` is not one: the included file
+    # has to be named from the file doing the including, and a glob is a fatal
+    # error.  configd generates redis.conf from a fragment directory instead,
+    # which is what leaves the distribution's own redis.conf in place underneath
+    # what this recipe decided.
+    return (
+        configd => sub { return ( languages => ['redis'] ) },
+        $self->SUPER::required_recipes(%opts),
+    );
 }
 
 sub rate_limits {

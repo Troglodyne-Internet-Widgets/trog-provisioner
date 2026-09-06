@@ -49,6 +49,43 @@ If a sieve script in the $data_dir/mailnames/$USER/$USER.sieve exists, we will r
 
 TODO: gather this data from something secure, such as keepass or vault.
 
+=head3 Two domains on one guest
+
+postfix, opendkim and opendmarc each keep their configuration in a single file
+with no C<conf.d>, and C<postconf -e> B<sets> a parameter rather than adding to
+one -- so provisioning a second domain onto a guest that already hosts one used
+to replace the first domain's C<mydestination> instead of joining it, and mail
+for that domain quietly stopped being delivered locally.
+
+So this recipe writes fragments rather than files. The C<configd> recipe is
+pulled in to adopt those three, and what goes into the fragment directories is:
+
+=over 4
+
+=item * C</etc/postfix/main.cf.d/40-mail> and C</etc/postfix/master.cf.d/40-mail>,
+from the global half -- the guest's own mail stack, said once. The milters live
+here for a reason: C<smtpd_milters> is a list configd joins across fragments,
+and two domains each naming opendkim would have postfix sign every message
+twice.
+
+=item * C</etc/postfix/main.cf.d/50-E<lt>domainE<gt>> and
+C</etc/opendmarc.conf.d/50-E<lt>domainE<gt>>, per domain -- the parts that
+actually name it. C<mydestination>, C<masquerade_domains>,
+C<virtual_mailbox_domains> and C<header_checks> are joined across domains, so
+each of them gets what it asked for.
+
+=item * C</etc/opendkim.conf.d/40-mail>, from the global half, since nothing in
+it is per domain.
+
+=back
+
+Not everything comes apart. The virtual maps, the transport map and the
+recipient access table are still one file per guest written by whichever domain
+provisioned last, and C<myhostname> and the TLS certificate can only have one
+value because postfix has one of each. Those are visible disagreements now --
+C<configd status postfix> lists the fragments and who wrote them -- rather than
+a silent overwrite.
+
 =cut
 
 use UUID                  qw{uuid};
@@ -61,6 +98,20 @@ sub deps {
         return qw{postfix postfix-pcre dovecot-imapd dovecot-pop3d dovecot-antispam dovecot-sieve dovecot-lmtpd postgrey opendmarc opendkim spamassassin clamav amavisd-new rpm2cpio 7zip bzip2 lrzip lzop unrar-free};
     }
     die "Unsupported packager";
+}
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    # postfix, opendkim and opendmarc each keep their configuration in one file
+    # with no conf.d, so two domains provisioned onto one guest cannot both
+    # configure them -- and with postconf the loser is not told.  configd gives
+    # each of those files a fragment directory, which is what the templates here
+    # write into.
+    return (
+        configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
+        $self->SUPER::required_recipes(%opts),
+    );
 }
 
 sub dep_conflicts {
@@ -145,6 +196,8 @@ sub template_files {
         'mail.opendmarc.tt'              => 'opendmarc.conf',
         'mail.opendmarc-ignorehosts.tt'  => 'ignore.hosts',
         'mail.postfix.master.tt'         => 'master.cf',
+        'mail.postfix.main.global.tt'    => 'main.cf.global',
+        'mail.postfix.main.tt'           => 'main.cf.domain',
         'mail.amavis.tt'                 => '50-user',
         'mail.autodiscover.tt'           => 'autodiscover.xml',
         'mail.autodiscover_vhost.tt'     => 'autodiscover_vhost',

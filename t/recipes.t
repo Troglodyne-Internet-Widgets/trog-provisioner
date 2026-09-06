@@ -627,6 +627,120 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     }
 };
 
+# ----------------------------------------------------------------
+# configd: the recipes for the software that has no conf.d
+# ----------------------------------------------------------------
+subtest 'the recipes covered by a configd language ask for it' => sub {
+
+    # Naming the languages here rather than having configd know which recipes
+    # exist: the recipe that configures the software is the one that knows which
+    # file it is about to write into.
+    my %want = (
+        mail  => [qw{opendkim opendmarc postfix}],
+        redis => ['redis'],
+    );
+
+    foreach my $recipe ( sort keys %want ) {
+        my %required = "Provisioner::Recipe::$recipe"->new(%PROV)->required_recipes( %G, %{ $required_config{$recipe} // {} } );
+        ok( $required{configd}, "$recipe pulls in configd" ) or next;
+
+        my %args = $required{configd}->(%G);
+        is_deeply( $args{languages}, $want{$recipe}, "and asks it for @{$want{$recipe}}" );
+    }
+};
+
+subtest 'configd takes the union of what asked for it' => sub {
+    my $r = 'Provisioner::Recipe::configd'->new(%PROV);
+
+    # Which is how they arrive: Hash::Merge joins two dependants' arrays, so a
+    # language two recipes both need is in the list twice.  Rendering `configd
+    # adopt postfix` twice is harmless and looks like a bug in the makefile.
+    my %opts = $r->validate( %G, languages => [qw{postfix redis postfix opendkim}] );
+    is_deeply( $opts{languages}, [qw{opendkim postfix redis}], 'deduplicated and sorted' );
+
+    # It becomes a module name and a shell argument, and it is the one thing
+    # here that comes from configuration rather than from another recipe.
+    like(
+        exception { 'Provisioner::Recipe::configd'->new(%PROV)->validate( %G, languages => ['postfix; rm -rf /'] ) },
+        qr/languages/,
+        'and a language name that is not a name is refused'
+    );
+};
+
+subtest 'the makefile fragment adopts every language it was given' => sub {
+    my $out = 'Provisioner::Recipe::configd'->new(%PROV)->render( %G, languages => [qw{postfix redis}] );
+
+    like( $out, qr{install_configd}, 'it installs Configd against the system perl' );
+
+    foreach my $language (qw{postfix redis}) {
+
+        # Once during the build, so the fragment directories exist and a bad
+        # language name fails the build rather than the postrun.
+        like( $out, qr{configd adopt --no-restart '$language'}, "$language is adopted without restarting anything" );
+
+        # And once after it, when every recipe has written its fragments.
+        like( $out, qr{queue_postrun_task /usr/bin/configd adopt '$language'}, "and adopted again once the makefile is done" );
+    }
+};
+
+subtest 'mail writes fragments rather than editing the files' => sub {
+    my $r   = 'Provisioner::Recipe::mail'->new(%PROV);
+    my $out = $r->render(%G);
+
+    # postconf sets a parameter and cannot add to one, which is the whole reason
+    # a second domain used to take the first one's mail with it.
+    unlike( $out, qr/^postconf /m, 'no postconf -e survives in the fragment' );
+    like( $out, qr{main\.cf\.d/50-\Q$G{domain}\E},        'main.cf gets a fragment named for the domain' );
+    like( $out, qr{opendmarc\.conf\.d/50-\Q$G{domain}\E}, 'and so does opendmarc.conf' );
+
+    # Overwriting a file configd generates works until the next restart, and
+    # then silently does not.
+    unlike( $out, qr{mv \S* /etc/opendkim\.conf},  'nothing overwrites /etc/opendkim.conf' );
+    unlike( $out, qr{mv \S* /etc/opendmarc\.conf}, 'nor /etc/opendmarc.conf' );
+
+    my $global = $r->render_global(%G);
+    like( $global, qr{main\.cf\.d/40-mail},       'the guest-wide half of main.cf is written once' );
+    like( $global, qr{master\.cf\.d/40-mail},     'and so is master.cf' );
+    like( $global, qr{opendkim\.conf\.d/40-mail}, 'and opendkim.conf, none of which is per domain' );
+};
+
+subtest 'the milters are named once, not once per domain' => sub {
+
+    # smtpd_milters is a parameter configd joins across fragments.  Named in the
+    # per-domain half, two domains would have postfix run opendkim twice and
+    # sign every message twice over.
+    my $r = 'Provisioner::Recipe::mail'->new(%PROV);
+    unlike( $r->render_file( 'files/mail.postfix.main.tt', %G ), qr/^smtpd_milters/m, 'not in the domain fragment' );
+    like( $r->render_file( 'files/mail.postfix.main.global.tt', %G ), qr/^smtpd_milters/m, 'in the guest-wide one' );
+};
+
+subtest 'master.cf fragment rows name the types the package ships' => sub {
+
+    # configd keys a master.cf row on the service name and its type together, so
+    # a row naming a type the package does not use is a second service rather
+    # than an override -- and two queue managers share one queue.
+    my $master = 'Provisioner::Recipe::mail'->new(%PROV)->render_file( 'files/mail.postfix.master.tt', %G );
+
+    foreach my $service (qw{pickup qmgr}) {
+        like( $master, qr/^$service\s+unix\s/m, "$service is unix-domain, as postfix has shipped it since 3.0" );
+        unlike( $master, qr/^$service\s+fifo\s/m, "and not also a fifo" );
+    }
+};
+
+subtest 'redis writes a fragment and keeps the packaged config underneath' => sub {
+    my $r      = 'Provisioner::Recipe::redis'->new(%PROV);
+    my $global = $r->render_global(%G);
+
+    like( $global, qr{redis\.conf\.d/50-provisioner}, 'the configuration goes in as a fragment' );
+    unlike( $global, qr{cp \S+ /etc/redis/redis\.conf}, 'and does not overwrite the generated file' );
+
+    # An empty save is what turns RDB persistence off; adding snapshot points
+    # without it only ever means more snapshots than the package asked for.
+    my $off = 'Provisioner::Recipe::redis'->new(%PROV)->render_file( 'files/redis.conf.tt', %G, save => 0 );
+    like( $off, qr/^save ""$/m, 'save: 0 clears every snapshot point named before it' );
+    unlike( $off, qr/^save \d/m, 'and names none of its own' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
