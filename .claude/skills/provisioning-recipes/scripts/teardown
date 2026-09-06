@@ -13,9 +13,16 @@ use re '/aa';
 use FindBin::libs;
 
 use File::Basename();
+use File::Path();
+use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
 use IPC::Run3();
 use Pod::Usage qw{pod2usage};
+use YAML::XS();
+
+use Trog::Config();
+use Trog::HV();
+use Trog::Hypervisors();
 
 =head1 NAME
 
@@ -25,16 +32,38 @@ teardown - take the throwaway guest and the throwaway configuration back out aga
 
     teardown vm.test
     teardown --keep-config vm.test
+    teardown --orphans --dryrun
 
 =head1 DESCRIPTION
 
 Destroys the guest, purges its domain directory from here and from the
-hypervisor, and removes the scratch configuration directory.
+hypervisor, takes its data directory out of the data source on both, and
+removes the scratch configuration directory.
 
 Run it even when the provision failed -- especially then.  A half-built guest
 still holds an address out of the pool, a disk in the storage pool and a
 definition in libvirt, and the next run will collide with all three.  Collect
 the artifacts first; they are gone after this.
+
+=head2 The data directory
+
+That is the one that gets forgotten, because nothing collides with it and
+nothing stops working when it is left.  C<new_config> makes
+C<$data_source/$domain> for whatever datadirs the recipes ask for, writes
+anything fetched off the last guest into it, and ships the whole thing to the
+hypervisor for the guest to pull its payload out of.  Neither copy belongs to
+anyone once the guest is gone.
+
+They are small and they are quiet, so they pile up a pair at a time: a hundred
+and fifty six on the workstation and seventy two on the hypervisor when this was
+written, each named after a UUID that stopped meaning anything the moment its
+guest was destroyed.  And they are not empty: a guest built with the C<backup>
+recipe leaves the private half of its backup key in there, which is the one file
+that recipe goes out of its way to delete from the guest itself.
+
+So teardown removes it, on both sides, C<--keep-data> to keep it.  Only when
+the configuration in play is a scratch one: a real domain's data directory is
+where its backups are restored from, and it is not this script's to touch.
 
 =head1 OPTIONS
 
@@ -45,9 +74,24 @@ the artifacts first; they are gone after this.
 Leave the scratch configuration directory alone.  For when the next run should
 reuse the same throwaway secret store rather than building another.
 
+=item B<--keep-data>
+
+Leave the domain's data directory where it is, here and on the hypervisor.  For
+when the next run should start from what this one produced.
+
+=item B<--orphans>
+
+Sweep instead of tearing one down: every C<.test> directory in the data source,
+here and across the fleet, that no hypervisor has a guest for and no recipe
+configuration names.  This is for the ones already there -- runs that ended
+before teardown did, or before it removed them.  Takes no domain.
+
+Pair it with C<--dryrun> first; it prints what it found and where each copy is.
+
 =item B<--connect> URI, B<--hvconf> FILE
 
-Passed through to C<bin/destroy>.
+Passed through to C<bin/destroy>, and used to find the hypervisor holding the
+other copy of the data directory.
 
 =item B<--dryrun>
 
@@ -57,56 +101,248 @@ Say what would go without any of it going.
 
 =cut
 
+# scratch_config's marker.  Its presence is what says the configuration in play
+# describes throwaway guests, and so what makes their data ours to remove.
+our $MARKER = '.trog-scratch-config';
+
 sub main {
     my @args = @_;
 
-    my ($keep_config, $uri, $hvconf, $dryrun, $help);
-    GetOptionsFromArray(\@args,
+    my ( $keep_config, $keep_data, $orphans, $uri, $hvconf, $dryrun, $help );
+    GetOptionsFromArray(
+        \@args,
         'keep-config' => \$keep_config,
+        'keep-data'   => \$keep_data,
+        'orphans'     => \$orphans,
         'connect=s'   => \$uri,
         'hvconf=s'    => \$hvconf,
         'dryrun'      => \$dryrun,
         'help'        => \$help,
     );
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    return sweep_orphans( $uri, $hvconf, $dryrun ) if $orphans;
 
     my $domain = shift @args;
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $rc = destroy_guest($domain, $uri, $hvconf, $dryrun);
+    # Worked out before the guest goes: the fleet can only answer which
+    # hypervisor holds a guest for as long as there is one to hold.
+    my ( $data, $hv ) = $keep_data ? () : data_dir( $domain, $uri, $hvconf );
+
+    my $rc = destroy_guest( $domain, $uri, $hvconf, $dryrun );
+
+    # Whether or not the destroy worked.  A guest that would not go is exactly
+    # the run whose leavings nobody comes back for.
+    purge_data_dir( $data, $hv, $dryrun ) if $data;
+
     $rc ||= remove_config($dryrun) unless $keep_config;
 
     return $rc;
 }
 
 sub destroy_guest {
-    my ($domain, $uri, $hvconf, $dryrun) = @_;
+    my ( $domain, $uri, $hvconf, $dryrun ) = @_;
 
     my $destroy = File::Basename::dirname(__FILE__) . '/../../../../bin/destroy';
 
-    my @cmd = ($^X, $destroy, '--purge', $domain);
+    my @cmd = ( $^X, $destroy, '--purge', $domain );
     push @cmd, '--connect', $uri    if $uri;
     push @cmd, '--hvconf',  $hvconf if $hvconf;
-    push @cmd, '--dryrun'           if $dryrun;
+    push @cmd, '--dryrun' if $dryrun;
 
     print {*STDERR} "Destroying $domain\n";
-    IPC::Run3::run3(\@cmd, \undef, undef, undef);
+    IPC::Run3::run3( \@cmd, \undef, undef, undef );
     my $rc = $? >> 8;
 
     # Worth saying rather than swallowing: what is left behind is a disk and a
     # lease that the next run will trip over.
-    print {*STDERR} "\nbin/destroy exited $rc; $domain may still be on the hypervisor.\n"
-      . "Check with: virsh -c \$URI list --all\n" if $rc;
+    print {*STDERR} "\nbin/destroy exited $rc; $domain may still be on the hypervisor.\n" . "Check with: virsh -c \$URI list --all\n" if $rc;
 
     return $rc;
 }
+
+=head1 SUBROUTINES
+
+=head2 data_dir($domain, $uri, $hvconf)
+
+The domain's directory under the data source, and the hypervisor holding the
+other copy of it.  Empty, having said why, when the configuration in play is not
+a scratch one or does not say where the data source is.
+
+=cut
+
+sub data_dir {
+    my ( $domain, $uri, $hvconf ) = @_;
+
+    my $cfg = Trog::Config->dir;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    unless ( -f "$cfg/$MARKER" ) {
+        print {*STDERR} "$cfg is not a scratch configuration, so the data directory stays.\n" . "A real domain's is where its backups are restored from.  --orphans sweeps the throwaway ones.\n";
+        return ();
+    }
+
+    my $root = data_root($domain) or return ();
+
+    # bin/destroy's rule, for bin/destroy's reason: the domain arrives on the
+    # command line and ends up in an rm.
+    $domain =~ s/\///g;
+    return () unless length $domain && $domain !~ m/\A[.]+\z/;
+
+    # Warned about rather than fatal.  A guest that never got defined -- a
+    # provision that died early, or a teardown run twice -- still left a
+    # directory here, and that half can go whatever the fleet says.
+    my $hv = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf ) };
+    print {*STDERR} "Could not work out which hypervisor held $domain, so only the copy here goes:\n$@"
+      unless $hv;
+
+    return ( "$root/$domain", $hv );
+}
+
+=head2 data_root($domain)
+
+Where the data source is, according to the configuration in play: the C<data>
+recipe's C<from>, as C<bin/new_config> reads it.  Undef, having said so, when
+nothing says.
+
+=cut
+
+sub data_root {
+    my ($domain) = @_;
+
+    my $conf = recipes_conf();
+
+    # Defined only when there is a domain to ask about: the sweep has none, and
+    # a hash lookup on undef is fatal here rather than merely empty.
+    my $from = ( $domain ? $conf->{$domain}{data}{from} : undef ) // $conf->{_base}{data}{from};
+
+    print {*STDERR} 'Nothing in ' . Trog::Config->dir . "/recipes.yaml says where the data source is\n" . "(_base: data: from), so there is nothing to remove from it.\n"
+      unless $from;
+
+    return $from;
+}
+
+=head2 recipes_conf()
+
+The recipe configuration in play: F<recipes.yaml> with F<recipes.d/> laid over
+it, the way C<bin/new_config> reads it.  Only the shape matters here -- which
+domains are named, and where the data source is -- so this merges shallowly
+rather than dragging in the dependency resolution that goes with the real thing.
+
+=cut
+
+sub recipes_conf {
+    my $dir  = Trog::Config->dir;
+    my $file = "$dir/recipes.yaml";
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    my %conf = %{ -f $file ? YAML::XS::Load( File::Slurper::read_binary($file) ) : {} };
+
+    foreach my $extra ( sort glob "$dir/recipes.d/*.yaml" ) {
+        my $loaded = eval { YAML::XS::Load( File::Slurper::read_binary($extra) ) } // {};
+        %conf = ( %conf, %$loaded );
+    }
+
+    return \%conf;
+}
+
+=head2 purge_data_dir($dir, $hv, $dryrun)
+
+Remove the directory here and on the hypervisor.  C<new_config> ships the whole
+thing over for the guest to pull its payload out of, so there are two.
+
+=cut
+
+sub purge_data_dir {
+    my ( $dir, $hv, $dryrun ) = @_;
+
+    if ($dryrun) {
+        print "Would purge the data directory $dir, here and on the hypervisor\n";
+        return;
+    }
+
+    print "Purging data directory $dir\n";
+    File::Path::remove_tree($dir) if -d $dir;
+    $hv->run( qw{rm -rf}, $dir )  if $hv && !$hv->is_local;
+
+    return;
+}
+
+=head2 sweep_orphans($uri, $hvconf, $dryrun)
+
+Every C<.test> directory in the data source that no hypervisor in the fleet has
+a guest for and no recipe configuration names, here and on each of them.
+
+The two exclusions are the whole safety of it, so neither is inferred: a name
+libvirt still knows about is a live guest however old its directory looks, and a
+name the configuration carries is one somebody means to build again.
+
+=cut
+
+sub sweep_orphans {
+    my ( $uri, $hvconf, $dryrun ) = @_;
+
+    my $root = data_root() or return 1;
+
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
+
+    my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ recipes_conf() };
+    foreach my $hv (@hvs) {
+        my @names = eval {
+            map { $_->get_name } $hv->vmm->list_all_domains();
+        };
+        print {*STDERR} 'Could not ask ' . $hv->describe . " what it has, so nothing there is swept: $@" if $@;
+        $spoken_for{$_} = 1 for @names;
+    }
+
+    my %found;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
+    $found{ File::Basename::basename($_) }{here} = 1 for grep { -d $_ } glob "$root/*.test";
+
+    foreach my $hv (@hvs) {
+        next if $hv->is_local;
+        my $listing = $hv->capture("ls -1 $root 2>/dev/null") // '';
+        push @{ $found{$_}{on} }, $hv for grep { substr( $_, -length '.test' ) eq '.test' } split( "\n", $listing );
+    }
+
+    my @orphans = sort grep { !$spoken_for{$_} } keys %found;
+    unless (@orphans) {
+        print "Nothing under $root belongs to a guest that is gone.\n";
+        return 0;
+    }
+
+    print scalar(@orphans) . ' of ' . scalar( keys %found ) . " .test data directories under $root belong to no guest:\n";
+    foreach my $name (@orphans) {
+        my @where = ( $found{$name}{here} ? 'here' : (), map { $_->name // $_->describe } @{ $found{$name}{on} // [] } );
+        print "  $name (" . join( ', ', @where ) . ")\n";
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] None of it removed.\n";
+        return 0;
+    }
+
+    foreach my $name (@orphans) {
+        File::Path::remove_tree("$root/$name") if $found{$name}{here};
+        $_->run( qw{rm -rf}, "$root/$name" ) for @{ $found{$name}{on} // [] };
+    }
+
+    print 'Removed ' . scalar(@orphans) . " data directories.\n";
+    return 0;
+}
+
+=head2 remove_config($dryrun)
+
+Take the scratch configuration directory out.
+
+=cut
 
 sub remove_config {
     my ($dryrun) = @_;
 
     my $dir = $ENV{TROG_PROVISIONER_CONFIG};
-    unless (defined $dir && length $dir) {
+    unless ( defined $dir && length $dir ) {
         print {*STDERR} "TROG_PROVISIONER_CONFIG is not set, so there is no scratch config to remove.\n";
         return 0;
     }
@@ -120,7 +356,7 @@ sub remove_config {
         return 0;
     }
 
-    IPC::Run3::run3([$^X, $scratch, '--remove', $dir], \undef, undef, undef);
+    IPC::Run3::run3( [ $^X, $scratch, '--remove', $dir ], \undef, undef, undef );
     return $? >> 8;
 }
 
