@@ -566,8 +566,16 @@ sub mongle_domain_xml {
     my $disk_volume = "$domain-qcow2";
     $hv->create_disk( $disk_volume, backing => $base, capacity => $disk_size );
 
-    my ( $extra_disks, $filesystems ) = mongle_extra_disks($config);
-    my $tpm = mongle_tpm($hv);
+    # Worked out once, from what this hypervisor will take, and handed to every
+    # disk in the domain.  The metadata cache is the exception: it is a function
+    # of how large the image is, so only the disk whose size we know gets one.
+    my %tuning = mongle_disk_tuning($config);
+    my %shape  = $hv->qcow2_shape($disk_size);
+    $tuning{metadata_cache} = $shape{metadata_cache};
+
+    my ( $extra_disks, $filesystems ) = mongle_extra_disks( $config, \%tuning );
+    my $tpm       = mongle_tpm($hv);
+    my $iothreads = mongle_iothreads( $tuning{iothreads} );
 
     # NoCloud wants all three, and cloud-init will not look at a seed that is
     # missing any of them.
@@ -589,6 +597,9 @@ sub mongle_domain_xml {
         DISKVOLUME  => $disk_volume,
         CLOUDINIT   => $cloudinit,
         BRIDGENAME  => $bridge_device,
+        IOTHREADS   => $iothreads,
+        DISKDRIVER  => disk_driver_xml( \%tuning, format => 'qcow2', primary => 1, index => 0 ),
+        DISKTUNE    => disk_tune_xml( \%tuning ),
         EXTRADISKS  => $extra_disks,
         FILESYSTEMS => $filesystems,
         TPM         => $tpm,
@@ -628,6 +639,304 @@ sub mongle_tpm {
 XML
 }
 
+# How every disk in this domain is driven, worked out once.
+#
+# Nothing in here is emitted because it is a good idea.  It is emitted because
+# Trog::HV::supports says this hypervisor's libvirt will parse it and this
+# hypervisor's qemu will implement it -- the fleet is not all one version, and
+# the two ways of getting it wrong land in different places.  XML libvirt cannot
+# parse is a domain that will not define, which we find out here.  XML libvirt
+# parses and hands to a qemu that has never heard of it is a domain that defines
+# and then will not start, which we find out somewhere much less convenient.
+#
+# Every knob has a provision.conf key, and an explicit setting is obeyed as
+# written.  See docs/CONFIGURATION.md.
+sub mongle_disk_tuning {
+    my ($config) = @_;
+    my $hv = Trog::HV->new();
+
+    my $iothreads = disk_iothreads( $config, $hv );
+
+    return (
+        cache            => disk_cache( $config, $hv ),
+        io               => disk_io( $config, $hv ),
+        discard          => $hv->supports('discard') ? 1 : 0,
+        detect_zeroes    => disk_detect_zeroes( $config, $hv ),
+        discard_no_unref => $hv->supports('discard_no_unref') ? 1 : 0,
+        iothreads        => $iothreads,
+        mapping          => ( $iothreads > 1 && $hv->supports('iothread_mapping') ) ? 1 : 0,
+        queues           => disk_queues( $config, $hv ),
+        blockio          => disk_blockio( $config, $hv ),
+        iotune           => disk_iotune( $config, $hv ),
+    );
+}
+
+# Config::Simple hands back undef for a key that is not there, and an empty
+# string for one that is there with nothing after the '='.  Neither is an answer.
+sub _asked {
+    my ( $config, $key ) = @_;
+    my $value = $config->param($key);
+    return undef unless defined $value && length $value;
+    return $value;
+}
+
+# cache='none' is the only knob here that no version can answer for.
+#
+# Unset, qemu caches every guest block in the host's page cache as well as the
+# guest's own -- so a hypervisor holds two copies of everything, in memory that
+# Trog::Hypervisors is not counting when it decides what else fits.  O_DIRECT
+# gives that back.  What it costs is the shared base image: every guest is an
+# overlay on one file, and writeback means the host caches that file once for
+# all of them.  That is a real trade rather than a free win, which is why it is
+# a key rather than a constant.
+#
+# What decides it is whether the pool's filesystem will take an O_DIRECT write,
+# since one that will not fails qemu's open and the domain defines cleanly and
+# then refuses to start.  That is asked of the filesystem: see
+# Trog::HV::pool_takes_direct_io for why naming filesystems does not work.
+sub disk_cache {
+    my ( $config, $hv ) = @_;
+
+    my $asked = _asked( $config, 'disk_cache' );
+    return $asked if $asked;
+    return 'none' if $hv->pool_takes_direct_io;
+
+    print "The storage pool, on " . $hv->pool_fstype . ", would not take an O_DIRECT write, so this\n" . "guest gets cache='writeback' rather than a domain that defines and then won't start.\n" . direct_io_advice($hv) . "Set disk_cache in provision.conf to say otherwise.\n";
+    return 'writeback';
+}
+
+# Which of the two ZFS answers this is, when it is ZFS: a release with no Direct
+# I/O at all, or one that has it and a pool or a dataset configured not to use
+# it.  An operator can act on either, and can act on neither if all they are
+# told is that the filesystem said no.
+sub direct_io_advice {
+    my ($hv) = @_;
+    return '' unless $hv->pool_fstype eq 'zfs';
+
+    my $version = $hv->zfs_version;
+    return "The pool is on ZFS and the hypervisor would not say which version; ask it with\n" . "`cat /sys/module/zfs/version`.\n"
+      unless defined $version;
+
+    return "OpenZFS is $version here and Direct I/O arrived in 2.3, so this wants an upgrade.\n"
+      if _zfs_predates_direct_io($version);
+
+    return "OpenZFS $version has Direct I/O, so it is the pool or the dataset refusing it:\n" . "`zpool get all` for the feature flags, `zfs get direct` for the property.\n";
+}
+
+# 2.10 is a later release than 2.3, which a string comparison gets backwards.
+sub _zfs_predates_direct_io {
+    my ($version) = @_;
+    my ( $major, $minor ) = $version =~ m/^(\d+)[.](\d+)/ or return 0;
+    return ( ( $major * 1_000 ) + $minor ) < 2_003 ? 1 : 0;
+}
+
+# Left to qemu unless asked for: the AIO backend is the one thing on this list
+# the domain template used to set and no longer does, and turning it back on
+# behind somebody's back is not this function's business.  disk_io=io_uring
+# reinstates it, on a hypervisor whose qemu has it.
+sub disk_io {
+    my ( $config, $hv ) = @_;
+
+    my $asked = _asked( $config, 'disk_io' ) or return undef;
+    return $asked unless $asked eq 'io_uring';
+    return 'io_uring' if $hv->supports('io_uring');
+
+    print "disk_io=io_uring needs libvirt 6.3 and qemu 5.0; " . $hv->describe . " has older,\n" . "so the disk is left on qemu's own choice of AIO backend.\n";
+    return undef;
+}
+
+# Off unless asked for, which is a deliberate departure from "turn the discard
+# path on".  detect_zeroes='unmap' makes qemu inspect every write for a buffer
+# of zeros, on the write path, for the sake of reclaiming space the guest never
+# asked to reclaim -- and the guest's weekly fstrim, which discard='unmap' now
+# passes through, reclaims what it actually freed without spending anything per
+# write.  Worth having on a guest that genuinely writes zeros in bulk; not worth
+# it as a default for every guest.
+sub disk_detect_zeroes {
+    my ( $config, $hv ) = @_;
+
+    my $asked = _asked( $config, 'disk_detect_zeroes' ) or return undef;
+    return $asked if $hv->supports('detect_zeroes');
+
+    print "disk_detect_zeroes needs libvirt 2.0; " . $hv->describe . " has older, so it is left off.\n";
+    return undef;
+}
+
+# One by default: without it, virtio-blk submission runs on qemu's main loop,
+# serialised against everything else that loop does.  More than one is only
+# worth asking for on a guest with several busy disks, or on a hypervisor new
+# enough to spread one disk's queues across them -- see disk_driver_xml.
+sub disk_iothreads {
+    my ( $config, $hv ) = @_;
+
+    my $asked = _asked( $config, 'disk_iothreads' ) // 1;
+    return 0      if $asked <= 0;
+    return $asked if $hv->supports('iothread');
+
+    print "disk_iothreads needs libvirt 1.2.8 and qemu 2.1; " . $hv->describe . " has older,\n" . "so this guest's disks stay on qemu's main loop.\n";
+    return 0;
+}
+
+# One virtqueue per vcpu unless told otherwise.  Recent qemu sizes virtio-blk
+# this way itself, so on most of the fleet this says out loud what was already
+# happening -- but it has to be said out loud to be mapped across iothreads.
+sub disk_queues {
+    my ( $config, $hv ) = @_;
+    return undef unless $hv->supports('queues');
+
+    my $asked = _asked( $config, 'disk_queues' ) // $config->param('cpus');
+    return $asked > 0 ? $asked : undef;
+}
+
+# What the guest is told its sectors are.  virtio-blk says 512/512 by default,
+# so a guest lays its filesystem out for 512 byte sectors and then does
+# read-modify-write against 4K hardware underneath for the life of the disk.
+#
+# This has to be right before the guest's filesystem is made; setting it on an
+# existing guest realigns nothing.  4096 is safe to announce even on a 512n
+# device -- the guest merely aligns to a boundary that device does not care
+# about -- which is why it is the default rather than something probed.
+sub disk_blockio {
+    my ( $config, $hv ) = @_;
+    return undef unless $hv->supports('blockio');
+
+    return {
+        logical  => _asked( $config, 'disk_logical_block_size' )  // 512,
+        physical => _asked( $config, 'disk_physical_block_size' ) // 4096,
+    };
+}
+
+# The limits, in the order libvirt wants them.
+my @IOTUNE_KEY = qw{
+  total_bytes_sec read_bytes_sec write_bytes_sec
+  total_iops_sec  read_iops_sec  write_iops_sec
+};
+
+# hypervisors.conf reserves memory, CPUs and disk space, and reserves nothing at
+# all of the one resource every guest on a machine is sharing a queue for.  One
+# guest running a backup can flatten every other guest in the pool and no
+# capacity check will have predicted it.  This is the knob that answers that;
+# it is off unless a guest is given limits, because a throttle is a cost and
+# only the person who knows the workload can say what it should be.
+#
+# Unsupported is fatal rather than skipped: every other knob here failing open
+# leaves a guest merely untuned, but a throttle silently not applied leaves
+# somebody believing in a limit that is not there.
+sub disk_iotune {
+    my ( $config, $hv ) = @_;
+
+    my %limit = map { $_ => _asked( $config, "disk_$_" ) } @IOTUNE_KEY;
+    delete @limit{ grep { !defined $limit{$_} } keys %limit };
+    return undef unless %limit;
+
+    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honour them.\n"
+      unless $hv->supports('iotune');
+
+    # libvirt's own rule: a total is a total, and may not be given beside the
+    # halves it is the total of.
+    foreach my $unit (qw{bytes_sec iops_sec}) {
+        next unless $limit{"total_$unit"};
+        die "disk_total_$unit cannot be set alongside disk_read_$unit or disk_write_$unit:\n" . "libvirt takes a total or the two halves, never both.\n"
+          if $limit{"read_$unit"} || $limit{"write_$unit"};
+    }
+
+    return \%limit;
+}
+
+# The <driver> for one disk.  %opts is its format and its position among the
+# domain's disks; the primary one is the disk that gets the metadata cache and
+# the queue mapping, being the one whose size we know and the one that is busy.
+sub disk_driver_xml {
+    my ( $tuning, %opts ) = @_;
+
+    my $format = $opts{format};
+    my @attrs  = ( "name='qemu'", "type='$format'" );
+
+    push @attrs, "cache='$tuning->{cache}'"                 if $tuning->{cache};
+    push @attrs, "io='$tuning->{io}'"                       if $tuning->{io};
+    push @attrs, "discard='unmap'"                          if $tuning->{discard};
+    push @attrs, "detect_zeroes='$tuning->{detect_zeroes}'" if $tuning->{detect_zeroes};
+    push @attrs, "queues='$tuning->{queues}'"               if $tuning->{queues};
+
+    # A qcow2 knob, and the extra disks are not all qcow2: on a raw block device
+    # there is no cluster to keep the reference to.  What it does buy, on the
+    # ones that are, is a guest discard that punches the hole in the host's
+    # filesystem without unrefing the cluster in the image -- so the space comes
+    # back without the qcow2 fragmenting itself rewriting what it just freed.
+    push @attrs, "discard_no_unref='on'" if $tuning->{discard_no_unref} && $format eq 'qcow2';
+
+    # iothread and iothreads are mutually exclusive, and the mapping only goes
+    # on the disk it was worked out for.  Everything else gets one iothread out
+    # of the pool, round robin, so a guest with several disks spreads them --
+    # and with the default pool of one they share it and are still off the main
+    # loop, which is the part that mattered.
+    my $mapped = $opts{primary} && $tuning->{mapping};
+    push @attrs, sprintf( "iothread='%d'", ( ( $opts{index} // 0 ) % $tuning->{iothreads} ) + 1 )
+      if $tuning->{iothreads} && !$mapped;
+
+    my @children = disk_driver_children( $tuning, %opts );
+    my $attrs    = join( ' ', @attrs );
+
+    return "      <driver $attrs/>\n" unless @children;
+    return "      <driver $attrs>\n" . join( '', @children ) . "      </driver>\n";
+}
+
+sub disk_driver_children {
+    my ( $tuning, %opts ) = @_;
+    my @children;
+
+    push @children, "        <metadata_cache><max_size unit='bytes'>$tuning->{metadata_cache}</max_size></metadata_cache>\n"
+      if $opts{primary} && $tuning->{metadata_cache};
+
+    # Listed without queue children on purpose: given the iothreads and the
+    # queue count, libvirt and qemu distribute the virtqueues between them, and
+    # a mapping written out by hand here would only be the same answer with more
+    # ways to get it wrong.
+    return @children unless $opts{primary} && $tuning->{mapping};
+
+    push @children, "        <iothreads>\n";
+    push @children, "          <iothread id='$_'/>\n" for 1 .. $tuning->{iothreads};
+    push @children, "        </iothreads>\n";
+
+    return @children;
+}
+
+# The disk's own tuning elements, which are siblings of <driver> rather than
+# attributes of it.
+sub disk_tune_xml {
+    my ($tuning) = @_;
+    my $xml = '';
+
+    $xml .= sprintf( "      <blockio logical_block_size='%d' physical_block_size='%d'/>\n", $tuning->{blockio}{logical}, $tuning->{blockio}{physical} )
+      if $tuning->{blockio};
+
+    return $xml unless $tuning->{iotune};
+
+    $xml .= "      <iotune>\n";
+    $xml .= "        <$_>$tuning->{iotune}{$_}</$_>\n" for grep { defined $tuning->{iotune}{$_} } @IOTUNE_KEY;
+    $xml .= "      </iotune>\n";
+
+    return $xml;
+}
+
+# The domain's iothread pool, or nothing when it has none.
+#
+# Its own function rather than a conditional in the substitution table: what
+# goes in there wants to be a name, so that the table stays a list of what each
+# placeholder is filled with rather than a place where one of them is also
+# worked out.
+sub mongle_iothreads {
+    my ($count) = @_;
+    return '' unless $count;
+
+    return <<"XML" =~ s/\n\z//r;
+  <!-- Threads qemu processes virtio-blk requests on: without any, submission
+       runs on qemu's main loop, serialised against everything else that loop
+       is doing.  See mongle_disk_tuning below. -->
+  <iothreads>$count</iothreads>
+XML
+}
+
 # Whatever mounts.txt asks for, as libvirt device XML.
 #
 # Each line is pool=name.  A `raw` pool is a host block device, `dir` is a
@@ -635,7 +944,7 @@ XML
 # is taken as the name of another libvirt pool.  `fuse` is skipped: the guest
 # mounts those itself.
 sub mongle_extra_disks {
-    my ($config) = @_;
+    my ( $config, $tuning ) = @_;
 
     my $hv         = Trog::HV->new();
     my $domain     = $config->param('domain');
@@ -648,6 +957,7 @@ sub mongle_extra_disks {
     if ( _readable($spec_file) ) {
         my @devnames = ( 'vdb' .. 'vdz' );
         my $order    = 2;
+        my $index    = 0;
 
         foreach my $diskspec ( grep { $_ } split( "\n", File::Slurper::read_text($spec_file) ) ) {
             my ( $pool, $disk ) = split( "=", $diskspec );
@@ -678,13 +988,14 @@ FS
                 next;
             }
 
+            $index++;
+
             if ( $pool eq 'raw' ) {
-                push @disks, sprintf( <<'DISK', _xml($disk), _xml($dev), $order );
+                push @disks, sprintf( <<'DISK', disk_driver_xml( $tuning, format => 'raw', index => $index ), _xml($disk), _xml($dev), disk_tune_xml($tuning), $order );
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw'/>
-      <source dev='%s'/>
+%s      <source dev='%s'/>
       <target dev='%s' bus='virtio'/>
-      <boot order='%d'/>
+%s      <boot order='%d'/>
     </disk>
 DISK
                 next;
@@ -693,12 +1004,11 @@ DISK
             # A file, or a volume in some other pool -- either way it resolves
             # to a path, and libvirt wants the path.
             my $path = $pool eq 'file' ? $disk : ( $hv->volume_path( $disk, $pool ) // $disk );
-            push @disks, sprintf( <<'DISK', _xml($path), _xml($dev), $order );
+            push @disks, sprintf( <<'DISK', disk_driver_xml( $tuning, format => 'qcow2', index => $index ), _xml($path), _xml($dev), disk_tune_xml($tuning), $order );
     <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2'/>
-      <source file='%s'/>
+%s      <source file='%s'/>
       <target dev='%s' bus='virtio'/>
-      <boot order='%d'/>
+%s      <boot order='%d'/>
     </disk>
 DISK
         }

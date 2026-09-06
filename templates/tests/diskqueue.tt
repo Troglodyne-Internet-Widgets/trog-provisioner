@@ -1,0 +1,52 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $rules = '/etc/udev/rules.d/99-diskqueue.rules';
+ok(-f $rules, 'the udev rule is where udev will look for it');
+
+# 99- matters: udev applies rules in filename order and the last write wins, so
+# a rule that sorts early is one anything else can overrule.
+like($rules, qr{/99-}, 'and sorts last, so nothing dropped in later overrules it');
+
+my $text = do { local (@ARGV, $/) = $rules; <> } // '';
+like($text, qr/ENV\{DEVTYPE\}=="disk"/, 'scoped to whole disks, not partitions that have no queue of their own');
+
+# A rule udev will not parse is a comment with extra steps.  udevadm verify is
+# systemd 250 and later; where there is no such subcommand there is nothing to
+# assert rather than something to fail.
+my $verify = `udevadm verify $rules 2>&1`;
+if ($verify =~ m/unknown command|invalid option/i) {
+    note "this udev has no verify subcommand, so the rule was not syntax checked";
+}
+else {
+    is($?, 0, 'udev parses the rule') or diag $verify;
+}
+
+my @queues = grep { -e "$_/scheduler" } glob('[% FOR device IN devices %]/sys/block/[% device %]/queue [% END %]');
+
+unless (@queues) {
+    fail('the guest has virtio disks for this to have applied to');
+    done_testing();
+    exit 0;
+}
+
+foreach my $queue (@queues) {
+    my ($disk) = $queue =~ m{/sys/block/([^/]+)/};
+
+    # `[none] mq-deadline` when the kernel offers a choice, `none` when it does
+    # not.  Both mean it took.
+    my $scheduler = do { local (@ARGV, $/) = "$queue/scheduler"; <> } // '';
+    chomp $scheduler;
+    ok(
+        $scheduler =~ m/\[\Q[% scheduler %]\E\]/ || $scheduler eq '[% scheduler %]',
+        "$disk is on the [% scheduler %] scheduler, so it is not reordering for a device it cannot see"
+    ) or diag $scheduler;
+
+    my $ahead = do { local (@ARGV, $/) = "$queue/read_ahead_kb"; <> } // '';
+    chomp $ahead;
+    is($ahead, '[% read_ahead_kb %]', "$disk reads ahead [% read_ahead_kb %]KiB");
+}
+
+done_testing();
