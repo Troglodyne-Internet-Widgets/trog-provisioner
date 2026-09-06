@@ -574,7 +574,8 @@ sub mongle_domain_xml {
     $tuning{metadata_cache} = $shape{metadata_cache};
 
     my ( $extra_disks, $filesystems ) = mongle_extra_disks( $config, \%tuning );
-    my $tpm = mongle_tpm($hv);
+    my $tpm       = mongle_tpm($hv);
+    my $iothreads = mongle_iothreads( $tuning{iothreads} );
 
     # NoCloud wants all three, and cloud-init will not look at a seed that is
     # missing any of them.
@@ -596,7 +597,7 @@ sub mongle_domain_xml {
         DISKVOLUME  => $disk_volume,
         CLOUDINIT   => $cloudinit,
         BRIDGENAME  => $bridge_device,
-        IOTHREADS   => $tuning{iothreads} ? "  <!-- Threads qemu processes virtio-blk requests on: without any, submission\n       runs on qemu's main loop, serialised against everything else that loop\n       is doing.  See mongle_disk_tuning in bin/provision. -->\n  <iothreads>$tuning{iothreads}</iothreads>" : '',
+        IOTHREADS   => $iothreads,
         DISKDRIVER  => disk_driver_xml( \%tuning, format => 'qcow2', primary => 1, index => 0 ),
         DISKTUNE    => disk_tune_xml( \%tuning ),
         EXTRADISKS  => $extra_disks,
@@ -679,12 +680,7 @@ sub _asked {
     return $value;
 }
 
-# Filesystems with no O_DIRECT to open a disk image with.  ZFS grew a real one
-# in OpenZFS 2.3 and there is no way to ask which is running from here, so it
-# stays on the list and anybody who has the new one says so in provision.conf.
-my %NO_DIRECT_IO = map { $_ => 1 } qw{tmpfs ramfs zfs};
-
-# cache='none' is the only knob here that a version cannot answer for.
+# cache='none' is the only knob here that no version can answer for.
 #
 # Unset, qemu caches every guest block in the host's page cache as well as the
 # guest's own -- so a hypervisor holds two copies of everything, in memory that
@@ -694,20 +690,44 @@ my %NO_DIRECT_IO = map { $_ => 1 } qw{tmpfs ramfs zfs};
 # all of them.  That is a real trade rather than a free win, which is why it is
 # a key rather than a constant.
 #
-# The check that matters is not a version but a filesystem: O_DIRECT on one that
-# does not implement it fails the open, so the domain defines cleanly and then
-# refuses to start.
+# What decides it is whether the pool's filesystem will take an O_DIRECT write,
+# since one that will not fails qemu's open and the domain defines cleanly and
+# then refuses to start.  That is asked of the filesystem: see
+# Trog::HV::pool_takes_direct_io for why naming filesystems does not work.
 sub disk_cache {
     my ( $config, $hv ) = @_;
 
     my $asked = _asked( $config, 'disk_cache' );
     return $asked if $asked;
+    return 'none' if $hv->pool_takes_direct_io;
 
-    my $fstype = $hv->pool_fstype;
-    return 'none' unless $NO_DIRECT_IO{$fstype};
-
-    print "The storage pool is on $fstype, which has no O_DIRECT for cache='none' to open with,\n" . "so this guest gets cache='writeback' rather than a domain that defines and won't start.\n" . "Set disk_cache in provision.conf to say otherwise.\n";
+    print "The storage pool, on " . $hv->pool_fstype . ", would not take an O_DIRECT write, so this\n" . "guest gets cache='writeback' rather than a domain that defines and then won't start.\n" . direct_io_advice($hv) . "Set disk_cache in provision.conf to say otherwise.\n";
     return 'writeback';
+}
+
+# Which of the two ZFS answers this is, when it is ZFS: a release with no Direct
+# I/O at all, or one that has it and a pool or a dataset configured not to use
+# it.  An operator can act on either, and can act on neither if all they are
+# told is that the filesystem said no.
+sub direct_io_advice {
+    my ($hv) = @_;
+    return '' unless $hv->pool_fstype eq 'zfs';
+
+    my $version = $hv->zfs_version;
+    return "The pool is on ZFS and the hypervisor would not say which version; ask it with\n" . "`cat /sys/module/zfs/version`.\n"
+      unless defined $version;
+
+    return "OpenZFS is $version here and Direct I/O arrived in 2.3, so this wants an upgrade.\n"
+      if _zfs_predates_direct_io($version);
+
+    return "OpenZFS $version has Direct I/O, so it is the pool or the dataset refusing it:\n" . "`zpool get all` for the feature flags, `zfs get direct` for the property.\n";
+}
+
+# 2.10 is a later release than 2.3, which a string comparison gets backwards.
+sub _zfs_predates_direct_io {
+    my ($version) = @_;
+    my ( $major, $minor ) = $version =~ m/^(\d+)[.](\d+)/ or return 0;
+    return ( ( $major * 1_000 ) + $minor ) < 2_003 ? 1 : 0;
 }
 
 # Left to qemu unless asked for: the AIO backend is the one thing on this list
@@ -897,6 +917,24 @@ sub disk_tune_xml {
     $xml .= "      </iotune>\n";
 
     return $xml;
+}
+
+# The domain's iothread pool, or nothing when it has none.
+#
+# Its own function rather than a conditional in the substitution table: what
+# goes in there wants to be a name, so that the table stays a list of what each
+# placeholder is filled with rather than a place where one of them is also
+# worked out.
+sub mongle_iothreads {
+    my ($count) = @_;
+    return '' unless $count;
+
+    return <<"XML" =~ s/\n\z//r;
+  <!-- Threads qemu processes virtio-blk requests on: without any, submission
+       runs on qemu's main loop, serialised against everything else that loop
+       is doing.  See mongle_disk_tuning below. -->
+  <iothreads>$count</iothreads>
+XML
 }
 
 # Whatever mounts.txt asks for, as libvirt device XML.

@@ -1160,6 +1160,66 @@ sub pool_fstype {
     return $self->{pool_fstype} = $type;
 }
 
+=head2 pool_takes_direct_io
+
+Whether a file in the storage pool can be opened C<O_DIRECT> and written to,
+which is the whole of what C<cache='none'> needs of a filesystem.
+
+Asked of the filesystem rather than worked out from its name, because the name
+does not answer it and a list of names that supposedly do was wrong about every
+entry on it.  tmpfs takes an O_DIRECT write on a current kernel.  ZFS grew real
+Direct I/O in OpenZFS 2.3, where it is then subject to the pool's feature flags
+and to the dataset's own C<direct> property -- so not even the version settles
+that one, and a table here would be a stale copy of three things that move on
+somebody else's schedule.
+
+A 4K direct write into the pool directory is the same open qemu is about to do,
+and it answers for all of the above and for whatever the pool is on next.  Not
+sudo, for the same reason C<base_image> is not: a pool directory this user
+cannot write to is one the base image could never have been downloaded into.
+
+=cut
+
+sub pool_takes_direct_io {
+    my ($self) = @_;
+    return $self->{pool_takes_direct_io} if defined $self->{pool_takes_direct_io};
+
+    my $probe = $self->pool_path . "/.odirect-probe.$$";
+
+    # dd rather than perl: this is the one machine in the fleet we have not
+    # asked to have anything installed on, and coreutils is not a dependency
+    # the way an interpreter would be.  It opens with O_DIRECT and writes a
+    # block, so a filesystem that refuses either one fails here.
+    my $taken = $self->run(
+        'sh', '-c',
+        'dd if=/dev/zero of="$1" bs=4096 count=1 oflag=direct >/dev/null 2>&1; status=$?; rm -f "$1"; exit $status',
+        'sh', $probe,
+    ) == 0;
+
+    return $self->{pool_takes_direct_io} = $taken ? 1 : 0;
+}
+
+=head2 zfs_version
+
+The OpenZFS release this hypervisor is running, or undef where there is no ZFS.
+
+Only ever used to say something useful in the message when a pool on ZFS turns
+out not to take an O_DIRECT write: Direct I/O arrived in 2.3, so the version is
+the difference between "upgrade and this gets faster" and "this pool is
+configured not to".
+
+=cut
+
+sub zfs_version {
+    my ($self) = @_;
+    return $self->{zfs_version} if exists $self->{zfs_version};
+
+    my $version = $self->capture('cat /sys/module/zfs/version 2>/dev/null') // '';
+    chomp $version;
+
+    return $self->{zfs_version} = length $version ? $version : undef;
+}
+
 # qemu's default cluster, and the one worth moving to on a disk large enough to
 # have outgrown the metadata cache.
 my $QCOW2_DEFAULT_CLUSTER = 64 * 1024;

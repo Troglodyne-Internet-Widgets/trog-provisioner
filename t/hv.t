@@ -661,6 +661,32 @@ subtest 'an unanswerable hypervisor is assumed to support nothing' => sub {
     ok( !$hv->supports('discard'), 'and nothing is emitted on the strength of it' );
 };
 
+subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its name' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my @ran;
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( run => sub { my ( $self, @argv ) = @_; push @ran, \@argv; return 0 } );
+
+    ok( $hv->pool_takes_direct_io, 'a pool whose filesystem takes the write says so' );
+
+    my $command = join( ' ', @{ $ran[0] } );
+    like( $command, qr/oflag=direct/,                         'by doing the same O_DIRECT open qemu is about to do' );
+    like( $command, qr/bs=4096/,                              'with a block a direct write can actually be aligned to' );
+    like( $command, qr{/opt/terraform/disks/\.odirect-probe}, 'in the pool, which is the filesystem in question' );
+    like( $command, qr/rm -f/,                                'and takes the probe file away again' );
+
+    # Named filesystems are exactly what this stopped doing: tmpfs takes an
+    # O_DIRECT write on a current kernel and ZFS has since 2.3, so a list of
+    # names that supposedly cannot would today be wrong about both of them.
+    $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+    $mock->redefine( run => sub { return 1 } );
+    ok( !$hv->pool_takes_direct_io, 'and one that refuses it says that instead' );
+
+    $mock->redefine( run => sub { die "asked twice\n" } );
+    ok( !$hv->pool_takes_direct_io, 'the answer is kept, a build asking once per disk' );
+};
+
 subtest 'how big a qcow2 has to be before its layout changes' => sub {
     my $mock = Test::MockModule->new('Trog::HV');
     $mock->redefine( libvirt_version  => sub { 10_000_000 } );

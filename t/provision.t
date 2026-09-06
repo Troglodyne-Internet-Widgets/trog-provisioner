@@ -151,9 +151,10 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     # on a version, and a version we could not ask for reads as "assume not".
     # What the domain looks like when the answers do come back is the subtest
     # after this one.
-    $hv_mock->redefine( libvirt_version => sub { 0 } );
-    $hv_mock->redefine( qemu_version    => sub { 0 } );
-    $hv_mock->redefine( pool_fstype     => sub { 'ext2/ext3' } );
+    $hv_mock->redefine( libvirt_version      => sub { 0 } );
+    $hv_mock->redefine( qemu_version         => sub { 0 } );
+    $hv_mock->redefine( pool_fstype          => sub { 'ext2/ext3' } );
+    $hv_mock->redefine( pool_takes_direct_io => sub { 1 } );
     $hv_mock->redefine(
         cloudinit_iso => sub {
             my ( $self, $domain, %files ) = @_;
@@ -224,17 +225,19 @@ sub _tuned_xml {
     );
 
     my $hv_mock = Test::MockModule->new('Trog::HV');
-    $hv_mock->redefine( bridge_device    => sub { 'br0' } );
-    $hv_mock->redefine( has_tpm          => sub { 0 } );
-    $hv_mock->redefine( pool             => sub { 1 } );
-    $hv_mock->redefine( base_image       => sub { '/pool/baseimage-qcow2' } );
-    $hv_mock->redefine( create_disk      => sub { '/pool/vm.example.com-qcow2' } );
-    $hv_mock->redefine( cloudinit_iso    => sub { '/pool/seed.iso' } );
-    $hv_mock->redefine( domain_dir       => sub { $dir } );
-    $hv_mock->redefine( libvirt_version  => sub { $opts{libvirt} } );
-    $hv_mock->redefine( qemu_version     => sub { $opts{qemu} } );
-    $hv_mock->redefine( pool_fstype      => sub { $opts{fstype} // 'ext2/ext3' } );
-    $hv_mock->redefine( qemu_img_options => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
+    $hv_mock->redefine( bridge_device        => sub { 'br0' } );
+    $hv_mock->redefine( has_tpm              => sub { 0 } );
+    $hv_mock->redefine( pool                 => sub { 1 } );
+    $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
+    $hv_mock->redefine( create_disk          => sub { '/pool/vm.example.com-qcow2' } );
+    $hv_mock->redefine( cloudinit_iso        => sub { '/pool/seed.iso' } );
+    $hv_mock->redefine( domain_dir           => sub { $dir } );
+    $hv_mock->redefine( libvirt_version      => sub { $opts{libvirt} } );
+    $hv_mock->redefine( qemu_version         => sub { $opts{qemu} } );
+    $hv_mock->redefine( pool_fstype          => sub { $opts{fstype}    // 'ext2/ext3' } );
+    $hv_mock->redefine( pool_takes_direct_io => sub { $opts{direct_io} // 1 } );
+    $hv_mock->redefine( zfs_version          => sub { $opts{zfs_version} } );
+    $hv_mock->redefine( qemu_img_options     => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
 
     Trog::HV->forget();
     Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
@@ -242,8 +245,26 @@ sub _tuned_xml {
     my %seed = (
         'user-data' => 'a', 'meta-data' => 'b', 'network-config' => 'c',
     );
-    my ($xml) = quietly( sub { Trog::Bin::Provisioner::mongle_domain_xml( $config, \%seed ) } );
-    return $xml;
+
+    # The XML in scalar context, what it printed on the way in list context: the
+    # printed half is the whole of what a downgraded cache mode tells anybody.
+    my ( $xml, $said );
+    {
+        open( my $capture, '>', \$said ) or die $!;
+        local *STDOUT = $capture;
+        ($xml) = Trog::Bin::Provisioner::mongle_domain_xml( $config, \%seed );
+        close $capture;
+    }
+
+    return wantarray ? ( $xml, $said ) : $xml;
+}
+
+# What the build said while making that domain, for the decisions whose whole
+# point is telling somebody what to do about them.
+sub _tuned_output {
+    my (%opts) = @_;
+    my ( undef, $said ) = _tuned_xml(%opts);
+    return $said;
 }
 
 # libvirt encodes a version as major * 1_000_000 + minor * 1_000 + release, and
@@ -354,17 +375,43 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
     );
 };
 
-subtest 'cache=none is not offered a filesystem that cannot open O_DIRECT' => sub {
-    my $xml = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'zfs' );
-    like( $xml, qr/cache='writeback'/, 'a pool on zfs gets writeback rather than a domain that will not start' );
+subtest 'cache=none is offered to whatever will actually take an O_DIRECT write' => sub {
 
-    # Somebody who names a mode has a reason -- OpenZFS 2.3 grew a real
-    # O_DIRECT, and there is no way to detect that from here.
+    # Asked of the filesystem, not worked out from its name: tmpfs takes one on
+    # a current kernel and ZFS has since 2.3, so a list of names that cannot
+    # would today have both of them wrong.
+    my $tmpfs = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'tmpfs', direct_io => 1 );
+    like( $tmpfs, qr/cache='none'/, 'a filesystem that takes the write gets it, whatever it is called' );
+
+    my $refused = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'ext2/ext3', direct_io => 0 );
+    like( $refused, qr/cache='writeback'/, 'and one that refuses gets writeback, whatever it is called' );
+
+    # Somebody who names a mode has a reason.
     my $asked = _tuned_xml(
-        libvirt => 10_000_000, qemu => 9_000_000, fstype => 'zfs',
+        libvirt => 10_000_000, qemu => 9_000_000, direct_io => 0,
         config  => { disk_cache => 'none' }
     );
-    like( $asked, qr/cache='none'/, 'unless it is asked for anyway, which is obeyed as written' );
+    like( $asked, qr/cache='none'/, 'an explicit mode is obeyed as written either way' );
+};
+
+subtest 'a ZFS pool that refuses is told which of the two things it is' => sub {
+    my %zfs = ( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'zfs', direct_io => 0 );
+
+    like(
+        _tuned_output( %zfs, zfs_version => '2.2.7' ), qr/Direct I\/O arrived in 2\.3, so this wants an upgrade/,
+        'a release without Direct I/O at all is told to upgrade'
+    );
+    like(
+        _tuned_output( %zfs, zfs_version => '2.3.1' ), qr/zfs get direct/,
+        'and one that has it is pointed at the pool and the dataset instead'
+    );
+
+    # 2.10 is a later release than 2.3, which a string comparison gets backwards
+    # and would send somebody off to upgrade a version they already have.
+    like(
+        _tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs get direct/,
+        'and 2.10 is read as later than 2.3, not earlier'
+    );
 };
 
 # --- Which netplan entry gets the static IP ----------------------------------
