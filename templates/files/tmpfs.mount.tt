@@ -1,0 +1,22 @@
+[Unit]
+Description=Temporary Directory /tmp
+Documentation=https://systemd.io/TEMPORARY_DIRECTORIES
+Documentation=man:file-hierarchy(7)
+Documentation=https://systemd.io/API_FILE_SYSTEMS
+ConditionPathIsSymbolicLink=!/tmp
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+After=swap.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+# size is doubled when it is a percentage: Options= is a setting systemd expands
+# specifiers in, and a lone % there begins one rather than meaning itself.
+Options=mode=1777,strictatime,nosuid,nodev,size=[% unit_size %],nr_inodes=1m
+
+# Make 'systemctl enable tmp.mount' work:
+[Install]
+WantedBy=local-fs.target

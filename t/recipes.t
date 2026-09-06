@@ -808,6 +808,82 @@ subtest 'the sender login map covers every address a user sends from' => sub {
     like( $map, qr/^help\@\Q$G{domain}\E someone\@elsewhere\.test$/m, 'and an alias out of the domain keeps its address' );
 };
 
+# ----------------------------------------------------------------
+# tmpfs: /tmp on a tmpfs, at a size the operator picks
+# ----------------------------------------------------------------
+subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
+    my $out = 'Provisioner::Recipe::tmpfs'->new(%PROV)->render_global(%G);
+
+    # Debian ships tmp.mount in /usr/share/systemd, which is how it ships it
+    # off.  A unit systemd cannot see is one nothing can enable.
+    like( $out, qr{/etc/systemd/system/tmp\.mount}, 'the unit goes where systemd looks' );
+
+    # Enabled-but-not-mounted is not a state a running system stays in:
+    # tmp.mount is WantedBy=local-fs.target, so the next restart of anything
+    # re-pulls that target and mounts it.  Since it happens either way, it
+    # happens here, where every recipe after this sees the same /tmp and a
+    # failure fails the build.
+    like( $out, qr{systemctl enable --now tmp\.mount}, 'and is mounted, not merely enabled' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
+};
+
+subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
+
+    # setup.tmpl unpacks the payload and runs make from inside it.  With that in
+    # /tmp, mounting a tmpfs over /tmp strands the tree and the tarball -- make
+    # carries on, because its cwd is a directory it holds open, but the cleanup
+    # afterwards silently removes nothing.  Found on a guest, where 196K of
+    # payload was still sitting under the new mount.
+    my $setup = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
+
+    like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'the payload is unpacked into /var/tmp' );
+    like( $setup, qr{^cd /var/tmp/domainsetup_}m,          'and make runs from there' );
+
+    # Anchored past /var, or it matches the /tmp inside /var/tmp and can never
+    # pass -- which is how this assertion first failed against a correct file.
+    unlike( $setup, qr{(?<!/var)/tmp/domainsetup_}, 'with nothing left pointing at /tmp' );
+    unlike( $setup, qr{data\.tar\.gz\s+/tmp$}m,     'and the tarball does not land there either' );
+};
+
+subtest 'tmpfs escapes a percentage and leaves a byte size alone' => sub {
+    my $options = sub {
+        my ($size) = @_;
+        my %opts   = defined $size ? ( size => $size ) : ();
+        my $unit   = 'Provisioner::Recipe::tmpfs'->new(%PROV)->render_file( 'files/tmpfs.mount.tt', %G, %opts );
+        my ($line) = $unit =~ m/^Options=(.*)$/m;
+        return $line // q{};
+    };
+
+    # Options= is a setting systemd expands specifiers in, so a lone % begins
+    # one rather than meaning itself.  A literal percent is written %%.
+    like( $options->(),      qr/\bsize=50%%,/, 'the default reaches the unit doubled' );
+    like( $options->('25%'), qr/\bsize=25%%,/, 'and so does any other percentage' );
+
+    # And a size that is not a percentage must not be mangled on the way.
+    like( $options->('2G'),         qr/\bsize=2G,/,         'a suffixed size is left alone' );
+    like( $options->('1073741824'), qr/\bsize=1073741824,/, 'and so is a plain byte count' );
+
+    like( $options->(), qr/\bmode=1777\b/, '/tmp stays world-writable and sticky' );
+};
+
+subtest 'tmpfs refuses a size the kernel would not take' => sub {
+
+    # The failure is otherwise a mount that refuses at boot, on a guest nobody
+    # is watching, with /tmp quietly staying on the disk.
+    ## no critic (RequireQwForLiteralLists) -- one of these has a space in it
+    ## and another is empty, which is the whole point and neither of which qw()
+    ## can say.
+    foreach my $bad ( '50 percent', 'half', '', '10%%', '-1', '0' ) {
+        my $r = 'Provisioner::Recipe::tmpfs'->new(%PROV);
+        ok( exception { $r->render_global( %G, size => $bad ) }, "'$bad' is refused" );
+    }
+
+    foreach my $good (qw{50% 1% 100% 2G 512M 64k 1073741824}) {
+        my $r = 'Provisioner::Recipe::tmpfs'->new(%PROV);
+        is( exception { $r->render_global( %G, size => $good ) }, undef, "'$good' is accepted" );
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();
