@@ -1,0 +1,7 @@
+mkdir -p /var/log/rsyncd
+mv backup.logrotate /etc/logrotate.d/rsyncd-backup
+[%# root-owned and 0644, or logrotate passes the file over and says so nowhere
+    but its own --debug output.  A file moved out of the payload keeps the
+    ownership the tarball recorded, which is whoever generated it. -%]
+chown root:root /etc/logrotate.d/rsyncd-backup
+chmod 0644 /etc/logrotate.d/rsyncd-backup

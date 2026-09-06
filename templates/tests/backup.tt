@@ -4,7 +4,13 @@ use warnings;
 use Test::More;
 
 ok(-f '/root/.ssh/authorized_keys', 'authorized_keys exists');
-ok(-f '/root/rsyncd.[% domain %].conf', 'rsync daemon config exists');
+
+# /etc, not /root.  rsync reads the config named in the forced command before it
+# does anything else, and some builds of it will not take one out of /root: the
+# key authenticates, the daemon exits, and the destination reports a connection
+# that served no module.
+ok(-f '/etc/rsyncd.[% domain %].conf', 'rsync daemon config exists in /etc');
+ok(!-e '/root/rsyncd.[% domain %].conf', 'and not in /root, where it used to be');
 
 my $authorized = do { local (@ARGV, $/) = '/root/.ssh/authorized_keys'; <> } // '';
 
@@ -15,9 +21,13 @@ my $key = '[% pubkey %]';
 my $times = () = $authorized =~ m/\Q$key\E/g;
 is($times, 1, 'the backup key is authorized exactly once') or diag $authorized;
 
+# And at the config where it now lives.  A guest provisioned before it moved has
+# the key already, so an append that skips when the key is present would leave
+# the forced command pointing at the file in /root that this provision deleted.
+like($authorized, qr{command="rsync --daemon --server[^"]*--config=/etc/rsyncd\.\Q[% domain %]\E\.conf},
+    'behind a forced rsync command naming the config in /etc') or diag $authorized;
+
 # And with the restrictions that make it a backup key rather than a login.
-like($authorized, qr/command="rsync --daemon --server[^"]*rsyncd\.\Q[% domain %]\E\.conf/,
-    'behind a forced rsync command');
 foreach my $restriction (qw{no-agent-forwarding no-port-forwarding no-pty no-user-rc no-X11-forwarding}) {
     like($authorized, qr/\Q$restriction\E/, "and $restriction");
 }
@@ -25,5 +35,38 @@ foreach my $restriction (qw{no-agent-forwarding no-port-forwarding no-pty no-use
 # The private half arrives with the domain's data and has no business staying.
 ok(!-e '[% install_dir %]/[% domain %]/[% key_file %]',
     'the private key was removed from the guest');
+
+# Where the daemon says what it did.  Without a log file rsyncd hands its
+# messages back down the ssh connection to whoever asked, and the machine being
+# copied off keeps no record of a module that failed to open.
+my $conf = do { local (@ARGV, $/) = '/etc/rsyncd.[% domain %].conf'; <> } // '';
+like($conf, qr{^log file = /var/log/rsyncd/\Q[% domain %]\E\.log$}m,
+    'the daemon logs to /var/log') or diag $conf;
+
+# rsyncd opens that log before it chroots, so this has to exist up here.
+ok(-d '/var/log/rsyncd', 'the log directory exists');
+ok(-w '/var/log/rsyncd', 'and is writable');
+
+# And it gets rotated, or the log is only a slower way to fill the disk.
+my $rotate = '/etc/logrotate.d/rsyncd-backup';
+ok(-f $rotate, 'a logrotate config for it is installed');
+
+# logrotate skips a config file that is not owned by root or is writable by
+# anyone else, and says so nowhere but its own --debug output.  The payload is
+# unpacked as root but restores the ownership recorded in the tarball, which is
+# whoever generated it -- so the file lands here perfectly readable and ignored.
+my @st = stat $rotate;
+is(scalar getpwuid($st[4] // -1), 'root', 'and is owned by root');
+is($st[2] & 022, 0, 'and is not group or world writable');
+
+# Which is the question this actually answers: logrotate reading the file rather
+# than passing over it, and understanding what it finds.
+my $debug = `logrotate -d $rotate 2>&1`;
+unlike($debug, qr/Ignoring/, 'logrotate does not ignore it') or diag $debug;
+# Its own state file is not our business, and is the one error a run of this
+# under anything but root reliably produces.
+my @complaints = grep { m/error:/i && !m/state file/i } split m/\n/, $debug;
+is_deeply(\@complaints, [], 'and finds nothing to complain about in it') or diag $debug;
+like($debug, qr{/var/log/rsyncd/}, 'and it is the rsyncd log it rotates') or diag $debug;
 
 done_testing();

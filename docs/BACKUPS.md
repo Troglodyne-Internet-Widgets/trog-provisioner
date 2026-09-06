@@ -32,3 +32,7 @@ If config changes matter they ought to be implemented either as a new recipe or 
 If you setup the host to use the `backup` recipe, and another host to have the `backupdestination` recipe aimed at it, this implements incremental backups for you.
 This uses both rsync's `--link-dir` functionality to minimize disk usage per checkpoint and rsyncd via ssh authorized keys command as root for secure access while being able to access everything necessary.
 The idea is that you can rsync over a checkpoint into a datadir and just re-provision the host to solve your data loss problem.
+
+Each side keeps its own log of that, and rotates it.
+The host being backed up logs its rsync daemon to `/var/log/rsyncd/$DOMAIN.log`; the destination logs what it fetched to `/var/log/backups/$HOST.log`.
+Read both when a backup looks wrong: a module the source could not open is only visible on the source, and the destination is the only side that knows a transfer never started.

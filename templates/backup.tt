@@ -4,11 +4,28 @@
     dies on an already-absent file makes re-provisioning fail on a guest that
     is in exactly the state this wanted. -%]
 rm -f [% install_dir %]/[% domain %]/[% key_file %]
-mv rsyncd.conf /root/rsyncd.[% domain %].conf
-[%# Appended only if it is not already there.  This ran unconditionally, so every
-    re-provision added the same forced-command line to the root
-    authorized_keys file again -- the access does not change, the file just grows a copy each time. -%]
+[%# rsyncd opens its log before it chroots, so the directory has to be out
+    here rather than inside the path of some module. -%]
+mkdir -p /var/log/rsyncd
+[%# /etc, not /root.  rsync reads the config named in the forced command before
+    it does anything else, and some builds of it will not take one out of /root
+    -- which leaves a key that authenticates perfectly and a daemon that exits
+    before it has served a module. -%]
+mv rsyncd.conf /etc/rsyncd.[% domain %].conf
+[%# Owned by whoever built the payload otherwise: the tarball is unpacked as
+    root, which restores the ownership recorded in it. -%]
+chown root:root /etc/rsyncd.[% domain %].conf
+chmod 0644 /etc/rsyncd.[% domain %].conf
+[%# Where it lived before it moved, on a guest that has been provisioned once
+    already. -%]
+rm -f /root/rsyncd.[% domain %].conf
 mkdir -p /root/.ssh; chmod 0700 /root/.ssh
 touch /root/.ssh/authorized_keys; chmod 0600 /root/.ssh/authorized_keys
-grep -qF '[% pubkey %]' /root/.ssh/authorized_keys \
-    || echo "command=\"rsync --daemon --server --config=/root/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
+[%# Rewritten, rather than appended when absent.  Appending unconditionally grew
+    the file a copy at a time -- the access never changed, which is why nothing
+    noticed -- and skipping the append because the key was already there leaves a
+    guest provisioned before the config moved pointing its forced command at the
+    file in /root that the line above has just removed.  Dropping every line for
+    this key and writing the current one is both at once. -%]
+sed -i '\|[% pubkey %]|d' /root/.ssh/authorized_keys
+echo "command=\"rsync --daemon --server --config=/etc/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys
