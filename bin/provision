@@ -681,7 +681,7 @@ FS
             if ( $pool eq 'raw' ) {
                 push @disks, sprintf( <<'DISK', _xml($disk), _xml($dev), $order );
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' io='io_uring'/>
+      <driver name='qemu' type='raw'/>
       <source dev='%s'/>
       <target dev='%s' bus='virtio'/>
       <boot order='%d'/>
@@ -695,7 +695,7 @@ DISK
             my $path = $pool eq 'file' ? $disk : ( $hv->volume_path( $disk, $pool ) // $disk );
             push @disks, sprintf( <<'DISK', _xml($path), _xml($dev), $order );
     <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' io='io_uring'/>
+      <driver name='qemu' type='qcow2'/>
       <source file='%s'/>
       <target dev='%s' bus='virtio'/>
       <boot order='%d'/>

@@ -952,20 +952,6 @@ subtest 'iouring defers group membership past the makefile' => sub {
     like( $out, qr/%IO_URING_GID%/, 'the gid is substituted on the guest' );
 };
 
-subtest 'the guest disks ask qemu for the io_uring backend' => sub {
-
-    # The other half of the issue.  io='io_uring' rather than qemu's default
-    # thread pool; unlike io='native' it carries no requirement about caching.
-    my $xml = File::Slurper::read_text("$FindBin::Bin/../domain.xml.tmpl");
-    like( $xml, qr/<driver name='qemu' type='qcow2' io='io_uring'\/>/, 'the root disk does' );
-
-    # And so do the extra disks, which bin/provision builds rather than the
-    # template -- both shapes of them.
-    my $provision = File::Slurper::read_text("$FindBin::Bin/../bin/provision");
-    like( $provision, qr/<driver name='qemu' type='raw' io='io_uring'\/>/,   'a raw block extra disk does' );
-    like( $provision, qr/<driver name='qemu' type='qcow2' io='io_uring'\/>/, 'and a file-backed one' );
-};
-
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

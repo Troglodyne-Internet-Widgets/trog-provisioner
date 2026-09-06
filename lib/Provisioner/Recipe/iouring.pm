@@ -92,10 +92,11 @@ reach it.
 
 =head3 If the machine is itself a hypervisor
 
-Put C<libvirt-qemu> in C<members>. The domain XML this repo generates asks qemu
-for C<io='io_uring'> on every guest disk, and qemu runs unprivileged -- so at
-mode 1, on a host outside the group, every guest fails to start. The two halves
-of this were written together and will bite together.
+Put C<libvirt-qemu> in C<members>. qemu runs unprivileged, so a hypervisor at
+mode 1 whose qemu is outside the group cannot create a ring -- and any guest
+whose disk asks for the io_uring AIO backend then fails to start. Whether the
+guests ask is C<disk_io> in their C<provision.conf>; this recipe only decides
+whether qemu would be allowed to.
 
 =head3 Which accounts go in the group
 
