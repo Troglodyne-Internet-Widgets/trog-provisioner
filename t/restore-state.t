@@ -104,6 +104,42 @@ subtest 'an empty destination is filled rather than nested inside' => sub {
     ok( !-d "$tmp/destination/salvaged", 'and not in a directory named after the copy' );
 };
 
+subtest 'a destination keeps the mode the recipe made it with' => sub {
+    my $tmp = tempdir( CLEANUP => 1 );
+    tree( "$tmp/salvaged", 'passwd' => "bob\n" );
+    make_path("$tmp/destination");
+
+    # cp -a src/. dst/ carries the attributes of src itself onto dst, and the
+    # salvage arrives out of the domain directory the data target owns.  A mail
+    # store the recipe had just made 2750 came back 0755, taking with it the
+    # setgid bit that is what lets the next fetch read the maildirs at all.
+    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    chmod 02750, "$tmp/destination";
+    chmod 00700, "$tmp/salvaged";
+
+    my $r = restore( "$tmp/salvaged", "$tmp/destination" );
+    is( $r->{rc},                                0,       'restored' );
+    is( read_text("$tmp/destination/passwd"),    "bob\n", 'with the contents' );
+    is( ( stat("$tmp/destination") )[2] & 07777, 02750,   'and the destination still has the mode it was made with' );
+};
+
+subtest 'a mode it was asked for still wins over the one it found' => sub {
+    my $tmp = tempdir( CLEANUP => 1 );
+    tree( "$tmp/salvaged", 'db' => "rows\n" );
+    make_path("$tmp/destination");
+    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    chmod 02750, "$tmp/destination";
+
+    # Preserving what was there is the default, not an override of the caller.
+    #
+    # On the permission bits alone: chmod leaves the setgid bit of a directory
+    # alone whatever numeric mode it is given, so a caller cannot clear one this
+    # way and this does not claim it can.
+    my $r = restore( "$tmp/salvaged", "$tmp/destination", '', '0700' );
+    is( $r->{rc},                                0,     'restored' );
+    is( ( stat("$tmp/destination") )[2] & 00777, 00700, 'the mode the caller named is the one it ends up with' );
+};
+
 subtest 'a single file, and the ownership and mode it is asked for' => sub {
     my $tmp = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$tmp/salvaged", "signing key\n" );

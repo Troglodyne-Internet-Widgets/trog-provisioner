@@ -68,8 +68,20 @@ fi
 # there: `mv src dst` on an existing directory puts src *inside* dst, which is
 # how a restore ends up at /var/lib/redis/redis and the service still starts
 # empty.
+#
+# Keeping what the destination was made as.  `cp -a src/. dst/` copies the
+# attributes of src itself onto dst along with the contents, and the salvage
+# came out of a domain directory the data target owns -- so a destination the
+# recipe had just created 2750 dovecot:admin came back 0755 root:root, and the
+# setgid bit that is the whole reason the next salvage can be read went with it.
+# The contents keep the modes they were salvaged with; only the directory the
+# service was given is restored to what the recipe asked for.
 if [ -d "$SALVAGED" ] && [ -d "$DESTINATION" ]; then
+    dest_mode="$(stat -c '%a' "$DESTINATION")"
+    dest_owner="$(stat -c '%u:%g' "$DESTINATION")"
     cp -a "$SALVAGED/." "$DESTINATION/"
+    chmod "$dest_mode" "$DESTINATION"
+    chown "$dest_owner" "$DESTINATION"
     rm -rf "${SALVAGED:?}"
 else
     mkdir -p "$(dirname "$DESTINATION")"
