@@ -146,8 +146,17 @@ watching, than three minutes later on the guest.
 
 =cut
 
+# Once per run, whichever path reached it first.  A guest being re-provisioned
+# goes through the reuse branch, which places these and then schedules the
+# makefile itself; main places them too, for the guest that was just built.  On
+# the reuse path both fire, and the second would rewrite a key the recipe had
+# already handed to the service now reading it.
+my %PLACED;
+
 sub place_guest_secrets {
     my ( $guest, $domain ) = @_;
+
+    return if $PLACED{$domain}++;
 
     # The same domain directory bin/destroy purges: whatever hypervisor this run
     # is working with says where it is.
@@ -173,10 +182,15 @@ sub place_guest_secrets {
         $guest->write_text( $path, "$value\n", sudo => 1, mode => $wanted->{$path}{mode} // '0600' )
           or die "Could not place $path on $domain\n";
 
-        # Checked, because the service reads this file as itself: a chown that
-        # quietly did nothing leaves the file root's and the service without it.
+        # Attempted rather than required: this runs before the makefile, so the
+        # account that will own the file usually belongs to a package that is
+        # not installed yet.  The mode above is what keeps the secret to itself
+        # in the meantime, and the recipe chowns it once the service exists --
+        # which is why guest_secrets says the owner is what it ends up as
+        # rather than what it lands as.
         my $owner = $wanted->{$path}{owner} // 'root:root';
-        die "Could not give $path to $owner on $domain\n" if $guest->run_sudo( 'chown', $owner, $path );
+        print {*STDERR} "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
+          if $guest->run_sudo( 'chown', $owner, $path );
 
         print "Placed $path on $domain from $wanted->{$path}{ref}\n";
     }

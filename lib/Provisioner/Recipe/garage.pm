@@ -182,17 +182,28 @@ sub args {
 
 sub template_files {
     return (
-        'garage.toml.tt'    => 'garage.toml',
-        'garage.service.tt' => 'garage.service',
-        'garage_init.sh.tt' => 'garage_init.sh',
+        'garage.toml.tt'          => 'garage.toml',
+        'garage.service.tt'       => 'garage.service',
+        'garage_init.sh.tt'       => 'garage_init.sh',
+        'garage.snapshot.sh.tt'   => 'garage-snapshot.sh',
+        'garage.snapshot.cron.tt' => 'garage-snapshot.cron',
     );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # The objects and the metadata that says what they are, which together are
-    # everything about a garage node that is not already in garage.toml.
+    # The objects, and a snapshot of the metadata that says what they are, which
+    # together are everything about a garage node that is not already in
+    # garage.toml.
+    #
+    # A snapshot rather than the metadata directory itself, because that is an
+    # LMDB database: LMDB writes its files 0600 whatever the directory says, so
+    # the group the rest of the tree is given never reaches them and the fetch
+    # reads nothing -- and copying a live LMDB out from under a running writer
+    # produces a database with a torn page in it that restores looking fine.
+    # garage-snapshot.sh asks garage for one nightly; see garage.tt for the leg
+    # that puts it back.
     # templates/garage.tt is the other half: it gives both directories the admin
     # user as their group, because the fetch is an sftp session as that user
     # with no sudo and 0750 garage:garage comes back empty without complaining,
@@ -209,8 +220,8 @@ sub remote_files {
     my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
     my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
     return (
-        "$data_dir/"     => 'garage/data/',
-        "$metadata_dir/" => 'garage/meta/',
+        "$data_dir/"               => 'garage/data/',
+        "$metadata_dir/snapshots/" => 'garage/snapshots/',
     );
 }
 

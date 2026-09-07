@@ -117,6 +117,23 @@ unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no v
     or diag $execstart;
 
 
+# chroot(2) needs CAP_SYS_CHROOT, so a pdns_server the unit starts as User=pdns
+# never enters the chroot -- and then every path in its configuration, all of
+# which are written relative to that root, points somewhere on the real
+# filesystem that either does not exist or is not its to write.
+my $unit_user = `systemctl show -p User --value pdns 2>/dev/null`;
+chomp $unit_user;
+ok($unit_user eq 'root' || $unit_user eq '', 'pdns starts with the privilege it needs to chroot') or diag "User=$unit_user";
+
+my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'; <> } // '';
+like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');
+like($global_conf, qr/^setgid=pdns$/m, 'both halves of it');
+
+# Which is the whole point: the API socket lands inside the chroot, where
+# synczones and the patched lexicon look for it.
+ok(-S '/var/spool/powerdns/api.sock', 'the API socket exists, so the webserver bound it')
+    or diag `systemctl status pdns --no-pager -n 15 2>&1 | tail -8`;
+
 # pdns runs as pdns and the payload arrives owned by the admin user, so a
 # fragment moved into place and left alone is one pdns cannot read -- it falls
 # back to the packaged defaults, binds 0.0.0.0:53 on top of the recursor, and

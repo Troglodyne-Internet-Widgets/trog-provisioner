@@ -17,12 +17,14 @@ use Config::Simple;
 Point the PowerDNS unit at the spool directory it chroots into.
 
 =cut
+
 my $service_file = "/usr/lib/systemd/system/pdns.service";
 die "Can't find service file $service_file" unless -f $service_file;
 
 my $cfg = Config::Simple->new($service_file);
 
-$cfg->param("Service.WorkingDirectory", "/var/spool/powerdns");
+$cfg->param( "Service.WorkingDirectory", "/var/spool/powerdns" );
+
 # --chroot with the directory it chroots to.  It was passed bare, which is not
 # something pdns_server accepts -- "Unable to convert presentation address" and
 # an exit before it logs anywhere.  Everything it opens afterwards is named
@@ -31,7 +33,17 @@ $cfg->param("Service.WorkingDirectory", "/var/spool/powerdns");
 # /var/spool/powerdns where the rest of the recipe expects them.
 my $chroot     = '/var/spool/powerdns';
 my $invocation = "/usr/sbin/pdns_server --guardian=no --daemon=no --logging-facility=1 --log-timestamp=yes --write-pid=no --chroot=$chroot";
-$cfg->param("Service.ExecStart", $invocation);
+$cfg->param( "Service.ExecStart", $invocation );
 
-File::Copy::copy($service_file, "$service_file.bak");
+# And as root, because chroot(2) needs CAP_SYS_CHROOT and the packaged unit runs
+# it as User=pdns.  Started unprivileged, pdns_server cannot enter the chroot at
+# all: it goes on looking at the real filesystem root, where gsqlite3-database
+# names a /zones.db that is not there and the webserver cannot create /api.sock
+# in a directory it does not own.  Both come out as an exit with no obvious
+# cause.  pdns drops to setuid/setgid itself once it is inside -- see
+# pdns.global.tt -- which is the order this needs to happen in.
+$cfg->param( "Service.User",  "root" );
+$cfg->param( "Service.Group", "root" );
+
+File::Copy::copy( $service_file, "$service_file.bak" );
 $cfg->save();

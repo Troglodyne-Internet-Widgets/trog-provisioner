@@ -539,6 +539,11 @@ identity, which is the thing the store exists to prevent.
 
 C<ref> must name a field the store keeps, which is C<password> or C<username>.
 
+C<owner> is what the file ends up owned by, not what it lands as.  Placement
+happens before the makefile, so the account usually belongs to a package that is
+not installed yet; C<mode> is what keeps the secret to itself until the recipe
+chowns it, which the recipe has to do.
+
 =cut
 
 sub guest_secrets {

@@ -73,7 +73,13 @@ is($syntax, '', 'and is a valid shell script') or diag $syntax;
 my $live     = '[% install_dir %]/matrix.[% domain %]';
 my $salvaged = '[% install_dir %]/[% domain %]/matrix';
 
-ok(-s "$live/homeserver.db", 'the database is at the path homeserver.yaml names');
+# Synapse makes this on first start, which is queued as a postrun task, so on a
+# guest that has never run it there is nothing here yet.  What matters is that
+# a salvaged one was put back where the config names -- checked just below.
+SKIP: {
+    skip 'synapse has not been started yet, so it has made no database', 1 unless -e "$live/homeserver.db";
+    ok(-s "$live/homeserver.db", 'the database is at the path homeserver.yaml names');
+}
 ok(-d "$live/media",         'and the media store is beside it');
 
 # restore_state leaves the copy alone when the destination already has state --
@@ -85,19 +91,29 @@ foreach my $piece (qw{homeserver.db homeserver.signing.key}) {
     ok(-s "$live/$piece", "the salvaged $piece is on the guest, not stranded in the domain directory");
 }
 
-# And the key has to be one the next salvage can read, or none of the above
-# helps the guest after this one: the fetch runs as [% admin_user %] over sftp
-# with no sudo, and a key at 0600 owned by matrix-synapse never came down at
-# all.  Which is how a rebuild lost the federation identity even when every
-# other thing here was restored.
+# The signing key does not come off the guest any more and must not: it is the
+# federation identity of this server, bin/provision puts it here out of the
+# secret store before the makefile runs, and remote_skip keeps it out of the
+# salvage so it never reaches the domain directory or a backup of it.  So the
+# contract is the opposite of what it was -- kept to synapse, and readable by
+# nobody else on the box.
 my $signing_key = "$live/homeserver.signing.key";
 ok(-s $signing_key, 'synapse has a signing key');
 SKIP: {
     my @key_stat = stat $signing_key;
-    skip 'there is no signing key to stat', 2 unless @key_stat;
-    is($key_stat[2] & 07777, 0640, 'group-readable, so the next rebuild can keep this identity');
-    is(scalar getgrgid($key_stat[5]), '[% admin_user %]', 'by the group the salvage runs as');
+    skip 'there is no signing key to stat', 3 unless @key_stat;
+
+    is($key_stat[2] & 07777, 0600, 'kept to synapse');
+    is(scalar getpwuid($key_stat[4] // -1), 'matrix-synapse', 'and owned by it');
+
+    my $keyline = do { local (@ARGV, $/) = $signing_key; <> } // '';
+    like($keyline, qr/\Aed25519 \S+ \S+/, 'and is the key the store handed over, in the format synapse reads');
 }
+
+# The other half of that bargain: nothing salvages it, so a rebuild gets the
+# same identity from the store rather than a new one from the guest.
+ok(!-e "[% install_dir %]/[% domain %]/matrix/homeserver.signing.key",
+    'and no copy of it was left in the domain directory for a backup to pick up');
 
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;

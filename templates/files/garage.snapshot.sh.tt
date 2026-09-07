@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Take a snapshot of garage's metadata that can actually be carried off the guest.
+#
+# The objects under [% data_dir %] are ordinary files and are salvaged as they
+# are.  The metadata is not: it is an LMDB database, and LMDB writes
+# db.lmdb/data.mdb and lock.mdb 0600 whatever the mode of the directory holding
+# them, so the group the rest of the tree is given never reaches them and the
+# fetch -- sftp as [% admin_user %] with no sudo -- reads nothing.  Copying them
+# anyway would be worse than not having them: a live LMDB copied out from under
+# a running writer is a database with a torn page in it, and it restores
+# looking fine.
+#
+# So garage is asked for a snapshot instead, which is what `meta snapshot` is
+# for, and that is what remote_files names.  It is written under
+# [% metadata_dir %]/snapshots by garage itself, and made readable here
+# afterwards.
+#
+# Old ones are pruned to the last few: a snapshot is the size of the metadata,
+# and the point of keeping more than one is that the newest may have been taken
+# during whatever went wrong.
+
+set -euo pipefail
+
+SNAPDIR='[% metadata_dir %]/snapshots'
+KEEP=3
+
+# --all would ask every node in the cluster; this guest is responsible for its
+# own metadata and nobody else's.
+/usr/local/bin/garage meta snapshot
+
+# garage names them by timestamp, so the newest sorts last.  A snapshot it did
+# not manage to write is not a thing to prune towards.
+if [ ! -d "$SNAPDIR" ]; then
+    echo "garage-snapshot.sh: garage wrote no snapshot under $SNAPDIR" >&2
+    exit 1
+fi
+
+# Readable by the account the fetch runs as, and by nobody else: the metadata
+# says what every object in the store is and who may read it.
+chown -R garage:[% admin_user %] "$SNAPDIR"
+find "$SNAPDIR" -type d -exec chmod 2750 {} +
+find "$SNAPDIR" -type f -exec chmod 0640 {} +
+
+ls -1dt "$SNAPDIR"/*/ 2>/dev/null | tail -n "+$(( KEEP + 1 ))" | xargs -r rm -rf
+
+echo "garage-snapshot.sh: snapshot taken, $(ls -1d "$SNAPDIR"/*/ 2>/dev/null | wc -l) kept"

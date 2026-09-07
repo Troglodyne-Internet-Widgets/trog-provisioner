@@ -26,7 +26,17 @@ id garage 2>/dev/null || useradd -r -d [% data_dir %] -s /usr/sbin/nologin garag
 # one replaces before anything is started that would write over it.
 mkdir -p '[% data_dir %]' '[% metadata_dir %]'
 [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/data' '[% data_dir %]'
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/meta' '[% metadata_dir %]'
+[%# The metadata comes back as a snapshot rather than as the database itself --
+    see remote_files -- so it goes back the same way: the newest one salvaged
+    becomes the database this node starts on.  Into db.lmdb, which is what
+    garage opens, and only when there is not one there already: a guest with its
+    own metadata keeps it, exactly as restore_state would have it. -%]
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/snapshots' '[% metadata_dir %]/snapshots'
+NEWEST=$$(ls -1dt '[% metadata_dir %]'/snapshots/*/ 2>/dev/null | head -1); \
+if [ -n "$$NEWEST" ] && [ ! -e '[% metadata_dir %]/db.lmdb' ]; then \
+    cp -a "$$NEWEST" '[% metadata_dir %]/db.lmdb'; \
+    echo "garage: started from the snapshot at $$NEWEST"; \
+fi
 chown -R garage:[% admin_user %] '[% data_dir %]' '[% metadata_dir %]'
 find '[% data_dir %]' '[% metadata_dir %]' -type d -exec chmod 2750 {} +
 # Download garage binary (idempotent - skipped if same version already installed)
@@ -42,8 +52,19 @@ install -m 0600 -o garage -g garage garage.toml /etc/garage.toml
 # Install systemd service and init script
 install -m 0644 garage.service /etc/systemd/system/garage.service
 install -m 0755 garage_init.sh [% script_dir %]/garage_init.sh
+[%# The snapshot the next rebuild will be restored from.  Nightly, and once now
+    so that a guest rebuilt before the first cron has something to be rebuilt
+    from -- queued, because garage has to be running to be asked for one. -%]
+install -m 0750 garage-snapshot.sh /usr/local/sbin/garage-snapshot.sh
+install -m 0644 garage-snapshot.cron /etc/cron.d/garage-snapshot
+chown root:root /etc/cron.d/garage-snapshot
+chmod 0644 /etc/cron.d/garage-snapshot
 # Enable and start, then run layout init and bucket creation post-start
 systemctl daemon-reload
 systemctl enable garage
 [% script_dir %]/queue_postrun_task systemctl start garage
 [% script_dir %]/queue_postrun_task [% script_dir %]/garage_init.sh
+[%# Last, because `garage meta snapshot` asks the running daemon for one: queued
+    ahead of the start it needs, it fails and a guest rebuilt before the first
+    cron has nothing to be rebuilt from. -%]
+[% script_dir %]/queue_postrun_task /usr/local/sbin/garage-snapshot.sh

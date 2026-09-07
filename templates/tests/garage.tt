@@ -39,9 +39,12 @@ foreach my $bucket (qw{[% buckets.join(' ') %]}) {
 # bin/new_config comes for these over sftp as [% admin_user %] with no sudo, and
 # garage:garage 0750 reads back as an empty directory rather than as a refusal.
 # A node can look perfectly well backed up right up until somebody rebuilds it.
+# The objects, and the snapshot of the metadata rather than the metadata itself:
+# LMDB writes db.lmdb 0600 whatever the directory says, so what garage is asked
+# to snapshot is what can be carried off the guest.
 my %garage_dirs = (
-    data => '[% data_dir || '/var/lib/garage/data' %]',
-    meta => '[% metadata_dir || '/var/lib/garage/meta' %]',
+    data      => '[% data_dir || '/var/lib/garage/data' %]',
+    snapshots => '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots',
 );
 
 foreach my $what (sort keys %garage_dirs) {
@@ -61,6 +64,24 @@ foreach my $what (sort keys %garage_dirs) {
 # And the restore half.  restore_state moves the salvage out of the domain
 # directory once it has put it back, so anything still sitting there while
 # garage started from nothing is a rebuild that lost the objects.
+# What the snapshot is for: a database this node can actually be rebuilt onto.
+ok(-d '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots', 'garage has been asked for a metadata snapshot');
+my @snaps = glob('[% metadata_dir || '/var/lib/garage/meta' %]/snapshots/*/');
+ok(scalar @snaps, 'and there is one to salvage') or diag `ls -la '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots' 2>&1`;
+
+ok(-x '/usr/local/sbin/garage-snapshot.sh', 'the snapshot script is installed');
+my $cron = do { local (@ARGV, $/) = '/etc/cron.d/garage-snapshot'; <> } // '';
+like($cron, qr{garage-snapshot\.sh}, 'and runs on a schedule, so the salvage is never older than a day');
+
+# Copying a live LMDB is what this exists to avoid, so the database itself must
+# not be what gets carried: it is 0600 and the fetch could not read it anyway.
+my $live = '[% metadata_dir || '/var/lib/garage/meta' %]/db.lmdb';
+SKIP: {
+    skip 'no db.lmdb yet', 1 unless -d $live;
+    my $denied = `su -s /bin/sh -c 'find "$live" ! -readable -print' [% admin_user %] 2>&1`;
+    isnt($denied, '', 'the live database is not readable by the fetch, which is why the snapshot exists');
+}
+
 foreach my $what (sort keys %garage_dirs) {
     my $salvage = "[% install_dir %]/[% domain %]/garage/$what";
     my @unrestored = glob("$salvage/*");
