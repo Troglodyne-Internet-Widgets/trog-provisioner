@@ -14,8 +14,9 @@ t/skills-teardown.t - the provisioning-recipes teardown: what a throwaway run le
 =cut
 
 use Test::More;
-use File::Path qw{make_path};
-use File::Temp qw{tempdir};
+use Test::MockModule qw{strict};
+use File::Path       qw{make_path};
+use File::Temp       qw{tempdir};
 use File::Slurper::Temp();
 
 use FindBin;
@@ -28,6 +29,21 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Provisioner::Cookbook();
+use Trog::HV();
+
+# Enough of Sys::Virt to answer the one question the sweep asks of it.
+{
+
+    package Test::Libvirt;
+    our @DOMAINS;
+
+    sub list_all_domains {
+        return map { bless { name => $_ }, 'Test::Libvirt::Domain' } @DOMAINS;
+    }
+
+    package Test::Libvirt::Domain;
+    sub get_name { return $_[0]->{name} }
+}
 
 require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/teardown")
   or BAIL_OUT('the teardown script does not load');
@@ -138,6 +154,55 @@ subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
     # Every real domain's data lives in the same directory, and the whole reason
     # this is safe to run is that it is only ever looking at .test.
     ok( -d "$data/real.example.com", 'and does not so much as consider a real domain' );
+};
+
+subtest 'the sweep covers the domain directory as well as the data source' => sub {
+    my $domains = tempdir( CLEANUP => 1 );
+    write_config( 'named.test' => 1 );
+    make_path("$data/$_")    for qw{orphan.test live.test};
+    make_path("$domains/$_") for qw{orphan.test live.test named.test};
+
+    # A hypervisor to have a domain directory and a list of guests.  Both of the
+    # sweep's exclusions come from somewhere real: the configuration above, and
+    # this.
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( domain_dir => sub { $domains } );
+    $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
+    local @Test::Libvirt::DOMAINS = ('live.test');
+
+    my ($said) = says( sub { Trog::Skill::Teardown::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    like( $said, qr/\Q$domains\E/, 'the domain directory is one of the places it looks' );
+
+    ok( !-e "$data/orphan.test",    'the orphan goes from the data source' );
+    ok( !-e "$domains/orphan.test", 'and from the domain directory' );
+
+    ok( -d "$data/live.test",     'a guest libvirt still has is not an orphan' );
+    ok( -d "$domains/live.test",  'in either place' );
+    ok( -d "$domains/named.test", 'and neither is one the configuration names' );
+
+    Trog::HV->forget();
+
+    # It is only live while this subtest says it is.
+    File::Path::remove_tree("$data/live.test");
+};
+
+subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
+    write_config();
+    make_path("$data/orphan.test");
+
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
+    $hv->redefine( vmm        => sub { die "connection refused\n" } );
+
+    my ( $said, $rc ) = says( sub { Trog::Skill::Teardown::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    is( $rc, 1, 'the sweep fails rather than carrying on' );
+    like( $said, qr/nothing is swept/, 'and says so' );
+
+    # The guests it holds are exactly the ones that would look like orphans.
+    ok( -d "$data/orphan.test", 'nothing was removed on the strength of a list it could not get' );
+
+    Trog::HV->forget();
+    rmdir "$data/orphan.test";
 };
 
 subtest 'a sweep with nothing to do says so' => sub {

@@ -446,11 +446,13 @@ for what it left:**
 .claude/skills/provisioning-recipes/scripts/teardown --orphans --dryrun
 ```
 
-Every `.test` directory in the data source, here and across the fleet, that no
-hypervisor has a guest for and no recipe configuration names. Read the dry run,
-then run it without `--dryrun`. Those two exclusions are the whole safety of it,
-so do not reach past them: a name libvirt still knows about is a live guest
-however old its directory looks.
+Every `.test` directory that no hypervisor has a guest for and no recipe
+configuration names, in both of the places a run leaves one — the data source
+and the domain directory — here and across the fleet. Read the dry run, then run
+it without `--dryrun`. Those two exclusions are the whole safety of it, so do not
+reach past them: a name libvirt still knows about is a live guest however old its
+directory looks, and a hypervisor that will not say what it has stops the sweep
+rather than being taken to hold nothing.
 
 ## Reporting
 
