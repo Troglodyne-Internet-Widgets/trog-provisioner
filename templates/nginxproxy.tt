@@ -6,15 +6,18 @@ mv nginx.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
 # to $connection_upgrade, which that file's map defines.  Restarting here fails
 # on `unknown "connection_upgrade" variable` every time.
 [% script_dir %]/queue_postrun_task systemctl restart nginx
-[%# The document root of every vhost this writes.  nginx does not create a root
+[%# The document root of every vhost that has one.  nginx does not create a root
     and does not refuse to start without one -- it serves 404 for everything
     under it, which looks like an application fault rather than a missing
-    directory.  Only .well_known was being made, so a vhost with a static_dir
-    of its own had a root that did not exist. -%]
+    directory.
+
+    Only the ones a recipe declared: a vhost with no static_dir serves no files,
+    so making it a www/ to serve them out of invented a directory for every
+    reverse proxy on the fleet and told nginx to stat it. -%]
 [% FOR vhost IN vhosts.keys().sort() %]
-[% IF !vhosts.$vhost.ssl_redirect %]
-mkdir -p '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir || 'www' %]'
-chown [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir || 'www' %]'
+[% IF !vhosts.$vhost.ssl_redirect AND vhosts.$vhost.static_dir %]
+mkdir -p '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]'
+chown [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]'
 [% END -%]
 [% END -%]
 # Get ready for ACME

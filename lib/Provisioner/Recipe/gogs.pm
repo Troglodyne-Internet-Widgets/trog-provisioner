@@ -35,9 +35,10 @@ on a scheduled interval.
 
 Requires nginxproxy recipe.
 
-NOTE: Ensure 'git' (or your chosen gogs_admin value) is included in the aliases
-section of ipmap.cfg for your domain so DNS/SSL certificates work for
-git.[domain].
+Served at the domain itself, not at C<git.$domain>: the vhost nginxproxy writes
+answers on the domain and the aliases C<new_config> gives it, and nothing was
+adding a C<git> to those.  The recipe keeps its files under
+C<$install_dir/git.$domain>, which is a directory name and not a hostname.
 
 =head3 deps
 

@@ -14,10 +14,15 @@ PATH    = [% install_dir %]/git.[% domain %]/data/gogs.db
 ROOT = [% install_dir %]/git.[% domain %]/repos
 
 [server]
-DOMAIN       = git.[% domain %]
+; The domain itself, not git.<domain>.  gogs is served by the vhost nginxproxy
+; writes for this domain, which answers on the domain and its aliases -- and a
+; git. was neither among them nor guaranteed to resolve, so every clone URL gogs
+; printed, every redirect it issued after a login and every webhook it signed
+; named a host the operator had to go and create by hand.
+DOMAIN       = [% domain %]
 HTTP_PORT    = 3000
 HTTP_ADDR    = 127.0.0.1
-ROOT_URL     = https://git.[% domain %]/
+ROOT_URL     = https://[% domain %]/
 OFFLINE_MODE = true
 
 [mailer]

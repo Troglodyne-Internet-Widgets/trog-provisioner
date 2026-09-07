@@ -32,8 +32,13 @@ server {
 [% auth_statics = vhosts.$vhost.auth_statics -%]
 [% auth_uri     = vhosts.$vhost.auth_uri -%]
 [% proxy_uri    = vhosts.$vhost.proxy_uri -%]
-[%# Relative: every use below is under install_dir/domain already. -%]
-[% static_dir   = vhosts.$vhost.static_dir || 'www' -%]
+[%# Relative: every use below is under install_dir/domain already.  No default:
+    a vhost serves files only if the recipe behind it said where they are.  It
+    used to fall back to www/, which is where a tpsgi application keeps them and
+    nowhere a gogs or a synapse has anything at all -- so a pure proxy got a root
+    that did not exist, and nginx logged stat() ... failed (13: Permission
+    denied) on it for every request it went on to proxy correctly anyway. -%]
+[% static_dir   = vhosts.$vhost.static_dir -%]
 [% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
@@ -52,6 +57,7 @@ server {
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
 
+[% IF static_dir %]
     location / {
         gzip on;
         etag on;
@@ -62,6 +68,7 @@ server {
         root [% install_dir %]/[% domain %]/[% static_dir %];
         try_files $uri $uri.html $uri/index.html @default;
     }
+    [% END -%]
 
     [% IF public_dir %]
     location /[% public_dir %] {
@@ -75,7 +82,7 @@ server {
     }
     [% END -%]
 
-    [% IF auth_statics AND auth_uri %]
+    [% IF auth_statics AND auth_uri AND static_dir %]
     location /[% auth_statics %] {
         auth_request [% auth_uri %];
         etag on;
@@ -96,7 +103,7 @@ server {
     }
     [% END -%]
 
-    [% IF nocache_prefix %]
+    [% IF nocache_prefix AND static_dir %]
     location [% nocache_prefix %] {
         sendfile on;
         sendfile_max_chunk 1m;
@@ -106,7 +113,12 @@ server {
     }
     [% END -%]
 
-    location @default {
+[%# Named only when something falls back to it.  With no statics there is
+    nothing to fall through from, so this becomes the only location on the vhost
+    rather than the end of a try_files chain -- and nginx refuses a proxy_pass
+    with a URI part in a named location, which is why the socket form goes
+    through an upstream either way. -%]
+    location [% IF static_dir %]@default[% ELSE %]/[% END %] {
         proxy_pass [% proxy_uri %];
         proxy_buffering off;
         proxy_http_version 1.1;

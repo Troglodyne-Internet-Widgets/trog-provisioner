@@ -1227,6 +1227,57 @@ subtest 'the root password survives being put in a SQL string' => sub {
     unlike( $cnf->(q{pa'ss}), qr/&#39;/, 'and nothing is HTML-escaped on the way' );
 };
 
+subtest 'a vhost serves files only where a recipe said it has some' => sub {
+    my $vhost = sub {
+        my (%vhosts) = @_;
+
+        # A fresh object per configuration: validate is memoized on the object,
+        # so asking one twice with different vhosts answers with the first.
+        return 'Provisioner::Recipe::nginxproxy'->new(%PROV)->render_file( 'files/nginx.domain.conf.tt', %G, vhosts => \%vhosts );
+    };
+
+    # What a reverse proxy in front of gogs or synapse configures.  static_dir
+    # used to fall back to www/, so this got root install_dir/domain/www -- a
+    # directory the recipe never asked for, on every domain that proxies.
+    my $proxy = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
+    unlike( $proxy, qr/^\s*root\s/m, 'a vhost with no static_dir is given no root' );
+    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!xs, 'and proxies from / rather than falling through to a named location' );
+    unlike( $proxy, qr/try_files/, 'with nothing to try before proxying' );
+
+    # And the other half: a recipe that does serve files still gets exactly what
+    # it named, with the proxy behind it as the fallback.
+    my $static = $vhost->( 443 => { ssl => 1, proxy_uri => 'run/app.sock', static_dir => 'www/static' } );
+    like( $static, qr{^\s*root /opt/domains/test\.test\.test/www/static;}m, 'a declared static_dir is the root' );
+    like( $static, qr/try_files \$uri .*\@default/,                         'statics are tried before the proxy' );
+    like( $static, qr/location \@default \{/,                               'and the proxy is the fallback it names' );
+
+    # nocache_prefix and auth_statics both serve files out of the static root.
+    # matrix sets a nocache_prefix and no static_dir, so this block used to be
+    # rendered with the www/ fallback under it.
+    my $nocache = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:8008', nocache_prefix => '^~ /(_matrix)/' } );
+    unlike( $nocache, qr/^\s*root\s/m, 'a nocache_prefix with no static_dir serves no files either' );
+
+    # public_dir is an alias rather than a root, so it is the one thing here that
+    # does not need a static_dir behind it.  deluged sets it and nothing else.
+    my $public = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:8112', public_dir => 'torrents' } );
+    like( $public, qr{^\s*alias /opt/domains/test\.test\.test/torrents;}m, 'a public_dir is still served without one' );
+    unlike( $public, qr/^\s*root\s/m, 'and still brings no root with it' );
+};
+
+subtest 'gogs is served where the vhost actually answers' => sub {
+    my $ini = 'Provisioner::Recipe::gogs'->new(%PROV)->render_file( 'files/gogs.app.ini.tt', %G, %{ $required_config{gogs} }, secret_key => q{} );
+
+    # nginxproxy writes one vhost, for the domain and the aliases new_config
+    # gives it, and a git. is not among them.  Every clone URL, login redirect
+    # and webhook gogs emitted named a host nobody had made.
+    like( $ini, qr{^ROOT_URL\s*=\s*https://\Qtest.test.test\E/$}m, 'ROOT_URL is the domain itself' );
+    like( $ini, qr{^DOMAIN\s*=\s*\Qtest.test.test\E$}m,            'and so is DOMAIN' );
+
+    # The files stay under git.$domain.  That is a directory name, and moving it
+    # would strand what remote_files salvaged off every guest that has one.
+    like( $ini, qr{^ROOT\s*=\s*/opt/domains/git\.test\.test\.test/repos$}m, 'while the repository store is left where it is' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

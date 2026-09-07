@@ -106,4 +106,20 @@ my $port = `ss -lntp 2>/dev/null | grep -c ':3000 '`;
 chomp $port;
 ok($port >= 1, 'gogs is listening on port 3000');
 
+# The host gogs believes it is.  nginxproxy writes one vhost, answering on the
+# domain and the aliases new_config gives it, and a git. is not among them --
+# so every clone URL gogs printed, every redirect after a login and every
+# webhook it signed named a host that nobody had made and nothing resolved.
+like($ini, qr{^ROOT_URL\s*=\s*https://\Q[% domain %]\E/?\s*$}m, 'ROOT_URL is the domain the vhost answers on')
+    or diag $ini;
+like($ini, qr/^DOMAIN\s*=\s*\Q[% domain %]\E\s*$/m, 'and so is DOMAIN');
+unlike($ini, qr{^(ROOT_URL|DOMAIN)\s*=.*\bgit\.\Q[% domain %]\E}m,
+    'neither names a git. host the operator would have had to create');
+
+# And it answers there.  The vhost proxies everything now that it serves no
+# statics of its own, so this is the whole path: nginx, the proxy_pass, gogs.
+my $served = `curl -sk -o /dev/null -w '%{http_code}' -H 'Host: [% domain %]' https://127.0.0.1/ 2>/dev/null`;
+like($served, qr/^(200|30[0-9])$/, 'the domain itself serves gogs through nginx')
+    or diag "got HTTP $served";
+
 done_testing();
