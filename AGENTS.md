@@ -2,6 +2,10 @@
 
 This document provides guidelines for AI coding agents working with the Provisioners codebase.
 
+The *procedure* -- which skills to invoke, when, and what to run before a
+changeset is finished -- is in [CLAUDE.md](CLAUDE.md).  This is what that
+procedure is applied to.
+
 ## Overview
 
 Provisioners is a Perl-based configuration file generator for provisioning VMs using a recipe-based approach.
