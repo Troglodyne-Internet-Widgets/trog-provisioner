@@ -14,6 +14,7 @@ Automatically build and host pretty much any website
 | [EXAMPLE.md](EXAMPLE.md) | a worked deployment, end to end |
 | [STYLE.md](STYLE.md) and [docs/POD.md](docs/POD.md) | how we write the perl and document it |
 | [t/TESTING.md](t/TESTING.md) | how we test, here and on the guest |
+| [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) | working here with a coding agent: the procedure, and the guidelines it follows |
 
 ## WHY
 
