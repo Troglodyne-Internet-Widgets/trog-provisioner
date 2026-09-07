@@ -10,8 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-use Crypt::PRNG();
-
 =head1 Provisioner::Recipe::gogs
 
 =head2 SYNOPSIS
@@ -79,7 +77,12 @@ Returns directories to create for data storage.
 
 =head3 remote_files
 
-Returns remote file mappings for backup/restore.
+The whole of C<git.$domain>, which is every repository, the issue database and
+the accounts that can push to any of it.  None of it is regenerable, and the
+fragment puts it back with C<restore_state> before gogs is started.
+
+C<custom/conf/app.ini> comes along inside it, which is how C<SECRET_KEY>
+survives a rebuild: see L</args>.
 
 =over 1
 
@@ -88,6 +91,20 @@ Returns remote file mappings for backup/restore.
 =item OUTPUTS: hash of remote path => local backup path
 
 =back
+
+=head3 args
+
+C<secret_key> has no default, deliberately.  It signs sessions and encrypts 2FA
+enrolments, and it used to be minted afresh by every C<bin/new_config> run --
+which is a rotation rather than a default: re-provisioning logged everybody out
+and voided every second factor, unless an operator had thought to pin the key in
+C<recipes.yaml>.
+
+So the guest owns it.  It already lives in C<app.ini> there, C<remote_files>
+brings that file back, and the fragment lifts the key out of whatever C<app.ini>
+is on the guest before overwriting it -- minting one only when there genuinely is
+none.  Setting it here still works and still wins, for a key an operator is
+keeping somewhere else.
 
 =cut
 
@@ -129,14 +146,15 @@ sub args {
             github_orgs     => { type => 'array',  default => [], items => { type => 'string' } },
             github_token    => { type => 'string' },
             mirror_interval => { type => 'integer', minimum => 1, maximum => 23, default => 6 },
-            secret_key      => { type => 'string',  default => _seekrit() },
-            ipv6            => { type => 'boolean', default => 1 },
+
+            # No default.  This was `default => _seekrit()`, evaluated once per
+            # new_config run, so every re-provision handed gogs sixty-four fresh
+            # characters and took every session and every 2FA enrolment with it.
+            # The guest owns the key; the fragment carries it forward.
+            secret_key => { type => 'string' },
+            ipv6       => { type => 'boolean', default => 1 },
         },
     );
-}
-
-sub _seekrit {
-    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand(62) ] } 1 .. 64;
 }
 
 sub template_files {

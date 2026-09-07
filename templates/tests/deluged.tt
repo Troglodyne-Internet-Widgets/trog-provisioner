@@ -26,4 +26,42 @@ ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the vhost'
 ok(!-e '/etc/nginx/sites-enabled/files.[% domain %].conf',
     'and deluged did not write a competing one');
 
+# The state directory, made here rather than by deluged, because the torrent
+# state salvaged off the last guest is restored into it before the daemon is
+# started at all.
+ok(-d '/var/lib/deluged/config/state', 'the torrent state directory is there before deluged makes it');
+
+# And the path down to it walkable by the admin user, since the salvage that
+# preserves it is an sftp session as that user with no sudo.  One directory in
+# this list owned debian-deluged:debian-deluged is a fetch that comes back empty
+# and does not say why.
+foreach my $dir (qw{/var/lib/deluged /var/lib/deluged/config /var/lib/deluged/config/state}) {
+    my @st = stat($dir);
+    is(scalar getgrgid($st[5] // -1), '[% admin_user %]', "$dir has the admin user as its group");
+    is($st[2] & 0050, 0050, "$dir can be read and walked by that group");
+    ok(!($st[2] & 0007), "$dir is closed to everybody else");
+}
+
+# The group stops there: core.conf is this domain configuration, rewritten from
+# the template every provision, and nothing off the guest reads it.
+my @core = stat('/var/lib/deluged/config/core.conf');
+is(scalar getgrgid($core[5] // -1), 'debian-deluged', 'core.conf keeps the group it had');
+ok(!($core[2] & 0007), 'and is readable by nobody else');
+
+# What remote_files is a round trip for.  State salvaged off the last guest is
+# restored before deluged starts and the copy in the data directory goes away
+# when it is; still sitting there with an empty state directory beside it is a
+# restore that never happened, and a seedbox that has forgotten every torrent.
+sub has_content {
+    my ($dir) = @_;
+    opendir(my $dh, $dir) or return 0;
+    my @entries = grep { !m/\A\.\.?\z/ } readdir($dh);
+    closedir($dh);
+    return scalar @entries;
+}
+
+ok(!has_content('[% install_dir %]/[% domain %]/deluged/state')
+    || has_content('/var/lib/deluged/config/state'),
+    'nothing was salvaged and left unrestored beside an empty state directory');
+
 done_testing();

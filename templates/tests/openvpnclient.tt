@@ -3,6 +3,15 @@ use strict;
 use warnings;
 use Test::More;
 
+sub slurp {
+    my ($file) = @_;
+    open( my $fh, '<', $file ) or return '';
+    local $/;
+    my $content = <$fh>;
+    close $fh;
+    return $content // '';
+}
+
 my $status = `systemctl is-active openvpn-client\@client 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'openvpn client is running');
@@ -15,5 +24,31 @@ ok(-f '/etc/openvpn/client/client.conf', 'openvpn client config exists');
 # Nothing had ever waited for this.
 my $link = `ip link show tun0 2>&1`;
 like($link, qr/tun0/, 'the tunnel interface exists') or diag $link;
+
+# What remote_files names.  /etc/openvpn/client is root's, the fetch is sftp as
+# [% admin_user %] with no sudo, and salvaging it therefore fetched an empty
+# directory without saying so -- so the fragment stages a copy he can read, and
+# nobody else can.
+my $stage = '/etc/openvpn/client-salvage';
+ok(-d $stage, 'the client certificates were staged where the fetch can reach them');
+foreach my $file (qw{ca.crt client.crt client.key}) {
+    ok(-s "$stage/$file", "the staged copy has $file");
+}
+
+my $uid = getpwnam('[% admin_user %]');
+is((stat("$stage/client.key"))[4], $uid, 'the staged key belongs to [% admin_user %], who does the fetching');
+is((stat("$stage/client.key"))[2] & 07777, 0600, 'and nobody else can read it');
+is(slurp("$stage/client.key"), slurp('/etc/openvpn/client/client.key'), 'and it is the key this tunnel is using');
+
+# The copy the data target laid down, when the restore left it there.
+# restore_state moves it into place on a rebuilt guest and declines on one that
+# already has its certificates, so finding it here at all means it declined --
+# and finding it here empty means the fetch read nothing off the last guest,
+# which is the whole failure this staging exists to end.
+my $salvaged = '[% install_dir %]/[% domain %]/openvpn-client';
+SKIP: {
+    skip('nothing was salvaged off a previous guest', 1) unless -d $salvaged;
+    ok(-s "$salvaged/client.key", 'the salvaged certificates came down with a key in them');
+}
 
 done_testing();

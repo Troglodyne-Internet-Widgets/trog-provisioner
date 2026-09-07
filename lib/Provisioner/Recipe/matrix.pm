@@ -10,8 +10,6 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
-use Crypt::PRNG();
-
 =head1 Provisioner::Recipe::matrix
 
 =head2 SYNOPSIS
@@ -73,7 +71,12 @@ Returns template file mappings.
 
 =head3 datadirs
 
-Returns directories to create for data storage.
+Where the salvaged homeserver lands in the domain's data directory, so that the
+fragment has a fixed place to look for it whether or not there was a guest to
+take it off.
+
+There was a C<matrix-admin> beside it that nothing has ever written to: the
+admin interface came down as C<admin.matrix>, and no longer comes down at all.
 
 =over 1
 
@@ -85,7 +88,16 @@ Returns directories to create for data storage.
 
 =head3 remote_files
 
-Returns remote file mappings for backup/restore.
+The homeserver directory, which is everything this server is.  C<homeserver.db>
+holds every room, message and account; the media store sits beside it; and
+C<homeserver.signing.key> is the identity the rest of the federation knows it
+by.  A guest rebuilt without them is a stranger wearing the same name, so the
+fragment puts them back with C<restore_state> before synapse is started.
+
+The admin interface used to be salvaged too, and is not any more.  The fragment
+downloads it from its GitHub release on every provision, so a copy of it went
+down to the hypervisor and back up again preserving nothing, and sat in the
+backups being a web application somebody else maintains.
 
 =over 1
 
@@ -150,6 +162,7 @@ sub deps {
 }
 
 sub args {
+    my ($self) = @_;
     return (
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
@@ -173,16 +186,12 @@ sub args {
             smtp_pass                  => { type => 'string' },
             smtp_domain                => { type => 'string' },
             require_transport_security => { type => 'boolean', default => 1 },
-            registration_shared_secret => { type => 'string',  default => _seekrit() },
+            registration_shared_secret => { type => 'string',  default => $self->persisted_secret('registration_shared_secret.txt') },
             ipv6                       => { type => 'boolean', default => 1 },
             redis_host                 => { type => 'string',  default => '127.0.0.1' },
             redis_port                 => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
-}
-
-sub _seekrit {
-    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand(62) ] } 1 .. 32;
 }
 
 sub template_files {
@@ -199,14 +208,18 @@ sub template_files {
 }
 
 sub datadirs {
-    return qw{matrix matrix-admin};
+    return qw{matrix};
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
+
+    # The homeserver only.  admin.matrix was salvaged beside it, and the
+    # fragment re-downloads that release from GitHub every provision regardless,
+    # so the round trip preserved nothing and only put somebody else's web
+    # application in our backups.
     return (
-        "$install_dir/matrix.$domain/"       => 'matrix/',
-        "$install_dir/admin.matrix.$domain/" => 'admin.matrix/',
+        "$install_dir/matrix.$domain/" => 'matrix/',
     );
 }
 

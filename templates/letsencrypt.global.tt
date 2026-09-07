@@ -15,5 +15,24 @@ ln -s /etc/dehydrated/accounts /var/lib/dehydrated/accounts
 mkdir -p /etc/letsencrypt/fetchers/
 # Setup dehydrated logrotate
 mv dehydrated.logrotate /etc/logrotate.d/dehydrated
+# The ACME account from the last guest, back in place before dehydrated is
+# asked to register a new one.
+#
+# Losing the account key loses the registration: certificates issued under it
+# stay valid but nothing can revoke them, and the guest starts over as a
+# stranger to the CA.  This is here rather than in the per-domain fragment
+# because that runs after this one, by which point --register has left an
+# account sitting in the destination and restore_state would -- rightly --
+# decline to write over it.  There is one account per guest, so restoring it
+# once, here, is the right scope as well as the only workable order.
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/.letsencrypt/accounts' '/etc/dehydrated/accounts' 'root:[% admin_user %]'
 # Setup LE
 dehydrated --register --accept-terms; /bin/true
+# And left where the next fetch can read it.  That fetch is sftp as
+# [% admin_user %] with no sudo, and dehydrated writes the account key 0600
+# root, so it came back empty and the rebuilt guest registered afresh.  0640 in
+# a 0750 directory is the least that lets the salvage read it; nobody else on
+# the guest can.
+chown -R root:[% admin_user %] /etc/dehydrated/accounts
+find /etc/dehydrated/accounts -type d -exec chmod 0750 {} +
+find /etc/dehydrated/accounts -type f -exec chmod 0640 {} +

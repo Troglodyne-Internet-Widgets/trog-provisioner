@@ -143,8 +143,26 @@ function unchanged_cert {
 exit_hook() {
   # This hook is called at the end of a dehydrated command and can be used
   # to do some final (cleanup or other) tasks.
+  #
+  # What it is used for is leaving the certificate store where the next rebuild
+  # can salvage it.  bin/new_config fetches /var/lib/dehydrated/certs over sftp
+  # as [% admin_user %] with no sudo, and dehydrated writes a fresh private key
+  # 0600 root on every renewal -- so this has to run after every dehydrated
+  # command, not just the one the provision queues.
+  #
+  # It was a flat `chmod -R 0660`, which takes the execute bit off the
+  # directories along with everything else.  After the first nightly renewal the
+  # admin could not so much as enter the tree; the fetch came back empty, said
+  # nothing anybody reads, and the next guest re-issued from scratch against the
+  # rate limit.
+  #
+  # Certificates are public and stay world readable.  The private keys are
+  # root:[% admin_user %] 0640, which is the least that still lets the salvage
+  # read them.
   chown -R root:[% admin_user %] /var/lib/dehydrated
-  chmod -R 0660 /var/lib/dehydrated
+  find /var/lib/dehydrated -type d -exec chmod 0755 {} +
+  find /var/lib/dehydrated -type f -exec chmod 0644 {} +
+  find /var/lib/dehydrated -type f -name 'priv*' -exec chmod 0640 {} +
   :
 }
 

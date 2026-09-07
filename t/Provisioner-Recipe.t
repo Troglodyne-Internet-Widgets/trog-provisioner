@@ -19,6 +19,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use File::Temp qw{tempdir};
+use File::Slurper::Temp();
 use Test::More;
 use Test::Fatal qw{exception};
 
@@ -177,6 +178,30 @@ subtest 'a recipe gets its declared defaults end to end' => sub {
         return %opts;
     }
 }
+
+subtest 'persisted_secret keeps a secret still across runs' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+
+    my $recipe = bless { output_dir => $dir }, 'Provisioner::Recipe';
+    my $first  = $recipe->persisted_secret('shared.txt');
+
+    like( $first, qr/\A[0-9a-f]{64}\z/, 'sixty-four hex characters' );
+    is( bless( { output_dir => $dir }, 'Provisioner::Recipe' )->persisted_secret('shared.txt'), $first, 'and the next run gets the same one' );
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f, Plicease::ProhibitLeadingZeros)
+    is( ( stat "$dir/shared.txt" )[2] & 07777, 0600, 'kept to ourselves' );
+
+    # A default that mints a fresh secret per run is a rotation, and whatever the
+    # last one authenticated stops working at the next provision.
+    isnt( $recipe->persisted_secret('other.txt'), $first, 'a different name is a different secret' );
+
+    File::Slurper::Temp::write_text( "$dir/edited.txt", "not a secret\n" );
+    eval { $recipe->persisted_secret('edited.txt') };
+    like( $@, qr/64 hex characters/, 'a file somebody edited is an error rather than a silent nonsense secret' );
+
+    eval { bless( {}, 'Provisioner::Recipe' )->persisted_secret('nowhere.txt') };
+    like( $@, qr/no output_dir/, 'and it says so when there is nowhere to keep one' );
+};
 
 subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $one = bless {}, 'Test::Recipe::Memo';

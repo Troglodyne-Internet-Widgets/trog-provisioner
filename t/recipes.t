@@ -29,6 +29,7 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw(tempdir);
+use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
 use File::Slurper();
@@ -589,6 +590,61 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
             $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
             "$name makes at least one assertion or says why it is not"
         );
+    }
+};
+
+# remote_files is a round trip and the second half of it is the recipe's own: the
+# fetch lands the salvage under install_dir/domain, and unless that is already
+# where the service reads it, some fragment has to move it.  Thirteen recipes
+# named state to salvage and never wrote that leg, so the state came down, went
+# back up, and sat in the domain directory while the rebuilt guest started empty.
+# What the fragment does with it -- restore_state, or an importer for a database
+# dump -- is its business; that it says the path at all is what this asks.
+subtest 'a recipe that salvages state puts it back' => sub {
+    my $install = '[% install_dir %]';
+    my $domain  = '[% domain %]';
+
+    foreach my $recipe ( sort @available ) {
+        my $class    = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my %salvaged = eval { $class->remote_files( $install, $domain ) };
+        next unless %salvaged;
+
+        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+
+        foreach my $source ( sort keys %salvaged ) {
+            ( my $landed = $salvaged{$source} ) =~ s{/\z}{};
+
+            # State the domain already owns needs no restore: the data target
+            # rsyncs the domain directory back to exactly where it came from.
+            next if index( $source, "$install/$domain" ) == 0;
+
+            ok(
+                index( $fragments, "$install/$domain/$landed" ) >= 0,
+                "$recipe: something puts $landed back"
+            ) or diag "$recipe salvages $source into $landed and no fragment names it again";
+        }
+    }
+};
+
+# A default that is generated rather than written down is a rotation: it changes
+# every time bin/new_config runs, so whatever the last one authenticated -- a
+# session, an admin token, another node in a cluster -- stops working at the next
+# provision, and nothing anywhere says why.  Provisioner::Recipe::persisted_secret
+# is how a recipe keeps one still; this is what notices when a recipe does not.
+subtest 'no recipe hands out a default that changes between runs' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    foreach my $recipe ( sort @available ) {
+        my %first  = eval { Provisioner::Cookbook->spec( $recipe, output_dir => $dir ) } or next;
+        my %second = eval { Provisioner::Cookbook->spec( $recipe, output_dir => $dir ) } or next;
+
+        my $defaults = sub {
+            my ($spec) = @_;
+            my $props = $spec->{properties} // {};
+            return { map { $_ => $props->{$_}{default} } grep { defined $props->{$_}{default} && !ref $props->{$_}{default} } keys %$props };
+        };
+
+        is_deeply( $defaults->( \%second ), $defaults->( \%first ), "$recipe: the same configuration twice running" );
     }
 };
 

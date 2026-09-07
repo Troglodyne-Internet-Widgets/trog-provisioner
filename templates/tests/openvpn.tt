@@ -3,6 +3,15 @@ use strict;
 use warnings;
 use Test::More;
 
+sub slurp {
+    my ($file) = @_;
+    open( my $fh, '<', $file ) or return '';
+    local $/;
+    my $content = <$fh>;
+    close $fh;
+    return $content // '';
+}
+
 # Every file easyrsa is supposed to produce, checked by name.  easyrsa prompts
 # for a Common Name unless it is told --batch, and a make recipe has no terminal
 # to answer from, so gen-req died on EOF with "Error making certificate request"
@@ -17,15 +26,46 @@ foreach my $pki (qw{
     ok(-s "/etc/openvpn/easy-rsa/$pki", "easy-rsa produced $pki");
 }
 
-# And the copies the server actually reads.
+# And the copies the server actually reads.  Compared rather than merely
+# counted: a restore that landed one directory deeper than it should have
+# leaves both of these there and disagreeing.
 foreach my $file (qw{ca.crt server.crt server.key dh.pem ta.key}) {
     ok(-s "/etc/openvpn/server/$file", "$file was copied into the server directory");
 }
+is(slurp('/etc/openvpn/server/ca.crt'), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the CA the server reads is the CA in the pki');
 
 # The CA is named for the domain; EASYRSA_REQ_CN is how that is passed in batch
 # mode, where the answer used to be piped to a prompt.
 my $subject = `openssl x509 -noout -subject -in /etc/openvpn/easy-rsa/pki/ca.crt 2>/dev/null`;
 like($subject, qr/\Q[% domain %]\E/, 'the CA is named for the domain') or diag $subject;
+
+# The staged copy is the whole reason a rebuilt guest can keep its CA.  The
+# fetch is sftp as [% admin_user %] with no sudo and the pki is 0700 root, so
+# what remote_files names has to be this, owned by him and readable by nobody
+# else.  Naming the pki itself fetched an empty directory and said nothing.
+my $stage = '/etc/openvpn/pki-salvage';
+ok(-d $stage, 'the pki was staged where the fetch can reach it');
+foreach my $file (qw{ca.crt private/ca.key issued/server.crt}) {
+    ok(-s "$stage/$file", "the staged pki has $file");
+}
+
+my $uid = getpwnam('[% admin_user %]');
+is((stat($stage))[4], $uid, 'the staged pki belongs to [% admin_user %], who does the fetching');
+is((stat("$stage/private/ca.key"))[4], $uid, 'and so does the CA key inside it');
+is((stat("$stage/private/ca.key"))[2] & 07777, 0600, 'which nobody else can read');
+is(slurp("$stage/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the staged CA is the one in use');
+
+# What the data target laid down, if it is still there.  restore_state takes the
+# salvage away when it puts it back, and declines when this guest already has a
+# pki -- which is a guest whose CA is that one already.  So a copy still sitting
+# here beside a CA that is not it is the rebuild that lost its CA, and a copy
+# sitting here empty is the fetch that could not read what it was pointed at.
+my $salvaged = '[% install_dir %]/[% domain %]/openvpn/pki';
+SKIP: {
+    skip('nothing was salvaged off a previous guest', 2) unless -d $salvaged;
+    ok(-s "$salvaged/ca.crt", 'the salvaged pki came down with a CA in it');
+    is(slurp("$salvaged/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'and it is the CA this guest is using');
+}
 
 my $status = `systemctl is-active openvpn-server\@server 2>/dev/null`;
 chomp $status;

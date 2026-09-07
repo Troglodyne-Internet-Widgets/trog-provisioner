@@ -40,6 +40,39 @@ is exposed for remote authentication (e.g. SSSD clients).
 
 Requires the C<letsencrypt> recipe for TLS certificates.
 
+=head2 SURVIVING A REBUILD
+
+The seed is what a directory starts as, not what it is.  Every password a user
+has changed since, every SSH key they have added, every group an operator made
+by hand, lives in C</var/lib/ldap> and in nothing else -- so a guest rebuilt
+from the recipe alone comes up with its users as they were on the day it was
+first provisioned, and nobody finds out until somebody cannot log in.
+
+C</var/lib/ldap> cannot simply be salvaged, and neither can C</etc/ldap/slapd.d>.
+The fetch is sftp as the admin user with no sudo, and the package ships both of
+those 0700 C<openldap:openldap>: named here, either comes back as an empty
+directory and nothing anywhere says why.  Nor would copying them be right if
+they could be read.  MDB is a private on-disk format, tied to the slapd that
+wrote it and the architecture it was written on, and the point of a rebuild is
+that the new guest is not the old one.
+
+So the directory is exported instead.  C<ldap-export.sh> runs hourly and writes
+C<slapcat> output to C</var/backups/ldap>, owned by the admin user, and that is
+what C<remote_files> names.  On the next guest C<ldap-reload.sh> loads the data
+half back with C<slapadd> before the seed runs, and the seed then does what it
+was always supposed to do: fill in what is missing, rather than be the whole
+directory.
+
+The configuration database comes down beside the data and does not go back up.
+C<cn=config> names the schema of the slapd that wrote it, the paths that slapd
+was built with, and the TLS settings this recipe rewrites on every provision;
+restoring a previous guest's copy over a new one is how you get a slapd that
+will not start and will not say why.  It is exported so that an ACL or an
+overlay somebody added is legible and can be put back deliberately.
+
+An hour is therefore what a rebuild can lose, and only ever what changed in that
+hour.
+
 =cut
 
 sub args {
@@ -115,13 +148,16 @@ sub template_files {
         'ldap.slapd.debconf.tt' => 'slapd.debconf',
         'ldap.seed.ldif.tt'     => 'seed.ldif',
         'ldap.tls.ldif.tt'      => 'tls.ldif',
+        'ldap.export.sh.tt'     => 'ldap-export.sh',
+        'ldap.export.cron.tt'   => 'ldap-export.cron',
+        'ldap.reload.sh.tt'     => 'ldap-reload.sh',
     );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        '/etc/ldap/slapd.d/' => 'ldap-slapd.d',
+        '/var/backups/ldap/' => 'ldap',
     );
 }
 

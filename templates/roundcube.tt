@@ -5,8 +5,18 @@ cd [% install_dir %]/webmail.[% domain %] && tar --strip-components=1 -zxvf roun
 install fpm.ini /etc/php/$(PHP_VER)/fpm/pool.d/roundcube-[% domain %].ini
 install config.inc.php [% install_dir %]/webmail.[% domain %]/config/config.inc.php
 [% script_dir %]/queue_postrun_task systemctl restart php$(PHP_VER)-fpm
+[%# Contacts, identities and every per-user preference live in that one sqlite
+    file and nothing else has a copy of them, so a rebuilt guest gets the
+    salvaged one back before roundcube is served.  Ahead of the initialization
+    below, which is otherwise what would be sitting in the destination by the
+    time this ran, and restore_state declines in front of content. -%]
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/roundcube' '[% install_dir %]/webmail.[% domain %]_data' www-data:www-data
+[%# Roundcube will not create its own schema, so a guest with no previous one
+    needs this.  A guest that has just had one restored does not: sqlite3 stops
+    on the first table it is told to create twice, and the whole point of the
+    restore was that this database already has tables in it. -%]
 # Initialize the roundcube database, because autocreate is beyond them
-sqlite3 [% install_dir %]/webmail.[% domain %]_data/roundcube.db < [% install_dir %]/webmail.[% domain %]/SQL/sqlite.initial.sql
+test -s [% install_dir %]/webmail.[% domain %]_data/roundcube.db || sqlite3 [% install_dir %]/webmail.[% domain %]_data/roundcube.db < [% install_dir %]/webmail.[% domain %]/SQL/sqlite.initial.sql
 chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]_data
 chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]
 # Setup the vhost

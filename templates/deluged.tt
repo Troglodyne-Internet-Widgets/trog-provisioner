@@ -9,7 +9,29 @@ if [ ! -f /var/lib/deluged/config/core.conf ]; then \
     chown root:debian-deluged /var/lib/deluged/config/core.conf; \
     chmod 0640 /var/lib/deluged/config/core.conf; \
 fi
+[%# The torrent state off the last guest, put back before the daemon starts:
+    torrents.state and the fastresume data beside it, which is the list of what
+    deluged is meant to be seeding and how far through each one it got.  A
+    rebuilt seedbox without it comes up idle and there is nothing left that can
+    tell it what it was doing.
+
+    The directory is made here because deluged has not started yet to make it,
+    and because restore_state fills an existing empty directory rather than
+    nesting the copy inside it.  A destination that already has torrents in it
+    is a guest that is still running, and it keeps what it has. -%]
+mkdir -p /var/lib/deluged/config/state
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/deluged/state' /var/lib/deluged/config/state
 chown -R debian-deluged:debian-deluged /var/lib/deluged/config
+[%# And now open the path down to the state to the admin user, because the
+    salvage that preserves it is an sftp session as that user with no sudo: a
+    tree owned debian-deluged:debian-deluged is one it can neither list nor
+    walk into, and what comes back is an empty directory and no complaint.  The
+    group stops at the state -- core.conf holds this domain configuration and
+    nothing off the guest needs to read it. -%]
+chown debian-deluged:[% admin_user %] /var/lib/deluged /var/lib/deluged/config
+chmod 0750 /var/lib/deluged /var/lib/deluged/config
+chown -R debian-deluged:[% admin_user %] /var/lib/deluged/config/state
+chmod -R u=rwX,g=rX,o= /var/lib/deluged/config/state
 # Enable and queue service starts
 systemctl enable deluged
 systemctl enable deluge-web

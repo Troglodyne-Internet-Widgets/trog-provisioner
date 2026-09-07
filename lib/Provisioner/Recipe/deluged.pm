@@ -35,6 +35,30 @@ loaded.
 NOTE: Add C<files> to the C<aliases> section of ipmap.cfg for the domain
 so that C<files.[domain]> is covered by the SSL certificate.
 
+=head3 What survives a rebuild
+
+C<remote_files> salvages C</var/lib/deluged/config/state/>, and the makefile
+fragment puts it back before the daemon is started.  That directory is
+C<torrents.state> and the fastresume data beside it: the list of what deluged is
+meant to be seeding and how far through each one it got.  A rebuilt seedbox
+without it comes up idle, and nothing else on the machine can say what it was
+doing.
+
+The rest of the config directory is left behind on purpose.  This recipe
+rewrites C<core.conf> from its own template on every provision, so salvaging
+that preserves nothing.  The C<auth> file is a set of daemon credentials
+generated on first start which C<deluge-web> copies into its own config, and
+restoring one half of that pair gives a web UI that cannot talk to the daemon it
+is running against; generated fresh together they agree.  Something that
+regenerates correctly does not belong in C<remote_files>.
+
+The fetch is an sftp session as the admin user with no sudo, so the fragment
+gives that user the group on the path down to C<state/>, 0750 on the directories
+and 0640 on what is in them.  Salvaging the whole config directory, which is
+what this recipe asked for before, could not work for the same reason: it is
+owned C<debian-deluged:debian-deluged> throughout, so what came back was an
+empty directory and no complaint about it.
+
 =cut
 
 sub required_recipes {
@@ -87,7 +111,10 @@ sub template_files {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        '/var/lib/deluged/config/' => 'deluged/config/',
+        # The torrent state only.  The configuration around it is regenerated
+        # every provision and the daemon credentials have to be, so this is the
+        # whole of what a rebuild cannot make again for itself.
+        '/var/lib/deluged/config/state/' => 'deluged/state/',
     );
 }
 

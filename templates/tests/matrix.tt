@@ -65,6 +65,40 @@ ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is
 my $syntax = `bash -n [% script_dir %]/matrix_register_admin.sh 2>&1`;
 is($syntax, '', 'and is a valid shell script') or diag $syntax;
 
+# What the last guest was carrying, put where synapse reads it.  homeserver.db
+# is every room, message and account; homeserver.signing.key is the identity the
+# rest of the federation knows this server by.  new_config fetches both into the
+# domain directory, and until something moved them back out again a rebuilt
+# guest came up empty and introduced itself to everybody as a stranger.
+my $live     = '[% install_dir %]/matrix.[% domain %]';
+my $salvaged = '[% install_dir %]/[% domain %]/matrix';
+
+ok(-s "$live/homeserver.db", 'the database is at the path homeserver.yaml names');
+ok(-d "$live/media",         'and the media store is beside it');
+
+# restore_state leaves the copy alone when the destination already has state --
+# re-provisioning a guest that is still running, whose own state is the real one
+# and whose fetch may well have been partial.  What it must never do is leave it
+# there with nothing at the live path.
+foreach my $piece (qw{homeserver.db homeserver.signing.key}) {
+    next unless -e "$salvaged/$piece";
+    ok(-s "$live/$piece", "the salvaged $piece is on the guest, not stranded in the domain directory");
+}
+
+# And the key has to be one the next salvage can read, or none of the above
+# helps the guest after this one: the fetch runs as [% admin_user %] over sftp
+# with no sudo, and a key at 0600 owned by matrix-synapse never came down at
+# all.  Which is how a rebuild lost the federation identity even when every
+# other thing here was restored.
+my $signing_key = "$live/homeserver.signing.key";
+ok(-s $signing_key, 'synapse has a signing key');
+SKIP: {
+    my @key_stat = stat $signing_key;
+    skip 'there is no signing key to stat', 2 unless @key_stat;
+    is($key_stat[2] & 07777, 0640, 'group-readable, so the next rebuild can keep this identity');
+    is(scalar getgrgid($key_stat[5]), '[% admin_user %]', 'by the group the salvage runs as');
+}
+
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;
 

@@ -30,4 +30,70 @@ foreach my $pkg (map { "$_$major" } qw{postgresql- postgresql-client- postgresql
     like($installed, qr/Status: install ok installed/, "$pkg is installed");
 }
 
+# The round trip.  remote_files salvages /var/backups/postgres off the guest this
+# one replaces and the data recipe puts it back under the domain directory, and
+# for a long time nothing imported it: a rebuild came up holding the dumps an
+# operator had configured once and nothing that had happened since.  What follows
+# takes a real backup, throws a database away, and asks for it back.
+ok(-x '/usr/local/sbin/postgres-backup.sh', 'the backup is installed');
+ok(-x '/usr/local/sbin/postgres-restore.sh', 'and so is the restore that reads what it wrote');
+
+sub psql {
+    my ($query, $db) = @_;
+    $db //= 'postgres';
+    my $out = `sudo -u postgres psql -tAX -d $db -c "$query" 2>&1`;
+    chomp $out;
+    return $out;
+}
+
+my $probe = 'restore_probe';
+psql("DROP DATABASE IF EXISTS $probe");
+psql("CREATE DATABASE $probe");
+psql('CREATE TABLE t (v text)', $probe);
+psql("INSERT INTO t VALUES ('salvaged')", $probe);
+
+is(system('/usr/local/sbin/postgres-backup.sh > /tmp/postgres-backup.log 2>&1'), 0, 'the nightly backup runs')
+    or diag `cat /tmp/postgres-backup.log`;
+
+my @dumps = sort glob '/var/backups/postgres/*';
+ok(scalar @dumps, 'and left a dump behind') or diag `ls -la /var/backups/postgres`;
+my $newest = $dumps[-1] // '';
+ok(-f "$newest/complete", 'which says it finished, since nothing will restore one that does not');
+
+# pg_dump writes the per-database dump itself, as the postgres user, into a
+# directory it makes 0700 -- and what salvages it is bin/new_config over sftp as
+# the admin user, with no sudo.  A dump only postgres can read is a rebuild that
+# comes up empty.
+ok(-d "$newest/$probe", 'with the probe database dumped') or diag `ls -la $newest`;
+my $mode = (stat "$newest/$probe")[2] & 07777;
+ok(($mode & 0005) == 0005, 'and readable by something other than postgres')
+    or diag sprintf('mode %04o', $mode);
+
+# The rebuild: the database is gone and the salvage is the only thing that knows
+# what was in it.
+psql("DROP DATABASE $probe");
+is(system('/usr/local/sbin/postgres-restore.sh /var/backups/postgres > /tmp/postgres-restore.log 2>&1'), 0, 'the restore runs')
+    or diag `cat /tmp/postgres-restore.log`;
+is(psql('SELECT v FROM t', $probe), 'salvaged', 'and the database nothing else could have brought back is back');
+
+# And the half that makes it safe on a cluster that is still running: a database
+# that is there is not written over, however old or short the dump beside it is.
+psql("UPDATE t SET v='since the dump'", $probe);
+is(system('/usr/local/sbin/postgres-restore.sh /var/backups/postgres > /tmp/postgres-restore.log 2>&1'), 0, 'restoring again is not an error')
+    or diag `cat /tmp/postgres-restore.log`;
+is(psql('SELECT v FROM t', $probe), 'since the dump', 'and it left the live database alone');
+
+# A dump with no `complete` in it is a backup that was interrupted, and half a
+# cluster restored is worse than none: it ends up holding databases, which is
+# what stops the next provision from trying again.
+my $half = '/tmp/half-a-dump';
+system("rm -rf $half && mkdir -p $half/20200101-000000");
+system("cp -a $newest/$probe $half/20200101-000000/$probe");
+psql("DROP DATABASE $probe");
+is(system("/usr/local/sbin/postgres-restore.sh $half > /tmp/postgres-restore.log 2>&1"), 0, 'an unfinished dump is not an error')
+    or diag `cat /tmp/postgres-restore.log`;
+is(psql("SELECT count(*) FROM pg_database WHERE datname='$probe'"), '0', 'but it is not restored either');
+
+system("rm -rf $half");
+
 done_testing();

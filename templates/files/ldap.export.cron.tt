@@ -1,0 +1,11 @@
+# The directory, as LDIF, once an hour.
+#
+# A rebuild can only put back what the last export caught, and the fetch that
+# feeds it runs against whatever is on the guest at the moment somebody types
+# bin/new_config.  An hour is what a rebuilt guest can lose: the password
+# changed and the key added since the last run.  slapcat on a domain directory
+# costs a fraction of a second, so the interval is about how much log noise is
+# tolerable rather than about load.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+17 * * * * root /usr/local/sbin/ldap-export.sh > /var/log/ldap-export.log 2>&1

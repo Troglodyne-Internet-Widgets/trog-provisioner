@@ -30,8 +30,20 @@ mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
 mv synczones.conf /etc/synczones.conf
 chown root:root /etc/synczones.conf
 chmod 0600 /etc/synczones.conf
-# Apply schema
-sqlite3 /var/spool/powerdns/zones.db < /usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql
+[%# The zone database belongs to the guest rather than to any one domain: a
+    single zones.db under /var/spool/powerdns holds every zone the machine
+    answers for, and each domain salvages that same host-wide tree.  So the
+    restore is done here, once, and not in the per-domain half -- where it could
+    never fire anyway, because by then the schema below has put a zones.db in
+    the destination and restore_state declines in front of content.
+    Which is also why it goes ahead of the schema rather than after it. -%]
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns 0775
+[%# Apply the schema, unless what came back already has one.  Unconditional was
+    right against a spool the package left empty and is an error against a
+    restored database: sqlite3 stops on the first table it is told to create
+    twice, and takes the target down with it. -%]
+# Apply schema, to a database that does not already have one
+sqlite3 /var/spool/powerdns/zones.db 'SELECT 1 FROM domains LIMIT 1' >/dev/null 2>&1 || sqlite3 /var/spool/powerdns/zones.db < /usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql
 # Don't need no bind
 mkdir -p /etc/powerdns/config-available
 mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf

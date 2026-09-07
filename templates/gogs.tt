@@ -3,6 +3,17 @@
 # redirection, so this ran id in the background, succeeded on the empty
 # redirection that was left, and never reached useradd at all.
 id -u [% gogs_admin %] >/dev/null 2>&1 || useradd -r -s /bin/bash -d [% install_dir %]/git.[% domain %] [% gogs_admin %]
+# Put the git service back before the mkdir below makes the directory it lives
+# in: restore_state declines a destination that already has anything in it, and
+# an empty repos/ is anything.
+#
+# This is every repository, the issue database and the users.  It came down off
+# the last guest into the domain directory and nothing has ever moved it back
+# out again, so a rebuilt guest greeted its users with the installer.
+#
+# No owner argument: the chown -R below covers the restored tree, and a
+# repository store is not a thing to walk twice.
+[% script_dir %]/restore_state [% install_dir %]/[% domain %]/gogs [% install_dir %]/git.[% domain %]
 # Create data directories
 # Spelled out rather than brace-expanded: make runs recipe lines under /bin/sh,
 # which is dash here and does not expand braces.  It made one directory named
@@ -19,6 +30,20 @@ if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
 	ln -sf /usr/local/lib/gogs/gogs /usr/local/bin/gogs; \
 	rm -rf /tmp/gogs /tmp/gogs.tar.gz; \
 fi
+[% UNLESS secret_key -%]
+# The session key belongs to the guest, not to this configuration.  It signs
+# sessions and encrypts 2FA enrolments, and it used to arrive as sixty-four
+# characters minted by whichever new_config run wrote this file -- so every
+# re-provision logged everybody out and voided every second factor.
+#
+# So take the key out of the app.ini that is already here -- the restore above
+# just put the last guest one back, or this is a live guest and it is its own --
+# and only mint one when there genuinely is none.  Nothing is pinned in
+# recipes.yaml, or this whole block would not have been rendered.
+KEY=$$(sed -n 's/^[[:space:]]*SECRET_KEY[[:space:]]*=[[:space:]]*//p' [% install_dir %]/git.[% domain %]/custom/conf/app.ini 2>/dev/null | head -n1); \
+	[ -n "$$KEY" ] || KEY=$$(head -c 96 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | cut -c1-64); \
+	sed -i "s|^SECRET_KEY.*|SECRET_KEY   = $$KEY|" app.ini
+[% END -%]
 # Deploy configuration
 install -m 0640 app.ini [% install_dir %]/git.[% domain %]/custom/conf/app.ini
 chown [% gogs_admin %]:[% admin_user %] [% install_dir %]/git.[% domain %]/custom/conf/app.ini

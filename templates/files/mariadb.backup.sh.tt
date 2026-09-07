@@ -55,6 +55,13 @@ DBS=$($MYSQL -sN -e "SHOW DATABASES" | grep -Evx "$SKIP_RE")
 
 echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'dump_db "$@"' _ {}
 
+# Written last, and only reached because everything above worked: this is what
+# tells mariadb-restore.sh the dump is whole.  A rebuilt guest imports the newest
+# dump that has one, and half a database restored is worse than none -- it leaves
+# the server holding data, which is what stops the next provision from trying
+# again.
+: > "$DEST/complete"
+
 # Prune: keep only the 7 most recent dated backup directories
 ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
 

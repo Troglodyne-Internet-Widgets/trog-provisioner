@@ -32,6 +32,36 @@ Sets up convenience scripts in /opt/lexicon per domain to run lexicon manually:
 Also stashes a local copy of any provisioned certs so you don't violate ToS or get rate-limited from repeated redeploys of systems.
 Requires that the user running new_config has a key authorized as the admin user on the remote host.
 
+=head2 What the salvage needs to be able to read
+
+C<remote_files> names the two certificate directories and the account
+directory, and the certificates in them are no use on their own. A guest rebuilt
+with certificates it has no keys for issues again from scratch, which is what the
+salvage exists to avoid: it spends Let's Encrypt rate limit, and if the account
+key went missing with them it spends the registration as well -- the old
+certificates stay valid, but nothing can revoke them and the guest is a stranger
+to the CA again.
+
+The fetch is an sftp session as the admin user with no sudo, and dehydrated
+writes every private key it makes C<0600 root>. So the guest has to leave them
+readable by that account or the fetch returns an empty directory and says
+nothing anybody reads. That is done in two places, and it has to be both:
+C<get_cert> after the provision, and the C<exit_hook> in this domain's dehydrated
+hook after B<every> dehydrated run, because the nightly renewal writes a fresh
+private key and never goes near C<get_cert>.
+
+What that leaves on the guest: certificates world readable, since they are
+public; private keys and the account key C<0640 root:E<lt>adminE<gt>>, which is
+the least that a fetch by that account can still read. The consequence to know
+about is the other end of the wire -- the keys land in the provisioner's data
+directory and in whatever backs it up, so that directory holds this domain's TLS
+private keys.
+
+The account key goes back in the global fragment rather than this recipe's own,
+because the global one runs first and ends with C<dehydrated --register>: by the
+time the per-domain fragment runs there is an account in the destination
+already, and C<restore_state> will not write over one.
+
 =cut
 
 sub deps {

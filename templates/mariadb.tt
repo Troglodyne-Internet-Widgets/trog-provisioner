@@ -1,6 +1,13 @@
 [%# Every argument quoted, so one that renders empty stays an argument rather
-    than shifting the ones after it along. -%]
-[% script_dir %]/install_mariadb.sh "[% version %]" "mariadb-provisioner.cnf" "secure_installation.sql" "[% install_dir %]/[% domain %]/[% dumpfile %]"
+    than shifting the ones after it along.  The last of them is where the dumps
+    salvaged off the guest this one replaces landed, which the installer needs
+    to know about only so that the seed schema stands aside for them. -%]
+[% script_dir %]/install_mariadb.sh "[% version %]" "mariadb-provisioner.cnf" "secure_installation.sql" "[% install_dir %]/[% domain %]/[% dumpfile %]" "[% install_dir %]/[% domain %]/mysql"
+# The other half of the round trip remote_files exists for.  Installed as well
+# as run: a restore that went wrong is a thing an operator wants to be able to
+# do again by hand, against whichever dump they choose.
+install -m 0750 mariadb-restore.sh /usr/local/sbin/mariadb-restore.sh
+/usr/local/sbin/mariadb-restore.sh "[% install_dir %]/[% domain %]/mysql"
 # Clients read ~/.my.cnf without being told to, and recipes outside this repo
 # point --defaults-file at one.  Homes by getent rather than ~name: the service
 # user's is the domain directory, not /home.

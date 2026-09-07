@@ -8,6 +8,9 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use Crypt::PRNG();
+use File::Slurper();
+use File::Slurper::Temp();
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
@@ -458,6 +461,48 @@ sub remote_skip {
     return ();
 }
 
+=head3 $secret = $recipe->persisted_secret($filename)
+
+A secret that has to stay the same for the life of a domain rather than the life
+of a run.  Made once, kept in C<$filename> under the domain's output directory,
+and read back on every run after.
+
+An C<args> default that mints a fresh one each time is a rotation rather than a
+default: whatever the last one authenticated -- a session, an admin token,
+another node in a cluster -- stops working at the next provision, and nothing
+says why.  So write it down.
+
+Sixty-four hex characters.  Dies rather than hand back a file that does not look
+like one, since the usual reason for that is somebody having edited it.
+
+=cut
+
+sub persisted_secret {
+    my ( $self, $filename ) = @_;
+
+    my $dir = $self->{output_dir}
+      or die "Cannot keep $filename anywhere: this recipe has no output_dir
+";
+    my $file = "$dir/$filename";
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    if ( -f $file ) {
+        my $kept = File::Slurper::read_text($file);
+        chomp $kept;
+        die "$file does not hold a secret this made: expected 64 hex characters
+"
+          unless $kept =~ m/\A[0-9a-f]{64}\z/;
+        return $kept;
+    }
+
+    my $secret = Crypt::PRNG::random_bytes_hex(32);
+    File::Slurper::Temp::write_text( $file, "$secret\n" );
+    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    chmod 0600, $file;
+
+    return $secret;
+}
+
 =head3 @dirs = $recipe->datadirs()
 
 Directories under the domain's C<install_dir> this recipe needs to exist.
@@ -487,6 +532,24 @@ see L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provis
 Which is also the reason C<remote_skip> exists: a directory salvaged wholesale is
 a directory that ends up in that tarball, and some of what lives in one is meant
 to stay on the machine it was made on.
+
+=head4 Naming it is half of it
+
+What C<remote_files> names comes back down and goes back up, and lands under
+C<install_dir/domain> with everything else in the data directory.  If the
+service reads it somewhere else, the fragment has to put it there:
+
+    [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns
+
+C<restore_state> declines when nothing was salvaged, when what was salvaged is
+empty -- the shape of a fetch that could not read the directory -- and when the
+destination already has state in it, which is what keeps re-provisioning a live
+guest from writing a partial copy over the real thing.  Call it before the
+service starts.
+
+A recipe whose state already lives under C<install_dir/domain> needs none of
+this: the data target puts it back where it came from.  That is the reason to
+keep state there when the software will let you.
 
 =cut
 

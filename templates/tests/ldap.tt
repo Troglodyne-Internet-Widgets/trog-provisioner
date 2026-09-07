@@ -3,6 +3,10 @@ use strict;
 use warnings;
 use Test::More;
 
+# A DN with anything but ASCII in it arrives base64 encoded, on both sides of
+# the comparison at the bottom of this file.
+use MIME::Base64 qw{decode_base64};
+
 my $status = `systemctl is-active slapd 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'slapd is running');
@@ -98,5 +102,87 @@ foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %]
 
 my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
 like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
+
+# What a rebuild will be rebuilt from.
+#
+# The directory is the one thing here nothing regenerates: the seed knows the
+# accounts as users.yaml describes them and knows nothing about the password
+# somebody changed or the SSH key they added afterwards.  /var/lib/ldap is
+# 0700 openldap:openldap and the fetch is sftp as the admin user with no sudo,
+# so what has to exist is an export the admin user can read.
+my $export_dir = '/var/backups/ldap';
+ok(-d $export_dir, 'the directory is exported to somewhere the fetch can reach');
+
+my @dstat = stat($export_dir);
+is(scalar getpwuid($dstat[4] // -1), '[% admin_user %]',
+    'the export belongs to the admin user, who is the one who fetches it');
+is(($dstat[2] // 0) & 07777, 0700, 'and nobody else on the guest can read it')
+    or diag sprintf('mode %04o', ($dstat[2] // 0) & 07777);
+
+foreach my $ldif (qw{data.ldif config.ldif}) {
+    ok(-s "$export_dir/$ldif", "$ldif was exported and is not an empty file");
+
+    # Exactly what the fetch does: sftp as the admin user, no sudo, and no
+    # error anywhere when it turns out it cannot read the thing it came for.
+    my $rc = system("sudo -u [% admin_user %] test -r '$export_dir/$ldif'");
+    is($rc, 0, "and the admin user can read $ldif");
+}
+
+# LDIF wraps at 78 columns and continues with a leading space, so a DN longer
+# than that arrives split across two lines and matches nothing.
+sub unwrapped {
+    my ($path) = @_;
+    my $body = do { local (@ARGV, $/) = $path; <> } // '';
+    $body =~ s/\n //g;
+    return $body;
+}
+
+my $exported = unwrapped("$export_dir/data.ldif");
+like($exported, qr/^dn:\s*\Q[% base_dn %]\E$/mi, 'the data export is this domain and not an empty database');
+
+[% FOR u IN users %]
+like($exported, qr/^dn:\s*uid=\Q[% u.name %]\E,ou=People/mi, 'the export caught [% u.name %]');
+[% END %]
+
+my $exported_config = unwrapped("$export_dir/config.ldif");
+like($exported_config, qr/^dn:\s*cn=config$/mi, 'and the configuration database is exported beside it');
+
+ok(-x '/usr/local/sbin/ldap-export.sh', 'the exporter is installed');
+ok(-x '/usr/local/sbin/ldap-reload.sh', 'and so is the reloader the next guest runs');
+
+# Hourly, because an hour is what a rebuild is allowed to lose.  An export that
+# only ever ran during the provision would age into a directory as it was on
+# build day, which is the failure this whole arrangement exists to prevent.
+my $export_cron = do { local (@ARGV, $/) = '/etc/cron.d/ldap-export'; <> } // '';
+like($export_cron, qr{^\S+ \S+ \S+ \S+ \S+ +root +/usr/local/sbin/ldap-export\.sh}m,
+    'and it is run on a cron rather than only at provision time') or diag $export_cron;
+
+# And the other end of it: what came off the last guest is in the directory this
+# one is serving.  slapcat rather than ldapsearch on both sides -- it reads the
+# database as root, so no ACL hides an entry from the comparison and no
+# olcSizeLimit truncates it into a false pass.
+sub dns_of {
+    my ($body) = @_;
+    my @dns;
+    foreach my $line (split m/\n/, $body) {
+        push @dns, $1                if $line =~ m/^dn:\s+(.*)$/;
+        push @dns, decode_base64($1) if $line =~ m/^dn::\s+(.*)$/;
+    }
+
+    # A DN is case-insensitive and the space after a comma is not part of it.
+    return map { my $d = lc $_; $d =~ s/,\s+/,/g; $d } @dns;
+}
+
+my $reloaded = '/var/backups/ldap-reloaded.ldif';
+SKIP: {
+    skip 'this guest had nothing salvaged to reload, so it seeded its directory instead', 1
+        unless -s $reloaded;
+
+    my %live = map { $_ => 1 } dns_of(`slapcat -F /etc/ldap/slapd.d -b '[% base_dn %]' 2>/dev/null`);
+    my @lost = grep { !$live{$_} } dns_of(unwrapped($reloaded));
+
+    is(scalar @lost, 0, 'every entry the previous guest had is in the directory this one serves')
+        or diag "missing: " . join(', ', splice(@lost, 0, 10));
+}
 
 done_testing();

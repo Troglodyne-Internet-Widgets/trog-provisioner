@@ -116,6 +116,33 @@ together for exactly that reason, and an address a user really sends from that
 neither mentions is mail that stops going out. Unauthenticated senders are not
 checked against it -- deciding what to believe about those is DMARC's job.
 
+=head3 What a rebuild keeps, and what being able to keep it costs
+
+C<remote_files> names two things: this domain's mail store, and C</mail/keys>.
+
+C</mail/keys> is not where opendkim keeps its keys -- that is
+C</etc/opendkim/keys>, which belongs to opendkim -- it is a copy of them made
+for the fetch to read. C<bin/new_config> reads a running guest over sftp as the
+admin user and cannot sudo, so a directory a service keeps to itself comes back
+empty and says nothing about having done so; and a signing key that comes back
+empty is a domain whose every past signature stops verifying the next time it is
+built. The copy is 0600 in a 0700 directory owned by the admin account, which is
+as tight as something readable by the fetching user gets.
+
+The mail store is salvaged where it stands, and the mode it stands in is
+C<2750>, owned C<dovecot:admin>. That is not tidiness: dovecot copies the mode
+and the group of the nearest existing parent onto every maildir and message file
+it creates, so the group and the setgid bit on C</mail/E<lt>domainE<gt>> are what
+decide whether the rebuild B<after> the next one still has mail to salvage. The
+fragment used to finish with C<chown -R dovecot:dovecot>, and dovecot keeps its
+maildirs to itself, so the mail survived one rebuild and not two.
+
+The cost, in both cases, is that the admin account can read them -- all of this
+domain's mail, and the key that signs its outbound -- and that what comes down
+lands in the provisioner's data directory and in whatever backs that directory
+up. Nothing here is readable by the rest of the guest, which is more than was
+true before, but the data directory should be treated as holding the mail.
+
 =head3 What still cannot come apart
 
 C<myhostname> and the TLS certificate can only have one value, because postfix

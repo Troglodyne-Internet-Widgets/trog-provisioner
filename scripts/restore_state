@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# Put a recipe's salvaged state back where the service looks for it.
+#
+# remote_files is a round trip and this is the leg the guest end of it needs.
+# bin/new_config fetches what a recipe named off the running guest, the data
+# target lands it under $install_dir/$domain, and something has to move it to
+# wherever the service actually reads it.  That something is this, called from
+# the recipe's fragment before the service is started.
+#
+#     restore_state <salvaged> <destination> [owner[:group]] [mode]
+#
+# It declines in three cases, each of which is a normal thing to happen rather
+# than an error:
+#
+#   - nothing was salvaged.  A guest being built for the first time has no
+#     previous guest to have taken anything off.
+#
+#   - what was salvaged is empty.  The fetch runs as the admin user over sftp
+#     with no sudo, so a directory the service keeps to itself comes back with
+#     nothing in it.  Restoring that over anything would be worse than useless.
+#
+#   - the destination already has something in it.  This is the important one.
+#     Re-provisioning a guest that is still running fetches its live state
+#     minutes earlier -- and if that fetch came back partial, writing it back
+#     would replace the real thing with the half of it we could read.  The
+#     guest keeps what it has; the copy stays in the domain directory where
+#     somebody can look at it.
+#
+# Which means restoring is for a rebuilt guest, and a no-op on a live one, and
+# a recipe whose package populates the destination before the fragment runs has
+# to stop the service and clear it out first, or it will find content here and
+# decline.
+
+set -euo pipefail
+
+SALVAGED="${1:?usage: restore_state <salvaged> <destination> [owner[:group]] [mode]}"
+DESTINATION="${2:?usage: restore_state <salvaged> <destination> [owner[:group]] [mode]}"
+OWNER="${3:-}"
+MODE="${4:-}"
+
+has_content() {
+    local path="$1"
+    [ -e "$path" ] || return 1
+    if [ -d "$path" ]; then
+        [ -n "$(find "$path" -mindepth 1 -print -quit 2>/dev/null)" ]
+    else
+        [ -s "$path" ]
+    fi
+}
+
+if [ ! -e "$SALVAGED" ]; then
+    echo "restore_state: nothing salvaged at $SALVAGED, leaving $DESTINATION alone"
+    exit 0
+fi
+
+if ! has_content "$SALVAGED"; then
+    echo "restore_state: $SALVAGED is empty -- the fetch found nothing it could read; leaving $DESTINATION alone" >&2
+    exit 0
+fi
+
+if has_content "$DESTINATION"; then
+    echo "restore_state: $DESTINATION already has state in it, keeping it; $SALVAGED left where it is"
+    exit 0
+fi
+
+# Contents rather than the directory itself when the destination is already
+# there: `mv src dst` on an existing directory puts src *inside* dst, which is
+# how a restore ends up at /var/lib/redis/redis and the service still starts
+# empty.
+if [ -d "$SALVAGED" ] && [ -d "$DESTINATION" ]; then
+    cp -a "$SALVAGED/." "$DESTINATION/"
+    rm -rf "${SALVAGED:?}"
+else
+    mkdir -p "$(dirname "$DESTINATION")"
+    mv "$SALVAGED" "$DESTINATION"
+fi
+
+[ -n "$OWNER" ] && chown -R "$OWNER" "$DESTINATION"
+[ -n "$MODE" ] && chmod -R "$MODE" "$DESTINATION"
+
+echo "restore_state: restored $DESTINATION"
+exit 0

@@ -15,6 +15,55 @@ install -d -m 0750 -o root -g redis /etc/redis/redis.conf.d
 # 0600 root:root: the fragment can hold requirepass, and the only thing that
 # reads it is configd, running as root out of the unit's ExecStartPre.
 install -m 0600 -o root -g root redis.conf /etc/redis/redis.conf.d/50-provisioner
+[%# The RDB and the AOF -- whatever redis was being used for beyond a cache --
+    live in /var/lib/redis, and the package leaves that directory redis:redis
+    0750.  Both legs of the round trip remote_files promises run into that, and
+    neither of them used to happen.
+
+    The fetch is an sftp session as the admin user with no sudo, so a 0750
+    directory owned by redis comes back empty and says so to nobody.  The group
+    is handed to the admin user here rather than a readable copy being staged
+    the way the openvpn pki and the DKIM keys are: those are written once and a
+    snapshot of one is as good as the original, where an RDB is rewritten every
+    time redis saves, and a copy taken at provision time would be however many
+    weeks stale by the time anybody wanted it.  It is the same trade either
+    way -- the state is readable by whoever holds the admin account from here
+    on, and travels into the data directory and into any backup taken of it.
+    The setgid bit is what keeps the arrangement true tomorrow rather than only
+    today: the packaged unit sets UMask=007, so the files redis writes are 0660,
+    and setgid is what makes the group on them the admin user rather than redis.
+
+    Restoring has an ordering problem the other recipes do not.  redis is
+    already up by the time this runs -- cloud-init installs the package, and
+    installing it starts it -- so it owns the destination, and it reads an RDB
+    only at startup while writing one whenever it likes.  Anything put under a
+    running redis is therefore both ignored and doomed.  Hence stopping it
+    first.  But a stop is itself a save when there are snapshot points
+    configured, and the empty dump.rdb that leaves behind is exactly what makes
+    restore_state decline on the grounds that the destination already has state
+    in it.  So the directory is asked whether it holds anything while redis is
+    still up, and the snapshot the stop wrote is thrown away only if it did not.
+    A guest that really does have state keeps it and restore_state declines for
+    the right reason; a rebuilt one gets its keyspace back.  The postrun restart
+    at the end of this fragment is where redis reads what was put there.
+
+    One redis serves the whole guest, so this is the global fragment and it runs
+    once -- for whichever domain was provisioned into the guest first, which is
+    the domain directory the state travels in. -%]
+mkdir -p /var/lib/redis
+if [ -n "$$(find /var/lib/redis -mindepth 1 -print -quit 2>/dev/null)" ]; then HAD_STATE=1; else HAD_STATE=; fi; \
+systemctl stop redis-server || /bin/true; \
+if [ -z "$$HAD_STATE" ]; then rm -rf /var/lib/redis/*; fi
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/redis' /var/lib/redis
+chown -R redis:[% admin_user %] /var/lib/redis
+find /var/lib/redis -type d -exec chmod 2750 {} +
+[%# Up again here rather than only at the end with the rest of the deferred
+    work.  redis was running for the whole provision before any of this existed,
+    since cloud-init starts it, and anything later in the makefile is entitled
+    to go on assuming that; this is only closing the window the stop above
+    opened, and is where redis reads the restored keyspace back in.  The queued
+    restart below is still what picks up the configuration configd merged. -%]
+systemctl start redis-server
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable redis-server
 [% script_dir %]/queue_postrun_task systemctl restart redis-server

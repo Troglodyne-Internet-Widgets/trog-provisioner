@@ -118,7 +118,24 @@ sub template_files {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # SQLite database containing all DNS zone records
+        # The sqlite database holding every zone record the guest answers for,
+        # which after provisioning is not what the zonefile said: lexicon writes
+        # the DCV records into it, and so does anybody adding a record by hand.
+        # A rebuilt guest that started from the zonefile again would answer with
+        # the handful of records this recipe knows about and nothing else.
+        #
+        # The whole spool comes down, not just zones.db, because the chroot is
+        # what pdns opens everything relative to.  The global fragment puts it
+        # back -- one zones.db serves every domain on the guest, so restoring it
+        # is a fact about the machine rather than about a domain, and it has to
+        # happen before the schema is applied or there would already be a
+        # database in the way.
+        #
+        # Which leaves one hole worth knowing about: the global half runs for
+        # whichever domain reaches it first, so a guest hosting several and
+        # rebuilt starting from a domain that never had a previous guest gets an
+        # empty database, and the other salvages sit unrestored in their domain
+        # directories.  The guest test says so when it happens.
         '/var/spool/powerdns/' => 'pdns/',
     );
 }

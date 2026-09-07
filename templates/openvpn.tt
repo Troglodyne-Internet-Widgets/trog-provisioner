@@ -1,6 +1,14 @@
 	# Set up easy-rsa PKI
 	mkdir -p /etc/openvpn/easy-rsa
 	cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+	# Put back the PKI taken off the last guest, before easyrsa is asked for
+	# anything.  The guard below only ever fires on a re-provision, where the old
+	# pki is still on the disk; a rebuilt guest has a new disk and sails straight
+	# past it, issues itself a new CA, and every client certificate ever issued
+	# off the old one stops working -- with the clients nowhere to be told.
+	# restore_state declines when nothing was salvaged and when there is already
+	# a pki here, so this is a no-op on both of the cases that are not a rebuild.
+	[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/openvpn/pki' /etc/openvpn/easy-rsa/pki root:root
 	# --batch on every one of these.  easyrsa prompts for a Common Name
 	# otherwise, and a make recipe has no terminal to answer from, so gen-req
 	# read EOF and died with "Error making certificate request" -- taking the
@@ -26,6 +34,11 @@
 	if [ ! -f /etc/openvpn/easy-rsa/pki/ta.key ]; then \
 	    cd /etc/openvpn/easy-rsa && openvpn --genkey secret pki/ta.key; \
 	fi
+	# A restored pki arrives with whatever the data directory was chmodded to,
+	# which is 0750 and readable by the domain user.  easyrsa makes its own at
+	# 0700 with the keys at 0600, and this puts a restored one back at the same
+	# thing: rwX is the directories, and nothing for anybody else.
+	chmod -R u=rwX,go= /etc/openvpn/easy-rsa/pki
 	# Copy PKI files into place
 	cp /etc/openvpn/easy-rsa/pki/ca.crt              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/issued/server.crt   /etc/openvpn/server/
@@ -33,6 +46,22 @@
 	cp /etc/openvpn/easy-rsa/pki/dh.pem              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/ta.key              /etc/openvpn/server/
 	chmod 0600 /etc/openvpn/server/server.key /etc/openvpn/server/ta.key
+	# Stage a copy of the pki that the next fetch can actually read.  new_config
+	# comes in over sftp as [% admin_user %] with no sudo, and the pki is 0700
+	# root with 0600 keys, so naming it in remote_files fetched an empty
+	# directory and said nothing about it.  Staging is what the mail recipe does
+	# with the DKIM keys, and it costs the same thing: the CA private key is
+	# readable by whoever holds the admin account from here on, and it travels
+	# into the data directory and into any backup taken of that.  The alternative
+	# is a VPN that does not survive its own guest.
+	#
+	# Remade from scratch each run so a certificate revoked since the last one
+	# does not sit here looking current.
+	rm -rf /etc/openvpn/pki-salvage
+	mkdir -p /etc/openvpn/pki-salvage
+	cp -a /etc/openvpn/easy-rsa/pki/. /etc/openvpn/pki-salvage/
+	chown -R [% admin_user %]:[% admin_user %] /etc/openvpn/pki-salvage
+	chmod -R u=rwX,go= /etc/openvpn/pki-salvage
 	# Deploy server configuration
 	cp server.conf /etc/openvpn/server/server.conf
 	chown root:root /etc/openvpn/server/server.conf

@@ -44,4 +44,9 @@ LEVEL     = Info
 
 [security]
 INSTALL_LOCK = true
+; Empty here unless recipes.yaml pins one, and filled in by the fragment from
+; whatever key the guest already had.  This used to be sixty-four characters
+; minted by the new_config run that wrote this file, which meant a new key on
+; every re-provision: every session invalid, every 2FA enrolment undecryptable,
+; and nothing to say why.
 SECRET_KEY   = [% secret_key %]

@@ -20,6 +20,36 @@ DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] plexmediaserver
 # Ensure the plex service user exists (created by package but guard anyway)
 id plex > /dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /var/lib/plexmediaserver plex
+[%# Plex has to be stopped before anything below touches the library or the
+    preferences, both of which a running Plex owns.  Installing the package
+    starts it, and it writes its own copy of Preferences.xml back out, so
+    everything set at the bottom of this target was overwritten before the guest
+    had finished provisioning -- the file ended up carrying the
+    MachineIdentifier Plex wrote and none of the certificate or account
+    settings.  It is started again in the postrun tasks at the end. -%]
+systemctl stop plexmediaserver; /bin/true
+[%# The library off the last guest, put back before Plex is started again: the
+    metadata it built by scanning, what everybody watched and how far into it
+    they got, and the playlists.  The media is on a mount and survives on its
+    own; what a rebuild loses is everything the library remembered about it.
+
+    Installing the package started Plex, and Plex lays its whole directory
+    skeleton down within seconds of starting, so restore_state finds a
+    destination with content in it and declines on that alone.  The skeleton is
+    cleared out of the way first -- but only when this guest has nothing under
+    Metadata, which is what separates a library minutes old from one that has
+    been cataloguing media and is worth more than the copy fetched off it just
+    now. -%]
+PMS='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
+if [ -n "$$(find '[% install_dir %]/[% domain %]/plexmediaserver' -mindepth 1 -print -quit 2>/dev/null)" ] \
+    && [ -z "$$(find "$$PMS/Metadata" -mindepth 1 -print -quit 2>/dev/null)" ]; then \
+    rm -rf /var/lib/plexmediaserver; \
+fi
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/plexmediaserver' /var/lib/plexmediaserver
+[%# The admin user owns the group here deliberately, over whatever was restored
+    as much as over a fresh install: the salvage is an sftp session as that user
+    with no sudo, and a library Plex keeps to itself comes back empty without
+    saying so. -%]
 # Plex data directory
 mkdir -p '/var/lib/plexmediaserver/Library/Application Support'
 chown -R plex:[% admin_user %] /var/lib/plexmediaserver
@@ -43,13 +73,13 @@ chmod 0750 '[% dir %]'
 # -- and the preferences file went to /Preferences.xml rather than into Plex's
 # library.  The python was worse: a "-c" string spanning several lines with no
 # continuations, so make handed the shell a quote it never closed.
-[%# Plex has to be stopped while its preferences are edited.  Installing the
-    package starts it, and a running Plex owns that file: it writes its own copy
-    back out, so everything set below was overwritten before the guest had
-    finished provisioning -- the file ended up carrying the MachineIdentifier Plex wrote and
-    none of the certificate or account settings.  It is started again in the
-    postrun tasks at the end of this target. -%]
-systemctl stop plexmediaserver; /bin/true
+[%# It reads and modifies rather than writing a fresh file, which is what makes
+    a restored library and this generated file agree: a library brings its own
+    Preferences.xml, carrying the MachineIdentifier and the token that says this
+    server is already claimed by an account, and those are exactly the things a
+    rebuilt guest must keep to come back as the same server rather than as a new
+    one waiting to be claimed.  Only the three settings this recipe is the
+    authority on go over the top of them. -%]
 PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
 mkdir -p "$$PREFS_DIR"; \
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \

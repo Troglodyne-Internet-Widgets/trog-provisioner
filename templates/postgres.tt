@@ -1,6 +1,10 @@
-[% FOR dump_file IN dumps %]
-sudo -u postgres psql < [% install_dir %]/[% domain %]/[% dump_file %]
-[% END -%]
+[%# The salvage and the seeds in one call, because which of them to load is one
+    decision: what this guest had beats what an operator once wrote down, and
+    neither goes over a database that is already there.  Loading the configured
+    dumps on their own is what made a rebuild throw away everything since the
+    snapshot they hold. -%]
+install -m 0750 postgres-restore.sh /usr/local/sbin/postgres-restore.sh
+/usr/local/sbin/postgres-restore.sh "[% install_dir %]/[% domain %]/postgres"[% FOR dump_file IN dumps %] "[% install_dir %]/[% domain %]/[% dump_file %]"[% END %]
 # Install nightly logical backup script and cron job
 install -m 0750 postgres-backup.sh /usr/local/sbin/postgres-backup.sh
 install -m 0644 postgres-backup.cron /etc/cron.d/postgres-backup

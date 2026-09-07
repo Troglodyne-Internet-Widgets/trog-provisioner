@@ -37,7 +37,36 @@ like($domain_conf, qr{^gsqlite3-database=/zones\.db$}m,
     'the database is named relative to the chroot') or diag $domain_conf;
 
 # And it is where that resolves to from outside.
-ok(-s '/var/spool/powerdns/zones.db', 'which is /var/spool/powerdns/zones.db on the host');
+my $zonedb = '/var/spool/powerdns/zones.db';
+ok(-s $zonedb, 'which is /var/spool/powerdns/zones.db on the host');
+
+# Whichever way this guest got its database -- loaded from the zonefile on a
+# first build, or handed back the previous guest's on a rebuild -- it has to be
+# answering for this domain by the end of it.  The rebuild is the case that used
+# to come out empty, and the case the guard on the zone load can now break.
+my $domain_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM domains WHERE name='[% domain %]'" 2>&1` // '';
+chomp $domain_rows;
+is($domain_rows, '1', 'the zone database answers for this domain, exactly once') or diag $domain_rows;
+
+my $record_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM records r JOIN domains d ON d.id = r.domain_id WHERE d.name='[% domain %]'" 2>&1` // '';
+chomp $record_rows;
+ok($record_rows =~ m/^[0-9]+$/ && $record_rows > 0, "and has records for it ($record_rows)") or diag $record_rows;
+
+# restore_state takes the salvage away when it puts it back, so one still
+# sitting in the domain directory means it declined.  Declining is the right
+# answer against a guest that already had its zones -- it is the wrong one while
+# the salvage holds records this database has never seen, which is a rebuild
+# that threw away every zone edit lexicon or DCV made since the last provision.
+my $salvaged = '[% install_dir %]/[% domain %]/pdns/zones.db';
+SKIP: {
+    skip 'no previous guest was salvaged from', 1 unless -s $salvaged;
+    my $was = `sqlite3 '$salvaged' 'SELECT COUNT(*) FROM records' 2>/dev/null` // '';
+    my $now = `sqlite3 '$zonedb' 'SELECT COUNT(*) FROM records' 2>/dev/null` // '';
+    chomp($was, $now);
+    ok($was =~ m/^[0-9]+$/ && $now =~ m/^[0-9]+$/ && $now >= $was,
+        "the live database kept the $was records the salvage had (it has $now)")
+        or diag "salvage at $salvaged was never restored into $zonedb";
+}
 
 # The socket itself, which is what lexicon talks to.
 my $api = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/api.conf'; <> } // '';
