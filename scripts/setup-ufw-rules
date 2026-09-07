@@ -68,6 +68,18 @@ my @admin        = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
 my %rate_limited = ();
 
 foreach my $app (@apps) {
+
+    # Any limit an older provision left on this profile, first.  Adding the
+    # allow does not displace it: ufw keys a rule on its action as well as its
+    # ports, so the two sit side by side and the limit is the one that counts.
+    # A guest built before this stops limiting things therefore goes on limiting
+    # them however often it is re-provisioned -- and it is not only ssh.  The
+    # APT profile covers 53, 80 and 443, so the six-in-thirty landed on DNS as
+    # well, which is a machine that resolves a name twice and then cannot for
+    # half a minute.  Failure is the usual case and means there was none.
+    system( qw{ufw --force delete limit in},  $app );
+    system( qw{ufw --force delete limit out}, $app );
+
     push( @rules, [ "allow", "out", $app ] );
 
     unless ( $rate_limited{$app} ) {

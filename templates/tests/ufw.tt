@@ -18,6 +18,14 @@ like($rules, qr/OpenSSH/, 'ssh is allowed at all') or diag $rules;
 # here instead: by the hashlimit below, at whatever rate_limits says.
 unlike($rules, qr/^\s*OpenSSH\s+LIMIT/mi, 'and not by ufw\'s six-in-thirty limit') or diag $rules;
 
+# Nor anything else.  A guest built before this stopped limiting profiles keeps
+# the limit through a re-provision unless it is deleted, because ufw keys a rule
+# on its action as well as its ports and the allow lands beside it rather than
+# over it.  The APT profile is the one that hurt: it covers 53, 80 and 443, so
+# six in thirty applied to DNS, and a machine that resolved a name twice could
+# not resolve one again for half a minute.
+unlike($rules, qr/\bLIMIT\b/, 'nothing at all is on ufw\'s limit any more') or diag $rules;
+
 # ufw's limit is six connections in thirty seconds.  That is the right setting
 # for ssh and the wrong one for anything a browser talks to -- one page load
 # opens more than six -- and it was applied to every application profile there
