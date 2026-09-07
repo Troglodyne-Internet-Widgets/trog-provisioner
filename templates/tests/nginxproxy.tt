@@ -99,4 +99,8 @@ foreach my $names ($vhost =~ m/^\s*server_name\s+([^;]+);/gm) {
 unlike($vhost, qr/^\s*listen\s+(\[::\]:)?80\b[^;]*\bssl\b/m,
     'port 80 does not claim ssl') or diag $vhost;
 
+# ACME spells it .well-known, with a hyphen -- RFC 8615, and every client.  The
+# underscore this used to make is a directory no challenge is ever fetched from.
+ok(-d '[% install_dir %]/[% domain %]/www/.well-known', 'the ACME webroot is spelled the way ACME spells it');
+
 done_testing();

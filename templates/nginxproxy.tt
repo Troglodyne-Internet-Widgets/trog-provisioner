@@ -21,6 +21,12 @@ chown [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.stati
 [% END -%]
 [% END -%]
 # Get ready for ACME
-mkdir -p [% install_dir %]/[% domain %]/www/.well_known; /bin/true
-chown [% user %]:www-data [% install_dir %]/[% domain %]/www/.well_known
-chmod 0755 [% install_dir %]/[% domain %]/www/.well_known
+[%# .well-known, with a hyphen.  RFC 8615 spells it that way and so does every
+    ACME client; an underscore is a directory nothing will ever fetch out of. -%]
+mkdir -p [% install_dir %]/[% domain %]/www/.well-known; /bin/true
+chown [% user %]:www-data [% install_dir %]/[% domain %]/www/.well-known
+chmod 0755 [% install_dir %]/[% domain %]/www/.well-known
+[%# The misspelled one off a guest that was built before this.  rmdir and not
+    rm -rf: it is only ever made empty, so one with anything in it is somebody
+    else.s and not ours to remove. -%]
+rmdir [% install_dir %]/[% domain %]/www/.well_known 2>/dev/null; /bin/true
