@@ -45,5 +45,37 @@ $cfg->param( "Service.ExecStart", $invocation );
 $cfg->param( "Service.User",  "root" );
 $cfg->param( "Service.Group", "root" );
 
+# Three more things the packaged unit does that a chrooted pdns cannot live
+# with.  Each of them hid the next, and each fails in a way that names anything
+# but itself, so they are worth spelling out.
+#
+# The bounding set is CAP_NET_BIND_SERVICE and CAP_CHOWN, which is right for a
+# server that never chroots and leaves root without CAP_SYS_CHROOT.  pdns then
+# cannot enter the chroot, goes on resolving every path in its configuration --
+# all of which are written relative to that root -- against the real filesystem,
+# and dies looking for a /zones.db nobody put there.  CAP_SETUID and CAP_SETGID
+# come with it because pdns drops to setuid/setgid itself once it is inside.
+my $caps = "CAP_NET_BIND_SERVICE CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID";
+$cfg->param( "Service.CapabilityBoundingSet", $caps );
+
+# And the same set again as the ambient one, which is what decides the effective
+# capabilities the process actually starts with.  Widening only the bounding set
+# leaves root holding CAP_NET_BIND_SERVICE and CAP_CHOWN and nothing else, so
+# pdns chroots and then cannot give up its privileges: "Unable to set effective
+# user id to 109: Operation not permitted", once a second, forever.
+$cfg->param( "Service.AmbientCapabilities", $caps );
+
+# chroot(2) is in systemd's @mount group, and the unit denies that group, so
+# even with the capability the call is killed by seccomp -- SIGSYS, a core dump,
+# and a service that says only "signal=SYS".  Everything else in the deny list
+# stays.
+$cfg->param( "Service.SystemCallFilter", "~ \@clock \@debug \@module \@raw-io \@reboot \@swap \@cpu-emulation \@obsolete" );
+
+# And Type=notify cannot work with a chroot, because the notify socket is
+# outside it.  pdns says so in as many words and refuses to chroot at all:
+# "Unable to chroot when running from systemd.  Please disable chroot= or set
+# the 'Type' for this service to 'simple'".
+$cfg->param( "Service.Type", "simple" );
+
 File::Copy::copy( $service_file, "$service_file.bak" );
 $cfg->save();

@@ -660,6 +660,10 @@ sub handle_domain {
             print "Backing up $module files from $fqdn\n";
             my %tg   = $builder->remote_files( $data_config->{to}, $fqdn );
             my @skip = $builder->remote_skip();
+
+            # Asked before any of it comes down, so what does is what the guest
+            # looks like now rather than whenever its cron last ran.
+            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $data_config->{to}, $fqdn ) ] );
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Writing remote file $to_fetch as $data_dir/$tg{$to_fetch}\n";
 
@@ -898,6 +902,52 @@ sub handle_domain {
 
     print "Done.\n";
     return 0;
+}
+
+=head2 refresh_salvage($static_ip, $admin_user, $cfg_dir, $module, $commands)
+
+Ask the guest to bring what is about to be salvaged up to date.
+
+A dump written nightly and fetched at noon is twelve hours out of date, and the
+difference is everything that happened in between -- which is exactly what a
+rebuild is trying not to lose.  A recipe says how to refresh its own state in
+C<remote_prepare>; this runs it, as root, on the guest being salvaged.
+
+A failure is a warning.  The guest may not have the script yet, and last night's
+dump is worth more than none -- which is what dying here would leave.
+
+=cut
+
+sub refresh_salvage {
+    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands ) = @_;
+
+    return unless @$commands;
+
+    # Required rather than used at the top, the way Trog::HV is: it brings an
+    # SSH stack with it, and a run whose recipes ask for nothing should not pay
+    # for that -- nor should the tests, which mock the filesystem out from under
+    # anything that reads one while loading.
+    require Trog::Guest;
+
+    ( my $host = $static_ip ) =~ s{/.*\z}{};
+    my $guest = Trog::Guest->new(
+        name     => $host,
+        host     => $host,
+        user     => $admin_user,
+        key_path => "$cfg_dir/key.rsa",
+    );
+
+    foreach my $command (@$commands) {
+        print "Asking $host to run '$command' before salvaging $module\n";
+
+        # Through a shell, because what a recipe hands over is a command line
+        # rather than an argv -- a script with its arguments, or a pipeline.
+        next unless $guest->run_sudo( '/bin/sh', '-c', $command );
+
+        print {*STDERR} "$module: '$command' failed on $host, so what comes down is whatever was already there.\n" . "Whatever it was going to refresh is as old as the last time something did.\n";
+    }
+
+    return 1;
 }
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)

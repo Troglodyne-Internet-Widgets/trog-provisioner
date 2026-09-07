@@ -96,6 +96,12 @@ sub template_files {
 # nothing here can regenerate.  What imports them again is postgres-restore.sh --
 # see L</What a rebuild keeps>, and Provisioner::Recipe's remote_files, which is
 # only half a round trip until a fragment does something with what it names.
+# The same reason mariadb has one: the nightly dump is a night old, and the
+# difference is what a rebuild would lose.
+sub remote_prepare {
+    return ('/usr/local/sbin/postgres-backup.sh');
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

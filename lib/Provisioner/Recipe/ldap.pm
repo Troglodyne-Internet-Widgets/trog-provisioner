@@ -154,6 +154,13 @@ sub template_files {
     );
 }
 
+# An export taken now.  The cron runs hourly, and an hour of a directory is a
+# password somebody changed and a key somebody added that a rebuild would put
+# back the way they were.
+sub remote_prepare {
+    return ('/usr/local/sbin/ldap-export.sh');
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

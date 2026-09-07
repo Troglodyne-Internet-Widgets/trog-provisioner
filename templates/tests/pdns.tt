@@ -125,6 +125,15 @@ my $unit_user = `systemctl show -p User --value pdns 2>/dev/null`;
 chomp $unit_user;
 ok($unit_user eq 'root' || $unit_user eq '', 'pdns starts with the privilege it needs to chroot') or diag "User=$unit_user";
 
+# Both sets, not just the bounding one: the ambient set is what the process
+# actually starts holding, and a pdns that can chroot but cannot setuid spends
+# its life failing to drop privileges once a second.
+foreach my $set (qw{CapabilityBoundingSet AmbientCapabilities}) {
+    my $caps = `systemctl show -p $set --value pdns 2>/dev/null`;
+    like($caps, qr/cap_sys_chroot/i, "$set lets it chroot");
+    like($caps, qr/cap_setuid/i,     "$set lets it drop privileges afterwards");
+}
+
 my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'; <> } // '';
 like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');
 like($global_conf, qr/^setgid=pdns$/m, 'both halves of it');

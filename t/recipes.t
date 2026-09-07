@@ -660,6 +660,37 @@ subtest 'a secret placed from the store is never salvaged back' => sub {
     }
 };
 
+# A salvage is only as fresh as whatever wrote it, so a recipe whose state is
+# written on a schedule has to be able to say "take one now" before the fetch --
+# otherwise a rebuild restores the guest to whenever the cron last ran.  What
+# remote_prepare names has to be something the recipe actually puts on the guest.
+subtest 'what a recipe asks the guest to run before a salvage is something it installed' => sub {
+    my $install = '/opt/domains';
+    my $domain  = 'vm.test';
+
+    foreach my $recipe ( sort @available ) {
+        my $class   = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my @prepare = eval { $class->remote_prepare( $install, $domain ) };
+        next unless @prepare;
+
+        my %generated = eval { $class->template_files() };
+        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+
+        foreach my $command (@prepare) {
+            my ($program) = $command =~ m{\A(\S+)};
+
+            # Installed by the fragment, under the name the command calls it by.
+            my ($leaf) = $program =~ m{([^/]+)\z};
+            ok(
+                index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
+                "$recipe: $program is something this recipe puts on the guest"
+            ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
+        }
+
+        ok( scalar( eval { $class->remote_files( $install, $domain ) } ), "$recipe: and it has something to salvage afterwards" );
+    }
+};
+
 # A default that is generated rather than written down is a rotation: it changes
 # every time bin/new_config runs, so whatever the last one authenticated -- a
 # session, an admin token, another node in a cluster -- stops working at the next

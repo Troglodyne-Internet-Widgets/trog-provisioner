@@ -190,6 +190,13 @@ sub template_files {
     );
 }
 
+# A snapshot taken now, rather than whatever the nightly cron last left: the
+# metadata is what says which object is which, and a rebuild wants the one that
+# matches the objects coming down beside it.
+sub remote_prepare {
+    return ('/usr/local/sbin/garage-snapshot.sh');
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 

@@ -171,6 +171,13 @@ sub template_files {
 # nothing here can regenerate.  What imports them again is mariadb-restore.sh --
 # see L</What a rebuild keeps>, and Provisioner::Recipe's remote_files, which is
 # only half a round trip until a fragment does something with what it names.
+# A dump taken now.  The cron runs at half two, so a salvage without this is
+# every write since then, and the restore below would put the guest back to
+# whenever that was.
+sub remote_prepare {
+    return ('/usr/local/sbin/mariadb-backup.sh');
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

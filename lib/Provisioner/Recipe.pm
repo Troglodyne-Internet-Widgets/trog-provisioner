@@ -563,6 +563,33 @@ sub datadirs {
     return ();
 }
 
+=head3 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+What the guest should be asked to do immediately before its C<remote_files> are
+fetched, as shell commands run there as root.
+
+A salvage is only as fresh as whatever wrote it.  A database dumped nightly, an
+LDIF exported hourly, a snapshot of something that cannot be copied while it is
+open -- all of them are a cron away from the moment somebody actually rebuilds
+the guest, and the difference is however much happened in between.  This is
+where a recipe closes that gap: it says "take one now", and C<bin/new_config>
+asks, and the fetch that follows carries what the guest looks like at that
+moment rather than what it looked like last night.
+
+    sub remote_prepare { return ('/usr/local/sbin/mariadb-backup.sh') }
+
+A command that fails is a warning rather than an error.  The guest may not have
+the script yet -- it is being asked before its first provision has run -- and
+last night's dump is worth more than no dump at all, which is what dying here
+would leave.  What it must not be is silent, since a salvage nobody refreshed is
+one somebody will restore from later believing otherwise.
+
+=cut
+
+sub remote_prepare {
+    return ();
+}
+
 =head3 %path_map = $recipe->remote_files($install_dir, $domain)
 
 What to salvage off a guest that is already running this recipe, as a map of the
