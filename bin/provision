@@ -16,6 +16,7 @@ use Trog::Hypervisors();
 use Trog::Guest();
 use Trog::Config();
 use Trog::Credentials();
+use Trog::Secrets();
 use File::Basename();
 use File::Slurper();
 use IPC::Run3();
@@ -126,6 +127,63 @@ sub _must_read {
 }
 
 # The same question where the answer is allowed to be no.
+
+=head2 place_guest_secrets($guest, $domain)
+
+Put the files a recipe reads but must never generate onto the guest, out of the
+secret store.
+
+C<bin/new_config> leaves a manifest beside the domain saying where each one goes
+and which reference holds it -- the reference, never the value, so that nothing
+here is readable out of the domain directory or out of a backup of it.  This
+resolves them and writes each file, before the makefile that will read them has
+started.
+
+Dies if the store cannot be reached.  A guest whose signing key or equivalent
+did not arrive is a guest that will make itself a new identity, which is the
+whole thing this exists to stop; better to fail here, where an operator is
+watching, than three minutes later on the guest.
+
+=cut
+
+sub place_guest_secrets {
+    my ( $guest, $domain ) = @_;
+
+    # The same domain directory bin/destroy purges: whatever hypervisor this run
+    # is working with says where it is.
+    my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
+    return unless _readable($manifest);
+
+    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
+    return unless ref $wanted eq 'HASH' && %$wanted;
+
+    my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
+    my %values = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Secrets->prompt( 'Enter password:', 'keepass' ), %needed );
+
+    foreach my $path ( sort keys %$wanted ) {
+        my $value = $values{$path};
+        die "The secret store had nothing for $wanted->{$path}{ref}, which $domain needs at $path\n"
+          unless defined $value && length $value;
+
+        # The directory the recipe will later make: this runs first, so it is not
+        # there yet and a write into it would fail.
+        my $dir = File::Basename::dirname($path);
+        die "Could not make $dir on $domain\n" if $guest->run_sudo( 'mkdir', '-p', $dir );
+
+        $guest->write_text( $path, "$value\n", sudo => 1, mode => $wanted->{$path}{mode} // '0600' )
+          or die "Could not place $path on $domain\n";
+
+        # Checked, because the service reads this file as itself: a chown that
+        # quietly did nothing leaves the file root's and the service without it.
+        my $owner = $wanted->{$path}{owner} // 'root:root';
+        die "Could not give $path to $owner on $domain\n" if $guest->run_sudo( 'chown', $owner, $path );
+
+        print "Placed $path on $domain from $wanted->{$path}{ref}\n";
+    }
+
+    return 1;
+}
+
 sub _readable {
     my ($path) = @_;
     open( my $fh, '<', $path ) or return 0;
@@ -255,6 +313,10 @@ sub main {
         $guest->put_file( $map, '/root/devices.map', sudo => 1 )
           or die "could not sync devices map!";
     }
+
+    # Before cloud-init has finished, and so well before the makefile it
+    # schedules starts: these are what a recipe reads rather than generates.
+    place_guest_secrets( $guest, $domain );
 
     $guest->wait_for_cloud_init($domain);
 
@@ -431,6 +493,7 @@ sub provision_domain {
         print "Syncing setup script\n";
         $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
           or die "Could not ship the setup script to $domain";
+        place_guest_secrets( $guest, $domain );
         print "Scheduling job to run setup script\n";
         print $guest->capture("sudo at now -f /root/setup-$domain.sh");
         print "Done.\n";

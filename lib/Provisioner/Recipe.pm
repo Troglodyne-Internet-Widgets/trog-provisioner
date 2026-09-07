@@ -461,7 +461,7 @@ sub remote_skip {
     return ();
 }
 
-=head3 $secret = $recipe->persisted_secret($filename)
+=head3 $secret = $recipe->persisted_secret($filename, $generate)
 
 A secret that has to stay the same for the life of a domain rather than the life
 of a run.  Made once, kept in C<$filename> under the domain's output directory,
@@ -472,13 +472,19 @@ default: whatever the last one authenticated -- a session, an admin token,
 another node in a cluster -- stops working at the next provision, and nothing
 says why.  So write it down.
 
-Sixty-four hex characters.  Dies rather than hand back a file that does not look
-like one, since the usual reason for that is somebody having edited it.
+Sixty-four hex characters by default; pass a coderef to make something else.
+Dies rather than hand back a default-shaped file that does not look like one,
+since the usual reason for that is somebody having edited it.
+
+This is for a secret that belongs in the domain's configuration -- something a
+template renders into a file on the guest.  A secret that is itself a file, and
+one nothing should be able to read out of the domain directory, belongs in
+C<guest_secrets> instead.
 
 =cut
 
 sub persisted_secret {
-    my ( $self, $filename ) = @_;
+    my ( $self, $filename, $generate ) = @_;
 
     my $dir = $self->{output_dir}
       or die "Cannot keep $filename anywhere: this recipe has no output_dir
@@ -491,16 +497,52 @@ sub persisted_secret {
         chomp $kept;
         die "$file does not hold a secret this made: expected 64 hex characters
 "
-          unless $kept =~ m/\A[0-9a-f]{64}\z/;
+          unless $generate || $kept =~ m/\A[0-9a-f]{64}\z/;
         return $kept;
     }
 
-    my $secret = Crypt::PRNG::random_bytes_hex(32);
+    my $secret = $generate ? $generate->() : Crypt::PRNG::random_bytes_hex(32);
+    die "The generator for $filename produced nothing\n" unless defined $secret && length $secret;
+
     File::Slurper::Temp::write_text( $file, "$secret\n" );
     ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     chmod 0600, $file;
 
     return $secret;
+}
+
+=head3 %files = $recipe->guest_secrets($install_dir, $domain)
+
+Files the guest has to have that must not travel in the payload, as a map of the
+path on the guest to how one gets there:
+
+    "$install_dir/matrix.$domain/homeserver.signing.key" => {
+        ref      => "secret:matrix/$domain-signing-key/password",
+        generate => \&_signing_key,
+        owner    => 'matrix-synapse:matrix-synapse',
+        mode     => '0600',
+    }
+
+The value lives in the secret store: made once by C<generate>, answered from
+there every provision after.  C<bin/new_config> writes the references, never the
+values, beside the domain; C<bin/provision> resolves them and puts each file on
+the guest before the makefile runs.
+
+Which is why this is not C<remote_files>.  A secret salvaged off a guest lands
+in the domain directory, and from there into the payload of every rebuild and
+into every backup taken of it.  These never do -- name the file in
+C<remote_skip> as well and the guest is the only place it sits.
+
+A recipe using this must not generate the file itself when it is missing.  It is
+missing because the store could not be reached, and a fresh one is a new
+identity, which is the thing the store exists to prevent.
+
+C<ref> must name a field the store keeps, which is C<password> or C<username>.
+
+=cut
+
+sub guest_secrets {
+    return ();
 }
 
 =head3 @dirs = $recipe->datadirs()

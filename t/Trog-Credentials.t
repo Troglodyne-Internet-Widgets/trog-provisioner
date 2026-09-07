@@ -147,4 +147,22 @@ subtest 'sudo on a machine nobody is watching' => sub {
     like( $why, qr/Trog::Credentials/,     'and how to hand one in' );
 };
 
+subtest 'remember keeps what was typed for the rest of the run' => sub {
+    Trog::Credentials->forget();
+
+    ok( !Trog::Credentials->have('keepass'), 'nothing to start with' );
+
+    Trog::Credentials->remember( 'keepass', 'typed at a prompt' );
+    ok( Trog::Credentials->have('keepass'), 'and now there is' );
+    is( Trog::Credentials->get('keepass'), 'typed at a prompt', 'which is what was typed' );
+
+    # The allowlist is the whole point of the module: a name nobody can ask for
+    # is a name that would sit here being never used.
+    eval { Trog::Credentials->remember( 'keypass', 'a typo' ) };
+    like( $@, qr/Unknown credential/, 'a name that is not one is refused' );
+
+    Trog::Credentials->forget();
+    ok( !Trog::Credentials->have('keepass'), 'and forget clears it like any other' );
+};
+
 done_testing();

@@ -118,7 +118,13 @@ sub prompt {
     # IO::Prompter and IO::Prompt fall out with each other over @ARGV unless it
     # is flattened first.
     local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
-    return IO::Prompter::prompt( $message, -echo => '*' );
+    my $answer = IO::Prompter::prompt( $message, -echo => '*' );
+
+    # Kept, so the next thing in this run that wants the same store is not asked
+    # again.  The usual caller pipes the answer in, and a pipe answers once.
+    Trog::Credentials->remember( $name, "$answer" ) if defined $name;
+
+    return $answer;
 }
 
 =head2 read($file, $password, %needed)
@@ -225,6 +231,94 @@ sub write {
 
     $kdbx->save_db( $file, $password );
     return $file;
+}
+
+=head2 remember($file, $password, %generator_by_ref)
+
+What each reference already holds, making and keeping one where it holds
+nothing.  The generator is a coderef, called only when the entry is missing.
+
+This is for a secret the provisioner owns rather than one an operator wrote
+down: a signing key, a shared secret between a guest and whatever authenticates
+against it.  Generated once and kept here, it survives the guest being rebuilt
+without ever being written into the domain directory -- which is where the data
+recipe would pick it up and carry it into every backup taken afterwards.
+
+Dies rather than overwrite: a reference that exists is answered, never replaced.
+
+=cut
+
+sub remember {
+    my ( $class, $file, $password, %generator_by_ref ) = @_;
+
+    return () unless %generator_by_ref;
+
+    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+      or die "Could not open $file\n";
+    $kdbx->unlock() or die "Could not unlock $file\n";
+
+    my ( %values, %made );
+    foreach my $ref ( sort keys %generator_by_ref ) {
+        my ( $group, $title, $field ) = $class->parse($ref);
+
+        my $g     = $kdbx->find_group( { title => $group } );
+        my $entry = $g && $kdbx->find_entry( { group => $g->{gid}, title => $title } );
+
+        if ( $entry && defined $entry->{$field} && length $entry->{$field} ) {
+            $values{$ref} = $entry->{$field};
+            next;
+        }
+
+        my $made = $generator_by_ref{$ref}->()
+          or die "The generator for $ref produced nothing\n";
+
+        $g     //= $kdbx->add_group( { title => $group } );
+        $entry //= $kdbx->add_entry( { group => $g->{gid}, title => $title } );
+        $entry->{$field} = $made;
+
+        $values{$ref} = $made;
+        $made{$ref}   = 1;
+    }
+
+    $kdbx->lock();
+
+    # Only when there is something new to keep.  Saving rewrites the whole
+    # database, and a run that read but did not add has no business doing that
+    # to the file every other domain is also being provisioned out of.
+    return %values unless %made;
+
+    $kdbx->save_db( $file, $password );
+    $class->_confirm_kept( $file, $password, \%values, \%made );
+
+    return %values;
+}
+
+# What was written has to be readable, because the database keeps the fields it
+# knows about and quietly drops the rest -- a reference naming anything but
+# password or username stores nothing.  Left unchecked, the caller is handed the
+# secret it just made, the next run finds nothing and makes another, and a
+# secret that is supposed to outlive the guest rotates on every provision
+# instead.  So: read it back, and say so now rather than never.
+sub _confirm_kept {
+    my ( $class, $file, $password, $values, $made ) = @_;
+
+    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+      or die "Could not re-open $file to check what was written to it\n";
+    $kdbx->unlock() or die "Could not unlock $file\n";
+
+    foreach my $ref ( sort keys %$made ) {
+        my ( $group, $title, $field ) = $class->parse($ref);
+        my $g     = $kdbx->find_group( { title => $group } );
+        my $entry = $g && $kdbx->find_entry( { group => $g->{gid}, title => $title } );
+
+        next if $entry && defined $entry->{$field} && $entry->{$field} eq $values->{$ref};
+
+        $kdbx->lock();
+        die "$file did not keep $ref.  A reference has to name a field the database stores,\n" . "which is password or username; '$field' is not one and was dropped on save.\n";
+    }
+
+    $kdbx->lock();
+    return 1;
 }
 
 =head2 parse($reference)

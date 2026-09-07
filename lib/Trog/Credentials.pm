@@ -73,6 +73,16 @@ type it.
 
 =head1 CLASS METHODS
 
+=head2 remember($name, $value)
+
+Keep something that was typed rather than handed in, so that the next thing in
+the same run wanting it does not ask again.
+
+A provision resolves the store twice -- once to fill in the C<secret:> notes in
+a configuration, once to put the files a recipe reads but must not generate on
+the guest -- and asking twice is worse than a nuisance: the usual caller pipes
+the answer in, and a pipe answers once.
+
 =head2 get($name)
 
 The credential, or undef if it was not given.
@@ -90,6 +100,16 @@ a missing one both look the same otherwise.
 our %KNOWN = map { $_ => 1 } qw{keepass sudo};
 
 our %CREDENTIAL;
+
+sub remember {
+    my ( $class, $name, $value ) = @_;
+
+    die "Unknown credential '$name'.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
+      unless $KNOWN{$name};
+
+    $CREDENTIAL{$name} = $value;
+    return 1;
+}
 
 sub get {
     my ( $class, $name ) = @_;

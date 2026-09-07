@@ -10,6 +10,9 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Crypt::PRNG();
+use MIME::Base64();
+
 =head1 Provisioner::Recipe::matrix
 
 =head2 SYNOPSIS
@@ -209,6 +212,37 @@ sub template_files {
 
 sub datadirs {
     return qw{matrix};
+}
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+    return (
+        "$install_dir/matrix.$domain/homeserver.signing.key" => {
+            ref      => "secret:matrix/$domain-signing-key/password",
+            generate => \&_signing_key,
+            owner    => 'matrix-synapse:matrix-synapse',
+            mode     => '0600',
+        },
+    );
+}
+
+# What signedjson writes: the algorithm, a short version tag naming this key
+# among any others the server has had, and the 32 seed bytes in unpadded
+# base64.  Made here rather than on the guest because a guest that makes its own
+# makes a new one every time it is rebuilt.
+sub _signing_key {
+    my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
+    my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
+    $seed =~ s/=+\z//;
+
+    return "ed25519 $version $seed";
+}
+
+# The signing key is in the secret store and is put on the guest from there, so
+# it has no business coming back off one -- salvaged, it would sit in the domain
+# directory and in every backup taken of it.
+sub remote_skip {
+    return (qr{/homeserver[.]signing[.]key\z});
 }
 
 sub remote_files {

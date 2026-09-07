@@ -626,6 +626,40 @@ subtest 'a recipe that salvages state puts it back' => sub {
     }
 };
 
+# A file placed out of the secret store is one the guest must never hand back:
+# salvaged, it would land in the domain directory and in every backup taken of
+# it, which is the exposure keeping it in the store avoids in the first place.
+# So anything named in guest_secrets has to be named in remote_skip too --
+# unless nothing salvages the directory it sits in, in which case there is
+# nothing to skip.
+subtest 'a secret placed from the store is never salvaged back' => sub {
+    my $install = '/opt/domains';
+    my $domain  = 'vm.test';
+
+    foreach my $recipe ( sort @available ) {
+        my $class  = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my %placed = eval { $class->guest_secrets( $install, $domain ) };
+        next unless %placed;
+
+        my %salvaged = eval { $class->remote_files( $install, $domain ) };
+        my @skip     = eval { $class->remote_skip() };
+
+        foreach my $path ( sort keys %placed ) {
+            like( $placed{$path}{ref}, qr{\Asecret:[^/]+/[^/]+/(?:password|username)\z}, "$recipe: $path names a reference the store can keep" );
+            ok( ref $placed{$path}{generate} eq 'CODE', "$recipe: and says how to make one" );
+
+            # Only the salvages that would actually pick this file up.
+            my @covering = grep { index( $path, $_ ) == 0 } keys %salvaged;
+            next unless @covering;
+
+            ok(
+                ( grep { $path =~ $_ } @skip ),
+                "$recipe: $path is kept out of the salvage that would take it"
+            ) or diag "salvaged by: @covering, and remote_skip has: @skip";
+        }
+    }
+};
+
 # A default that is generated rather than written down is a rotation: it changes
 # every time bin/new_config runs, so whatever the last one authenticated -- a
 # session, an admin token, another node in a cluster -- stops working at the next

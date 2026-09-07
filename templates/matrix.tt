@@ -47,22 +47,21 @@ chown root:root /etc/matrix-synapse/homeserver.yaml
 chown root:root /etc/matrix-synapse/log.yaml
 chmod 0644 /etc/matrix-synapse/homeserver.yaml
 chmod 0644 /etc/matrix-synapse/log.yaml
-# Generate a signing key only if the guest did not arrive with one.  This is the
-# server's federation identity, not a secret it can rotate: minting a new one
-# tells everybody who knew this homeserver that it is a stranger now, which is
-# why the restore above has to have run before we get here.
-if [ ! -f [% install_dir %]/matrix.[% domain %]/homeserver.signing.key ]; then \
-    python3 -c "from synapse.crypto import key; print(key.generate_signing_key('ed25519').decode('ascii'))" > [% install_dir %]/matrix.[% domain %]/homeserver.signing.key; \
-fi
-# Group-readable, on purpose, and after the blanket chmod above rather than
-# inside the branch that writes it.  The salvage runs as [% admin_user %] over
-# sftp with no sudo, so a key at 0600 owned by matrix-synapse is a key the fetch
-# cannot read: it never came down, and the restore had nothing to put back even
-# once there was something to put it back with.  That account can already read
-# homeserver.db, which is every message on the server, so this concedes it
-# nothing it did not already have.
-chown matrix-synapse:[% admin_user %] [% install_dir %]/matrix.[% domain %]/homeserver.signing.key
-chmod 0640 [% install_dir %]/matrix.[% domain %]/homeserver.signing.key
+[%# The signing key is not made here, and must never be.  It is the federation
+    identity of this server: a new one tells everybody who knew this homeserver
+    that it is a stranger now.  bin/provision puts it on the guest out of the
+    secret store before this makefile starts -- see guest_secrets in
+    Provisioner::Recipe -- so a missing one means the store could not be
+    reached, and generating a replacement would do the exact damage the store
+    is there to prevent.  Fail instead, and say so. -%]
+test -s '[% install_dir %]/matrix.[% domain %]/homeserver.signing.key' \
+    || { echo "matrix: no signing key at [% install_dir %]/matrix.[% domain %]/homeserver.signing.key" >&2; \
+         echo "bin/provision places it from the secret store; synapse must not be started without it." >&2; \
+         exit 1; }
+[%# Kept to synapse, since nothing has to read it off this guest any more: it
+    is in the store, and remote_skip keeps it out of the salvage. -%]
+chown matrix-synapse:matrix-synapse '[% install_dir %]/matrix.[% domain %]/homeserver.signing.key'
+chmod 0600 '[% install_dir %]/matrix.[% domain %]/homeserver.signing.key'
 # Download and setup Synapse Admin
 [% script_dir %]/matrix.download-admin.sh [% install_dir %]/admin.matrix.[% domain %]
 chown -R www-data:[% admin_user %] [% install_dir %]/admin.matrix.[% domain %]

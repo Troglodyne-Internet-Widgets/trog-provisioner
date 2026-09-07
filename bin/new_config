@@ -336,8 +336,10 @@ sub handle_domain {
 
     # A recipe carries a note saying where a password is, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
+    my $keepass;
     if (%to_replace) {
-        my %secrets = Trog::Secrets->read( $sfile, Trog::Secrets->prompt( 'Enter password:', 'keepass' ), %to_replace );
+        $keepass = Trog::Secrets->prompt( 'Enter password:', 'keepass' );
+        my %secrets = Trog::Secrets->read( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
     }
@@ -608,6 +610,8 @@ sub handle_domain {
     # This is sometimes the case when we have multiple recipes depending on the same thing!
     @modules = Provisioner::Utils::lastuniq(@modules);
 
+    my %guest_secrets;
+
     # Actually process the modules now that we have solved deps.
     foreach my $module (@modules) {
         my $builder = $builders{$module};
@@ -640,6 +644,11 @@ sub handle_domain {
         # Grab the relevant makefile vars for the target
         my %t_vars = $builder->makefile_vars();
         %mf_vars = ( %mf_vars, %t_vars ) if %t_vars;
+
+        # Files the guest has to have that must not travel in the payload: the
+        # store holds them, bin/provision puts them there.  Collected here and
+        # resolved in one go below, so a run wants the store password once.
+        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $data_config->{to}, $fqdn ) );
 
         # Make dirs in the DATADIR needed by ssh
         foreach my $d ( $builder->datadirs() ) {
@@ -775,6 +784,8 @@ sub handle_domain {
     print "Writing Makefile to $cfg_dir\n";
     File::Slurper::Temp::write_binary( "$cfg_dir/Makefile", $makefile );
 
+    write_guest_secrets( $cfg_dir, $fqdn, \%guest_secrets, $sfile, $keepass );
+
     my $r_text = join( ', ', @$resolvers );
 
     # Build a provision.conf
@@ -887,6 +898,51 @@ sub handle_domain {
 
     print "Done.\n";
     return 0;
+}
+
+=head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)
+
+Make sure the secret store holds a value for everything the recipes asked to
+have placed on the guest, and write down where each one goes.
+
+The manifest carries the reference, never the value.  It sits beside the domain
+rather than in the payload precisely so that these do not go the way
+C<remote_files> state goes -- into the data directory, into the tarball, and into
+every backup taken of it.  C<bin/provision> reads it, resolves the references,
+and puts the files on the guest before the makefile runs.
+
+=cut
+
+sub write_guest_secrets {
+    my ( $cfg_dir, $fqdn, $wanted, $store, $keepass ) = @_;
+
+    my $manifest = "$cfg_dir/guest-secrets.yaml";
+    unlink $manifest;
+    return unless %$wanted;
+
+    # Asking for the password here rather than at the top: a run whose recipes
+    # want nothing placed should not be made to produce one.
+    $keepass //= Trog::Secrets->prompt( 'Enter password:', 'keepass' );
+
+    my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } keys %$wanted;
+    my %held      = Trog::Secrets->remember( $store, $keepass, %generator );
+
+    my %manifest = map {
+        $_ => {
+            ref   => $wanted->{$_}{ref},
+            owner => $wanted->{$_}{owner} // 'root:root',
+            mode  => $wanted->{$_}{mode}  // '0600',
+        }
+    } keys %$wanted;
+
+    File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
+    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    chmod 0600, $manifest;
+
+    print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n";
+    print "  $_ <- $manifest{$_}{ref}\n" for sort keys %manifest;
+
+    return \%held;
 }
 
 # Copy the helper scripts into the domain's directory so they get tarred up with
