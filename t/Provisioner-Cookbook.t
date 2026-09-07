@@ -90,6 +90,72 @@ subtest 'configuration() is read once and remembered' => sub {
     ok( exists Provisioner::Cookbook->configuration("$dir/recipes.yaml")->{'two.test'}, 'and forget() makes it read again' );
 };
 
+subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
+    my $conf = {
+        _base => {
+            _global => { user => 'www-data' },
+            data    => { from => '/opt/data', to => '/opt/domains' },
+            ntp     => { pool => 'base.pool' },
+        },
+        'one.test' => {
+            _global => { user   => 'someone-else' },
+            ntp     => { iburst => 1 },
+            nginx   => {},
+        },
+    };
+
+    my $one = Provisioner::Cookbook->domain_config( 'one.test', $conf );
+
+    is( $one->{ntp}{pool},   'base.pool', 'what _base configures a recipe with reaches the domain' );
+    is( $one->{ntp}{iburst}, 1,           'and what the domain adds is kept' );
+    ok( exists $one->{nginx}, 'along with a recipe only the domain asks for' );
+    is( $one->{data}{from}, '/opt/data', 'and the data configuration comes with it' );
+
+    # _global merges the other way round -- the domain's own wins -- so it is
+    # not this method's to answer.
+    ok( !exists $one->{_global}, 'the global section is not part of it' );
+
+    is_deeply( $conf->{'one.test'}{ntp}, { iburst => 1 }, 'the configuration it was handed is not written into' );
+
+    is_deeply(
+        Provisioner::Cookbook->domain_config( undef, $conf )->{ntp}, { pool => 'base.pool' },
+        'with no domain it is what _base says, which is what a domain gets by default'
+    );
+    is_deeply(
+        Provisioner::Cookbook->domain_config( 'nosuch.test', $conf )->{ntp}, { pool => 'base.pool' },
+        'and a domain nothing configures gets the same'
+    );
+};
+
+subtest 'where _base and a domain disagree, _base wins' => sub {
+    my $conf = {
+        _base      => { ntp => { pool => 'base.pool' } },
+        'one.test' => { ntp => { pool => 'domain.pool' } },
+    };
+
+    is( Provisioner::Cookbook->domain_config( 'one.test', $conf )->{ntp}{pool}, 'base.pool', 'which is what a provision has always done with it' );
+};
+
+subtest 'the data source, and a domain inside it' => sub {
+    my $conf = {
+        _base       => { data => { from => '/opt/data', to => '/opt/domains' } },
+        'one.test'  => { ntp  => {} },
+        'own.test'  => { data => { to => '/srv' } },
+        'none.test' => { ntp  => {} },
+    };
+
+    is_deeply( Provisioner::Cookbook->data_config( undef, $conf ), { from => '/opt/data', to => '/opt/domains' }, 'what every domain gets' );
+    is( Provisioner::Cookbook->data_dir( 'one.test', $conf ), '/opt/data/one.test', 'and the directory one of them owns' );
+
+    # A domain may add to the data configuration; where it contradicts _base,
+    # domain_config's answer is the one a provision would use.
+    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{to}, '/opt/domains', 'a domain does not get to move the install dir out from under _base' );
+
+    is( Provisioner::Cookbook->data_dir( undef,      $conf ), undef, 'no domain, no directory' );
+    is( Provisioner::Cookbook->data_dir( 'one.test', {} ),    undef, 'and none when nothing says where the data source is' );
+    is( Provisioner::Cookbook->data_config( 'none.test', {} ), undef, 'which is undef rather than an error' );
+};
+
 subtest 'the shelf has the recipes on it' => sub {
     my @names = Provisioner::Cookbook->names();
 

@@ -321,6 +321,12 @@ sub placeholders_in {
     return ();
 }
 
+# Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
+# behaviour, so the functional interface means one thing inside that script and
+# the default anywhere else.  This is the one the merged configuration has
+# always had -- where two of these disagree, the more general one wins.
+sub _merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
+
 =head2 configuration($path)
 
 The recipe configuration an installation is running on: F<recipes.yaml> with
@@ -354,13 +360,8 @@ sub configuration {
 
     my $conf = YAML::XS::Load( File::Slurper::read_binary($path) );
 
-    # An explicit behaviour rather than the process-wide one: this answer should
-    # not depend on what else the caller has loaded.  STORAGE_PRECEDENT is what
-    # bin/new_config has always merged these with, and is why a domain file adds
-    # to recipes.yaml rather than overriding it.
-    my $merger = Hash::Merge->new('STORAGE_PRECEDENT');
-
-    my $extra = File::Basename::dirname($key) . '/recipes.d';
+    my $merger = _merger();
+    my $extra  = File::Basename::dirname($key) . '/recipes.d';
     File::Find::find(
         {
             wanted => sub {
@@ -380,6 +381,72 @@ sub configuration {
     ) if -d $extra;
 
     return $CONFIGURATION{$key} = $conf;
+}
+
+=head2 domain_config($domain, $conf)
+
+Everything one domain is configured with: its own entry with the C<_base> entry
+folded into it, which is what a recipe's options are read out of.  With no
+domain, C<_base> alone -- what a domain gets when it says nothing itself.
+
+C<$conf> is a configuration to work from, defaulting to C<configuration()>.  A
+caller that has already done something to one -- resolved the C<secret:>
+references in it, say -- passes it, so that work is not thrown away and the two
+of you cannot end up merging the same file differently.  What comes back is a
+copy, so fold it, delete out of it, hand it to a recipe.
+
+C<_global> is not part of it.  It says what the guest is rather than what a
+recipe takes, and the two halves of it combine the other way round: the
+domain's own wins there, where C<_base> wins here.
+
+=cut
+
+sub domain_config {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my $base = clone( $conf->{_base}                                 // {} );
+    my $own  = clone( ( defined $domain ? $conf->{$domain} : undef ) // {} );
+    delete $base->{_global};
+    delete $own->{_global};
+
+    return _merger()->merge( $base, $own );
+}
+
+=head2 data_config($domain, $conf)
+
+What the C<data> recipe is configured with for a domain: C<from>, the directory
+on the machine doing the provisioning, and C<to>, where it lands on the guest.
+
+Undef when the configuration does not say, which is fatal to a provision and
+merely nothing to do for anything cleaning up after one.
+
+=cut
+
+sub data_config {
+    my ( $class, $domain, $conf ) = @_;
+    return $class->domain_config( $domain, $conf )->{data};
+}
+
+=head2 data_dir($domain, $conf)
+
+The domain's own directory under the data source.  C<bin/new_config> makes the
+recipes' datadirs in it, writes whatever it fetched off the last guest into it,
+and ships it to the hypervisor for the guest to pull its payload out of; the
+teardown in the provisioning-recipes skill is what takes it away again.
+
+Undef when nothing says where the data source is.
+
+=cut
+
+sub data_dir {
+    my ( $class, $domain, $conf ) = @_;
+    return undef unless defined $domain && length $domain;
+
+    my $from = ( $class->data_config( $domain, $conf ) // {} )->{from};
+    return undef unless defined $from && length $from;
+
+    return "$from/$domain";
 }
 
 =head2 forget()

@@ -165,7 +165,7 @@ sub destroy_guest {
 
 The domain's directory under the data source, and the hypervisor holding the
 other copy of it.  Empty, having said why, when the configuration in play is not
-a scratch one or does not say where the data source is.
+a scratch one, or does not say where the data source is.
 
 =cut
 
@@ -179,12 +179,16 @@ sub data_dir {
         return ();
     }
 
-    my $root = data_root($domain) or return ();
-
     # bin/destroy's rule, for bin/destroy's reason: the domain arrives on the
     # command line and ends up in an rm.
     $domain =~ s/\///g;
     return () unless length $domain && $domain !~ m/\A[.]+\z/;
+
+    my $dir = Provisioner::Cookbook->data_dir($domain);
+    unless ($dir) {
+        print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_base: data: from), so there is nothing to remove from it.\n";
+        return ();
+    }
 
     # Warned about rather than fatal.  A guest that never got defined -- a
     # provision that died early, or a teardown run twice -- still left a
@@ -193,30 +197,7 @@ sub data_dir {
     print {*STDERR} "Could not work out which hypervisor held $domain, so only the copy here goes:\n$@"
       unless $hv;
 
-    return ( "$root/$domain", $hv );
-}
-
-=head2 data_root($domain)
-
-Where the data source is, according to the configuration in play: the C<data>
-recipe's C<from>, as C<bin/new_config> reads it.  Undef, having said so, when
-nothing says.
-
-=cut
-
-sub data_root {
-    my ($domain) = @_;
-
-    my $conf = Provisioner::Cookbook->configuration();
-
-    # Defined only when there is a domain to ask about: the sweep has none, and
-    # a hash lookup on undef is fatal here rather than merely empty.
-    my $from = ( $domain ? $conf->{$domain}{data}{from} : undef ) // $conf->{_base}{data}{from};
-
-    print {*STDERR} 'Nothing in ' . Trog::Config->dir . "/recipes.yaml says where the data source is\n" . "(_base: data: from), so there is nothing to remove from it.\n"
-      unless $from;
-
-    return $from;
+    return ( $dir, $hv );
 }
 
 =head2 purge_data_dir($dir, $hv, $dryrun)
@@ -258,7 +239,11 @@ name the configuration carries is one somebody means to build again.
 sub sweep_orphans {
     my ( $uri, $hvconf, $dryrun ) = @_;
 
-    my $root = data_root() or return 1;
+    my $root = ( Provisioner::Cookbook->data_config() // {} )->{from};
+    unless ($root) {
+        print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_base: data: from), so there is nothing to sweep.\n";
+        return 1;
+    }
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
 
