@@ -117,4 +117,22 @@ unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no v
     or diag $execstart;
 
 
+# pdns runs as pdns and the payload arrives owned by the admin user, so a
+# fragment moved into place and left alone is one pdns cannot read -- it falls
+# back to the packaged defaults, binds 0.0.0.0:53 on top of the recursor, and
+# exits.  Which looks like anything except a permissions problem.
+foreach my $fragment (qw{00-global.conf sqlite.conf api.conf}) {
+    my $path = "/etc/powerdns/pdns.d/$fragment";
+    ok(-f $path, "$fragment is installed");
+    my @st = stat $path;
+    next unless @st;
+    is(scalar getgrgid($st[5] // -1), 'pdns', "$fragment is group pdns");
+    ok($st[2] & 0040, "$fragment is group readable, so pdns can actually read it");
+}
+
+# What the fragments are for: without them pdns takes the packaged default of
+# 0.0.0.0:53, which is where the recursor already is.
+my $ports = `ss -lnup 2>/dev/null`;
+like($ports, qr/127\.0\.0\.1:2500/, 'pdns is on the port the recipe puts it on') or diag $ports;
+
 done_testing();

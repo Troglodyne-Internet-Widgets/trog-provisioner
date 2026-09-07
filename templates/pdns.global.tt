@@ -27,6 +27,14 @@ grep -qxF '[% zone %]=[% forward_zones.$zone %]' /etc/powerdns/forward-zones || 
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
 # Set up the API so we can use lexicon
 mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
+[%# Readable by pdns, which is not who the payload arrives owned by.  A file
+    moved out of it keeps the transfer user and its 0600, so pdns could not read
+    a line of its own configuration: it fell back to the packaged defaults,
+    bound 0.0.0.0:53 where the recursor already was, and exited with "Unable to
+    bind to UDP socket" on every provision.  api.conf carries the API key, hence
+    the group rather than the world. -%]
+chown root:pdns /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
+chmod 0640 /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
 mv synczones.conf /etc/synczones.conf
 chown root:root /etc/synczones.conf
 chmod 0600 /etc/synczones.conf
