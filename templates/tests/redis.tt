@@ -50,7 +50,7 @@ is($denied, '', '[% admin_user %] can read every last thing in it') or diag $den
 my $salvage = '[% install_dir %]/[% domain %]/redis';
 my @unrestored = glob("$salvage/*");
 SKIP: {
-    skip 'nothing was salvaged off a previous guest', 1 unless @unrestored;
+    skip 'no salvage left to check: either there was none, or it was restored and moved', 1 unless @unrestored;
     ok(scalar glob('/var/lib/redis/*'), 'salvaged redis state was put back where redis reads it')
         or diag "still sitting in $salvage: @unrestored";
 }

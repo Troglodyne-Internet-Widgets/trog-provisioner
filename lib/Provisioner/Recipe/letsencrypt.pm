@@ -140,9 +140,13 @@ sub enrich {
     return %params;
 }
 
+# /etc/dehydrated/certs is not among these.  dehydrated is configured with
+# BASEDIR=/var/lib/dehydrated and writes its certificates under that, so the
+# /etc one is made, chowned, and never written to -- salvaging it fetched an
+# empty directory every run, and now that an empty salvage says so out loud it
+# would say so every run about a directory that is empty on purpose.
 sub remote_files {
     return (
-        '/etc/dehydrated/certs/'     => '.letsencrypt/etc-certs',
         '/var/lib/dehydrated/certs/' => '.letsencrypt/var-certs',
         '/etc/dehydrated/accounts/'  => '.letsencrypt/accounts',
     );

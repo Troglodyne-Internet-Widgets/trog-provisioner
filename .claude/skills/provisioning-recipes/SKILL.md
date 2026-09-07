@@ -198,6 +198,29 @@ reliable — use it only as the fallback.
 **`--restore` puts the domain and the disk back.** Unnecessary before a
 teardown, which is the usual ending, but do it on anything you intend to keep.
 
+**A console capture is where it stopped, not why it stopped.** `--console` will
+happily tell you the guest is sitting on
+`Job systemd-networkd-wait-online.service/start running (40s / no limit)` and
+that is not an answer, it is the question restated. Do not stop there and
+conclude the network is broken, or that it is the hypervisor's fault. There are
+two rungs above it and they are the ones that give reasons:
+
+- `--cat` the configuration and the logs off the disk. The guest does not have
+  to boot for this, so it works on the one that never will:
+  `--cat "$DOMAIN" /etc/netplan/50-cloud-init.yaml`,
+  `--cat "$DOMAIN" /var/log/cloud-init.log`, `--ls "$DOMAIN" /etc/netplan`.
+- `--single` for a shell on it, and then **bring the network up by hand**:
+  `netplan apply`, `networkctl status`, `journalctl -u systemd-networkd`. A
+  netplan that will not apply says why in one line — a duplicate address, an
+  interface name nothing matched, a renderer that is not installed — and that
+  line is what the forty seconds of asterisks were standing in for.
+
+**And a guest that did not ask for an address is not always a broken guest.**
+`bin/provision` waits thirty seconds for the lease. Two consecutive runs failing
+there looks conclusive and is not: the third, on the same code and the same
+hypervisor, came up clean. Retry once before you start bisecting, and if it
+fails again, go up the rungs above rather than reasoning about what changed.
+
 ## When a provision "times out"
 
 A timeout is a claim about elapsed time, and there are layers of them in play on

@@ -62,7 +62,7 @@ is(slurp("$stage/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the stage
 # sitting here empty is the fetch that could not read what it was pointed at.
 my $salvaged = '[% install_dir %]/[% domain %]/openvpn/pki';
 SKIP: {
-    skip('nothing was salvaged off a previous guest', 2) unless -d $salvaged;
+    skip('no salvage left to check: either there was none, or it was restored and moved', 2) unless -d $salvaged;
     ok(-s "$salvaged/ca.crt", 'the salvaged pki came down with a CA in it');
     is(slurp("$salvaged/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'and it is the CA this guest is using');
 }

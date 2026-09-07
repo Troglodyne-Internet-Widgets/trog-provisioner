@@ -47,7 +47,7 @@ is(slurp("$stage/client.key"), slurp('/etc/openvpn/client/client.key'), 'and it 
 # which is the whole failure this staging exists to end.
 my $salvaged = '[% install_dir %]/[% domain %]/openvpn-client';
 SKIP: {
-    skip('nothing was salvaged off a previous guest', 1) unless -d $salvaged;
+    skip('no salvage left to check: either there was none, or it was restored and moved', 1) unless -d $salvaged;
     ok(-s "$salvaged/client.key", 'the salvaged certificates came down with a key in them');
 }
 
