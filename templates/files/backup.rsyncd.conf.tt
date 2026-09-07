@@ -4,7 +4,7 @@ port = 40404
     had no record of a module that failed to open or a transfer that stopped
     halfway.  Rotated by /etc/logrotate.d/rsyncd-backup. -%]
 log file = /var/log/rsyncd/[% domain %].log
-[% FOR target IN targets.keys() %]
+[% FOR target IN targets.keys().sort() %]
 [[% target %]]
 use chroot = yes
 open noatime = yes 

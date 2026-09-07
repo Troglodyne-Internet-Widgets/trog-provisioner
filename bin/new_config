@@ -10,7 +10,6 @@ use strict;
 use warnings FATAL => 'all';
 
 no warnings qw{experimental};
-use feature qw{state};
 use re '/aa';
 
 use FindBin::libs;
@@ -194,35 +193,7 @@ sub get_config {
 # XXX Regrettably needs a touch() of eval()
 
 sub get_recipe_config {
-    state $c;
-    return $c if $c;
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    return {} unless -f $pfile;
-    $c = YAML::XS::Load( File::Slurper::read_binary($pfile) );
-
-    # Make sure we always look for recipes.d next to the recipes.yaml
-    my $loc = File::Basename::dirname( Cwd::abs_path($pfile) );
-
-    File::Find::find(
-        {
-            wanted => sub {
-                my $object = $_;
-                ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-                return unless ( -f $object && $object =~ m/\.yaml$/ );
-                my $config = YAML::XS::Load( File::Slurper::read_binary($object) );
-
-                # You have to put global things in the base recipes.yaml
-                delete $config->{_base};
-                delete $config->{_shared};
-                $c = Hash::Merge::merge( $c, $config );
-            },
-            no_chdir => 1,
-            bydepth  => 1,
-        },
-        "$loc/recipes.d/"
-    ) if -d "$loc/recipes.d";
-
-    return $c;
+    return Provisioner::Cookbook->configuration($pfile);
 }
 
 sub expand_dependent_domains {
@@ -370,9 +341,9 @@ sub handle_domain {
         %secrets = ();
     }
 
-    # Allow a base recipe set
-    my $base_recipe  = delete $rconf->{_base}         // {};
-    my $base_globals = delete $base_recipe->{_global} // {};
+    # Allow a base recipe set.  Read rather than removed: the merge below is
+    # Provisioner::Cookbook's, and it wants the configuration whole.
+    my $base_globals = clone( $rconf->{_base}{_global} // {} );
 
     # Figure out if we need to make this recipe depend on another
     my $shared_hosts = delete $rconf->{_shared} // {};
@@ -405,7 +376,11 @@ sub handle_domain {
     my $transfer_user = $global_conf->{transfer_user} // $hv->hv_user;
     die "Could not work out the transfer user for " . $hv->describe . "\n" unless $transfer_user;
 
-    $rconf->{$domain} = Hash::Merge::merge( $base_recipe, $rconf->{$domain} );
+    # The same fold as anything else asking what a domain is configured with,
+    # over this copy rather than the file, so the secrets resolved above survive
+    # it.
+    $rconf->{$domain} = Provisioner::Cookbook->domain_config( $domain, $rconf );
+    delete $rconf->{_base};
 
     # bin/new_guest writes CHANGEME wherever a recipe requires something it has
     # no default for.  A placeholder is a perfectly good string, so nothing
@@ -428,11 +403,12 @@ sub handle_domain {
     }
 
     # There will always be data config
+    my $data_dir    = Provisioner::Cookbook->data_dir( $fqdn, $rconf );
     my $data_config = delete $rconf->{$domain}{data};
     die "Must provide data configuation for $fqdn" unless $data_config;
 
     my @data_users;
-    my $data_users_f = "$data_config->{from}/$fqdn/users.yaml";
+    my $data_users_f = "$data_dir/users.yaml";
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     if ( -f $data_users_f ) {
         my $data_users_yaml = YAML::XS::Load( File::Slurper::read_binary($data_users_f) );
@@ -665,7 +641,7 @@ sub handle_domain {
 
         # Make dirs in the DATADIR needed by ssh
         foreach my $d ( $builder->datadirs() ) {
-            make_path("$data_config->{from}/$fqdn/$d") unless -d "$data_config->{from}/$fqdn/$d";
+            make_path("$data_dir/$d") unless -d "$data_dir/$d";
         }
 
         # Schlep over stuff from existing deployments
@@ -674,13 +650,13 @@ sub handle_domain {
             my %tg   = $builder->remote_files( $data_config->{to}, $fqdn );
             my @skip = $builder->remote_skip();
             foreach my $to_fetch ( sort keys(%tg) ) {
-                print "Writing remote file $to_fetch as $data_config->{from}/$fqdn/$tg{$to_fetch}\n";
+                print "Writing remote file $to_fetch as $data_dir/$tg{$to_fetch}\n";
 
                 # XXX deal with connection drops
                 ($ssh) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $ssh;
                 my $num_copied = $ssh->rget(
                     $to_fetch,
-                    "$data_config->{from}/$fqdn/$tg{$to_fetch}",
+                    "$data_dir/$tg{$to_fetch}",
 
                     # These are directories, and a recipe can have something in one
                     # that is meant to stay on the machine it was made on -- see
@@ -866,7 +842,7 @@ sub handle_domain {
     # existed has no data of its own yet, and rsync fails rather than shrugging
     # when the source directory is not there -- which fails the data target, and
     # takes the rest of the Makefile with it before any other recipe has run.
-    $hv->sync_dir("$data_config->{from}/$fqdn");
+    $hv->sync_dir($data_dir);
 
     print "Done.\n";
     return 0;

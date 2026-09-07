@@ -9,8 +9,15 @@ use warnings FATAL => 'all';
 use re '/aa';
 
 use Clone qw{clone};
+use Cwd();
 use File::Basename();
+use File::Find();
+use File::Slurper();
 use File::Temp();
+use Hash::Merge();
+use YAML::XS();
+
+use Trog::Config();
 
 =head1 NAME
 
@@ -313,6 +320,143 @@ sub placeholders_in {
     return ($path) if defined $config && !$ref && $config eq $class->PLACEHOLDER;
     return ();
 }
+
+# Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
+# behaviour, so the functional interface means one thing inside that script and
+# the default anywhere else.  This is the one the merged configuration has
+# always had -- where two of these disagree, the more general one wins.
+sub _merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
+
+=head2 configuration($path)
+
+The recipe configuration an installation is running on: F<recipes.yaml> with
+every F<recipes.d/*.yaml> beside it merged into it, keyed by domain.  C<$path>
+defaults to the F<recipes.yaml> in L<Trog::Config>'s directory, and an absent
+one is an empty configuration rather than an error.
+
+A domain's own file adds to what the main file says rather than overruling it:
+a key both of them carry keeps the value F<recipes.yaml> gave it.  C<_base> and
+C<_shared> are dropped from the per-domain files outright, since what every
+guest gets is not something one guest gets to say.
+
+Read once per file and remembered, on the grounds that nobody edits the
+configuration underneath a command that is already running on it.
+
+=cut
+
+# Keyed by resolved path: a run that reads two installations gets two answers,
+# and one that reads the same file twice does the work once.
+my %CONFIGURATION;
+
+sub configuration {
+    my ( $class, $path ) = @_;
+    $path //= Trog::Config->path('recipes.yaml');
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    return {} unless -f $path;
+
+    my $key = Cwd::abs_path($path);
+    return $CONFIGURATION{$key} if $CONFIGURATION{$key};
+
+    my $conf = YAML::XS::Load( File::Slurper::read_binary($path) );
+
+    my $merger = _merger();
+    my $extra  = File::Basename::dirname($key) . '/recipes.d';
+    File::Find::find(
+        {
+            wanted => sub {
+                my $file = $_;
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+                return unless -f $file && $file =~ m/\.yaml$/;
+
+                my $domain = YAML::XS::Load( File::Slurper::read_binary($file) );
+                delete $domain->{$_} for qw{_base _shared};
+
+                $conf = $merger->merge( $conf, $domain );
+            },
+            no_chdir => 1,
+            bydepth  => 1,
+        },
+        $extra
+    ) if -d $extra;
+
+    return $CONFIGURATION{$key} = $conf;
+}
+
+=head2 domain_config($domain, $conf)
+
+Everything one domain is configured with: its own entry with the C<_base> entry
+folded into it, which is what a recipe's options are read out of.  With no
+domain, C<_base> alone -- what a domain gets when it says nothing itself.
+
+C<$conf> is a configuration to work from, defaulting to C<configuration()>.  A
+caller that has already done something to one -- resolved the C<secret:>
+references in it, say -- passes it, so that work is not thrown away and the two
+of you cannot end up merging the same file differently.  What comes back is a
+copy, so fold it, delete out of it, hand it to a recipe.
+
+C<_global> is not part of it.  It says what the guest is rather than what a
+recipe takes, and the two halves of it combine the other way round: the
+domain's own wins there, where C<_base> wins here.
+
+=cut
+
+sub domain_config {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my $base = clone( $conf->{_base}                                 // {} );
+    my $own  = clone( ( defined $domain ? $conf->{$domain} : undef ) // {} );
+    delete $base->{_global};
+    delete $own->{_global};
+
+    return _merger()->merge( $base, $own );
+}
+
+=head2 data_config($domain, $conf)
+
+What the C<data> recipe is configured with for a domain: C<from>, the directory
+on the machine doing the provisioning, and C<to>, where it lands on the guest.
+
+Undef when the configuration does not say, which is fatal to a provision and
+merely nothing to do for anything cleaning up after one.
+
+=cut
+
+sub data_config {
+    my ( $class, $domain, $conf ) = @_;
+    return $class->domain_config( $domain, $conf )->{data};
+}
+
+=head2 data_dir($domain, $conf)
+
+The domain's own directory under the data source.  C<bin/new_config> makes the
+recipes' datadirs in it, writes whatever it fetched off the last guest into it,
+and ships it to the hypervisor for the guest to pull its payload out of; the
+teardown in the provisioning-recipes skill is what takes it away again.
+
+Undef when nothing says where the data source is.
+
+=cut
+
+sub data_dir {
+    my ( $class, $domain, $conf ) = @_;
+    return undef unless defined $domain && length $domain;
+
+    my $from = ( $class->data_config( $domain, $conf ) // {} )->{from};
+    return undef unless defined $from && length $from;
+
+    return "$from/$domain";
+}
+
+=head2 forget()
+
+Drop what C<configuration> remembers.  For a test that writes a configuration,
+reads it, and writes it again.
+
+=cut
+
+sub forget { %CONFIGURATION = (); return 1 }
 
 =head1 SEE ALSO
 

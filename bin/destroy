@@ -222,7 +222,7 @@ sub purge_domain_dir {
         File::Path::remove_tree($dir);
 
         # A remote HV holds a copy of the whole domain dir for the guest to pull.
-        $hv->run( qw{rm -rf}, $dir ) unless $hv->is_local;
+        $hv->remove_tree($dir) unless $hv->is_local;
     }
     return;
 }

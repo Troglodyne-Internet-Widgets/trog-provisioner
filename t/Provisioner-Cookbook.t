@@ -20,7 +20,141 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
+use File::Temp();
+use File::Slurper::Temp();
+
 use Provisioner::Cookbook();
+
+subtest 'configuration() reads recipes.yaml and the recipes.d beside it' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", <<'YAML' );
+_base:
+    data:
+        from: /opt/data
+        to: /opt/domains
+_shared:
+    one.test:
+        - two.test
+one.test:
+    ntp:
+    mariadb:
+        version: '10.11'
+YAML
+
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.d/two.test.yaml", <<'YAML' );
+_base:
+    data:
+        from: /somewhere/else
+_shared: {}
+two.test:
+    ntp:
+YAML
+
+    Provisioner::Cookbook->forget();
+    my $conf = Provisioner::Cookbook->configuration("$dir/recipes.yaml");
+
+    is( $conf->{_base}{data}{from}, '/opt/data', 'the base survives a domain file that also names one' );
+    is_deeply( $conf->{_shared}{'one.test'}, ['two.test'], 'and so does _shared' );
+    ok( exists $conf->{'one.test'}, 'the domain in recipes.yaml is there' );
+    ok( exists $conf->{'two.test'}, 'and the one in recipes.d' );
+    is( $conf->{'one.test'}{mariadb}{version}, '10.11', 'with what it was configured with' );
+
+    is_deeply( Provisioner::Cookbook->configuration("$dir/nosuch.yaml"), {}, 'a configuration that is not there is empty, not fatal' );
+};
+
+subtest 'a domain file adds to recipes.yaml rather than overruling it' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "one.test:\n    ntp:\n        pool: base.pool\n" );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.d/one.test.yaml", "one.test:\n    ntp:\n        pool: domain.pool\n        iburst: 1\n" );
+
+    Provisioner::Cookbook->forget();
+    my $conf = Provisioner::Cookbook->configuration("$dir/recipes.yaml");
+
+    is( $conf->{'one.test'}{ntp}{pool},   'base.pool', 'the value both files carry is the one recipes.yaml gave it' );
+    is( $conf->{'one.test'}{ntp}{iburst}, 1,           'and what only the domain file says is added' );
+};
+
+subtest 'configuration() is read once and remembered' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "one.test:\n    ntp:\n" );
+
+    Provisioner::Cookbook->forget();
+    my $first = Provisioner::Cookbook->configuration("$dir/recipes.yaml");
+
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "two.test:\n    ntp:\n" );
+    is_deeply( Provisioner::Cookbook->configuration("$dir/recipes.yaml"), $first, 'the file is not re-read under a running command' );
+
+    Provisioner::Cookbook->forget();
+    ok( exists Provisioner::Cookbook->configuration("$dir/recipes.yaml")->{'two.test'}, 'and forget() makes it read again' );
+};
+
+subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
+    my $conf = {
+        _base => {
+            _global => { user => 'www-data' },
+            data    => { from => '/opt/data', to => '/opt/domains' },
+            ntp     => { pool => 'base.pool' },
+        },
+        'one.test' => {
+            _global => { user   => 'someone-else' },
+            ntp     => { iburst => 1 },
+            nginx   => {},
+        },
+    };
+
+    my $one = Provisioner::Cookbook->domain_config( 'one.test', $conf );
+
+    is( $one->{ntp}{pool},   'base.pool', 'what _base configures a recipe with reaches the domain' );
+    is( $one->{ntp}{iburst}, 1,           'and what the domain adds is kept' );
+    ok( exists $one->{nginx}, 'along with a recipe only the domain asks for' );
+    is( $one->{data}{from}, '/opt/data', 'and the data configuration comes with it' );
+
+    # _global merges the other way round -- the domain's own wins -- so it is
+    # not this method's to answer.
+    ok( !exists $one->{_global}, 'the global section is not part of it' );
+
+    is_deeply( $conf->{'one.test'}{ntp}, { iburst => 1 }, 'the configuration it was handed is not written into' );
+
+    is_deeply(
+        Provisioner::Cookbook->domain_config( undef, $conf )->{ntp}, { pool => 'base.pool' },
+        'with no domain it is what _base says, which is what a domain gets by default'
+    );
+    is_deeply(
+        Provisioner::Cookbook->domain_config( 'nosuch.test', $conf )->{ntp}, { pool => 'base.pool' },
+        'and a domain nothing configures gets the same'
+    );
+};
+
+subtest 'where _base and a domain disagree, _base wins' => sub {
+    my $conf = {
+        _base      => { ntp => { pool => 'base.pool' } },
+        'one.test' => { ntp => { pool => 'domain.pool' } },
+    };
+
+    is( Provisioner::Cookbook->domain_config( 'one.test', $conf )->{ntp}{pool}, 'base.pool', 'which is what a provision has always done with it' );
+};
+
+subtest 'the data source, and a domain inside it' => sub {
+    my $conf = {
+        _base       => { data => { from => '/opt/data', to => '/opt/domains' } },
+        'one.test'  => { ntp  => {} },
+        'own.test'  => { data => { to => '/srv' } },
+        'none.test' => { ntp  => {} },
+    };
+
+    is_deeply( Provisioner::Cookbook->data_config( undef, $conf ), { from => '/opt/data', to => '/opt/domains' }, 'what every domain gets' );
+    is( Provisioner::Cookbook->data_dir( 'one.test', $conf ), '/opt/data/one.test', 'and the directory one of them owns' );
+
+    # A domain may add to the data configuration; where it contradicts _base,
+    # domain_config's answer is the one a provision would use.
+    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{to}, '/opt/domains', 'a domain does not get to move the install dir out from under _base' );
+
+    is( Provisioner::Cookbook->data_dir( undef,      $conf ), undef, 'no domain, no directory' );
+    is( Provisioner::Cookbook->data_dir( 'one.test', {} ),    undef, 'and none when nothing says where the data source is' );
+    is( Provisioner::Cookbook->data_config( 'none.test', {} ), undef, 'which is undef rather than an error' );
+};
 
 subtest 'the shelf has the recipes on it' => sub {
     my @names = Provisioner::Cookbook->names();

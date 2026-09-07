@@ -6,6 +6,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
+use File::Basename();
 use File::Path();
 use File::Copy();
 use File::Temp();
@@ -336,6 +337,16 @@ defaulting to 0644, since C<tee> would otherwise leave it to root's umask.
 
 =item C<remove(@paths)>
 
+=item C<remove_tree(@paths)>
+
+A directory and everything under it.
+
+=item C<list_dir($path)>
+
+What is in a directory, as names with no path on them and no dotfiles among
+them.  Empty for a directory that is not there, the way C<glob> is: the callers
+are asking what is left somewhere, and nothing is a perfectly good answer.
+
 =item C<read_text($path)>
 
 =item C<write_text($path, $content, %opts)>
@@ -395,6 +406,25 @@ sub remove {
         return 1;
     }
     return $self->run( qw{rm -f}, @paths ) == 0;
+}
+
+sub remove_tree {
+    my ( $self, @paths ) = @_;
+    if ( $self->is_local ) {
+        File::Path::remove_tree(@paths);
+        return 1;
+    }
+    return $self->run( qw{rm -rf}, @paths ) == 0;
+}
+
+sub list_dir {
+    my ( $self, $path ) = @_;
+    return map { File::Basename::basename($_) } glob "$path/*" if $self->is_local;
+
+    # ls rather than a listing over the connection: sftp is not used here at
+    # all, and for the same reason -- see above.
+    my $listing = $self->capture("ls -1 $path 2>/dev/null") // '';
+    return grep { length } split( "\n", $listing );
 }
 
 sub read_text {

@@ -223,6 +223,12 @@ subtest 'local file helpers' => sub {
 
     $hv->remove("$dir/f");
     ok( !-f "$dir/f", 'remove' );
+
+    is_deeply( [ sort $hv->list_dir($dir) ],     ['a'], 'list_dir names what is in a directory' );
+    is_deeply( [ $hv->list_dir("$dir/nosuch") ], [],    'and says nothing about one that is not there' );
+
+    $hv->remove_tree("$dir/a");
+    ok( !-e "$dir/a", 'remove_tree takes the directory and what is under it' );
 };
 
 subtest 'append_line does not duplicate' => sub {
