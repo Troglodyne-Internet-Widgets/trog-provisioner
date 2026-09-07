@@ -23,7 +23,12 @@ mkdir -p [% install_dir %]/git.[% domain %]/repos [% install_dir %]/git.[% domai
 INSTALLED_VER=$$(/usr/local/bin/gogs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
 if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
 	ARCH=$$(dpkg --print-architecture); \
-	curl -fsSL "https://github.com/gogs/gogs/releases/download/v[% version %]/gogs_[% version %]_linux_$$ARCH.tar.gz" -o /tmp/gogs.tar.gz; \
+	rm -f /tmp/gogs.tar.gz; \
+	for NAME in "v[% version %]" "[% version %]"; do \
+		curl -fsSL "https://github.com/gogs/gogs/releases/download/v[% version %]/gogs_$${NAME}_linux_$${ARCH}.tar.gz" -o /tmp/gogs.tar.gz && break; \
+		rm -f /tmp/gogs.tar.gz; \
+	done; \
+	test -s /tmp/gogs.tar.gz || exit 1; \
 	tar -xzf /tmp/gogs.tar.gz -C /tmp; \
 	install -d /usr/local/lib/gogs; \
 	cp -a /tmp/gogs/. /usr/local/lib/gogs/; \

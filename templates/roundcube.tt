@@ -2,7 +2,12 @@ mkdir -p [% install_dir %]/webmail.[% domain %]
 mkdir -p [% install_dir %]/webmail.[% domain %]_data
 wget -O [% install_dir %]/webmail.[% domain %]/roundcube.tar.gz https://github.com/roundcube/roundcubemail/releases/download/[% version %]/roundcubemail-[% version %]-complete.tar.gz
 cd [% install_dir %]/webmail.[% domain %] && tar --strip-components=1 -zxvf roundcube.tar.gz
-install fpm.ini /etc/php/$(PHP_VER)/fpm/pool.d/roundcube-[% domain %].ini
+[%# php-fpm includes pool.d/*.conf and nothing else, so a pool called .ini was
+    read by nobody: no process ever ran for this domain, the socket the vhost
+    names was never created, and every request to webmail was a 502 that named
+    a missing file rather than a missing pool. -%]
+install -m 0644 fpm.ini /etc/php/$(PHP_VER)/fpm/pool.d/roundcube-[% domain %].conf
+rm -f /etc/php/$(PHP_VER)/fpm/pool.d/roundcube-[% domain %].ini
 install config.inc.php [% install_dir %]/webmail.[% domain %]/config/config.inc.php
 [% script_dir %]/queue_postrun_task systemctl restart php$(PHP_VER)-fpm
 [%# Contacts, identities and every per-user preference live in that one sqlite
@@ -10,15 +15,20 @@ install config.inc.php [% install_dir %]/webmail.[% domain %]/config/config.inc.
     salvaged one back before roundcube is served.  Ahead of the initialization
     below, which is otherwise what would be sitting in the destination by the
     time this ran, and restore_state declines in front of content. -%]
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/roundcube' '[% install_dir %]/webmail.[% domain %]_data' www-data:www-data
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/roundcube' '[% install_dir %]/webmail.[% domain %]_data' [% user %]:www-data
 [%# Roundcube will not create its own schema, so a guest with no previous one
     needs this.  A guest that has just had one restored does not: sqlite3 stops
     on the first table it is told to create twice, and the whole point of the
     restore was that this database already has tables in it. -%]
 # Initialize the roundcube database, because autocreate is beyond them
 test -s [% install_dir %]/webmail.[% domain %]_data/roundcube.db || sqlite3 [% install_dir %]/webmail.[% domain %]_data/roundcube.db < [% install_dir %]/webmail.[% domain %]/SQL/sqlite.initial.sql
-chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]_data
-chown -R www-data:www-data [% install_dir %]/webmail.[% domain %]
+[%# The pool runs as the service user for this domain, not as www-data, so
+    www-data owning the tree left php-fpm unable to write the database, its
+    journal, or the logs and temp directories roundcube keeps under the docroot
+    -- an install that comes up and then cannot record a thing.  www-data is
+    the group instead, which is all nginx needs to serve the static files. -%]
+chown -R [% user %]:www-data [% install_dir %]/webmail.[% domain %]_data
+chown -R [% user %]:www-data [% install_dir %]/webmail.[% domain %]
 # Setup the vhost
 mkdir -p /etc/nginx/sites-enabled; /bin/true
 mv webmail_nginx.conf /etc/nginx/sites-enabled/webmail.[% domain %].conf

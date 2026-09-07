@@ -49,6 +49,17 @@ like($ini, qr/^MODE\s*=\s*console/m, 'gogs logs to the console as well as its ow
 
 ok(-s '[% install_dir %]/git.[% domain %]/data/gogs.db', 'the sqlite database was created');
 
+# The release asset is not named after the version alone.  gogs started
+# spelling it gogs_v0.14.2_linux_amd64.tar.gz at 0.14.2, so the URL built from
+# the bare version 404s from that release on -- curl wrote nothing, tar had
+# nothing to open and the whole target died before any of this ran.  Asking the
+# binary its version covers both halves: that one was fetched at all, and that
+# it is the one this domain asked for.
+my $reported = `/usr/local/bin/gogs --version 2>&1`;
+chomp $reported;
+like($reported, qr/\b\Q[% version %]\E\b/, 'the installed gogs is the version configured')
+    or diag $reported;
+
 # The git service the last guest was carrying, put where gogs reads it.
 # new_config fetches git.[% domain %] into the domain directory -- every
 # repository, the issue database, the users -- and nothing ever moved it back

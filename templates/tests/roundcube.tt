@@ -18,14 +18,26 @@ my $status = `systemctl is-active nginx 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'and nginx is running');
 
-# php-fpm is what serves it, through the socket the vhost names.
-my $pool = `ls /etc/php/*/fpm/pool.d/roundcube-[% domain %].ini 2>/dev/null`;
-ok($pool, 'the php-fpm pool for this domain is installed') or diag $pool;
+# php-fpm is what serves it, through the socket the vhost names.  The pool has
+# to be a .conf: php-fpm.conf includes pool.d/*.conf and nothing else, so this
+# was installed as a .ini, read by nobody, and no process ever ran for the
+# domain -- while a test that only asked whether the file was there passed.
+my $pool = `ls /etc/php/*/fpm/pool.d/roundcube-[% domain %].conf 2>/dev/null`;
+ok($pool, 'the php-fpm pool for this domain is installed where php-fpm includes it') or diag $pool;
+ok(!glob('/etc/php/*/fpm/pool.d/roundcube-[% domain %].ini'),
+    'and not under an extension php-fpm never reads');
 
 # An empty user in a pool file is one php-fpm refuses to start on.
-my $conf = `cat /etc/php/*/fpm/pool.d/roundcube-[% domain %].ini 2>/dev/null`;
+my $conf = `cat /etc/php/*/fpm/pool.d/roundcube-[% domain %].conf 2>/dev/null`;
 like($conf, qr/^user\s*=\s*\S+/m,  'the pool names a user');
 like($conf, qr/^group\s*=\s*\S+/m, 'and a group');
+
+# Which is only worth anything if php-fpm went on to make the socket.  Without
+# the pool loaded there is no socket, and nginx answers every request to
+# webmail with a 502 naming a missing file rather than a missing pool.
+my $sock = '/var/run/roundcube-[% domain %].sock';
+ok(-S $sock, 'php-fpm created the socket the vhost proxies to')
+    or diag `ls -l /var/run/roundcube-* /run/php/ 2>&1`;
 
 # The database has to be where the DSN says it is, because that is the only
 # place roundcube will look for it, and it is where the salvaged one is put
@@ -41,6 +53,26 @@ ok(-s $db, 'and there is a database there');
 my $tables = `sqlite3 '$db' "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('users','contacts','identities')" 2>&1` // '';
 chomp $tables;
 is($tables, '3', 'and roundcube tables in it') or diag $tables;
+
+# The pool runs as the domain's own user, and roundcube writes: the sqlite
+# database and its journal, the session and attachment temp files, and its own
+# log.  www-data owned all of it, so every one of those was refused -- an
+# install that comes up and cannot record anything.
+my ($pool_user) = $conf =~ m/^user\s*=\s*(\S+)/m;
+$pool_user //= '';
+foreach my $path ($db, '[% install_dir %]/webmail.[% domain %]_data',
+    '[% install_dir %]/webmail.[% domain %]/temp', '[% install_dir %]/webmail.[% domain %]/logs') {
+    my $writable = $pool_user ? `runuser -u $pool_user -- test -w '$path' && echo yes` : '';
+    like($writable, qr/yes/, "$pool_user, which the pool runs as, can write $path")
+        or diag `ls -ld '$path'`;
+}
+
+# And nginx gets an answer out of it.  A 502 here is the pool not being loaded;
+# anything else means php ran.
+my $code = `curl -sk -o /dev/null -w '%{http_code}' -H 'Host: webmail.[% domain %]' https://127.0.0.1/ 2>/dev/null`;
+chomp $code;
+like($code, qr/^(?:200|30[0-9])$/, 'roundcube answers a request through nginx')
+    or diag "HTTP $code from the webmail vhost";
 
 # restore_state removes the salvage once it has put it back, so one still lying
 # in the domain directory means it declined.  That is correct against a guest
