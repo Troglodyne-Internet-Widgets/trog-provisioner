@@ -204,6 +204,12 @@ sub args {
                     properties => {
                         password => { type => 'string' },
                         gecos    => { type => 'string' },
+
+                        # The mailboxes doveadm makes for this account beyond
+                        # INBOX.  It has been in the SYNOPSIS and read by the
+                        # template since either existed, and was the one thing
+                        # under `names` nothing declared.
+                        mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
                     },
                 },
             },

@@ -133,4 +133,19 @@ SKIP: {
     is($owner, '[% name %]@[% domain %]', '[% name %]@[% domain %] owns its own address') or diag $owner;
 }
 [% END %]
+# The mailboxes the recipe asked doveadm to make.  doveadm looks an account up
+# in the passwd-file userdb, which is keyed on the full address, so the bare
+# local part the fragment used to pass was a user dovecot had never heard of:
+# "doveadm(bob): Error: User does not exist", exit 67, and the mail target died
+# there with every test below it unrun.
+[% FOR name IN names.keys().sort() %]
+[% IF names.$name.mailboxes.size() %]
+{
+    my $boxes = `doveadm mailbox list -u '[% name %]\@[% domain %]' 2>&1`;
+[% FOR box IN names.$name.mailboxes %]
+    like($boxes, qr/^\Q[% box %]\E$/m, '[% name %] has the mailbox [% box %]') or diag $boxes;
+[% END %]
+}
+[% END %]
+[% END %]
 done_testing();
