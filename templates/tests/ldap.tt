@@ -85,7 +85,13 @@ like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $gr
 # started after the change, so a slapd restarted before joining the group is one
 # that still cannot read the key -- the same error 80, from a process whose
 # account has the right group and whose process does not.
-my ($pid) = `systemctl show -p MainPID --value slapd 2>/dev/null` =~ m/(\d+)/;
+# The process table, not systemd.  slapd has no native unit here: what runs it
+# is /etc/init.d/slapd through systemd-sysv-generator, and a generated unit
+# never learns a MainPID -- `systemctl show -p MainPID --value slapd` answers 0
+# on a slapd that is plainly running and serving.  Asked that way this block
+# skipped itself on every guest it has ever been run on, which is the one thing
+# an assertion must not do quietly.
+my ($pid) = `pgrep -x slapd 2>/dev/null` =~ m/(\d+)/;
 SKIP: {
     skip 'slapd is not running', 1 unless $pid;
     my $procgroups = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
@@ -140,6 +146,14 @@ sub unwrapped {
 my $exported = unwrapped("$export_dir/data.ldif");
 like($exported, qr/^dn:\s*\Q[% base_dn %]\E$/mi, 'the data export is this domain and not an empty database');
 
+# What the seed put there, rather than what the package did.  The base entry
+# above is dpkg-reconfigure's work out of the debconf answers and is present
+# whether the seed ran, failed or was never called -- so it says nothing about
+# the seed.  These three are the seed's alone.
+foreach my $rdn ('ou=People', 'ou=Groups', 'cn=ldapusers,ou=Groups') {
+    like($exported, qr/^dn:\s*\Q$rdn,[% base_dn %]\E$/mi, "the seed made $rdn");
+}
+
 [% FOR u IN users %]
 like($exported, qr/^dn:\s*uid=\Q[% u.name %]\E,ou=People/mi, 'the export caught [% u.name %]');
 [% END %]
@@ -164,6 +178,15 @@ like($export_cron, qr{^\S+ \S+ \S+ \S+ \S+ +root +/usr/local/sbin/ldap-export\.s
 sub dns_of {
     my ($body) = @_;
     my @dns;
+
+    # Unwrapped here rather than by the caller.  slapcat's output is LDIF as
+    # much as the file it wrote is, so it wraps at the same 78 columns and
+    # continues with the same leading space -- and only the file side was ever
+    # being joined back up, so a DN long enough to wrap came off the live
+    # directory truncated at the fold and matched nothing on the other side.
+    # Both sides come through here, so this is where the join belongs.
+    $body =~ s/\n //g;
+
     foreach my $line (split m/\n/, $body) {
         push @dns, $1                if $line =~ m/^dn:\s+(.*)$/;
         push @dns, decode_base64($1) if $line =~ m/^dn::\s+(.*)$/;
@@ -178,11 +201,16 @@ SKIP: {
     skip 'this guest had nothing salvaged to reload, so it seeded its directory instead', 1
         unless -s $reloaded;
 
-    my %live = map { $_ => 1 } dns_of(`slapcat -F /etc/ldap/slapd.d -b '[% base_dn %]' 2>/dev/null`);
-    my @lost = grep { !$live{$_} } dns_of(unwrapped($reloaded));
+    # 2>&1 and not 2>/dev/null.  What this compares is the whole of one side
+    # against the whole of the other, so a slapcat that stopped partway through
+    # looks exactly like a directory that lost the entries it stopped before --
+    # and the sentence saying which it was is the one being discarded.
+    my $live_ldif = `slapcat -F /etc/ldap/slapd.d -b '[% base_dn %]' 2>&1`;
+    my %live      = map { $_ => 1 } dns_of($live_ldif);
+    my @lost      = grep { !$live{$_} } dns_of(unwrapped($reloaded));
 
     is(scalar @lost, 0, 'every entry the previous guest had is in the directory this one serves')
-        or diag "missing: " . join(', ', splice(@lost, 0, 10));
+        or diag "missing: " . join(', ', splice(@lost, 0, 10)) . "\nslapcat said:\n$live_ldif";
 }
 
 done_testing();

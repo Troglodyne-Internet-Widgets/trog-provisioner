@@ -123,6 +123,21 @@ sub enrich {
     ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
     $opts{ldap_domain} =~ tr/,/./;
 
+    # The dc the base entry names, taken from the base DN rather than from the
+    # domain.  The seed used to work it out itself with domain.split('.'), and
+    # split's argument is a pattern there as much as it is in perl -- so '.'
+    # matched every character, the entry went out with an empty dc, and slapd
+    # refused it:
+    #   ldap_add: Naming violation (64)
+    #     value of single-valued naming attribute 'dc' conflicts with value
+    #     present in entry
+    # which ldapadd -c stepped over and nothing has ever noticed, because the
+    # entry it could not add is one dpkg-reconfigure has always made already.
+    # Off base_dn and not the domain because an operator who sets base_dn is
+    # naming a tree the hostname does not describe, and the dc has to be the
+    # first component of the DN the entry is filed under either way.
+    ( $opts{base_dc} ) = $opts{base_dn} =~ m/\Adc=([^,]+)/;
+
     return %opts;
 }
 
