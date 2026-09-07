@@ -1,12 +1,20 @@
--- set root password
-UPDATE mysql.user SET Password=PASSWORD([% root_pw %]) WHERE User='root';
--- delete anonymous users
-DELETE FROM mysql.user WHERE User='';
--- delete remote root capabilities
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
--- drop database 'test'
+-- Run once, as root over the unix socket, after the package has installed.
+--
+-- Both auth methods, deliberately: unix_socket is how root connects from this
+-- machine -- the backup cron, the schema load, everything the provisioner runs
+-- -- and losing it would lock all of that out.  The password is for whatever
+-- authenticates as root without being root.
+--
+-- mark_raw because this is SQL and Xslate escapes for HTML; the quoting and
+-- backslash escaping a single-quoted literal needs is done in enrich.
+ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket OR mysql_native_password USING PASSWORD('[% root_pw_sql | mark_raw %]');
+
+-- Anonymous users, and root anywhere but here.
+DELETE FROM mysql.global_priv WHERE User='';
+DELETE FROM mysql.global_priv WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+
+-- The test database, and any lingering grants on it.
 DROP DATABASE IF EXISTS test;
--- also make sure there are lingering permissions to it
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
--- make changes immediately
+
 FLUSH PRIVILEGES;

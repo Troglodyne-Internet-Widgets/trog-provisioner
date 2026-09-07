@@ -1,0 +1,25 @@
+# Client credentials with full access to the database, for root and the admin.
+#
+# Every section a client might read, and each one naming the socket: --defaults-file
+# replaces the defaults rather than adding to them, so a file used that way has
+# to carry everything the client needs to connect.  Recipes outside this
+# repository point --defaults-file here.
+[client]
+socket = /run/mysqld/mysqld.sock
+user = root
+password = "[% root_pw_cnf | mark_raw %]"
+
+[mysqlcheck]
+socket = /run/mysqld/mysqld.sock
+user = root
+password = "[% root_pw_cnf | mark_raw %]"
+
+[mariadb-dump]
+socket = /run/mysqld/mysqld.sock
+user = root
+password = "[% root_pw_cnf | mark_raw %]"
+
+[mariabackup]
+socket = /run/mysqld/mysqld.sock
+user = root
+password = "[% root_pw_cnf | mark_raw %]"

@@ -1,0 +1,26 @@
+# The provisioner's half of mariadb's configuration, as a drop-in the packaged
+# server already reads.  The datadir, socket and basedir are the package's and
+# are deliberately not named here.
+[mariadbd]
+# Local only.  Anything that needs the database reaches it over the socket.
+skip_networking = 1
+
+# Off in the packaging, and the reason this recipe pins an exact version:
+# binlogs restore only onto the version that wrote them.
+log_bin = /var/log/mysql/maria_binlog
+
+max_allowed_packet = 256M
+sql_mode = ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+local-infile = 0
+max_delayed_threads = 0
+character-set-client-handshake = FALSE
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+symbolic-links = 0
+
+general_log = 1
+general_log_file = /var/log/mysql/query.log
+
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow-query.log
+long_query_time = 30

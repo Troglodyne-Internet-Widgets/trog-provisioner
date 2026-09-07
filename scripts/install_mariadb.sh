@@ -1,77 +1,128 @@
 #!/bin/bash
 
-# HA HA HA you think you can use packaged software for your DB.
-# You would be wrong, as binlogs can only be restored on *the exact same version*.
-# Welcome to hell.
+# MariaDB, at exactly the version asked for, from MariaDB's own apt repository.
+#
+# Usage: install_mariadb.sh VERSION CONFIG SECURE_SQL SCHEMA
+#
+# CONFIG and SECURE_SQL are rendered by the recipe into the build directory and
+# named relative to it, which is where the makefile runs this from.  SCHEMA is
+# the dump, absolute, out of the domain's data directory.
+#
+# The exact version is the requirement, not a preference: binlogs restore only
+# onto the version that wrote them, so "whatever the distribution ships" is not
+# an option for a database this fleet expects to restore.
+#
+# A per-release repository exists only for the distributions that existed when
+# that release was made -- 11.4.4 and 10.11.10 have noble, 10.11.7 does not --
+# so this asks before it commits.
+set -euo pipefail
 
-CLIENT=$1
-VERSION=$2
-SCHEMA=$3
+# Not VERSION: /etc/os-release defines that, and NAME and ID besides.  Anything
+# reading it has to keep its own names out of the way, which is also why the
+# codename below is read in a subshell.
+MARIADB_VERSION=$1
+CONFIG=$2
+SECURE_SQL=$3
+SCHEMA=$4
 
-# An empty argument is no argument at all once the shell has split the command
-# line, so a template variable that rendered empty silently shifted these along
-# -- $CLIENT held the version, $VERSION held the path to the dump, and the
-# download asked archive.mariadb.org for a URL with a filesystem path in the
-# middle of it.  Say so instead.
-for arg in CLIENT VERSION SCHEMA; do
-    [ -n "${!arg}" ] || { echo "install_mariadb.sh: $arg is empty; refusing to guess" >&2; exit 2; }
+for arg in MARIADB_VERSION CONFIG SECURE_SQL SCHEMA; do
+    [ -n "${!arg:-}" ] || { echo "install_mariadb.sh: $arg is empty; refusing to guess" >&2; exit 2; }
 done
 
-wait_for_mysql() {
-    retry=30
-    ctr=0
-    until pgrep -F /opt/mysql/pidfile &> /dev/null
-    do
-        [ $ctr -eq $retry ] && echo "Server didn't come up within $retry seconds" && exit 1
-        echo "Waiting for mysql server to come live (try $ctr)..."
-        sleep 1
-        let "ctr+=1"
-    done
+CODENAME=$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")
+[ -n "$CODENAME" ] || { echo "install_mariadb.sh: no VERSION_CODENAME in /etc/os-release" >&2; exit 2; }
+
+REPO="https://archive.mariadb.org/mariadb-$MARIADB_VERSION/repo/ubuntu"
+
+installed_version() { dpkg-query -W -f='${Version}' mariadb-server 2>/dev/null || true; }
+
+add_repository() {
+    if ! curl -fsI "$REPO/dists/$CODENAME/Release" >/dev/null 2>&1; then
+        echo "install_mariadb.sh: mariadb $MARIADB_VERSION has no apt repository for $CODENAME." >&2
+        echo "  MariaDB publishes one per release per distribution, and only for the" >&2
+        echo "  distributions that existed when the release was made." >&2
+        echo "  $MARIADB_VERSION has: $(curl -fsSL "$REPO/dists/" 2>/dev/null | grep -oE 'href="[a-z]+/"' | sed 's/href="//;s|/"||' | tr '\n' ' ')" >&2
+        exit 3
+    fi
+
+    install -d -m 0755 /etc/apt/keyrings
+    curl -fsSL -o /etc/apt/keyrings/mariadb.pgp https://mariadb.org/mariadb_release_signing_key.pgp
+
+    # curl -f catches an HTTP error; it does not catch a proxy answering 200
+    # with a login page, which apt would report as a signature failure on every
+    # source it has.
+    gpg --show-keys /etc/apt/keyrings/mariadb.pgp >/dev/null 2>&1 \
+        || { echo "install_mariadb.sh: what came back from mariadb.org is not a PGP key" >&2; exit 3; }
+
+    cat > /etc/apt/sources.list.d/mariadb.sources <<EOF
+Types: deb
+URIs: $REPO
+Suites: $CODENAME
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/mariadb.pgp
+EOF
+
+    # Above 1000 is what lets apt *downgrade* to it.  Ubuntu ships 10.11.14, so
+    # a guest pinned to 10.11.10 would otherwise get the newer one and find out
+    # at restore time.
+    cat > /etc/apt/preferences.d/mariadb.pref <<'EOF'
+Package: *
+Pin: release o=MariaDB
+Pin-Priority: 1001
+EOF
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
+        mariadb-server mariadb-client mariadb-backup libmariadb-dev libmariadb-dev-compat
+
+    # A pin can be outvoted and a repository can hold a rebuild, so ask what is
+    # actually installed rather than assuming the transaction meant what we did.
+    local got
+    got=$(installed_version)
+    case "$got" in
+        *"$MARIADB_VERSION"*) echo "install_mariadb.sh: mariadb-server $got" ;;
+        *) echo "install_mariadb.sh: installed mariadb-server $got, wanted $MARIADB_VERSION" >&2; exit 4 ;;
+    esac
 }
 
-wait_for_no_mysql() {
-    retry=30
-    ctr=0
-    until ! pgrep -F /opt/mysql/pidfile &> /dev/null
-    do
-        [ $ctr -eq $retry ] && echo "Server didn't die within $retry seconds" && exit 1
-        echo "Waiting for mysql server to shutdown (try $ctr)..."
-        sleep 1
-        let "ctr+=1"
-    done
-}
+# Every provision runs this, and an apt transaction over the network is not free.
+case "$(installed_version)" in
+    *"$MARIADB_VERSION"*) echo "install_mariadb.sh: mariadb-server $MARIADB_VERSION is already installed" ;;
+    *) add_repository ;;
+esac
 
+# Before the server is restarted, so it comes up reading our settings -- the
+# schema below loads under the sql_mode and binlogging this configures rather
+# than under the package's defaults.
+install -m 0644 -o root -g root "$CONFIG" /etc/mysql/mariadb.conf.d/60-provisioner.cnf
 
-if [ ! -f /opt/mysql/bin/mariadbd ]; then
-    ln -s /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
-    mkdir -p /opt/mysql
-    # -f: without it curl saves the error page on a 404 and the only sign is
-    # tar saying "not in gzip format" several lines later.
-    curl -fso /tmp/mysql.tar.gz -- https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz \
-        || { echo "install_mariadb.sh: could not download mariadb $VERSION" >&2; exit 3; }
-    stat /tmp/mysql.tar.gz
-    stat /opt/mysql/
-    echo "curl -so /tmp/mysql.tar.gz -- https://archive.mariadb.org/mariadb-$VERSION/bintar-linux-systemd-x86_64/mariadb-$VERSION-linux-systemd-x86_64.tar.gz"
-    tar --strip-components=1 -C /opt/mysql/ -zxf /tmp/mysql.tar.gz
-    rm /tmp/mysql.tar.gz
+systemctl enable mariadb
+systemctl restart mariadb
 
-    # Time to make a datadir & launch this sucker
-    mkdir -p /opt/mysql/data
-    mkdir -p /opt/mysql/binlogs
-    mkdir -p /opt/mysql/logs
-    chown -R mysql:$CLIENT /opt/mysql
+# The socket, not a pidfile: it is what a client actually needs, and the pidfile
+# appears before the server answers.
+for _ in $(seq 30); do
+    mariadb -e 'SELECT 1' >/dev/null 2>&1 && break
+    echo "Waiting for mariadb to answer..."
+    sleep 1
+done
+mariadb -e 'SELECT 1' >/dev/null 2>&1 || { echo "install_mariadb.sh: mariadb never came up" >&2; exit 5; }
 
-    # Initialize the DB
-    /opt/mysql/scripts/mariadb-install-db --defaults-file=/opt/mysql/my.cnf
-    ln -s /opt/mysql/mariadb.service /usr/lib/systemd/system/mariadb.service
-    systemctl enable mariadb
-    systemctl start  mariadb
+# It holds the root password, so it goes whatever happens next -- including the
+# run where securing has already been done and it is never read.
+trap 'rm -f "$SECURE_SQL"' EXIT
 
-    wait_for_mysql
-
-    rm -rf /tmp/mysql/$CLIENT
+# Keyed on the SQL rather than merely "has this ever run", so that changing
+# root_pw re-runs it.  A bare marker would leave the database on the old
+# password while every .my.cnf this recipe writes claims the new one, and the
+# first thing to notice would be a backup that stopped working.
+SECURED=/etc/mysql/.secured
+WANT=$(sha256sum < "$SECURE_SQL" | cut -d' ' -f1)
+if [ "$(cat "$SECURED" 2>/dev/null || true)" != "$WANT" ]; then
+    mariadb < "$SECURE_SQL"
+    printf '%s\n' "$WANT" > "$SECURED"
+    chmod 0600 "$SECURED"
 fi
 
-# Install the schema for the client
-mysql --defaults-file=/opt/mariadb/my.cnf -- < $SCHEMA
-wait_for_mysql
+mariadb < "$SCHEMA"
