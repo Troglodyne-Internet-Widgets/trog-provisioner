@@ -34,6 +34,20 @@ foreach my $file (qw{ca.crt server.crt server.key dh.pem ta.key}) {
 }
 is(slurp('/etc/openvpn/server/ca.crt'), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the CA the server reads is the CA in the pki');
 
+# Modes, because this is the half of the round trip that only goes wrong on the
+# second provision.  A salvaged pki comes back through the data directory, which
+# chmods everything it lands 0750, and the normalisation that used to follow was
+# chmod u=rwX -- where X means "execute if somebody already has it", which after
+# that chmod is every file.  So a rebuilt guest kept its CA and made it 0700,
+# and the certificates copied on into the server directory went with it.
+foreach my $mode (qw{ca.crt dh.pem ta.key issued/server.crt private/ca.key private/server.key}) {
+    is((stat("/etc/openvpn/easy-rsa/pki/$mode"))[2] & 07777, 0600, "pki/$mode is 0600 however this guest was built");
+}
+is((stat('/etc/openvpn/easy-rsa/pki'))[2] & 07777, 0700, 'and the pki directory is 0700');
+foreach my $file (qw{ca.crt server.crt server.key dh.pem ta.key}) {
+    is((stat("/etc/openvpn/server/$file"))[2] & 07777, 0600, "the server copy of $file is 0600, not whatever cp carried over");
+}
+
 # The CA is named for the domain; EASYRSA_REQ_CN is how that is passed in batch
 # mode, where the answer used to be piped to a prompt.
 my $subject = `openssl x509 -noout -subject -in /etc/openvpn/easy-rsa/pki/ca.crt 2>/dev/null`;

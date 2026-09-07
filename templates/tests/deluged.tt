@@ -64,4 +64,16 @@ ok(!has_content('[% install_dir %]/[% domain %]/deluged/state')
     || has_content('/var/lib/deluged/config/state'),
     'nothing was salvaged and left unrestored beside an empty state directory');
 
+# Modes per type, not u=rwX: the data target lands a salvage 0750, X preserves
+# an execute bit somebody already has, and the state would come back executable
+# on a rebuild while looking right on a first build.
+my $state = '/var/lib/deluged/config/state';
+SKIP: {
+    skip 'no state directory yet', 2 unless -d $state;
+    my @wrong_dirs  = grep { ( (stat $_)[2] & 07777 ) != 0750 } grep { -d $_ } glob("$state $state/*");
+    my @wrong_files = grep { ( (stat $_)[2] & 07777 ) != 0640 } grep { -f $_ } glob("$state/*");
+    is_deeply(\@wrong_dirs,  [], 'every directory under the torrent state is 0750');
+    is_deeply(\@wrong_files, [], 'and every file in it is 0640, executable bits and all');
+}
+
 done_testing();

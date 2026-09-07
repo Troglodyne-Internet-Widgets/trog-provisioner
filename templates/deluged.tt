@@ -31,7 +31,14 @@ chown -R debian-deluged:debian-deluged /var/lib/deluged/config
 chown debian-deluged:[% admin_user %] /var/lib/deluged /var/lib/deluged/config
 chmod 0750 /var/lib/deluged /var/lib/deluged/config
 chown -R debian-deluged:[% admin_user %] /var/lib/deluged/config/state
-chmod -R u=rwX,g=rX,o= /var/lib/deluged/config/state
+[%# Spelled out per type rather than with u=rwX,g=rX.  A capital X sets execute
+    on a directory, or on anything that already has it -- and the data target
+    lands the whole domain directory 0750, so every restored file arrives with
+    the bit set and keeps it, and torrent state comes back executable.  A first
+    build never shows this, since what deluged writes itself has no execute bit
+    for X to preserve. -%]
+find /var/lib/deluged/config/state -type d -exec chmod 0750 {} +
+find /var/lib/deluged/config/state -type f -exec chmod 0640 {} +
 # Enable and queue service starts
 systemctl enable deluged
 systemctl enable deluge-web
