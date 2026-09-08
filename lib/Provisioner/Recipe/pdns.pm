@@ -28,7 +28,7 @@ The idea here is to allow simple DNS delegation of subdomains to provisioned mac
 
 Uses the sqlite backend.
 
-Appends arbitrary records (in plain text files, basically a zonefile fragment) specified as extra_records.  Relative to the datadir if not absolute path.
+Appends arbitrary records specified as extra_records: plain text files, each a zonefile fragment.  Relative to the datadir if not absolute path.
 
 Sets up the recursor in the event you want to point your resolver at it for fast resolves and to mitigate DNS rate-limiting by RBLs.
 

@@ -380,11 +380,8 @@ sub guest_ls {
     return 0;
 }
 
-# Single-user without anybody having to catch a five second window.
-#
-# The kernel command line lives in the guest's own grub.cfg, so `single` goes on
-# there and the next boot comes up in rescue mode.  Every menu entry gets it,
-# because which one the firmware picks is not ours to decide.
+# `single` goes onto every menu entry, because which one the firmware picks is
+# not ours to decide.
 sub single {
     my ( $hv, $domain ) = @_;
 

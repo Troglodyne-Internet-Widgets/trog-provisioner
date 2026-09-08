@@ -310,11 +310,6 @@ sub pool_path {
     my ($self) = @_;
     return $self->{pool_path} if defined $self->{pool_path};
 
-    # Where the pool actually is beats where we would have put one: we delete
-    # things out of this path, and a pool somebody made somewhere else is not a
-    # reason to be wrong about it.  The name and the default are historical --
-    # terraform chose both -- and are kept because that is where the volumes on
-    # a hypervisor built by the old tool actually live.
     return $self->{_pool_path} //= ( $self->pool_target('tf_disks') // '/opt/terraform/disks' );
 }
 

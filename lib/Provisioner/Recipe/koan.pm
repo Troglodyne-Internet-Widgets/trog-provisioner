@@ -358,10 +358,7 @@ sub enrich {
               if $opts{matrix_e2ee} && !$opts{matrix_device_id};
         }
 
-        # Auto-generate a pickle key if E2EE is on and none supplied.  This
-        # encrypts the local olm store on disk  losing it means losing the
-        # ability to decrypt past sessions, so the user can supply their
-        # own to keep it stable across re-deploys.
+        # Minted here when E2EE is on and none was given.
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {
             $opts{matrix_pickle_key} = join '',
               map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand(16) ] } 1 .. 64;

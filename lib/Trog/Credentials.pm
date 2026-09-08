@@ -117,8 +117,6 @@ sub prompt {
     local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
     my $answer = IO::Prompter::prompt( $message, -echo => '*' );
 
-    # Kept, so the next thing in this run that wants the same store is not asked
-    # again.  The usual caller pipes the answer in, and a pipe answers once.
     $class->remember( $name, "$answer" ) if defined $name;
 
     return $answer;

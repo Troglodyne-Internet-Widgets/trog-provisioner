@@ -23,7 +23,7 @@ In recipes.yaml:
 
 Sets up some fail2ban rules for your configured recipes.
 
-Currently very limited, only sets stuff up for tpsgi.
+Currently very limited: it configures a jail for tpsgi and nothing else.
 
 =cut
 

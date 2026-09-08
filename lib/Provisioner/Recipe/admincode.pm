@@ -33,7 +33,7 @@ Uses L<Pithub> as the backend so should work with gogs or any other server w/ co
 
 Does all of the clones read-only as the admin user, and then swaps out the origin for an r/w SSH origin.
 
-Idea here is to easily set up stuff for developers/agents by cloning the many repos they need.
+Idea here is to set a developer or agent up in one step by cloning the many repos they need.
 Setup your global git configuration via the skel mechanism in 'adminconfig'.
 
 In the event the repo has a Makefile.PL we will attempt to install its' CPAN deps if the perl target is enabled.

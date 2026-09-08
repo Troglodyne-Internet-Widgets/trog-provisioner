@@ -156,14 +156,6 @@ sub _latest_garage_version {
 sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # The shared secret every node in the cluster authenticates with.  Kept in
-    # the store and placed as a file rather than rendered into garage.toml: a
-    # default that mints a fresh one is a rotation, and the rest of the cluster
-    # stops talking to this node at the next provision.  garage reads it out of
-    # the path rpc_secret_file names, which is what garage.toml now carries.
-    #
-    # Outside the domain directory on purpose -- that is what the data recipe
-    # takes to the hypervisor and into every backup of it.
     return (
         '/etc/garage.rpc_secret' => {
             ref      => "secret:garage/$domain-rpc-secret/password",

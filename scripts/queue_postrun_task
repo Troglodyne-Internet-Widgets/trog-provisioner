@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Queue up stuff to get run by post_install once the makefile is done.
+# Queue up a command for post_install to run once the makefile is done.
 #
 # "$*" rather than $*: a task is one line, and unquoted it would be split and
 # glob-expanded on the way in.

@@ -168,11 +168,8 @@ sub deps {
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # postfix, opendkim and opendmarc each keep their configuration in one file
-    # with no conf.d, so two domains provisioned onto one guest cannot both
-    # configure them -- and with postconf the loser is not told.  configd gives
-    # each of those files a fragment directory, which is what the templates here
-    # write into.
+    # configd is what gives main.cf, master.cf, opendkim.conf and
+    # opendmarc.conf the fragment directories the templates here write into.
     return (
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
         $self->SUPER::required_recipes(%opts),

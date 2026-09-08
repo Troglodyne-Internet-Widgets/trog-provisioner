@@ -131,7 +131,7 @@ sub template_files {
     rmtree $dir;
     mkdir $dir;
 
-    # Only render things we actually need
+    # Only render the profiles this guest actually needs
     my %ret = (
         'ufw.rsyslog.tt' => 'ufw/rsyslog',
         'ufw.http.tt'    => 'ufw/http',

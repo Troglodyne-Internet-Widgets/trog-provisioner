@@ -138,10 +138,6 @@ sub args {
             # the build rather than quietly installing an older one.
             version => { type => 'string', default => '0.002' },
 
-            # Anything cpanm takes in place of a module name: a tarball on the
-            # guest, or a URL.  For a build that is not on CPAN yet, and for a
-            # guest that cannot reach CPAN.  What it installs is still held to
-            # C<version>.
             source => { type => 'string' },
         },
     );

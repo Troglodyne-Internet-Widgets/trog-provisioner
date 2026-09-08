@@ -42,7 +42,7 @@ them against a KeePass database.  C<apply> puts the answers back where the notes
 were.  C<write> makes a database, which is what a test harness wants and what
 nothing else should.
 
-=head2 The shape of a reference
+=head2 The syntax of a reference
 
 C<secret:GROUP/ENTRY/FIELD> -- a group in the database, an entry in that group,
 and a field on that entry, which is C<password> or C<username> in practice.

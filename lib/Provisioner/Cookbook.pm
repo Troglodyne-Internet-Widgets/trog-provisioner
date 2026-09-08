@@ -274,9 +274,9 @@ sub _scaffold_value {
 
     if ( $type eq 'object' ) {
 
-        # An object with a shape gets that shape; one that is just a bag of
-        # whatever (additionalProperties) has nothing to scaffold, so it is
-        # left out rather than guessed at.
+        # An object with declared properties gets scaffolded from them; one that
+        # is only additionalProperties has nothing to scaffold, so it is left
+        # out rather than guessed at.
         my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
         return ( undef, () ) unless %$sub;
         return ( $sub,  @todo );

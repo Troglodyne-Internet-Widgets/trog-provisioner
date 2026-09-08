@@ -1032,8 +1032,8 @@ sub refresh_salvage {
 
 # The newest mtime anywhere under each path, one number apiece.  The mtime of a
 # directory only moves when an entry is added or removed, so asking the
-# directories alone would miss a dump rewritten in place -- which is the usual
-# shape of the thing being watched for.
+# directories alone would miss a dump rewritten in place, which is the usual
+# case being watched for.
 #
 # Absent paths, and ones the probe cannot read, come back empty and compare
 # equal to each other, so a path that did not exist before or after is not a
@@ -1183,11 +1183,11 @@ sub _salvage_gap {
 #
 # Files rather than entries: rget makes the local directories on the way down
 # whether or not it can read what is inside them, so a tree of empty directories
-# is precisely the shape an unreadable fetch leaves behind.
+# is precisely what an unreadable fetch leaves behind.
 #
-# It stops at the first thing it finds instead of walking the tree, because one
+# It stops at the first file it finds instead of walking the tree, because one
 # file answers the whole question and some of what gets salvaged is very large.
-# Symlinks count as that thing and are not followed: one salvaged off a guest can
+# Symlinks count as a file and are not followed: one salvaged off a guest can
 # point anywhere, including back up the tree it is in.
 sub _dir_has_files {
     my ($dir) = @_;

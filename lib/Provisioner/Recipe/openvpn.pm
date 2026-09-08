@@ -159,7 +159,7 @@ sub enrich {
 sub _netmask_to_cidr {
     my ($mask) = @_;
 
-    # Guard the shape before inet_aton(), which would otherwise resolve a
+    # Guard the format before inet_aton(), which would otherwise resolve a
     # non-dotted-quad as a hostname.
     return 0 unless $mask && $mask =~ m{^\d{1,3}(?:\.\d{1,3}){3}$};
     my $packed = inet_aton($mask) or return 0;
@@ -192,11 +192,8 @@ sub restores {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # The staged copy of the PKI (CA, server cert/key, DH params, TLS auth
-        # key, client certs), rather than the pki itself: the fetch is sftp as
-        # the admin user with no sudo, and easy-rsa keeps the original where he
-        # cannot read a byte of it.  The fragment stages this one and restores
-        # what came down from it.
+        # The staged copy: CA, server cert and key, DH params, TLS auth key and
+        # the client certs.
         '/etc/openvpn/pki-salvage/' => 'openvpn/pki/',
     );
 }

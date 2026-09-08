@@ -614,10 +614,10 @@ service reads it somewhere else, the fragment has to put it there:
     [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns
 
 C<restore_state> declines when nothing was salvaged, when what was salvaged is
-empty -- the shape of a fetch that could not read the directory -- and when the
-destination already has state in it, which is what keeps re-provisioning a live
-guest from writing a partial copy over the real thing.  Call it before the
-service starts.
+empty -- which is what a fetch that could not read the directory leaves -- and
+when the destination already has state in it, which is what keeps
+re-provisioning a live guest from writing a partial copy over the real thing.
+Call it before the service starts.
 
 A recipe whose state already lives under C<install_dir/domain> needs none of
 this: the data target puts it back where it came from.  That is the reason to

@@ -426,11 +426,7 @@ sub seed {
 sub _guest_addresses {
     my ($hv) = @_;
 
-    # Not wrapped in an eval.  A hypervisor that cannot be reached is the one
-    # case where carrying on is worse than stopping: seeding half a fleet and
-    # then handing out addresses is exactly the stomping this exists to prevent,
-    # and swallowing the error is how a database ended up holding one row and
-    # calling itself seeded.
+    # Deliberately not wrapped in an eval; ensure_seeded says why.
     my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
     return () unless @names;
 
