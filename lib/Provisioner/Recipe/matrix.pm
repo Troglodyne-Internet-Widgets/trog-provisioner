@@ -190,8 +190,13 @@ sub args {
             smtp_domain                => { type => 'string' },
             require_transport_security => { type => 'boolean', default => 1 },
             ipv6                       => { type => 'boolean', default => 1 },
-            redis_host                 => { type => 'string',  default => '127.0.0.1' },
-            redis_port                 => { type => 'integer', minimum => 1024, default => 6379 },
+
+            # Synapse will not start until this is answered either way.  Off
+            # unless the domain says otherwise: opting a homeserver into
+            # reporting its usage is the operator's call, not this recipe's.
+            report_stats => { type => 'boolean', default => 0 },
+            redis_host   => { type => 'string',  default => '127.0.0.1' },
+            redis_port   => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
 }

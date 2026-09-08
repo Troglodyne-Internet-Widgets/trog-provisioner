@@ -173,7 +173,22 @@ sub have {
 
 Read the block.  C<$fh> defaults to standard input; pass one in tests.
 
-Nothing calls this for you.  See IT HAS TO BE ASKED FOR.
+B<This is what C<--credentials> is.>  C<bin/provision --credentials> and
+C<bin/new_config --credentials> call it once, before anything that could want a
+password, and nothing else does -- see IT HAS TO BE ASKED FOR.
+
+It is not a slower C<prompt>.  C<prompt> gets one credential at the moment
+something wants it, and on a pipe that means whichever line arrives next.  This
+takes several at once, each named, so the order they are asked for in does not
+matter -- which is the whole point for a run with no terminal that needs both
+the store passphrase and a sudo password and cannot know which will be wanted
+first.  That is what makes it worth piping a block rather than a bare password:
+
+    printf 'keepass: %s\nsudo: %s\n\n' "$STORE_PASS" "$SUDO_PASS" \
+        | bin/provision --credentials some.domain
+
+Everything it reads goes where C<prompt> looks first, so a password given here
+is one nothing asks about again.
 
 =cut
 

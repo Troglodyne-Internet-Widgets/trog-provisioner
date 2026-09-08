@@ -7,6 +7,14 @@
 server_name: "matrix.[% domain %]"
 pid_file: /var/run/matrix-synapse.pid
 
+# Synapse refuses to start until this is answered one way or the other, and says
+# so as a configuration error rather than anything about statistics:
+#   Please opt in or out of reporting homeserver usage statistics, by setting
+#   the `report_stats` key in your config file to either True or False.
+# Off unless the domain says otherwise, since opting a homeserver into reporting
+# is the operator's to decide rather than ours.
+report_stats: [% report_stats ? 'true' : 'false' %]
+
 public_baseurl: https://matrix.[% domain %]/
 
 listeners:

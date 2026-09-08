@@ -8,7 +8,18 @@ Type=simple
 User=matrix-synapse
 Group=matrix-synapse
 WorkingDirectory=/etc/matrix-synapse
-ExecStart=/usr/bin/python3 -m synapse.app.homeserver --config-path /etc/matrix-synapse/homeserver.yaml
+# The interpreter the package put synapse in, not the system one.  matrix-synapse-py3
+# ships into its own virtualenv, so /usr/bin/python3 has never been able to find it:
+#   /usr/bin/python3: Error while finding module specification for
+#   'synapse.app.homeserver' (ModuleNotFoundError: No module named 'synapse')
+# which is an exit 1 every five seconds behind a Restart=always, and a homeserver
+# that has never once come up.
+#
+# No ExecStartPre with --generate-keys, which is what the packaged unit does.  The
+# signing key is the federation identity of this server and comes out of the secret
+# store; letting synapse mint its own when it cannot find one is precisely the damage
+# the store is there to prevent, and the fragment fails loudly instead.
+ExecStart=/opt/venvs/matrix-synapse/bin/python -m synapse.app.homeserver --config-path /etc/matrix-synapse/homeserver.yaml
 Restart=always
 RestartSec=5
 

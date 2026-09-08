@@ -48,7 +48,7 @@ sub guest_that {
 
 sub refresh {
     my (@args) = @_;
-    return Trog::Provisioner::Config::Generator::refresh_salvage( '192.168.1.9', 'admin', '/nonexistent', 'mariadb', @args );
+    return Trog::Provisioner::Config::Generator::refresh_salvage( qw{192.168.1.9 admin /nonexistent mariadb}, @args );
 }
 
 subtest 'a refresh that worked says nothing' => sub {

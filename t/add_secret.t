@@ -45,7 +45,7 @@ sub add {
 subtest 'a secret that was not there' => sub {
     my $kdbx = store();
 
-    my $rc = add( '--secrets', $kdbx, '--group', 'troglodyne', '--title', 'easydns_token', '--', 'hunter2' );
+    my $rc = add( '--secrets', $kdbx, qw{--group troglodyne --title easydns_token -- hunter2} );
     is( $rc, 0, 'it reports success' );
 
     my %got = Trog::Secrets->read( $kdbx, 'throwaway', probe => 'secret:troglodyne/easydns_token/password' );
@@ -60,7 +60,7 @@ subtest 'a secret that was not there' => sub {
 subtest 'the field defaults to password, and username works too' => sub {
     my $kdbx = store();
 
-    is( add( '--secrets', $kdbx, '--group', 'troglodyne', '--title', 'tok', '--field', 'username', '--', 'someuser' ), 0, 'a username is stored' );
+    is( add( '--secrets', $kdbx, qw{--group troglodyne --title tok --field username -- someuser} ), 0, 'a username is stored' );
     my %got = Trog::Secrets->read( $kdbx, 'throwaway', probe => 'secret:troglodyne/tok/username' );
     is( $got{probe}, 'someuser', 'under the field it was given' );
 };
@@ -69,7 +69,7 @@ subtest 'a reference that already holds something is left alone' => sub {
     my $kdbx = store();
 
     # The same value is not a change, so it is not a failure either.
-    is( add( '--secrets', $kdbx, '--group', 'seed', '--title', 'entry', '--', 'already here' ), 0, 'storing what is already there is fine' );
+    is( add( '--secrets', $kdbx, qw{--group seed --title entry --}, 'already here' ), 0, 'storing what is already there is fine' );
 
     # A different one is refused rather than rotated: whatever authenticated
     # with the old secret stops working, and that is not a thing to do while
@@ -78,7 +78,7 @@ subtest 'a reference that already holds something is left alone' => sub {
     my @said;
     {
         local $SIG{__WARN__} = sub { push @said, @_ };
-        $rc = add( '--secrets', $kdbx, '--group', 'seed', '--title', 'entry', '--', 'something else' );
+        $rc = add( '--secrets', $kdbx, qw{--group seed --title entry --}, 'something else' );
     }
     isnt( $rc, 0, 'a different value is refused' );
     like( join( '', @said ), qr/will not replace it/, 'and says why' );
@@ -92,7 +92,7 @@ subtest 'a field the database does not keep is an error, not a success' => sub {
 
     # KeePass keeps password and username; anything else is dropped on save,
     # and a tool that reported success would have written nothing.
-    my $rc = eval { add( '--secrets', $kdbx, '--group', 'g', '--title', 't', '--field', 'notes', '--', 'value' ) };
+    my $rc = eval { add( '--secrets', $kdbx, qw{--group g --title t --field notes -- value} ) };
     is( $rc, undef, 'it dies rather than returning' );
     like( $@, qr/password or username/, 'naming the fields that are kept' ) or diag $@;
 };
