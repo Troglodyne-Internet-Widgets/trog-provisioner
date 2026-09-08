@@ -1243,9 +1243,9 @@ sub mongle_cloud_init {
     # here and is not copied anywhere else.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
-    my $us = Trog::Local->new();
-    $us->append_line( $us->authorized_keys, $pubkey )
-      or die "Could not authorize the key for $domain on " . $us->describe . "\n";
+    my $this_machine = Trog::Local->new();
+    $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
+      or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
 
     my $pkgs = _coerce_array( $config->param('packages') );
 

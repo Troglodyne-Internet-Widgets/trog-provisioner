@@ -383,22 +383,31 @@ sub handle_domain {
     # all three counts.  Nothing is copied to the hypervisor for the guest to
     # pull from; it comes to this machine for it.
     #
-    # Required rather than used at the top, the way Trog::HV is: it is a
-    # Trog::Machine, and that brings an SSH stack with it.
+    # Required rather than used at the top because Net::OpenSSH::More, which
+    # Trog::Machine loads, reads the filesystem from a BEGIN block --
+    # File::HomeDir looks for xdg-user-dir on the way in.  t/new_config.t loads
+    # this modulino under Test::MockFile in strict mode, where an unmocked stat
+    # is fatal, so a top-level use of anything descending from Trog::Machine
+    # stops the test loading at all.  Nothing here does work at load time; the
+    # dependency four levels down does.
     require Trog::Local;
 
-    my $us            = Trog::Local->new();
+    my $this_machine  = Trog::Local->new();
     my $tld_ip        = $hv->virbr_ip;
-    my $transfer_port = $global_conf->{transfer_port} // $us->sshd_port;
-    my $transfer_user = $global_conf->{transfer_user} // $us->transfer_user;
-    die "Could not work out the transfer user on " . $us->describe . "\n" unless $transfer_user;
+    my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
+    my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
+    die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
 
     # Which of our addresses is a question about how this machine is attached to
-    # the network the guest will be on, so it is asked rather than assumed --
+    # the networks the guest will be on, so it is asked rather than assumed --
     # and overridable, because a machine with several routes to the same place
     # is not something the kernel can pick between on our behalf.
-    my $transfer_ip = $global_conf->{transfer_ip} // $us->transfer_ip( $hv->virbr_ip );
-    die "Nothing on " . $us->describe . " can be reached from a guest on " . $hv->virbr_ip . ".\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to: put this machine on the hypervisor's guest network, or name the\n" . "address as transfer_ip in the [global] section of ipmap.cfg.\n"
+    #
+    # The guest's own address first, then the hypervisor's NAT bridge: we may
+    # share either with it, and sharing the static subnet is the case a
+    # workstation that is not itself a guest is in.
+    my $transfer_ip = $global_conf->{transfer_ip} // $this_machine->transfer_ip( $static_ip, $tld_ip );
+    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and neither $static_ip nor $tld_ip routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
       unless $transfer_ip;
 
     # The same fold as anything else asking what a domain is configured with,
@@ -995,10 +1004,9 @@ dies, before anything is fetched.
 # The guest a salvage talks to: the one about to be rebuilt, reached as the admin
 # user with the key this run has already written into the config directory.
 #
-# Trog::Guest is required rather than used at the top, the way Trog::HV is: it
-# brings an SSH stack with it, and a run whose recipes ask for nothing should not
-# pay for that -- nor should the tests, which mock the filesystem out from under
-# anything that reads one while loading.
+# Trog::Guest is required rather than used at the top for the reason given where
+# Trog::Local is: Net::OpenSSH::More stats the filesystem from a BEGIN block, and
+# t/new_config-salvage.t loads this under Test::MockFile.
 sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
