@@ -98,6 +98,19 @@ Then the mechanical ones:
 `perltidy` runs itself, if the hook is installed: `cp git-hooks/pre-commit
 .git/hooks/`.  Do that once, in any checkout you intend to commit from.
 
+## When something is slow
+
+**`perl-slop:profiling-perl`.**  Measure before you conclude, and measure again
+after you change something.  "It is just slow" is not a finding; a line number
+and a percentage is.
+
+That goes double for anything that looks like a timeout on a provision.  There
+are layers of them in play on a remote one, and a failure at a suspiciously
+round interval that does not move when you raise the setting is a failure fired
+by a different timeout than the one you are configuring -- so establish which
+one before concluding anything about the guest.  The `provisioning-recipes`
+skill has the ones that have caught us.
+
 ## Commits and pull requests
 
 Branch, never commit to `master`.
