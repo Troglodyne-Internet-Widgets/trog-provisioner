@@ -50,6 +50,20 @@ ended without one, this finds what it left:
 
     .claude/skills/provisioning-recipes/scripts/teardown --orphans --dryrun
 
+A guest is not the only thing a run leaves behind.  An agent given its own
+worktree gets a full checkout under `.claude/worktrees/`, and the harness only
+reaps one it finds unchanged -- so every fan-out that did any work leaves its
+checkouts there, ignored by git and under a dot directory nobody lists.  When
+both of these are true:
+
+    du -hs .claude/worktrees          # over 1G
+    df -h  .claude/worktrees          # 80% or worse
+
+invoke the `agent-worktrees` skill, which says what is safe to remove and what
+the lock file does and does not mean.  Do not sweep them by hand: an unpushed
+branch lives in one of those directories and nowhere else, and `git worktree
+remove --force` is exactly the flag for throwing it away.
+
 ## Finishing a changeset
 
 Before you commit, in this order:
