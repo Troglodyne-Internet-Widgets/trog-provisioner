@@ -25,13 +25,11 @@ id garage 2>/dev/null || useradd -r -d [% data_dir %] -s /usr/sbin/nologin garag
 # Create storage directories, and put back what was salvaged off the guest this
 # one replaces before anything is started that would write over it.
 mkdir -p '[% data_dir %]' '[% metadata_dir %]'
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/data' '[% data_dir %]'
 [%# The metadata comes back as a snapshot rather than as the database itself --
     see remote_files -- so it goes back the same way: the newest one salvaged
     becomes the database this node starts on.  Into db.lmdb, which is what
     garage opens, and only when there is not one there already: a guest with its
     own metadata keeps it, exactly as restore_state would have it. -%]
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/snapshots' '[% metadata_dir %]/snapshots'
 NEWEST=$$(ls -1dt '[% metadata_dir %]'/snapshots/*/ 2>/dev/null | head -1); \
 if [ -n "$$NEWEST" ] && [ ! -e '[% metadata_dir %]/db.lmdb' ]; then \
     cp -a "$$NEWEST" '[% metadata_dir %]/db.lmdb'; \

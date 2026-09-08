@@ -145,6 +145,18 @@ sub enrich {
 # /etc one is made, chowned, and never written to -- salvaging it fetched an
 # empty directory every run, and now that an empty salvage says so out loud it
 # would say so every run about a directory that is empty on purpose.
+sub restores {
+    my ( $self, %opts ) = @_;
+    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
+
+    # The ACME account is the identity the CA knows this guest by, and the certs
+    # are what a rebuild would otherwise ask for again -- into the rate limit.
+    return (
+        '/etc/dehydrated/accounts'          => { from => "$install_dir/$domain/.letsencrypt/accounts",          owner => "root:$admin" },
+        "/var/lib/dehydrated/certs/$domain" => { from => "$install_dir/$domain/.letsencrypt/var-certs/$domain", owner => "root:$admin" },
+    );
+}
+
 sub remote_files {
     return (
         '/var/lib/dehydrated/certs/' => '.letsencrypt/var-certs',

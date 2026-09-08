@@ -53,6 +53,23 @@ sub args {
             user => { type => 'string' },
             from => { type => "string" },
             to   => { type => "string" },
+
+            # Where each recipe's salvaged state goes back, keyed on the
+            # destination.  Nobody writes this by hand: it is what every recipe
+            # depending on this one handed over through its restores(), the way
+            # ufw is handed rate_limits.  See Provisioner::Recipe::restores.
+            restores => {
+                type                 => 'object',
+                additionalProperties => {
+                    type       => 'object',
+                    required   => [qw{from}],
+                    properties => {
+                        from  => { type => 'string' },
+                        owner => { type => 'string' },
+                        mode  => { type => 'string' },
+                    },
+                },
+            },
         },
     );
 }

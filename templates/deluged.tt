@@ -20,7 +20,6 @@ fi
     nesting the copy inside it.  A destination that already has torrents in it
     is a guest that is still running, and it keeps what it has. -%]
 mkdir -p /var/lib/deluged/config/state
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/deluged/state' /var/lib/deluged/config/state
 chown -R debian-deluged:debian-deluged /var/lib/deluged/config
 [%# And now open the path down to the state to the admin user, because the
     salvage that preserves it is an sftp session as that user with no sudo: a

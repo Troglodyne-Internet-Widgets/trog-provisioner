@@ -77,7 +77,12 @@ sub deps {
 }
 
 sub required_recipes {
-    return ( nginx => sub { () } );
+    my ( $self, %opts ) = @_;
+
+    # SUPER as well as our own: the base decides what a recipe owes ufw and
+    # data, and an override that drops it silently loses the restore of
+    # whatever this recipe salvages.
+    return ( nginx => sub { () }, $self->SUPER::required_recipes(%opts) );
 }
 
 # NOTE: FPM php.ini: /etc/php/8.3/fpm/php.ini
@@ -116,6 +121,19 @@ sub enrich {
     my ( $self, %opts ) = @_;
     $opts{'des_key'} = 'rcube-' . UUID::uuid();
     return %opts;
+}
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # user falls back to admin_user the way validate would, because
+    # required_recipes is asked before anything is validated.
+    my $user = $opts{user} // $opts{admin_user} // 'root';
+
+    # Contacts, identities and every per-user preference live in the one sqlite
+    # file, and the fragment declines to seed a schema over a restored one.
+    return ( "$install_dir/webmail.${domain}_data" => { from => "$install_dir/$domain/roundcube", owner => "$user:www-data" } );
 }
 
 sub remote_files {

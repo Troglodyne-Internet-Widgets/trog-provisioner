@@ -612,6 +612,14 @@ subtest 'a recipe that salvages state puts it back' => sub {
 
         my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
 
+        # Where a recipe says its salvage goes back, which data walks so the
+        # fragment does not have to.  redis and plexmediaserver still say it in
+        # their own fragments, because their destinations are owned by a service
+        # that is already running and the restore has to sit between a stop and
+        # a start.
+        my %restores = eval { $class->restores( install_dir => $install, domain => $domain, admin_user => 'admin' ) };
+        my $declared = join "\n", map { $_->{from} // q{} } values %restores;
+
         foreach my $source ( sort keys %salvaged ) {
             ( my $landed = $salvaged{$source} ) =~ s{/\z}{};
 
@@ -620,9 +628,9 @@ subtest 'a recipe that salvages state puts it back' => sub {
             next if index( $source, "$install/$domain" ) == 0;
 
             ok(
-                index( $fragments, "$install/$domain/$landed" ) >= 0,
+                index( $declared, "$install/$domain/$landed" ) >= 0 || index( $fragments, "$install/$domain/$landed" ) >= 0,
                 "$recipe: something puts $landed back"
-            ) or diag "$recipe salvages $source into $landed and no fragment names it again";
+            ) or diag "$recipe salvages $source into $landed, and neither its restores() nor its fragment names it again";
         }
     }
 };
@@ -1338,6 +1346,54 @@ subtest 'no firewall profile is named after something in /etc/services' => sub {
             ok( !$service{$section}, ( File::Basename::basename($tt) ) . ": [$section] is a name ufw will load" )
               or diag "ufw skips [$section]: also in /etc/services";
         }
+    }
+};
+
+subtest 'a recipe that says where its state goes back depends on the thing that puts it there' => sub {
+    my %opts = ( install_dir => '[% install_dir %]', domain => '[% domain %]', admin_user => 'admin' );
+
+    foreach my $recipe ( sort @available ) {
+        my $class = eval { Provisioner::Cookbook->load($recipe) } or next;
+
+        my %restores = eval { $class->restores(%opts) };
+        next unless %restores;
+
+        # The base hands data whatever restores() returned, the way it hands ufw
+        # whatever rate_limits() returned.  An override of required_recipes that
+        # does not chain to SUPER drops that silently -- six of them did, and the
+        # recipes it would have dropped were the stateful ones.
+        my %required = eval { $class->required_recipes(%opts) };
+        ok( $required{data}, "$recipe asks for data, so its restores reach it" )
+          or diag "$recipe declares restores() but its required_recipes does not mention data; does it chain to SUPER?";
+
+        # And every entry says where it is coming from, because that is the half
+        # nothing else can supply.
+        foreach my $to ( sort keys %restores ) {
+            ok( length( $restores{$to}{from} // q{} ), "$recipe: $to says what it is restored from" );
+        }
+    }
+};
+
+subtest 'nothing restores state from a fragment that data could do' => sub {
+
+    # data walks the map now.  The two that still call restore_state themselves
+    # are the ones whose destination is owned by a service cloud-init has already
+    # started, so the restore has to sit between a stop and a start inside their
+    # own target -- which is not something the data target can be in the middle
+    # of.  Anything else doing it by hand is a recipe that has not been moved
+    # over, and two mechanisms for one job is what this went to some trouble to
+    # stop being true.
+    my @allowed = qw{data redis plexmediaserver};
+
+    foreach my $tt ( sort glob("$template_dir/*.tt") ) {
+        my $name = File::Basename::basename( $tt, '.tt' );
+        $name =~ s/[.]global\z//;
+        next if grep { $_ eq $name } @allowed;
+
+        my $body = File::Slurper::read_text($tt);
+        $body =~ s/\[%#.*?%\]//gs;
+
+        unlike( $body, qr{/restore_state\b}, "$name leaves the restoring to data" );
     }
 };
 

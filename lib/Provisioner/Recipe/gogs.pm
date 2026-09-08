@@ -125,6 +125,11 @@ sub required_recipes {
                 },
             )
         },
+
+        # SUPER as well as our own: the base decides what a recipe owes ufw
+        # and data, and an override that drops it silently loses the restore
+        # of whatever this recipe salvages.
+        $self->SUPER::required_recipes(%opts),
     );
 }
 
@@ -169,6 +174,16 @@ sub template_files {
 
 sub datadirs {
     return qw{gogs};
+}
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # Every repository, the issue database and the users.  No owner: the account
+    # that ends up holding it is made by this recipe's own target, which runs
+    # after data, and the chown -R there covers the restored tree.
+    return ( "$install_dir/git.$domain" => { from => "$install_dir/$domain/gogs" } );
 }
 
 sub remote_files {

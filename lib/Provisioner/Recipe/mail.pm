@@ -326,6 +326,19 @@ sub datadirs {
     return ('.mail');
 }
 
+sub restores {
+    my ( $self, %opts ) = @_;
+    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
+
+    # Not the inverse of remote_files, which is why this is said rather than
+    # derived: the whole of /mail/keys comes down, and one directory out of it
+    # goes back somewhere else entirely.
+    return (
+        "/etc/opendkim/keys/$domain" => { from => "$install_dir/$domain/.mail/keys/$domain", owner => 'opendkim:opendkim' },
+        "/mail/$domain"              => { from => "$install_dir/$domain/mailnames",          owner => "dovecot:$admin" },
+    );
+}
+
 sub remote_files {
     my ( $class, $install_dir, $domain ) = @_;
     return (

@@ -13,7 +13,6 @@ id -u [% gogs_admin %] >/dev/null 2>&1 || useradd -r -s /bin/bash -d [% install_
 #
 # No owner argument: the chown -R below covers the restored tree, and a
 # repository store is not a thing to walk twice.
-[% script_dir %]/restore_state [% install_dir %]/[% domain %]/gogs [% install_dir %]/git.[% domain %]
 # Create data directories
 # Spelled out rather than brace-expanded: make runs recipe lines under /bin/sh,
 # which is dash here and does not expand braces.  It made one directory named

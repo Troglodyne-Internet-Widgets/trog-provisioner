@@ -140,6 +140,16 @@ sub template_files {
     );
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # The certificate authority.  A rebuilt guest that makes a new one is a
+    # server every existing client refuses to talk to, so this has to arrive
+    # before easyrsa is asked whether it needs to build one.
+    return ( '/etc/openvpn/easy-rsa/pki' => { from => "$install_dir/$domain/openvpn/pki", owner => 'root:root' } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

@@ -224,7 +224,12 @@ re-deploy.
 =cut
 
 sub required_recipes {
-    return ( claude => sub { () } );
+    my ( $self, %opts ) = @_;
+
+    # SUPER as well as our own: the base decides what a recipe owes ufw and
+    # data, and an override that drops it silently loses the restore of
+    # whatever this recipe salvages.
+    return ( claude => sub { () }, $self->SUPER::required_recipes(%opts) );
 }
 
 sub deps {

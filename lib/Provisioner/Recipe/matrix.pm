@@ -130,6 +130,11 @@ sub required_recipes {
                 },
             )
         },
+
+        # SUPER as well as our own: the base decides what a recipe owes ufw
+        # and data, and an override that drops it silently loses the restore
+        # of whatever this recipe salvages.
+        $self->SUPER::required_recipes(%opts),
     );
 }
 
@@ -266,6 +271,15 @@ sub _signing_key {
 # its domain directory, and this is what stops a rebuild carrying it home.
 sub remote_skip {
     return (qr{/homeserver[.]signing[.]key\z});
+}
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # The media store and the database.  No owner: the fragment chowns the whole
+    # tree to matrix-synapse afterwards anyway.
+    return ( "$install_dir/matrix.$domain" => { from => "$install_dir/$domain/matrix" } );
 }
 
 sub remote_files {

@@ -174,6 +174,25 @@ sub guest_secrets {
     );
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # The objects as they are, and the metadata as a snapshot -- LMDB copied out
+    # from under a running writer restores looking fine and is not, so
+    # remote_prepare asks garage for one and this is what puts it back.
+    # Defaulted here as well as in args, because required_recipes is asked before
+    # anything is validated: what it sees is what the domain wrote, and a domain
+    # that took the default wrote nothing at all.
+    my $data     = $opts{data_dir}     // '/var/lib/garage/data';
+    my $metadata = $opts{metadata_dir} // '/var/lib/garage/meta';
+
+    return (
+        $data                 => { from => "$install_dir/$domain/garage/data" },
+        "$metadata/snapshots" => { from => "$install_dir/$domain/garage/snapshots" },
+    );
+}
+
 sub rate_limits {
 
     # S3 and admin, RPC between nodes, and the web endpoint.  These are the

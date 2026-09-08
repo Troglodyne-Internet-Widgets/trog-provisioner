@@ -79,6 +79,11 @@ sub required_recipes {
                 },
             )
         },
+
+        # SUPER as well as our own: the base decides what a recipe owes ufw
+        # and data, and an override that drops it silently loses the restore
+        # of whatever this recipe salvages.
+        $self->SUPER::required_recipes(%opts),
     );
 }
 
@@ -106,6 +111,12 @@ sub template_files {
         'deluged.core.conf.tt' => 'deluged_core.conf',
         'deluged.ufw.conf.tt'  => 'deluged_ufw.conf',
     );
+}
+
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+    return ( '/var/lib/deluged/config/state' => { from => "$install_dir/$domain/deluged/state" } );
 }
 
 sub remote_files {
