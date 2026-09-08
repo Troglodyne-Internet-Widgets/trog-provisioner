@@ -132,6 +132,11 @@ sub template_files {
 
     return (
         'openvpn.server.conf.tt' => 'server.conf',
+
+        # The ufw application profile for the port and protocol this domain
+        # configured.  It lived under ufw, which is handed rate_limits and
+        # nothing else -- so it named two variables it never had.
+        'openvpn.ufw.conf.tt' => 'openvpn_ufw.conf',
     );
 }
 

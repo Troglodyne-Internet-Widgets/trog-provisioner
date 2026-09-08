@@ -86,4 +86,26 @@ chomp $status;
 is($status, 'active', 'openvpn server is running');
 ok(-f '/etc/openvpn/server/server.conf', 'openvpn server config exists');
 
+# The firewall profile.  The copy that used to ship under the ufw recipe named
+# the port and protocol variables, and ufw is handed neither -- a recipe gives
+# it rate_limits and nothing else -- so it rendered `ports=/` on every guest:
+# a profile ufw lists and out of which no usable rule can be made.
+my $profile = '/etc/ufw/applications.d/openvpn-server';
+ok(-f $profile, 'the openvpn firewall profile was installed');
+my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
+like($prof, qr{^ports=\Q[% port %]\E/\Q[% proto %]\E$}m, 'and it names the port and protocol this domain configured') or diag $prof;
+unlike($prof, qr{^ports=/\s*$}m, 'rather than the empty pair it used to render') or diag $prof;
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
+
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*OpenVPN\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    # What the profile is for: ufw resolving it to the real port.  A malformed
+    # one lists and then yields nothing here.
+    my $info = `ufw app info OpenVPN 2>&1`;
+    like($info, qr{\Q[% port %]\E/\Q[% proto %]\E}, 'and resolves it to a port a rule can be made from') or diag $info;
+}
+
 done_testing();

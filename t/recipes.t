@@ -1303,6 +1303,43 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
+subtest 'no firewall profile is named after something in /etc/services' => sub {
+
+    # ufw refuses to load a profile whose section name is also a service name,
+    # and says so only as a warning on stderr -- so the profile is absent from
+    # `ufw app list`, no rule is ever made from it, and nothing anywhere fails.
+    # [ldap] and [redis] were both shipped this way, which meant the port each
+    # of those recipes exists to expose was never opened by its own profile.
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_r)
+    plan skip_all => 'no /etc/services to check against' unless -r '/etc/services';
+
+    my %service;
+    foreach my $line ( split m/\n/, File::Slurper::read_text('/etc/services') ) {
+        next if $line =~ m/\A\s*[#]/;
+        my ($name) = $line =~ m/\A(\S+)\s/ or next;
+
+        # Case sensitively, which is how ufw compares them: [OpenVPN] is
+        # accepted where an openvpn would not be.
+        $service{$name} = 1;
+    }
+
+    my @profiles = sort ( glob("$template_dir/files/ufw.*.tt"), glob("$template_dir/files/*.ufw.conf.tt") );
+    ok( scalar @profiles, 'there are firewall profiles to check' );
+
+    foreach my $tt (@profiles) {
+        my $body = File::Slurper::read_text($tt);
+
+        # Comments here explain which names were skipped and why, so they name
+        # the very things being tested for.
+        $body =~ s/\[%#.*?%\]//gs;
+
+        foreach my $section ( $body =~ m/^\[([^\]]+)\]\s*$/gm ) {
+            ok( !$service{$section}, ( File::Basename::basename($tt) ) . ": [$section] is a name ufw will load" )
+              or diag "ufw skips [$section]: also in /etc/services";
+        }
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

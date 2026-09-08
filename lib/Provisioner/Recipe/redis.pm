@@ -90,10 +90,15 @@ sub required_recipes {
 }
 
 sub rate_limits {
+    my ( $self, %opts ) = @_;
 
     # Clients hold connections open rather than opening one per operation, so
     # even a busy application opens few a second.
-    return ( 6379 => 512 );
+    #
+    # On the configured port, not on 6379.  This named the default outright, so
+    # a guest that moved redis had the limit applied to a port nothing was
+    # listening on and none at all on the port it had actually been given.
+    return ( ( $opts{port} // 6379 ) => 512 );
 }
 
 sub args {
@@ -121,6 +126,11 @@ sub args {
 sub template_files {
     return (
         'redis.conf.tt' => 'redis.conf',
+
+        # The ufw application profile for the port this guest configured.  It
+        # lived under ufw, where the port is not knowable: a recipe hands ufw
+        # its rate_limits and nothing else.
+        'redis.ufw.conf.tt' => 'redis_ufw.conf',
     );
 }
 

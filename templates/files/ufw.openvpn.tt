@@ -1,4 +1,0 @@
-[OpenVPN]
-title=OpenVPN
-description=Allow OpenVPN traffic
-ports=[% port %]/[% proto %]

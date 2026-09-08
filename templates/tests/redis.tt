@@ -10,8 +10,13 @@ ok(-f '/etc/redis/redis.conf', 'redis config exists');
 
 # Running and answering are different questions, and only the second one is any
 # use to the things that depend on redis -- matrix asks for it by name.
-my $ping = `redis-cli ping 2>&1`;
-like($ping, qr/PONG/, 'redis answers') or diag $ping;
+#
+# On the configured port.  redis-cli with no -p talks to 6379, so this asked the
+# default whatever the guest had been told to use, and a domain that moved redis
+# failed here while redis was up and answering perfectly well where it had been
+# put.
+my $ping = `redis-cli -p [% port %] ping 2>&1`;
+like($ping, qr/PONG/, 'redis answers on the port it was configured with') or diag $ping;
 
 # On the socket or address it was configured with, rather than wherever it
 # happened to come up.
@@ -53,6 +58,28 @@ SKIP: {
     skip 'no salvage left to check: either there was none, or it was restored and moved', 1 unless @unrestored;
     ok(scalar glob('/var/lib/redis/*'), 'salvaged redis state was put back where redis reads it')
         or diag "still sitting in $salvage: @unrestored";
+}
+
+# The firewall profile.  The one that used to ship under the ufw recipe was
+# called [redis], and ufw skips a profile whose section name is also a service
+# name in /etc/services -- redis is 6379/tcp there -- saying so only as a
+# warning on stderr.  So it was absent from `ufw app list`, no rule was ever
+# made from it, and nothing failed: this has never worked on any guest.
+my $profile = '/etc/ufw/applications.d/redis-server';
+ok(-f $profile, 'the redis firewall profile was installed');
+my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
+like($prof, qr/^ports=\Q[% port %]\E\/tcp$/m, 'and it names the port this guest configured') or diag $prof;
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
+
+    # Listed is the whole assertion: a profile ufw declines to parse is simply
+    # not here, and says nothing else about itself.
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*redis-server\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    my $status = `ufw status 2>/dev/null`;
+    like($status, qr/^\s*redis-server\b/m, 'and has a rule for it after the reset') or diag $status;
 }
 
 done_testing();

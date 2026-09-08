@@ -75,6 +75,10 @@
 	find /etc/openvpn/pki-salvage -type d -exec chmod 0700 {} +
 	find /etc/openvpn/pki-salvage -type f -exec chmod 0600 {} +
 	# Deploy server configuration
+	# The firewall profile for this port and protocol.  Rendered here because the
+	# copy that lived under ufw named variables ufw is never given, so it wrote
+	# ports=/ on every guest.
+	install -m 0644 -o root -g root openvpn_ufw.conf /etc/ufw/applications.d/openvpn-server
 	cp server.conf /etc/openvpn/server/server.conf
 	chown root:root /etc/openvpn/server/server.conf
 	chmod 0640 /etc/openvpn/server/server.conf
