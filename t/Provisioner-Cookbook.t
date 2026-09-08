@@ -377,4 +377,35 @@ sub stray_parameters {
     return @found;
 }
 
+subtest 'where a domain lives is _global to say, not the data recipe' => sub {
+    my $conf = {
+        _base        => { _global => { install_dir => '/srv/domains', data_source => '/srv/data' } },
+        'own.test'   => { _global => { install_dir => '/elsewhere' } },
+        'plain.test' => {},
+    };
+
+    is( Provisioner::Cookbook->install_dir( 'plain.test', $conf ), '/srv/domains', 'what _base says' );
+    is( Provisioner::Cookbook->install_dir( 'own.test',   $conf ), '/elsewhere',   'and a domain may say otherwise' );
+    is( Provisioner::Cookbook->data_source( 'plain.test', $conf ), '/srv/data', 'likewise the source' );
+
+    # It used to be read out of data's `to`, so a configuration written before
+    # the move has to go on working.
+    my $legacy = { _base => { data => { from => '/opt/data', to => '/opt/domains' } }, 'a.test' => {} };
+    is( Provisioner::Cookbook->install_dir( 'a.test', $legacy ), '/opt/domains', 'falling back to what data says' );
+    is( Provisioner::Cookbook->data_source( 'a.test', $legacy ), '/opt/data',    'both halves of it' );
+
+    # _global wins where they disagree: that is the point of the move.
+    my $both = {
+        _base    => { _global => { install_dir => '/srv/domains' }, data => { to => '/opt/domains' } },
+        'a.test' => {},
+    };
+    is( Provisioner::Cookbook->install_dir( 'a.test', $both ), '/srv/domains', 'and _global is the one that counts' );
+
+    # A path to render is harmless to guess at.  Where the teardown sweeps is
+    # not, so that one says nothing rather than pointing at a directory nobody
+    # named.
+    is( Provisioner::Cookbook->install_dir( 'a.test', {} ), '/opt/domains', 'install_dir has a default' );
+    is( Provisioner::Cookbook->data_source( 'a.test', {} ), undef,          'and data_source deliberately has none' );
+};
+
 done_testing();
