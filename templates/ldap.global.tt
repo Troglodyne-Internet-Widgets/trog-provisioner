@@ -45,13 +45,12 @@ rm -f tls.ldif
 systemctl restart slapd
 
 [%# Declared as an application profile, not allowed here.  setup-ufw-rules
-    opens with `ufw reset`, which drops every rule on the guest, and the ufw
-    target runs after this one -- so this rule was added and then deleted on
-    every provision that had both recipes.  It only looked like it worked
-    because slapd ships its own LDAPS profile covering 636, which is the
-    default: a domain that set port: to anything else had nothing opening it.
-    /etc/ufw/applications.d survives the reset, and setup-ufw-rules allows
-    whatever `ufw app list` reports afterwards. -%]
+    allows whatever `ufw app list` reports, so a profile is what the ufw target
+    applies; a bare rule here is instead something that has to outlive a target
+    running after this one, which opens with a `ufw reset`.  What that rule
+    could never do is name a port: slapd ships OpenLDAP profiles covering the
+    default of 636, so a domain that set port: to anything else had nothing
+    naming the port it had actually been given. -%]
 # Declare the firewall profile for LDAPS
 install -o root -g root -m 0644 ldap_ufw.conf /etc/ufw/applications.d/ldap
 

@@ -79,7 +79,7 @@ SKIP: {
     like($apps, qr/^\s*redis-server\s*$/m, 'ufw lists it as an application') or diag $apps;
 
     my $status = `ufw status 2>/dev/null`;
-    like($status, qr/^\s*redis-server\b/m, 'and has a rule for it after the reset') or diag $status;
+    like($status, qr/^\s*redis-server\b/m, 'and the ufw target turned it into a rule') or diag $status;
 }
 
 done_testing();
