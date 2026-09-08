@@ -53,6 +53,12 @@ my %limits = (
 [% END -%]
 );
 
+# ssh by name, rather than only through the loop below.  An assertion over the
+# set we were handed cannot notice a member missing from that set, which is
+# exactly how ssh went unlimited on every guest with a listening recipe.
+like($before, qr/-p tcp --dport 22 .*--hashlimit-above \d+\/sec/,
+    'ssh is rate limited, whatever else the guest listens on') or diag $before;
+
 foreach my $spec (sort keys %limits) {
     my ($port, $proto) = split m{/}, $spec;
     $proto //= 'tcp';

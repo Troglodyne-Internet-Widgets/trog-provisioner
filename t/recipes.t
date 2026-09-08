@@ -352,6 +352,32 @@ subtest 'ufw rejects malformed port_forwards' => sub {
     ok( $res, 'ufw dies when port_forward entry missing to' );
 };
 
+subtest 'ssh is rate limited whatever else the guest listens on' => sub {
+    my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
+
+    # setup-ufw-rules stopped applying ufw's own `limit` to OpenSSH, because six
+    # connections in thirty seconds locks a provision out of the guest it is
+    # building.  This is the limit that was supposed to cover it instead.
+    my %bare = $r->validate();
+    is( $bare{rate_limits}{22}, 64, 'a guest listening on nothing still limits ssh' );
+
+    # required_recipes hands rate_limits over whole, so the key is present and a
+    # default one level up never fires.  On the port itself it fills the gap in
+    # the map instead, which is what the schema was always trying to say.
+    my %listening = $r->validate( rate_limits => { '1194/udp' => 256 } );
+    is( $listening{rate_limits}{'1194/udp'}, 256, "a recipe's own limit survives" );
+    is( $listening{rate_limits}{22},         64,  'and ssh is limited beside it' );
+
+    # An operator's own number wins outright, the way any default gives way to
+    # one.  "Higher wins" is resolve_conflict's rule for two recipes disagreeing,
+    # not a floor under what a person asked for.
+    my %raised = $r->validate( rate_limits => { 22 => 512 } );
+    is( $raised{rate_limits}{22}, 512, 'an operator can raise it' );
+
+    my %lowered = $r->validate( rate_limits => { 22 => 2 } );
+    is( $lowered{rate_limits}{22}, 2, 'and can lower it' );
+};
+
 subtest 'a rate limit says which protocol it limits' => sub {
 
     # The rule is written per protocol, so a limit naming only a port is a limit
