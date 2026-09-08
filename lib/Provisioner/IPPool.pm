@@ -322,6 +322,22 @@ sub seed {
             $recorded += record( $found->{ip}, $found->{domain} );
         }
 
+        # Anything else answering in the pool.  The guests above come from what
+        # they were configured with, which says nothing about the rest of the
+        # network -- a printer, a router, a machine nobody told us about.  Those
+        # are found by asking the hypervisor what is on the wire.
+        my $already = taken();
+        foreach my $found ( _live_addresses( $hv, [ sort keys %in_pool ] ) ) {
+
+            # In the pool only.  The table holds whatever the hypervisor has
+            # spoken to lately, most of which is on the wider network and none
+            # of our business: an address we could never hand out is not one
+            # worth a row saying we will not.
+            next unless $in_pool{ $found->{ip} };
+            next if $already->{ $found->{ip} };
+            $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
+        }
+
         # The hypervisor itself.  hypervisors.conf names it as the host half of
         # the libvirt URI, so that is what gets resolved; a hypervisor we cannot
         # resolve is not one whose address we can protect.
@@ -374,6 +390,41 @@ sub _guest_addresses {
     }
 
     return @found;
+}
+
+# What is answering in the pool right now, as a list of address and MAC.
+#
+# The hypervisor's own neighbour table, which is where libvirt gets what
+# `virsh domifaddr --source arp` reports and what virt-manager shows.  It only
+# holds an address the host has spoken to lately, so the pool is swept first --
+# without that it knew two of this fleet's ten guests, and with it, eight, the
+# other two being in the table under an interface domifaddr did not pick.
+#
+# Swept and read on the hypervisor rather than from here: this machine may not
+# be on that network at all, and the table that matters is the one the guests
+# share a bridge with.
+#
+# A stale entry costs an address that was actually free, which is the safe
+# direction to be wrong in -- unlike handing out one somebody is answering on.
+sub _live_addresses {
+    my ( $hv, $pool ) = @_;
+    return () unless @$pool;
+
+    my $bridge = eval { $hv->bridge_device } or return ();
+    my $sweep  = join q{ }, map { "ping -c1 -W1 '$_' >/dev/null 2>&1 &" } @$pool;
+
+    my $said = $hv->capture("sudo sh -c '$sweep wait; ip -4 neigh show dev $bridge'") // q{};
+
+    my @live;
+    foreach my $line ( split "\n", $said ) {
+
+        # FAILED and INCOMPLETE are the answers for an address nothing is on.
+        next if $line =~ m/\b(?:FAILED|INCOMPLETE)\b/;
+        my ( $ip, $mac ) = $line =~ m/\A([0-9]+(?:[.][0-9]+){3})\s+lladdr\s+(\S+)/ or next;
+        push( @live, { ip => $ip, mac => $mac } );
+    }
+
+    return @live;
 }
 
 # Numeric already, or whatever the resolver says.  undef rather than a die: a
