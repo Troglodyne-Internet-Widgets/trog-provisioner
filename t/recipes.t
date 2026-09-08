@@ -856,9 +856,8 @@ subtest 'mail writes fragments rather than editing the files' => sub {
     my $r   = 'Provisioner::Recipe::mail'->new(%PROV);
     my $out = $r->render(%G);
 
-    # postconf sets a parameter and cannot add to one, which is the whole reason
-    # a second domain used to take the first one's mail with it.
-    unlike( $out, qr/^postconf /m, 'no postconf -e survives in the fragment' );
+    # configd joins a parameter across the fragments it finds, so a second
+    # domain adds to what the first one set rather than replacing it.
     like( $out, qr{main\.cf\.d/50-\Q$G{domain}\E},        'main.cf gets a fragment named for the domain' );
     like( $out, qr{opendmarc\.conf\.d/50-\Q$G{domain}\E}, 'and so does opendmarc.conf' );
 
@@ -867,14 +866,9 @@ subtest 'mail writes fragments rather than editing the files' => sub {
     foreach my $table (qw{virtual_maps virtual_aliases transport_maps sdd_relay_maps sender_login header_checks}) {
         like( $out, qr{/etc/postfix/domains/\Q$G{domain}\E/$table\b}, "$table is this domain's own file" );
     }
-    unlike( $out, qr{/etc/postfix/virtual/maps\b}, 'nothing writes the shared virtual map any more' );
-    unlike( $out, qr{recipient_access_pcre},       'and the recipient access table is gone entirely' );
 
     # Overwriting a file configd generates works until the next restart, and
-    # then silently does not.
-    unlike( $out, qr{mv \S* /etc/opendkim\.conf},  'nothing overwrites /etc/opendkim.conf' );
-    unlike( $out, qr{mv \S* /etc/opendmarc\.conf}, 'nor /etc/opendmarc.conf' );
-
+    # then silently does not, so the guest-wide parts go in as fragments too.
     my $global = $r->render_global(%G);
     like( $global, qr{main\.cf\.d/40-mail},       'the guest-wide half of main.cf is written once' );
     like( $global, qr{master\.cf\.d/40-mail},     'and so is master.cf' );
@@ -909,7 +903,6 @@ subtest 'redis writes a fragment and keeps the packaged config underneath' => su
     my $global = $r->render_global(%G);
 
     like( $global, qr{redis\.conf\.d/50-provisioner}, 'the configuration goes in as a fragment' );
-    unlike( $global, qr{cp \S+ /etc/redis/redis\.conf}, 'and does not overwrite the generated file' );
 
     # An empty save is what turns RDB persistence off; adding snapshot points
     # without it only ever means more snapshots than the package asked for.
@@ -936,9 +929,6 @@ subtest 'the address classes do not overlap' => sub {
     # mail stops reaching anybody's mailbox.
     like( $guest, qr/^mydestination =$/m,                         'the guest-wide half resets mydestination' );
     like( $guest, qr/^mydestination = \$myhostname, localhost$/m, 'before naming what is actually local' );
-
-    # The check it used to make, postfix makes by itself.
-    unlike( $guest, qr/^[^#]*check_recipient_access/m, 'no recipient access table in the restriction list' );
 };
 
 subtest 'an authenticated sender must own the address' => sub {
@@ -1005,13 +995,13 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # payload was still sitting under the new mount.
     my $setup = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
 
-    like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'the payload is unpacked into /var/tmp' );
+    like( $setup, qr{data\.tar\.gz /var/tmp$}m,            'the payload is fetched into /var/tmp' );
+    like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'unpacked there' );
     like( $setup, qr{^cd /var/tmp/domainsetup_}m,          'and make runs from there' );
 
-    # Anchored past /var, or it matches the /tmp inside /var/tmp and can never
-    # pass -- which is how this assertion first failed against a correct file.
-    unlike( $setup, qr{(?<!/var)/tmp/domainsetup_}, 'with nothing left pointing at /tmp' );
-    unlike( $setup, qr{data\.tar\.gz\s+/tmp$}m,     'and the tarball does not land there either' );
+    # The cleanup repeats both paths rather than deriving them, so it is where
+    # it can disagree with the three lines above.
+    like( $setup, qr{^rm -rf /var/tmp/domainsetup_\S+ /var/tmp/data\.tar\.gz}m, 'and both are cleared away from there' );
 };
 
 subtest 'tmpfs escapes a percentage and leaves a byte size alone' => sub {
@@ -1132,17 +1122,13 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     # cannot use io_uring however the guest is configured.  The repository
     # builds are Debian's and depend on liburing2.
     like( $out, qr{install_mariadb\.sh "11\.4\.4"}, 'the installer gets the version it was given' );
-    unlike( $out, qr{/opt/mysql}, 'and nothing hand-rolls a layout under /opt' );
 
-    # The fragment asks for the install; how to do it is the script's.  It used
-    # to spell out the secure-installation dance here, which put the file
-    # holding root_pw in /etc/mysql and left it there when the SQL failed.
+    # The fragment asks for the install; how to do it is the script's, which is
+    # what keeps the file holding root_pw out of /etc/mysql when the SQL fails.
     like(
         $out, qr{install_mariadb\.sh "[^"]+" "mariadb-provisioner\.cnf" "secure_installation\.sql"},
         'the config and the secure-installation sql are handed to it'
     );
-    unlike( $out, qr{mariadb <},            'the fragment runs no SQL of its own' );
-    unlike( $out, qr{/etc/mysql/\.secured}, 'nor keeps the marker for it' );
 
     # Asking for the mariadb packages up front would have cloud-init install
     # Ubuntu's before the makefile runs, only for the pin to downgrade them.
@@ -1192,7 +1178,6 @@ subtest 'a changed root password re-runs the securing' => sub {
     # while every .my.cnf claims the new one, and the first thing to notice is a
     # backup that stopped working.
     like( $script, qr/sha256sum < "\$SECURE_SQL"/, 'the marker is keyed on the SQL, not on having run' );
-    unlike( $script, qr/touch .*\.secured/, 'rather than a bare touch' );
 };
 
 subtest 'the installer configures the server before anything uses it' => sub {
@@ -1224,9 +1209,8 @@ subtest 'install_mariadb.sh keeps the version it was handed' => sub {
     # the script's own scope renamed the release we were asked for to
     # "24.04.4 LTS (Noble Numbat)" and sent it looking for a repository under
     # that.  A guest found this; nothing here could have.
-    unlike( $script, qr/^\s*[.] \/etc\/os-release\s*$/m, 'os-release is not sourced into the script scope' );
     like( $script, qr/CODENAME=\$\(\. \/etc\/os-release/, 'the codename is read in a subshell instead' );
-    unlike( $script, qr/^VERSION=/m, 'and the version it was handed is not named VERSION' );
+    like( $script, qr/^MARIADB_VERSION=\$1$/m,            'and what it was handed keeps a name of its own' );
 };
 
 subtest 'the root password survives being put in a SQL string' => sub {

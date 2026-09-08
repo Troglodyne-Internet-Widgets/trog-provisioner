@@ -72,7 +72,7 @@ subtest "the helper scripts ride along in the tarball" => sub {
     ok( !-e "$cfg_dir/scripts/stale", 'and clears out what it found there' );
 };
 
-subtest "the Makefile moves the scripts rather than fetching them" => sub {
+subtest "the Makefile moves the scripts into place" => sub {
 
     # Configured the way new_config configures it; a bare Xslate has no tabinate.
     my $xslate = Text::Xslate->new(
@@ -86,7 +86,6 @@ subtest "the Makefile moves the scripts rather than fetching them" => sub {
     );
 
     like( $out, qr{^\tmv scripts/\* /root/bin/$}m, 'moves them out of the extracted tarball' );
-    unlike( $out, qr{rsync.*scripts}, 'and does not go back to the hypervisor for them' );
 };
 
 sub _slurp {

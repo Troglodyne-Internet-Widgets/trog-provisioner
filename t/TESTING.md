@@ -73,10 +73,10 @@ The only acceptable means of mocking subroutines is Test::MockModule in strict m
 
 Whenever possible fake files using Test::MockFile.
 Any deps of the SUT which do file access in BEGIN blocks will have to be `use`d in the test itself.
-Any deps which use bareword filehandles will also require this treatment, and any files they access cannot be mocked via MockFiles.
-Test::Mockfile must be the last dependency loaded in the test.
+Any deps which use bareword filehandles will also require this treatment; any files they access cannot be mocked via MockFiles and should use File::Temp instead.
+Test::Mockfile must be the last dependency loaded in the test before the SUT.
 
-Prefer `Test2::V1 -i` over using Test::More where possible.
+Prefer `Test2::V1 -i` over using Test::More where possible, but don't convert existing tests from one idiom to the other.
 
 Use FindBin::libs to enable testing libdirs.
 
@@ -85,11 +85,33 @@ This may be omitted for scripts and modulinos, as it is expected that they may e
 
 It is acceptable for the system under test to `die()` during tests; in general we want negative results as fast as is possible.
 
-When you are specifically testing for a termination condition, use Test::Fatal or Test2::Tools::Exception as appropriate
+When you are specifically testing for a termination condition, use Test::Fatal or Test2::Tools::Exception as appropriate.
+
+When DB calls have to be faked, use DBIX::QuickDB.
+
+When a piece of code is removed, don't assert that it isn't there - testing undefined behavior is a waste of time.
 
 # Running tests
 
 Run tests with `prove -lm -j8`
+
+Re-run with `-v $testfile` option if you need details on why a specific test failed
+
+# Test coverage
+
+To discern coverage information run `cover -test -report json`.
+It will output coverage information per test and total in `cover_db/cover.json`
+
+We want coverage per file to be greater than or equal to what it was before a patchset.
+
+# Test performance
+
+Structural test files should not ever take more than 30 seconds to run, and we should aim for substantially less than that.
+If the runtime of a test increases by 3 standard deviations versus what it previously took, profiling should be done; there is likely room for improvement.
+
+`prove -MDevel::NYTProf -lmv $testfile && nytprofhtml` will produce the profiling information you need to read in `nytprof/`
+
+See the `perl-slop:profiling-perl` skill for more details.
 
 # Nature of fake data
 

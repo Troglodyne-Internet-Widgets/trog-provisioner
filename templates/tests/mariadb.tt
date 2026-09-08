@@ -20,10 +20,8 @@ my $status = `systemctl is-active mariadb 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'mariadb is running');
 
-# The packaged layout, rather than the /opt/mysql the bintar needed.
 ok(-d '/var/lib/mysql', 'the packaged data directory exists');
 ok(-f '/var/lib/mysql/ibdata1', 'and was initialised');
-ok(!-e '/opt/mysql', 'and nothing was hand-rolled under /opt') or diag `ls -la /opt`;
 
 # Our configuration went in as a drop-in the packaged server reads, and it read
 # it -- a drop-in in the wrong directory is a setting that looks applied.

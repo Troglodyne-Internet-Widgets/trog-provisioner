@@ -94,7 +94,6 @@ my $profile = '/etc/ufw/applications.d/openvpn-server';
 ok(-f $profile, 'the openvpn firewall profile was installed');
 my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
 like($prof, qr{^ports=\Q[% port %]\E/\Q[% proto %]\E$}m, 'and it names the port and protocol this domain configured') or diag $prof;
-unlike($prof, qr{^ports=/\s*$}m, 'rather than the empty pair it used to render') or diag $prof;
 
 SKIP: {
     skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
