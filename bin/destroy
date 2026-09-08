@@ -101,34 +101,51 @@ sub main {
     print "Destroying domain: $domain\n";
     print "[DRY RUN] No changes will be made.\n" if $dryrun;
 
-    # 1. Stop and undefine the VM
-    destroy_vm( $domain, $dryrun );
+    # Steps 1 to 5, and then the address whatever happened to them.  Held in an
+    # eval rather than left to abort the run, because the address is the one
+    # thing whose leaking causes trouble for something else later -- a destroy
+    # that stumbled over a disk it could not remove used to leave the domain
+    # holding its address forever, and that is precisely the case that wants
+    # reclaiming.
+    my $failure;
+    unless (
+        eval {
+            # 1. Stop and undefine the VM
+            destroy_vm( $domain, $dryrun );
 
-    # 2. Remove the disks it was using
-    destroy_disks( $domain, $dryrun );
+            # 2. Remove the disks it was using
+            destroy_disks( $domain, $dryrun );
 
-    # 3. Remove HV-side rsyslog config
-    remove_rsyslog_config( $domain, $dryrun );
+            # 3. Remove HV-side rsyslog config
+            remove_rsyslog_config( $domain, $dryrun );
 
-    # 4. Remove the domain's SSH pubkey from the HV's authorized_keys
-    remove_authorized_key( $domain, $dryrun );
+            # 4. Remove the domain's SSH pubkey from the HV's authorized_keys
+            remove_authorized_key( $domain, $dryrun );
 
-    # 5. Optionally purge the domain directory
-    if ($purge) {
-        purge_domain_dir( $domain, $dryrun );
-    }
-    else {
-        print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
+            # 5. Optionally purge the domain directory
+            if ($purge) {
+                purge_domain_dir( $domain, $dryrun );
+            }
+            else {
+                print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
+            }
+            1;
+        }
+    ) {
+        $failure = $@ || "destroying $domain failed\n";
+        warn $failure;
     }
 
     # 6. Give the address back to the pool
-    release_ip( $domain, $dryrun );
+    release_ip( $domain, $dryrun, $hv );
+
+    die $failure if $failure;
 
     print "Done.\n";
     return 0;
 }
 
-=head2 release_ip($domain, $dryrun)
+=head2 release_ip($domain, $dryrun, $hv)
 
 Hand the domain's static address back to the pool.
 
@@ -138,10 +155,15 @@ which keeps whatever address the domain already has.  This is the deliberate
 otherwise the pool fills with entries for guests that stopped existing, which
 is what the C<[ips]> section of F<ipmap.cfg> did for years.
 
+B<Only once the guest is actually gone.>  A destroy that could not undefine the
+domain has left something running on that address, and handing it to the next
+thing that asks would put two guests on it.  So the hypervisor is asked, and an
+address belonging to a domain that is still defined stays where it is, loudly.
+
 =cut
 
 sub release_ip {
-    my ( $domain, $dryrun ) = @_;
+    my ( $domain, $dryrun, $hv ) = @_;
 
     my $held = Provisioner::IPPool::held_by($domain);
     unless ($held) {
@@ -151,6 +173,22 @@ sub release_ip {
 
     if ($dryrun) {
         print "[DRY RUN] Would return $held to the pool\n";
+        return 0;
+    }
+
+    # Positively gone, or it keeps the address.  An unreachable hypervisor cannot
+    # tell us the guest went away, and the two ways of being wrong here are not
+    # equal: an address held that should be free is a nuisance somebody fixes
+    # with reseed_ips --prune, where an address freed while something is still
+    # answering on it puts two guests on one address.
+    my $exists = eval { $hv ? $hv->domain_exists($domain) : undef };
+    unless ( defined $exists ) {
+        warn "Could not ask whether $domain is really gone, so $held stays assigned to it.\n" . "Take it back once you are sure, with: bin/reseed_ips --prune\n";
+        return 0;
+    }
+
+    if ($exists) {
+        warn "$domain still exists on " . $hv->describe . ", so $held is not being returned to the pool.\n" . "Destroy it properly, or take the address back with: bin/reseed_ips --prune\n";
         return 0;
     }
 
