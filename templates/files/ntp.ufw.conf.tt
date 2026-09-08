@@ -1,0 +1,23 @@
+[%# An application profile rather than a bare `ufw allow`.  setup-ufw-rules
+    opens with `ufw reset`, which drops every rule on the guest, and the ufw
+    target runs after this one, so a rule added here would be gone by the time
+    setup-ufw-rules ran.  Profiles live in /etc/ufw/applications.d, which the
+    reset does not touch, so what is declared here is what setup-ufw-rules
+    allows -- out as well as in -- once it walks `ufw app list`.  Chrony is
+    client-only (port 0 in ntp.chrony.conf.tt), so the outbound half is the
+    one this recipe actually needs; the inbound half comes along for free the
+    same way it does for every other profile.
+
+    Named ntp-client and not ntp, because ufw refuses a profile whose section
+    name is also a service name in /etc/services and says so only as a
+    warning on stderr:
+
+        WARN: Skipping .ntp.: also in /etc/services
+
+    -- so the profile would be absent from `ufw app list`, no rule would ever
+    be made from it, and chrony would go on reaching nothing without a single
+    failure printed anywhere a provision looks. -%]
+[ntp-client]
+title=NTP client
+description=Outbound time sync for chrony
+ports=123/udp

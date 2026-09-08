@@ -25,8 +25,6 @@ is_deeply(\@bare, [], 'no directive was left without its argument')
 like($conf, qr/^[ \t]*makestep[ \t]+\S+[ \t]+\S+[ \t]*$/m, 'makestep has both of its arguments');
 ok(scalar(grep { m/^\s*(pool|server)\s+\S+/ } split m/\n/, $conf), 'at least one time source');
 
-done_testing();
-
 # chrony ships /etc/chrony/conf.d and /etc/chrony/sources.d, and they are inert
 # unless chrony.conf says to read them.  This file used to overwrite the
 # vendor's confdir line out of existence, which left the guest with a conf.d
@@ -52,3 +50,44 @@ close $fh;
 my $with = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
 unlike($with, qr/(?:error|cannot|invalid)/i, 'and a fragment in conf.d is read without complaint') or diag $with;
 unlink $fragment;
+
+# Everything above proves chrony was handed a config it accepts -- not that
+# it can do anything with it.  A chrony blocked from reaching any of its
+# pools renders and starts exactly like one that can, and every assertion
+# above this line passes either way.  This asks chrony itself, not the file.
+#
+# Polled rather than slept on once: the postrun restart and the pool's own
+# resolution can both still be settling by the time this test starts, and
+# iburst's first burst is not guaranteed to land inside any single fixed
+# wait.  docs/APPROACH.md: no static sleep outside of a loop that checks
+# whether what it is waiting on is actually ready.
+my ( $sources, @source_lines, $reached );
+for ( 1 .. 30 ) {
+    $sources      = `chronyc -n sources 2>&1`;
+    @source_lines = grep { m/^[\^=#]/ } split m/\n/, $sources;
+
+    # Reach is an 8-bit octal shift register of the last 8 poll results; 0
+    # means none of them got an answer.  A source can sit there unreached
+    # forever with 123/udp blocked, which is exactly the failure mode this
+    # guards -- so this checks for having been answered at all rather than
+    # for Leap status saying Normal.  A freshly booted guest may not have
+    # finished stepping to the source yet even once egress is open, and that
+    # is a real, separate thing this test is not claiming.
+    $reached = grep {
+        my @field = split ' ';
+        # oct(), not a string comparison against '0': chronyc pads this
+        # field, and a string ne would count "000" -- still nothing
+        # answered -- as a reach.
+        defined $field[4] && $field[4] =~ m/\A[0-7]+\z/ && oct( $field[4] ) != 0;
+    } @source_lines;
+    last if $reached;
+    sleep 1;
+}
+
+ok( scalar(@source_lines), 'chronyc has at least one configured time source' )
+  or diag "chronyc -n sources:\n$sources";
+
+ok( $reached, 'at least one time source has answered a poll within 30s' )
+  or diag "chronyc -n sources:\n$sources\nchronyc -n tracking:\n" . `chronyc -n tracking 2>&1`;
+
+done_testing();
