@@ -22,3 +22,6 @@ cover_db/
 .build
 Provisioner-Recipe-*
 trog-provisioner-*
+
+# Robot foo
+.claude/worktrees
