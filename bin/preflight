@@ -20,6 +20,7 @@ use Sys::Virt();
 
 use Trog::Config();
 use Trog::HV();
+use Trog::Local();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -87,6 +88,7 @@ sub main {
         \&check_passwordless_sudo,
         \&check_iso_builder,
         \&check_rsync,
+        \&check_transfer_ip,
         \&check_libvirt,
         \&check_sys_virt_in_step,
         \&check_config,
@@ -221,6 +223,40 @@ keeps a re-provision from moving twenty gigabytes of video it already has.
     sudo apt install rsync
 
 on $where.
+FIX
+}
+
+# A guest fetches its payload from this machine, over ssh, so it has to have an
+# address of ours to fetch from.  Which of ours depends on how this machine is
+# attached to the hypervisor's networks, and on a workstation that is not on any
+# of them there is no answer -- which is the whole run failing at the guest's
+# first target rather than here, so it is worth a question up front.
+#
+# This asks the routing table, which cannot see a firewall in between or a route
+# that only works one way.  It says there is an address to try, not that the
+# guest will get through on it.
+sub check_transfer_ip {
+    my ($hv) = @_;
+
+    my $virbr = eval { $hv->virbr_ip };
+    return report( 0, 'Could not ask the hypervisor for its NAT bridge', <<"FIX" ) unless $virbr;
+$@
+Guests are built on that network and fetch their payload across it, so this has
+to answer before anything can be worked out about reaching them.
+FIX
+
+    my $ours = eval { Trog::Local->new()->transfer_ip($virbr) };
+    return report( 1, "Guests fetch their payload from $ours", q{} ) if $ours;
+
+    return report( 0, "No address of ours is reachable from a guest on $virbr", <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  Nothing routes to the
+hypervisor's guest network from here.
+
+Put this machine on that network, or name the address yourself in the [global]
+section of ipmap.cfg:
+
+    transfer_ip = 192.0.2.10
 FIX
 }
 

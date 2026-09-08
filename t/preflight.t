@@ -14,6 +14,7 @@ t/preflight.t - bin/preflight: what it checks, and what it tells you to do about
 use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
+use File::Slurper();
 
 use FindBin;
 use FindBin::libs;
@@ -27,12 +28,24 @@ use Trog::HV();
 my $script = "$FindBin::Bin/../bin/preflight";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
+# Redirected at the file descriptor rather than by localising the glob.  Some
+# checks run a command, and IPC::Run3 saves and restores the real STDOUT around
+# one -- an in-memory handle in its place is not something it can hand back, and
+# everything printed after the first such check goes missing rather than failing.
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
-    return wantarray ? ( $result[0], $out ) : $result[0];
+
+    my $tmp = File::Temp->new( UNLINK => 1 );
+    open( my $saved, '>&', \*STDOUT ) or die "could not save STDOUT: $!";
+    open( STDOUT,    '>',  "$tmp" )   or die "could not redirect STDOUT: $!";
+
+    my @result = eval { $code->() };
+    my $error  = $@;
+
+    open( STDOUT, '>&', $saved ) or die "could not restore STDOUT: $!";
+    die $error if $error;
+
+    return wantarray ? ( $result[0], File::Slurper::read_text("$tmp") ) : $result[0];
 }
 
 subtest 'libvirt packs its version into one integer' => sub {
@@ -134,6 +147,32 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
 };
 
+subtest 'a guest has to have an address of ours to fetch from' => sub {
+    my $hv    = Test::MockModule->new('Trog::HV');
+    my $local = Test::MockModule->new('Trog::Local');
+
+    $hv->redefine( virbr_ip => sub { '192.168.122.1' } );
+
+    $local->redefine( transfer_ip => sub { '192.168.122.251' } );
+    my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    ok( $result->{ok}, 'an address a guest can route to passes' );
+    like( $out, qr/192[.]168[.]122[.]251/, 'and says which one, since nothing else prints it' );
+
+    # A workstation on none of the hypervisor's networks. The guest's very first
+    # target fetches from here, so this is the whole run failing later.
+    $local->redefine( transfer_ip => sub { undef } );
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    ok( !$result->{ok}, 'no route to the guest network fails' );
+    like( $result->{fix}, qr/transfer_ip/, 'and points at the setting that overrides it' );
+    like( $result->{fix}, qr/\[global\]/,  'in the section it goes in' );
+
+    # Reported, not thrown: a hypervisor that will not answer about its bridge
+    # is one more line in the list rather than the end of the run.
+    $hv->redefine( virbr_ip => sub { die "no brctl\n" } );
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    ok( !$result->{ok}, 'a hypervisor that cannot say where its guests live fails' );
+};
+
 subtest 'the configuration it copies from has to be there' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
@@ -170,7 +209,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/ISO builder/,           'and the ISO builder' );
     like( $out, qr/libvirt/,               'and libvirt' );
     like( $out, qr/Missing from/,          'and the configuration' );
-    like( $out, qr/5 things to fix first/, 'counted, all in one run' );
+    like( $out, qr/6 things to fix first/, 'counted, all in one run' );
 };
 
 done_testing();

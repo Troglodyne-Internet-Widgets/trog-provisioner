@@ -7,7 +7,7 @@ use re '/aa';
 
 =head1 NAME
 
-t/Trog-Machine.t - Trog::Machine: putting a directory somewhere, and not putting it twice
+t/Trog-Machine.t - Trog::Machine: fetching a directory, and not fetching it twice
 
 =cut
 
@@ -63,39 +63,25 @@ subtest 'the ssh rsync is told to use' => sub {
     unlike( Trog::Machine->new( host => 'hv.test' )->_rsh, qr{-i}, 'no key, no -i naming a file that is not there' );
 };
 
-subtest 'what put_dir asks rsync for' => sub {
+subtest 'the port the far side listens on' => sub {
     my $mock = Test::MockModule->new('Trog::Machine');
-    my @asked;
-    $mock->redefine( mkpath => sub { 1 } );
-    $mock->redefine( _rsync => sub { shift; push( @asked, [@_] ); 1 } );
+    my $asked;
 
-    ok( remote()->put_dir( '/bogus/data/vm.test', '/bogus/data/vm.test' ), 'it goes' );
-
-    is(
-        $asked[0][0], '/bogus/data/vm.test/',
-        'a trailing slash on the source, which is rsync for "the contents of this"'
+    $mock->redefine(
+        capture => sub {
+            $asked = $_[1];
+            return "2222\n";
+        }
     );
-    is(
-        $asked[0][1], 'doge@hv.test:/bogus/data/vm.test/',
-        'and the far side named as the login it will arrive as'
-    );
+    is( remote()->sshd_port, 2222, 'what its configuration says' );
+    like( $asked, qr{sshd_config[.]d}, 'asked of the drop-in directory as well as the main file' );
 
-    # Not through rsync at all: sync_dir means "make sure the hypervisor has
-    # this", and when the hypervisor is us it already does.
-    my ( $local, $localmock ) = here();
-    @asked = ();
-    ok( $local->put_dir( '/bogus/data/vm.test', '/bogus/data/vm.test' ), 'a local machine says yes' );
-    is( scalar(@asked), 0, 'without copying a directory onto itself' );
-};
-
-subtest 'a destination that cannot be made is not transferred into' => sub {
-    my $mock = Test::MockModule->new('Trog::Machine');
-    my $ran  = 0;
-    $mock->redefine( mkpath => sub { 0 } );
-    $mock->redefine( _rsync => sub { $ran++; 1 } );
-
-    is( remote()->put_dir( '/bogus/data/vm.test', '/bogus/data/vm.test' ), 0, 'it says so' );
-    is( $ran,                                                              0, 'and does not spend a transfer finding out' );
+    # No Port line is not a failure to find one: it is how every stock install
+    # says 22.  Test::NoWarnings at the end of this file is the assertion that
+    # nothing was said about it -- this used to warn, and now runs against
+    # ourselves on every provision.
+    $mock->redefine( capture => sub { return "\n" } );
+    is( remote()->sshd_port, 22, 'and 22 when it says nothing' );
 };
 
 subtest 'what get_dir asks rsync for' => sub {

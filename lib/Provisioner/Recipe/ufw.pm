@@ -41,10 +41,11 @@ sub deps {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The hypervisor is always one, whether or not anybody said so: it is what
-    # the guest fetches its payload from, over ssh, repeatedly.
+    # Whoever holds the payload is always one, whether or not anybody said so:
+    # the guest fetches from it over ssh, repeatedly, and it is also the machine
+    # doing the provisioning.
     my @nets = @{ $opts{admin_networks} // [] };
-    unshift @nets, $opts{hv_ip} if $opts{hv_ip} && !grep { $_ eq $opts{hv_ip} } @nets;
+    unshift @nets, $opts{transfer_ip} if $opts{transfer_ip} && !grep { $_ eq $opts{transfer_ip} } @nets;
     $opts{admin_networks} = \@nets;
 
     return %opts;

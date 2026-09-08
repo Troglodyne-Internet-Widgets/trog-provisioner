@@ -76,8 +76,8 @@ my %G = (
     admin_email                => 'admin@test.test',
     main_ip                    => '192.168.1.100',
     tld_ip                     => '192.168.1.1',
-    hv_ip                      => '192.168.122.1',
-    hv_ssh_port                => 22,
+    transfer_ip                => '192.168.122.251',
+    transfer_port              => 22,
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     full_aliases               => ['www.test.test.test'],
@@ -257,11 +257,12 @@ foreach my $recipe (@available) {
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
 
-# The guest rsyncs its payload off the hypervisor, so every one of these has to
-# name it.  When the host came out empty the recipe still rendered, and still
-# looked plausible -- 'doge@:/opt/data/...' -- and only failed on the guest,
-# hours later, at the point where it had already been told the build succeeded.
-subtest 'every rsync off the hypervisor names it' => sub {
+# The guest rsyncs its payload off whoever is holding it -- this machine -- so
+# every one of these has to name it.  When the host came out empty the recipe
+# still rendered, and still looked plausible -- 'doge@:/opt/data/...' -- and only
+# failed on the guest, hours later, at the point where it had already been told
+# the build succeeded.
+subtest 'every rsync of a payload names the machine holding it' => sub {
     my %seen;
     foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
         foreach my $tt ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" ) {
@@ -279,7 +280,7 @@ subtest 'every rsync off the hypervisor names it' => sub {
             next unless index( $out, 'rsync' ) >= 0;
             $seen{$recipe}++;
             unlike( $out, qr/\@:/, "$recipe: no empty host between the user and the path" );
-            like( $out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}" );
+            like( $out, qr/\@\Q$G{transfer_ip}\E:/, "$recipe: rsyncs from $G{transfer_ip}" );
         }
     }
     ok( scalar keys %seen, 'and there were rsyncing recipes to check' );

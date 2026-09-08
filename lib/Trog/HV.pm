@@ -334,40 +334,6 @@ sub pool_target {
     return $path;
 }
 
-=head2 authorized_keys
-
-The C<authorized_keys> file of the hypervisor-side transfer user, which is the
-account the guest scp's its payload out of.
-
-=cut
-
-sub authorized_keys {
-    my ($self) = @_;
-    return "$ENV{HOME}/.ssh/authorized_keys" if $self->is_local;
-
-    my $home = $self->capture('echo $HOME');
-    chomp $home if defined $home;
-    die "Could not determine the home directory of the transfer user on the hypervisor\n"
-      unless defined $home && length $home;
-    return "$home/.ssh/authorized_keys";
-}
-
-=head2 hv_user
-
-The unprivileged user the guest will scp its payload back from.
-
-=cut
-
-sub hv_user {
-    my ($self) = @_;
-    return scalar getpwuid($<) if $self->is_local;
-    return $self->ssh_user     if defined $self->ssh_user;
-
-    my $who = $self->capture('id -un');
-    chomp $who if defined $who;
-    return $who;
-}
-
 =head1 LIBVIRT
 
 All of this goes through L<Sys::Virt>, which talks the connection URI's
@@ -964,11 +930,6 @@ The libvirt NAT bridge.
 The hypervisor's address on that NAT bridge, which is what the guest scp's from
 and ships its logs to.
 
-=head2 sshd_port
-
-The port the hypervisor's sshd listens on.  Read out of C<sshd_config> rather
-than off the wire, since there may be several sshd instances running.
-
 =head2 has_tpm
 
 Whether guests built here should be given a TPM.
@@ -1320,17 +1281,6 @@ sub virbr_ip {
     return $self->{virbr_ip} = $ip;
 }
 
-sub sshd_port {
-    my ($self) = @_;
-    return $self->{sshd_port} if defined $self->{sshd_port};
-
-    my $port = $self->capture(q{grep '^Port' /etc/ssh/sshd_config | awk '{print $2}'});
-    chomp $port if defined $port;
-    warn "Could not determine SSH port for the hypervisor, assuming 22\n" unless $port;
-
-    return $self->{sshd_port} = ( $port || 22 );
-}
-
 =head1 CAPACITY
 
 What the hypervisor has, what its guests have already been promised, and
@@ -1498,50 +1448,6 @@ sub _fraction {
 }
 
 =head1 PROVISIONING
-
-=head2 sync_domain_dir($domain)
-
-Put the domain's directory on the hypervisor.
-
-The guest pulls its payload off the hypervisor over the NAT network, so when the
-hypervisor isn't us, C<domain_dir> has to exist on both ends.  The whole
-directory goes, not just the tarball: what else lives in there is decided by
-whatever provisions these domains, not by this repository, so we are in no
-position to guess which parts the guest will reach for.
-
-Note that this puts the guest's private key on the hypervisor too.  That is the
-cost of the hypervisor being the machine the guest fetches from.
-
-=cut
-
-sub sync_domain_dir {
-    my ( $self, $domain ) = @_;
-    return $self->sync_dir( $self->domain_dir . "/$domain" );
-}
-
-=head2 sync_dir($path)
-
-Ship a directory to the same path on the hypervisor, and make sure it is there
-even when there is nothing to ship.
-
-That second half matters more than it sounds.  A guest rsyncs its payload out of
-a directory on the hypervisor, and rsync fails rather than shrugging when the
-source is not there -- so a directory that is empty here has to be an empty
-directory there, not an absent one.
-
-=cut
-
-sub sync_dir {
-    my ( $self, $path ) = @_;
-    return 1 if $self->is_local;
-
-    return $self->mkpath($path) ? 1 : 0 unless -d $path;
-
-    print "Shipping $path to the hypervisor...\n";
-    $self->put_dir( $path, $path )
-      or die "Could not copy $path to the hypervisor\n";
-    return 1;
-}
 
 =head2 guest_ssh_ip($config, $lease_ip)
 
