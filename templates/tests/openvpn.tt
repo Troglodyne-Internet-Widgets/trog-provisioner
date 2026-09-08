@@ -127,11 +127,19 @@ like($filter, qr{^-A ufw-before-forward -d \Q[% subnet %]/[% cidr %]\E .*RELATED
 # a rule naming an interface this guest does not have are the same thing from
 # the outside -- iptables accepts any name, and nothing ever matches it -- and
 # both look exactly like a working VPN until somebody connects to it.
-my $nat = `iptables -t nat -S POSTROUTING 2>&1`;
-my ($masq_iface) = $nat =~ m{^-A POSTROUTING -s \Q[% subnet %]/[% cidr %]\E -o (\S+) -j MASQUERADE$}m;
+my $nat = `iptables -t nat -S 2>&1`;
+my ($masq_iface) = $nat =~ m{^-A trog-nat -s \Q[% subnet %]/[% cidr %]\E -o (\S+) -j MASQUERADE$}m;
 ok($masq_iface, 'the VPN subnet is masqueraded on the way out') or diag $nat;
 ok($masq_iface && -d "/sys/class/net/$masq_iface", 'and out of an interface this guest actually has')
     or diag 'masquerading out of: ' . ($masq_iface // 'nothing');
+
+# Once, however many times ufw has reloaded.  ufw reloads with
+# iptables-restore --noflush, which flushes a user chain the input declares and
+# never flushes a built-in one -- so this rule written straight into POSTROUTING
+# gained a copy on every reload, and a table with six identical MASQUERADE rules
+# in it is one nobody can read.  In trog-nat it is replaced instead.
+my $copies = () = $nat =~ m{^-A \S+ -s \Q[% subnet %]/[% cidr %]\E -o \S+ -j MASQUERADE$}mg;
+is($copies, 1, 'and masqueraded exactly once') or diag $nat;
 
 # In the file as well as in the kernel: the kernel copy is gone at the next
 # reboot, and /etc/ufw/before.rules is what puts it back.
