@@ -108,6 +108,12 @@ sub template_files {
     );
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+    return ( '/var/lib/deluged/config/state' => { from => "$install_dir/$domain/deluged/state" } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

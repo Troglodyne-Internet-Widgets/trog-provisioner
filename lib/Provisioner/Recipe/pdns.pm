@@ -115,6 +115,15 @@ sub template_files {
     );
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # The whole spool, because the chroot is what pdns opens everything relative
+    # to.  0775 because the chroot needs the group in.
+    return ( '/var/spool/powerdns' => { from => "$install_dir/$domain/pdns", owner => 'pdns:pdns', mode => '0775' } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

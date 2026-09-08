@@ -118,6 +118,19 @@ sub enrich {
     return %opts;
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # user falls back to admin_user the way validate would, because
+    # required_recipes is asked before anything is validated.
+    my $user = $opts{user} // $opts{admin_user} // 'root';
+
+    # Contacts, identities and every per-user preference live in the one sqlite
+    # file, and the fragment declines to seed a schema over a restored one.
+    return ( "$install_dir/webmail.${domain}_data" => { from => "$install_dir/$domain/roundcube", owner => "$user:www-data" } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

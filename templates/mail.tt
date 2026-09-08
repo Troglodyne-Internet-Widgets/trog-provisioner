@@ -28,7 +28,6 @@ mv InternalHosts /etc/opendkim
 # This domain's key rather than everything that was under /etc/opendkim/keys: a
 # guest hosting two domains has both in the salvage, and each domain's fragment
 # puts its own back.
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/.mail/keys/[% domain %]' '/etc/opendkim/keys/[% domain %]' 'opendkim:opendkim'
 [ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
@@ -90,7 +89,6 @@ mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
 # than restored, because the accounts come from the recipe.
 # TODO make the old one take precedence via configuration
 test -f [% install_dir %]/[% domain %]/mailnames/passwd && mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/mailnames' '/mail/[% domain %]' 'dovecot:[% admin_user %]'
 sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd
 [%# Readable by dovecot here rather than only in the sweep at the bottom of this

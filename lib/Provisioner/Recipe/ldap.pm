@@ -183,6 +183,17 @@ sub remote_prepare {
     return ('/usr/local/sbin/ldap-export.sh');
 }
 
+sub restores {
+    my ( $self, %opts ) = @_;
+    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
+
+    # Into the export directory rather than straight at slapd: this is where the
+    # hourly export writes and where the next fetch looks, so a rebuilt guest has
+    # its last known directory in the one place from the moment it is built.  The
+    # reload that reads it back is this recipe's own, and runs later.
+    return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => "$admin:$admin" } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (

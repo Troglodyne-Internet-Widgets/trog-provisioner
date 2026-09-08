@@ -88,7 +88,16 @@ else
     mv "$SALVAGED" "$DESTINATION"
 fi
 
-[ -n "$OWNER" ] && chown -R "$OWNER" "$DESTINATION"
+# Attempted rather than required.  The data target runs before every recipe
+# target, so the account that will own this often belongs to a package that is
+# installed, or a useradd that runs, later -- gogs makes its own in its own
+# target.  The recipe chowns again once the account exists; this is only so the
+# common case does not need it.  Failing here would abort the whole target for
+# something that fixes itself two targets later.
+if [ -n "$OWNER" ] && ! chown -R "$OWNER" "$DESTINATION" 2>/dev/null; then
+    echo "restore_state: no $OWNER on this guest yet, so $DESTINATION stays root's until the recipe gives it away" >&2
+fi
+
 [ -n "$MODE" ] && chmod -R "$MODE" "$DESTINATION"
 
 echo "restore_state: restored $DESTINATION"

@@ -17,7 +17,6 @@ chmod 0700 /etc/dehydrated/hooks/[% domain %].sh
 # two domains has both in the salvage and each domain's fragment puts its own
 # back.  The account key is not restored here -- it goes back in the global
 # fragment, ahead of `dehydrated --register`.
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/.letsencrypt/var-certs/[% domain %]' '/var/lib/dehydrated/certs/[% domain %]' 'root:[% admin_user %]'
 # Slap in a utility to do dns mongling for the domain
 mkdir -p /opt/lexicon/[% domain %]; /bin/true
 mv lexicon.sh /opt/lexicon/[% domain %]/[% registrar.type %]

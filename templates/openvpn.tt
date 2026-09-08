@@ -8,7 +8,6 @@
 	# off the old one stops working -- with the clients nowhere to be told.
 	# restore_state declines when nothing was salvaged and when there is already
 	# a pki here, so this is a no-op on both of the cases that are not a rebuild.
-	[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/openvpn/pki' /etc/openvpn/easy-rsa/pki root:root
 	# --batch on every one of these.  easyrsa prompts for a Common Name
 	# otherwise, and a make recipe has no terminal to answer from, so gen-req
 	# read EOF and died with "Error making certificate request" -- taking the

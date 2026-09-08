@@ -28,7 +28,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y matrix-synapse-py3
 #
 # No owner argument: the chown -R and chmod -R below cover the restored tree,
 # and a media store is not a thing to walk twice.
-[% script_dir %]/restore_state [% install_dir %]/[% domain %]/matrix [% install_dir %]/matrix.[% domain %]
 # Setup directories
 mkdir -p [% install_dir %]/matrix.[% domain %]
 mkdir -p [% install_dir %]/matrix.[% domain %]/media

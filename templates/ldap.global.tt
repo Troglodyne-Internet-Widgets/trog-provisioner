@@ -68,7 +68,6 @@ install -o root -g root -m 0644 ldap_ufw.conf /etc/ufw/applications.d/ldap
     it, and declines when the destination has an export in it already, which is
     what a live guest being re-provisioned looks like. -%]
 mkdir -p /var/backups/ldap
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/ldap' /var/backups/ldap '[% admin_user %]:[% admin_user %]'
 # Group and other, not a mode: the directory needs its owner bits to stay
 # traversable, and a recursive 0600 would leave the admin user unable to enter
 # the directory it owns -- which is the sftp fetch reading nothing all over again.

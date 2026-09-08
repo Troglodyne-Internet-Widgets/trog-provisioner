@@ -227,13 +227,22 @@ This is configured by setting the sub value.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    my %limits = $self->rate_limits(%opts);
-    return () unless %limits;
+    my @required;
 
     # A recipe that names limits is a recipe that listens, and something has to
     # apply them.  Saying so here is what makes the dependency explicit rather
     # than ufw knowing the name of every recipe that might be installed.
-    return ( ufw => sub { return ( rate_limits => \%limits ) } );
+    my %limits = $self->rate_limits(%opts);
+    push( @required, ufw => sub { return ( rate_limits => \%limits ) } ) if %limits;
+
+    # Likewise for state: a recipe that says where its salvage goes back is a
+    # recipe that depends on the thing which puts it there.  data walks what
+    # every dependant handed it, rather than each fragment calling restore_state
+    # for itself.
+    my %restores = $self->restores(%opts);
+    push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
+
+    return @required;
 }
 
 =head3 $merged = $recipe->reconcile($merged, $incoming)
@@ -534,6 +543,48 @@ one somebody will restore from later believing otherwise.
 =cut
 
 sub remote_prepare {
+    return ();
+}
+
+=head3 %restores = $recipe->restores(%opts)
+
+Where the state this recipe salvaged has to be put back, as a map of the
+destination on the guest to how to get it there:
+
+    "/var/lib/deluged/config/state" => {
+        from  => "$install_dir/$domain/deluged/state",
+        owner => 'debian-deluged:debian-deluged',   # optional
+        mode  => '0750',                            # optional
+    }
+
+Handed the whole configuration rather than a path and a domain, because what a
+destination is owned by is often one of the other settings -- C<admin_user>,
+the service C<user> -- and a recipe should not have to be told twice.
+
+C<data> walks this, so the fragment does not have to call C<restore_state>
+itself.  Keyed on the destination because that is what has to be unique: two
+recipes restoring different things to the same path is a disagreement, and
+C<reconcile> is where it gets settled rather than silently resolved.
+
+B<Not derived from C<remote_files>.>  It looks like the inverse and often is,
+but not always: C<mail> salvages C</mail/keys> whole and puts one subdirectory
+of it back at C</etc/opendkim/keys/$domain>, which no rule about reversing the
+map would produce.  Restoring state to the wrong place is destructive, so this
+is said outright rather than inferred.
+
+Leave it empty -- which is the default -- for a recipe whose salvage lands in
+the domain directory the service already reads from, since the C<data> target
+has then already put it where it goes.
+
+A recipe whose destination is owned by a service that is running before the
+makefile starts cannot use this: the restore has to happen between a stop and a
+start inside that recipe's own target.  C<redis> and C<plexmediaserver> are the
+two, and they keep their own C<restore_state> calls.
+
+=cut
+
+sub restores {
+    my ( $self, %opts ) = @_;
     return ();
 }
 

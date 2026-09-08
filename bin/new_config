@@ -42,7 +42,6 @@ use File::Find();
 use Provisioner::IPPool;
 use Provisioner::Utils;
 use Provisioner::Cookbook();
-use Provisioner::Recipe::data;
 
 # Better stack traces
 use Carp::Always;
@@ -415,8 +414,14 @@ sub handle_domain {
     }
 
     # There will always be data config
-    my $data_dir    = Provisioner::Cookbook->data_dir( $fqdn, $rconf );
-    my $data_config = delete $rconf->{$domain}{data};
+    my $data_dir = Provisioner::Cookbook->data_dir( $fqdn, $rconf );
+
+    # Read, not deleted.  It used to be lifted out of the configuration entirely,
+    # which is what kept it from being a recipe the depsolver could see -- and so
+    # from being handed anything by the recipes that depend on it.  It stays in,
+    # takes part in the loop like everything else, and is only lifted back out at
+    # the makefile render, where its target has a fixed slot ahead of the others.
+    my $data_config = $rconf->{$domain}{data};
     die "Must provide data configuation for $fqdn" unless $data_config;
 
     my @data_users;
@@ -515,17 +520,10 @@ sub handle_domain {
     $global_config->{transfer_user} = $transfer_user;
     $global_config->{hv_ssh_port}   = $hv_ssh_port;
 
-    my $do            = Provisioner::Recipe::data::->new(%provisioner_opts);
-    my $data_fragment = $do->render( %$global_config, %$data_config );
-    my @tests         = $do->tests();
+    # Where every recipe's tests are written, data's included: it is a module
+    # now, so the loop below renders them out of the configuration it ended up
+    # with rather than out of what it started with.
     mkdir "$cfg_dir/t";
-    foreach my $test (@tests) {
-        my $tname = $test;
-        $tname =~ s/tt$/t/;
-        my $rendered = $do->render_file( "tests/$test", %$global_config, %$data_config );
-        print "Writing $test as $tname\n";
-        File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
-    }
 
     # set the install_dir for configs to use from here
     $global_config->{install_dir} = $data_config->{to};
@@ -583,7 +581,16 @@ sub handle_domain {
         my $pconf = $rconf->{$domain}{$module} // {};
 
         # Check and see if this particular provisioner requires another recipe to work.
-        my %dep_recipes = $builder->required_recipes( %$global_config, %$pconf );
+        #
+        # The base's own answer first, then the recipe's.  What the base decides
+        # every recipe owes -- ufw its rate limits, data its restores -- is not
+        # something an override should be able to drop by forgetting to chain to
+        # SUPER, and six of them do exactly that.  Asking it here means a recipe
+        # only has to say what is true of itself.
+        my %dep_recipes = (
+            Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
+            $builder->required_recipes( %$global_config, %$pconf ),
+        );
         foreach my $required ( keys(%dep_recipes) ) {
             my $manual_args = delete $pconf->{$required} // {};
 
@@ -776,6 +783,22 @@ sub handle_domain {
     } @pkgs if @conflicts;
 
     my $extra_packages = join( ', ', @pkgs );
+
+    # Out of the module machinery, and only here.  data took part in the loop
+    # like any other recipe -- which is what let the recipes hand it their
+    # restores -- but its target is not one of the ordered ones: makefile.tt
+    # places it by hand, ahead of everything, because a recipe finding its state
+    # already restored is the entire point.
+    #
+    # Both lines are needed.  The first supplies the data_fragment the template
+    # expects, and leaving it in %fragments would emit a second state/data:
+    # target that make would override the first with.  The second keeps it off
+    # all:'s prerequisite list, where it would run last.
+    #
+    # Compared exactly rather than matched, so a domain called 'data' does not
+    # lose its own target.
+    my $data_fragment = delete $fragments{data};
+    @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/data" } @modules_ordered;
 
     my $makefile = $tt->render(
         'makefile.tt',

@@ -4,3 +4,18 @@ mkdir -p [% to %]/[% domain %]
 rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% from %]/[% domain %]/ [% to %]/[% domain %]/
 chown -R [% user %]:[% admin_user %] [% to %]/[% domain %]
 chmod -R 0750 [% to %]/[% domain %]
+[%# And then put back whatever the recipes said they salvaged.  Here rather than
+    in each fragment: this is the same call fifteen times over, and the map it
+    walks is what every recipe depending on this one handed over through its
+    restores().  See Provisioner::Recipe::restores.
+
+    After the rsync above, because that is what brings the salvage onto the
+    guest in the first place, and before any recipe target, because a recipe
+    that finds its state already in place is the whole point.
+
+    restore_state declines on its own when there was nothing salvaged, when what
+    came down is empty, and when the destination already has state -- so this
+    can walk the whole map without asking any questions about any of it. -%]
+[% FOR dest IN restores.keys().sort() %]
+[% script_dir %]/restore_state '[% restores.$dest.from %]' '[% dest %]'[% IF restores.$dest.owner %] '[% restores.$dest.owner %]'[% ELSE %] ''[% END %][% IF restores.$dest.mode %] '[% restores.$dest.mode %]'[% END %]
+[% END -%]

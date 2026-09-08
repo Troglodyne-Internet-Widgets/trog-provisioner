@@ -45,7 +45,6 @@ chmod 0600 /etc/synczones.conf
     never fire anyway, because by then the schema below has put a zones.db in
     the destination and restore_state declines in front of content.
     Which is also why it goes ahead of the schema rather than after it. -%]
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns 0775
 [%# Apply the schema, unless what came back already has one.  Unconditional was
     right against a spool the package left empty and is an error against a
     restored database: sqlite3 stops on the first table it is told to create

@@ -268,6 +268,15 @@ sub remote_skip {
     return (qr{/homeserver[.]signing[.]key\z});
 }
 
+sub restores {
+    my ( $self,        %opts )   = @_;
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
+
+    # The media store and the database.  No owner: the fragment chowns the whole
+    # tree to matrix-synapse afterwards anyway.
+    return ( "$install_dir/matrix.$domain" => { from => "$install_dir/$domain/matrix" } );
+}
+
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 

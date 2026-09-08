@@ -25,7 +25,6 @@ mv dehydrated.logrotate /etc/logrotate.d/dehydrated
 # account sitting in the destination and restore_state would -- rightly --
 # decline to write over it.  There is one account per guest, so restoring it
 # once, here, is the right scope as well as the only workable order.
-[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/.letsencrypt/accounts' '/etc/dehydrated/accounts' 'root:[% admin_user %]'
 # Setup LE
 dehydrated --register --accept-terms; /bin/true
 # And left where the next fetch can read it.  That fetch is sftp as
