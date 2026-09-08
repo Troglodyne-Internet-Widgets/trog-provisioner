@@ -16,14 +16,29 @@ auth SHA256
 server [% subnet %] [% netmask %]
 ifconfig-pool-persist /var/log/openvpn/ipp.txt
 
+[%# Said out loud, because unset is not neutral: it takes the historical net30
+    default, which spends a /30 per client and which upstream has deprecated. -%]
+topology subnet
+
 [% IF dns.size() -%]
 [% FOR d IN dns -%]
 push "dhcp-option DNS [% d %]"
 [% END -%]
 [% END -%]
+[%# On unless the domain turns it off.  This decides whether the tunnel is the
+    whole internet for a client or only a route to what is behind the server,
+    and the client is told at connect time -- so the setting takes effect on
+    every deployed client the next time it reconnects, rather than on whoever
+    installs a new one.
+
+    Off is the answer when the guest is not meant to be an exit node for
+    anybody: the client keeps its own default route, and only the VPN subnet
+    plus whatever the server pushes a route for goes down the tunnel. -%]
+[% IF redirect_gateway -%]
 # Route all client traffic through the VPN gateway.
 # bypass-dhcp ensures local DHCP still reaches the real gateway.
 push "redirect-gateway def1 bypass-dhcp"
+[% END -%]
 
 keepalive 10 120
 persist-key

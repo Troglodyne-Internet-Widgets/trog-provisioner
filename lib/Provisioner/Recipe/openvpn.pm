@@ -27,6 +27,10 @@ In recipes.yaml:
             cipher: AES-256-GCM
             # dns is optional; if omitted, no DNS servers are pushed to clients
             interface: eth0
+            # redirect_gateway is optional and on; set it false for a VPN that
+            # is a route to this guest's network rather than a client's whole
+            # internet
+            redirect_gateway: false
 
 =head2 DESCRIPTION
 
@@ -39,8 +43,32 @@ pushes a route for the VPN subnet to clients.
 If the ufw recipe is also enabled, a UFW application rule for OpenVPN will be
 installed automatically.
 
-The interface option is used to set up NAT (masquerade) so VPN clients can
-reach the internet. If omitted, NAT is not configured.
+=head3 What it takes to route a client's traffic anywhere
+
+Three things, and two of them are not enough.
+
+C<net.ipv4.ip_forward> is turned on, and a MASQUERADE rule sends the VPN subnet
+out of the guest wearing the guest's address.  Neither is what decides whether a
+forwarded packet lives: it meets the filter FORWARD chain first, and Ubuntu
+ships C</etc/default/ufw> with C<DEFAULT_FORWARD_POLICY="DROP">.  The third
+thing is therefore an accept for the subnet in C<ufw-before-forward>, without
+which the MASQUERADE rule is correct and unreachable -- and a client that
+connects loses its connectivity rather than gaining a route, since
+C<redirect-gateway> has meanwhile told it to send everything here.
+
+C<setup-masquerade> writes both halves.  The accept names the VPN subnet rather
+than setting C<DEFAULT_FORWARD_POLICY="ACCEPT">, which would make the guest
+willing to route anything for anybody.
+
+C<interface> says which interface to masquerade out of, and is not decided here:
+the name depends on how the guest booted -- C<ens3>, C<ens4>, C<enp1s0> -- and a
+wrong one writes a rule that matches nothing and reports success.  Omitted, the
+guest is asked which interface carries its default route at the moment the rule
+is written.
+
+C<redirect_gateway> tells clients to route everything through the tunnel, and
+defaults to on.  Turn it off for a VPN that is a route to what is behind the
+guest rather than a replacement for a client's own internet connection.
 
 =head3 The PKI is the part that cannot be made again
 
@@ -100,11 +128,25 @@ sub args {
             # type these were never checked -- the validator has no
             # _validate_type_ipv4 and never reached one, because the fields were
             # always absent until defaults started being applied.
-            subnet    => { type => 'string', format  => 'ipv4', default => '10.8.0.0' },
-            netmask   => { type => 'string', format  => 'ipv4', default => '255.255.255.0' },
-            cipher    => { type => 'string', default => 'AES-256-GCM' },
-            dns       => { type => 'array',  items   => { type => 'string' } },
+            subnet  => { type => 'string', format  => 'ipv4', default => '10.8.0.0' },
+            netmask => { type => 'string', format  => 'ipv4', default => '255.255.255.0' },
+            cipher  => { type => 'string', default => 'AES-256-GCM' },
+            dns     => { type => 'array',  items   => { type => 'string' } },
+
+            # Which interface VPN traffic is masqueraded out of.  No default,
+            # because the answer is a fact about the guest and not one this
+            # machine can know -- these guests come up as ens3, ens4 or enp1s0
+            # depending on how they booted, and naming the wrong one writes a
+            # rule that matches nothing.  Left unset, setup-masquerade asks the
+            # guest which interface its default route leaves by.
             interface => { type => 'string' },
+
+            # Whether the server tells clients to send everything down the
+            # tunnel.  Pushed at connect time, so whatever this says takes
+            # effect on every deployed client the next time it reconnects --
+            # which is why the default is the permissive one rather than the
+            # cautious one.
+            redirect_gateway => { type => 'boolean', default => 1 },
         },
     );
 }
