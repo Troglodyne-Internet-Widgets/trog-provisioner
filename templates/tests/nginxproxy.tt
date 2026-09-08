@@ -40,6 +40,25 @@ foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
     ok($reachable, "and www-data can actually traverse into $root");
 }
 
+# Traverse is not read.  A file the running application drops into the docroot
+# after this recipe has run gets the group nginxproxy set the directory to only
+# because of the setgid bit -- without it, the file keeps whatever group the
+# process that wrote it defaulted to, which is never www-data, and 0750 shuts
+# "other" out entirely.  Written and read as root, chmodded down to what data
+# leaves everything at, so this is a probe of the group nginx reads with, not
+# of a stray world-readable default.
+foreach my $root ($vhost =~ m/^\s*root\s+(\S+);/gm) {
+    next unless -d $root;
+    my $probe = "$root/.nginxproxy_read_probe";
+    open(my $fh, '>', $probe) or die "could not write $probe: $!";
+    print {$fh} "probe\n";
+    close $fh;
+    chmod 0750, $probe;
+    my $readable = system('runuser', '-u', 'www-data', '--', 'cat', $probe) == 0;
+    ok($readable, "and www-data can actually read a file under $root, not merely traverse to it");
+    unlink $probe;
+}
+
 # Every server block serves something.  A vhost that neither serves files nor
 # proxies from / answers 404 to everything, which reads as an application fault
 # rather than a configuration that forgot to say what it was for.

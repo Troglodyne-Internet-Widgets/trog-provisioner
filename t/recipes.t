@@ -1274,6 +1274,57 @@ subtest 'a vhost serves files only where a recipe said it has some' => sub {
     unlike( $public, qr/^\s*root\s/m, 'and still brings no root with it' );
 };
 
+subtest 'nginxproxy opens exactly as much of the domain directory as a docroot needs' => sub {
+    my $frag = sub {
+        my (%vhosts) = @_;
+
+        # A fresh object per configuration, for the same reason the vhost
+        # closure above uses one: validate is memoized on the object.
+        return 'Provisioner::Recipe::nginxproxy'->new(%PROV)->render( %G, vhosts => \%vhosts );
+    };
+
+    # data leaves the domain directory 0750 user:admin_user, and www-data is
+    # neither -- but a pure proxy has nothing under there nginx ever opens, so
+    # granting it traversal would be exposure with nothing to show for it.
+    my $proxy = $frag->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
+    unlike( $proxy, qr/chmod o\+x/, 'a vhost with no static_dir gets no traversal at all' );
+
+    # www/static is two directories under the domain root, and data leaves both
+    # of them 0750 once it has actually rsynced content down -- so both need
+    # opening, the way a guest seeded with real content under www/ showed only
+    # one of them was.
+    my $static = $frag->( 443 => { ssl => 1, proxy_uri => 'run/app.sock', static_dir => 'www/static' } );
+    like( $static, qr{chmod o\+x '/opt/domains/test\.test\.test'$}m, 'the domain directory gets traversal' );
+    like(
+        $static, qr{chmod o\+x '/opt/domains/test\.test\.test/www'$}m,
+        'and so does the directory static_dir sits under'
+    );
+    unlike(
+        $static, qr{chmod o\+x '/opt/domains/test\.test\.test/www/static'},
+        'but not static_dir itself -- that is a group change, not a traverse bit'
+    );
+
+    # The docroot itself is handed to www-data by group, recursively: data
+    # already rsynced whatever the domain has to serve before this fragment
+    # ever runs, and a non-recursive chown left everything under the top
+    # directory in the admin group, unreadable to www-data despite the
+    # directory itself claiming to be theirs.
+    like(
+        $static,
+        qr{chown -R \Q$G{user}\E:www-data '/opt/domains/test\.test\.test/www/static'},
+        'static_dir is chowned recursively, not just retagged at the top'
+    ) or diag $static;
+
+    # And setgid on every directory under it, so a file the running application
+    # writes after this recipe has finished lands in that group too -- the same
+    # arrangement redis and mail keep their own later writes in.
+    like(
+        $static,
+        qr{find '/opt/domains/test\.test\.test/www/static' -type d -exec chmod g\+s},
+        'and every directory under static_dir is left setgid for what gets written later'
+    );
+};
+
 subtest 'gogs is served where the vhost actually answers' => sub {
     my $ini = 'Provisioner::Recipe::gogs'->new(%PROV)->render_file( 'files/gogs.app.ini.tt', %G, %{ $required_config{gogs} }, secret_key => q{} );
 

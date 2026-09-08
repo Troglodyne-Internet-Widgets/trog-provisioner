@@ -198,6 +198,36 @@ sub enrich {
             $vopts->{proxy_uri} = "http://$name";
         }
         $opts{upstreams} = \%upstreams;
+
+        # Whether any vhost actually serves files, and every directory between
+        # the domain root and a declared static_dir short of static_dir itself.
+        # Both matter because data leaves the domain directory 0750
+        # user:admin_user, which shuts www-data out of it regardless of
+        # whether the domain has any docroot for it to read -- a pure proxy
+        # has nothing under there nginx ever opens, so granting it traversal
+        # would be exposure with nothing to show for it.  And tpsgi declares
+        # www/static, where www is not a fiction this recipe invents: data's
+        # rsync brings it down already populated whenever the domain has
+        # content checked in, left 0750 the same as everything else, which
+        # shuts www-data out one level further in than the domain root alone.
+        # static_dir gets its own group and setgid below and needs nothing
+        # here; this is only the directories strictly above it.
+        my $serves_static;
+        my %traverse;
+        foreach my $vopts ( values %{ $opts{vhosts} } ) {
+            next if $vopts->{ssl_redirect};
+            next unless $vopts->{static_dir};
+            $serves_static = 1;
+            my @parts = split '/', $vopts->{static_dir};
+            pop @parts;
+            my $path = '';
+            foreach my $part (@parts) {
+                $path = length $path ? "$path/$part" : $part;
+                $traverse{$path} = 1;
+            }
+        }
+        $opts{serves_static} = $serves_static ? 1 : 0;
+        $opts{traverse_dirs} = [ sort keys %traverse ];
     }
 
     return %opts;
