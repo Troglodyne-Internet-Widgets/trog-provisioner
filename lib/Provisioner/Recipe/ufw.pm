@@ -81,9 +81,20 @@ sub args {
             # the recipes that actually listen, through their rate_limits: see
             # Provisioner::Recipe::rate_limits.  Setting a port here still wins
             # if it is higher, which is how an operator raises one.
+            #
+            # The default is on the port rather than on the map holding it.  A
+            # default one level up means "when this property is absent", and
+            # required_recipes hands rate_limits over whole -- so the first
+            # recipe that listened on anything supplied the key, and ssh's limit
+            # was never filled in on any guest that had one.  On the property it
+            # means "when this key is missing from the map", which is what was
+            # always meant by it.
             rate_limits => {
-                type    => 'object',
-                default => { 22 => 64 },
+                type       => 'object',
+                default    => {},
+                properties => {
+                    22 => { type => 'integer', default => 64 },
+                },
             },
 
             # Networks allowed in without ufw's rate limit.  Its limit denies a
