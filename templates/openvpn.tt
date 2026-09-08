@@ -84,12 +84,20 @@
 	# Enable IP forwarding
 	echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
 	sysctl -p /etc/sysctl.d/99-openvpn.conf
-[% IF interface -%]
-	# NAT for VPN clients: masquerade VPN subnet out via the named interface.
-	# Mirrors the setup-port-forwards pattern by editing /etc/ufw/before.rules
-	# so the rule survives reboots without needing iptables-persistent.
-	[% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %]=[% interface %]'
-[% END -%]
+	# Forwarding and NAT for VPN clients: let the VPN subnet be forwarded, and
+	# masquerade it out of the guest's egress interface.  Both, because either
+	# on its own routes nothing -- a forwarded packet meets the filter FORWARD
+	# chain before it ever reaches nat POSTROUTING, and ufw's forward policy is
+	# DROP.  Mirrors the setup-port-forwards pattern by editing
+	# /etc/ufw/before.rules so the rules survive reboots without needing
+	# iptables-persistent.
+	#
+	# Unconditional, and the interface optional.  A guest running this recipe
+	# routes for its clients or it is a VPN that takes them off the internet,
+	# so there is no configuration in which leaving the rules out is the right
+	# answer.  Left unnamed, setup-masquerade asks the guest which interface
+	# its default route leaves by, which is the only place that answer exists.
+	[% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
 	# Enable and start the service
 	systemctl daemon-reload
 	systemctl enable openvpn-server@server

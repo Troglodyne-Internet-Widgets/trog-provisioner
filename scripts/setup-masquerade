@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
 
+package Trog::Script::SetupMasquerade;
+
 use strict;
 use warnings;
 
@@ -7,74 +9,218 @@ use warnings;
 
 =head2 SYNOPSIS
 
-    setup-masquerade 10.8.0.0/24=eth0 [10.9.0.0/24=eth1 ...]
+    setup-masquerade 10.8.0.0/24=eth0 [10.9.0.0/24 ...]
 
 =head2 DESCRIPTION
 
-Idempotently edits C</etc/ufw/before.rules> to add C<*nat> POSTROUTING
-MASQUERADE rules for the given C<SUBNET=INTERFACE> pairs.
+Idempotently edits C</etc/ufw/before.rules> so a VPN subnet is both forwarded
+and masqueraded, for each C<SUBNET> or C<SUBNET=INTERFACE> given.
 
-ufw does not expose masquerade rules through its app rule mechanism, so this
+Two rules, not one, because either on its own routes nothing.  A packet from a
+VPN client traverses routing, then the filter FORWARD chain, and only then nat
+POSTROUTING -- so a MASQUERADE rule on a firewall whose forward policy is DROP
+is a correct rule nothing ever reaches.  Ubuntu ships C</etc/default/ufw> with
+C<DEFAULT_FORWARD_POLICY="DROP">, which is every guest here.  So this writes:
+
+=over 4
+
+=item * C<*nat> POSTROUTING MASQUERADE, so a client's traffic leaves wearing the
+guest's address.
+
+=item * C<*filter> C<ufw-before-forward> ACCEPTs for the subnet, so it gets that
+far.  Both directions: out of the subnet, and back into it for connections that
+are already established.
+
+=back
+
+The forward accepts name the subnet rather than setting
+C<DEFAULT_FORWARD_POLICY="ACCEPT">, which would make the guest willing to route
+anything for anybody.  It is a VPN, not a router.
+
+If C<INTERFACE> is left off, the interface carrying the guest's default route is
+used.  That is asked of the guest at the moment the rule is written, because the
+name is a fact about the guest -- C<ens3>, C<enp1s0>, C<eth0> depending on how
+it booted -- and not something the configuration on the hypervisor can know.  A
+guest with no default route is one nobody can name an answer for, so that is an
+error rather than a rule quietly left out.
+
+ufw does not expose either kind of rule through its app rule mechanism, so this
 mirrors the C<setup-port-forwards> pattern: hand-edit C</etc/ufw/before.rules>
-to inject a C<*nat> table block above the existing C<*filter> block. Re-runs
-are safe. Existing rules are detected and skipped, and the C<*nat> header is
-only written when no such block already exists.
+between markers, so a re-run replaces what the last one wrote rather than adding
+to it, and a subnet that changed does not leave its old rules behind.  A
+MASQUERADE rule for one of the named subnets that is B<not> between the markers
+is removed as well, so a file that acquired one some other way does not end up
+holding two.  Masquerades for any other subnet are left alone.
 
 If the C<ufw> service is active, the rules are applied via C<ufw reload>.
 
 =cut
 
-exit 0 unless @ARGV;
+# The file ufw reads its own rules out of.  our, so that a test can point it at
+# something which is not the firewall of the machine running the test.
+our $FILE = '/etc/ufw/before.rules';
 
-my $file = '/etc/ufw/before.rules';
+my %MARKS = (
+    nat    => [ '# BEGIN trog-provisioner masquerade',     '# END trog-provisioner masquerade' ],
+    filter => [ '# BEGIN trog-provisioner vpn forwarding', '# END trog-provisioner vpn forwarding' ],
+);
 
-open( my $fh, '<', $file ) or die "Cannot read $file: $!";
-my $content = do { local $/; <$fh> };
-close $fh;
+exit main(@ARGV) unless caller;
 
-my @rules;
-for my $arg (@ARGV) {
-    my ( $subnet, $iface ) = split /=/, $arg, 2;
-    die "Bad arg '$arg' (expected SUBNET/MASK=INTERFACE)\n"
-      unless defined $subnet && length $subnet
-          && defined $iface  && length $iface;
-    push @rules, "-A POSTROUTING -s $subnet -o $iface -j MASQUERADE";
-}
+sub main {
+    my (@args) = @_;
+    return 0 unless @args;
 
-# Drop rules already present so re-runs are no-ops.
-@rules = grep { $content !~ /^\Q$_\E$/m } @rules;
-exit 0 unless @rules;
+    open( my $fh, '<', $FILE ) or die "Cannot read $FILE: $!";
+    my $content = do { local $/; <$fh> };
+    close $fh;
 
-my $new;
-if ( $content =~ /^\*nat\b/m ) {
-    # *nat block exists; insert our rules just before its COMMIT.
-    $new = $content;
-    $new =~ s{(\*nat\b[^\*]*?)(^COMMIT$)}
-             { $1 . join("\n", @rules) . "\n" . $2 }sme
-        or die "Found *nat header but no matching COMMIT in $file\n";
-}
-else {
-    # No *nat block; create one immediately before the *filter block.
-    my $block = "*nat\n"
-              . ":POSTROUTING ACCEPT [0:0]\n"
-              . join( "\n", @rules ) . "\n"
-              . "COMMIT\n\n";
-    $new = $content;
-    if ( $new =~ /^\*filter\b/m ) {
-        $new =~ s/^(\*filter\b)/$block$1/m;
+    my ( @nat, @filter, @subnets );
+    foreach my $arg (@args) {
+        my ( $subnet, $iface ) = split( /=/, $arg, 2 );
+        die "Bad arg '$arg' (expected SUBNET/MASK or SUBNET/MASK=INTERFACE)\n"
+          unless defined $subnet && length $subnet;
+
+        $iface = _default_iface() unless defined $iface && length $iface;
+
+        push( @subnets, $subnet );
+        push( @nat,     "-A POSTROUTING -s $subnet -o $iface -j MASQUERADE" );
+
+        # Not bound to the interface the way the MASQUERADE rule is: a client
+        # talking to another client on the same VPN is forwarded back out the
+        # tun device rather than out to the internet, and naming the egress
+        # interface here would drop exactly that.
+        push( @filter, "-A ufw-before-forward -s $subnet -j ACCEPT" );
+
+        # The return path.  ufw's own before.rules accepts RELATED,ESTABLISHED
+        # for everything already, so this is narrower than what is there rather
+        # than additional to it -- and it is written so the pair reads as a
+        # pair, and still holds if that line ever stops being shipped.
+        push( @filter, "-A ufw-before-forward -d $subnet -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" );
     }
-    else {
-        $new .= "\n$block";
-    }
+
+    my $original = $content;
+    $content = _set_filter_rules( $content, @filter );
+    $content = _set_nat_rules( $content, \@subnets, @nat );
+
+    return 0 if $content eq $original;
+
+    open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!";
+    print $out $content;
+    close $out;
+
+    print 'Wrote ' . scalar(@nat) . ' masquerade and ' . scalar(@filter) . " forwarding rule(s) to $FILE\n";
+
+    _reload();
+    return 0;
 }
 
-open( my $out, '>', $file ) or die "Cannot write $file: $!";
-print $out $new;
-close $out;
+# Apply immediately if ufw is already active.  Its own sub so that a test can
+# stop this reaching the firewall of whatever is running the test.
+sub _reload {
+    my $status = qx{ufw status 2>/dev/null};
+    return unless $status =~ m/Status:\s*active/;
 
-print "Added " . scalar(@rules) . " masquerade rule(s) to $file\n";
+    system( 'ufw', 'reload' ) == 0 or warn "ufw reload failed: $?\n";
+    return;
+}
 
-# Apply immediately if ufw is already active.
-my $status = qx{ufw status 2>/dev/null};
-system( 'ufw', 'reload' ) == 0 or warn "ufw reload failed: $?\n"
-  if $status =~ /Status:\s*active/;
+# Its own sub for the same reason: what the guest says, separate from what this
+# makes of it.
+sub _default_routes {
+    return qx{ip -4 route show default 2>/dev/null};
+}
+
+# The interface the default route leaves by.  There can be more than one default
+# route -- these guests have a NAT'd management interface and a bridged one --
+# and `ip route show default` lists them in the order the kernel would pick, so
+# the first is the one traffic actually takes.
+sub _default_iface {
+    my ($route) = grep { m/\bdev\s+\S+/ } split( /\n/, _default_routes() );
+    my ($iface) = ( $route // q{} ) =~ m{\bdev\s+(\S+)};
+
+    die "No interface given and this guest has no default route to infer one from; name one in the recipe's 'interface'\n"
+      unless $iface;
+
+    return $iface;
+}
+
+# The forward accepts, in the *filter table that ufw's own before.rules
+# declares.
+sub _set_filter_rules {
+    my ( $text, @rules ) = @_;
+
+    $text = _drop_block( $text, 'filter' );
+    return $text unless @rules;
+
+    my $placed = _insert_before_commit( $text, 'filter', @rules );
+    die "Found no *filter block to add forwarding rules to in $FILE\n" unless defined $placed;
+
+    return $placed;
+}
+
+# The MASQUERADE rules, in the *nat table -- which ufw does not ship, so it is
+# created here when it is not already there.  Only ever one *nat block: a table
+# declared twice is a file iptables-restore refuses outright, and that is ufw
+# failing to start rather than one rule going missing.
+sub _set_nat_rules {
+    my ( $text, $subnets, @rules ) = @_;
+
+    $text = _drop_block( $text, 'nat' );
+
+    # And any unmarked rule for the same subnet, which would otherwise sit
+    # beside the marked copy for the life of the guest.  Only the subnets named
+    # here, so a masquerade somebody added by hand for something else is not
+    # swept up with them.
+    foreach my $subnet (@$subnets) {
+        $text =~ s{^-A POSTROUTING -s \Q$subnet\E -o \S+ -j MASQUERADE\n}{}mg;
+    }
+
+    return $text unless @rules;
+
+    my $placed = _insert_before_commit( $text, 'nat', @rules );
+    return $placed if defined $placed;
+
+    # No *nat block to insert into; make one immediately before the *filter
+    # block, which is where a nat table has to be.
+    my ( $begin, $end ) = @{ $MARKS{nat} };
+    my $block = "*nat\n" . ":POSTROUTING ACCEPT [0:0]\n" . join( "\n", $begin, @rules, $end ) . "\n" . "COMMIT\n\n";
+
+    return $text . "\n$block" unless $text =~ m/^[*]filter\b/m;
+
+    $text =~ s/^([*]filter\b)/$block$1/m;
+    return $text;
+}
+
+# Whatever the last run wrote under this name, wherever in the file it left it.
+sub _drop_block {
+    my ( $text,  $which ) = @_;
+    my ( $begin, $end )   = @{ $MARKS{$which} };
+
+    $text =~ s/^\Q$begin\E\n.*?^\Q$end\E\n//ms;
+    return $text;
+}
+
+# Our rules at the end of the named table rather than the start of it, so ufw's
+# own loopback, ICMP and conntrack rules are read first.  Undef when the file has
+# no such table, which is the caller's to decide what to do about.
+sub _insert_before_commit {
+    my ( $text, $table, @rules ) = @_;
+    my ( $begin, $end ) = @{ $MARKS{$table} };
+
+    my @out;
+    my ( $inside, $done ) = ( 0, 0 );
+    foreach my $line ( split( /\n/, $text, -1 ) ) {
+        $inside = 1 if $line =~ m/^[*]\Q$table\E\b/;
+        if ( $inside && !$done && $line =~ m/^COMMIT$/ ) {
+            push( @out, $begin, @rules, $end );
+            ( $inside, $done ) = ( 0, 1 );
+        }
+        push( @out, $line );
+    }
+
+    return unless $done;
+    return join( "\n", @out );
+}
+
+1;

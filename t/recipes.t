@@ -319,6 +319,30 @@ subtest 'ntp rejects non-array servers' => sub {
 };
 
 # ----------------------------------------------------------------
+# openvpn: redirect-gateway is what decides whether a client keeps its own
+# internet, so both answers want checking.  The guest test only ever sees the
+# default, and the default is the dangerous one to get wrong: turning it off for
+# everybody would change what every deployed client does on its next reconnect.
+# ----------------------------------------------------------------
+subtest 'openvpn pushes redirect-gateway unless the domain says otherwise' => sub {
+
+    # A fresh recipe per configuration: validated() memoizes on the object, so
+    # two configurations through one would both get the first one's answer.
+    my $vpn = sub { 'Provisioner::Recipe::openvpn'->new(%PROV) };
+
+    my $on = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G );
+    like( $on, qr/^push "redirect-gateway def1 bypass-dhcp"$/m, 'a domain that says nothing gets what it always got' );
+
+    my $off = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, redirect_gateway => 0 );
+    unlike( $off, qr/redirect-gateway/, 'and a domain that turns it off gets no push at all' );
+
+    # Unset takes OpenVPN's historical net30, a /30 per client, which upstream
+    # has deprecated.  Both configurations say so, since it is not the client's
+    # to choose.
+    like( $_, qr/^topology subnet$/m, 'and either way the server names its topology' ) for ( $on, $off );
+};
+
+# ----------------------------------------------------------------
 # ufw: validate enforces port_forward structure
 # ----------------------------------------------------------------
 subtest 'ufw rejects malformed port_forwards' => sub {

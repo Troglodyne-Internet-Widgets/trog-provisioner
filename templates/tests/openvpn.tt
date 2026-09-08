@@ -108,4 +108,50 @@ SKIP: {
     like($info, qr{\Q[% port %]\E/\Q[% proto %]\E}, 'and resolves it to a port a rule can be made from') or diag $info;
 }
 
+# Forwarding.  ip_forward and a MASQUERADE rule route nothing between them: a
+# forwarded packet meets the filter FORWARD chain before it ever reaches nat
+# POSTROUTING, and ufw ships with DEFAULT_FORWARD_POLICY="DROP".  Without an
+# accept for the VPN subnet the guest drops every client's traffic while
+# pushing redirect-gateway to tell it to send everything here, so connecting to
+# the VPN takes the client off the internet.
+my $forwarding = `sysctl -n net.ipv4.ip_forward 2>/dev/null`;
+chomp $forwarding;
+is($forwarding, '1', 'the kernel is willing to forward');
+
+# -S rather than -L: it prints rules in the form they were written, so this
+# checks the rule and not the shape of a table listing.
+my $filter = `iptables -S ufw-before-forward 2>&1`;
+like($filter, qr{^-A ufw-before-forward -s \Q[% subnet %]/[% cidr %]\E -j ACCEPT$}m,
+    'the VPN subnet is forwarded rather than dropped') or diag $filter;
+like($filter, qr{^-A ufw-before-forward -d \Q[% subnet %]/[% cidr %]\E .*RELATED,ESTABLISHED -j ACCEPT$}m,
+    'and the answers get back to it') or diag $filter;
+
+# The NAT rule, and the interface it names.  A rule that was never written and
+# a rule naming an interface this guest does not have are the same thing from
+# the outside -- iptables accepts any name, and nothing ever matches it -- and
+# both look exactly like a working VPN until somebody connects to it.
+my $nat = `iptables -t nat -S POSTROUTING 2>&1`;
+my ($masq_iface) = $nat =~ m{^-A POSTROUTING -s \Q[% subnet %]/[% cidr %]\E -o (\S+) -j MASQUERADE$}m;
+ok($masq_iface, 'the VPN subnet is masqueraded on the way out') or diag $nat;
+ok($masq_iface && -d "/sys/class/net/$masq_iface", 'and out of an interface this guest actually has')
+    or diag 'masquerading out of: ' . ($masq_iface // 'nothing');
+
+# In the file as well as in the kernel: the kernel copy is gone at the next
+# reboot, and /etc/ufw/before.rules is what puts it back.
+my $before = slurp('/etc/ufw/before.rules');
+like($before, qr{^-A ufw-before-forward -s \Q[% subnet %]/[% cidr %]\E -j ACCEPT$}m,
+    'and the forwarding rules survive a reboot, because ufw reads them from before.rules');
+
+# What the server tells clients to do with all this.
+my $server_conf = slurp('/etc/openvpn/server/server.conf');
+like($server_conf, qr{^topology subnet$}m,
+    'the server names its topology rather than taking the deprecated net30 default');
+[% IF redirect_gateway -%]
+like($server_conf, qr{^push "redirect-gateway def1 bypass-dhcp"$}m,
+    'and pushes the default route, which is what this domain asked for');
+[% ELSE -%]
+unlike($server_conf, qr{redirect-gateway},
+    'and pushes no default route, which is what this domain asked for');
+[% END -%]
+
 done_testing();
