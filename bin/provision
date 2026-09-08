@@ -647,8 +647,8 @@ sub mongle_domain_xml {
     # disk in the domain.  The metadata cache is the exception: it is a function
     # of how large the image is, so only the disk whose size we know gets one.
     my %tuning = mongle_disk_tuning($config);
-    my %shape  = $hv->qcow2_shape($disk_size);
-    $tuning{metadata_cache} = $shape{metadata_cache};
+    my %qcow2  = $hv->qcow2_tuning($disk_size);
+    $tuning{metadata_cache} = $qcow2{metadata_cache};
 
     my ( $extra_disks, $filesystems ) = mongle_extra_disks( $config, \%tuning );
     my $tpm       = mongle_tpm($hv);

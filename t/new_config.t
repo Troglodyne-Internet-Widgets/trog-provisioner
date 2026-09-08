@@ -283,7 +283,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
 subtest 'an empty tree of directories is not a salvage' => sub {
 
     # rget makes the local directories on the way down whether or not it can read
-    # what is inside them, so this is the exact shape an unreadable fetch leaves.
+    # what is inside them, so this is exactly what an unreadable fetch leaves.
     my $dir = "$salvage_root/slapd";
     mkdir $dir           or die "Could not create $dir: $!";
     mkdir "$dir/slapd.d" or die "Could not create $dir/slapd.d: $!";

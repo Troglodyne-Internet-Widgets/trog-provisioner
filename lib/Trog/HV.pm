@@ -672,7 +672,7 @@ A qcow2 volume backed by the base image, made if it is not already there.
 C<backing> is the path to lay it over and C<capacity> its size in bytes.
 Returns the path.
 
-How it is laid out inside comes from C<qcow2_shape>, which is where the
+How it is laid out inside comes from C<qcow2_tuning>, which is where the
 reasoning lives.  Nothing it decides is retrofittable: cluster size and
 subcluster allocation are properties of the image as created, so a disk that
 already exists is left exactly as it is -- it is a guest's filesystem.
@@ -695,15 +695,15 @@ sub create_disk {
 
     print "Creating disk $name ($capacity bytes)" . ( $backing ? " over $backing" : '' ) . "\n";
 
-    my %shape  = $self->qcow2_shape($capacity);
+    my %tuning = $self->qcow2_tuning($capacity);
     my $target = "<format type='qcow2'/>";
 
-    if ( $shape{cluster_size} ) {
-        print "  ...with $shape{cluster_size} byte clusters, so qemu's metadata cache still covers a disk this size\n";
-        $target .= "<clusterSize unit='bytes'>$shape{cluster_size}</clusterSize>";
+    if ( $tuning{cluster_size} ) {
+        print "  ...with $tuning{cluster_size} byte clusters, so qemu's metadata cache still covers a disk this size\n";
+        $target .= "<clusterSize unit='bytes'>$tuning{cluster_size}</clusterSize>";
     }
 
-    if ( $shape{extended_l2} ) {
+    if ( $tuning{extended_l2} ) {
         print "  ...with subcluster allocation, so a small write into this overlay does not rewrite a whole cluster\n";
         $target .= '<features><extended_l2/></features>';
     }
@@ -1227,10 +1227,10 @@ my $QCOW2_METADATA_DEFAULT = 32 * 1024 * 1024;
 my $QCOW2_METADATA_CAP     = 256 * 1024 * 1024;
 
 # Above this the default metadata cache stops covering the whole image.  See
-# qcow2_shape for where the number comes from.
+# qcow2_tuning for where the number comes from.
 my $QCOW2_LARGE_DISK = 128 * 1024 * 1024 * 1024;
 
-=head2 qcow2_shape($capacity)
+=head2 qcow2_tuning($capacity)
 
 How a qcow2 of this size should be laid out on this hypervisor: the cluster size
 to make it with, whether it gets subcluster allocation, and how much metadata
@@ -1262,25 +1262,25 @@ metadata cache is raised on top for the rare disk that outgrows even that.
 
 =cut
 
-sub qcow2_shape {
+sub qcow2_tuning {
     my ( $self, $capacity ) = @_;
 
-    my %shape = ( extended_l2 => $self->supports('extended_l2') ? 1 : 0 );
+    my %tuning = ( extended_l2 => $self->supports('extended_l2') ? 1 : 0 );
 
     # One L2 entry per cluster, twice as wide when it also carries the
     # subcluster allocation bitmap.
-    my $entry = $shape{extended_l2} ? 16 : 8;
+    my $entry = $tuning{extended_l2} ? 16 : 8;
 
-    $shape{cluster_size} = $QCOW2_LARGE_CLUSTER
+    $tuning{cluster_size} = $QCOW2_LARGE_CLUSTER
       if $capacity > $QCOW2_LARGE_DISK && $self->supports('cluster_size');
 
-    my $cluster = $shape{cluster_size} // $QCOW2_DEFAULT_CLUSTER;
+    my $cluster = $tuning{cluster_size} // $QCOW2_DEFAULT_CLUSTER;
     my $wanted  = int( $capacity / $cluster ) * $entry;
 
-    return %shape unless $wanted > $QCOW2_METADATA_DEFAULT && $self->supports('metadata_cache');
+    return %tuning unless $wanted > $QCOW2_METADATA_DEFAULT && $self->supports('metadata_cache');
 
-    $shape{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
-    return %shape;
+    $tuning{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
+    return %tuning;
 }
 
 sub bridge_device {

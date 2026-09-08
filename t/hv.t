@@ -704,40 +704,40 @@ subtest 'how big a qcow2 has to be before its layout changes' => sub {
     # Subclusters are the point of the exercise: every guest disk is an overlay
     # on the shared base image, and without them a 4K write into a hole rewrites
     # a whole cluster out of the backing file.  Size has nothing to do with it.
-    my %small = $hv->qcow2_shape( 40 * 1024**3 );
+    my %small = $hv->qcow2_tuning( 40 * 1024**3 );
     ok( $small{extended_l2}, 'a 40G overlay gets subcluster allocation' );
     is( $small{cluster_size},   undef, 'at the default cluster size' );
     is( $small{metadata_cache}, undef, 'and qemu is left to size its own metadata cache' );
 
     # 128 GiB is where the default 32 MiB of metadata cache stops covering the
     # whole image once extended L2 entries have doubled in width.
-    my %edge = $hv->qcow2_shape( 128 * 1024**3 );
+    my %edge = $hv->qcow2_tuning( 128 * 1024**3 );
     is( $edge{cluster_size}, undef, 'the last size the default cluster still covers is left alone' );
 
-    my %large = $hv->qcow2_shape( 200 * 1024**3 );
+    my %large = $hv->qcow2_tuning( 200 * 1024**3 );
     is( $large{cluster_size},   1024 * 1024, 'past it, 1M clusters buy the coverage back' );
     is( $large{metadata_cache}, undef,       'which is enough on its own, so the cache is still qemu default' );
 
     # And past what even that covers, the cache is raised rather than the
     # clusters made coarser again.
-    my %huge = $hv->qcow2_shape( 8 * 1024**4 );
+    my %huge = $hv->qcow2_tuning( 8 * 1024**4 );
     is( $huge{cluster_size},   1024 * 1024,       '8T keeps the 1M clusters' );
     is( $huge{metadata_cache}, 128 * 1024 * 1024, 'and asks for the metadata cache it actually needs' );
 
     # Host memory, held for as long as the domain runs, and not counted by
     # anything in Trog::Hypervisors.  So there is a ceiling on it.
-    my %vast = $hv->qcow2_shape( 64 * 1024**4 );
+    my %vast = $hv->qcow2_tuning( 64 * 1024**4 );
     is( $vast{metadata_cache}, 256 * 1024 * 1024, 'up to a limit, past which it stops asking' );
 };
 
-subtest 'the disk is created in the shape that was decided for it' => sub {
+subtest 'the disk is created with the tuning that was decided for it' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my @created;
     my $mock = Test::MockModule->new('Trog::HV');
-    $mock->redefine( volume_path => sub { undef } );
-    $mock->redefine( pool        => sub { FakeBuildPool->new( \@created ) } );
-    $mock->redefine( qcow2_shape => sub { ( extended_l2 => 1, cluster_size => 1048576 ) } );
+    $mock->redefine( volume_path  => sub { undef } );
+    $mock->redefine( pool         => sub { FakeBuildPool->new( \@created ) } );
+    $mock->redefine( qcow2_tuning => sub { ( extended_l2 => 1, cluster_size => 1048576 ) } );
 
     quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ) } );
 
