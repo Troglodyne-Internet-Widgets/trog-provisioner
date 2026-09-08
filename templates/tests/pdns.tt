@@ -83,11 +83,8 @@ my $zones_file    = '/etc/powerdns/forward-zones';
 my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
 
 # Zones go in forward-zones-file, one per line, rather than into a fragment in
-# recursor.d.  The fragment said `forward-zones+=<domain>=...` and the recursor
-# refused the whole file, every time: += wants a plain forward-zones to append
-# to, and giving it one in recursor.conf ahead of include-dir did not help --
-# the documentation offers += for the main configuration and says nothing about
-# included files.
+# recursor.d: the recursor refuses a file using `forward-zones+=` outright.
+# templates/pdns.tt has the account.
 like($recursor_conf, qr{^forward-zones-file=\Q$zones_file\E}m,
     'the recursor is pointed at a forward zones file') or diag $recursor_conf;
 ok(-f $zones_file, 'and that file exists');

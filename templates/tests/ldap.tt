@@ -111,13 +111,10 @@ foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %]
 my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
 like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
 
-# What a rebuild will be rebuilt from.
-#
-# The directory is the one thing here nothing regenerates: the seed knows the
-# accounts as users.yaml describes them and knows nothing about the password
-# somebody changed or the SSH key they added afterwards.  /var/lib/ldap is
-# 0700 openldap:openldap and the fetch is sftp as the admin user with no sudo,
-# so what has to exist is an export the admin user can read.
+# What a rebuild will be rebuilt from.  Nothing regenerates the directory, and
+# the fetch is sftp as the admin user with no sudo -- so what has to exist is an
+# export that account can read.  templates/files/ldap.export.sh.tt says why it
+# is an export rather than a copy.
 my $export_dir = '/var/backups/ldap';
 ok(-d $export_dir, 'the directory is exported to somewhere the fetch can reach');
 

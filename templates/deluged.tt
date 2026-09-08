@@ -9,11 +9,9 @@ if [ ! -f /var/lib/deluged/config/core.conf ]; then \
     chown root:debian-deluged /var/lib/deluged/config/core.conf; \
     chmod 0640 /var/lib/deluged/config/core.conf; \
 fi
-[%# The torrent state off the last guest, put back before the daemon starts:
-    torrents.state and the fastresume data beside it, which is the list of what
-    deluged is meant to be seeding and how far through each one it got.  A
-    rebuilt seedbox without it comes up idle and there is nothing left that can
-    tell it what it was doing.
+[%# The torrent state off the last guest, put back before the daemon starts.
+    Provisioner::Recipe::deluged, "What survives a rebuild", says what is in
+    there and why the rest of the config directory is not.
 
     The directory is made here because deluged has not started yet to make it,
     and because restore_state fills an existing empty directory rather than

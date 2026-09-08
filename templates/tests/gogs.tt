@@ -87,10 +87,9 @@ if (@salvaged_repos) {
 ok(!-e "$salvaged/data/gogs.db" || -s '[% install_dir %]/git.[% domain %]/data/gogs.db',
     'a salvaged database is not sitting in the domain directory with nothing at the live path');
 
-# The session key belongs to the guest.  It signs sessions and encrypts 2FA
-# enrolments, and it used to arrive as sixty-four characters minted by whichever
-# new_config run wrote app.ini -- so every re-provision logged everybody out and
-# voided every second factor, and said nothing about it.
+# The session key belongs to the guest, not to the configuration that built it:
+# minting a new one on each provision logs everybody out and voids every second
+# factor.  templates/gogs.tt has the account, next to the code that keeps it.
 my ($key) = $ini =~ m/^SECRET_KEY\s*=\s*(\S+)\s*$/m;
 ok($key && length($key) >= 32, 'gogs has a session key of some substance')
     or diag 'SECRET_KEY: ' . ($key // 'unset');

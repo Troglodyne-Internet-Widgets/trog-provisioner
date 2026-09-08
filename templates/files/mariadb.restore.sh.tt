@@ -7,16 +7,11 @@
 # The directory is what remote_files brought back: /var/backups/mysql off the
 # guest this one replaces, laid out by mariadb-backup.sh as
 # <timestamp>/<database>/<table>.sql.gz with the views, routines and grants
-# beside them.  It came down, it went back up into the domain directory, and
-# nothing imported it -- so a rebuilt guest came up holding whatever snapshot an
-# operator had once dropped in the data directory, and none of what had happened
-# since.  This is the leg that was missing.
+# beside them.
 #
-# What it will not do is the important half.  scripts/restore_state declines when
-# the destination already has state in it, because re-provisioning a running
-# guest fetches that guest's own state minutes earlier, and writing a fetch that
-# came up short back over the original would replace the real thing with the half
-# of it we could read.  A database has the same problem and takes the same
+# What it will not do is the important half.  scripts/restore_state declines a
+# destination that already has state in it, for the reason Provisioner::Recipe
+# gives under restore_state.  A database has the same problem and takes the same
 # answer, one level down: this creates a database that is not there and never
 # writes into one that is.  A rebuilt server has none of them and gets all of it;
 # a live one has all of them and gets nothing.

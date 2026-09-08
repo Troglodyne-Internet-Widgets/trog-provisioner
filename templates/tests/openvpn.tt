@@ -107,12 +107,10 @@ SKIP: {
     like($info, qr{\Q[% port %]\E/\Q[% proto %]\E}, 'and resolves it to a port a rule can be made from') or diag $info;
 }
 
-# Forwarding.  ip_forward and a MASQUERADE rule route nothing between them: a
-# forwarded packet meets the filter FORWARD chain before it ever reaches nat
-# POSTROUTING, and ufw ships with DEFAULT_FORWARD_POLICY="DROP".  Without an
-# accept for the VPN subnet the guest drops every client's traffic while
-# pushing redirect-gateway to tell it to send everything here, so connecting to
-# the VPN takes the client off the internet.
+# Forwarding.  ip_forward and MASQUERADE route nothing between them, because a
+# forwarded packet meets the filter FORWARD chain first and ufw defaults that to
+# DROP -- so a client connects and loses the internet.  templates/openvpn.tt has
+# the account.
 my $forwarding = `sysctl -n net.ipv4.ip_forward 2>/dev/null`;
 chomp $forwarding;
 is($forwarding, '1', 'the kernel is willing to forward');

@@ -5,10 +5,9 @@ use Test::More;
 
 ok(-f '/root/.ssh/authorized_keys', 'authorized_keys exists');
 
-# /etc, not /root.  rsync reads the config named in the forced command before it
-# does anything else, and some builds of it will not take one out of /root: the
-# key authenticates, the daemon exits, and the destination reports a connection
-# that served no module.
+# /etc, not /root: some builds of rsync will not read a config out of there, and
+# the daemon then exits having served no module.  Provisioner::Recipe::backup
+# has the account.
 ok(-f '/etc/rsyncd.[% domain %].conf', 'rsync daemon config exists in /etc');
 ok(!-e '/root/rsyncd.[% domain %].conf', 'and not in /root, where it used to be');
 

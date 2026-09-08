@@ -60,11 +60,9 @@ SKIP: {
         or diag "still sitting in $salvage: @unrestored";
 }
 
-# The firewall profile.  The one that used to ship under the ufw recipe was
-# called [redis], and ufw skips a profile whose section name is also a service
-# name in /etc/services -- redis is 6379/tcp there -- saying so only as a
-# warning on stderr.  So it was absent from `ufw app list`, no rule was ever
-# made from it, and nothing failed: this has never worked on any guest.
+# The firewall profile, under the name ufw will actually load: it skips a
+# section whose name is also a service name in /etc/services, and says so only
+# on stderr.  templates/files/redis.ufw.conf.tt has the account.
 my $profile = '/etc/ufw/applications.d/redis-server';
 ok(-f $profile, 'the redis firewall profile was installed');
 my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
