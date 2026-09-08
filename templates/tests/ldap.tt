@@ -13,9 +13,11 @@ is($status, 'active', 'slapd is running');
 
 ok(-f '/etc/ldap/slapd.d/cn=config.ldif', 'slapd OLC config exists');
 
-# Verify LDAPS port is listening
-my $ldaps = `ss -tlnp 2>/dev/null | grep ':636'`;
-ok($ldaps, 'LDAPS port 636 is listening');
+# On the port this domain configured, not on 636.  SLAPD_SERVICES named a bare
+# ldaps:///, so slapd listened on the default whatever port: said, and asking
+# after 636 here agreed with it and reported a pass either way.
+my $ldaps = `ss -tlnp 2>/dev/null | grep ':[% port %] '`;
+ok($ldaps, 'LDAPS is listening on port [% port %]') or diag `ss -tlnp 2>/dev/null | grep slapd`;
 
 # Verify base DN is accessible
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;

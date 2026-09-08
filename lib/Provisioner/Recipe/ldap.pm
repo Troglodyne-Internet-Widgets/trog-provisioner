@@ -35,8 +35,10 @@ C<posixAccount>, and C<shadowAccount> object classes, plus C<ldapPublicKey> for
 SSH public key storage.
 
 LDAPS is configured using the certificate provided by the C<letsencrypt> recipe.
-Port 389 (plain LDAP) is left open for local connections only; port 636 (LDAPS)
-is exposed for remote authentication (e.g. SSSD clients).
+Port 389 (plain LDAP) is left open for local connections only; C<port> -- 636
+unless the domain says otherwise -- carries LDAPS and is exposed for remote
+authentication (e.g. SSSD clients).  It is what slapd is told to listen on and
+what the firewall profile opens, so the two cannot disagree.
 
 Requires the C<letsencrypt> recipe for TLS certificates.
 

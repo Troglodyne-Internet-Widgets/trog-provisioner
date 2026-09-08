@@ -3,8 +3,15 @@ DEBIAN_FRONTEND=noninteractive debconf-set-selections slapd.debconf
 rm -f slapd.debconf
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd
 
-# Enable LDAPS by configuring service URIs
-sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps:/// ldapi:///"|' /etc/default/slapd
+[%# On the configured port, not on 636.  This said a bare ldaps:///, which is
+    every interface on the default port -- so port: was a documented, validated,
+    defaulted option that set nothing whatsoever.  Its only consumer was the
+    firewall, which meant a domain that moved LDAPS had a hole opened where
+    nothing listened and slapd still answering on 636.
+    The host part is left empty, which is what makes it every interface: a
+    ldaps://:port/ binds the same addresses the bare form does. -%]
+# Enable LDAPS on the configured port by setting the service URIs
+sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps://:[% port %]/ ldapi:///"|' /etc/default/slapd
 systemctl restart slapd
 
 # Configure TLS for LDAPS, against the certificate the ssl target links on
