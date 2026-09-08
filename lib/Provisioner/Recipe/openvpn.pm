@@ -141,9 +141,9 @@ sub args {
             # Whether the server tells clients to send everything down the
             # tunnel.  Pushed at connect time, so whatever this says takes
             # effect on every deployed client the next time it reconnects --
-            # which is why the default is the permissive one rather than the
-            # cautious one.
-            redirect_gateway => { type => 'boolean', default => 1 },
+            # turning it on is therefore a change to machines nobody is
+            # touching, which is why it is off unless a domain asks.
+            redirect_gateway => { type => 'boolean', default => 0 },
         },
     );
 }

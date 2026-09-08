@@ -61,6 +61,7 @@ formats = #!/usr/bin/env perl
 # custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
 # name, from a string.
 allow = IO::Prompter Text::Xslate::Bridge::TT2 re
+[ProhibitPrintSTDERR]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork

@@ -65,6 +65,11 @@ sub main {
     my $pool = $c->param( -block => 'ip_pool' ) // {};
 
     unless ( keys %$pool ) {
+
+        # Configuration guidance rather than a diagnostic: whoever is reading
+        # this is being told what to type, and a file and line from inside this
+        # script is not the part they need.
+        ## no critic (ProhibitPrintSTDERR)
         print STDERR "No [ip_pool] section found in $cfile\n";
         print STDERR "Add one like:\n\n";
         print STDERR "  [ip_pool]\n";
@@ -72,13 +77,14 @@ sub main {
         print STDERR "  OR\n\n";
         print STDERR "  [ip_pool]\n";
         print STDERR "  cidr = 192.168.1.0/24\n\n";
+        ## use critic
         return 1;
     }
 
     my @pool_ips = Provisioner::IPPool::pool_ips($pool);
 
     unless (@pool_ips) {
-        print STDERR "ip_pool section found but no IPs could be parsed.\n";
+        print STDERR "ip_pool section found but no IPs could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
 
