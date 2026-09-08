@@ -20,6 +20,11 @@ use Pod::Usage   qw{pod2usage};
 use Trog::HV();
 use Trog::Hypervisors();
 
+# On the printing in here: what this tool produces -- a filename, a port -- goes
+# to stdout so it can be captured, and everything telling the operator what is
+# happening goes to stderr.  That is why the narration below is print rather
+# than warn, and each one says so; anything that actually goes wrong dies.
+
 =head1 NAME
 
 debug_boot - watch a guest boot, and stop it at the boot menu when it will not
@@ -196,7 +201,7 @@ sub console {
     redefine( $hv, $domain, $xml );
     restart( $hv, $domain );
 
-    print {*STDERR} "Letting it boot for $opt->{wait}s...\n";
+    print {*STDERR} "Letting it boot for $opt->{wait}s...\n";    ## no critic (ProhibitPrintSTDERR)
     sleep $opt->{wait};
 
     return fetch( $hv, $domain, $opt );
@@ -212,7 +217,7 @@ sub hold {
     redefine( $hv, $domain, $xml );
     restart( $hv, $domain );
 
-    printf {*STDERR} "%s is holding at the boot menu for %ds.\n", $domain, $opt->{timeout} / 1000;
+    printf {*STDERR} "%s is holding at the boot menu for %ds.\n", $domain, $opt->{timeout} / 1000;    ## no critic (ProhibitPrintSTDERR)
     return vnc( $hv, $domain );
 }
 
@@ -238,10 +243,10 @@ sub restore {
             $hv,  'virt-edit', '-d', $domain, '/boot/grub/grub.cfg',
             '-e', 's/^([ \t]*linux[ \t]+[^\n]*?)[ \t]+single[ \t]*$/$1/m'
         );
-        print {*STDERR} "Took single back off the kernel command line.\n" unless $rc;
+        print {*STDERR} "Took single back off the kernel command line.\n" unless $rc;    ## no critic (ProhibitPrintSTDERR)
     }
 
-    print {*STDERR} "Restored $domain; restart it for that to take effect.\n";
+    print {*STDERR} "Restored $domain; restart it for that to take effect.\n";           ## no critic (ProhibitPrintSTDERR)
     return 0;
 }
 
@@ -254,7 +259,7 @@ sub fetch {
     # Root's, because libvirt wrote it.
     my $content = $hv->capture("sudo cat '$log'");
     unless ( defined $content && length $content ) {
-        print {*STDERR} "Nothing at $log on the hypervisor.\n" . "Was this started with --console?\n";
+        print {*STDERR} "Nothing at $log on the hypervisor.\n" . "Was this started with --console?\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
 
@@ -265,9 +270,11 @@ sub fetch {
     File::Slurper::Temp::write_text( $into, $content );
 
     my @lines = split "\n", $content;
+    ## no critic (ProhibitPrintSTDERR)
     print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines );
     print {*STDERR} "  $_\n" for @lines[ -8 .. -1 ];
     print {*STDERR} "\nA hang is the last line before the silence.\n\n";
+    ## use critic
 
     print "$into\n";
     return 0;
@@ -283,7 +290,7 @@ sub shot {
     my $into = $opt->{into} // "/tmp/$domain-screen.ppm";
     $hv->get_file( $remote, $into ) or die "Could not fetch the screenshot.\n";
 
-    print {*STDERR} "Console of $domain as it is right now.\n";
+    print {*STDERR} "Console of $domain as it is right now.\n";    ## no critic (ProhibitPrintSTDERR)
     print "$into\n";
     return 0;
 }
@@ -300,9 +307,11 @@ sub vnc {
 
     # It listens on the hypervisor's loopback, which is the right place for it
     # to listen; getting there is a tunnel's job.
+    ## no critic (ProhibitPrintSTDERR)
     print {*STDERR} "$domain is on $display, which is the hypervisor's loopback.\n\n";
     print {*STDERR} "  ssh -N -L $vnc:127.0.0.1:$vnc " . ( $hv->ssh_target // 'localhost' ) . "\n";
     print {*STDERR} "  then point a VNC client at 127.0.0.1:$vnc\n\n";
+    ## use critic
 
     print "$vnc\n";
     return 0;
@@ -312,7 +321,7 @@ sub keys_to {
     my ( $hv, $domain, @keys ) = @_;
 
     @keys = qw{KEY_ESC} unless @keys;
-    print {*STDERR} "Sending @keys to $domain\n";
+    print {*STDERR} "Sending @keys to $domain\n";    ## no critic (ProhibitPrintSTDERR)
 
     $hv->run( qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys ) == 0
       or die "Could not send @keys to $domain.\n";
@@ -355,7 +364,7 @@ sub guest_cat {
     )->filename;
     File::Slurper::Temp::write_text( $into, $content );
 
-    printf {*STDERR} "%s:%s -- %d bytes, read off the disk\n", $domain, $path, length $content;
+    printf {*STDERR} "%s:%s -- %d bytes, read off the disk\n", $domain, $path, length $content;    ## no critic (ProhibitPrintSTDERR)
     print "$into\n";
     return 0;
 }
@@ -398,7 +407,7 @@ sub single {
     die "Could not put single on the kernel command line of $domain.\n$out" if $rc;
 
     $dom->create();
-    print {*STDERR} "$domain is booting single-user.  Undo it with --restore.\n\n";
+    print {*STDERR} "$domain is booting single-user.  Undo it with --restore.\n\n";    ## no critic (ProhibitPrintSTDERR)
 
     return vnc( $hv, $domain );
 }
@@ -431,7 +440,7 @@ sub restart {
     $dom = $hv->vmm->get_domain_by_name($domain);
     $dom->create();
 
-    print {*STDERR} "Restarted $domain\n";
+    print {*STDERR} "Restarted $domain\n";    ## no critic (ProhibitPrintSTDERR)
     return 1;
 }
 

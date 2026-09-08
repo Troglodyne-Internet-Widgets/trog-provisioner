@@ -241,6 +241,10 @@ sub report {
     # first or the two arrive interleaved on a terminal.
     STDOUT->flush();
 
+    # Signed off rather than warned: every line below is the report to whoever
+    # ran this, deliberately on the channel --stdout is not, and warn would put
+    # a source location on each line of it.
+    ## no critic (ProhibitPrintSTDERR)
     print {*STDERR} "\n";
     print {*STDERR} "Wrote $output\n" if defined $output;
     print {*STDERR} sprintf(
@@ -258,6 +262,7 @@ sub report {
     }
 
     print {*STDERR} "\nThen:\n  bin/provision $hostname\n";
+    ## use critic
     return;
 }
 

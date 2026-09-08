@@ -313,7 +313,10 @@ sub _run_sudo_attempt {
     # Three goes at typing it, then give up rather than loop.
     die 'Could not authenticate sudo on ' . $self->describe . "\n" if $attempts >= 3;
 
-    print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);
+    # Not warn: this is the second half of a password prompt, being read by
+    # somebody with a terminal in front of them, and a source location stapled
+    # to it would be noise in the middle of them retyping it.
+    print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);    ## no critic (ProhibitPrintSTDERR)
     delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
     $self->_ask_for_sudo_password();
 
