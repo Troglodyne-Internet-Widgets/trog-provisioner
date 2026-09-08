@@ -11,3 +11,14 @@ chown root:root /etc/chrony/chrony.conf
 chmod 0644 /etc/chrony/chrony.conf
 systemctl enable chrony
 [% script_dir %]/queue_postrun_task systemctl restart chrony
+
+[%# Declared as an application profile, not allowed here.  `default deny
+    outgoing` from the ufw recipe blocks 123/udp outbound, and a bare `ufw
+    allow` added by this fragment does not survive the `ufw reset` that
+    setup-ufw-rules opens with -- so chrony was configured client-only and
+    had nowhere to send a request.  /etc/ufw/applications.d survives the
+    reset, and setup-ufw-rules allows whatever `ufw app list` reports
+    afterwards, out as well as in -- which is enough, since this fragment
+    runs before the ufw target (alphabetical module order) either way. -%]
+# Declare the firewall profile for outbound NTP
+install -o root -g root -m 0644 ntp_ufw.conf /etc/ufw/applications.d/ntp

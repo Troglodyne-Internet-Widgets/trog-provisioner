@@ -83,6 +83,12 @@ sub args {
 sub template_files {
     return (
         'ntp.chrony.conf.tt' => 'chrony.conf',
+
+        # The ufw application profile that opens outbound 123/udp.  A bare
+        # `ufw allow` in the fragment does not survive the `ufw reset` that
+        # setup-ufw-rules opens with, and the ufw target runs after this
+        # one.
+        'ntp.ufw.conf.tt' => 'ntp_ufw.conf',
     );
 }
 
