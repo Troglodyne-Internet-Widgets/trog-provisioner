@@ -27,7 +27,11 @@ use parent qw{Provisioner::Recipe};
 
 Installs and configures Plex Media Server from the official Plex apt repository.
 Plex listens on port 32400 (TCP). A UFW application profile is registered so
-the firewall allows access.
+the firewall allows access, and also carries the ports Plex uses for local
+discovery: 1900/udp (SSDP, for DLNA clients), 32410/32412/32413/32414/udp
+(Plex GDM, local server/client discovery) and 32469/udp (the DLNA server).
+Without them the server is reachable by address but not discoverable, which
+is the more common way people actually notice a media server is broken.
 
 =head3 deps
 
@@ -87,6 +91,13 @@ sub deps {
 sub rate_limits {
 
     # One client streaming opens a handful; a household opens a few handfuls.
+    #
+    # The discovery ports (1900, 32410/32412/32413/32414, 32469) are not named
+    # here.  setup-ufw-ratelimits writes its hashlimit rule with `-p tcp`
+    # unconditionally, so a UDP port passed to it gets no working limit at all
+    # -- and broadcast discovery traffic is nowhere near volume enough to want
+    # one anyway; a household's clients announce themselves occasionally, not
+    # by opening connections.
     return ( 32400 => 1024 );
 }
 
