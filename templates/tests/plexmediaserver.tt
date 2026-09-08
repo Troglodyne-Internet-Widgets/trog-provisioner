@@ -62,4 +62,44 @@ my $metadata = '/var/lib/plexmediaserver/Library/Application Support/Plex Media 
 ok(!has_content($salvaged) || has_content($metadata),
     'nothing was salvaged and left unrestored beside an empty library');
 
+# The firewall profile.  Streaming (32400/tcp) is only half of it: 1900/udp is
+# SSDP, how DLNA clients find the server; 32410/32412/32413/32414/udp is Plex
+# GDM, local server/client discovery; 32469/udp is the DLNA server.  Without
+# these a client that already has the address can still reach it, but nothing
+# on the LAN can find that address in the first place.
+my $profile = '/etc/ufw/applications.d/plexmediaserver';
+ok(-f $profile, 'the plex firewall profile was installed');
+my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
+like($prof, qr{^ports=32400/tcp\|1900,32410,32412,32413,32414,32469/udp$}m,
+    'and it names the streaming port alongside every discovery port') or diag $prof;
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 4 unless -x '/usr/sbin/ufw';
+
+    # Listed is not the whole assertion here the way it is elsewhere: ufw
+    # accepts a profile with a malformed ports= line and lists it anyway, so a
+    # profile that resolves to fewer ports than intended would still pass this
+    # much.  `ufw app info` is what says whether it parsed a port at all.
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*plexmediaserver\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    my $info = `ufw app info plexmediaserver 2>&1`;
+    like($info, qr{32400/tcp}, 'app info resolves the streaming port') or diag $info;
+
+    # ufw prints one comma-separated group per protocol rather than one port
+    # per line -- "1900,32410,32412,32413,32414,32469/udp" -- so every port but
+    # the last in the group is followed by a comma, not by /udp.  Anchoring on
+    # /udp caught only 32469 and reported the other five unresolved when they
+    # were not: it was the assertion, not the profile.
+    foreach my $port (qw{1900 32410 32412 32413 32414 32469}) {
+        like($info, qr{\b$port(?=,|/udp)}, "app info resolves discovery port $port/udp") or diag $info;
+    }
+
+    my $status = `ufw status 2>/dev/null`;
+    like($status, qr/^\s*plexmediaserver\s+ALLOW\s+/m, 'and is allowed in after the reset')
+        or diag $status;
+    like($status, qr/^\s*plexmediaserver\s+ALLOW OUT\s+/m, 'and out as well')
+        or diag $status;
+}
+
 done_testing();
