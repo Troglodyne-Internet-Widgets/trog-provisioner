@@ -19,6 +19,7 @@ use File::Which();
 use Sys::Virt();
 
 use Trog::Config();
+use Provisioner::Cookbook();
 use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
@@ -89,6 +90,7 @@ sub main {
         \&check_iso_builder,
         \&check_rsync,
         \&check_transfer_ip,
+        \&check_fetch_sources,
         \&check_libvirt,
         \&check_sys_virt_in_step,
         \&check_config,
@@ -257,6 +259,58 @@ Put this machine on that network, or name the address yourself in the [global]
 section of ipmap.cfg:
 
     transfer_ip = 192.0.2.10
+FIX
+}
+
+# A recipe that ships an operator's own files names a directory nothing here
+# creates: adminconfig's skel, openvpnclient's cert_dir.  The guest rsyncs those
+# out of this machine, so an absent one fails that recipe's target part way
+# through a build -- and rsync's error for it names neither the recipe that
+# asked nor the domain it was for.
+#
+# Asked of every domain rather than of one, because preflight is about the
+# machine and because skel is usually said once in _base for the whole fleet.
+# Read raw, without validating or enriching: a configuration with a CHANGEME
+# still in it is one somebody is in the middle of writing, and refusing to look
+# at it would withhold exactly the answer they need next.
+sub check_fetch_sources {
+    my ($hv) = @_;
+
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+    my %wanted;
+
+    foreach my $domain ( grep { !m/\A_/ } sort keys %$conf ) {
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+
+        foreach my $name ( sort keys %$recipes ) {
+            my $class = eval { Provisioner::Cookbook->load($name) } or next;
+            next unless $class->can('fetch_sources');
+
+            my $opts = $recipes->{$name} // {};
+            next unless ref $opts eq 'HASH';
+
+            foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
+                next unless defined $path && length $path;
+                $wanted{$path}{$name} = 1;
+            }
+        }
+    }
+
+    return report( 1, 'No recipe fetches a directory of yours', q{} ) unless %wanted;
+
+    my @missing = grep { !-d } sort keys %wanted;
+    return report( 1, scalar( keys %wanted ) . ' fetched ' . ( keys %wanted == 1 ? 'directory is' : 'directories are' ) . ' here', q{} ) unless @missing;
+
+    my $detail = join( q{}, map { "    $_ (" . join( ', ', sort keys %{ $wanted{$_} } ) . ")\n" } @missing );
+    return report( 0, scalar(@missing) . ' fetched ' . ( @missing == 1 ? 'directory is' : 'directories are' ) . ' not on this machine', <<"FIX" );
+A guest rsyncs these out of this machine, and the recipe that wants one fails
+when it is not there:
+
+$detail
+They used to be read off the hypervisor, so on an installation that predates
+that change they are still over there.  Bring them here:
+
+    rsync -a @{[ $hv->ssh_host // 'the-hypervisor' ]}:<path>/ <path>/
 FIX
 }
 

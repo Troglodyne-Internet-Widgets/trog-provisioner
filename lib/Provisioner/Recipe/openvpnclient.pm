@@ -88,6 +88,11 @@ sub template_files {
     );
 }
 
+sub fetch_sources {
+    my ( $self, %opts ) = @_;
+    return defined $opts{cert_dir} ? ( $opts{cert_dir} ) : ();
+}
+
 sub tests {
     return qw{openvpnclient.tt};
 }

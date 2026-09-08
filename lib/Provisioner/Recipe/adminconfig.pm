@@ -56,6 +56,11 @@ sub deps {
     die "Unsupported packager";
 }
 
+sub fetch_sources {
+    my ( $self, %opts ) = @_;
+    return defined $opts{skel} ? ( $opts{skel} ) : ();
+}
+
 sub tests {
     return qw{adminconfig.tt};
 }

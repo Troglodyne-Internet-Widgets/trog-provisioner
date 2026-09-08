@@ -871,6 +871,35 @@ subtest 'no cron template redirects with &>' => sub {
     }
 };
 
+# bin/preflight asks this of a configuration nobody has finished writing yet, so
+# a recipe whose path is not filled in has to answer with nothing rather than
+# with undef or with a die.
+subtest 'a recipe names the directories it fetches, and copes with not being told' => sub {
+    foreach my $recipe ( sort @available ) {
+        my $class = eval { Provisioner::Cookbook->load($recipe) } or next;
+
+        my @unasked = eval { $class->fetch_sources() };
+        is( $@, q{}, "$recipe: asking with nothing at all does not die" );
+        is_deeply( [ grep { defined } @unasked ], [], "$recipe: and names no directory" );
+    }
+
+    # The two that do name one.  Both are the operator's own files, which is why
+    # nothing here creates them and something has to check they are there.
+    my $adminconfig   = Provisioner::Cookbook->load('adminconfig');
+    my $openvpnclient = Provisioner::Cookbook->load('openvpnclient');
+
+    is_deeply(
+        [ $adminconfig->fetch_sources( skel => '/bogus/dotfiles/somebody' ) ],
+        ['/bogus/dotfiles/somebody'],
+        'adminconfig fetches the skel it was given'
+    );
+    is_deeply(
+        [ $openvpnclient->fetch_sources( cert_dir => '/bogus/vpn-certs/one' ) ],
+        ['/bogus/vpn-certs/one'],
+        'openvpnclient fetches its certificate directory'
+    );
+};
+
 subtest 'what a rebuild is not allowed to carry over' => sub {
     require Provisioner::Recipe;
     require Provisioner::Recipe::tcms;

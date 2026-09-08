@@ -15,6 +15,8 @@ use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use Provisioner::Cookbook();
 
 use FindBin;
 use FindBin::libs;
@@ -171,6 +173,46 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
     $hv->redefine( virbr_ip => sub { die "no brctl\n" } );
     ($result) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
     ok( !$result->{ok}, 'a hypervisor that cannot say where its guests live fails' );
+};
+
+# A directory the operator owns and this tool only reads.  It is fetched off
+# this machine during the build, so an absent one fails a recipe's target part
+# way through -- and rsync's error for it names neither the recipe nor the
+# domain.
+subtest 'a directory a recipe fetches has to be on this machine' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $hv  = Test::MockModule->new('Trog::HV');
+    $hv->redefine( ssh_host => sub { 'hv.test' } );
+
+    my $present = "$dir/dotfiles";
+    mkdir $present;
+
+    my $write = sub {
+        File::Slurper::Temp::write_text( "$dir/recipes.yaml", $_[0] );
+        Provisioner::Cookbook->forget();
+        return;
+    };
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    # skel is said once in _base for the whole fleet, so this is the usual shape.
+    $write->("---\n_base:\n    adminconfig:\n        skel: \"$present\"\none.test:\n    adminconfig:\n");
+    my ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    ok( $result->{ok}, 'a directory that is there passes' );
+
+    $write->("---\n_base:\n    adminconfig:\n        skel: \"$dir/gone\"\none.test:\n    adminconfig:\ntwo.test:\n    openvpnclient:\n        cert_dir: $dir/alsogone\n");
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    ok( !$result->{ok}, 'one that is not fails' );
+    like( $result->{what}, qr/\b2 fetched directories/,         'counting the paths rather than the domains that wanted them' );
+    like( $result->{fix},  qr{\Q$dir/gone\E \Q(adminconfig)\E}, 'naming the path and the recipe that asked' );
+    like( $result->{fix},  qr{alsogone \Q(openvpnclient)\E},    'for each of them' );
+    like( $result->{fix},  qr{rsync -a hv[.]test:},             'and how to bring one over from the hypervisor' );
+
+    # Nothing to check is not a failure: a fleet may run no recipe that fetches
+    # a directory of the operator's at all.
+    $write->("---\none.test:\n    ntp:\n");
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    ok( $result->{ok}, 'and a configuration that fetches nothing passes' );
 };
 
 subtest 'the configuration it copies from has to be there' => sub {

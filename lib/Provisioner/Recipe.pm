@@ -453,6 +453,32 @@ sub enrich {
     return %opts;
 }
 
+=head3 @paths = $recipe->fetch_sources(%opts)
+
+Directories on I<this machine> that the guest will rsync out of, so that
+something can check they are there before a run starts.
+
+A recipe that ships an operator's own files -- C<adminconfig>'s C<skel>,
+C<openvpnclient>'s C<cert_dir> -- names a path that nothing here creates and
+nothing here validates.  The fragment rsyncs it, so an absent one fails that
+recipe's target twenty minutes into a build, and the error rsync gives for it
+says nothing about which recipe asked or which domain it was for.
+
+Called with the recipe's raw options rather than its validated ones, and before
+a build rather than during one, so it has to cope with a configuration that is
+not finished: return nothing for a field that is absent instead of assuming it
+is there.  C<bin/preflight> is the caller.
+
+Not to be confused with C<datadirs>, which are directories under the data
+directory that this tool makes for the recipe.  These are the ones somebody
+else made and we only read.
+
+=cut
+
+sub fetch_sources {
+    return ();
+}
+
 =head3 @patterns = $recipe->remote_skip()
 
 rsync exclude patterns for paths under C<remote_files> which must not come down.
