@@ -72,8 +72,23 @@ It copies `ipmap.cfg` and `recipes.yaml`, leaves `recipes.d/` empty, and builds
 a KeePass DB holding a made-up value for every `secret:` reference in
 `recipes.yaml`.
 
-Two things about it worth understanding:
+Three things about it worth understanding:
 
+- **Addresses look after themselves.** They come out of `ips.db` beside the rest
+  of the configuration, not the `[ips]` section of `ipmap.cfg`, and `new_config`
+  takes one in a transaction — so a fan-out of provisions cannot hand two guests
+  the same address, and there is nothing to edit by hand. The scratch
+  configuration gets its own database, seeded from what the hypervisors are
+  actually running, so a throwaway guest cannot take an address a real one has.
+
+  `bin/assign_ip $DOMAIN` says what a domain holds, assigning one if it has none;
+  `bin/list_ip_pool` shows what is taken and what is free. Neither is something
+  you have to run before provisioning.
+
+  If the database and reality have drifted — something built, moved or destroyed
+  by hand — `bin/reseed_ips` asks the hypervisors again. `--dryrun` first: it
+  really asks and writes nothing. It rebuilds reservations and adds guests it
+  finds, and never takes an address off a domain unless you say `--prune`.
 - **`recipes.d/` is empty on purpose.** `new_config` gathers secrets across
   every domain it can see, so copying the real `recipes.d/` would mean needing
   every password in the real store to build one throwaway guest.
@@ -452,6 +467,10 @@ is a regression test you are guessing about.
 out of the pool, a disk in the storage pool and a definition in libvirt, and the
 next run collides with all three. Collect the artifacts first — they are gone
 after this.
+
+Tearing down is also what gives the address back: `bin/destroy` releases it, and
+nothing else does. A guest abandoned without one keeps its address reserved
+against a domain that no longer exists.
 
 It also takes the guest's directory out of the data source, on this machine and
 on the hypervisor. That is the one nothing else would ever notice: `new_config`

@@ -62,7 +62,6 @@ sub main {
 
     my $c = Config::Simple->new($cfile);
     die "$Config::Simple::errstr\n" unless $c;
-    my $ips  = $c->param( -block => 'ips' )     // {};
     my $pool = $c->param( -block => 'ip_pool' ) // {};
 
     unless ( keys %$pool ) {
@@ -83,13 +82,12 @@ sub main {
         return 1;
     }
 
-    # Build assigned-IP lookup from [ips] section (strip CIDR suffix if present)
-    my %assigned;
-    for my $domain ( sort keys %$ips ) {
-        my $ip = $ips->{$domain};
-        $ip =~ s|/\d+$||;
-        $assigned{$ip} = $domain;
-    }
+    # Out of the database rather than the [ips] section of the file: two runs
+    # cannot share a file, and this is the same record bin/new_config assigns
+    # from.  Seeded from the hypervisors on the first call, so a fleet that has
+    # never had one gets a true answer rather than an empty pool.
+    Provisioner::IPPool::ensure_seeded($pool);
+    my %assigned = %{ Provisioner::IPPool::taken() };
 
     my @available = grep { !$assigned{$_} } @pool_ips;
     my @used      = grep { $assigned{$_} } @pool_ips;
@@ -121,6 +119,11 @@ sub main {
         print "Pool exhausted:  no IPs available.\n";
     }
 
+    # Explicit, because this is what the process exits with.  Falling off the
+    # end returns whatever the last statement evaluated to, which for the
+    # branch above is nothing -- so a successful listing exited on undef and
+    # said "Use of uninitialized value in exit".
+    return 0;
 }
 
 exit main(@ARGV) unless caller;

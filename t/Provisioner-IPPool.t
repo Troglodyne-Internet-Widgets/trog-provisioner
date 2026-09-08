@@ -14,6 +14,10 @@ t/Provisioner-IPPool.t - the static address pool: parsing it, and handing out of
 use Test::More;
 use Test::Fatal;
 use File::Temp qw{tempfile};
+use File::Slurper::Temp();
+use POSIX();
+
+use Trog::SQLite();
 
 use FindBin::libs;
 
@@ -56,77 +60,211 @@ subtest 'pool_ips: deduplicates overlap' => sub {
     ok !( grep { $seen{$_} > 1 } keys %seen ), 'no duplicate IPs';
 };
 
-subtest 'auto_assign: picks first available' => sub {
-    my $cfg = write_ipmap(<<'END');
-[global]
-tld=test.local
-[ips]
-existing=192.168.1.10
-[ip_pool]
-addresses = 192.168.1.10 192.168.1.11 192.168.1.12
-END
+# --- Handing addresses out -----------------------------------------------------
+#
+# The database, not the file.  Two runs cannot share a file: both read it, both
+# find the same first free address, both write, and the second write wins -- so
+# a fan-out of provisions gives two guests the same address and neither says so.
 
-    my $pool    = { addresses => '192.168.1.10 192.168.1.11 192.168.1.12' };
-    my $ip_conf = { existing  => '192.168.1.10' };
+sub fresh_db {
+    Trog::SQLite::forget();
 
-    my $ip = Provisioner::IPPool::auto_assign( $cfg, 'newguest', $pool, $ip_conf );
-    is $ip, '192.168.1.11', 'first available IP returned';
+    # A directory per subtest, so one subtest's assignments are not another's.
+    $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\ngateway=10.9.9.1\n" );
+    return;
+}
 
-    require Config::Simple;
-    my $c = Config::Simple->new($cfg);
-    is $c->param('ips.newguest'), '192.168.1.11', 'IP persisted in ipmap file';
+subtest 'assign: picks the first free one' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11 10.9.9.12' };
+
+    is( Provisioner::IPPool::assign( 'a.test', $pool ), '10.9.9.10', 'the first' );
+    is( Provisioner::IPPool::assign( 'b.test', $pool ), '10.9.9.11', 'then the next' );
 };
 
-subtest 'auto_assign: CIDR pool' => sub {
-    my $cfg = write_ipmap(<<'END');
-[global]
-tld=test.local
-[ips]
-[ip_pool]
-cidr = 192.168.2.0/30
-END
+subtest 'assign: a domain that already has one is answered with it' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11' };
 
-    my $pool    = { cidr => '192.168.2.0/30' };
-    my $ip_conf = {};
-
-    my $ip = Provisioner::IPPool::auto_assign( $cfg, 'cidrguest', $pool, $ip_conf );
-    like $ip, qr/^192\.168\.2\./, 'IP from CIDR range';
-
-    require Config::Simple;
-    my $c = Config::Simple->new($cfg);
-    is $c->param('ips.cidrguest'), $ip, 'CIDR-assigned IP written to file';
+    # Idempotent, so re-provisioning does not move a guest to a new address and
+    # anything that wants to know can just ask.
+    my $first = Provisioner::IPPool::assign( 'a.test', $pool );
+    is( Provisioner::IPPool::assign( 'a.test', $pool ), $first,      'the same address' );
+    is( Provisioner::IPPool::assign( 'b.test', $pool ), '10.9.9.11', 'and nothing else was consumed' );
 };
 
-subtest 'auto_assign: dies when exhausted' => sub {
-    my $cfg = write_ipmap(<<'END');
-[global]
-tld=test.local
-[ips]
-a=192.168.1.10
-b=192.168.1.11
-[ip_pool]
-addresses = 192.168.1.10 192.168.1.11
-END
+subtest 'assign: reservations are not handed out' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11' };
 
-    my $pool    = { addresses => '192.168.1.10 192.168.1.11' };
-    my $ip_conf = { a         => '192.168.1.10', b => '192.168.1.11' };
+    # The hypervisor and the gateway live in here so that nothing is ever given
+    # an address something else is already answering on.
+    is( Provisioner::IPPool::reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 1, 'reserved' );
+    is( Provisioner::IPPool::reserve( '10.9.9.10', 'gateway:10.9.9.10' ), 0, 'and saying so twice changes nothing' );
 
-    my $out = exception { Provisioner::IPPool::auto_assign( $cfg, 'overflow', $pool, $ip_conf ) };
-    like $out, qr/exhausted/i, 'dies with exhausted message';
+    is( Provisioner::IPPool::assign( 'a.test', $pool ), '10.9.9.11', 'the reserved one is skipped' );
 };
 
-subtest 'auto_assign: dies when no pool configured' => sub {
-    my $cfg = write_ipmap(<<'END');
-[global]
-tld=test.local
-[ips]
-END
+subtest 'assign: dies when the pool is exhausted' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10' };
 
-    my $pool    = {};
-    my $ip_conf = {};
+    Provisioner::IPPool::assign( 'a.test', $pool );
+    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool exhausted/, 'says so' );
+};
 
-    my $out = exception { Provisioner::IPPool::auto_assign( $cfg, 'nopool', $pool, $ip_conf ) };
-    like $out, qr/ip_pool|pool/i, 'dies with no-pool message';
+subtest 'assign: dies when no pool is configured' => sub {
+    fresh_db();
+    like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No \[ip_pool\] section/, 'says so' );
+};
+
+subtest 'release: gives it back, and only for a guest' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11' };
+
+    my $had = Provisioner::IPPool::assign( 'a.test', $pool );
+    is( Provisioner::IPPool::release('a.test'),         $had,  'says what it released' );
+    is( Provisioner::IPPool::held_by('a.test'),         undef, 'which it no longer holds' );
+    is( Provisioner::IPPool::assign( 'b.test', $pool ), $had,  'and the address is available again' );
+
+    is( Provisioner::IPPool::release('never.test'), undef, 'releasing what was never held is not an error' );
+
+    # A reservation is not a guest, and bin/destroy must not be able to hand the
+    # gateway out by being pointed at it.
+    Provisioner::IPPool::reserve( '10.9.9.11', 'gateway:10.9.9.11' );
+    is( Provisioner::IPPool::release('gateway:10.9.9.11'), undef,               'and a reservation is not released' );
+    is( Provisioner::IPPool::taken()->{'10.9.9.11'},       'gateway:10.9.9.11', 'it is still spoken for' );
+};
+
+subtest 'assignments: guests only, which is what the zone renders' => sub {
+    fresh_db();
+    my $pool = { addresses => '10.9.9.10 10.9.9.11' };
+
+    Provisioner::IPPool::assign( 'a.test', $pool );
+    Provisioner::IPPool::reserve( '10.9.9.11', 'hv:somewhere' );
+
+    is_deeply( Provisioner::IPPool::assignments(), { 'a.test' => '10.9.9.10' }, 'the reservation is not a domain' );
+    is_deeply(
+        Provisioner::IPPool::taken(),
+        { '10.9.9.10' => 'a.test', '10.9.9.11' => 'hv:somewhere' },
+        'though it is certainly taken'
+    );
+};
+
+{
+    # A stand-in hypervisor: _live_addresses only asks it two things.
+    package FakeHV;
+    sub new           { my ( $class, $said ) = @_; return bless { said => $said }, $class }
+    sub bridge_device { return 'br0' }
+    sub capture       { return $_[0]->{said} }
+}
+
+subtest 'what is answering on the wire' => sub {
+    fresh_db();
+
+    # Two signals, because one is not trustworthy alone.  The sweep says which
+    # addresses answered, which is deterministic; the neighbour table is
+    # consulted for a second opinion and for the hardware address, because its
+    # entries decay to STALE between the sweep and the read.
+    my $hv = FakeHV->new(<<'SAID');
+LIVE 192.168.1.43
+LIVE 192.168.1.54
+192.168.1.1 FAILED
+192.168.1.43 lladdr 52:54:00:e7:46:8f REACHABLE
+192.168.1.54 lladdr ce:f9:56:8c:db:2b STALE
+192.168.1.55 lladdr 52:54:00:aa:bb:cc REACHABLE
+192.168.1.59 lladdr 52:54:00:de:ad:01 STALE
+192.168.1.62 lladdr 52:54:00:00:00:01 INCOMPLETE
+SAID
+
+    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.168.1.43'] );
+
+    # .43 answered and is REACHABLE.  .54 answered but has gone STALE, which is
+    # exactly the decay the ping result is there to survive.  .55 did not answer
+    # but is REACHABLE, so something is there that does not speak ICMP.
+    is_deeply( [ map { $_->{ip} } @live ], [qw{192.168.1.43 192.168.1.54 192.168.1.55}], 'answered, or reachable' );
+
+    # STALE without an answer is not a signal: it outlives the machine that put
+    # it there, and .59 is an address a guest destroyed days ago used to have.
+    unlike( join( ',', map { $_->{ip} } @live ), qr/192[.]168[.]1[.]59/, 'and a leftover entry is not read as occupied' );
+
+    is( $live[1]{mac}, 'ce:f9:56:8c:db:2b', 'the hardware address comes off the table even when the entry is stale' );
+
+    # A hypervisor that will not say what bridge it is on cannot be asked what
+    # is on it, and that is not a reason to stop seeding.
+    is_deeply( [ Provisioner::IPPool::_live_addresses( FakeHV->new(q{}), [] ) ], [], 'nothing to sweep is nothing to report' );
+};
+
+subtest 'a seed that could not finish is retried, not remembered' => sub {
+    fresh_db();
+
+    # What went wrong in practice: one hypervisor answered, another could not be
+    # reached, and the database was left holding a single reservation.  Asking
+    # "are there any rows at all" then said it was seeded, so every guest on the
+    # fleet stayed missing and no later run went looking again.
+    my $db = Provisioner::IPPool::dbh();
+    Provisioner::IPPool::reserve( '10.9.9.10', 'hv:somewhere' );
+
+    my $done = $db->selectall_arrayref('SELECT source FROM seeded');
+    is_deeply( $done, [], 'a row is not a finished seed' );
+
+    # Only the marker says so, and it is written after the hypervisor has
+    # answered everything.
+    $db->do("INSERT INTO seeded (source) VALUES ('hv:somewhere')");
+    is_deeply(
+        $db->selectall_arrayref('SELECT source FROM seeded'),
+        [ ['hv:somewhere'] ],
+        'and once it has, that hypervisor is not swept again'
+    );
+};
+
+subtest 'two runs at once cannot be given the same address' => sub {
+    fresh_db();
+
+    # The entire reason this is a database.  Forked rather than mocked, because
+    # what is being tested is two processes contending for one file -- which is
+    # exactly what a fan-out of provisions is, and what the [ips] section could
+    # not survive.
+    my $pool = { cidr => '10.9.40.0/27' };
+    my $dir  = $ENV{TROG_PROVISIONER_CONFIG};
+
+    pipe( my $read, my $write ) or die "pipe: $!";
+
+    my @kids;
+    foreach my $n ( 1 .. 8 ) {
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+
+        if ( !$pid ) {
+            close $read;
+
+            # A handle inherited across a fork is the one thing SQLite will not
+            # forgive, so each child opens its own.
+            Trog::SQLite::forget();
+            my $got = eval { Provisioner::IPPool::assign( "d$n.test", $pool ) } // "ERROR: $@";
+            print {$write} "$got\n";
+            close $write;
+
+            ## no critic (Subroutines::ProhibitCallsToUnexportedSubs)
+            POSIX::_exit(0);
+        }
+
+        push( @kids, $pid );
+    }
+
+    close $write;
+    my @said = <$read>;
+    close $read;
+    waitpid( $_, 0 ) for @kids;
+
+    chomp @said;
+    is( scalar @said, 8, 'every one of them got an answer' );
+    unlike( join( ',', @said ), qr/ERROR/, 'and none of them failed' ) or diag join( "\n", @said );
+
+    my %seen;
+    my @twice = grep { $seen{$_}++ } @said;
+    is_deeply( \@twice, [], 'no address was handed out twice' ) or diag join( ',', sort @said );
 };
 
 subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {

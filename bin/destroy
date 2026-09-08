@@ -9,6 +9,7 @@ use warnings FATAL => 'all';
 
 use re '/aa';
 use FindBin::libs;
+use Provisioner::IPPool();
 use Trog::HV();
 use Trog::Hypervisors();
 use File::Path();
@@ -120,8 +121,43 @@ sub main {
         print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
     }
 
+    # 6. Give the address back to the pool
+    release_ip( $domain, $dryrun );
+
     print "Done.\n";
     return 0;
+}
+
+=head2 release_ip($domain, $dryrun)
+
+Hand the domain's static address back to the pool.
+
+Here and nowhere else: re-provisioning a guest goes through C<bin/provision>,
+which keeps whatever address the domain already has.  This is the deliberate
+"take it away" verb, so it is the one that should let go of the address --
+otherwise the pool fills with entries for guests that stopped existing, which
+is what the C<[ips]> section of F<ipmap.cfg> did for years.
+
+=cut
+
+sub release_ip {
+    my ( $domain, $dryrun ) = @_;
+
+    my $held = Provisioner::IPPool::held_by($domain);
+    unless ($held) {
+        print "No address was assigned to $domain\n";
+        return 0;
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] Would return $held to the pool\n";
+        return 0;
+    }
+
+    Provisioner::IPPool::release($domain);
+    print "Returned $held to the pool\n";
+
+    return 1;
 }
 
 sub destroy_vm {

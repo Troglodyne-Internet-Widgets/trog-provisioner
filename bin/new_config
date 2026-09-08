@@ -181,11 +181,15 @@ sub get_config {
     die $Config::Simple::errstr unless $c;
 
     my $global_conf = $c->param( -block => 'global' );
-    my $ip_conf     = $c->param( -block => 'ips' );
     my $alias_conf  = $c->param( -block => 'aliases' );
     my $ns_conf     = $c->param( -block => 'nameservers' );
     my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
-    return ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $pool_conf );
+
+    # No [ips] here any more: addresses live in ips.db, where two runs
+    # assigning at once cannot both take the same one.  They are read after the
+    # domain is known to have a recipe, since touching the database at all is
+    # something this should not do for a domain it is about to refuse.
+    return ( $global_conf, $alias_conf, $ns_conf, $pool_conf );
 }
 
 # Basically build a pointer so we can modify the actual value, cuz the actual ref can't survive the iterator var :(
@@ -281,7 +285,7 @@ sub handle_domain {
 
     die "Must pass domain" unless $domain;
 
-    my ( $global_conf, $ip_conf, $alias_conf, $ns_conf, $pool_conf ) = get_config();
+    my ( $global_conf, $alias_conf, $ns_conf, $pool_conf ) = get_config();
 
     my $basedir = $global_conf->{basedir};
     die "Must have basedir defined in global section of $cfile" unless $basedir;
@@ -297,13 +301,6 @@ sub handle_domain {
 
     my $admin_email = $global_conf->{admin_email};
     die "Must set admin_email in global section of $cfile" unless $admin_email;
-
-    # Everything in the map is spelled out, so a bare label is a leftover from
-    # when there was a tld to append and is worth saying so about rather than
-    # quietly assigning it a fresh address.
-    my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
-    die "These entries in the [ips] block of $cfile are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
-      if @unqualified;
 
     my $gateway = $global_conf->{gateway};
     die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
@@ -328,11 +325,23 @@ sub handle_domain {
     # Only now, with the domain known to be one we have a recipe for, do the
     # things that cannot be taken back: an address out of the pool, and a prompt
     # for the password to the secret store.
-    my $static_ip = $ip_conf->{$domain};
-    unless ($static_ip) {
-        $static_ip = Provisioner::IPPool::auto_assign( $cfile, $domain, $pool_conf, $ip_conf );
-        $ip_conf->{$domain} = $static_ip;
-    }
+    #
+    # Seeded here for the same reason -- the first call builds the database out
+    # of what every hypervisor is running, which is not work to do on behalf of
+    # a domain that has no recipe.
+    Provisioner::IPPool::ensure_seeded($pool_conf);
+
+    # One transaction, so a fan-out of provisions cannot hand two guests the
+    # same address.  Idempotent, so re-provisioning keeps what this domain has.
+    my $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
+    my $ip_conf   = Provisioner::IPPool::assignments();
+
+    # Every domain is spelled out, so a bare label is a leftover from when there
+    # was a tld to append and is worth saying so about rather than quietly
+    # letting it into a zone file.
+    my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
+    die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
+      if @unqualified;
 
     # A recipe carries a note saying where a password is, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
