@@ -390,6 +390,18 @@ sub handle_domain {
     # The same fold as anything else asking what a domain is configured with,
     # over this copy rather than the file, so the secrets resolved above survive
     # it.
+    # Where this domain lives, and where what gets shipped to it comes from.
+    # Asked before _base goes, because that is where a fleet says it once for
+    # every domain -- and asked of Cookbook, which is what knows that a
+    # configuration written before the move says it under data instead.
+    #
+    # _global's to say, not the data recipe's: every recipe interpolates
+    # install_dir, and reading it out of data's `to` made all of them depend on
+    # that recipe for a path rather than for anything it does, which is what
+    # kept data from being an ordinary recipe.
+    $global_config->{install_dir} //= Provisioner::Cookbook->install_dir( $domain, $rconf );
+    $global_config->{data_source} //= Provisioner::Cookbook->data_source( $domain, $rconf );
+
     $rconf->{$domain} = Provisioner::Cookbook->domain_config( $domain, $rconf );
     delete $rconf->{_base};
 
@@ -413,16 +425,31 @@ sub handle_domain {
         }
     }
 
-    # There will always be data config
-    my $data_dir = Provisioner::Cookbook->data_dir( $fqdn, $rconf );
-
     # Read, not deleted.  It used to be lifted out of the configuration entirely,
     # which is what kept it from being a recipe the depsolver could see -- and so
     # from being handed anything by the recipes that depend on it.  It stays in,
     # takes part in the loop like everything else, and is only lifted back out at
     # the makefile render, where its target has a fixed slot ahead of the others.
-    my $data_config = $rconf->{$domain}{data};
-    die "Must provide data configuation for $fqdn" unless $data_config;
+    # Optional now.  It was required because install_dir was read out of it, so a
+    # domain without one had nowhere to put anything.  That comes from _global,
+    # so a guest with nothing to ship and no state to restore simply gets no
+    # data target.
+    my $data_config = $rconf->{$domain}{data} // {};
+
+    # Where this domain's files live, and where what gets shipped to it comes
+    # from.  _global's to say, not the data recipe's: every recipe interpolates
+    # install_dir, and reading it out of data's `to` made all of them depend on
+    # that recipe for a path rather than for anything it does -- which is what
+    # kept data from being an ordinary recipe.  Cookbook still answers with
+    # data's own fields for a configuration written before the move.
+    #
+    # Here rather than further down, so that everything after it -- the tests
+    # data renders, what each recipe is asked to salvage -- is asked with the
+    # same answer.
+    die "Nothing says where $fqdn's data comes from: set data_source in _global, or from under data.\n"
+      unless defined $global_config->{data_source} && length $global_config->{data_source};
+
+    my $data_dir = "$global_config->{data_source}/$fqdn";
 
     my @data_users;
     my $data_users_f = "$data_dir/users.yaml";
@@ -525,10 +552,7 @@ sub handle_domain {
     # with rather than out of what it started with.
     mkdir "$cfg_dir/t";
 
-    # set the install_dir for configs to use from here
-    $global_config->{install_dir} = $data_config->{to};
-    $global_config->{data_source} = $data_config->{from};
-    $global_config->{script_dir}  = $root_scripts;
+    $global_config->{script_dir} = $root_scripts;
 
     # If we use a local dns provider, we might be doing NS delegation to this box.
     # As such we have to teach anything relying on DNS changes to use it.
@@ -664,7 +688,7 @@ sub handle_domain {
         # Files the guest has to have that must not travel in the payload: the
         # store holds them, bin/provision puts them there.  Collected here and
         # resolved in one go below, so a run wants the store password once.
-        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $data_config->{to}, $fqdn ) );
+        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn ) );
 
         # Make dirs in the DATADIR needed by ssh
         foreach my $d ( $builder->datadirs() ) {
@@ -674,12 +698,12 @@ sub handle_domain {
         # Schlep over stuff from existing deployments
         if ($target_is_up) {
             print "Backing up $module files from $fqdn\n";
-            my %tg   = $builder->remote_files( $data_config->{to}, $fqdn );
+            my %tg   = $builder->remote_files( $global_config->{install_dir}, $fqdn );
             my @skip = $builder->remote_skip();
 
             # Asked before any of it comes down, so what does is what the guest
             # looks like now rather than whenever its cron last ran.
-            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $data_config->{to}, $fqdn ) ], [ sort keys %tg ] );
+            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $global_config->{install_dir}, $fqdn ) ], [ sort keys %tg ] );
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Writing remote file $to_fetch as $data_dir/$tg{$to_fetch}\n";
 

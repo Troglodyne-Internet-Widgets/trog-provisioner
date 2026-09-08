@@ -412,6 +412,80 @@ sub domain_config {
     return _merger()->merge( $base, $own );
 }
 
+=head2 global_config($domain, $conf)
+
+The C<_global> block a domain is built with: what C<_base> says, with the
+domain's own on top.
+
+C<_global> is what several recipes share rather than what any one of them owns,
+which is why it is merged separately from the recipes themselves -- see
+C<domain_config>, which deliberately leaves it out.
+
+=cut
+
+sub global_config {
+    my ( $class, $domain, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my $base = clone( $conf->{_base}{_global}                                 // {} );
+    my $own  = clone( ( defined $domain ? $conf->{$domain}{_global} : undef ) // {} );
+
+    return { %$base, %$own };
+}
+
+=head2 install_dir($domain, $conf)
+
+Where a domain's files live on the guest.
+
+This is C<_global>'s to say, not the C<data> recipe's.  It used to be read out
+of C<data>'s C<to> field, which meant every recipe interpolating C<install_dir>
+depended on the data recipe for the path rather than for anything data does --
+and that is what kept data from being an ordinary recipe.
+
+Falls back to that field for a configuration written before the move, and to
+F</opt/domains> for one that says neither.
+
+=cut
+
+sub install_dir {
+    my ( $class, $domain, $conf ) = @_;
+
+    my $said = $class->global_config( $domain, $conf )->{install_dir};
+    return $said if defined $said && length $said;
+
+    my $legacy = ( $class->data_config( $domain, $conf ) // {} )->{to};
+    return $legacy if defined $legacy && length $legacy;
+
+    return '/opt/domains';
+}
+
+=head2 data_source($domain, $conf)
+
+Where the hypervisor keeps what gets shipped to the guest.
+
+The other half of the same move: C<_global>'s to say, falling back to C<data>'s
+C<from>.
+
+B<No default.>  Unlike C<install_dir>, which is a path to render into a
+configuration and harmless to guess at, this one is what the teardown sweeps --
+so a configuration that says nothing has to come back undef and mean "nothing
+to sweep", rather than pointing something destructive at a directory nobody
+named.
+
+=cut
+
+sub data_source {
+    my ( $class, $domain, $conf ) = @_;
+
+    my $said = $class->global_config( $domain, $conf )->{data_source};
+    return $said if defined $said && length $said;
+
+    my $legacy = ( $class->data_config( $domain, $conf ) // {} )->{from};
+    return $legacy if defined $legacy && length $legacy;
+
+    return undef;
+}
+
 =head2 data_config($domain, $conf)
 
 What the C<data> recipe is configured with for a domain: C<from>, the directory
@@ -442,7 +516,9 @@ sub data_dir {
     my ( $class, $domain, $conf ) = @_;
     return undef unless defined $domain && length $domain;
 
-    my $from = ( $class->data_config( $domain, $conf ) // {} )->{from};
+    # Through data_source, so that a domain saying where its data lives in
+    # _global gets the same answer as one that still says it under data.
+    my $from = $class->data_source( $domain, $conf );
     return undef unless defined $from && length $from;
 
     return "$from/$domain";
