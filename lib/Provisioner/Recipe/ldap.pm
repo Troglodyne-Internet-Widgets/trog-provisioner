@@ -169,9 +169,10 @@ sub template_files {
         'ldap.export.cron.tt'   => 'ldap-export.cron',
         'ldap.reload.sh.tt'     => 'ldap-reload.sh',
 
-        # The ufw application profile for this domain's port.  A bare
-        # `ufw allow` in the fragment does not survive the `ufw reset` that
-        # setup-ufw-rules opens with, and the ufw target runs after this one.
+        # The ufw application profile for this domain's port.  A profile is
+        # what setup-ufw-rules applies -- it allows whatever `ufw app list`
+        # reports -- rather than something a fragment has to get past the ufw
+        # target, which runs after this one.
         'ldap.ufw.conf.tt' => 'ldap_ufw.conf',
     );
 }

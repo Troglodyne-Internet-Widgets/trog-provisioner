@@ -16,10 +16,10 @@ install -d -m 0750 -o root -g redis /etc/redis/redis.conf.d
 # reads it is configd, running as root out of the unit's ExecStartPre.
 install -m 0600 -o root -g root redis.conf /etc/redis/redis.conf.d/50-provisioner
 [%# The firewall profile for the port redis was configured with.  Declared as a
-    profile because setup-ufw-rules opens with a `ufw reset` that drops every
-    rule, and named redis-server because ufw skips a profile whose section name
-    is also in /etc/services -- which is what the one shipped under ufw was
-    called, so it has never once been loaded. -%]
+    profile because that is what setup-ufw-rules applies -- it allows whatever
+    `ufw app list` reports -- and named redis-server because ufw skips a profile
+    whose section name is also in /etc/services, which is what the one shipped
+    under ufw was called, so it has never once been loaded. -%]
 install -m 0644 -o root -g root redis_ufw.conf /etc/ufw/applications.d/redis-server
 [%# The RDB and the AOF -- whatever redis was being used for beyond a cache --
     live in /var/lib/redis, and the package leaves that directory redis:redis

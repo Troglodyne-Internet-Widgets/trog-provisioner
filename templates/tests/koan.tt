@@ -31,9 +31,9 @@ foreach my $file (
 
 [% IF messaging_provider == 'matrix' -%]
 # The matrix federation port, declared as a profile rather than allowed from
-# the fragment.  `default deny outgoing` blocks 8448, and a rule added here did
-# not survive the `ufw reset` setup-ufw-rules opens with -- which is why this
-# used to be queued to postrun to land after it.
+# the fragment.  `default deny outgoing` blocks 8448, and a rule added here had
+# to outlive the ufw target -- which is why this used to be queued to postrun to
+# land after it.  A profile is what that target applies instead.
 my $profile = '/etc/ufw/applications.d/koan';
 ok(-f $profile, 'the matrix federation firewall profile was installed');
 
