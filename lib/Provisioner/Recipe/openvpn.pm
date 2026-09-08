@@ -27,9 +27,6 @@ In recipes.yaml:
             cipher: AES-256-GCM
             # dns is optional; if omitted, no DNS servers are pushed to clients
             interface: eth0
-            # redirect_gateway is optional and on; set it false for a VPN that
-            # is a route to this guest's network rather than a client's whole
-            # internet
             redirect_gateway: false
 
 =head2 DESCRIPTION
@@ -66,9 +63,9 @@ wrong one writes a rule that matches nothing and reports success.  Omitted, the
 guest is asked which interface carries its default route at the moment the rule
 is written.
 
-C<redirect_gateway> tells clients to route everything through the tunnel, and
-defaults to on.  Turn it off for a VPN that is a route to what is behind the
-guest rather than a replacement for a client's own internet connection.
+C<redirect_gateway> tells clients to route everything through the tunnel, not
+just requests to hosts on the VPN.
+Default off.
 
 =head3 The PKI is the part that cannot be made again
 
