@@ -1,0 +1,20 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $status = `systemctl is-active nginx 2>/dev/null`;
+chomp $status;
+is($status, 'active', 'nginx is running');
+
+ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginx domain config exists');
+ok(-f '[% install_dir %]/[% domain %]/index.html', 'game page exists');
+ok(-f '[% install_dir %]/[% domain %]/engine/data/loader.js', 'EmulatorJS engine data exists');
+ok(!-d '[% install_dir %]/[% domain %]/engine/.git', 'engine checkout has no .git left in it');
+
+# nginx stays up on the last configuration it accepted, so asking whether it is
+# running says nothing about the file this recipe just wrote.
+my $check = `nginx -t 2>&1`;
+like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
+
+done_testing();

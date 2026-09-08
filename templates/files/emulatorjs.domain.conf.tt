@@ -1,0 +1,39 @@
+server {
+    listen 443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
+[% IF ipv6 %]    listen [::]:443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
+[% END -%]
+
+    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+
+    ssl_certificate     /etc/ssl/certs/[% domain %].pem;
+    ssl_certificate_key /etc/ssl/private/[% domain %].pem;
+
+    root [% install_dir %]/[% domain %];
+
+    # EmulatorJS's threaded cores need SharedArrayBuffer, which a browser
+    # grants only to a page that has cross-origin-isolated itself with both
+    # of these -- without them the cores that use threads fall back silently
+    # to their slow path instead of refusing to run.
+    add_header Cross-Origin-Opener-Policy   "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+
+    location / {
+        sendfile on;
+        sendfile_max_chunk 1m;
+        tcp_nopush on;
+        try_files $uri $uri/index.html =404;
+    }
+}
+
+server {
+    listen 80[% IF backlog %] backlog=[% backlog %][% END %];
+[% IF ipv6 %]    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
+[% END -%]
+
+    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+
+    # Plain HTTP is not a secure context, so a browser will not
+    # cross-origin-isolate the page however the headers above ask -- serving
+    # over it at all is serving cores that silently cannot use threads.
+    return 301 https://$host$request_uri;
+}

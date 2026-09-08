@@ -1,0 +1,33 @@
+# Pin the engine to the configured tag.  Idempotent across re-provisions: a
+# guest already on this version does not re-clone, and one on another version
+# is thrown away and re-fetched rather than patched in place.
+mkdir -p [% install_dir %]/[% domain %]; /bin/true
+INSTALLED_VER=$$(cat [% install_dir %]/[% domain %]/engine/.emulatorjs_version 2>/dev/null); \
+if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
+	rm -rf [% install_dir %]/[% domain %]/engine; \
+	git clone --branch '[% version %]' --depth 1 '[% repo_url %]' '[% install_dir %]/[% domain %]/engine'; \
+	rm -rf [% install_dir %]/[% domain %]/engine/.git; \
+	echo '[% version %]' > [% install_dir %]/[% domain %]/engine/.emulatorjs_version; \
+fi
+# Deploy the game page and the vhost
+install -m 0644 index.html [% install_dir %]/[% domain %]/index.html
+mv emulatorjs.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
+# Queued, not immediate: nginx is a dependency of this recipe, ordered after
+# it, so conf.d/global.conf -- which this vhost's connection upgrade map lives
+# in -- is not installed yet at this point in the build.
+[% script_dir %]/queue_postrun_task systemctl restart nginx
+# engine/ is public code straight off GitHub -- nginx reading it costs nothing
+# to allow outright, the same as any other package's files on disk.
+chown -R root:www-data [% install_dir %]/[% domain %]/engine
+find [% install_dir %]/[% domain %]/engine -type d -exec chmod g+s {} +
+chmod -R o+rX [% install_dir %]/[% domain %]/engine
+# roms/ is not manufactured here -- it is an operator's own file, arriving
+# through the data recipe's rsync same as any other domain content -- so it
+# may not exist yet on a guest nobody has handed a ROM to.  data already left
+# it 0750 user:admin_user; only the group gets read access, the same way
+# nginxproxy's static_dir does.
+test -d [% install_dir %]/[% domain %]/roms && { \
+	chown -R [% user %]:www-data [% install_dir %]/[% domain %]/roms; \
+	find [% install_dir %]/[% domain %]/roms -type d -exec chmod g+s {} +; \
+} || true
+chmod o+x [% install_dir %]/[% domain %]
