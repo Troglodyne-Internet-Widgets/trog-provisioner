@@ -8,9 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-use Crypt::PRNG();
-use File::Slurper();
-use File::Slurper::Temp();
 use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
@@ -459,56 +456,6 @@ expected to cope with.
 
 sub remote_skip {
     return ();
-}
-
-=head3 $secret = $recipe->persisted_secret($filename, $generate)
-
-A secret that has to stay the same for the life of a domain rather than the life
-of a run.  Made once, kept in C<$filename> under the domain's output directory,
-and read back on every run after.
-
-An C<args> default that mints a fresh one each time is a rotation rather than a
-default: whatever the last one authenticated -- a session, an admin token,
-another node in a cluster -- stops working at the next provision, and nothing
-says why.  So write it down.
-
-Sixty-four hex characters by default; pass a coderef to make something else.
-Dies rather than hand back a default-shaped file that does not look like one,
-since the usual reason for that is somebody having edited it.
-
-This is for a secret that belongs in the domain's configuration -- something a
-template renders into a file on the guest.  A secret that is itself a file, and
-one nothing should be able to read out of the domain directory, belongs in
-C<guest_secrets> instead.
-
-=cut
-
-sub persisted_secret {
-    my ( $self, $filename, $generate ) = @_;
-
-    my $dir = $self->{output_dir}
-      or die "Cannot keep $filename anywhere: this recipe has no output_dir
-";
-    my $file = "$dir/$filename";
-
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    if ( -f $file ) {
-        my $kept = File::Slurper::read_text($file);
-        chomp $kept;
-        die "$file does not hold a secret this made: expected 64 hex characters
-"
-          unless $generate || $kept =~ m/\A[0-9a-f]{64}\z/;
-        return $kept;
-    }
-
-    my $secret = $generate ? $generate->() : Crypt::PRNG::random_bytes_hex(32);
-    die "The generator for $filename produced nothing\n" unless defined $secret && length $secret;
-
-    File::Slurper::Temp::write_text( $file, "$secret\n" );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
-    chmod 0600, $file;
-
-    return $secret;
 }
 
 =head3 %files = $recipe->guest_secrets($install_dir, $domain)

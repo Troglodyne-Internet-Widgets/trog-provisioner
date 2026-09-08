@@ -15,7 +15,6 @@ use IPC::Run3();
 use File::Slurper::Temp();
 use Net::OpenSSH::More();
 use Trog::Credentials();
-use Trog::Secrets();
 
 =head1 NAME
 
@@ -257,7 +256,7 @@ sub _ask_for_sudo_password {
       . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n"
       unless $self->_have_terminal();
 
-    my $password = Trog::Secrets->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo' );
+    my $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo' );
 
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 

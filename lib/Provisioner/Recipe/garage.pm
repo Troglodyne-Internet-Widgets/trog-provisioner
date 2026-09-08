@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use Crypt::PRNG();
+
 use parent qw{Provisioner::Recipe};
 
 use HTTP::Tiny;
@@ -79,10 +81,15 @@ Validates the recipe configuration:
 
 =over 4
 
-=item C<rpc_secret> (optional)  64-character hex string used as the shared
-RPC secret between cluster nodes.  Auto-generated with C<openssl rand -hex 32>
-on first run and persisted to C<rpc_secret.txt> in the domain output directory,
-so that it stays the same across provisions -- see C<persisted_secret> in
+=item The RPC secret
+
+The 32-byte hex secret nodes in a cluster authenticate to each other with.  It
+is not a configuration field: it is kept in the secret store, placed on the
+guest as C</etc/garage.rpc_secret> by C<bin/provision>, and named to garage by
+C<rpc_secret_file>.  So it is the same secret across provisions -- a fresh one
+is a rotation, and the rest of the cluster stops talking to this node -- and it
+never sits in the domain directory, which is what gets carried off to the
+hypervisor and into every backup.  See C<guest_secrets> in
 L<Provisioner::Recipe>.
 
 =item C<version> (optional, default: latest GitHub release)  Garage release tag to download.
@@ -146,6 +153,27 @@ sub _latest_garage_version {
     return $FALLBACK_VERSION;
 }
 
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+
+    # The shared secret every node in the cluster authenticates with.  Kept in
+    # the store and placed as a file rather than rendered into garage.toml: a
+    # default that mints a fresh one is a rotation, and the rest of the cluster
+    # stops talking to this node at the next provision.  garage reads it out of
+    # the path rpc_secret_file names, which is what garage.toml now carries.
+    #
+    # Outside the domain directory on purpose -- that is what the data recipe
+    # takes to the hypervisor and into every backup of it.
+    return (
+        '/etc/garage.rpc_secret' => {
+            ref      => "secret:garage/$domain-rpc-secret/password",
+            generate => sub { Crypt::PRNG::random_bytes_hex(32) },
+            owner    => 'garage:garage',
+            mode     => '0600',
+        },
+    );
+}
+
 sub rate_limits {
 
     # S3 and admin, RPC between nodes, and the web endpoint.  These are the
@@ -158,7 +186,6 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            rpc_secret         => { type => 'string',  default => $self->persisted_secret('rpc_secret.txt'), },
             version            => { type => 'string',  default => _latest_garage_version(), },
             data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
             metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },

@@ -23,7 +23,6 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Trog::Credentials();
-use Trog::Secrets();
 
 sub given {
     my ($block) = @_;
@@ -105,16 +104,16 @@ subtest 'who actually asks' => sub {
 
     given ("keepass: handed in\n");
 
-    is( Trog::Secrets->prompt( 'passphrase:', 'keepass' ), 'handed in', 'a named password that was handed in is not asked for' );
-    is( $asked,                                            0,           'nobody was prompted' );
+    is( Trog::Credentials->prompt( 'passphrase:', 'keepass' ), 'handed in', 'a named password that was handed in is not asked for' );
+    is( $asked,                                                0,           'nobody was prompted' );
 
-    is( Trog::Secrets->prompt( 'sudo:', 'sudo' ), 'typed at a terminal', 'one that was not is asked for' );
-    is( $asked,                                   1,                     'exactly once' );
+    is( Trog::Credentials->prompt( 'sudo:', 'sudo' ), 'typed at a terminal', 'one that was not is asked for' );
+    is( $asked,                                       1,                     'exactly once' );
 
     # Something with no name is always asked for, which is the old behaviour and
     # what anything without a name in the block should get.
-    is( Trog::Secrets->prompt('something else:'), 'typed at a terminal', 'and an unnamed password is always asked for' );
-    is( $asked,                                   2,                     'again' );
+    is( Trog::Credentials->prompt('something else:'), 'typed at a terminal', 'and an unnamed password is always asked for' );
+    is( $asked,                                       2,                     'again' );
 };
 
 subtest 'sudo on a machine nobody is watching' => sub {

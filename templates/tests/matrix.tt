@@ -91,29 +91,45 @@ foreach my $piece (qw{homeserver.db homeserver.signing.key}) {
     ok(-s "$live/$piece", "the salvaged $piece is on the guest, not stranded in the domain directory");
 }
 
-# The signing key does not come off the guest any more and must not: it is the
-# federation identity of this server, bin/provision puts it here out of the
-# secret store before the makefile runs, and remote_skip keeps it out of the
-# salvage so it never reaches the domain directory or a backup of it.  So the
-# contract is the opposite of what it was -- kept to synapse, and readable by
-# nobody else on the box.
-my $signing_key = "$live/homeserver.signing.key";
+# Under synapse's own configuration directory rather than the domain directory.
+# bin/provision places these before the makefile runs, and the fragment restores
+# this domain's salvage into the domain directory -- which restore_state declines
+# to do once anything is sitting in it, so a secret placed there stopped the
+# media store coming back.  The domain directory is also what the data recipe
+# carries to the hypervisor and into every backup, which is the last place a
+# secret held in the store should be.
+my $signing_key = '/etc/matrix-synapse/homeserver.signing.key';
+my $reg_secret  = '/etc/matrix-synapse/registration.shared.secret';
+
 ok(-s $signing_key, 'synapse has a signing key');
-SKIP: {
-    my @key_stat = stat $signing_key;
-    skip 'there is no signing key to stat', 3 unless @key_stat;
+ok(-s $reg_secret,  'and the registration secret it shares with the admin script');
 
-    is($key_stat[2] & 07777, 0600, 'kept to synapse');
-    is(scalar getpwuid($key_stat[4] // -1), 'matrix-synapse', 'and owned by it');
+foreach my $secret ($signing_key, $reg_secret) {
+    SKIP: {
+        my @st = stat $secret;
+        skip "there is no $secret to stat", 2 unless @st;
 
-    my $keyline = do { local (@ARGV, $/) = $signing_key; <> } // '';
-    like($keyline, qr/\Aed25519 \S+ \S+/, 'and is the key the store handed over, in the format synapse reads');
+        is($st[2] & 07777, 0600, "$secret is kept to synapse");
+        is(scalar getpwuid($st[4] // -1), 'matrix-synapse', "and owned by it");
+    }
 }
 
-# The other half of that bargain: nothing salvages it, so a rebuild gets the
-# same identity from the store rather than a new one from the guest.
-ok(!-e "[% install_dir %]/[% domain %]/matrix/homeserver.signing.key",
-    'and no copy of it was left in the domain directory for a backup to pick up');
+my $keyline = do { local (@ARGV, $/) = $signing_key; <> } // '';
+like($keyline, qr/\Aed25519 \S+ \S+/, 'the key is the one the store handed over, in the format synapse reads');
+
+# The config has to name them, or synapse makes its own and the federation meets
+# a stranger after every rebuild.
+my $hs = do { local (@ARGV, $/) = '/etc/matrix-synapse/homeserver.yaml'; <> } // '';
+like($hs, qr{^signing_key_path:\s*\Q$signing_key\E$}m, 'and homeserver.yaml reads it from there');
+like($hs, qr{^registration_shared_secret_path:\s*\Q$reg_secret\E$}m, 'as it does the registration secret');
+unlike($hs, qr/^registration_shared_secret:/m, 'with no copy of the secret written into the config itself');
+
+# The other half of that bargain: neither is in the domain directory, so nothing
+# salvages one and a rebuild gets the same identity from the store.
+foreach my $stray (qw{homeserver.signing.key registration.shared.secret}) {
+    ok(!-e "$live/$stray", "no copy of $stray was left in the domain directory for a backup to pick up");
+    ok(!-e "[% install_dir %]/[% domain %]/matrix/$stray", "nor in the salvage");
+}
 
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts every vhost we added') or diag $check;

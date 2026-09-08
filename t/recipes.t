@@ -695,8 +695,9 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
 # A default that is generated rather than written down is a rotation: it changes
 # every time bin/new_config runs, so whatever the last one authenticated -- a
 # session, an admin token, another node in a cluster -- stops working at the next
-# provision, and nothing anywhere says why.  Provisioner::Recipe::persisted_secret
-# is how a recipe keeps one still; this is what notices when a recipe does not.
+# provision, and nothing anywhere says why.  Provisioner::Recipe::guest_secrets
+# is how a recipe keeps one still -- in the store, placed on the guest, never in
+# a default -- and this is what notices when a recipe does not.
 subtest 'no recipe hands out a default that changes between runs' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 

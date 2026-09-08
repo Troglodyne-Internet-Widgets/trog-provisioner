@@ -167,7 +167,7 @@ sub place_guest_secrets {
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
-    my %values = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Secrets->prompt( 'Enter password:', 'keepass' ), %needed );
+    my %values = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
 
     foreach my $path ( sort keys %$wanted ) {
         my $value = $values{$path};
@@ -189,7 +189,7 @@ sub place_guest_secrets {
         # which is why guest_secrets says the owner is what it ends up as
         # rather than what it lands as.
         my $owner = $wanted->{$path}{owner} // 'root:root';
-        print {*STDERR} "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
+        warn "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
           if $guest->run_sudo( 'chown', $owner, $path );
 
         print "Placed $path on $domain from $wanted->{$path}{ref}\n";

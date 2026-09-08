@@ -338,7 +338,7 @@ sub handle_domain {
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;
     if (%to_replace) {
-        $keepass = Trog::Secrets->prompt( 'Enter password:', 'keepass' );
+        $keepass = Trog::Credentials->prompt( 'Enter password:', 'keepass' );
         my %secrets = Trog::Secrets->read( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
@@ -663,7 +663,7 @@ sub handle_domain {
 
             # Asked before any of it comes down, so what does is what the guest
             # looks like now rather than whenever its cron last ran.
-            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $data_config->{to}, $fqdn ) ] );
+            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $data_config->{to}, $fqdn ) ], [ sort keys %tg ] );
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Writing remote file $to_fetch as $data_dir/$tg{$to_fetch}\n";
 
@@ -711,10 +711,12 @@ sub handle_domain {
                 );
                 next unless $gap;
 
-                # On STDERR both times.  The rest of a run is a wall of progress
-                # on STDOUT, and the line saying a service's state did not come
-                # down has to survive being scrolled past.
-                print STDERR $gap->{message} . "\n";
+                # warn rather than printed: the rest of a run is a wall of
+                # progress on STDOUT, and the line saying a service's state did
+                # not come down has to survive being scrolled past.  warn also
+                # goes through the warn handler, so a caller that wants these
+                # somewhere other than the terminal can have them.
+                warn $gap->{message} . "\n";
                 push( @empty_salvage, $gap ) if $gap->{alarming};
             }
         }
@@ -895,16 +897,14 @@ sub handle_domain {
     # rebuilds the guest and loses the data; this is the thing that tells you
     # not to run it yet.
     if (@empty_salvage) {
-        print STDERR "\n" . scalar(@empty_salvage) . " salvage(s) on $fqdn came back with nothing:\n";
-        print STDERR "    $_->{recipe} read nothing out of $_->{remote}\n" for @empty_salvage;
-        print STDERR "None of that state is in $data_dir.  Rebuilding $fqdn now loses it.\n";
+        warn "\n" . scalar(@empty_salvage) . " salvage(s) on $fqdn came back with nothing:\n" . join( q{}, map { "    $_->{recipe} read nothing out of $_->{remote}\n" } @empty_salvage ) . "None of that state is in $data_dir.  Rebuilding $fqdn now loses it.\n";
     }
 
     print "Done.\n";
     return 0;
 }
 
-=head2 refresh_salvage($static_ip, $admin_user, $cfg_dir, $module, $commands)
+=head2 refresh_salvage($static_ip, $admin_user, $cfg_dir, $module, $commands, $watched)
 
 Ask the guest to bring what is about to be salvaged up to date.
 
@@ -913,15 +913,25 @@ difference is everything that happened in between -- which is exactly what a
 rebuild is trying not to lose.  A recipe says how to refresh its own state in
 C<remote_prepare>; this runs it, as root, on the guest being salvaged.
 
-A failure is a warning.  The guest may not have the script yet, and last night's
-dump is worth more than none -- which is what dying here would leave.
+A failure is usually a warning.  The guest may not have the script yet, and last
+night's dump is worth more than none -- which is what dying here would leave.
+
+B<Unless it changed something first.>  C<$watched> is what is about to come
+down, and the newest mtime under each of those paths is taken before and after
+every command.  A command that failed having touched none of them left last
+night's dump exactly as it was, and that is the case the warning is for.  One
+that failed having touched them did not leave a stale dump, it left a partial
+one -- a mysqldump killed midway, a snapshot half written -- and fetching that
+would carry a corrupt copy home and call it the state of the guest.  So that one
+dies, before anything is fetched.
 
 =cut
 
 sub refresh_salvage {
-    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands ) = @_;
+    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @_;
 
     return unless @$commands;
+    $watched //= [];
 
     # Required rather than used at the top, the way Trog::HV is: it brings an
     # SSH stack with it, and a run whose recipes ask for nothing should not pay
@@ -937,17 +947,61 @@ sub refresh_salvage {
         key_path => "$cfg_dir/key.rsa",
     );
 
+    my %seen = _salvage_mtimes( $guest, $watched );
+
     foreach my $command (@$commands) {
         print "Asking $host to run '$command' before salvaging $module\n";
 
         # Through a shell, because what a recipe hands over is a command line
         # rather than an argv -- a script with its arguments, or a pipeline.
-        next unless $guest->run_sudo( '/bin/sh', '-c', $command );
+        my $failed = $guest->run_sudo( '/bin/sh', '-c', $command );
 
-        print {*STDERR} "$module: '$command' failed on $host, so what comes down is whatever was already there.\n" . "Whatever it was going to refresh is as old as the last time something did.\n";
+        # Taken again whether it worked or not: a command that succeeded is
+        # supposed to have changed things, and comparing the next one against
+        # what was there before this one ran would blame it for that.
+        my %now     = _salvage_mtimes( $guest, $watched );
+        my @touched = grep { ( $seen{$_} // q{} ) ne ( $now{$_} // q{} ) } sort keys %now;
+        %seen = %now;
+
+        next unless $failed;
+
+        die "$module: '$command' failed on $host after changing what it was refreshing:\n" . join( q{}, map { "    $_\n" } @touched ) . "That is a partial dump rather than a stale one, and fetching it would carry\n" . "a corrupt copy home as though it were the state of the guest.  Nothing was\n" . "fetched.  Fix the guest, or move what it left aside, and run this again.\n"
+          if @touched;
+
+        warn "$module: '$command' failed on $host, so what comes down is whatever was already there.\n" . "Whatever it was going to refresh is as old as the last time something did.\n";
     }
 
     return 1;
+}
+
+# The newest mtime anywhere under each path, one number apiece.  The mtime of a
+# directory only moves when an entry is added or removed, so asking the
+# directories alone would miss a dump rewritten in place -- which is the usual
+# shape of the thing being watched for.
+#
+# Absent paths, and ones the probe cannot read, come back empty and compare
+# equal to each other, so a path that did not exist before or after is not a
+# change.
+sub _salvage_mtimes {
+    my ( $guest, $watched ) = @_;
+    return () unless @$watched;
+
+    my $script = join "\n", map {
+        ( my $q = $_ ) =~ s/'/'\\''/g;
+        "printf '%s\\t%s\\n' '$q' \"\$(find '$q' -printf '%T@\\n' 2>/dev/null | sort -rn | head -1)\""
+    } @$watched;
+
+    ( my $quoted = $script ) =~ s/'/'\\''/g;
+    my $said = $guest->capture("sudo sh -c '$quoted'") // q{};
+
+    my %mtime;
+    foreach my $line ( split "\n", $said ) {
+        my ( $path, $stamp ) = split "\t", $line, 2;
+        next unless defined $path && length $path;
+        $mtime{$path} = defined $stamp ? $stamp : q{};
+    }
+
+    return %mtime;
 }
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)
@@ -972,7 +1026,7 @@ sub write_guest_secrets {
 
     # Asking for the password here rather than at the top: a run whose recipes
     # want nothing placed should not be made to produce one.
-    $keepass //= Trog::Secrets->prompt( 'Enter password:', 'keepass' );
+    $keepass //= Trog::Credentials->prompt( 'Enter password:', 'keepass' );
 
     my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } keys %$wanted;
     my %held      = Trog::Secrets->remember( $store, $keepass, %generator );
@@ -986,7 +1040,6 @@ sub write_guest_secrets {
     } keys %$wanted;
 
     File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     chmod 0600, $manifest;
 
     print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n";
@@ -1011,19 +1064,19 @@ sub pack_scripts {
     make_path($to) or die "Could not create $to: $!\n";
 
     my @packed;
-    opendir( my $dh, $from ) or die "Could not read $from: $!\n";
-    foreach my $script ( sort grep { !m/\A\.\.?\z/ } readdir $dh ) {
+    foreach my $script ( Provisioner::Utils::files_in($from) ) {
 
-        # Opening it both skips the subdirectories and proves we may read it.
+        # Opening it proves we may read it; files_in has already left out the
+        # directories.
         open( my $probe, '<', "$from/$script" ) or next;
         close $probe;
         copy( "$from/$script", "$to/$script" )
           or die "Could not copy $script into $to: $!\n";
-        ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+        ## no critic (Plicease::ProhibitLeadingZeros) -- the policy exempts a
+        ## literal handed straight to chmod; this is a mask against a mode.
         chmod( ( stat("$from/$script") )[2] & 07777, "$to/$script" );
         push @packed, "scripts/$script";
     }
-    closedir $dh;
 
     print "Packed " . scalar(@packed) . " scripts from $from\n";
     return @packed;
@@ -1084,20 +1137,36 @@ sub _dir_has_files {
     my ($dir) = @_;
     return 0 unless -d $dir;
 
-    my @unwalked = ($dir);
-    while ( my $next = shift @unwalked ) {
-        opendir( my $dh, $next ) or next;
-        my @entries = grep { !m/\A\.\.?\z/ } readdir $dh;
-        closedir $dh;
+    # Stopped at the first one rather than counted: whether there is anything at
+    # all is the whole question, and some of what gets salvaged is very large.
+    # die is how you leave File::Find early, so the find is wrapped and the
+    # message it throws is the answer.
+    # A reference rather than a string, compared by identity below.  File::Find
+    # appends its own context to a death on the way out of wanted, so a message
+    # does not arrive as it was thrown and cannot be told from a real error.
+    my $found = \'found';
 
-        foreach my $entry (@entries) {
-            my $path = "$next/$entry";
-            return 1 if -l $path || !-d $path;
-            push( @unwalked, $path );
-        }
-    }
+    my $ok = eval {
+        File::Find::find(
+            {
+                no_chdir => 1,
+                wanted   => sub {
 
-    return 0;
+                    # Symlinks count and are not followed: one salvaged off a
+                    # guest can point anywhere, including back up its own tree.
+                    ## no critic (ValuesAndExpressions::ProhibitFiletest_l, ValuesAndExpressions::ProhibitFiletest_d)
+                    die $found if -l $File::Find::name || !-d $File::Find::name;
+                },
+            },
+            $dir
+        );
+        1;
+    };
+    return 0 if $ok;
+
+    my $err = $@;
+    return 1 if ref $err && ref $err eq 'SCALAR' && $err == $found;
+    die $err;
 }
 
 sub _get_sftp {

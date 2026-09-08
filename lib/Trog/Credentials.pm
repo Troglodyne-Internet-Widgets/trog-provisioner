@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use IO::Prompter();
+
 =head1 NAME
 
 Trog::Credentials - passwords handed to a run that has nobody to ask.
@@ -73,6 +75,55 @@ type it.
 
 =head1 CLASS METHODS
 
+=cut
+
+# Names a caller may ask for.  An allowlist rather than free text: a typo in the
+# block should say so at the top of the run, not silently become a prompt in the
+# middle of one.
+our %KNOWN = map { $_ => 1 } qw{keepass sudo};
+
+our %CREDENTIAL;
+
+=head2 prompt($message, $name)
+
+The password, asked for if this run has not already been given it.
+
+Here rather than in L<Trog::Secrets>, which is where it used to live: what this
+does is get a credential, which is what this module is for.  L<Trog::Machine>
+wants the same thing when sudo on the far side turns out to need a password,
+and one way of asking is better than two.
+
+C<$name> says which password this is, and is what makes it answerable without
+asking -- a run driven by something with no terminal hands its passwords in up
+front, and this returns one of those rather than prompting.  Leave the name out
+and it always asks, which is what you want for something there is no name for.
+
+=cut
+
+sub prompt {
+    my ( $class, $message, $name ) = @_;
+    $message //= 'Enter password:';
+
+    return $class->get($name) if defined $name && $class->have($name);
+
+    # IO::Prompter reads from *ARGV, so a program that has arguments -- which
+    # bin/new_config and bin/provision both do, the domain being one -- sends it
+    # off to open a file named after one of them:
+    #
+    #     prompt(): Can't open *ARGV: No such file or directory
+    #
+    # Flattening @ARGV to a single string leaves nothing there to open, and it
+    # falls back to the terminal or to standard input as intended.
+    local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
+    my $answer = IO::Prompter::prompt( $message, -echo => '*' );
+
+    # Kept, so the next thing in this run that wants the same store is not asked
+    # again.  The usual caller pipes the answer in, and a pipe answers once.
+    $class->remember( $name, "$answer" ) if defined $name;
+
+    return $answer;
+}
+
 =head2 remember($name, $value)
 
 Keep something that was typed rather than handed in, so that the next thing in
@@ -83,23 +134,7 @@ a configuration, once to put the files a recipe reads but must not generate on
 the guest -- and asking twice is worse than a nuisance: the usual caller pipes
 the answer in, and a pipe answers once.
 
-=head2 get($name)
-
-The credential, or undef if it was not given.
-
-=head2 have($name)
-
-Whether it was given, without reading it.  C<get> on an empty value and C<get> on
-a missing one both look the same otherwise.
-
 =cut
-
-# Names a caller may ask for.  An allowlist rather than free text: a typo in the
-# block should say so at the top of the run, not silently become a prompt in the
-# middle of one.
-our %KNOWN = map { $_ => 1 } qw{keepass sudo};
-
-our %CREDENTIAL;
 
 sub remember {
     my ( $class, $name, $value ) = @_;
@@ -111,10 +146,23 @@ sub remember {
     return 1;
 }
 
+=head2 get($name)
+
+The credential, or undef if it was not given.
+
+=cut
+
 sub get {
     my ( $class, $name ) = @_;
     return $CREDENTIAL{$name};
 }
+
+=head2 have($name)
+
+Whether it was given, without reading it.  C<get> on an empty value and C<get> on
+a missing one both look the same otherwise.
+
+=cut
 
 sub have {
     my ( $class, $name ) = @_;

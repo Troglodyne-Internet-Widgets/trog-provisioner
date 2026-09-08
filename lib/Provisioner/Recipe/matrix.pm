@@ -189,7 +189,6 @@ sub args {
             smtp_pass                  => { type => 'string' },
             smtp_domain                => { type => 'string' },
             require_transport_security => { type => 'boolean', default => 1 },
-            registration_shared_secret => { type => 'string',  default => $self->persisted_secret('registration_shared_secret.txt') },
             ipv6                       => { type => 'boolean', default => 1 },
             redis_host                 => { type => 'string',  default => '127.0.0.1' },
             redis_port                 => { type => 'integer', minimum => 1024, default => 6379 },
@@ -216,10 +215,25 @@ sub datadirs {
 
 sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
+
+    # Under synapse's own configuration directory rather than the domain
+    # directory, for two reasons.  bin/provision places these before the
+    # makefile runs, and matrix.tt restores its salvage into the domain
+    # directory -- which restore_state declines to do once anything is sitting
+    # in it, so a secret placed there stopped the media store coming back.  And
+    # the domain directory is what the data recipe carries off to the
+    # hypervisor and into every backup taken of it, which is the one place a
+    # secret held in the store should never end up.
     return (
-        "$install_dir/matrix.$domain/homeserver.signing.key" => {
+        "/etc/matrix-synapse/homeserver.signing.key" => {
             ref      => "secret:matrix/$domain-signing-key/password",
             generate => \&_signing_key,
+            owner    => 'matrix-synapse:matrix-synapse',
+            mode     => '0600',
+        },
+        "/etc/matrix-synapse/registration.shared.secret" => {
+            ref      => "secret:matrix/$domain-registration-secret/password",
+            generate => sub { Crypt::PRNG::random_bytes_hex(32) },
             owner    => 'matrix-synapse:matrix-synapse',
             mode     => '0600',
         },
@@ -241,6 +255,10 @@ sub _signing_key {
 # The signing key is in the secret store and is put on the guest from there, so
 # it has no business coming back off one -- salvaged, it would sit in the domain
 # directory and in every backup taken of it.
+#
+# Kept now that the key is placed under /etc/matrix-synapse and cannot be
+# salvaged from there anyway: a guest built before that move still has one in
+# its domain directory, and this is what stops a rebuild carrying it home.
 sub remote_skip {
     return (qr{/homeserver[.]signing[.]key\z});
 }

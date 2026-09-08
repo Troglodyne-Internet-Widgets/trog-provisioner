@@ -10,7 +10,6 @@ use re '/aa';
 
 use File::KeePass::KDBX();
 use IO::Prompter();
-use Trog::Credentials();
 use Scalar::Util qw{looks_like_number};
 
 =head1 NAME
@@ -27,7 +26,7 @@ it answers.
 
     my %needed = Trog::Secrets->needed($config);
     if (%needed) {
-        my %values = Trog::Secrets->read($file, Trog::Secrets->prompt('Enter password:', 'keepass'), %needed);
+        my %values = Trog::Secrets->read($file, Trog::Credentials->prompt('Enter password:', 'keepass'), %needed);
         Trog::Secrets->apply($config, %values);
     }
 
@@ -91,40 +90,6 @@ sub needed {
     }
 
     return %found;
-}
-
-=head2 prompt($message, $name)
-
-Ask for a password, without echoing it.
-
-Here rather than anywhere else because this is where the asking already was,
-and one way of asking is better than two: L<Trog::Machine> wants the same thing
-when sudo on the far side turns out to need a password.
-
-C<$name> says which password this is, and is what makes it answerable without
-asking.  A run driven by something with no terminal -- tCMS's reprovision button,
-a cron -- hands its passwords in up front, and this returns one of those rather
-than prompting; see L<Trog::Credentials>.  Leave the name out and it always asks,
-which is what you want for something there is no name for.
-
-=cut
-
-sub prompt {
-    my ( $class, $message, $name ) = @_;
-    $message //= 'Enter password:';
-
-    return Trog::Credentials->get($name) if defined $name && Trog::Credentials->have($name);
-
-    # IO::Prompter and IO::Prompt fall out with each other over @ARGV unless it
-    # is flattened first.
-    local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
-    my $answer = IO::Prompter::prompt( $message, -echo => '*' );
-
-    # Kept, so the next thing in this run that wants the same store is not asked
-    # again.  The usual caller pipes the answer in, and a pipe answers once.
-    Trog::Credentials->remember( $name, "$answer" ) if defined $name;
-
-    return $answer;
 }
 
 =head2 read($file, $password, %needed)

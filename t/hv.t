@@ -579,11 +579,11 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
     my $tty = Test::MockModule->new('Trog::Machine');
     $tty->redefine( _have_terminal => sub { 1 } );
 
-    # One way of asking, in Trog::Secrets, rather than a second one here with
-    # Term::ReadKey doing its own echo suppression.
+    # One way of asking, in Trog::Credentials, rather than a second one here
+    # with Term::ReadKey doing its own echo suppression.
     my @asked;
-    my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( prompt => sub { push @asked, $_[1]; 'hunter2' } );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { push @asked, $_[1]; 'hunter2' } );
 
     quietly( sub { $hv->run_sudo(qw{true}) } );
 

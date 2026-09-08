@@ -49,6 +49,10 @@ if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/nu
 fi
 # Install config (mode 0600 - contains rpc_secret)
 install -m 0600 -o garage -g garage garage.toml /etc/garage.toml
+[%# Given away here because bin/provision places it before this guest has a
+    garage account to give it to -- the useradd above is in this same target. -%]
+chown garage:garage /etc/garage.rpc_secret
+chmod 0600 /etc/garage.rpc_secret
 # Install systemd service and init script
 install -m 0644 garage.service /etc/systemd/system/garage.service
 install -m 0755 garage_init.sh [% script_dir %]/garage_init.sh

@@ -28,6 +28,7 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Test::More;
 use File::Temp();
+use Provisioner::Utils();
 use Text::Xslate();
 
 # Deliberately not t/new_config.t: that one runs under Test::MockFile in strict
@@ -50,10 +51,7 @@ subtest "the helper scripts ride along in the tarball" => sub {
     is_deeply( [ sort @packed ], [@packed], 'in a stable order, so the tarball is reproducible' );
     like( $_, qr{\Ascripts/}, "$_ is stored under scripts/" ) for $packed[0];
 
-    my @source = sort grep { -f "$checkout/scripts/$_" } do {
-        opendir( my $dh, "$checkout/scripts" ) or die $!;
-        grep { !m/\A\.\.?\z/ } readdir $dh;
-    };
+    my @source = Provisioner::Utils::files_in("$checkout/scripts");
     is( scalar @packed, scalar @source, 'all of them, not some of them' );
 
     for my $rel (@packed) {

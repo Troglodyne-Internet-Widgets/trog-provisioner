@@ -28,14 +28,14 @@ log_config: "/etc/matrix-synapse/log.yaml"
 
 media_store_path: [% install_dir %]/matrix.[% domain %]/media
 
-signing_key_path: [% install_dir %]/matrix.[% domain %]/homeserver.signing.key
+signing_key_path: /etc/matrix-synapse/homeserver.signing.key
 
 trusted_key_servers:
   - server_name: "matrix.org"
     verify_keys:
       "ed25519:auto": "Noi6WqcDj0QmPxCNQqgezwTlBKrfqehY1u2FyWP9uYw"
 
-registration_shared_secret: "[% registration_shared_secret %]"
+registration_shared_secret_path: /etc/matrix-synapse/registration.shared.secret
 
 enable_registration: true
 
