@@ -38,6 +38,18 @@ Do not read `recipes.yaml` or merge `_base` yourself -- that is how the copy in
 the skill's teardown came to disagree with `bin/new_config` about which
 directory a domain's data was in.
 
+## What a recipe takes belongs in its schema
+
+**When you are writing a recipe or changing what one takes, invoke the
+`writing-recipes` skill.**
+
+`args()` validates, defaults, coerces and documents, all of it for free, and the
+recurring mistake here is to do one of those jobs in perl instead -- where
+`bin/recipes` cannot show it and a reader cannot find it.  The skill is mostly
+about resisting that, and about the construct that decides whether a default
+lands where you meant it to: ufw's ssh rate limit was defaulted one level too
+high, so it never applied on any guest that ran a recipe which listens.
+
 ## A recipe is verified on a guest
 
 `t/recipes.t` proves a template renders.  It says nothing about whether the
