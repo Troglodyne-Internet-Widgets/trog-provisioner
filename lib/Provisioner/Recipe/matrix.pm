@@ -130,11 +130,6 @@ sub required_recipes {
                 },
             )
         },
-
-        # SUPER as well as our own: the base decides what a recipe owes ufw
-        # and data, and an override that drops it silently loses the restore
-        # of whatever this recipe salvages.
-        $self->SUPER::required_recipes(%opts),
     );
 }
 

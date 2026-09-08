@@ -77,12 +77,7 @@ sub deps {
 }
 
 sub required_recipes {
-    my ( $self, %opts ) = @_;
-
-    # SUPER as well as our own: the base decides what a recipe owes ufw and
-    # data, and an override that drops it silently loses the restore of
-    # whatever this recipe salvages.
-    return ( nginx => sub { () }, $self->SUPER::required_recipes(%opts) );
+    return ( nginx => sub { () } );
 }
 
 # NOTE: FPM php.ini: /etc/php/8.3/fpm/php.ini

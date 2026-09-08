@@ -1358,13 +1358,15 @@ subtest 'a recipe that says where its state goes back depends on the thing that 
         my %restores = eval { $class->restores(%opts) };
         next unless %restores;
 
-        # The base hands data whatever restores() returned, the way it hands ufw
-        # whatever rate_limits() returned.  An override of required_recipes that
-        # does not chain to SUPER drops that silently -- six of them did, and the
-        # recipes it would have dropped were the stateful ones.
-        my %required = eval { $class->required_recipes(%opts) };
+        # Asked of the base, which is what bin/new_config asks: it merges the
+        # base's answer alongside the recipe's own, so a recipe that overrides
+        # required_recipes without chaining to SUPER -- six of them do -- still
+        # owes data what the base says it owes.  Asking the recipe here instead
+        # would be testing whether it happened to chain, which is not the thing
+        # that has to be true.
+        my %required = eval { Provisioner::Recipe::required_recipes( $class, %opts ) };
         ok( $required{data}, "$recipe asks for data, so its restores reach it" )
-          or diag "$recipe declares restores() but its required_recipes does not mention data; does it chain to SUPER?";
+          or diag "$recipe declares restores() but the base does not turn that into a dependency on data";
 
         # And every entry says where it is coming from, because that is the half
         # nothing else can supply.
