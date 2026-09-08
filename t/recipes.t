@@ -143,6 +143,7 @@ my %required_config = (
         version  => '11.4.4',
     },
     tpsgi           => { routers         => ['app.psgi'] },
+    emulatorjs      => { version => '4.2.3', core => 'nes', rom => 'game.nes' },
     gogs            => { version         => '0.13.0',        admin_password => 's3cr3t' },
     plexmediaserver => { plex_login_name => 'plexuser',      admin_mail     => 'admin@test.test' },
     openvpnclient   => { server          => 'vpn.test.test', cert_dir       => '/opt/domains/test.test.test/vpn' },
@@ -270,6 +271,27 @@ rejects_missing( 'mariadb', { root_pw  => 'x',     dumpfile => 'd.sql' }, 'versi
 rejects_missing( 'adminconfig', {}, 'skel' );
 rejects_missing( 'imagemagick', {}, 'version' );
 rejects_missing( 'pdns',        {}, 'api_key' );
+
+rejects_missing( 'emulatorjs', { core    => 'nes',    rom  => 'game.nes' }, 'version' );
+rejects_missing( 'emulatorjs', { version => '4.2.3',  rom  => 'game.nes' }, 'core' );
+rejects_missing( 'emulatorjs', { version => '4.2.3',  core => 'nes' },      'rom' );
+
+subtest 'emulatorjs rejects a core or rom that is not filename-shaped' => sub {
+    my $r = 'Provisioner::Recipe::emulatorjs'->new(%PROV);
+    ok( exception { $r->render( %G, version => '4.2.3', core => "nes'; alert(1)", rom => 'game.nes' ) }, 'core is rejected' );
+};
+
+subtest 'emulatorjs escapes an apostrophe in game_title rather than breaking out of the JS string' => sub {
+    my $r   = 'Provisioner::Recipe::emulatorjs'->new(%PROV);
+    my $out = $r->render_file(
+        'files/emulatorjs.index.html.tt', %G,
+        version    => '4.2.3',
+        core       => 'nes',
+        rom        => 'game.nes',
+        game_title => q{Mario's Adventure},
+    );
+    like( $out, qr/Mario\\'s Adventure/, 'the apostrophe is escaped rather than closing the string' );
+};
 
 rejects_missing(
     'koan',
