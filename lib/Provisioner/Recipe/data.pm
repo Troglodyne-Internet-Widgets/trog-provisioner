@@ -14,29 +14,38 @@ use parent qw{Provisioner::Recipe};
 
 =head2 SYNOPSIS
 
-In recipes.yaml:
+Nothing configures this.  Where a domain's files live and where what is shipped
+to it comes from are C<_global>'s to say, in recipes.yaml:
+
+    _base:
+        _global:
+            install_dir: /opt/domains
+            data_source: /opt/data
 
     somedomain:
-        data:
-           - from: /opt/domaindata/my.domain
-             to: /opt/domains/my.domain
-           - from: /foo/bar
-             to: /baz
+        deluged:
 
-In ipmap.cfg:
+and in ipmap.cfg:
 
     transfer_user=whoever_runs_trog_provisioner
+
+C<somedomain> above gets this recipe without asking for it, because C<deluged>
+has state to put back and depends on the thing that puts it there.
 
 =head2 DESCRIPTION
 
 Schlep data from the hypervisor onto the guest, and put back whatever the
 recipes salvaged off the last one.
 
-C<from> and C<to> default to C<data_source> and C<install_dir> out of
-C<_global>, which is where they belong: every recipe interpolates
-C<install_dir>, and it used to be read out of this recipe's C<to> field -- so
-each of them depended on this one for a path rather than for anything it does.
-Saying them here still wins, for a configuration written before the move.
+It reads C<install_dir> and C<data_source> and has no fields of its own.  They
+used to be this recipe's C<to> and C<from>, which meant every recipe that
+interpolates C<install_dir> -- nearly all of them -- depended on this one for a
+path rather than for anything it does.  A configuration still saying them here
+goes on working: L<Provisioner::Cookbook> reads C<install_dir> out of C<to> and
+C<data_source> out of C<from> when C<_global> is quiet.
+
+What it puts back, and where, comes from the recipes: see C<restores> in
+L<Provisioner::Recipe>.
 
 =cut
 
@@ -48,27 +57,6 @@ sub deps {
     die "Unsupported packager";
 }
 
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    # Where this domain lives is _global's to say now, and this recipe moves
-    # things into it rather than deciding what it is.  Said explicitly under
-    # data it still wins, for a configuration written before the move.
-    # Not `required` in args, because validation runs before this does and a
-    # field somebody is about to be given a default for is not a field they
-    # failed to provide.  Which leaves saying so here.
-    $opts{to}   //= $opts{install_dir};
-    $opts{from} //= $opts{data_source};
-
-    die "data has nowhere to put anything: set install_dir in _global, or to under data.\n"
-      unless defined $opts{to} && length $opts{to};
-
-    die "data has nothing to bring: set data_source in _global, or from under data.\n"
-      unless defined $opts{from} && length $opts{from};
-
-    return %opts;
-}
-
 sub args {
     return (
         type       => "object",
@@ -78,8 +66,6 @@ sub args {
             # it did so bare, and nothing declared it, so it rendered empty --
             # `chown -R :group`, which quietly changes only the group.
             user => { type => 'string' },
-            from => { type => "string" },
-            to   => { type => "string" },
 
             # Where each recipe's salvaged state goes back, keyed on the
             # destination.  Nobody writes this by hand: it is what every recipe
