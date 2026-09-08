@@ -2,6 +2,60 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Find ();
+
+# What the next fetch will find.  bin/new_config reads the mail store off a
+# running guest over sftp as [% admin_user %], with no sudo, so a maildir that
+# account cannot enter comes back empty and says nothing about it.  The fragment
+# used to end by handing the whole store to dovecot:dovecot, which meant the
+# mail survived one rebuild and not two.
+my $store = '/mail/[% domain %]';
+my $admin_gid = (getgrnam('[% admin_user %]'))[2];
+ok(defined $admin_gid, 'the admin user has a group for the mail store to be readable by');
+
+SKIP: {
+    skip 'no admin group to check the mail store against', 6 unless defined $admin_gid;
+
+    my @st = stat $store;
+    ok(scalar @st, "$store exists") or skip 'no mail store', 5;
+    is($st[5], $admin_gid, 'the mail store is grouped to the admin user');
+    ok($st[2] & 02000, 'and setgid, so what dovecot creates in it inherits that group');
+    is($st[2] & 0007, 0, 'and is closed to everybody else on the guest');
+
+    # Every maildir and message underneath, since it is the whole tree the
+    # salvage walks.  Directories need the execute bit as well or the walk stops
+    # at them.
+    my (@unreadable, @exposed);
+    File::Find::find({ no_chdir => 1, wanted => sub {
+        my @f = lstat $File::Find::name or return;
+        return if -l _;
+        my $need = -d _ ? 0050 : 0040;
+        push @unreadable, $File::Find::name if $f[5] != $admin_gid || ($f[2] & $need) != $need;
+        push @exposed,    $File::Find::name if $f[2] & 0007;
+    } }, $store);
+    is(scalar @unreadable, 0, 'and everything in it is readable by the account that fetches it')
+        or diag join("\n", @unreadable);
+    is(scalar @exposed, 0, 'and readable by nobody else')
+        or diag join("\n", @exposed);
+}
+
+# And the walk itself, done the way the fetch does it.
+my $gripes = `sudo -u '[% admin_user %]' find '$store' -print 2>&1 >/dev/null`;
+is($gripes, '', 'the admin user can walk the whole mail store') or diag $gripes;
+
+# The DKIM key, and the copy of it the fetch can actually reach: /etc/opendkim
+# belongs to opendkim, and the salvage has no sudo.  install_dkim_records looks
+# for the copy at exactly this path, and got /mail/keys/keys/<domain> instead
+# once a second domain was provisioned onto the guest.
+ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM signing key');
+ok(!-e '/mail/keys/keys', 'staged once, rather than into itself');
+SKIP: {
+    my $staged = '/mail/keys/[% domain %]/default.private';
+    ok(-s $staged, 'and a copy of it where the next fetch will look') or skip 'nothing staged to read', 2;
+    is(system('sudo', '-u', '[% admin_user %]', 'test', '-r', $staged), 0, 'which the admin user can read');
+    my $mode = (stat $staged)[2] & 07777;
+    is($mode & 0007, 0, sprintf('and nobody else can (%04o)', $mode));
+}
 
 my $postfix = `systemctl is-active postfix 2>/dev/null`;
 chomp $postfix;
@@ -78,5 +132,20 @@ SKIP: {
     chomp $owner;
     is($owner, '[% name %]@[% domain %]', '[% name %]@[% domain %] owns its own address') or diag $owner;
 }
+[% END %]
+# The mailboxes the recipe asked doveadm to make.  doveadm looks an account up
+# in the passwd-file userdb, which is keyed on the full address, so the bare
+# local part the fragment used to pass was a user dovecot had never heard of:
+# "doveadm(bob): Error: User does not exist", exit 67, and the mail target died
+# there with every test below it unrun.
+[% FOR name IN names.keys().sort() %]
+[% IF names.$name.mailboxes.size() %]
+{
+    my $boxes = `doveadm mailbox list -u '[% name %]\@[% domain %]' 2>&1`;
+[% FOR box IN names.$name.mailboxes %]
+    like($boxes, qr/^\Q[% box %]\E$/m, '[% name %] has the mailbox [% box %]') or diag $boxes;
+[% END %]
+}
+[% END %]
 [% END %]
 done_testing();

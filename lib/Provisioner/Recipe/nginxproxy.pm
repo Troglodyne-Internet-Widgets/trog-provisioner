@@ -64,7 +64,13 @@ still be served by nginx.
 
 It is up to your application to cull/regenerate/never generate .html versions of your routes when appropriate.
 
-If no static_dir is set, it will be www/ in the domain's install dir.
+A vhost serves files only if it was told where they are.  With no static_dir
+there is no C<root> and no C<try_files>: the vhost proxies everything, which is
+what a reverse proxy in front of gogs or synapse actually wants.  It used to
+fall back to C<www/> -- where a tpsgi application keeps its statics and where a
+pure proxy has nothing at all -- so nginx was given a root that need not exist
+and logged a failed C<stat()> on every request it then proxied correctly anyway.
+A recipe that does serve files says so, the way tpsgi does.
 
 You can also guard a folder for statics behind auth via the auth_statics and auth_uri mechanism.
 The auth_uri should return 200 in the event the user is sufficiently authenticated (see nginx's L<auth_request|https://nginx.org/en/docs/http/ngx_http_auth_request_module.html>)

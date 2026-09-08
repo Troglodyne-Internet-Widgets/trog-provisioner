@@ -42,6 +42,18 @@ this one.  Recipe execution order is determined by the C<order:> key  set
 this recipe's order to a value that sorts before any recipe depending on the
 tunnel (e.g. C<order: A>).
 
+=head3 Why nothing here is salvaged
+
+C<cert_dir> on the hypervisor is where these certificates are kept, and they are
+rsynced over the guest's copy on every run -- so a rebuilt guest needs nothing
+brought back off the last one.
+
+Which is the whole reason there is no C<remote_files> here.  Salvaging
+F</etc/openvpn/client> would take a client key, which the fetch cannot read
+anyway without a staged copy made for it, and put a second copy of it in the
+domain directory and in every backup taken of that.  The hypervisor already
+holds the only copy that has to exist.
+
 =cut
 
 sub deps {
@@ -73,12 +85,6 @@ sub template_files {
 
     return (
         'openvpnclient.client.conf.tt' => 'client.conf',
-    );
-}
-
-sub remote_files {
-    return (
-        '/etc/openvpn/client/' => 'openvpn-client/',
     );
 }
 

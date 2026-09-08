@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# Put a salvaged PostgreSQL dump into a cluster that has just been built, and
+# fall back to the seed dumps the recipe was configured with when there is
+# nothing to put back.
+#
+#     postgres-restore.sh <salvaged dump directory> [seed dump ...]
+#
+# The directory is what remote_files brought back: /var/backups/postgres off the
+# guest this one replaces, laid out by postgres-backup.sh as <timestamp>/ holding
+# globals.sql.gz and a directory-format dump per database.  It came down, it went
+# back up into the domain directory, and nothing imported it -- the fragment
+# loaded the configured dumps instead, so a rebuilt guest came up holding a
+# snapshot an operator had once written and none of what had happened since.
+#
+# Which is what the two halves here are for.  The salvage is what this guest
+# actually had; the seeds are what to do for a domain that has never had a
+# database at all.  The salvage wins, and neither of them is loaded over
+# something that is already there.
+#
+# That last part is scripts/restore_state's rule, one level down.  It declines
+# when the destination already has state in it, because re-provisioning a running
+# guest fetches that guest's own state minutes earlier and writing a short fetch
+# back over the original would replace the real thing with the half of it we
+# could read.  So this restores a database that is not there and never writes
+# into one that is: a rebuilt cluster has none of them and gets all of it, a live
+# one has all of them and gets nothing.
+set -euo pipefail
+shopt -s nullglob
+
+SALVAGED="${1:?usage: postgres-restore.sh <salvaged dump directory> [seed dump ...]}"
+shift
+
+# Everything that talks to the cluster is the postgres user: the socket is peer
+# authenticated, and root is not postgres.  Which is also why the dumps below are
+# read by this script and piped in, rather than named to psql -- the domain
+# directory is 0750 to the admin user's group, and postgres is not in it.
+psql_super() { sudo -u postgres psql --quiet --no-psqlrc "$@"; }
+
+database_exists() {
+    [ -n "$(psql_super -tAc "SELECT 1 FROM pg_database WHERE datname='$1'")" ]
+}
+
+user_databases() {
+    psql_super -tAc "SELECT datname FROM pg_database WHERE datistemplate=false AND datname<>'postgres'"
+}
+
+# The last thing postgres-backup.sh writes is `complete`, so a directory without
+# one is a backup that was interrupted -- or one taken before the backup learned
+# to say, which is the same amount of knowledge about it.  Restoring half a
+# cluster is worse than restoring none: it leaves the cluster holding databases,
+# and holding databases is exactly what stops the next provision from trying
+# again.  An operator who knows an older dump is whole says so by touching the
+# file.
+newest_finished_dump() {
+    local dumps=( "$SALVAGED"/*/ )
+    local i
+    for (( i = ${#dumps[@]} - 1; i >= 0; i-- )); do
+        if [ -f "${dumps[$i]}complete" ]; then
+            printf '%s\n' "${dumps[$i]%/}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+restored=0
+if DUMP="$(newest_finished_dump)"; then
+    pending=()
+    for dbdir in "$DUMP"/*/; do
+        db="$(basename "$dbdir")"
+        if database_exists "$db"; then
+            echo "postgres-restore.sh: $db is already in this cluster, keeping what it has"
+            continue
+        fi
+        pending+=( "$db" )
+    done
+
+    if [ "${#pending[@]}" -gt 0 ]; then
+
+        # Roles before the databases that are owned by them and the grants that
+        # name them.  Errors are expected rather than fatal: initdb made this
+        # cluster its own postgres role, and pg_dumpall says CREATE ROLE for that
+        # one too.
+        if [ -f "$DUMP/globals.sql.gz" ]; then
+            echo "postgres-restore.sh: restoring roles from $DUMP/globals.sql.gz"
+            pigz -dc "$DUMP/globals.sql.gz" | psql_super -d postgres || true
+        fi
+
+        for db in "${pending[@]}"; do
+            echo "postgres-restore.sh: restoring $db from $DUMP"
+
+            # --file=- turns the dump back into SQL on stdout, which is how a
+            # directory-format dump gets into a cluster this script cannot
+            # connect to as itself.  --create means the script carries the
+            # CREATE DATABASE and the \connect that follows it.
+            pg_restore --create --file=- "$DUMP/$db" \
+                | psql_super --set ON_ERROR_STOP=1 -d postgres
+            restored=$(( restored + 1 ))
+        done
+    fi
+fi
+
+if [ "$restored" -gt 0 ]; then
+    echo "postgres-restore.sh: restored $restored database(s) from $DUMP"
+    exit 0
+fi
+
+if [ -n "$(user_databases)" ]; then
+    echo "postgres-restore.sh: this cluster already has databases of its own; the seed dumps are not loaded over them"
+    exit 0
+fi
+
+for seed in "$@"; do
+    echo "postgres-restore.sh: loading the seed dump $seed"
+    psql_super < "$seed"
+done

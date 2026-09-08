@@ -35,4 +35,31 @@ ok(-s '/usr/share/keyrings/plex.gpg', 'the signing key is installed');
 my $policy = `apt-cache policy plexmediaserver 2>/dev/null`;
 like($policy, qr/Installed:\s*(?!\(none\))\S+/, 'plexmediaserver is installed') or diag $policy;
 
+# The library is left where the next salvage can read it: that fetch is an sftp
+# session as the admin user with no sudo, so a library owned plex:plex comes
+# back as an empty directory and says nothing about why.
+my @lib = stat('/var/lib/plexmediaserver');
+is(scalar getpwuid($lib[4] // -1), 'plex', 'the library is owned by plex');
+is(scalar getgrgid($lib[5] // -1), '[% admin_user %]', 'and the admin user has the group on it');
+ok(!($lib[2] & 0007), 'with nothing left for anybody else');
+
+# What remote_files is a round trip for.  A library salvaged off the last guest
+# is restored into /var/lib/plexmediaserver before Plex starts, and the copy in
+# the data directory goes away when it is.  If it is still sitting there, the
+# only good reason is that this guest had a library of its own worth keeping --
+# which means metadata.  Anything else is a restore that never happened, and a
+# rebuilt server that has forgotten what everybody watched.
+sub has_content {
+    my ($dir) = @_;
+    opendir(my $dh, $dir) or return 0;
+    my @entries = grep { !m/\A\.\.?\z/ } readdir($dh);
+    closedir($dh);
+    return scalar @entries;
+}
+
+my $salvaged = '[% install_dir %]/[% domain %]/plexmediaserver';
+my $metadata = '/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Metadata';
+ok(!has_content($salvaged) || has_content($metadata),
+    'nothing was salvaged and left unrestored beside an empty library');
+
 done_testing();

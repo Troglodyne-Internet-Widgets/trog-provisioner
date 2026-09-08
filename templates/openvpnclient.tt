@@ -7,6 +7,11 @@
 	cp client.conf /etc/openvpn/client/client.conf
 	chown root:root /etc/openvpn/client/client.conf
 	chmod 0640 /etc/openvpn/client/client.conf
+[%# Nothing is salvaged off this guest.  cert_dir on the hypervisor is where
+    these come from and it is rsynced over them every provision, so a copy
+    taken off the guest would be a second copy of material the hypervisor
+    already holds -- and it would sit in the domain directory and in every
+    backup of it, which a private key has no business doing. -%]
 	# Enable and start the tunnel immediately so dependent recipes can use it
 	systemctl daemon-reload
 	systemctl enable openvpn-client@client

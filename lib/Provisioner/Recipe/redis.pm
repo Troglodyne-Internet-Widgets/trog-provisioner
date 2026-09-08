@@ -43,6 +43,28 @@ wherever nothing above says otherwise, so anything this recipe has no opinion
 about is still whatever Debian chose rather than absent. The C<configd> recipe
 is pulled in for that; see L<Provisioner::Recipe::configd>.
 
+=head2 Surviving a rebuild
+
+C</var/lib/redis> is salvaged off a running guest and put back on the one that
+replaces it, so a redis holding anything more than a cache comes up with the
+keyspace it had rather than an empty one.
+
+That costs something worth saying out loud.  The fetch is an sftp session as the
+admin user with no sudo, and the package leaves the directory C<redis:redis>
+0750 -- which comes back empty, and says nothing at all about having done so.
+So the fragment gives the directory the admin user as its group, and sets the
+setgid bit so the files redis writes afterwards land in that group too: the
+keyspace is readable from here on by whoever holds the admin account, and goes
+into the data directory and into any backup taken of it.  A guest where redis is
+only a cache pays none of that and should say C<save: 0>, which turns
+persistence off and leaves nothing to salvage.
+
+Putting it back is the fiddly end.  redis is installed and started by cloud-init
+long before any fragment runs, so it owns the destination before there is
+anything to restore into it; the fragment stops it, works out whether what is
+there is real state or the empty snapshot the stop just wrote, and restarts it
+afterwards.  C<templates/redis.global.tt> says how, at length.
+
 =cut
 
 sub deps {
@@ -68,10 +90,15 @@ sub required_recipes {
 }
 
 sub rate_limits {
+    my ( $self, %opts ) = @_;
 
     # Clients hold connections open rather than opening one per operation, so
     # even a busy application opens few a second.
-    return ( 6379 => 512 );
+    #
+    # On the configured port, not on 6379.  This named the default outright, so
+    # a guest that moved redis had the limit applied to a port nothing was
+    # listening on and none at all on the port it had actually been given.
+    return ( ( $opts{port} // 6379 ) => 512 );
 }
 
 sub args {
@@ -99,11 +126,24 @@ sub args {
 sub template_files {
     return (
         'redis.conf.tt' => 'redis.conf',
+
+        # The ufw application profile for the port this guest configured.  It
+        # lived under ufw, where the port is not knowable: a recipe hands ufw
+        # its rate_limits and nothing else.
+        'redis.ufw.conf.tt' => 'redis_ufw.conf',
     );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
+
+    # The RDB and the AOF: whatever redis was being used for beyond a cache, and
+    # the only thing about a redis guest that cannot be built again out of the
+    # configuration.  Naming it here is half the job and the half that is
+    # invisible when the other half is missing -- see the long comment in
+    # templates/redis.global.tt, which is what makes this directory readable to
+    # the account the fetch runs as, and what puts the contents back on a guest
+    # that has just been rebuilt.
     return (
         '/var/lib/redis/' => 'redis/',
     );

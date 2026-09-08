@@ -29,8 +29,10 @@ use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw(tempdir);
+use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
+use File::Basename();
 use File::Slurper();
 use Text::Xslate();
 
@@ -592,6 +594,127 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
     }
 };
 
+# remote_files is a round trip and the second half of it is the recipe's own: the
+# fetch lands the salvage under install_dir/domain, and unless that is already
+# where the service reads it, some fragment has to move it.  Thirteen recipes
+# named state to salvage and never wrote that leg, so the state came down, went
+# back up, and sat in the domain directory while the rebuilt guest started empty.
+# What the fragment does with it -- restore_state, or an importer for a database
+# dump -- is its business; that it says the path at all is what this asks.
+subtest 'a recipe that salvages state puts it back' => sub {
+    my $install = '[% install_dir %]';
+    my $domain  = '[% domain %]';
+
+    foreach my $recipe ( sort @available ) {
+        my $class    = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my %salvaged = eval { $class->remote_files( $install, $domain ) };
+        next unless %salvaged;
+
+        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+
+        foreach my $source ( sort keys %salvaged ) {
+            ( my $landed = $salvaged{$source} ) =~ s{/\z}{};
+
+            # State the domain already owns needs no restore: the data target
+            # rsyncs the domain directory back to exactly where it came from.
+            next if index( $source, "$install/$domain" ) == 0;
+
+            ok(
+                index( $fragments, "$install/$domain/$landed" ) >= 0,
+                "$recipe: something puts $landed back"
+            ) or diag "$recipe salvages $source into $landed and no fragment names it again";
+        }
+    }
+};
+
+# A file placed out of the secret store is one the guest must never hand back:
+# salvaged, it would land in the domain directory and in every backup taken of
+# it, which is the exposure keeping it in the store avoids in the first place.
+# So anything named in guest_secrets has to be named in remote_skip too --
+# unless nothing salvages the directory it sits in, in which case there is
+# nothing to skip.
+subtest 'a secret placed from the store is never salvaged back' => sub {
+    my $install = '/opt/domains';
+    my $domain  = 'vm.test';
+
+    foreach my $recipe ( sort @available ) {
+        my $class  = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my %placed = eval { $class->guest_secrets( $install, $domain ) };
+        next unless %placed;
+
+        my %salvaged = eval { $class->remote_files( $install, $domain ) };
+        my @skip     = eval { $class->remote_skip() };
+
+        foreach my $path ( sort keys %placed ) {
+            like( $placed{$path}{ref}, qr{\Asecret:[^/]+/[^/]+/(?:password|username)\z}, "$recipe: $path names a reference the store can keep" );
+            ok( ref $placed{$path}{generate} eq 'CODE', "$recipe: and says how to make one" );
+
+            # Only the salvages that would actually pick this file up.
+            my @covering = grep { index( $path, $_ ) == 0 } keys %salvaged;
+            next unless @covering;
+
+            ok(
+                ( grep { $path =~ $_ } @skip ),
+                "$recipe: $path is kept out of the salvage that would take it"
+            ) or diag "salvaged by: @covering, and remote_skip has: @skip";
+        }
+    }
+};
+
+# A salvage is only as fresh as whatever wrote it, so a recipe whose state is
+# written on a schedule has to be able to say "take one now" before the fetch --
+# otherwise a rebuild restores the guest to whenever the cron last ran.  What
+# remote_prepare names has to be something the recipe actually puts on the guest.
+subtest 'what a recipe asks the guest to run before a salvage is something it installed' => sub {
+    my $install = '/opt/domains';
+    my $domain  = 'vm.test';
+
+    foreach my $recipe ( sort @available ) {
+        my $class   = eval { Provisioner::Cookbook->load($recipe) } or next;
+        my @prepare = eval { $class->remote_prepare( $install, $domain ) };
+        next unless @prepare;
+
+        my %generated = eval { $class->template_files() };
+        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+
+        foreach my $command (@prepare) {
+            my ($program) = $command =~ m{\A(\S+)};
+
+            # Installed by the fragment, under the name the command calls it by.
+            my ($leaf) = $program =~ m{([^/]+)\z};
+            ok(
+                index( $fragments, $program ) >= 0 || ( grep { $_ eq $leaf } values %generated ),
+                "$recipe: $program is something this recipe puts on the guest"
+            ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
+        }
+
+        ok( scalar( eval { $class->remote_files( $install, $domain ) } ), "$recipe: and it has something to salvage afterwards" );
+    }
+};
+
+# A default that is generated rather than written down is a rotation: it changes
+# every time bin/new_config runs, so whatever the last one authenticated -- a
+# session, an admin token, another node in a cluster -- stops working at the next
+# provision, and nothing anywhere says why.  Provisioner::Recipe::guest_secrets
+# is how a recipe keeps one still -- in the store, placed on the guest, never in
+# a default -- and this is what notices when a recipe does not.
+subtest 'no recipe hands out a default that changes between runs' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    foreach my $recipe ( sort @available ) {
+        my %first  = eval { Provisioner::Cookbook->spec( $recipe, output_dir => $dir ) } or next;
+        my %second = eval { Provisioner::Cookbook->spec( $recipe, output_dir => $dir ) } or next;
+
+        my $defaults = sub {
+            my ($spec) = @_;
+            my $props = $spec->{properties} // {};
+            return { map { $_ => $props->{$_}{default} } grep { defined $props->{$_}{default} && !ref $props->{$_}{default} } keys %$props };
+        };
+
+        is_deeply( $defaults->( \%second ), $defaults->( \%first ), "$recipe: the same configuration twice running" );
+    }
+};
+
 # cron runs a job with /bin/sh, which is dash on Ubuntu, and dash reads &> as a
 # background & followed by a redirection.  A cron line written with it runs
 # detached, captures nothing, and reports success to cron the instant it starts
@@ -1104,6 +1227,118 @@ subtest 'the root password survives being put in a SQL string' => sub {
     is( $cnf->(q{pa"ss}),  q{"pa\\"ss"},  'a double quote is escaped for the option file' );
     is( $cnf->(q{pa\\ss}), q{"pa\\\\ss"}, 'and so is a backslash' );
     unlike( $cnf->(q{pa'ss}), qr/&#39;/, 'and nothing is HTML-escaped on the way' );
+};
+
+subtest 'a vhost serves files only where a recipe said it has some' => sub {
+    my $vhost = sub {
+        my (%vhosts) = @_;
+
+        # A fresh object per configuration: validate is memoized on the object,
+        # so asking one twice with different vhosts answers with the first.
+        return 'Provisioner::Recipe::nginxproxy'->new(%PROV)->render_file( 'files/nginx.domain.conf.tt', %G, vhosts => \%vhosts );
+    };
+
+    # What a reverse proxy in front of gogs or synapse configures.  static_dir
+    # used to fall back to www/, so this got root install_dir/domain/www -- a
+    # directory the recipe never asked for, on every domain that proxies.
+    my $proxy = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
+    unlike( $proxy, qr/^\s*root\s/m, 'a vhost with no static_dir is given no root' );
+    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!xs, 'and proxies from / rather than falling through to a named location' );
+    unlike( $proxy, qr/try_files/, 'with nothing to try before proxying' );
+
+    # And the other half: a recipe that does serve files still gets exactly what
+    # it named, with the proxy behind it as the fallback.
+    my $static = $vhost->( 443 => { ssl => 1, proxy_uri => 'run/app.sock', static_dir => 'www/static' } );
+    like( $static, qr{^\s*root /opt/domains/test\.test\.test/www/static;}m, 'a declared static_dir is the root' );
+    like( $static, qr/try_files \$uri .*\@default/,                         'statics are tried before the proxy' );
+    like( $static, qr/location \@default \{/,                               'and the proxy is the fallback it names' );
+
+    # nocache_prefix and auth_statics both serve files out of the static root.
+    # matrix sets a nocache_prefix and no static_dir, so this block used to be
+    # rendered with the www/ fallback under it.
+    my $nocache = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:8008', nocache_prefix => '^~ /(_matrix)/' } );
+    unlike( $nocache, qr/^\s*root\s/m, 'a nocache_prefix with no static_dir serves no files either' );
+
+    # public_dir is an alias rather than a root, so it is the one thing here that
+    # does not need a static_dir behind it.  deluged sets it and nothing else.
+    my $public = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:8112', public_dir => 'torrents' } );
+    like( $public, qr{^\s*alias /opt/domains/test\.test\.test/torrents;}m, 'a public_dir is still served without one' );
+    unlike( $public, qr/^\s*root\s/m, 'and still brings no root with it' );
+};
+
+subtest 'gogs is served where the vhost actually answers' => sub {
+    my $ini = 'Provisioner::Recipe::gogs'->new(%PROV)->render_file( 'files/gogs.app.ini.tt', %G, %{ $required_config{gogs} }, secret_key => q{} );
+
+    # nginxproxy writes one vhost, for the domain and the aliases new_config
+    # gives it, and a git. is not among them.  Every clone URL, login redirect
+    # and webhook gogs emitted named a host nobody had made.
+    like( $ini, qr{^ROOT_URL\s*=\s*https://\Qtest.test.test\E/$}m, 'ROOT_URL is the domain itself' );
+    like( $ini, qr{^DOMAIN\s*=\s*\Qtest.test.test\E$}m,            'and so is DOMAIN' );
+
+    # The files stay under git.$domain.  That is a directory name, and moving it
+    # would strand what remote_files salvaged off every guest that has one.
+    like( $ini, qr{^ROOT\s*=\s*/opt/domains/git\.test\.test\.test/repos$}m, 'while the repository store is left where it is' );
+};
+
+subtest 'a recipe that needs a port open declares a profile rather than a rule' => sub {
+
+    # setup-ufw-rules opens with `ufw reset`, which drops every rule on the
+    # guest, and the ufw target runs after the recipes that depend on it.  So a
+    # rule a fragment adds itself is deleted a few targets later, and the only
+    # reason ldap looked like it worked was that slapd ships a profile covering
+    # the port it defaults to.  Profiles live in /etc/ufw/applications.d, which
+    # the reset leaves alone, and setup-ufw-rules allows every one it finds.
+    foreach my $tt ( sort glob("$template_dir/*.tt") ) {
+        next if $tt =~ m{/ufw(?:[.]global)?[.]tt\z};
+
+        my $body = File::Slurper::read_text($tt);
+
+        # Comments say what used to be here and why it moved; the rule itself is
+        # what must not come back.  Directive and comment markers are stripped
+        # so a template comment quoting the old line does not read as one.
+        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/^\s*#.*$//gm;
+
+        my ($offender) = $body =~ m/^([^\n]*\bufw\s+(?:allow|deny|limit|reject)\b[^\n]*)$/m;
+        is( $offender, undef, ( File::Basename::basename($tt) ) . ' adds no firewall rule of its own' );
+    }
+};
+
+subtest 'no firewall profile is named after something in /etc/services' => sub {
+
+    # ufw refuses to load a profile whose section name is also a service name,
+    # and says so only as a warning on stderr -- so the profile is absent from
+    # `ufw app list`, no rule is ever made from it, and nothing anywhere fails.
+    # [ldap] and [redis] were both shipped this way, which meant the port each
+    # of those recipes exists to expose was never opened by its own profile.
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_r)
+    plan skip_all => 'no /etc/services to check against' unless -r '/etc/services';
+
+    my %service;
+    foreach my $line ( split m/\n/, File::Slurper::read_text('/etc/services') ) {
+        next if $line =~ m/\A\s*[#]/;
+        my ($name) = $line =~ m/\A(\S+)\s/ or next;
+
+        # Case sensitively, which is how ufw compares them: [OpenVPN] is
+        # accepted where an openvpn would not be.
+        $service{$name} = 1;
+    }
+
+    my @profiles = sort ( glob("$template_dir/files/ufw.*.tt"), glob("$template_dir/files/*.ufw.conf.tt") );
+    ok( scalar @profiles, 'there are firewall profiles to check' );
+
+    foreach my $tt (@profiles) {
+        my $body = File::Slurper::read_text($tt);
+
+        # Comments here explain which names were skipped and why, so they name
+        # the very things being tested for.
+        $body =~ s/\[%#.*?%\]//gs;
+
+        foreach my $section ( $body =~ m/^\[([^\]]+)\]\s*$/gm ) {
+            ok( !$service{$section}, ( File::Basename::basename($tt) ) . ": [$section] is a name ufw will load" )
+              or diag "ufw skips [$section]: also in /etc/services";
+        }
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

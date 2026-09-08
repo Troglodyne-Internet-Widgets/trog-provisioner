@@ -1,0 +1,61 @@
+#!/bin/bash
+# Write the directory out as LDIF, somewhere the next provision can read it.
+#
+# The directory is the one thing on this guest nothing else can regenerate:
+# every password a user has changed, every SSH key they have added, every group
+# an operator has made since the guest was built.  The seed the recipe ships
+# knows none of that, so a rebuilt guest without this is a guest whose users
+# find their accounts as they were on the day it was first provisioned.
+#
+# It is exported rather than copied because slapd's on-disk format is a
+# private one: an MDB database is tied to the slapd that wrote it and to the
+# architecture it was written on, so carrying /var/lib/ldap between guests
+# works right up until the archive moves to a new slapd and then does not.
+# LDIF is the format OpenLDAP promises to read back, on any version.
+#
+# And it is written where the admin user can read it because that is who
+# fetches it.  bin/new_config collects what remote_files names over sftp as the
+# admin user with no sudo at all -- so /var/lib/ldap, which the package ships
+# 0700 openldap:openldap, comes back as an empty directory and says nothing
+# about why.
+
+set -euo pipefail
+
+BASE_DN='[% base_dn %]'
+DEST=/var/backups/ldap
+OWNER='[% admin_user %]'
+
+# Dumped somewhere else and moved in, rather than written in place.  This runs
+# on a cron against a live directory and the fetch runs whenever an operator
+# says so, and a fetch that arrives in the middle of a dump would otherwise
+# salvage half a file and call it the directory.  A rename is atomic; a
+# redirect into the destination is not.
+STAGING=$(mktemp -d /var/backups/.ldap-export.XXXXXX)
+trap 'rm -rf "$STAGING"' EXIT
+
+install -d -o "$OWNER" -g "$OWNER" -m 0700 "$DEST"
+
+# slapcat reads the database files rather than talking to slapd, so it needs no
+# bind and no password on the command line, and MDB lets it take a consistent
+# snapshot while slapd is serving.  -n 0 is the configuration database, which
+# is the other half of what an operator has changed here: schema, ACLs, and the
+# overlays somebody turned on.  -b rather than -n for the data, because which
+# number the directory got depends on what else is configured and its suffix
+# does not.
+slapcat -F /etc/ldap/slapd.d -n 0 -l "$STAGING/config.ldif"
+slapcat -F /etc/ldap/slapd.d -b "$BASE_DN" -l "$STAGING/data.ldif"
+
+# An empty dump is not a directory, it is a slapcat that found nothing, and
+# writing it over the last good one would throw away the only copy of the
+# directory that exists off this machine.
+if [ ! -s "$STAGING/data.ldif" ]; then
+    echo "ldap-export: slapcat produced nothing for $BASE_DN; keeping the last export" >&2
+    exit 1
+fi
+
+chown "$OWNER:$OWNER" "$STAGING"/*.ldif
+chmod 0600 "$STAGING"/*.ldif
+mv "$STAGING/config.ldif" "$DEST/config.ldif"
+mv "$STAGING/data.ldif" "$DEST/data.ldif"
+
+echo "ldap-export: wrote $DEST/data.ldif and $DEST/config.ldif"

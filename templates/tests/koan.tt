@@ -29,4 +29,29 @@ foreach my $file (
     is($st[2] & 07777, 0640,                 "and mode 0640");
 }
 
+[% IF messaging_provider == 'matrix' -%]
+# The matrix federation port, declared as a profile rather than allowed from
+# the fragment.  `default deny outgoing` blocks 8448, and a rule added here did
+# not survive the `ufw reset` setup-ufw-rules opens with -- which is why this
+# used to be queued to postrun to land after it.
+my $profile = '/etc/ufw/applications.d/koan';
+ok(-f $profile, 'the matrix federation firewall profile was installed');
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
+
+    # A malformed profile is absent from the list rather than reported.
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*koan-matrix\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    # Outbound is the direction this one is for: koan reaches out to a
+    # homeserver, it does not answer federation itself.
+    my $status = `ufw status 2>/dev/null`;
+    like($status, qr/koan-matrix.*\bALLOW OUT\b|\bALLOW OUT\b.*koan-matrix/m, 'and 8448 is allowed outbound') or diag $status;
+}
+[% ELSE -%]
+# Not a matrix bot, so nothing should have opened the federation port.
+ok(!-e '/etc/ufw/applications.d/koan', 'no matrix firewall profile on a bot that does not speak matrix');
+[% END -%]
+
 done_testing();

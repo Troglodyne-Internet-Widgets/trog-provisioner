@@ -169,4 +169,48 @@ subtest 'the whole cycle, as new_config runs it' => sub {
     is( $config->{recipe}{other}, 'left alone',     'and nothing else moved' );
 };
 
+subtest 'remember makes a secret once and keeps it' => sub {
+    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+    my $file = "$dir/secrets.kdbx";
+    my $pass = 'throwaway';
+
+    Trog::Secrets->write( $file, $pass, 'secret:existing/entry/password' => 'written by somebody' );
+
+    my $calls = 0;
+    my $make  = sub { $calls++; return "made-$calls" };
+
+    my %first = Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test-signing-key/password' => $make );
+    is( $first{'secret:matrix/vm.test-signing-key/password'}, 'made-1', 'a reference that held nothing gets one made' );
+    is( $calls,                                               1,        'the generator ran once' );
+
+    # A new process, the same database: the point of the whole thing.
+    my %again = Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test-signing-key/password' => $make );
+    is( $again{'secret:matrix/vm.test-signing-key/password'}, 'made-1', 'and the next run is answered with the same one' );
+    is( $calls,                                               1,        'without the generator running again' );
+
+    my %kept = Trog::Secrets->remember( $file, $pass, 'secret:existing/entry/password' => sub { 'replaced' } );
+    is( $kept{'secret:existing/entry/password'}, 'written by somebody', 'what an operator wrote down is answered, never replaced' );
+
+    # Reading it the ordinary way has to find what remember left.
+    my %read = Trog::Secrets->read( $file, $pass, 'somewhere' => 'secret:matrix/vm.test-signing-key/password' );
+    is( $read{somewhere}, 'made-1', 'and read() finds it like any other entry' );
+
+    eval {
+        Trog::Secrets->remember( $file, $pass, 'secret:empty/handed/password' => sub { '' } );
+    };
+    like( $@, qr/produced nothing/, 'a generator that makes nothing is an error rather than an empty secret' );
+
+    is_deeply( { Trog::Secrets->remember( $file, $pass ) }, {}, 'nothing asked for is nothing done' );
+
+    # The database keeps password and username and drops anything else, so a
+    # reference naming another field would store nothing, be answered from
+    # memory this run, and be made afresh on every run after -- which is the one
+    # failure this whole mechanism exists to prevent.
+    eval {
+        Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test/signing_key' => sub { 'not a field it keeps' } );
+    };
+    like( $@, qr/did not keep/,         'a field the database drops is an error at once' );
+    like( $@, qr/password or username/, 'and it says which fields there are' );
+};
+
 done_testing();

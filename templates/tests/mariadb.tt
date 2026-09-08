@@ -103,4 +103,63 @@ SKIP: {
 my $lib = `ldd \$(command -v mariadbd || echo /usr/sbin/mariadbd) 2>/dev/null`;
 like($lib, qr/liburing/, 'mariadbd is linked against liburing') or diag $lib;
 
+# The round trip.  remote_files salvages /var/backups/mysql off the guest this
+# one replaces and the data recipe puts it back under the domain directory, and
+# for a long time nothing imported it: a rebuild came up holding the seed schema
+# an operator wrote once and nothing that had happened since.  What follows takes
+# a real backup, throws a database away, and asks for it back.
+ok(-x '/usr/local/sbin/mariadb-backup.sh', 'the backup is installed');
+ok(-x '/usr/local/sbin/mariadb-restore.sh', 'and so is the restore that reads what it wrote');
+
+sub sql {
+    my ($query, $db) = @_;
+    $db //= q{};
+    my $out = `mariadb -sN $db -e "$query" 2>&1`;
+    chomp $out;
+    return $out;
+}
+
+my $probe = 'restore_probe';
+system(qq{mariadb -e "DROP DATABASE IF EXISTS $probe"});
+system(qq{mariadb -e "CREATE DATABASE $probe"});
+system(qq{mariadb $probe -e "CREATE TABLE t (v VARCHAR(32))"});
+system(qq{mariadb $probe -e "INSERT INTO t VALUES ('salvaged')"});
+
+is(system('/usr/local/sbin/mariadb-backup.sh > /tmp/mariadb-backup.log 2>&1'), 0, 'the nightly backup runs')
+    or diag `cat /tmp/mariadb-backup.log`;
+
+my @dumps = sort glob '/var/backups/mysql/*';
+ok(scalar @dumps, 'and left a dump behind') or diag `ls -la /var/backups/mysql`;
+my $newest = $dumps[-1] // '';
+ok(-f "$newest/complete", 'which says it finished, since nothing will restore one that does not');
+ok(-f "$newest/$probe/t.sql.gz", 'with the probe database in it');
+
+# The rebuild: the database is gone and the salvage is the only thing that knows
+# what was in it.
+system(qq{mariadb -e "DROP DATABASE $probe"});
+is(system('/usr/local/sbin/mariadb-restore.sh /var/backups/mysql > /tmp/mariadb-restore.log 2>&1'), 0, 'the restore runs')
+    or diag `cat /tmp/mariadb-restore.log`;
+is(sql('SELECT v FROM t', $probe), 'salvaged', 'and the database nothing else could have brought back is back');
+
+# And the half that makes it safe on a guest that is still running: a database
+# that is there is not written over, however old or short the dump beside it is.
+system(qq{mariadb $probe -e "UPDATE t SET v='since the dump'"});
+is(system('/usr/local/sbin/mariadb-restore.sh /var/backups/mysql > /tmp/mariadb-restore.log 2>&1'), 0, 'restoring again is not an error')
+    or diag `cat /tmp/mariadb-restore.log`;
+is(sql('SELECT v FROM t', $probe), 'since the dump', 'and it left the live database alone');
+
+# A dump with no `complete` in it is a backup that was interrupted, and half a
+# database restored is worse than none: the server ends up holding data, which is
+# what stops the next provision from trying again.
+my $half = '/tmp/half-a-dump';
+system("rm -rf $half && mkdir -p $half/20200101-000000/never_finished");
+system("cp $newest/$probe/t.sql.gz $half/20200101-000000/never_finished/");
+is(system("/usr/local/sbin/mariadb-restore.sh $half > /tmp/mariadb-restore.log 2>&1"), 0, 'an unfinished dump is not an error')
+    or diag `cat /tmp/mariadb-restore.log`;
+is(sql("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='never_finished'"), '',
+   'but it is not restored either');
+
+system(qq{mariadb -e "DROP DATABASE IF EXISTS $probe"});
+system("rm -rf $half");
+
 done_testing();

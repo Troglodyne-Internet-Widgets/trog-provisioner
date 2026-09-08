@@ -8,6 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use File::Find();
 use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
@@ -48,6 +49,51 @@ sub already_required {
     my @available = keys(%INC);
     return 1 if any { m/\Q$module\E/ } @available;
     return 0;
+}
+
+=head3 files_in($dir)
+
+The names of the plain files directly in C<$dir>, sorted, with no leading path.
+
+Top level only, and no directories: every caller here is reading a flat
+directory -- the recipes, the scripts that get packed into a domain -- and a
+nested file is not one of the things they are looking for.
+
+Returns nothing for a directory that is not there or cannot be read, which is
+the same answer as one holding nothing and is what every caller wants.
+
+=cut
+
+sub files_in {
+    my ($dir) = @_;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
+    return () unless defined $dir && -d $dir;
+
+    my @found;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                my $path = $File::Find::name;
+
+                # Everything below the top is pruned rather than walked: these
+                # are flat directories and walking one that is not would be a
+                # different question than the caller asked.
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_d, ValuesAndExpressions::ProhibitFiletest_f)
+                if ( -d $path ) {
+                    $File::Find::prune = 1 unless $path eq $dir;
+                    return;
+                }
+                return unless -f $path;
+
+                ( my $name = $path ) =~ s{\A\Q$dir\E/}{};
+                push( @found, $name );
+            },
+        },
+        $dir
+    );
+
+    return sort @found;
 }
 
 =head3 lastuniq(@array)

@@ -112,13 +112,15 @@ sub args {
     );
 }
 
+# Profiles for services whose ports this recipe can actually know, which means
+# the ones that are fixed.  A recipe hands ufw its rate_limits and nothing else,
+# so a profile here cannot name a port the other recipe made configurable --
+# redis and openvpn both did, and both are rendered by their own recipes now.
 my %template2rule = (
     'ufw.pdns.tt'            => 'ufw/pdns',
     'ufw.mail.tt'            => 'ufw/mail',
     'ufw.plexmediaserver.tt' => 'ufw/plexmediaserver',
     'ufw.garage.tt'          => 'ufw/garage',
-    'ufw.redis.tt'           => 'ufw/redis',
-    'ufw.openvpn.tt'         => 'ufw/openvpn',
 );
 
 sub template_files {

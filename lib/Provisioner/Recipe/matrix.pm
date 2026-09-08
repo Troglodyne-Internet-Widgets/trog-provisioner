@@ -11,6 +11,7 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use Crypt::PRNG();
+use MIME::Base64();
 
 =head1 Provisioner::Recipe::matrix
 
@@ -73,7 +74,12 @@ Returns template file mappings.
 
 =head3 datadirs
 
-Returns directories to create for data storage.
+Where the salvaged homeserver lands in the domain's data directory, so that the
+fragment has a fixed place to look for it whether or not there was a guest to
+take it off.
+
+There was a C<matrix-admin> beside it that nothing has ever written to: the
+admin interface came down as C<admin.matrix>, and no longer comes down at all.
 
 =over 1
 
@@ -85,7 +91,16 @@ Returns directories to create for data storage.
 
 =head3 remote_files
 
-Returns remote file mappings for backup/restore.
+The homeserver directory, which is everything this server is.  C<homeserver.db>
+holds every room, message and account; the media store sits beside it; and
+C<homeserver.signing.key> is the identity the rest of the federation knows it
+by.  A guest rebuilt without them is a stranger wearing the same name, so the
+fragment puts them back with C<restore_state> before synapse is started.
+
+The admin interface used to be salvaged too, and is not any more.  The fragment
+downloads it from its GitHub release on every provision, so a copy of it went
+down to the hypervisor and back up again preserving nothing, and sat in the
+backups being a web application somebody else maintains.
 
 =over 1
 
@@ -150,6 +165,7 @@ sub deps {
 }
 
 sub args {
+    my ($self) = @_;
     return (
         type       => 'object',
         required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
@@ -173,16 +189,16 @@ sub args {
             smtp_pass                  => { type => 'string' },
             smtp_domain                => { type => 'string' },
             require_transport_security => { type => 'boolean', default => 1 },
-            registration_shared_secret => { type => 'string',  default => _seekrit() },
             ipv6                       => { type => 'boolean', default => 1 },
-            redis_host                 => { type => 'string',  default => '127.0.0.1' },
-            redis_port                 => { type => 'integer', minimum => 1024, default => 6379 },
+
+            # Synapse will not start until this is answered either way.  Off
+            # unless the domain says otherwise: opting a homeserver into
+            # reporting its usage is the operator's call, not this recipe's.
+            report_stats => { type => 'boolean', default => 0 },
+            redis_host   => { type => 'string',  default => '127.0.0.1' },
+            redis_port   => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
-}
-
-sub _seekrit {
-    return join '', map { ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 )[ Crypt::PRNG::rand(62) ] } 1 .. 32;
 }
 
 sub template_files {
@@ -199,14 +215,68 @@ sub template_files {
 }
 
 sub datadirs {
-    return qw{matrix matrix-admin};
+    return qw{matrix};
+}
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+
+    # Under synapse's own configuration directory rather than the domain
+    # directory, for two reasons.  bin/provision places these before the
+    # makefile runs, and matrix.tt restores its salvage into the domain
+    # directory -- which restore_state declines to do once anything is sitting
+    # in it, so a secret placed there stopped the media store coming back.  And
+    # the domain directory is what the data recipe carries off to the
+    # hypervisor and into every backup taken of it, which is the one place a
+    # secret held in the store should never end up.
+    return (
+        "/etc/matrix-synapse/homeserver.signing.key" => {
+            ref      => "secret:matrix/$domain-signing-key/password",
+            generate => \&_signing_key,
+            owner    => 'matrix-synapse:matrix-synapse',
+            mode     => '0600',
+        },
+        "/etc/matrix-synapse/registration.shared.secret" => {
+            ref      => "secret:matrix/$domain-registration-secret/password",
+            generate => sub { Crypt::PRNG::random_bytes_hex(32) },
+            owner    => 'matrix-synapse:matrix-synapse',
+            mode     => '0600',
+        },
+    );
+}
+
+# What signedjson writes: the algorithm, a short version tag naming this key
+# among any others the server has had, and the 32 seed bytes in unpadded
+# base64.  Made here rather than on the guest because a guest that makes its own
+# makes a new one every time it is rebuilt.
+sub _signing_key {
+    my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
+    my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
+    $seed =~ s/=+\z//;
+
+    return "ed25519 $version $seed";
+}
+
+# The signing key is in the secret store and is put on the guest from there, so
+# it has no business coming back off one -- salvaged, it would sit in the domain
+# directory and in every backup taken of it.
+#
+# Kept now that the key is placed under /etc/matrix-synapse and cannot be
+# salvaged from there anyway: a guest built before that move still has one in
+# its domain directory, and this is what stops a rebuild carrying it home.
+sub remote_skip {
+    return (qr{/homeserver[.]signing[.]key\z});
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
+
+    # The homeserver only.  admin.matrix was salvaged beside it, and the
+    # fragment re-downloads that release from GitHub every provision regardless,
+    # so the round trip preserved nothing and only put somebody else's web
+    # application in our backups.
     return (
-        "$install_dir/matrix.$domain/"       => 'matrix/',
-        "$install_dir/admin.matrix.$domain/" => 'admin.matrix/',
+        "$install_dir/matrix.$domain/" => 'matrix/',
     );
 }
 

@@ -3,8 +3,15 @@ DEBIAN_FRONTEND=noninteractive debconf-set-selections slapd.debconf
 rm -f slapd.debconf
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd
 
-# Enable LDAPS by configuring service URIs
-sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps:/// ldapi:///"|' /etc/default/slapd
+[%# On the configured port, not on 636.  This said a bare ldaps:///, which is
+    every interface on the default port -- so port: was a documented, validated,
+    defaulted option that set nothing whatsoever.  Its only consumer was the
+    firewall, which meant a domain that moved LDAPS had a hole opened where
+    nothing listened and slapd still answering on 636.
+    The host part is left empty, which is what makes it every interface: a
+    ldaps://:port/ binds the same addresses the bare form does. -%]
+# Enable LDAPS on the configured port by setting the service URIs
+sed -i 's|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps://:[% port %]/ ldapi:///"|' /etc/default/slapd
 systemctl restart slapd
 
 # Configure TLS for LDAPS, against the certificate the ssl target links on
@@ -37,17 +44,62 @@ ldapmodify -Y EXTERNAL -H ldapi:/// -f tls.ldif
 rm -f tls.ldif
 systemctl restart slapd
 
-# Open firewall for LDAPS
-ufw allow [% port %]/tcp comment 'LDAPS'
+[%# Declared as an application profile, not allowed here.  setup-ufw-rules
+    opens with `ufw reset`, which drops every rule on the guest, and the ufw
+    target runs after this one -- so this rule was added and then deleted on
+    every provision that had both recipes.  It only looked like it worked
+    because slapd ships its own LDAPS profile covering 636, which is the
+    default: a domain that set port: to anything else had nothing opening it.
+    /etc/ufw/applications.d survives the reset, and setup-ufw-rules allows
+    whatever `ufw app list` reports afterwards. -%]
+# Declare the firewall profile for LDAPS
+install -o root -g root -m 0644 ldap_ufw.conf /etc/ufw/applications.d/ldap
 
-# Seed base tree and users (idempotent - errors on existing entries are ignored)
+# Put back the directory this domain had before the guest was rebuilt, if there
+# is one.  This has to happen before the seed: the seed is what fills an empty
+# directory, and everything a user or an operator has done since -- a changed
+# password, an added SSH key, a group -- exists only in what was salvaged.
+[%# Into /var/backups/ldap and not straight out of the data directory, because
+    that is where the export writes and where the next fetch will look, so a
+    rebuilt guest has its last known directory in the one place from the moment
+    it is built rather than an hour later when the cron first runs.  Made first
+    so that the chmod below has something to work on when nothing was salvaged;
+    restore_state treats an empty directory as an empty destination and fills
+    it, and declines when the destination has an export in it already, which is
+    what a live guest being re-provisioned looks like. -%]
+mkdir -p /var/backups/ldap
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/ldap' /var/backups/ldap '[% admin_user %]:[% admin_user %]'
+# Group and other, not a mode: the directory needs its owner bits to stay
+# traversable, and a recursive 0600 would leave the admin user unable to enter
+# the directory it owns -- which is the sftp fetch reading nothing all over again.
+chmod -R go-rwx /var/backups/ldap
+install -m 0750 -o root -g root ldap-reload.sh /usr/local/sbin/ldap-reload.sh
+/usr/local/sbin/ldap-reload.sh
+
+# Seed base tree and users
 [%# Not swallowed.  This ran into a /bin/true, so a bind that failed -- which it
     did, every time, whenever the base DN slapd built from debconf differed from
     the one being bound against -- left an empty directory and a provision that
     reported success.  Entries that already exist are the one error worth
     ignoring, and ldapadd says so distinctly. -%]
-ldapadd -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
+[%# -c, because without it ldapadd stops at the first entry that already exists
+    and never reaches the rest of the file.  On a directory that was reloaded
+    above, the first entry is always the base -- so a user added to users.yaml
+    since the last provision was never created, and the seed that called itself
+    idempotent was only ever idempotent by giving up immediately. -%]
+ldapadd -c -x -D "cn=admin,[% base_dn %]" -w '[% admin_password %]' -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
 rm -f seed.ldif
+
+# And the other end of the round trip: the directory as LDIF, hourly, somewhere
+# the admin user can read it.  Nothing else on this guest can be regenerated
+# from the recipe, and slapd keeps it 0700 openldap:openldap where the fetch --
+# sftp as the admin user, no sudo -- reads exactly nothing.
+install -m 0750 -o root -g root ldap-export.sh /usr/local/sbin/ldap-export.sh
+install -m 0644 -o root -g root ldap-export.cron /etc/cron.d/ldap-export
+# Once now, so that a guest provisioned and then rebuilt an hour later has an
+# export to be rebuilt from rather than the empty directory the cron has not
+# reached yet.
+/usr/local/sbin/ldap-export.sh
 
 [% script_dir %]/queue_postrun_task systemctl enable slapd
 [% script_dir %]/queue_postrun_task systemctl restart slapd

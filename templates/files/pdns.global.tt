@@ -2,3 +2,9 @@ local-address=127.0.0.1
 local-port=2500
 # Inside the chroot; the recipe makes /var/spool/powerdns/run/pdns for it.
 socket-dir=/run/pdns
+# Started as root so it can chroot, and gives the privileges up itself once it
+# is in there.  configure_pdns takes User=pdns off the unit for the same reason:
+# a pdns_server that starts unprivileged never enters the chroot and spends the
+# rest of its short life looking for its database at the real root.
+setuid=pdns
+setgid=pdns

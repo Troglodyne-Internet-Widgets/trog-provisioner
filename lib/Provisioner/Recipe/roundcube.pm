@@ -35,8 +35,13 @@ multiple roundcube installs can coexist on the same host.
 User data (contacts, identities, preferences) lives in a SQLite database in
 $install_dir/webmail.$domain_data, which is initialized from Roundcube's
 sqlite.initial.sql as it will not autocreate. That directory is registered in
-remote_files, so it is preserved across provisions and picked up by the
+remote_files, so it comes down off a guest being rebuilt and is picked up by the
 'backup' recipe.
+
+Coming down is only half of it: the fragment calls C<restore_state> to put it
+back where the DSN in config.inc.php points, and initializes the schema only
+when that left nothing there. Nobody can type a contact list back in, so the
+alternative to restoring it is losing it.
 
 Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, i.e. a
 host running L<Provisioner::Recipe::mail>. TLS uses the certificate provided by
@@ -116,7 +121,11 @@ sub enrich {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # SQLite database with user data (contacts, identities, preferences)
+        # The sqlite database with the user data: contacts, identities and
+        # per-user preferences, none of which anything else has a copy of.  The
+        # fragment restores it from the domain directory before the vhost is
+        # reloaded, and only creates the schema when there was nothing to
+        # restore.
         "$install_dir/webmail.${domain}_data/" => 'roundcube/',
     );
 }

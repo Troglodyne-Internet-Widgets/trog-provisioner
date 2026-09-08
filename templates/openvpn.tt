@@ -1,6 +1,14 @@
 	# Set up easy-rsa PKI
 	mkdir -p /etc/openvpn/easy-rsa
 	cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+	# Put back the PKI taken off the last guest, before easyrsa is asked for
+	# anything.  The guard below only ever fires on a re-provision, where the old
+	# pki is still on the disk; a rebuilt guest has a new disk and sails straight
+	# past it, issues itself a new CA, and every client certificate ever issued
+	# off the old one stops working -- with the clients nowhere to be told.
+	# restore_state declines when nothing was salvaged and when there is already
+	# a pki here, so this is a no-op on both of the cases that are not a rebuild.
+	[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/openvpn/pki' /etc/openvpn/easy-rsa/pki root:root
 	# --batch on every one of these.  easyrsa prompts for a Common Name
 	# otherwise, and a make recipe has no terminal to answer from, so gen-req
 	# read EOF and died with "Error making certificate request" -- taking the
@@ -26,14 +34,51 @@
 	if [ ! -f /etc/openvpn/easy-rsa/pki/ta.key ]; then \
 	    cd /etc/openvpn/easy-rsa && openvpn --genkey secret pki/ta.key; \
 	fi
+	# A restored pki arrives with whatever the data directory was chmodded to,
+	# which is 0750 on every last file in it, and easyrsa makes its own at 0700
+	# with the keys at 0600.  Put both back at the second of those.
+	#
+	# Spelled out per type rather than with u=rwX, which is what was here and only
+	# ever looked right on a first build.  X is "execute if it is a directory or
+	# somebody already has execute", and after the data target every restored file
+	# does -- so a rebuilt guest came out with a 0700 CA key, a 0700 ca.crt, and
+	# executable certificates copied on into /etc/openvpn/server.  The recipe's own
+	# test caught it on the second provision and not the first, which is exactly
+	# the shape of a bug that only exists on the path that matters.
+	find /etc/openvpn/easy-rsa/pki -type d -exec chmod 0700 {} +
+	find /etc/openvpn/easy-rsa/pki -type f -exec chmod 0600 {} +
 	# Copy PKI files into place
 	cp /etc/openvpn/easy-rsa/pki/ca.crt              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/issued/server.crt   /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/private/server.key  /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/dh.pem              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/ta.key              /etc/openvpn/server/
-	chmod 0600 /etc/openvpn/server/server.key /etc/openvpn/server/ta.key
+	# Every one of them, not just the two secrets: cp gives a new file the mode of
+	# the one it came from, so what lands here is whatever the pki was left at, and
+	# naming only the keys let the certificates carry a rebuild's mode across.
+	chmod 0600 /etc/openvpn/server/ca.crt /etc/openvpn/server/server.crt /etc/openvpn/server/server.key /etc/openvpn/server/dh.pem /etc/openvpn/server/ta.key
+	# Stage a copy of the pki that the next fetch can actually read.  new_config
+	# comes in over sftp as [% admin_user %] with no sudo, and the pki is 0700
+	# root with 0600 keys, so naming it in remote_files fetched an empty
+	# directory and said nothing about it.  Staging is what the mail recipe does
+	# with the DKIM keys, and it costs the same thing: the CA private key is
+	# readable by whoever holds the admin account from here on, and it travels
+	# into the data directory and into any backup taken of that.  The alternative
+	# is a VPN that does not survive its own guest.
+	#
+	# Remade from scratch each run so a certificate revoked since the last one
+	# does not sit here looking current.
+	rm -rf /etc/openvpn/pki-salvage
+	mkdir -p /etc/openvpn/pki-salvage
+	cp -a /etc/openvpn/easy-rsa/pki/. /etc/openvpn/pki-salvage/
+	chown -R [% admin_user %]:[% admin_user %] /etc/openvpn/pki-salvage
+	find /etc/openvpn/pki-salvage -type d -exec chmod 0700 {} +
+	find /etc/openvpn/pki-salvage -type f -exec chmod 0600 {} +
 	# Deploy server configuration
+	# The firewall profile for this port and protocol.  Rendered here because the
+	# copy that lived under ufw named variables ufw is never given, so it wrote
+	# ports=/ on every guest.
+	install -m 0644 -o root -g root openvpn_ufw.conf /etc/ufw/applications.d/openvpn-server
 	cp server.conf /etc/openvpn/server/server.conf
 	chown root:root /etc/openvpn/server/server.conf
 	chmod 0640 /etc/openvpn/server/server.conf

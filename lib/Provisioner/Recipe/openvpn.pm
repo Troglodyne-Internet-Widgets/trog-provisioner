@@ -42,6 +42,35 @@ installed automatically.
 The interface option is used to set up NAT (masquerade) so VPN clients can
 reach the internet. If omitted, NAT is not configured.
 
+=head3 The PKI is the part that cannot be made again
+
+Everything else here is regenerated on demand; a new CA is not the same CA.
+Issue it a second time and every client certificate ever signed by the first one
+stops being trusted, and the clients holding them are not here to be told.  So
+the PKI makes the round trip, and the fragment puts it back before easyrsa is
+asked for anything.
+
+The guard on PKI generation is not enough on its own.  It only fires when the
+old pki is still on the disk, which is a re-provision; a guest rebuilt from
+nothing has an empty disk, sails past it and signs itself a new CA.  Restoring
+first is what closes that.
+
+What C<remote_files> names is a staged copy the fragment leaves at
+F</etc/openvpn/pki-salvage>, not the pki itself.  The fetch is an sftp session as
+the admin user with no sudo and easy-rsa keeps its pki at 0700 root with the keys
+at 0600, so naming the real thing came back with an empty directory and no
+complaint -- the salvage looked like it was working for as long as nobody
+rebuilt a guest.  The staged copy belongs to the admin user and is readable by
+nobody else, which is the same trade the mail recipe makes to salvage the DKIM
+keys: the CA private key is now readable by whoever holds the admin account, and
+it travels into the data directory and into whatever backup is taken of that.
+That is the price of a VPN that survives its own guest, and it is worth saying
+out loud because the alternative is not free either.
+
+The copy is only as new as the last provision, so a client certificate issued by
+hand afterwards is not in it until the next one runs.  The CA it was signed with
+is, which is what keeps the certificate working.
+
 =cut
 
 sub deps {
@@ -103,14 +132,23 @@ sub template_files {
 
     return (
         'openvpn.server.conf.tt' => 'server.conf',
+
+        # The ufw application profile for the port and protocol this domain
+        # configured.  It lived under ufw, which is handed rate_limits and
+        # nothing else -- so it named two variables it never had.
+        'openvpn.ufw.conf.tt' => 'openvpn_ufw.conf',
     );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # PKI (CA, server cert/key, DH params, TLS auth key, client certs)
-        '/etc/openvpn/easy-rsa/pki/' => 'openvpn/pki/',
+        # The staged copy of the PKI (CA, server cert/key, DH params, TLS auth
+        # key, client certs), rather than the pki itself: the fetch is sftp as
+        # the admin user with no sudo, and easy-rsa keeps the original where he
+        # cannot read a byte of it.  The fragment stages this one and restores
+        # what came down from it.
+        '/etc/openvpn/pki-salvage/' => 'openvpn/pki/',
     );
 }
 

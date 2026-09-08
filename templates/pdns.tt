@@ -15,9 +15,24 @@ mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
 # TODO do this via lexicon instead
 cp zonefile /var/spool/powerdns/[% domain %]/bind.zone
 zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdns/[% domain %]/zone.sql
-sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
+[%# Only load the zone into a database that does not already answer for it.  The
+    global half puts the previous guest zones.db back before this runs, and what
+    is in there is the live zone -- every record lexicon or DCV or somebody with
+    a shell added after the last provision.  Reloading the zonefile over it
+    would replace that with the handful of records this recipe knows about, and
+    it would not even get that far: zone2sql emits a plain insert into domains,
+    which the unique index on name refuses, so the target would fail outright.
+    A zone that is already there and needs changing is a job for lexicon. -%]
+sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% domain %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
 chown -R pdns:pdns /var/spool/powerdns
 chmod -R 0775 /var/spool/powerdns
+[%# pdns binds its control socket and its API socket as root, before it chroots
+    and before it drops to setuid -- and root without CAP_DAC_OVERRIDE, which
+    the unit does not grant, cannot write into a directory owned by pdns with
+    nothing for other.  So root owns the two it has to create sockets in, and
+    pdns keeps them through the group. -%]
+chown root:pdns /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
+chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
 [% script_dir %]/queue_postrun_task systemctl restart pdns
 [% script_dir %]/queue_postrun_task systemctl restart pdns-recursor
 # Setup lexicon shortcuts

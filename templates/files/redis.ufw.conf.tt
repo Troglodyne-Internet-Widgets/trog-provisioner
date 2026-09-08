@@ -1,0 +1,17 @@
+[%# Named redis-server and not redis, because ufw refuses a profile whose
+    section name is also a service name in /etc/services -- redis is 6379/tcp
+    there -- and says so only as a warning on stderr:
+
+        WARN: Skipping .redis.: also in /etc/services
+
+    so the profile is absent from `ufw app list`, no rule is ever made from it,
+    and nothing fails.  This one has been skipped on every guest that ever had
+    it, which is every guest with the port that redis is actually reachable on.
+
+    Rendered by this recipe rather than by ufw, because the port is this
+    recipe.s to know: ufw is handed rate_limits and nothing else, so a profile
+    on that side cannot name a port that was configured here. -%]
+[redis-server]
+title=Redis
+description=Redis in-memory data store, on the port this guest configured
+ports=[% port %]/tcp

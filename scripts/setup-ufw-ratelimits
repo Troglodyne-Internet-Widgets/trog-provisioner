@@ -2,7 +2,12 @@
 # Per-service connection rate limits, written into ufw's before.rules.
 #
 # Arguments are PORT=HITS pairs: the number of new connections a single source
-# may open to that port in a second before it is dropped.
+# may open to that port in a second before it is dropped, and EXEMPT=CIDR pairs
+# naming sources that are never dropped whatever they open.
+#
+# The exemptions are what admin_networks means once ssh is limited here rather
+# than by ufw: somebody administering the guest goes as fast as they like, and
+# everybody else meets the limit.
 #
 # ufw's own `limit` is six connections in thirty seconds, which is right for ssh
 # and absurd for a web server -- it rate limited real visitors off the site when
@@ -28,7 +33,23 @@ if [ "$#" -eq 0 ]; then
 fi
 
 block="$BEGIN\n"
+
+# The exemptions first, because iptables takes the first rule that matches and
+# a source let past has to be let past before anything counts it.
 for pair in "$@"; do
+    case "$pair" in
+        EXEMPT=*) ;;
+        *) continue ;;
+    esac
+    net=${pair##*=}
+    echo "Never rate limiting $net"
+    block="$block-A ufw-before-input -s $net -j RETURN\n"
+done
+
+for pair in "$@"; do
+    case "$pair" in
+        EXEMPT=*) continue ;;
+    esac
     port=${pair%%=*}
     hits=${pair##*=}
     echo "Rate limiting port $port at $hits new connections a second"

@@ -3,15 +3,21 @@ use strict;
 use warnings;
 use Test::More;
 
+# A DN with anything but ASCII in it arrives base64 encoded, on both sides of
+# the comparison at the bottom of this file.
+use MIME::Base64 qw{decode_base64};
+
 my $status = `systemctl is-active slapd 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'slapd is running');
 
 ok(-f '/etc/ldap/slapd.d/cn=config.ldif', 'slapd OLC config exists');
 
-# Verify LDAPS port is listening
-my $ldaps = `ss -tlnp 2>/dev/null | grep ':636'`;
-ok($ldaps, 'LDAPS port 636 is listening');
+# On the port this domain configured, not on 636.  SLAPD_SERVICES named a bare
+# ldaps:///, so slapd listened on the default whatever port: said, and asking
+# after 636 here agreed with it and reported a pass either way.
+my $ldaps = `ss -tlnp 2>/dev/null | grep ':[% port %] '`;
+ok($ldaps, 'LDAPS is listening on port [% port %]') or diag `ss -tlnp 2>/dev/null | grep slapd`;
 
 # Verify base DN is accessible
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
@@ -81,7 +87,13 @@ like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $gr
 # started after the change, so a slapd restarted before joining the group is one
 # that still cannot read the key -- the same error 80, from a process whose
 # account has the right group and whose process does not.
-my ($pid) = `systemctl show -p MainPID --value slapd 2>/dev/null` =~ m/(\d+)/;
+# The process table, not systemd.  slapd has no native unit here: what runs it
+# is /etc/init.d/slapd through systemd-sysv-generator, and a generated unit
+# never learns a MainPID -- `systemctl show -p MainPID --value slapd` answers 0
+# on a slapd that is plainly running and serving.  Asked that way this block
+# skipped itself on every guest it has ever been run on, which is the one thing
+# an assertion must not do quietly.
+my ($pid) = `pgrep -x slapd 2>/dev/null` =~ m/(\d+)/;
 SKIP: {
     skip 'slapd is not running', 1 unless $pid;
     my $procgroups = do { local (@ARGV, $/) = "/proc/$pid/status"; <> } // '';
@@ -98,5 +110,136 @@ foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %]
 
 my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
 like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
+
+# What a rebuild will be rebuilt from.
+#
+# The directory is the one thing here nothing regenerates: the seed knows the
+# accounts as users.yaml describes them and knows nothing about the password
+# somebody changed or the SSH key they added afterwards.  /var/lib/ldap is
+# 0700 openldap:openldap and the fetch is sftp as the admin user with no sudo,
+# so what has to exist is an export the admin user can read.
+my $export_dir = '/var/backups/ldap';
+ok(-d $export_dir, 'the directory is exported to somewhere the fetch can reach');
+
+my @dstat = stat($export_dir);
+is(scalar getpwuid($dstat[4] // -1), '[% admin_user %]',
+    'the export belongs to the admin user, who is the one who fetches it');
+is(($dstat[2] // 0) & 07777, 0700, 'and nobody else on the guest can read it')
+    or diag sprintf('mode %04o', ($dstat[2] // 0) & 07777);
+
+foreach my $ldif (qw{data.ldif config.ldif}) {
+    ok(-s "$export_dir/$ldif", "$ldif was exported and is not an empty file");
+
+    # Exactly what the fetch does: sftp as the admin user, no sudo, and no
+    # error anywhere when it turns out it cannot read the thing it came for.
+    my $rc = system("sudo -u [% admin_user %] test -r '$export_dir/$ldif'");
+    is($rc, 0, "and the admin user can read $ldif");
+}
+
+# LDIF wraps at 78 columns and continues with a leading space, so a DN longer
+# than that arrives split across two lines and matches nothing.
+sub unwrapped {
+    my ($path) = @_;
+    my $body = do { local (@ARGV, $/) = $path; <> } // '';
+    $body =~ s/\n //g;
+    return $body;
+}
+
+my $exported = unwrapped("$export_dir/data.ldif");
+like($exported, qr/^dn:\s*\Q[% base_dn %]\E$/mi, 'the data export is this domain and not an empty database');
+
+# What the seed put there, rather than what the package did.  The base entry
+# above is dpkg-reconfigure's work out of the debconf answers and is present
+# whether the seed ran, failed or was never called -- so it says nothing about
+# the seed.  These three are the seed's alone.
+foreach my $rdn ('ou=People', 'ou=Groups', 'cn=ldapusers,ou=Groups') {
+    like($exported, qr/^dn:\s*\Q$rdn,[% base_dn %]\E$/mi, "the seed made $rdn");
+}
+
+[% FOR u IN users %]
+like($exported, qr/^dn:\s*uid=\Q[% u.name %]\E,ou=People/mi, 'the export caught [% u.name %]');
+[% END %]
+
+my $exported_config = unwrapped("$export_dir/config.ldif");
+like($exported_config, qr/^dn:\s*cn=config$/mi, 'and the configuration database is exported beside it');
+
+ok(-x '/usr/local/sbin/ldap-export.sh', 'the exporter is installed');
+ok(-x '/usr/local/sbin/ldap-reload.sh', 'and so is the reloader the next guest runs');
+
+# Hourly, because an hour is what a rebuild is allowed to lose.  An export that
+# only ever ran during the provision would age into a directory as it was on
+# build day, which is the failure this whole arrangement exists to prevent.
+my $export_cron = do { local (@ARGV, $/) = '/etc/cron.d/ldap-export'; <> } // '';
+like($export_cron, qr{^\S+ \S+ \S+ \S+ \S+ +root +/usr/local/sbin/ldap-export\.sh}m,
+    'and it is run on a cron rather than only at provision time') or diag $export_cron;
+
+# And the other end of it: what came off the last guest is in the directory this
+# one is serving.  slapcat rather than ldapsearch on both sides -- it reads the
+# database as root, so no ACL hides an entry from the comparison and no
+# olcSizeLimit truncates it into a false pass.
+sub dns_of {
+    my ($body) = @_;
+    my @dns;
+
+    # Unwrapped here rather than by the caller.  slapcat's output is LDIF as
+    # much as the file it wrote is, so it wraps at the same 78 columns and
+    # continues with the same leading space -- and only the file side was ever
+    # being joined back up, so a DN long enough to wrap came off the live
+    # directory truncated at the fold and matched nothing on the other side.
+    # Both sides come through here, so this is where the join belongs.
+    $body =~ s/\n //g;
+
+    foreach my $line (split m/\n/, $body) {
+        push @dns, $1                if $line =~ m/^dn:\s+(.*)$/;
+        push @dns, decode_base64($1) if $line =~ m/^dn::\s+(.*)$/;
+    }
+
+    # A DN is case-insensitive and the space after a comma is not part of it.
+    return map { my $d = lc $_; $d =~ s/,\s+/,/g; $d } @dns;
+}
+
+my $reloaded = '/var/backups/ldap-reloaded.ldif';
+SKIP: {
+    skip 'this guest had nothing salvaged to reload, so it seeded its directory instead', 1
+        unless -s $reloaded;
+
+    # 2>&1 and not 2>/dev/null.  What this compares is the whole of one side
+    # against the whole of the other, so a slapcat that stopped partway through
+    # looks exactly like a directory that lost the entries it stopped before --
+    # and the sentence saying which it was is the one being discarded.
+    my $live_ldif = `slapcat -F /etc/ldap/slapd.d -b '[% base_dn %]' 2>&1`;
+    my %live      = map { $_ => 1 } dns_of($live_ldif);
+    my @lost      = grep { !$live{$_} } dns_of(unwrapped($reloaded));
+
+    is(scalar @lost, 0, 'every entry the previous guest had is in the directory this one serves')
+        or diag "missing: " . join(', ', splice(@lost, 0, 10)) . "\nslapcat said:\n$live_ldif";
+}
+
+# The firewall profile, not a rule.  A `ufw allow` in this recipe's fragment
+# did not survive the `ufw reset` that setup-ufw-rules opens with -- the ufw
+# target runs after this one -- so the rule was added and deleted on every
+# provision that had both recipes.  It only ever looked right because slapd
+# ships an LDAPS profile covering 636, which is the default; a domain that set
+# port: to anything else had nothing opening it.
+my $profile = '/etc/ufw/applications.d/ldap';
+ok(-f $profile, 'the ldap firewall profile was installed');
+my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
+like($prof, qr/^ports=\Q[% port %]\E\/tcp$/m, 'and it names the port this domain configured') or diag $prof;
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
+
+    # ufw has to be able to parse it, which is what listing it proves: a
+    # malformed profile is not reported, it is simply absent from the list.
+    # Listed is the whole assertion.  A profile ufw will not parse -- a section
+    # named for something already in /etc/services, which is what [ldap] was --
+    # is skipped with a warning on stderr and is simply absent here; no rule is
+    # ever made from it and nothing else fails.
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*slapd\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    my $status = `ufw status 2>/dev/null`;
+    like($status, qr/^\s*slapd\b/m, 'and has a rule for it after the reset') or diag $status;
+}
 
 done_testing();

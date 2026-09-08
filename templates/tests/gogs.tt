@@ -49,8 +49,77 @@ like($ini, qr/^MODE\s*=\s*console/m, 'gogs logs to the console as well as its ow
 
 ok(-s '[% install_dir %]/git.[% domain %]/data/gogs.db', 'the sqlite database was created');
 
+# The release asset is not named after the version alone.  gogs started
+# spelling it gogs_v0.14.2_linux_amd64.tar.gz at 0.14.2, so the URL built from
+# the bare version 404s from that release on -- curl wrote nothing, tar had
+# nothing to open and the whole target died before any of this ran.  Asking the
+# binary its version covers both halves: that one was fetched at all, and that
+# it is the one this domain asked for.
+my $reported = `/usr/local/bin/gogs --version 2>&1`;
+chomp $reported;
+like($reported, qr/\b\Q[% version %]\E\b/, 'the installed gogs is the version configured')
+    or diag $reported;
+
+# The git service the last guest was carrying, put where gogs reads it.
+# new_config fetches git.[% domain %] into the domain directory -- every
+# repository, the issue database, the users -- and nothing ever moved it back
+# out again, so a rebuilt guest came up with no repositories at all and met the
+# people who owned them with the installer.
+my $salvaged = '[% install_dir %]/[% domain %]/gogs';
+
+sub entries {
+    my ($dir) = @_;
+    opendir(my $dh, $dir) or return ();
+    my @found = grep { !m/\A[.][.]?\z/ } readdir $dh;
+    closedir $dh;
+    return @found;
+}
+
+# restore_state leaves the copy alone when the destination already has state --
+# re-provisioning a guest that is still running, whose own repositories are the
+# real ones.  Either way, nothing the copy knows about may be missing here.
+my @salvaged_repos = entries("$salvaged/repos");
+if (@salvaged_repos) {
+    my @live_repos = entries('[% install_dir %]/git.[% domain %]/repos');
+    ok(scalar @live_repos >= scalar @salvaged_repos, 'every account with salvaged repositories has them on the guest')
+        or diag "salvaged: @salvaged_repos, live: @live_repos";
+}
+ok(!-e "$salvaged/data/gogs.db" || -s '[% install_dir %]/git.[% domain %]/data/gogs.db',
+    'a salvaged database is not sitting in the domain directory with nothing at the live path');
+
+# The session key belongs to the guest.  It signs sessions and encrypts 2FA
+# enrolments, and it used to arrive as sixty-four characters minted by whichever
+# new_config run wrote app.ini -- so every re-provision logged everybody out and
+# voided every second factor, and said nothing about it.
+my ($key) = $ini =~ m/^SECRET_KEY\s*=\s*(\S+)\s*$/m;
+ok($key && length($key) >= 32, 'gogs has a session key of some substance')
+    or diag 'SECRET_KEY: ' . ($key // 'unset');
+
+my $salvaged_ini = "$salvaged/custom/conf/app.ini";
+if (-f $salvaged_ini) {
+    my $was = do { local (@ARGV, $/) = $salvaged_ini; <> } // '';
+    my ($had) = $was =~ m/^SECRET_KEY\s*=\s*(\S+)\s*$/m;
+    is($key, $had, 'and it is the key the guest already had, not one minted this run') if $had;
+}
+
 my $port = `ss -lntp 2>/dev/null | grep -c ':3000 '`;
 chomp $port;
 ok($port >= 1, 'gogs is listening on port 3000');
+
+# The host gogs believes it is.  nginxproxy writes one vhost, answering on the
+# domain and the aliases new_config gives it, and a git. is not among them --
+# so every clone URL gogs printed, every redirect after a login and every
+# webhook it signed named a host that nobody had made and nothing resolved.
+like($ini, qr{^ROOT_URL\s*=\s*https://\Q[% domain %]\E/?\s*$}m, 'ROOT_URL is the domain the vhost answers on')
+    or diag $ini;
+like($ini, qr/^DOMAIN\s*=\s*\Q[% domain %]\E\s*$/m, 'and so is DOMAIN');
+unlike($ini, qr{^(ROOT_URL|DOMAIN)\s*=.*\bgit\.\Q[% domain %]\E}m,
+    'neither names a git. host the operator would have had to create');
+
+# And it answers there.  The vhost proxies everything now that it serves no
+# statics of its own, so this is the whole path: nginx, the proxy_pass, gogs.
+my $served = `curl -sk -o /dev/null -w '%{http_code}' -H 'Host: [% domain %]' https://127.0.0.1/ 2>/dev/null`;
+like($served, qr/^(200|30[0-9])$/, 'the domain itself serves gogs through nginx')
+    or diag "got HTTP $served";
 
 done_testing();

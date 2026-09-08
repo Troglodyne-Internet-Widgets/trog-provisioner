@@ -407,6 +407,11 @@ sub template_files {
         # makefile fragment skips installing it in that case.
         'koan-ssh-privkey.tt' => 'koan-ssh-privkey',
 
+        # The ufw profile opening the matrix federation port outbound.
+        # Always rendered; the fragment installs it only when this bot is
+        # actually talking to a homeserver.
+        'koan.ufw.conf.tt' => 'koan_ufw.conf',
+
         # Pre-seeds gh CLI's auth state so the bot can run `gh` without
         # ever needing an interactive `gh auth login`.
         'koan-gh-hosts.yml.tt' => 'koan-gh-hosts.yml',

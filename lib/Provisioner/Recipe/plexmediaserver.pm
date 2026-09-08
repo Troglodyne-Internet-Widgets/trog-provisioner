@@ -43,15 +43,28 @@ Returns system package dependencies needed before the recipe target runs.
 
 =head3 remote_files
 
-Returns remote file mappings for backup/restore.
+Salvages C</var/lib/plexmediaserver/>, which is the library: the metadata Plex
+built by scanning, what everybody watched and how far into it they got, and the
+playlists.  The media itself lives on a mount and survives a rebuild without
+help, so what is actually at risk is everything the library remembered about it.
 
-=over 1
+The fragment restores it before Plex is started again, having first cleared away
+the directory skeleton the package laid down -- and only when this guest has
+nothing under C<Metadata> of its own, so re-provisioning a guest that is still
+running keeps the library it has rather than the copy fetched off it minutes
+earlier.
 
-=item INPUTS: $install_dir, $domain
+A restored library brings its own C<Preferences.xml>, which is why the fragment
+reads and modifies that file rather than writing a fresh one: the
+MachineIdentifier and the token saying this server is already claimed stay where
+they are, and only the certificate path and the configured account go over the
+top.  A rebuilt guest therefore comes back as the same server to Plex rather
+than as a new one waiting to be claimed, and C<claim_token> is wanted only by a
+server that has never been linked at all.
 
-=item OUTPUTS: hash of remote path => local backup path
-
-=back
+The directory is left owned C<plex:>I<admin_user> at 0750 so the next salvage
+can read it.  The fetch is an sftp session as the admin user with no sudo, and a
+library Plex keeps to itself comes back empty without saying so.
 
 =cut
 

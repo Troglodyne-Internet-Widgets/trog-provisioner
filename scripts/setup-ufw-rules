@@ -19,11 +19,11 @@ keeps the provisioner from throttling itself out of the guest it is building.
 
 =cut
 
-my $DRY_RUN = (grep { $_ eq '--dry-run' } @ARGV) ? 1 : 0;
+my $DRY_RUN = ( grep { $_ eq '--dry-run' } @ARGV ) ? 1 : 0;
 
 # Enable every available service.
 my $list = qx{ufw app list};
-my @apps = split(/\n/, $list);
+my @apps = split( /\n/, $list );
 shift @apps;
 @apps = map { s/^\s+//; $_ } @apps;
 
@@ -50,25 +50,49 @@ my @rules = (
 # Even for ssh the limit is too tight for us: a provision opens far more than
 # six connections, so the provisioner locks itself out partway through its own
 # run and every step after that fails as "connection refused" on an address that
-# was working a minute earlier.  The networks we administer from are passed in
-# and exempted; with none given, nothing is.
-my @admin = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
-my %rate_limited = (OpenSSH => 1);
+# was working a minute earlier.  Which is what it kept doing, because
+# admin_networks is empty unless somebody fills it in, and an exemption nobody
+# has is no exemption.
+#
+# So ssh is allowed like everything else and rate limited like everything else:
+# through setup-ufw-ratelimits, which limits port 22 at whatever
+# Provisioner::Recipe::ufw's rate_limits says -- sixty-four new connections a
+# second by default, rather than six in thirty.  That is a limit a person
+# administering the guest never reaches and a brute force still does, and it is
+# the same mechanism every other port here is limited by instead of a second one
+# sitting in front of it a hundred times tighter.
+#
+# The admin networks stay exempt from that limit, and are passed to
+# setup-ufw-ratelimits to be let past it.
+my @admin        = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
+my %rate_limited = ();
 
 foreach my $app (@apps) {
-    push(@rules, ["allow", "out", $app]);
 
-    unless ($rate_limited{$app}) {
-        push(@rules, ["allow", "in", $app]);
+    # Any limit an older provision left on this profile, first.  Adding the
+    # allow does not displace it: ufw keys a rule on its action as well as its
+    # ports, so the two sit side by side and the limit is the one that counts.
+    # A guest built before this stops limiting things therefore goes on limiting
+    # them however often it is re-provisioned -- and it is not only ssh.  The
+    # APT profile covers 53, 80 and 443, so the six-in-thirty landed on DNS as
+    # well, which is a machine that resolves a name twice and then cannot for
+    # half a minute.  Failure is the usual case and means there was none.
+    system( qw{ufw --force delete limit in},  $app );
+    system( qw{ufw --force delete limit out}, $app );
+
+    push( @rules, [ "allow", "out", $app ] );
+
+    unless ( $rate_limited{$app} ) {
+        push( @rules, [ "allow", "in", $app ] );
         next;
     }
 
-    push(@rules, ["allow", "from", $_, "to", "any", "app", $app]) for @admin;
-    push(@rules, ["limit", "in", $app]);
+    push( @rules, [ "allow", "from", $_, "to", "any", "app", $app ] ) for @admin;
+    push( @rules, [ "limit", "in", $app ] );
 }
 
-@rules = map { unshift(@{$_}, '--dry-run'); $_ } @rules if $DRY_RUN;
-@rules = map { unshift(@{$_}, 'ufw'); $_ } @rules;
+@rules = map { unshift( @{$_}, '--dry-run' ); $_ } @rules if $DRY_RUN;
+@rules = map { unshift( @{$_}, 'ufw' );       $_ } @rules;
 
 foreach my $rule (@rules) {
     system(@$rule);
@@ -79,6 +103,7 @@ system(qw{ufw allow out 32768:61000/tcp});
 system(qw{ufw allow out 32768:61000/udp});
 system(qw{ufw allow in 32768:61000/tcp});
 system(qw{ufw allow in 32768:61000/udp});
+
 # Allow dhcp v4/v6
 system(qw{ufw allow out 67:68/udp});
 system(qw{ufw allow in 67:68/udp});

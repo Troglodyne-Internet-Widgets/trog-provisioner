@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# Put a salvaged MariaDB dump into a server that has just been built.
+#
+#     mariadb-restore.sh <salvaged dump directory>
+#
+# The directory is what remote_files brought back: /var/backups/mysql off the
+# guest this one replaces, laid out by mariadb-backup.sh as
+# <timestamp>/<database>/<table>.sql.gz with the views, routines and grants
+# beside them.  It came down, it went back up into the domain directory, and
+# nothing imported it -- so a rebuilt guest came up holding whatever snapshot an
+# operator had once dropped in the data directory, and none of what had happened
+# since.  This is the leg that was missing.
+#
+# What it will not do is the important half.  scripts/restore_state declines when
+# the destination already has state in it, because re-provisioning a running
+# guest fetches that guest's own state minutes earlier, and writing a fetch that
+# came up short back over the original would replace the real thing with the half
+# of it we could read.  A database has the same problem and takes the same
+# answer, one level down: this creates a database that is not there and never
+# writes into one that is.  A rebuilt server has none of them and gets all of it;
+# a live one has all of them and gets nothing.
+set -euo pipefail
+shopt -s nullglob
+
+SALVAGED="${1:?usage: mariadb-restore.sh <salvaged dump directory>}"
+
+# The accounts this server made for itself, which the last guest's are not
+# allowed to replace.  root's password is configuration -- install_mariadb.sh
+# has just set it from root_pw and the recipe has written it into three .my.cnf
+# files -- so a salvaged GRANT putting the old hash back would leave every one of
+# them claiming a password the server no longer has.
+OURS='root|mariadb\.sys|mysql'
+
+# The system databases, and the last guest's copy of the privilege tables.  What
+# is worth keeping out of mysql is the application accounts and what they may do,
+# and that comes back from grants.sql.gz below -- rather than by writing another
+# machine's global_priv over the one that was just secured, which is how a guest
+# ends up with a root nobody has the password for.
+SKIP='mysql|information_schema|performance_schema|sys'
+
+# The last thing mariadb-backup.sh writes is `complete`, so a directory without
+# one is a backup that was interrupted -- or one taken before the backup learned
+# to say, which is the same amount of knowledge about it.  Restoring half a
+# database is worse than restoring none: it leaves the server holding data, and
+# holding data is exactly what stops the next provision from trying again.  An
+# operator who knows an older dump is whole says so by touching the file.
+newest_finished_dump() {
+    local dumps=( "$SALVAGED"/*/ )
+    local i
+    for (( i = ${#dumps[@]} - 1; i >= 0; i-- )); do
+        if [ -f "${dumps[$i]}complete" ]; then
+            printf '%s\n' "${dumps[$i]%/}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# information_schema rather than SHOW DATABASES LIKE: an underscore is a LIKE
+# wildcard, and a fair few of these names have one in them.
+database_exists() {
+    [ -n "$(mariadb -sN -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$1'")" ]
+}
+
+DUMP=$(newest_finished_dump) || {
+    echo "mariadb-restore.sh: no finished dump under $SALVAGED, leaving this server as it is"
+    exit 0
+}
+
+restored=0
+for dbdir in "$DUMP"/*/; do
+    db="$(basename "$dbdir")"
+    if printf '%s' "$db" | grep -qxE "$SKIP"; then
+        continue
+    fi
+
+    if database_exists "$db"; then
+        echo "mariadb-restore.sh: $db is already on this server, keeping what it has"
+        continue
+    fi
+
+    echo "mariadb-restore.sh: restoring $db from $DUMP"
+    mariadb -e "CREATE DATABASE \`$db\`"
+
+    # Tables first, then the views that select from them, then the routines that
+    # call both.  A table at a time is safe because every file mariadb-dump
+    # writes carries its own FOREIGN_KEY_CHECKS=0 header.
+    for table in "$dbdir"*.sql.gz; do
+        case "${table##*/}" in
+            views.sql.gz | routines.sql.gz | grants.sql.gz ) continue ;;
+        esac
+        pigz -dc "$table" | mariadb "$db"
+    done
+    for extra in views routines; do
+        if [ -f "$dbdir$extra.sql.gz" ]; then
+            pigz -dc "$dbdir$extra.sql.gz" | mariadb "$db"
+        fi
+    done
+
+    restored=$(( restored + 1 ))
+done
+
+if [ "$restored" -eq 0 ]; then
+    echo "mariadb-restore.sh: every database in $DUMP is already here; nothing restored"
+    exit 0
+fi
+
+# The accounts last, because a grant names a database that has to exist by then.
+# One file, whichever comes first: mariadb-dump --system=users writes every
+# account there is whichever database it was pointed at, so the per-database
+# copies are all the same list.  The file carries that database as well as the
+# accounts, which is why only the account statements are taken out of it -- they
+# are one to a line, which is what makes a line filter honest here.  A grep that
+# matches nothing exits 1, and finding no accounts to restore is not a failure.
+GRANTS="$(find "$DUMP" -mindepth 2 -maxdepth 2 -name grants.sql.gz -print -quit)"
+if [ -n "$GRANTS" ]; then
+    echo "mariadb-restore.sh: restoring the accounts out of $GRANTS"
+    pigz -dc "$GRANTS" \
+        | { grep -E '^(CREATE USER|ALTER USER|GRANT|REVOKE|SET DEFAULT ROLE|SET PASSWORD) ' || true; } \
+        | { grep -vE "[\`']($OURS)[\`']@" || true; } \
+        | mariadb
+fi
+
+echo "mariadb-restore.sh: restored $restored database(s) from $DUMP"

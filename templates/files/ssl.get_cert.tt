@@ -23,17 +23,23 @@ else
 fi
 
 # Fix ownership so that the admin can schlep certs
+#
+# The salvage is an sftp session as [% admin_user %] with no sudo, so anything
+# it cannot read comes back empty and silent -- and a guest rebuilt with
+# certificates it has no keys for re-issues from scratch, spending rate limit
+# and, if the account key went too, the registration.
+#
+# Certificates are public and stay world readable.  The private keys and the
+# account key are 0640 root:[% admin_user %]: readable by the account that
+# fetches them, by root, and by nobody else.  The keys were 0770 here, which
+# also handed the group write on them for no reason anybody needs.
 echo "Fixing cert/account ownership...";
-sudo chown -R root:[% admin_user %] /etc/dehydrated/certs
-sudo chown -R root:[% admin_user %] /etc/dehydrated/accounts
-sudo chown -R root:[% admin_user %] /var/lib/dehydrated/certs
-sudo chmod -R 0755 /etc/dehydrated/certs
-sudo chmod -R 0750 /etc/dehydrated/accounts
-sudo chmod -R 0755 /var/lib/dehydrated/certs
-for d in /etc/dehydrated/certs/[% domain %] "$live"; do
-    [ -d "$d" ] || continue
-    sudo find "$d" -maxdepth 1 -name 'priv*' -exec chmod 0770 {} +
-done
+sudo chown -R root:[% admin_user %] /etc/dehydrated/certs /etc/dehydrated/accounts /var/lib/dehydrated/certs
+sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type d -exec chmod 0755 {} +
+sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type f -exec chmod 0644 {} +
+sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type f -name 'priv*' -exec chmod 0640 {} +
+sudo find /etc/dehydrated/accounts -type d -exec chmod 0750 {} +
+sudo find /etc/dehydrated/accounts -type f -exec chmod 0640 {} +
 
 echo "Done."
 exit "$fetched"

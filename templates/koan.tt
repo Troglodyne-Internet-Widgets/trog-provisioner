@@ -174,10 +174,14 @@ systemctl enable koan-awake.service
 systemctl enable koan.service
 
 [% IF messaging_provider == 'matrix' %]
-# Matrix federation/homeserver port - `default deny outgoing` from the
-# ufw recipe blocks 8448 by default.  Queued post-run so it survives
-# `ufw reset` in the ufw recipe (which runs alphabetically after koan).
-[% script_dir %]/queue_postrun_task ufw allow out 8448
+[%# Matrix federation port.  `default deny outgoing` from the ufw recipe blocks
+    8448, and this used to be queued to postrun so that it landed after the
+    `ufw reset` setup-ufw-rules opens with.  Declared as an application profile
+    instead: the reset does not clear /etc/ufw/applications.d, so the ordering
+    stops mattering and the port this bot needs is written down where every
+    other recipe writes down the ports it needs. -%]
+# Declare the firewall profile for matrix federation
+install -o root -g root -m 0644 koan_ufw.conf /etc/ufw/applications.d/koan
 [% END %]
 
 # Defer start until everything else has run (cron, nginx, etc.)

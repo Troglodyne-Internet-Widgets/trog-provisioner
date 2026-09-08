@@ -1,20 +1,56 @@
-# Housekeeping
-mkdir -p /mail/[% domain %]
+# Housekeeping.
+#
+# 2750, grouped to [% admin_user %], before dovecot has ever looked in here:
+# dovecot copies the mode and the group of the nearest existing parent onto
+# every maildir and every message file it creates, so what this line sets is
+# what decides whether the rebuild after the next one still has any mail to
+# salvage.  The fetch is an sftp session as [% admin_user %] with no sudo, and a
+# maildir it cannot enter comes back empty without saying so.
+#
+# Group and not world: everyone with an account here has their mail in this
+# directory.  The admin account can read all of it, which is the price of being
+# able to carry it onto the next guest at all.
+install -d -m 2750 -o dovecot -g [% admin_user %] /mail/[% domain %]
 # opendkim
 mkdir -p /etc/opendkim/keys/[% domain %]
 mv TrustedHosts /etc/opendkim
 mv SigningTable /etc/opendkim
 mv KeyTable /etc/opendkim
 mv InternalHosts /etc/opendkim
-# Generate the key if it does not exist, otherwise use the one you got.
-mv [% install_dir %]/[% domain %]/.mail/keys/* /etc/opendkim/keys/; /bin/true
+# The signing key the last guest used, or a new one.
+#
+# `mv .../.mail/keys/*` could not tell a first build from a fetch that read
+# nothing, so an unreadable salvage looked exactly like having nothing to
+# restore and the key below was quietly regenerated -- which is every signature
+# this domain ever sent failing to verify.  restore_state says which of the two
+# it was.
+#
+# This domain's key rather than everything that was under /etc/opendkim/keys: a
+# guest hosting two domains has both in the salvage, and each domain's fragment
+# puts its own back.
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/.mail/keys/[% domain %]' '/etc/opendkim/keys/[% domain %]' 'opendkim:opendkim'
 [ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
 sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
 # Stash a copy in /mail owned by the admin for schlepping.
-cp -r /etc/opendkim/keys /mail/keys
+#
+# /etc/opendkim belongs to opendkim and the fetch has no sudo, so this copy is
+# the only thing remote_files can actually read the signing key out of.
+#
+# The trailing dot matters: `cp -r /etc/opendkim/keys /mail/keys` copies the
+# directory *into* /mail/keys once /mail/keys exists, which is what the second
+# domain provisioned onto a guest got.  install_dkim_records looks for
+# /mail/keys/<domain>/default.private, found /mail/keys/keys/<domain> instead,
+# and published no DKIM record for that domain at all.
+mkdir -p /mail/keys
+cp -r /etc/opendkim/keys/. /mail/keys/
 chown -R [% admin_user %]:[% admin_user %] /mail/keys
+# 0700 and 0600: a private key sitting outside the daemon that owns it, on its
+# way into the provisioner data directory and from there into whatever backs
+# that up.  Readable by the account that fetches it and by nobody else.
+find /mail/keys -type d -exec chmod 0700 {} +
+find /mail/keys -type f -exec chmod 0600 {} +
 mkdir /var/spool/postfix/opendkim
 chown opendkim:postfix /var/spool/postfix/opendkim
 chmod 0770 /var/spool/postfix/opendkim
@@ -39,14 +75,33 @@ mv /etc/dovecot/conf.d /etc/dovecot/conf-available
 mkdir -p /etc/dovecot/conf.d
 mv dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
 mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
+# The mailboxes the last guest had, put back before anything else goes into
+# this directory.  restore_state declines when the destination already has
+# something in it, and that check is the whole of what stands between a fetch
+# that came back partial and a live mail store -- so it has to run while the
+# store is still empty, which means ahead of the generated passwd file.
+#
+# It also declines when the salvage is empty, which is what the maildirs of a
+# guest whose store the fetch could not read look like.  `mv .../mailnames/*`
+# could tell neither of those from a first build, and left the dotfiles behind
+# into the bargain.
+#
+# The salvaged passwd file is kept beside the mailboxes as passwd.old rather
+# than restored, because the accounts come from the recipe.
+# TODO make the old one take precedence via configuration
+test -f [% install_dir %]/[% domain %]/mailnames/passwd && mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/mailnames' '/mail/[% domain %]' 'dovecot:[% admin_user %]'
 sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd
+[%# Readable by dovecot here rather than only in the sweep at the bottom of this
+    target.  It arrives out of the payload as 0600, owned by the account that
+    shipped it, and dovecot auth reads it as the dovecot account -- so every
+    lookup answered "open(...passwd) failed: Permission denied" right up until
+    the chown at the end, which is well past the one thing in this target that
+    asks for a lookup. -%]
+chown dovecot:[% admin_user %] /mail/[% domain %]/passwd
+chmod 0640 /mail/[% domain %]/passwd
 [% script_dir %]/queue_postrun_task systemctl restart dovecot
-# Stash a copy of the mailnames, and restore it if necessary
-# TODO make the old one take precedence via configuration
-mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
-mv [% install_dir %]/[% domain %]/mailnames/* /mail/[% domain %]/; /bin/true
-chown -R dovecot:dovecot /mail/[% domain %]/
 # amvavisd-new
 mv 50-user /etc/amavis/conf.d/
 chown root:root /etc/amavis/conf.d/50-user
@@ -102,12 +157,43 @@ mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 [%- END %]
 # Setup mailboxes and sieve scripts for the various users
+[%# doveadm takes the account the way dovecot knows it, which is the full
+    address: the passwd-file userdb this pairs with is keyed on
+    <local part>@<domain>, so a bare local part is a user dovecot has never
+    heard of.  `doveadm mailbox create -u bob` answered
+    "doveadm(bob): Error: User doesn.t exist" and exited 67, which took the
+    whole mail target down with it and left the guest with no tests run at all.
+
+    sievec, not sievc.  Nothing had ever reached that line, because the guard
+    ahead of it only fires for a domain whose salvage brought a sieve script
+    back. -%]
+[%# doveadm does not read the configuration, it asks the auth process that is
+    already running -- and that one came up with the packaged configuration,
+    before either dovecot.conf above was installed.  The restart of dovecot this
+    target asks for is queued to postrun, which is long after the loop below, so
+    what answered every lookup here was the userdb of a dovecot that had never
+    been told about this domain: "User doesn.t exist", exit 67, target dead.
+    Restarted here instead, and queued as well, since the sweep at the bottom
+    changes the store again. -%]
+systemctl restart dovecot
 [% FOR name IN names.keys() %]
 test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && ln -s "/mail/[% domain %]/[% name %]/[% name %].sieve" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
-test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievc "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
+test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievec "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
 [% FOR box IN names.$name.mailboxes %]
-doveadm mailbox create -u [% name %] [% box %]
+[%# Asked for rather than made unconditionally: a rebuild restores this
+    account.s maildirs before this line, and creating a mailbox that is already
+    there is "Mailbox already exists" and exit 65 -- so the guest that had mail
+    to salvage is exactly the one this used to kill. -%]
+doveadm mailbox status -u [% name %]@[% domain %] messages [% box %] > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] [% box %]
 [% END -%]
 [% END -%]
+# The same thing the housekeeping at the top said, said again now that doveadm
+# has made the mailboxes and the store has grown since.  It used to end
+# `chown -R dovecot:dovecot`, and dovecot keeps its maildirs to itself: the next
+# fetch read nothing, said nothing, and the mail survived one rebuild and not
+# two.
+chown -R dovecot:[% admin_user %] /mail/[% domain %]
+find /mail/[% domain %] -type d -exec chmod 2750 {} +
+find /mail/[% domain %] -type f -exec chmod 0640 {} +
 # Set up mail cron to run sa-learn etc
 install -m 0644 -o root -g root mailcron /etc/cron.d/[% domain %]-mailcron

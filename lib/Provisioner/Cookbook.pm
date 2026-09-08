@@ -12,6 +12,7 @@ use Clone qw{clone};
 use Cwd();
 use File::Basename();
 use File::Find();
+use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
 use Hash::Merge();
@@ -71,11 +72,9 @@ sub names {
     my ($class) = @_;
 
     my $dir = $class->recipe_dir;
-    opendir( my $dh, $dir ) or die "Could not read $dir: $!\n";
-    my @names = sort map { m/\A(\w+)\.pm\z/ ? $1 : () } readdir $dh;
-    closedir $dh;
+    die "Could not read $dir\n" unless -d $dir;
 
-    return @names;
+    return map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
 }
 
 =head2 has($name)

@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use IO::Prompter();
+
 =head1 NAME
 
 Trog::Credentials - passwords handed to a run that has nobody to ask.
@@ -73,15 +75,6 @@ type it.
 
 =head1 CLASS METHODS
 
-=head2 get($name)
-
-The credential, or undef if it was not given.
-
-=head2 have($name)
-
-Whether it was given, without reading it.  C<get> on an empty value and C<get> on
-a missing one both look the same otherwise.
-
 =cut
 
 # Names a caller may ask for.  An allowlist rather than free text: a typo in the
@@ -91,10 +84,85 @@ our %KNOWN = map { $_ => 1 } qw{keepass sudo};
 
 our %CREDENTIAL;
 
+=head2 prompt($message, $name)
+
+The password, asked for if this run has not already been given it.
+
+Here rather than in L<Trog::Secrets>, which is where it used to live: what this
+does is get a credential, which is what this module is for.  L<Trog::Machine>
+wants the same thing when sudo on the far side turns out to need a password,
+and one way of asking is better than two.
+
+C<$name> says which password this is, and is what makes it answerable without
+asking -- a run driven by something with no terminal hands its passwords in up
+front, and this returns one of those rather than prompting.  Leave the name out
+and it always asks, which is what you want for something there is no name for.
+
+=cut
+
+sub prompt {
+    my ( $class, $message, $name ) = @_;
+    $message //= 'Enter password:';
+
+    return $class->get($name) if defined $name && $class->have($name);
+
+    # IO::Prompter reads from *ARGV, so a program that has arguments -- which
+    # bin/new_config and bin/provision both do, the domain being one -- sends it
+    # off to open a file named after one of them:
+    #
+    #     prompt(): Can't open *ARGV: No such file or directory
+    #
+    # Flattening @ARGV to a single string leaves nothing there to open, and it
+    # falls back to the terminal or to standard input as intended.
+    local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
+    my $answer = IO::Prompter::prompt( $message, -echo => '*' );
+
+    # Kept, so the next thing in this run that wants the same store is not asked
+    # again.  The usual caller pipes the answer in, and a pipe answers once.
+    $class->remember( $name, "$answer" ) if defined $name;
+
+    return $answer;
+}
+
+=head2 remember($name, $value)
+
+Keep something that was typed rather than handed in, so that the next thing in
+the same run wanting it does not ask again.
+
+A provision resolves the store twice -- once to fill in the C<secret:> notes in
+a configuration, once to put the files a recipe reads but must not generate on
+the guest -- and asking twice is worse than a nuisance: the usual caller pipes
+the answer in, and a pipe answers once.
+
+=cut
+
+sub remember {
+    my ( $class, $name, $value ) = @_;
+
+    die "Unknown credential '$name'.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
+      unless $KNOWN{$name};
+
+    $CREDENTIAL{$name} = $value;
+    return 1;
+}
+
+=head2 get($name)
+
+The credential, or undef if it was not given.
+
+=cut
+
 sub get {
     my ( $class, $name ) = @_;
     return $CREDENTIAL{$name};
 }
+
+=head2 have($name)
+
+Whether it was given, without reading it.  C<get> on an empty value and C<get> on
+a missing one both look the same otherwise.
+
+=cut
 
 sub have {
     my ( $class, $name ) = @_;
@@ -105,7 +173,22 @@ sub have {
 
 Read the block.  C<$fh> defaults to standard input; pass one in tests.
 
-Nothing calls this for you.  See IT HAS TO BE ASKED FOR.
+B<This is what C<--credentials> is.>  C<bin/provision --credentials> and
+C<bin/new_config --credentials> call it once, before anything that could want a
+password, and nothing else does -- see IT HAS TO BE ASKED FOR.
+
+It is not a slower C<prompt>.  C<prompt> gets one credential at the moment
+something wants it, and on a pipe that means whichever line arrives next.  This
+takes several at once, each named, so the order they are asked for in does not
+matter -- which is the whole point for a run with no terminal that needs both
+the store passphrase and a sudo password and cannot know which will be wanted
+first.  That is what makes it worth piping a block rather than a bare password:
+
+    printf 'keepass: %s\nsudo: %s\n\n' "$STORE_PASS" "$SUDO_PASS" \
+        | bin/provision --credentials some.domain
+
+Everything it reads goes where C<prompt> looks first, so a password given here
+is one nothing asks about again.
 
 =cut
 

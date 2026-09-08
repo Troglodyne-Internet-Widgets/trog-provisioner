@@ -4,7 +4,7 @@
 
 set -uo pipefail
 
-GOGS_URL="https://git.[% domain %]"
+GOGS_URL="https://[% domain %]"
 GOGS_ADMIN="[% gogs_admin %]"
 GOGS_PASS="[% admin_password %]"
 [% IF github_token -%]

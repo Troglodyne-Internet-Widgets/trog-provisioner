@@ -37,7 +37,36 @@ like($domain_conf, qr{^gsqlite3-database=/zones\.db$}m,
     'the database is named relative to the chroot') or diag $domain_conf;
 
 # And it is where that resolves to from outside.
-ok(-s '/var/spool/powerdns/zones.db', 'which is /var/spool/powerdns/zones.db on the host');
+my $zonedb = '/var/spool/powerdns/zones.db';
+ok(-s $zonedb, 'which is /var/spool/powerdns/zones.db on the host');
+
+# Whichever way this guest got its database -- loaded from the zonefile on a
+# first build, or handed back the previous guest's on a rebuild -- it has to be
+# answering for this domain by the end of it.  The rebuild is the case that used
+# to come out empty, and the case the guard on the zone load can now break.
+my $domain_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM domains WHERE name='[% domain %]'" 2>&1` // '';
+chomp $domain_rows;
+is($domain_rows, '1', 'the zone database answers for this domain, exactly once') or diag $domain_rows;
+
+my $record_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM records r JOIN domains d ON d.id = r.domain_id WHERE d.name='[% domain %]'" 2>&1` // '';
+chomp $record_rows;
+ok($record_rows =~ m/^[0-9]+$/ && $record_rows > 0, "and has records for it ($record_rows)") or diag $record_rows;
+
+# restore_state takes the salvage away when it puts it back, so one still
+# sitting in the domain directory means it declined.  Declining is the right
+# answer against a guest that already had its zones -- it is the wrong one while
+# the salvage holds records this database has never seen, which is a rebuild
+# that threw away every zone edit lexicon or DCV made since the last provision.
+my $salvaged = '[% install_dir %]/[% domain %]/pdns/zones.db';
+SKIP: {
+    skip 'no previous guest was salvaged from', 1 unless -s $salvaged;
+    my $was = `sqlite3 '$salvaged' 'SELECT COUNT(*) FROM records' 2>/dev/null` // '';
+    my $now = `sqlite3 '$zonedb' 'SELECT COUNT(*) FROM records' 2>/dev/null` // '';
+    chomp($was, $now);
+    ok($was =~ m/^[0-9]+$/ && $now =~ m/^[0-9]+$/ && $now >= $was,
+        "the live database kept the $was records the salvage had (it has $now)")
+        or diag "salvage at $salvaged was never restored into $zonedb";
+}
 
 # The socket itself, which is what lexicon talks to.
 my $api = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/api.conf'; <> } // '';
@@ -87,5 +116,49 @@ like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or
 unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
     or diag $execstart;
 
+
+# chroot(2) needs CAP_SYS_CHROOT, so a pdns_server the unit starts as User=pdns
+# never enters the chroot -- and then every path in its configuration, all of
+# which are written relative to that root, points somewhere on the real
+# filesystem that either does not exist or is not its to write.
+my $unit_user = `systemctl show -p User --value pdns 2>/dev/null`;
+chomp $unit_user;
+ok($unit_user eq 'root' || $unit_user eq '', 'pdns starts with the privilege it needs to chroot') or diag "User=$unit_user";
+
+# Both sets, not just the bounding one: the ambient set is what the process
+# actually starts holding, and a pdns that can chroot but cannot setuid spends
+# its life failing to drop privileges once a second.
+foreach my $set (qw{CapabilityBoundingSet AmbientCapabilities}) {
+    my $caps = `systemctl show -p $set --value pdns 2>/dev/null`;
+    like($caps, qr/cap_sys_chroot/i, "$set lets it chroot");
+    like($caps, qr/cap_setuid/i,     "$set lets it drop privileges afterwards");
+}
+
+my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'; <> } // '';
+like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');
+like($global_conf, qr/^setgid=pdns$/m, 'both halves of it');
+
+# Which is the whole point: the API socket lands inside the chroot, where
+# synczones and the patched lexicon look for it.
+ok(-S '/var/spool/powerdns/api.sock', 'the API socket exists, so the webserver bound it')
+    or diag `systemctl status pdns --no-pager -n 15 2>&1 | tail -8`;
+
+# pdns runs as pdns and the payload arrives owned by the admin user, so a
+# fragment moved into place and left alone is one pdns cannot read -- it falls
+# back to the packaged defaults, binds 0.0.0.0:53 on top of the recursor, and
+# exits.  Which looks like anything except a permissions problem.
+foreach my $fragment (qw{00-global.conf sqlite.conf api.conf}) {
+    my $path = "/etc/powerdns/pdns.d/$fragment";
+    ok(-f $path, "$fragment is installed");
+    my @st = stat $path;
+    next unless @st;
+    is(scalar getgrgid($st[5] // -1), 'pdns', "$fragment is group pdns");
+    ok($st[2] & 0040, "$fragment is group readable, so pdns can actually read it");
+}
+
+# What the fragments are for: without them pdns takes the packaged default of
+# 0.0.0.0:53, which is where the recursor already is.
+my $ports = `ss -lnup 2>/dev/null`;
+like($ports, qr/127\.0\.0\.1:2500/, 'pdns is on the port the recipe puts it on') or diag $ports;
 
 done_testing();

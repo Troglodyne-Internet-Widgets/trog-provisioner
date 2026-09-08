@@ -1,9 +1,44 @@
 # Create garage system user
 id garage 2>/dev/null || useradd -r -d [% data_dir %] -s /usr/sbin/nologin garage
-# Create storage directories
+[%# The objects and the metadata that says what they are: everything about a
+    garage node that is not already in garage.toml, and the two things
+    remote_files names.  Neither leg of that round trip used to happen.
+
+    The fetch is an sftp session as the admin user with no sudo, and these were
+    garage:garage 0750, which it reads nothing out of and says nothing about.
+    The group goes to the admin user rather than a readable copy being
+    staged the way the openvpn pki is: an object store is the wrong size to keep
+    two of, and a snapshot taken at provision time would be stale the moment
+    anything was written to a bucket.  Setgid, with the UMask in
+    garage.service, is what keeps that true for the files garage writes later
+    rather than only for the ones sitting here now.  The trade is the usual one
+    and worth saying out loud: the objects are readable from here on by whoever
+    holds the admin account, and travel into the data directory and into any
+    backup taken of it.
+
+    Restoring is simpler here than it is for redis, because garage is not
+    running yet -- it is downloaded further down and started from a postrun task
+    at the end -- so what is in the destination is whatever the last provision
+    left, and restore_state can tell a rebuilt guest from a live one on its own.
+    It declines on a live one, which is what keeps a fetch that came back
+    partial from being written over the real thing. -%]
+# Create storage directories, and put back what was salvaged off the guest this
+# one replaces before anything is started that would write over it.
 mkdir -p '[% data_dir %]' '[% metadata_dir %]'
-chown -R garage:garage '[% data_dir %]' '[% metadata_dir %]'
-chmod 0750 '[% data_dir %]' '[% metadata_dir %]'
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/data' '[% data_dir %]'
+[%# The metadata comes back as a snapshot rather than as the database itself --
+    see remote_files -- so it goes back the same way: the newest one salvaged
+    becomes the database this node starts on.  Into db.lmdb, which is what
+    garage opens, and only when there is not one there already: a guest with its
+    own metadata keeps it, exactly as restore_state would have it. -%]
+[% script_dir %]/restore_state '[% install_dir %]/[% domain %]/garage/snapshots' '[% metadata_dir %]/snapshots'
+NEWEST=$$(ls -1dt '[% metadata_dir %]'/snapshots/*/ 2>/dev/null | head -1); \
+if [ -n "$$NEWEST" ] && [ ! -e '[% metadata_dir %]/db.lmdb' ]; then \
+    cp -a "$$NEWEST" '[% metadata_dir %]/db.lmdb'; \
+    echo "garage: started from the snapshot at $$NEWEST"; \
+fi
+chown -R garage:[% admin_user %] '[% data_dir %]' '[% metadata_dir %]'
+find '[% data_dir %]' '[% metadata_dir %]' -type d -exec chmod 2750 {} +
 # Download garage binary (idempotent - skipped if same version already installed)
 if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/null | grep -qF '[% version %]'; then \
     curl -fsSL \
@@ -14,11 +49,26 @@ if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/nu
 fi
 # Install config (mode 0600 - contains rpc_secret)
 install -m 0600 -o garage -g garage garage.toml /etc/garage.toml
+[%# Given away here because bin/provision places it before this guest has a
+    garage account to give it to -- the useradd above is in this same target. -%]
+chown garage:garage /etc/garage.rpc_secret
+chmod 0600 /etc/garage.rpc_secret
 # Install systemd service and init script
 install -m 0644 garage.service /etc/systemd/system/garage.service
 install -m 0755 garage_init.sh [% script_dir %]/garage_init.sh
+[%# The snapshot the next rebuild will be restored from.  Nightly, and once now
+    so that a guest rebuilt before the first cron has something to be rebuilt
+    from -- queued, because garage has to be running to be asked for one. -%]
+install -m 0750 garage-snapshot.sh /usr/local/sbin/garage-snapshot.sh
+install -m 0644 garage-snapshot.cron /etc/cron.d/garage-snapshot
+chown root:root /etc/cron.d/garage-snapshot
+chmod 0644 /etc/cron.d/garage-snapshot
 # Enable and start, then run layout init and bucket creation post-start
 systemctl daemon-reload
 systemctl enable garage
 [% script_dir %]/queue_postrun_task systemctl start garage
 [% script_dir %]/queue_postrun_task [% script_dir %]/garage_init.sh
+[%# Last, because `garage meta snapshot` asks the running daemon for one: queued
+    ahead of the start it needs, it fails and a guest rebuilt before the first
+    cron has nothing to be rebuilt from. -%]
+[% script_dir %]/queue_postrun_task /usr/local/sbin/garage-snapshot.sh

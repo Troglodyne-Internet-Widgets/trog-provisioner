@@ -8,9 +8,10 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
+use Crypt::PRNG();
+
 use parent qw{Provisioner::Recipe};
 
-use Crypt::PRNG();
 use HTTP::Tiny;
 use Cpanel::JSON::XS();
 
@@ -49,6 +50,27 @@ Downloads the statically-linked garage binary from GitHub releases, installs a
 systemd service, writes C</etc/garage.toml>, and runs C<garage_init.sh> to
 apply a single-node layout and create any requested S3 buckets.
 
+=head3 Surviving a rebuild
+
+C<data_dir> and C<metadata_dir> are salvaged off a running guest and put back on
+the one that replaces it, before garage is started, so a rebuilt node comes up
+with its buckets and their contents rather than as an empty single-node cluster
+with a fresh layout.
+
+The fetch has no sudo, so both directories are owned C<garage> with the admin
+user as their group and the setgid bit set, and C<garage.service> is given a
+C<UMask> that leaves what garage writes readable to that group.  Left as
+C<garage:garage> 0750 they came back as empty directories and said nothing about
+it, which is the failure this arrangement buys off: the objects are readable
+from here on by whoever holds the admin account, and travel into the data
+directory and into whatever backup is taken of it.
+
+Only the default paths are salvaged.  C<remote_files> is called without the
+domain configuration, so a node told to keep its data somewhere else is fetched
+from C</var/lib/garage> regardless -- which finds nothing rather than the wrong
+thing, and wants naming in the backup targets by hand.  Restoring is not
+affected; the fragment knows the configured paths and uses them.
+
 =head3 deps
 
 Requires C<curl> to download the Garage binary.
@@ -59,9 +81,16 @@ Validates the recipe configuration:
 
 =over 4
 
-=item C<rpc_secret> (optional)  64-character hex string used as the shared
-RPC secret between cluster nodes.  Auto-generated with C<openssl rand -hex 32>
-on first run and persisted to C<rpc_secret.txt> in the domain output directory.
+=item The RPC secret
+
+The 32-byte hex secret nodes in a cluster authenticate to each other with.  It
+is not a configuration field: it is kept in the secret store, placed on the
+guest as C</etc/garage.rpc_secret> by C<bin/provision>, and named to garage by
+C<rpc_secret_file>.  So it is the same secret across provisions -- a fresh one
+is a rotation, and the rest of the cluster stops talking to this node -- and it
+never sits in the domain directory, which is what gets carried off to the
+hypervisor and into every backup.  See C<guest_secrets> in
+L<Provisioner::Recipe>.
 
 =item C<version> (optional, default: latest GitHub release)  Garage release tag to download.
 
@@ -124,24 +153,25 @@ sub _latest_garage_version {
     return $FALLBACK_VERSION;
 }
 
-sub _rpc_secret {
-    my ($self) = @_;
-    my $secret_file = "$self->{output_dir}/rpc_secret.txt";
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    if ( -f $secret_file ) {
-        open( my $fh, '<', $secret_file ) or die "Cannot read $secret_file: $!";
-        chomp( my $secret = <$fh> );
-        return $secret;
-    }
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
 
-    # 32 bytes -> the 64 hex chars garage expects for rpc_secret
-    my $secret = Crypt::PRNG::random_bytes_hex(32);
-    die "Could not generate rpc_secret" unless $secret =~ /^[0-9a-f]{64}$/;
-    open( my $fh, '>', $secret_file ) or die "Cannot write $secret_file: $!";
-    print $fh "$secret\n";
-    close $fh;
-    chmod 0600, $secret_file;
-    return $secret;
+    # The shared secret every node in the cluster authenticates with.  Kept in
+    # the store and placed as a file rather than rendered into garage.toml: a
+    # default that mints a fresh one is a rotation, and the rest of the cluster
+    # stops talking to this node at the next provision.  garage reads it out of
+    # the path rpc_secret_file names, which is what garage.toml now carries.
+    #
+    # Outside the domain directory on purpose -- that is what the data recipe
+    # takes to the hypervisor and into every backup of it.
+    return (
+        '/etc/garage.rpc_secret' => {
+            ref      => "secret:garage/$domain-rpc-secret/password",
+            generate => sub { Crypt::PRNG::random_bytes_hex(32) },
+            owner    => 'garage:garage',
+            mode     => '0600',
+        },
+    );
 }
 
 sub rate_limits {
@@ -156,7 +186,6 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            rpc_secret         => { type => 'string',  default => $self->_rpc_secret(), },
             version            => { type => 'string',  default => _latest_garage_version(), },
             data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
             metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },
@@ -180,22 +209,53 @@ sub args {
 
 sub template_files {
     return (
-        'garage.toml.tt'    => 'garage.toml',
-        'garage.service.tt' => 'garage.service',
-        'garage_init.sh.tt' => 'garage_init.sh',
+        'garage.toml.tt'          => 'garage.toml',
+        'garage.service.tt'       => 'garage.service',
+        'garage_init.sh.tt'       => 'garage_init.sh',
+        'garage.snapshot.sh.tt'   => 'garage-snapshot.sh',
+        'garage.snapshot.cron.tt' => 'garage-snapshot.cron',
     );
+}
+
+# A snapshot taken now, rather than whatever the nightly cron last left: the
+# metadata is what says which object is which, and a rebuild wants the one that
+# matches the objects coming down beside it.
+sub remote_prepare {
+    return ('/usr/local/sbin/garage-snapshot.sh');
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # data_dir and metadata_dir are user-configurable; fall back to defaults.
-    # Operators using non-default paths must add them to backup targets manually.
+    # The objects, and a snapshot of the metadata that says what they are, which
+    # together are everything about a garage node that is not already in
+    # garage.toml.
+    #
+    # A snapshot rather than the metadata directory itself, because that is an
+    # LMDB database: LMDB writes its files 0600 whatever the directory says, so
+    # the group the rest of the tree is given never reaches them and the fetch
+    # reads nothing -- and copying a live LMDB out from under a running writer
+    # produces a database with a torn page in it that restores looking fine.
+    # garage-snapshot.sh asks garage for one nightly; see garage.tt for the leg
+    # that puts it back.
+    # templates/garage.tt is the other half: it gives both directories the admin
+    # user as their group, because the fetch is an sftp session as that user
+    # with no sudo and 0750 garage:garage comes back empty without complaining,
+    # and it calls restore_state on each of them before garage is started.
+    #
+    # The defaults in practice, whatever the domain configured.  Nothing hands
+    # this method the domain configuration: bin/new_config builds the recipe
+    # object out of the provisioner options alone, and backupdestination calls
+    # it on the class name, so there is no data_dir on $self to find.  An
+    # operator who moved either directory therefore gets a fetch of a path that
+    # is not there and a restore with nothing to do -- a rebuild that loses the
+    # objects rather than one that corrupts them, and a path to name in the
+    # backup targets by hand.
     my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
     my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
     return (
-        "$data_dir/"     => 'garage/data/',
-        "$metadata_dir/" => 'garage/meta/',
+        "$data_dir/"               => 'garage/data/',
+        "$metadata_dir/snapshots/" => 'garage/snapshots/',
     );
 }
 

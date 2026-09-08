@@ -1,0 +1,81 @@
+#!/bin/bash
+# Load the salvaged directory into a guest that has just been built.
+#
+# This is the far end of the round trip ldap-export.sh starts.  The export left
+# an LDIF where the admin user could read it, bin/new_config fetched it into the
+# domain's data directory, the data target put it back on the new guest and
+# restore_state moved it to /var/backups/ldap; what is left is to get it into
+# slapd before the seed runs, so that a rebuilt guest comes up with the accounts
+# it had rather than the accounts it was first provisioned with.
+#
+# Only the data comes back.  The configuration database is exported beside it
+# and stays exported: cn=config names the schema the slapd that wrote it had,
+# the paths that slapd was built with and the TLS settings this recipe rewrites
+# on every provision, so loading a previous guest's copy over a new one is the
+# way to get a slapd that will not start for reasons it does not print.  What an
+# operator changed there -- an ACL, an overlay -- is in the export for somebody
+# to read and put back deliberately.
+
+set -euo pipefail
+
+BASE_DN='[% base_dn %]'
+SALVAGED=/var/backups/ldap/data.ldif
+
+# What was loaded, kept out of /var/backups/ldap so that the next export does
+# not overwrite it and the next fetch does not carry it back and forth forever.
+# It is what this guest was built from, which is the first thing anybody asks
+# when the directory is not what they expected.
+LOADED=/var/backups/ldap-reloaded.ldif
+
+if [ ! -s "$SALVAGED" ]; then
+    echo "ldap-reload: nothing salvaged at $SALVAGED, the seed is the directory"
+    exit 0
+fi
+
+# The guard, and the reason this is not just a slapadd.  A provision runs
+# against a guest that is already serving as often as against a new one, and on
+# that guest the salvage is a fetch taken minutes ago -- possibly a partial one.
+# Loading it would mean wiping a live directory and putting back the half of it
+# we could read.  So: anything in the database that the package did not put
+# there means this guest has a directory of its own, and it keeps it.
+#
+# What the package puts there is the suffix and the administrator beneath it,
+# both made by dpkg-reconfigure out of the debconf answers, and nothing else --
+# the seed that fills in the rest has not run yet at this point in the fragment.
+UNEXPECTED=$(slapcat -F /etc/ldap/slapd.d -b "$BASE_DN" 2>/dev/null |
+    grep '^dn:' |
+    grep -vxF "dn: $BASE_DN" |
+    grep -vxF "dn: cn=admin,$BASE_DN" || true)
+
+if [ -n "$UNEXPECTED" ]; then
+    echo "ldap-reload: $BASE_DN already has entries of its own, keeping them; $SALVAGED left where it is"
+    exit 0
+fi
+
+systemctl stop slapd
+
+# Moved aside rather than deleted.  slapadd on a directory of any size is a
+# minute of work that can fail on one malformed entry, and the difference
+# between a guest that stops the build with its packaged database intact and one
+# that carries on with an empty directory is this line.
+STASH=/var/lib/ldap.packaged
+rm -rf "$STASH"
+mv /var/lib/ldap "$STASH"
+install -d -o openldap -g openldap -m 0700 /var/lib/ldap
+
+if ! slapadd -q -F /etc/ldap/slapd.d -b "$BASE_DN" -l "$SALVAGED"; then
+    rm -rf /var/lib/ldap
+    mv "$STASH" /var/lib/ldap
+    systemctl start slapd
+    echo "ldap-reload: slapadd refused $SALVAGED; the packaged database is back and the directory was not restored" >&2
+    exit 1
+fi
+
+# slapadd wrote those files as root, and slapd does not run as root.
+chown -R openldap:openldap /var/lib/ldap
+rm -rf "$STASH"
+
+install -o root -g root -m 0600 "$SALVAGED" "$LOADED"
+
+systemctl start slapd
+echo "ldap-reload: loaded $SALVAGED into $BASE_DN"

@@ -458,6 +458,45 @@ sub remote_skip {
     return ();
 }
 
+=head3 %files = $recipe->guest_secrets($install_dir, $domain)
+
+Files the guest has to have that must not travel in the payload, as a map of the
+path on the guest to how one gets there:
+
+    "$install_dir/matrix.$domain/homeserver.signing.key" => {
+        ref      => "secret:matrix/$domain-signing-key/password",
+        generate => \&_signing_key,
+        owner    => 'matrix-synapse:matrix-synapse',
+        mode     => '0600',
+    }
+
+The value lives in the secret store: made once by C<generate>, answered from
+there every provision after.  C<bin/new_config> writes the references, never the
+values, beside the domain; C<bin/provision> resolves them and puts each file on
+the guest before the makefile runs.
+
+Which is why this is not C<remote_files>.  A secret salvaged off a guest lands
+in the domain directory, and from there into the payload of every rebuild and
+into every backup taken of it.  These never do -- name the file in
+C<remote_skip> as well and the guest is the only place it sits.
+
+A recipe using this must not generate the file itself when it is missing.  It is
+missing because the store could not be reached, and a fresh one is a new
+identity, which is the thing the store exists to prevent.
+
+C<ref> must name a field the store keeps, which is C<password> or C<username>.
+
+C<owner> is what the file ends up owned by, not what it lands as.  Placement
+happens before the makefile, so the account usually belongs to a package that is
+not installed yet; C<mode> is what keeps the secret to itself until the recipe
+chowns it, which the recipe has to do.
+
+=cut
+
+sub guest_secrets {
+    return ();
+}
+
 =head3 @dirs = $recipe->datadirs()
 
 Directories under the domain's C<install_dir> this recipe needs to exist.
@@ -468,6 +507,33 @@ owned, so a fragment does not have to open with a run of C<mkdir -p>.
 =cut
 
 sub datadirs {
+    return ();
+}
+
+=head3 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+What the guest should be asked to do immediately before its C<remote_files> are
+fetched, as shell commands run there as root.
+
+A salvage is only as fresh as whatever wrote it.  A database dumped nightly, an
+LDIF exported hourly, a snapshot of something that cannot be copied while it is
+open -- all of them are a cron away from the moment somebody actually rebuilds
+the guest, and the difference is however much happened in between.  This is
+where a recipe closes that gap: it says "take one now", and C<bin/new_config>
+asks, and the fetch that follows carries what the guest looks like at that
+moment rather than what it looked like last night.
+
+    sub remote_prepare { return ('/usr/local/sbin/mariadb-backup.sh') }
+
+A command that fails is a warning rather than an error.  The guest may not have
+the script yet -- it is being asked before its first provision has run -- and
+last night's dump is worth more than no dump at all, which is what dying here
+would leave.  What it must not be is silent, since a salvage nobody refreshed is
+one somebody will restore from later believing otherwise.
+
+=cut
+
+sub remote_prepare {
     return ();
 }
 
@@ -487,6 +553,24 @@ see L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provis
 Which is also the reason C<remote_skip> exists: a directory salvaged wholesale is
 a directory that ends up in that tarball, and some of what lives in one is meant
 to stay on the machine it was made on.
+
+=head4 Naming it is half of it
+
+What C<remote_files> names comes back down and goes back up, and lands under
+C<install_dir/domain> with everything else in the data directory.  If the
+service reads it somewhere else, the fragment has to put it there:
+
+    [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns
+
+C<restore_state> declines when nothing was salvaged, when what was salvaged is
+empty -- the shape of a fetch that could not read the directory -- and when the
+destination already has state in it, which is what keeps re-provisioning a live
+guest from writing a partial copy over the real thing.  Call it before the
+service starts.
+
+A recipe whose state already lives under C<install_dir/domain> needs none of
+this: the data target puts it back where it came from.  That is the reason to
+keep state there when the software will let you.
 
 =cut
 

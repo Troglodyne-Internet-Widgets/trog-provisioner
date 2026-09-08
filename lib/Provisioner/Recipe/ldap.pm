@@ -35,10 +35,45 @@ C<posixAccount>, and C<shadowAccount> object classes, plus C<ldapPublicKey> for
 SSH public key storage.
 
 LDAPS is configured using the certificate provided by the C<letsencrypt> recipe.
-Port 389 (plain LDAP) is left open for local connections only; port 636 (LDAPS)
-is exposed for remote authentication (e.g. SSSD clients).
+Port 389 (plain LDAP) is left open for local connections only; C<port> -- 636
+unless the domain says otherwise -- carries LDAPS and is exposed for remote
+authentication (e.g. SSSD clients).  It is what slapd is told to listen on and
+what the firewall profile opens, so the two cannot disagree.
 
 Requires the C<letsencrypt> recipe for TLS certificates.
+
+=head2 SURVIVING A REBUILD
+
+The seed is what a directory starts as, not what it is.  Every password a user
+has changed since, every SSH key they have added, every group an operator made
+by hand, lives in C</var/lib/ldap> and in nothing else -- so a guest rebuilt
+from the recipe alone comes up with its users as they were on the day it was
+first provisioned, and nobody finds out until somebody cannot log in.
+
+C</var/lib/ldap> cannot simply be salvaged, and neither can C</etc/ldap/slapd.d>.
+The fetch is sftp as the admin user with no sudo, and the package ships both of
+those 0700 C<openldap:openldap>: named here, either comes back as an empty
+directory and nothing anywhere says why.  Nor would copying them be right if
+they could be read.  MDB is a private on-disk format, tied to the slapd that
+wrote it and the architecture it was written on, and the point of a rebuild is
+that the new guest is not the old one.
+
+So the directory is exported instead.  C<ldap-export.sh> runs hourly and writes
+C<slapcat> output to C</var/backups/ldap>, owned by the admin user, and that is
+what C<remote_files> names.  On the next guest C<ldap-reload.sh> loads the data
+half back with C<slapadd> before the seed runs, and the seed then does what it
+was always supposed to do: fill in what is missing, rather than be the whole
+directory.
+
+The configuration database comes down beside the data and does not go back up.
+C<cn=config> names the schema of the slapd that wrote it, the paths that slapd
+was built with, and the TLS settings this recipe rewrites on every provision;
+restoring a previous guest's copy over a new one is how you get a slapd that
+will not start and will not say why.  It is exported so that an ACL or an
+overlay somebody added is legible and can be put back deliberately.
+
+An hour is therefore what a rebuild can lose, and only ever what changed in that
+hour.
 
 =cut
 
@@ -90,6 +125,21 @@ sub enrich {
     ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
     $opts{ldap_domain} =~ tr/,/./;
 
+    # The dc the base entry names, taken from the base DN rather than from the
+    # domain.  The seed used to work it out itself with domain.split('.'), and
+    # split's argument is a pattern there as much as it is in perl -- so '.'
+    # matched every character, the entry went out with an empty dc, and slapd
+    # refused it:
+    #   ldap_add: Naming violation (64)
+    #     value of single-valued naming attribute 'dc' conflicts with value
+    #     present in entry
+    # which ldapadd -c stepped over and nothing has ever noticed, because the
+    # entry it could not add is one dpkg-reconfigure has always made already.
+    # Off base_dn and not the domain because an operator who sets base_dn is
+    # naming a tree the hostname does not describe, and the dc has to be the
+    # first component of the DN the entry is filed under either way.
+    ( $opts{base_dc} ) = $opts{base_dn} =~ m/\Adc=([^,]+)/;
+
     return %opts;
 }
 
@@ -115,13 +165,28 @@ sub template_files {
         'ldap.slapd.debconf.tt' => 'slapd.debconf',
         'ldap.seed.ldif.tt'     => 'seed.ldif',
         'ldap.tls.ldif.tt'      => 'tls.ldif',
+        'ldap.export.sh.tt'     => 'ldap-export.sh',
+        'ldap.export.cron.tt'   => 'ldap-export.cron',
+        'ldap.reload.sh.tt'     => 'ldap-reload.sh',
+
+        # The ufw application profile for this domain's port.  A bare
+        # `ufw allow` in the fragment does not survive the `ufw reset` that
+        # setup-ufw-rules opens with, and the ufw target runs after this one.
+        'ldap.ufw.conf.tt' => 'ldap_ufw.conf',
     );
+}
+
+# An export taken now.  The cron runs hourly, and an hour of a directory is a
+# password somebody changed and a key somebody added that a rebuild would put
+# back the way they were.
+sub remote_prepare {
+    return ('/usr/local/sbin/ldap-export.sh');
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        '/etc/ldap/slapd.d/' => 'ldap-slapd.d',
+        '/var/backups/ldap/' => 'ldap',
     );
 }
 

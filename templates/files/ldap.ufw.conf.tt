@@ -1,0 +1,25 @@
+[%# An application profile rather than a bare `ufw allow`.  setup-ufw-rules
+    opens with `ufw reset`, which throws away every rule on the guest -- and the
+    ufw target runs after this one, so a rule added here was deleted a few
+    targets later.  Profiles live in /etc/ufw/applications.d, which the reset
+    does not touch, so what is declared here is what setup-ufw-rules allows when
+    it walks `ufw app list`.
+
+    Only the configured port.  slapd ships its own OpenLDAP LDAP and LDAPS
+    profiles, which is why the default of 636 went on working by accident; a
+    domain that set port: to anything else had nothing opening it at all.
+
+    Named slapd and not ldap, because ufw refuses a profile whose section name
+    is also a service name in /etc/services and says so only as a warning on
+    stderr:
+
+        WARN: Skipping .ldap.: also in /etc/services
+
+    -- so the profile is absent from `ufw app list`, no rule is ever made from
+    it, and nothing fails.  The file is still called ldap: the slapd package
+    owns /etc/ufw/applications.d/slapd, which is where its own two profiles
+    live, and that is not ours to write over. -%]
+[slapd]
+title=LDAP directory
+description=OpenLDAP directory server, on the port this domain configured
+ports=[% port %]/tcp
