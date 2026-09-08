@@ -32,11 +32,36 @@ use File::Temp  qw(tempdir);
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
+use File::Path();
+use File::Rsync();
 use File::Basename();
 use File::Slurper();
+use File::Slurper::Temp();
 use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
+
+# Whether a salvage would bring a file down, asked of the thing that decides.
+#
+# remote_skip holds rsync patterns rather than regexes, and a pattern that reads
+# exactly right and filters nothing is the failure worth catching -- which no
+# amount of matching the pattern against a string can find, because the string
+# is not what rsync is going to be given.  So this builds the relative path in a
+# scratch tree, runs a real local rsync with the recipe's excludes, and answers
+# with whether it arrived.
+sub salvage_brings_down {
+    my ( $relative, @skip ) = @_;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path( File::Basename::dirname("$dir/src/$relative") );
+    File::Slurper::Temp::write_text( "$dir/src/$relative", "x\n" );
+
+    my $rsync = File::Rsync->new( archive => 1, ( @skip ? ( exclude => \@skip ) : () ) );
+    $rsync->exec( src => "$dir/src/", dest => "$dir/dst/" )
+      or die "rsync failed in the test itself: " . join( '', @{ $rsync->err || [] } );
+
+    return -f "$dir/dst/$relative" ? 1 : 0;
+}
 
 # Global vars bin/new_config injects into every template render.
 my %G = (
@@ -756,10 +781,15 @@ subtest 'a secret placed from the store is never salvaged back' => sub {
             my @covering = grep { index( $path, $_ ) == 0 } keys %salvaged;
             next unless @covering;
 
-            ok(
-                ( grep { $path =~ $_ } @skip ),
-                "$recipe: $path is kept out of the salvage that would take it"
-            ) or diag "salvaged by: @covering, and remote_skip has: @skip";
+            # Each root separately: rsync matches a pattern relative to the
+            # transfer it is running, so a file that is kept out of one salvage
+            # is not thereby kept out of another that also reaches it.
+            foreach my $root ( sort @covering ) {
+                ok(
+                    !salvage_brings_down( substr( $path, length($root) ), @skip ),
+                    "$recipe: $path is kept out of the salvage of $root"
+                ) or diag "remote_skip has: @skip";
+            }
         }
     }
 };
@@ -856,13 +886,13 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     ok( $config, 'tCMS salvages its config directory' );
 
     my @skip = Provisioner::Recipe::tcms->remote_skip();
-    ok( scalar(@skip),                                   'and says something in it must stay behind' );
-    ok( ( grep { "${config}secrets.key" =~ $_ } @skip ), 'which is the vault key' );
+    ok( scalar(@skip),                                'and says something in it must stay behind' );
+    ok( !salvage_brings_down( 'secrets.key', @skip ), 'which is the vault key' );
 
     # And nothing else out of that directory, since the rest of it is the state
     # the salvage exists for.
     foreach my $keep (qw{auth.db main.cfg has_users}) {
-        ok( !( grep { "$config$keep" =~ $_ } @skip ), "$keep still comes over" );
+        ok( salvage_brings_down( $keep, @skip ), "$keep still comes over" );
     }
 };
 

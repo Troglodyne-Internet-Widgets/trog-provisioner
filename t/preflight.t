@@ -98,6 +98,42 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
     like( $result->{fix}, qr/take it away again/,        'and that it is a real grant of root' );
 };
 
+subtest 'rsync is the one thing both ends have to have' => sub {
+    my $hv    = Test::MockModule->new('Trog::HV');
+    my $which = Test::MockModule->new('File::Which');
+
+    $hv->redefine( is_local => sub { 0 } );
+    $hv->redefine( describe => sub { 'doge@hv.test' } );
+
+    # Both there.
+    $hv->redefine( run => sub { 0 } );
+    $which->redefine( which => sub { '/usr/bin/rsync' } );
+    my ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ok( $result->{ok}, 'rsync at both ends passes' );
+
+    # Missing on the hypervisor.
+    $hv->redefine( run => sub { 1 } );
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ok( !$result->{ok}, 'missing on the hypervisor fails' );
+    like( $result->{what}, qr/doge\@hv[.]test/,   'naming the end that has not got it' );
+    like( $result->{fix},  qr/apt install rsync/, 'and how to fix it' );
+
+    # Missing here, which is just as fatal and much easier to overlook: this is
+    # the machine that runs the rsync, not the one it talks to.
+    $hv->redefine( run => sub { 0 } );
+    $which->redefine( which => sub { undef } );
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ok( !$result->{ok}, 'missing here fails too' );
+    like( $result->{what}, qr/this machine/, 'naming this end' );
+
+    # A local hypervisor is one machine, and is not asked twice about it.
+    $hv->redefine( is_local => sub { 1 } );
+    $hv->redefine( run      => sub { die 'a local hypervisor should not be asked over ssh' } );
+    $which->redefine( which => sub { '/usr/bin/rsync' } );
+    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
+};
+
 subtest 'the configuration it copies from has to be there' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;

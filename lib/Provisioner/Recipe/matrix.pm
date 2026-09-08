@@ -265,7 +265,7 @@ sub _signing_key {
 # salvaged from there anyway: a guest built before that move still has one in
 # its domain directory, and this is what stops a rebuild carrying it home.
 sub remote_skip {
-    return (qr{/homeserver[.]signing[.]key\z});
+    return ('homeserver.signing.key');
 }
 
 sub restores {

@@ -28,13 +28,14 @@ require Trog::Guest;
 
 # One fake guest: run_sudo says whether the command failed, and capture answers
 # the mtime probe with whatever this test wants the tree to look like at that
-# moment.
+# moment.  It keeps what it was constructed with, because refresh_salvage names
+# the host in every message it prints and asks the guest which host that is.
 sub guest_that {
     my (%behaviour) = @_;
 
     my @probes = @{ $behaviour{mtimes} };
     my $mock   = Test::MockModule->new('Trog::Guest');
-    $mock->redefine( new      => sub { bless {}, shift } );
+    $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
     $mock->redefine( run_sudo => sub { $behaviour{exit} } );
     $mock->redefine(
         capture => sub {
@@ -50,6 +51,33 @@ sub refresh {
     my (@args) = @_;
     return Trog::Provisioner::Config::Generator::refresh_salvage( qw{192.168.1.9 admin /nonexistent mariadb}, @args );
 }
+
+# Both halves of a salvage want the guest -- refresh_salvage once a module, the
+# fetch once for each thing that module salvages -- and each of those used to be
+# its own ssh handshake against a machine that is about to be thrown away.
+subtest 'one connection per guest, however many times a run asks for one' => sub {
+    my $built = 0;
+    my $mock  = Test::MockModule->new('Trog::Guest');
+    $mock->redefine(
+        new => sub {
+            my ( $class, %opts ) = @_;
+            $built++;
+            return bless {%opts}, $class;
+        }
+    );
+
+    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
+    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
+
+    is( $built,       1,          'asking twice opens one connection' );
+    is( $again,       $first,     'and the second ask gets the one already open' );
+    is( $first->name, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
+
+    # A run configures several domains, and each of them is a different guest.
+    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});
+    is( $built, 2, 'a different guest is a different connection' );
+    isnt( $other, $first, 'rather than the last one answered for it' );
+};
 
 subtest 'a refresh that worked says nothing' => sub {
     my $guard = guest_that( exit => 0, mtimes => [ { '/var/backups/db' => '100' }, { '/var/backups/db' => '200' } ] );
@@ -92,7 +120,7 @@ subtest 'each command is judged against what the one before it left' => sub {
     my @exits  = ( 0, 1 );
 
     my $mock = Test::MockModule->new('Trog::Guest');
-    $mock->redefine( new      => sub { bless {}, shift } );
+    $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
     $mock->redefine( run_sudo => sub { shift @exits } );
     $mock->redefine(
         capture => sub {
@@ -111,7 +139,7 @@ subtest 'each command is judged against what the one before it left' => sub {
 subtest 'a recipe that watches nothing is not probed at all' => sub {
     my $asked = 0;
     my $mock  = Test::MockModule->new('Trog::Guest');
-    $mock->redefine( new      => sub { bless {}, shift } );
+    $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
     $mock->redefine( run_sudo => sub { 0 } );
     $mock->redefine( capture  => sub { $asked++; return q{} } );
 

@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
+use File::Which();
 
 use Sys::Virt();
 
@@ -85,6 +86,7 @@ sub main {
         \&check_reachable,
         \&check_passwordless_sudo,
         \&check_iso_builder,
+        \&check_rsync,
         \&check_libvirt,
         \&check_sys_virt_in_step,
         \&check_config,
@@ -190,6 +192,35 @@ cloud-init reads its configuration off a small ISO, and something has to make
 it:
 
     sudo apt install xorriso
+FIX
+}
+
+# Both ends, because both ends run one.  A domain's data directory goes up to the
+# hypervisor over rsync and comes off the guest being replaced over rsync, and
+# rsync is the only thing in this toolkit that has to exist on the machine
+# driving a run as well as on the machine being driven.
+#
+# Guests are not asked and do not need to be: every one this tool builds installs
+# rsync among its base packages, and one that has not been built yet has nothing
+# to salvage.
+sub check_rsync {
+    my ($hv) = @_;
+
+    my @missing;
+    push( @missing, 'this machine' ) unless File::Which::which('rsync');
+    push( @missing, $hv->describe ) if !$hv->is_local && $hv->run( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
+
+    return report( 1, 'rsync on both ends', q{} ) unless @missing;
+
+    my $where = join( ' and ', @missing );
+    return report( 0, "No rsync on $where", <<"FIX" );
+A domain's data directory is shipped to the hypervisor and salvaged off the old
+guest with it, and both of those compare before they transfer -- which is what
+keeps a re-provision from moving twenty gigabytes of video it already has.
+
+    sudo apt install rsync
+
+on $where.
 FIX
 }
 

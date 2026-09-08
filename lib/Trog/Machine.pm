@@ -10,6 +10,7 @@ use File::Basename();
 use File::Path();
 use File::Copy();
 use File::Temp();
+use File::Rsync();
 use File::Slurper();
 use IPC::Run3();
 use File::Slurper::Temp();
@@ -55,6 +56,27 @@ command, which reports what happened:
 C<sudo> goes in front of the write itself rather than in front of a move
 afterwards, so a privileged destination is written correctly the first time and
 there is no intermediate file whose location, ownership or mode can be wrong.
+
+=head2 Why the directories go over rsync
+
+A whole directory is the one thing here that is neither poured down that stdin
+nor run as a command: it goes through L<File::Rsync>, and it has to.
+
+The tree usually being asked about is a domain's data directory -- tens of
+gigabytes of video that changes by a handful of files between provisions -- and
+a transport that cannot ask what is already at the far end moves all of it every
+run.  That is what the tarball this replaced did, and it is the reason not to go
+back to one.
+
+The comparison is rsync's own quick check, size and mtime, not C<--checksum>.
+Checksumming a twenty gigabyte data directory reads all of it at both ends every
+run, which costs more than the transfer it exists to avoid.
+
+None of the sftp reasoning above applies here: rsync reports what happened and
+exits with a status, like anything else on this connection.
+
+rsync has to be installed on both ends.  F<bin/preflight> checks the hypervisor,
+and every guest this tool builds gets it among its base packages.
 
 =head1 CLASS METHODS
 
@@ -361,11 +383,23 @@ Append a line, but only if it isn't already there.
 
 =item C<put_dir($local, $remote)>
 
-Copy a whole directory tree across, contents and all.
+Copy a whole directory tree across, contents and all.  Incremental: what is
+already there and unchanged does not travel again.  See L</Why the directories
+go over rsync>.
+
+Nothing is deleted on the far side.  The tarball this replaced unpacked over
+whatever it found, so a file removed here has always survived there, and a
+data directory is the wrong place to start guessing about that.
 
 =item C<get_file($remote, $local)>
 
 The other direction, for one file.
+
+=item C<get_dir($remote, $local, %opts)>
+
+The other direction, for a tree.  C<exclude> takes an arrayref of rsync
+patterns for things that must not come down -- see C<remote_skip> in
+L<Provisioner::Recipe>, which is where the ones we use are written.
 
 =back
 
@@ -473,14 +507,19 @@ sub put_dir {
     return 1 if $self->is_local;
     $self->mkpath($remote) or return 0;
 
-    # Pack locally, then unpack on the far side out of the same stdin stream
-    # everything else here uses.  One round trip, modes preserved, and a real
-    # exit status at the end of it.
-    my $tarball = File::Temp->new( SUFFIX => '.tar.gz', UNLINK => 1 );
-    close $tarball;
-    return 0 if system( 'tar', '-C', $local, '-czf', "$tarball", '.' );
+    return $self->_rsync( _here($local), $self->_there($remote) );
+}
 
-    return $self->_run( { stdin_file => "$tarball" }, 'tar', '-C', $remote, '-xzf', '-' );
+sub get_dir {
+    my ( $self, $remote, $local, %opts ) = @_;
+
+    # Locally, whichever machine this is: the destination of a fetch is us.  And
+    # ours to make, because rsync creates the last component of a destination and
+    # not the path above it, which for a salvage is two or three levels down
+    # inside a data directory that may itself be new this run.
+    File::Path::make_path($local);
+
+    return $self->_rsync( $self->_there($remote), _here($local), %opts );
 }
 
 sub get_file {
@@ -581,6 +620,87 @@ sub _staging_path {
 
     warn 'Could not make a staging file on ' . $self->describe . "\n";
     return undef;
+}
+
+# How to name a directory to rsync.  The trailing slash is rsync's way of saying
+# "the contents of this" rather than "this, inside that", and every transfer here
+# means the contents.
+sub _here { return "$_[0]/" }
+
+sub _there {
+    my ( $self, $path ) = @_;
+    return _here($path) if $self->is_local;
+    return $self->ssh_target . ':' . _here($path);
+}
+
+# The ssh rsync is to use.  Spelled out rather than left to rsync's default,
+# because the port and the key are ours to know and neither reaches rsync from
+# the environment -- and because a guest rebuilt an hour ago presents a host key
+# nothing has seen before, which here is the run working rather than an attack.
+# The options are the ones Net::OpenSSH::More puts on its own master, so both
+# ways of reaching a machine agree about what they will accept from it.
+#
+# rsync word-splits this, so a path with a space in it would arrive as two
+# arguments.  Nothing here has one: the keys are written by this tool into the
+# domain directory it also names.
+sub _rsh {
+    my ($self) = @_;
+
+    my @ssh = (
+        'ssh', '-p', $self->ssh_port,
+        '-o' => 'StrictHostKeyChecking=no',
+        '-o' => 'UserKnownHostsFile=/dev/null',
+        '-o' => 'GSSAPIAuthentication=no',
+        '-o' => 'ConnectTimeout=180',
+    );
+    push( @ssh, '-i', $self->ssh_key ) if defined $self->ssh_key;
+
+    return join( ' ', @ssh );
+}
+
+# One rsync, either direction.
+#
+# Deliberately not through _run or _unhang.  This is a local process rather than
+# a command down the connection, and _unhang's limit is wall clock: it would call
+# a transfer of a data directory hung at exactly $HANG_TIMEOUT however well it
+# was going, which is the round-numbered failure that is never the timeout you
+# are looking at.  rsync's own --timeout is silence rather than elapsed time, so
+# a transfer that keeps moving has as long as it needs and one that stops is
+# over.
+sub _rsync {
+    my ( $self, $src, $dest, %opts ) = @_;
+
+    my @exclude = @{ $opts{exclude} // [] };
+
+    my $rsync = File::Rsync->new(
+        archive => 1,
+        timeout => $TIMEOUT,
+
+        # What moved, at the end.  The whole point of this is that an unchanged
+        # tree should be able to say so, and without it a walk that sent nothing
+        # looks exactly like one that sent twenty gigabytes.  Human units
+        # because the number this exists to print is measured in gigabytes.
+        stats            => 1,
+        'human-readable' => 1,
+
+        ( $self->is_local ? ()                       : ( rsh => $self->_rsh ) ),
+        ( @exclude        ? ( exclude => \@exclude ) : () ),
+
+        # Whatever the guest has that is older than our copy stays where it is.
+        # Carried over from the sftp fetch this replaced, which asked for the
+        # same thing under the name newer_only.
+        ( $opts{update} ? ( update => 1 ) : () ),
+    );
+
+    unless ( $rsync->exec( src => $src, dest => $dest ) ) {
+        warn "rsync $src -> $dest failed (status " . ( $rsync->status // '?' ) . "):\n" . join( '', map { "    $_" } @{ $rsync->err || [] } );
+        return 0;
+    }
+
+    my ($moved) = grep { m/^Total transferred file size/ } @{ $rsync->out || [] };
+    print $moved if $moved;
+
+    return 1;
 }
 
 sub _run {

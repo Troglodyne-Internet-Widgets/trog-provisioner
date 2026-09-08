@@ -100,7 +100,7 @@ sub remote_files {
 # is a systemd credential there and was never inside the guest's filesystem to
 # salvage.  This is for the ones using bin/tcms-vault-key --file.
 sub remote_skip {
-    return (qr{/tCMS/config/secrets\.key$});
+    return ('secrets.key');
 }
 
 sub tests {
