@@ -60,6 +60,15 @@ If the C<ufw> service is active, the rules are applied via C<ufw reload>.
 # something which is not the firewall of the machine running the test.
 our $FILE = '/etc/ufw/before.rules';
 
+# The MASQUERADE rules go in a chain of our own rather than straight into
+# POSTROUTING.  ufw reloads with `iptables-restore --noflush`, which flushes a
+# user chain the input declares and never flushes a built-in one -- so every
+# reload used to append another copy of a rule written as -A POSTROUTING, while
+# the same rule inside a declared chain is replaced.  Measured on a guest: six
+# identical MASQUERADE rules after a provision and two reloads, against one in
+# the chain however many times it is reloaded.
+our $NAT_CHAIN = 'trog-nat';
+
 my %MARKS = (
     nat    => [ '# BEGIN trog-provisioner masquerade',     '# END trog-provisioner masquerade' ],
     filter => [ '# BEGIN trog-provisioner vpn forwarding', '# END trog-provisioner vpn forwarding' ],
@@ -84,7 +93,7 @@ sub main {
         $iface = _default_iface() unless defined $iface && length $iface;
 
         push( @subnets, $subnet );
-        push( @nat,     "-A POSTROUTING -s $subnet -o $iface -j MASQUERADE" );
+        push( @nat,     "-A $NAT_CHAIN -s $subnet -o $iface -j MASQUERADE" );
 
         # Not bound to the interface the way the MASQUERADE rule is: a client
         # talking to another client on the same VPN is forwarded back out the
@@ -168,27 +177,44 @@ sub _set_nat_rules {
 
     $text = _drop_block( $text, 'nat' );
 
-    # And any unmarked rule for the same subnet, which would otherwise sit
-    # beside the marked copy for the life of the guest.  Only the subnets named
-    # here, so a masquerade somebody added by hand for something else is not
-    # swept up with them.
+    # And any rule for the same subnet an older version of this wrote straight
+    # into POSTROUTING, which would otherwise sit beside the chain for the life
+    # of the guest.  Only the subnets named here, so a masquerade somebody added
+    # by hand for something else is not swept up with them.
     foreach my $subnet (@$subnets) {
         $text =~ s{^-A POSTROUTING -s \Q$subnet\E -o \S+ -j MASQUERADE\n}{}mg;
     }
 
     return $text unless @rules;
 
+    # The jump is the one thing that has to be in POSTROUTING, and it is written
+    # once whatever the subnets are.
+    unshift( @rules, "-A POSTROUTING -j $NAT_CHAIN" );
+
     my $placed = _insert_before_commit( $text, 'nat', @rules );
-    return $placed if defined $placed;
+    return _declare_chain($placed) if defined $placed;
 
     # No *nat block to insert into; make one immediately before the *filter
     # block, which is where a nat table has to be.
     my ( $begin, $end ) = @{ $MARKS{nat} };
-    my $block = "*nat\n" . ":POSTROUTING ACCEPT [0:0]\n" . join( "\n", $begin, @rules, $end ) . "\n" . "COMMIT\n\n";
+    my $block = "*nat\n" . ":POSTROUTING ACCEPT [0:0]\n" . ":$NAT_CHAIN - [0:0]\n" . join( "\n", $begin, @rules, $end ) . "\n" . "COMMIT\n\n";
 
     return $text . "\n$block" unless $text =~ m/^[*]filter\b/m;
 
     $text =~ s/^([*]filter\b)/$block$1/m;
+    return $text;
+}
+
+# iptables-restore reads a table top to bottom and refuses a rule naming a chain
+# it has not seen declared, so the declaration goes directly under *nat rather
+# than beside the rules before COMMIT.  Once: a chain declared twice in one
+# table is a file it refuses outright, which is ufw failing to start.
+sub _declare_chain {
+    my ($text) = @_;
+
+    return $text if $text =~ m/^:\Q$NAT_CHAIN\E /m;
+
+    $text =~ s/^([*]nat\n)/$1:$NAT_CHAIN - [0:0]\n/m;
     return $text;
 }
 
