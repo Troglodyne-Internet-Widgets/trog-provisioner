@@ -196,6 +196,29 @@ SAID
     is_deeply( [ Provisioner::IPPool::_live_addresses( FakeHV->new(q{}), [] ) ], [], 'nothing to sweep is nothing to report' );
 };
 
+subtest 'a seed that could not finish is retried, not remembered' => sub {
+    fresh_db();
+
+    # What went wrong in practice: one hypervisor answered, another could not be
+    # reached, and the database was left holding a single reservation.  Asking
+    # "are there any rows at all" then said it was seeded, so every guest on the
+    # fleet stayed missing and no later run went looking again.
+    my $db = Provisioner::IPPool::dbh();
+    Provisioner::IPPool::reserve( '10.9.9.10', 'hv:somewhere' );
+
+    my $done = $db->selectall_arrayref('SELECT source FROM seeded');
+    is_deeply( $done, [], 'a row is not a finished seed' );
+
+    # Only the marker says so, and it is written after the hypervisor has
+    # answered everything.
+    $db->do("INSERT INTO seeded (source) VALUES ('hv:somewhere')");
+    is_deeply(
+        $db->selectall_arrayref('SELECT source FROM seeded'),
+        [ ['hv:somewhere'] ],
+        'and once it has, that hypervisor is not swept again'
+    );
+};
+
 subtest 'two runs at once cannot be given the same address' => sub {
     fresh_db();
 

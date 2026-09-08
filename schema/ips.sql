@@ -12,3 +12,12 @@ CREATE TABLE IF NOT EXISTS ips (
     kind   TEXT NOT NULL DEFAULT 'domain',
     noted  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Which sources have been interrogated, so that a seed which failed partway is
+-- retried rather than remembered as done.  Inferring it from "are there any
+-- rows at all" meant one hypervisor answering and another refusing left a
+-- database that looked seeded forever and was missing every guest on the second.
+CREATE TABLE IF NOT EXISTS seeded (
+    source TEXT PRIMARY KEY NOT NULL,
+    at     TEXT NOT NULL DEFAULT (datetime('now'))
+);

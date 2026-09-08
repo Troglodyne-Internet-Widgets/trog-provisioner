@@ -268,20 +268,21 @@ sub assign {
 
 =head3 ensure_seeded($pool)
 
-Fill an empty database from what is already out there, once.
+Fill the database from what is already out there, once per hypervisor.
 
-A database with anything in it is left alone, so this is safe to call from
-every entry point and does nothing on all but the first.
+Safe to call from every entry point: a hypervisor that has already been
+interrogated is skipped, so this does nothing on all but the first run.
+
+B<Dies if a hypervisor cannot be reached.>  Seeding half a fleet and then
+handing out addresses is exactly the stomping this exists to prevent, so a
+hypervisor that will not answer stops the run rather than producing a database
+that is quietly missing every guest on it.  Nothing is written for it, so the
+next run tries again.
 
 =cut
 
 sub ensure_seeded {
     my ($pool) = @_;
-
-    my $db  = dbh();
-    my $any = $db->selectrow_arrayref('SELECT 1 FROM ips LIMIT 1');
-    return 0 if $any;
-
     return seed($pool);
 }
 
@@ -324,9 +325,19 @@ sub seed {
         $recorded += reserve( $gw, "gateway:$gw" ) if $in_pool{$gw};
     }
 
+    my $db    = dbh();
+    my %done  = map { $_->[0] => 1 } @{ $db->selectall_arrayref('SELECT source FROM seeded') };
     my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+
     foreach my $name ( $fleet->configured ? $fleet->names : () ) {
-        my $hv = eval { $fleet->hypervisor($name) } or next;
+
+        # Once per hypervisor, and recorded as done only after it has answered
+        # everything.  A sweep is not free and a fleet does not change often, so
+        # this is not work to repeat on every provision -- but a hypervisor that
+        # could not be reached is one to come back to rather than write off.
+        next if $done{"hv:$name"};
+
+        my $hv = $fleet->hypervisor($name);
 
         # The sweep first, because what comes after reads the neighbour table it
         # fills: libvirt only knows a guest's bridged address if the host has
@@ -366,6 +377,8 @@ sub seed {
             next if $already->{ $found->{ip} };
             $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
         }
+
+        $db->do( 'INSERT OR IGNORE INTO seeded (source) VALUES (?)', undef, "hv:$name" );
     }
 
     return $recorded;
@@ -380,9 +393,12 @@ sub seed {
 sub _guest_addresses {
     my ($hv) = @_;
 
-    my @names = eval {
-        map { $_->get_name() } $hv->vmm->list_all_domains();
-    };
+    # Not wrapped in an eval.  A hypervisor that cannot be reached is the one
+    # case where carrying on is worse than stopping: seeding half a fleet and
+    # then handing out addresses is exactly the stomping this exists to prevent,
+    # and swallowing the error is how a database ended up holding one row and
+    # calling itself seeded.
+    my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
     return () unless @names;
 
     my $dir    = $hv->domain_dir;
