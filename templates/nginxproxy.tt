@@ -17,8 +17,41 @@ mv nginx.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
 [% FOR vhost IN vhosts.keys().sort() %]
 [% IF !vhosts.$vhost.ssl_redirect AND vhosts.$vhost.static_dir %]
 mkdir -p '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]'
-chown [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]'
+[%# Recursive, and this is the one place in this fragment that reaches inside
+    the directory instead of just retagging it.  data already rsynced whatever
+    the domain has to serve and left it 0750 user:admin_user, so the entries
+    under static_dir carry that group -- not www-data -- however far down they
+    go, and a non-recursive chown only ever retags the directory entry itself.
+    Only the group changes here; data already set the mode this recipe wants
+    group-read to mean. -%]
+chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]'
+[%# And on every directory in the tree, so a file the running application adds
+    after this recipe lands in the www-data group too, the way redis and mail
+    keep their own later writes in the group they were handed here.  Directories
+    only -- the setgid bit on a file means something else entirely, and there is
+    no reason for one of these to carry it. -%]
+find '[% install_dir %]/[% domain %]/[% vhosts.$vhost.static_dir %]' -type d -exec chmod g+s {} +
 [% END -%]
+[% END -%]
+[%# The data recipe leaves the domain directory 0750 user:admin_user, and
+    www-data is neither -- so it cannot traverse down to a docroot it has
+    otherwise been let into, and every request for a static file fails stat()
+    with permission denied and falls through the try_files chain to the proxy.
+    o+x only: descend, not list or read, so the directory stays as closed to
+    everyone else as the data recipe left it.  Runs after the data target
+    (this recipe comes after it in the lexical order the makefile builds
+    targets in), so the bit sticks rather than getting overwritten by the
+    chmod data itself runs. -%]
+[% IF serves_static %]
+chmod o+x '[% install_dir %]/[% domain %]'
+[% END -%]
+[%# And every directory strictly between the domain root and a declared
+    static_dir.  www/static is two levels deep, and www is not invented by
+    this recipe -- data rsyncs it down already populated whenever the domain
+    has content checked in, leaving it 0750 same as the domain root, which
+    shuts www-data out one level further in than the chmod above reaches. -%]
+[% FOR dir IN traverse_dirs %]
+chmod o+x '[% install_dir %]/[% domain %]/[% dir %]'
 [% END -%]
 # Get ready for ACME
 [%# .well-known, with a hyphen.  RFC 8615 spells it that way and so does every
