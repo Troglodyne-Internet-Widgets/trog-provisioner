@@ -266,6 +266,39 @@ sub assign {
     return $chosen;
 }
 
+=head3 forget_seeding()
+
+Drop the record of which hypervisors have been interrogated, so the next seed
+asks all of them again.  Returns how many were forgotten.
+
+=cut
+
+sub forget_seeding {
+    my $rows = dbh()->do('DELETE FROM seeded');
+    return $rows && $rows ne '0E0' ? $rows : 0;
+}
+
+=head3 clear_reservations()
+
+Drop every reservation -- the hypervisors, the gateways, and whatever else was
+found answering.  Returns how many went.
+
+These are B<derived> state: a note of what was observed to be there, not a
+decision anybody made.  So a reseed rebuilds them from scratch, and an address
+that has since gone quiet is correctly freed rather than reserved forever.
+
+Assignments are not touched, and must not be.  A domain holding an address is a
+decision -- something has been told it lives there, or is about to be built on
+it -- and a machine that happens to be switched off during a sweep is not
+evidence that its address is free.
+
+=cut
+
+sub clear_reservations {
+    my $rows = dbh()->do("DELETE FROM ips WHERE kind = 'reserved'");
+    return $rows && $rows ne '0E0' ? $rows : 0;
+}
+
 =head3 ensure_seeded($pool)
 
 Fill the database from what is already out there, once per hypervisor.

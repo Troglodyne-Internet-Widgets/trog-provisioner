@@ -84,6 +84,11 @@ Three things about it worth understanding:
   `bin/assign_ip $DOMAIN` says what a domain holds, assigning one if it has none;
   `bin/list_ip_pool` shows what is taken and what is free. Neither is something
   you have to run before provisioning.
+
+  If the database and reality have drifted — something built, moved or destroyed
+  by hand — `bin/reseed_ips` asks the hypervisors again. `--dryrun` first: it
+  really asks and writes nothing. It rebuilds reservations and adds guests it
+  finds, and never takes an address off a domain unless you say `--prune`.
 - **`recipes.d/` is empty on purpose.** `new_config` gathers secrets across
   every domain it can see, so copying the real `recipes.d/` would mean needing
   every password in the real store to build one throwaway guest.

@@ -1,0 +1,180 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::reseed_ips;
+
+#ABSTRACT: Ask the hypervisors again, when the address database has drifted.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Config::Simple;
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Trog::Config();
+use Provisioner::IPPool();
+
+=head1 USAGE
+
+    reseed_ips [--dryrun] [--prune] [--ipmap=file]
+
+Interrogate every hypervisor again and bring F<ips.db> back in line with what is
+actually out there.
+
+Seeding normally happens once per hypervisor and is then remembered, because a
+sweep is not free and a fleet does not change often.  That is the right default
+and the wrong one the day something is built, moved or destroyed by hand -- so
+this is how you say "look again".
+
+    $ bin/reseed_ips --dryrun
+    $ bin/reseed_ips
+
+=head2 WHAT IT REBUILDS, AND WHAT IT LEAVES ALONE
+
+Reservations -- the hypervisors, the gateways, and whatever else was found
+answering on the wire -- are B<derived>.  They are a note of what was observed,
+not a decision anybody made, so they are dropped and rebuilt.  An address that
+has since gone quiet is freed; one that has appeared is taken.
+
+Assignments are B<not> touched.  A domain holding an address is a decision:
+something has been told it lives there, or is about to be built on it.  A guest
+that happens to be switched off while the sweep runs is not evidence that its
+address is free, and quietly handing it to the next thing that asks is the
+failure this whole database exists to prevent.
+
+So the ordinary run only ever adds assignments -- guests found on a hypervisor
+that the database did not know about.
+
+=head2 --prune
+
+Also drop assignments for domains no hypervisor is running.
+
+This is the one that can take an address away from something, so it is not the
+default and it says what it removed.  Use it when the database has accumulated
+domains that genuinely no longer exist -- a guest destroyed without
+C<bin/destroy>, which is the only thing that releases an address on its own.
+
+Note that a domain configured but not yet built has no hypervisor running it
+either, and looks exactly the same from here.  If you have assigned addresses
+ahead of provisioning, pruning will take them back.
+
+=head2 --dryrun
+
+Do all of it inside a transaction and roll it back, reporting what would have
+changed.  The hypervisors are really asked; nothing is really written.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my $cfile = Trog::Config->path('ipmap.cfg');
+    my ( $dryrun, $prune, $help );
+    GetOptionsFromArray(
+        \@args,
+        'ipmap=s' => \$cfile,
+        'dryrun'  => \$dryrun,
+        'prune'   => \$prune,
+        'help'    => \$help,
+    );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    my $c = Config::Simple->new($cfile);
+    die "$Config::Simple::errstr\n" unless $c;
+    my $pool = $c->param( -block => 'ip_pool' ) // {};
+
+    my $db     = Provisioner::IPPool::dbh();
+    my %before = %{ Provisioner::IPPool::taken() };
+
+    # Everything, or nothing.  A reseed that stopped halfway would leave the
+    # reservations cleared and not yet rebuilt, which is a database saying the
+    # gateway is available.
+    $db->do('BEGIN IMMEDIATE');
+
+    my $ok = eval {
+        Provisioner::IPPool::forget_seeding();
+        Provisioner::IPPool::clear_reservations();
+        Provisioner::IPPool::ensure_seeded($pool);
+        prune_absent( $pool, \%before ) if $prune;
+        1;
+    };
+
+    unless ($ok) {
+        my $err = $@ || "reseed failed\n";
+        eval { $db->do('ROLLBACK') };
+        die $err;
+    }
+
+    my %after = %{ Provisioner::IPPool::taken() };
+
+    # Read back before the rollback, or there would be nothing to report.
+    $db->do( $dryrun ? 'ROLLBACK' : 'COMMIT' );
+
+    report( \%before, \%after, $dryrun );
+    return 0;
+}
+
+=head2 prune_absent($pool, $before)
+
+Drop assignments for domains no hypervisor is running.  Returns how many went.
+
+=cut
+
+sub prune_absent {
+    my ( $pool, $before ) = @_;
+
+    require Trog::Hypervisors;
+    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+
+    my %running;
+    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
+        my $hv = $fleet->hypervisor($name);
+        $running{ $_->get_name() } = 1 for $hv->vmm->list_all_domains();
+    }
+
+    my $gone = 0;
+    foreach my $domain ( sort values %$before ) {
+        next if $domain =~ m/\A(?:hv|gateway|insitu):/;
+        next if $running{$domain};
+
+        Provisioner::IPPool::release($domain);
+        $gone++;
+    }
+
+    return $gone;
+}
+
+=head2 report($before, $after, $dryrun)
+
+Say what changed, address by address.
+
+=cut
+
+sub report {
+    my ( $before, $after, $dryrun ) = @_;
+
+    my $would   = $dryrun ? 'would be ' : q{};
+    my @added   = grep { !$before->{$_} } sort keys %$after;
+    my @removed = grep { !$after->{$_} } sort keys %$before;
+    my @moved   = grep { $before->{$_} && $after->{$_} && $before->{$_} ne $after->{$_} } sort keys %$after;
+
+    printf "  %-18s %s\n", $_, "${would}recorded as $after->{$_}"            for @added;
+    printf "  %-18s %s\n", $_, "${would}freed (was $before->{$_})"           for @removed;
+    printf "  %-18s %s\n", $_, "${would}now $after->{$_}, was $before->{$_}" for @moved;
+
+    printf "%s: %d added, %d freed, %d changed hands; %d addresses spoken for\n",
+      ( $dryrun ? 'Nothing written' : 'Reseeded' ),
+      scalar @added, scalar @removed, scalar @moved, scalar keys %$after;
+
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
