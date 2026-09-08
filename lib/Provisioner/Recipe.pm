@@ -327,6 +327,11 @@ CONFLICT
 The ports this recipe listens on, and the new connections a second from a single
 source each should take before further ones are dropped.
 
+A key is a port, optionally with a protocol after a slash -- C<1194/udp>, the
+way a ufw application profile spells it.  A bare port means tcp.  A service
+reached over both names both, because the rule is written per protocol and one
+naming neither half is a port that looks limited and is not.
+
 Empty by default: most recipes listen on nothing, or reach the network through
 something that does -- an application behind C<nginxproxy> is covered by
 C<nginx>, not by itself.  A recipe that overrides this gets C<ufw> added to its
@@ -339,7 +344,9 @@ throttles real users.  Note that this is called before validation, so read
 C<%opts> with the same defaults the schema declares.
 
 Where two recipes name a limit for the same port, the B<higher> is used -- see
-C<merge_rate_limits> in C<bin/new_config>.
+C<resolve_conflict> in L<Provisioner::Recipe::ufw>.  Port and protocol together
+are the key, so C<53> and C<53/udp> are two limits and neither merges into the
+other.
 
 =cut
 

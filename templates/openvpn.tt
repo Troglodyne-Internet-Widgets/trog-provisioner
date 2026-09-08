@@ -97,7 +97,13 @@
 	# so there is no configuration in which leaving the rules out is the right
 	# answer.  Left unnamed, setup-masquerade asks the guest which interface
 	# its default route leaves by, which is the only place that answer exists.
-	[% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
+	#
+	# Deferred, because the ufw target opens with a `ufw reset` and that
+	# restores before.rules from the packaged copy -- taking these rules with
+	# it if they were written during the makefile.  post_install runs after
+	# every target, and the ufw target queues its own `systemctl restart ufw`
+	# behind this one, so the rules are in the file before ufw reads it.
+	[% script_dir %]/queue_postrun_task [% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
 	# Enable and start the service
 	systemctl daemon-reload
 	systemctl enable openvpn-server@server

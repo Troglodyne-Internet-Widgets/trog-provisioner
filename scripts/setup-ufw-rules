@@ -27,9 +27,19 @@ my @apps = split( /\n/, $list );
 shift @apps;
 @apps = map { s/^\s+//; $_ } @apps;
 
-# Sane defaults
+# Sane defaults.
+#
+# --force because `ufw reset` prompts and a provision has no terminal to answer
+# from: unforced it reads EOF and aborts, which makes every line below it a
+# statement about a firewall that was never reset.
+#
+# The reset also restores /etc/ufw/before.rules from /usr/share/ufw, which is
+# where setup-port-forwards and setup-ufw-ratelimits write -- both from this
+# same target, just below -- and where setup-masquerade writes, which the
+# openvpn recipe therefore queues as a postrun task.  templates/makefile.tt has
+# the ordering account.
 my @rules = (
-    [qw{reset}],
+    [qw{--force reset}],
     [qw{enable}],
     [qw{default deny outgoing}],
     [qw{default deny incoming}],

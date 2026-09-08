@@ -13,7 +13,16 @@
 [% global_targets.unshift('state') -%]
 
 .PHONY: all
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %]
+[%# ufw last, after every module.  setup-ufw-rules allows whatever `ufw app
+    list` reports, so a profile installed by a target running after it is a
+    service the firewall never opens; and it opens with a `ufw reset`, which
+    restores before.rules from the packaged copy and takes any rules already
+    written into it.  Application profiles survive that reset, so every recipe
+    can install one whenever it likes and be allowed here.
+
+    bin/new_config lifts ufw out of modules_ordered so this is the only place
+    the position is decided, rather than the alphabet deciding it. -%]
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %][% IF ufw_fragment %] [% state_dir %]/ufw[% END %]
 	[%# The tests run whether or not the deferred work succeeded, and the build
 	    still fails afterwards if it did not.  post_install failing used to stop
 	    make right there, so a guest with one broken postrun task produced no
@@ -113,6 +122,12 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 [% state_dir %]/data:
 [% data_fragment | tabinate -%]
 	touch $@
+
+[% IF ufw_fragment -%]
+[% state_dir %]/ufw:
+[% ufw_fragment | tabinate -%]
+	touch $@
+[% END -%]
 
 [% FOR module IN global_fragments.keys().sort() %]
 [% global_state_dir %]/global_[% module %]:

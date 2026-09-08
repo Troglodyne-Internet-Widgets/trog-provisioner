@@ -18,7 +18,7 @@ systemctl enable chrony
     setup-ufw-rules opens with -- so chrony was configured client-only and
     had nowhere to send a request.  /etc/ufw/applications.d survives the
     reset, and setup-ufw-rules allows whatever `ufw app list` reports
-    afterwards, out as well as in -- which is enough, since this fragment
-    runs before the ufw target (alphabetical module order) either way. -%]
+    afterwards, out as well as in -- which is enough, since makefile.tt orders
+    the ufw target after every module. -%]
 # Declare the firewall profile for outbound NTP
 install -o root -g root -m 0644 ntp_ufw.conf /etc/ufw/applications.d/ntp

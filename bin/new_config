@@ -824,11 +824,18 @@ sub handle_domain {
     my $data_fragment = delete $fragments{data};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/data" } @modules_ordered;
 
+    # ufw comes out for the opposite reason: it has to run after every other
+    # recipe rather than before them, and templates/makefile.tt says why.
+    # Ordering it there rather than here is what stops the alphabet deciding it.
+    my $ufw_fragment = delete $fragments{ufw};
+    @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
+
     my $makefile = $tt->render(
         'makefile.tt',
         {
             %$global_config,
             data_fragment    => $data_fragment,
+            ufw_fragment     => $ufw_fragment,
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
             modules_ordered  => \@modules_ordered,

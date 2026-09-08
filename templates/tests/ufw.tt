@@ -44,10 +44,21 @@ foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/nul
 # user.rules and rewrites it whenever a rule changes.
 my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
 
-[% FOR port IN rate_limits.keys().sort() %]
-like($before, qr/--dport [% port %] .*--hashlimit-above [% rate_limits.$port %]\/sec/,
-    'port [% port %] is rate limited at [% rate_limits.$port %] a second') or diag $before;
+# With the protocol, not just the port.  A rule against the wrong protocol
+# matches none of the service's traffic while before.rules still names the port
+# and reads as correct -- so an assertion on the port alone passes on a guest
+# where the limit does nothing.
+my %limits = (
+[% FOR spec IN rate_limits.keys().sort() %]    '[% spec %]' => [% rate_limits.$spec %],
 [% END -%]
+);
+
+foreach my $spec (sort keys %limits) {
+    my ($port, $proto) = split m{/}, $spec;
+    $proto //= 'tcp';
+    like($before, qr/-p \Q$proto\E --dport \Q$port\E .*--hashlimit-above \Q$limits{$spec}\E\/sec/,
+        "$proto port $port is rate limited at $limits{$spec} a second") or diag $before;
+}
 
 [% FOR net IN admin_networks %]
 # Named as an admin network, so it is let past the limit rather than counted by

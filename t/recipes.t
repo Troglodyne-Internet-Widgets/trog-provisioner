@@ -352,6 +352,43 @@ subtest 'ufw rejects malformed port_forwards' => sub {
     ok( $res, 'ufw dies when port_forward entry missing to' );
 };
 
+subtest 'a rate limit says which protocol it limits' => sub {
+
+    # The rule is written per protocol, so a limit naming only a port is a limit
+    # on that port's tcp side.  For a service reached over udp that matches none
+    # of its traffic, while before.rules names the port and reads as correct.
+    my %vpn = 'Provisioner::Recipe::openvpn'->rate_limits( port => 1194, proto => 'udp' );
+    is_deeply( [ keys %vpn ], ['1194/udp'], 'openvpn limits the protocol it listens on' );
+
+    my %tcp = 'Provisioner::Recipe::openvpn'->rate_limits( port => 443, proto => 'tcp' );
+    is_deeply( [ keys %tcp ], ['443/tcp'], 'and says so when it is configured for tcp instead' );
+
+    # Called before validation, so the schema default is not in %opts.
+    my %bare = 'Provisioner::Recipe::openvpn'->rate_limits();
+    is_deeply( [ keys %bare ], ['1194/udp'], 'and defaults the way the schema does' );
+
+    # A nameserver answers over both, and the unlimited half is the half that
+    # gets used.
+    my %dns = 'Provisioner::Recipe::pdns'->rate_limits();
+    is_deeply( [ sort keys %dns ], [ '53', '53/udp' ], 'pdns limits both halves of port 53' );
+
+    # A bare port still means tcp, so the recipes that only ever spoke tcp are
+    # untouched by any of this.
+    my %web = 'Provisioner::Recipe::nginx'->rate_limits();
+    is_deeply( [ sort { $a <=> $b } keys %web ], [ 80, 443 ], 'nginx names bare ports, which are tcp' );
+};
+
+subtest 'the rate limit rule is written for the protocol it was given' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-ratelimits");
+
+    ok( index( $script, '*/*) proto=${spec##*/}' ) >= 0, 'the protocol is read off a port spec that carries one' );
+    like( $script, qr/^\s*proto=tcp$/m,           'and defaults to tcp when there is none' );
+    like( $script, qr/-p \$proto --dport \$port/, 'the rule names that protocol' );
+
+    # Or 53/tcp and 53/udp share a table and each counts the other's traffic.
+    like( $script, qr/--hashlimit-name trog\$proto\$port/, 'and gets a table of its own, per port and protocol' );
+};
+
 # ----------------------------------------------------------------
 # ufw: two recipes listening on one port
 # ----------------------------------------------------------------
@@ -369,6 +406,13 @@ subtest 'ufw settles rate limits by taking the higher, and nothing else' => sub 
     is( $merged->{rate_limits}{443}, 2000, 'and a lower one does not lower it' );
 
     is( $merged->{rate_limits}{6379}, 512, 'a port only one recipe named is left alone' );
+
+    # Port and protocol together are the key, so these are two services and
+    # neither settles the other.
+    my $split = { rate_limits => { 53 => 4096, '53/udp' => 4096 } };
+    $r->reconcile( $split, { rate_limits => { 53 => 8192 } } );
+    is( $split->{rate_limits}{53},       8192, 'the tcp half takes the higher' );
+    is( $split->{rate_limits}{'53/udp'}, 4096, 'and the udp half is left where it was' );
 
     # Only rate limits.  Anything else two recipes disagree about here is a
     # misconfiguration somebody has to settle.
@@ -1372,6 +1416,33 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
+subtest 'the firewall reset is one that can actually run' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-rules");
+
+    # `ufw reset` prompts, and a provision has no terminal to answer from: it
+    # read EOF, printed "Aborted", and the first thing the target did was
+    # nothing.  Everything after it in that list is only true if this runs.
+    like( $script, qr/\[qw\{--force reset\}\]/, 'the reset is forced' );
+};
+
+subtest 'the ufw target runs after every recipe that installs a profile' => sub {
+
+    # setup-ufw-rules allows whatever `ufw app list` reports and opens with a
+    # reset that restores before.rules from the packaged copy.  A recipe whose
+    # target runs after it gets a profile nothing allowed, and rules nothing
+    # kept.  This held by alphabet alone until makefile.tt was made to say it.
+    my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
+
+    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/s, 'ufw is named after the ordered modules' );
+    like( $mf, qr/\QIF ufw_fragment\E/,                          'and only when there is a ufw target to name' );
+
+    # And bin/new_config is what takes it out of the ordered set, or there would
+    # be two targets of the same name and make would keep the second.
+    my $gen = File::Slurper::read_text("$FindBin::Bin/../bin/new_config");
+    like( $gen, qr/my \$ufw_fragment = delete \$fragments\{ufw\}/,         'the fragment is lifted out of the module set' );
+    like( $gen, qr{grep \{ \$_ ne "/etc/provisioner/state/\$fqdn/ufw" \}}, 'and off the prerequisite list with it' );
+};
+
 subtest 'no firewall profile is named after something in /etc/services' => sub {
 
     # ufw refuses to load a profile whose section name is also a service name,
@@ -1434,6 +1505,17 @@ subtest 'a recipe that says where its state goes back depends on the thing that 
             ok( length( $restores{$to}{from} // q{} ), "$recipe: $to says what it is restored from" );
         }
     }
+};
+
+subtest 'the masquerade rules are written after the firewall is reset' => sub {
+
+    # setup-masquerade edits before.rules, and the ufw target's reset restores
+    # that file from the packaged copy.  Written during the makefile the rules
+    # went in before the reset took them out again, so a VPN client connected
+    # and routed nowhere.  post_install runs after every target.
+    my $out = 'Provisioner::Recipe::openvpn'->new(%PROV)->render( %G, %{ $required_config{openvpn} // {} } );
+
+    like( $out, qr{queue_postrun_task \S*/setup-masquerade}, 'the masquerade write is deferred past the makefile' );
 };
 
 subtest 'nothing restores state from a fragment that data could do' => sub {

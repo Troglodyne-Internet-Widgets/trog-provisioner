@@ -93,11 +93,9 @@ sub rate_limits {
     # One client streaming opens a handful; a household opens a few handfuls.
     #
     # The discovery ports (1900, 32410/32412/32413/32414, 32469) are not named
-    # here.  setup-ufw-ratelimits writes its hashlimit rule with `-p tcp`
-    # unconditionally, so a UDP port passed to it gets no working limit at all
-    # -- and broadcast discovery traffic is nowhere near volume enough to want
-    # one anyway; a household's clients announce themselves occasionally, not
-    # by opening connections.
+    # here: broadcast discovery is nowhere near the volume to want a limit, and
+    # a household's clients announce themselves occasionally rather than by
+    # opening connections.
     return ( 32400 => 1024 );
 }
 

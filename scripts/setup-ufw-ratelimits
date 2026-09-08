@@ -5,6 +5,10 @@
 # may open to that port in a second before it is dropped, and EXEMPT=CIDR pairs
 # naming sources that are never dropped whatever they open.
 #
+# PORT may carry a protocol as PORT/PROTO, spelled the way a ufw application
+# profile spells it.  A bare port means tcp, which is what every port named here
+# meant before the protocol could be said at all.
+#
 # The exemptions are what admin_networks means once ssh is limited here rather
 # than by ufw: somebody administering the guest goes as fast as they like, and
 # everybody else meets the limit.
@@ -50,9 +54,14 @@ for pair in "$@"; do
     case "$pair" in
         EXEMPT=*) continue ;;
     esac
-    port=${pair%%=*}
+    spec=${pair%%=*}
     hits=${pair##*=}
-    echo "Rate limiting port $port at $hits new connections a second"
+    port=${spec%%/*}
+    proto=tcp
+    case "$spec" in
+        */*) proto=${spec##*/} ;;
+    esac
+    echo "Rate limiting $proto port $port at $hits new connections a second"
     # hashlimit rather than recent.  `-m recent --hitcount N` is capped by
     # xt_recent's ip_pkt_list_tot, which is 20 by default -- so every limit here
     # was rejected by iptables-restore with "RULE_APPEND failed (Invalid
@@ -62,8 +71,15 @@ for pair in "$@"; do
     #
     # hashlimit takes any rate, keeps its own per-source table, and says what it
     # means: drop new connections to this port from a source going faster than
-    # this.  A separate table per port, or they share one another's counts.
-    block="$block-A ufw-before-input -p tcp --dport $port -m conntrack --ctstate NEW -m hashlimit --hashlimit-above $hits/sec --hashlimit-burst $hits --hashlimit-mode srcip --hashlimit-name trog$port -j DROP\n"
+    # this.  A separate table per port and protocol, or they share one another's
+    # counts -- 53/tcp and 53/udp are different services and each gets its own.
+    #
+    # ctstate NEW means something weaker for udp than for tcp: there is no
+    # handshake, so it is the first packet of a flow conntrack has not seen
+    # lately rather than a SYN.  That is still the thing worth counting -- a
+    # reflection flood is new flows -- but it is why a udp rate is not a tcp
+    # rate written twice.
+    block="$block-A ufw-before-input -p $proto --dport $port -m conntrack --ctstate NEW -m hashlimit --hashlimit-above $hits/sec --hashlimit-burst $hits --hashlimit-mode srcip --hashlimit-name trog$proto$port -j DROP\n"
 done
 block="$block$END"
 

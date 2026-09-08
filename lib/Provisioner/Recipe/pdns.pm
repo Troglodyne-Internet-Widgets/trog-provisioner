@@ -51,7 +51,12 @@ sub rate_limits {
     # A resolver asks over UDP and asks often; a recursor in front of this one
     # asks on behalf of everybody behind it.  Set high enough that only a
     # reflection flood reaches it.
-    return ( 53 => 4096 );
+    #
+    # Both protocols, and udp is the one that matters: it is what a resolver
+    # asks over and what a reflection flood arrives on.  tcp is named too
+    # because a zone transfer and any answer too large for a datagram go that
+    # way, and an unlimited half is the half that gets used.
+    return ( 53 => 4096, '53/udp' => 4096 );
 }
 
 sub args {

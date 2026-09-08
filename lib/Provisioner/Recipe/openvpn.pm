@@ -109,10 +109,14 @@ sub deps {
 sub rate_limits {
     my ( $self, %opts ) = @_;
 
-    # Called before validation, so the schema default is not in %opts yet; it
-    # has to be repeated rather than read.  A client opens one tunnel and keeps
-    # it, so anything opening hundreds a second is not a client.
-    return ( ( $opts{port} // 1194 ) => 256 );
+    # Called before validation, so the schema defaults are not in %opts yet;
+    # they have to be repeated rather than read.  A client opens one tunnel and
+    # keeps it, so anything opening hundreds a second is not a client.
+    #
+    # On the protocol it was configured for.  A limit naming no protocol is
+    # written as tcp, and this listens on udp by default -- so the rule would
+    # match none of the traffic it was meant to limit.
+    return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
 sub args {
