@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+
+package Provisioner::Bin::assign_ip;
+
+#ABSTRACT: Take an address out of the pool for a domain, and say which.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use FindBin::libs;
+
+use Config::Simple;
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+
+use Trog::Config();
+use Provisioner::IPPool();
+
+=head1 USAGE
+
+    assign_ip [--ipmap=file] DOMAIN
+
+Print the static address C<DOMAIN> holds, assigning it the first free one in
+the pool if it does not have one yet.  Dies if the pool is exhausted or has not
+been configured.
+
+Idempotent: a domain that already has an address is answered with it, and
+nothing is written.  So this is safe to call from a script that does not know
+whether the domain has been provisioned before.
+
+    $ bin/assign_ip staging.troglodyne.net
+    192.168.1.48
+
+C<bin/new_config> calls the same code, so a provision assigns its own address
+and there is nothing to do by hand.  This is for the times you want to know the
+answer before provisioning, or want to reserve one for something the
+provisioner is not going to build.
+
+=head2 WHY THIS IS NOT A FILE
+
+Assignments live in F<ips.db> beside the rest of the configuration, and the
+choosing and the recording are one transaction.  Two of these running at once
+cannot pick the same address: the second waits for the first, then looks again
+and finds it taken.  The C<[ips]> section of F<ipmap.cfg> could not do that --
+both runs read the same free address and the second write won.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my $cfile = Trog::Config->path('ipmap.cfg');
+    my $help;
+    GetOptionsFromArray( \@args, 'ipmap=s' => \$cfile, 'help' => \$help );
+
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    my $domain = shift @args;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
+      unless defined $domain && length $domain;
+
+    my $c = Config::Simple->new($cfile);
+    die "$Config::Simple::errstr\n" unless $c;
+    my $pool = $c->param( -block => 'ip_pool' ) // {};
+
+    # Seeded from the hypervisors the first time anything asks, so the first
+    # assignment on a fleet that has never had a database does not hand out an
+    # address a guest is already using.
+    Provisioner::IPPool::ensure_seeded($pool);
+
+    print Provisioner::IPPool::assign( $domain, $pool ) . "\n";
+    return 0;
+}
+
+exit main(@ARGV) unless caller;
+
+1;
