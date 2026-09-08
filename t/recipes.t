@@ -32,6 +32,7 @@ use File::Temp  qw(tempdir);
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
+use File::Basename();
 use File::Slurper();
 use Text::Xslate();
 
@@ -1276,6 +1277,30 @@ subtest 'gogs is served where the vhost actually answers' => sub {
     # The files stay under git.$domain.  That is a directory name, and moving it
     # would strand what remote_files salvaged off every guest that has one.
     like( $ini, qr{^ROOT\s*=\s*/opt/domains/git\.test\.test\.test/repos$}m, 'while the repository store is left where it is' );
+};
+
+subtest 'a recipe that needs a port open declares a profile rather than a rule' => sub {
+
+    # setup-ufw-rules opens with `ufw reset`, which drops every rule on the
+    # guest, and the ufw target runs after the recipes that depend on it.  So a
+    # rule a fragment adds itself is deleted a few targets later, and the only
+    # reason ldap looked like it worked was that slapd ships a profile covering
+    # the port it defaults to.  Profiles live in /etc/ufw/applications.d, which
+    # the reset leaves alone, and setup-ufw-rules allows every one it finds.
+    foreach my $tt ( sort glob("$template_dir/*.tt") ) {
+        next if $tt =~ m{/ufw(?:[.]global)?[.]tt\z};
+
+        my $body = File::Slurper::read_text($tt);
+
+        # Comments say what used to be here and why it moved; the rule itself is
+        # what must not come back.  Directive and comment markers are stripped
+        # so a template comment quoting the old line does not read as one.
+        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/^\s*#.*$//gm;
+
+        my ($offender) = $body =~ m/^([^\n]*\bufw\s+(?:allow|deny|limit|reject)\b[^\n]*)$/m;
+        is( $offender, undef, ( File::Basename::basename($tt) ) . ' adds no firewall rule of its own' );
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

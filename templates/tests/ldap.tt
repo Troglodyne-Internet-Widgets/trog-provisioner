@@ -213,4 +213,31 @@ SKIP: {
         or diag "missing: " . join(', ', splice(@lost, 0, 10)) . "\nslapcat said:\n$live_ldif";
 }
 
+# The firewall profile, not a rule.  A `ufw allow` in this recipe's fragment
+# did not survive the `ufw reset` that setup-ufw-rules opens with -- the ufw
+# target runs after this one -- so the rule was added and deleted on every
+# provision that had both recipes.  It only ever looked right because slapd
+# ships an LDAPS profile covering 636, which is the default; a domain that set
+# port: to anything else had nothing opening it.
+my $profile = '/etc/ufw/applications.d/ldap';
+ok(-f $profile, 'the ldap firewall profile was installed');
+my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
+like($prof, qr/^ports=\Q[% port %]\E\/tcp$/m, 'and it names the port this domain configured') or diag $prof;
+
+SKIP: {
+    skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
+
+    # ufw has to be able to parse it, which is what listing it proves: a
+    # malformed profile is not reported, it is simply absent from the list.
+    # Listed is the whole assertion.  A profile ufw will not parse -- a section
+    # named for something already in /etc/services, which is what [ldap] was --
+    # is skipped with a warning on stderr and is simply absent here; no rule is
+    # ever made from it and nothing else fails.
+    my $apps = `ufw app list 2>&1`;
+    like($apps, qr/^\s*slapd\s*$/m, 'ufw lists it as an application') or diag $apps;
+
+    my $status = `ufw status 2>/dev/null`;
+    like($status, qr/^\s*slapd\b/m, 'and has a rule for it after the reset') or diag $status;
+}
+
 done_testing();

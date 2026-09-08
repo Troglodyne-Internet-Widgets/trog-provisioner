@@ -1,0 +1,14 @@
+[%# Declared here rather than allowed from the fragment.  `default deny
+    outgoing` from the ufw recipe blocks 8448, and a `ufw allow out` added by
+    this recipe does not survive the `ufw reset` that setup-ufw-rules opens
+    with -- which is why it was queued to postrun to run after it instead.  A
+    profile needs no such timing: /etc/ufw/applications.d is not what the reset
+    clears, and setup-ufw-rules allows every profile it finds, out and in.
+
+    Only rendered when this bot talks to a matrix homeserver.  The fragment
+    installs it in that case and not otherwise, the same way it treats a
+    github ssh key that was never configured. -%]
+[koan-matrix]
+title=Matrix federation
+description=Homeserver federation port koan reaches out to
+ports=8448/tcp
