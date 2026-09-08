@@ -160,27 +160,36 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
     sub capture       { return $_[0]->{said} }
 }
 
-subtest 'what is answering on the wire, out of the neighbour table' => sub {
+subtest 'what is answering on the wire' => sub {
     fresh_db();
 
-    # The shape `ip -4 neigh show dev br0` prints, which is where libvirt gets
-    # what `virsh domifaddr --source arp` reports.  FAILED and INCOMPLETE are
-    # the answers for an address nothing is on, and must not be read as one.
-    my $hv = FakeHV->new(<<'NEIGH');
+    # Two signals, because one is not trustworthy alone.  The sweep says which
+    # addresses answered, which is deterministic; the neighbour table is
+    # consulted for a second opinion and for the hardware address, because its
+    # entries decay to STALE between the sweep and the read.
+    my $hv = FakeHV->new(<<'SAID');
+LIVE 192.168.1.43
+LIVE 192.168.1.54
 192.168.1.1 FAILED
 192.168.1.43 lladdr 52:54:00:e7:46:8f REACHABLE
-192.168.1.54 lladdr ce:f9:56:8c:db:2b REACHABLE
+192.168.1.54 lladdr ce:f9:56:8c:db:2b STALE
+192.168.1.55 lladdr 52:54:00:aa:bb:cc REACHABLE
+192.168.1.59 lladdr 52:54:00:de:ad:01 STALE
 192.168.1.62 lladdr 52:54:00:00:00:01 INCOMPLETE
-192.168.1.254 lladdr 28:25:5f:45:39:a1 STALE
-NEIGH
+SAID
 
     my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.168.1.43'] );
-    is_deeply(
-        [ map { $_->{ip} } @live ],
-        [qw{192.168.1.43 192.168.1.54 192.168.1.254}],
-        'the ones with a hardware address, and not the ones without'
-    );
-    is( $live[1]{mac}, 'ce:f9:56:8c:db:2b', 'carrying the address that answered' );
+
+    # .43 answered and is REACHABLE.  .54 answered but has gone STALE, which is
+    # exactly the decay the ping result is there to survive.  .55 did not answer
+    # but is REACHABLE, so something is there that does not speak ICMP.
+    is_deeply( [ map { $_->{ip} } @live ], [qw{192.168.1.43 192.168.1.54 192.168.1.55}], 'answered, or reachable' );
+
+    # STALE without an answer is not a signal: it outlives the machine that put
+    # it there, and .59 is an address a guest destroyed days ago used to have.
+    unlike( join( ',', map { $_->{ip} } @live ), qr/192[.]168[.]1[.]59/, 'and a leftover entry is not read as occupied' );
+
+    is( $live[1]{mac}, 'ce:f9:56:8c:db:2b', 'the hardware address comes off the table even when the entry is stale' );
 
     # A hypervisor that will not say what bridge it is on cannot be asked what
     # is on it, and that is not a reason to stop seeding.

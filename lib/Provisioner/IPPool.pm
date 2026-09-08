@@ -314,45 +314,58 @@ sub seed {
     my $recorded = 0;
     my %in_pool  = map { $_ => 1 } pool_ips($pool);
 
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
-    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
-        my $hv = eval { $fleet->hypervisor($name) } or next;
-
-        foreach my $found ( _guest_addresses($hv) ) {
-            $recorded += record( $found->{ip}, $found->{domain} );
-        }
-
-        # Anything else answering in the pool.  The guests above come from what
-        # they were configured with, which says nothing about the rest of the
-        # network -- a printer, a router, a machine nobody told us about.  Those
-        # are found by asking the hypervisor what is on the wire.
-        my $already = taken();
-        foreach my $found ( _live_addresses( $hv, [ sort keys %in_pool ] ) ) {
-
-            # In the pool only.  The table holds whatever the hypervisor has
-            # spoken to lately, most of which is on the wider network and none
-            # of our business: an address we could never hand out is not one
-            # worth a row saying we will not.
-            next unless $in_pool{ $found->{ip} };
-            next if $already->{ $found->{ip} };
-            $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
-        }
-
-        # The hypervisor itself.  hypervisors.conf names it as the host half of
-        # the libvirt URI, so that is what gets resolved; a hypervisor we cannot
-        # resolve is not one whose address we can protect.
-        my $host = eval { $hv->ssh_host } or next;
-        my $ip   = _resolve($host)        or next;
-        $recorded += reserve( $ip, "hv:$name" ) if $in_pool{$ip};
-    }
-
-    # Whatever the guests are told to route through.  Handing a guest its own
-    # gateway is the sort of thing that looks like a network fault for a day.
+    # The gateway first, so that it is recorded as the gateway rather than as
+    # one more thing answering on the wire.  Handing a guest its own gateway is
+    # the sort of thing that looks like a network fault for a day.
     my $ipmap   = Config::Simple->new( Trog::Config->path('ipmap.cfg') );
     my $global  = $ipmap ? ( $ipmap->param( -block => 'global' ) // {} ) : {};
     my $gateway = $global->{gateway} // q{};
     foreach my $gw ( grep { length } split /[\s,]+/, $gateway ) {
         $recorded += reserve( $gw, "gateway:$gw" ) if $in_pool{$gw};
+    }
+
+    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
+        my $hv = eval { $fleet->hypervisor($name) } or next;
+
+        # The sweep first, because what comes after reads the neighbour table it
+        # fills: libvirt only knows a guest's bridged address if the host has
+        # spoken to it lately.
+        my @live = _live_addresses( $hv, [ sort keys %in_pool ] );
+
+        foreach my $found ( _guest_addresses($hv) ) {
+
+            # A guest answers on the NAT bridge too, and that address is
+            # libvirt's to hand out rather than ours.
+            next unless $in_pool{ $found->{ip} };
+            $recorded += record( $found->{ip}, $found->{domain} );
+        }
+
+        # The hypervisor itself, before the sweep results below, so it is named
+        # for what it is.  hypervisors.conf gives it as the host half of the
+        # libvirt URI, so that is what gets resolved; one we cannot resolve is
+        # not one whose address we can protect.
+        my $host = eval { $hv->ssh_host };
+        my $ip   = $host ? _resolve($host) : undef;
+        $recorded += reserve( $ip, "hv:$name" ) if $ip && $in_pool{$ip};
+
+        # Whatever else is answering.  The guests above come from what they were
+        # configured with and what libvirt claims, which says nothing about the
+        # rest of the network -- a printer, a router, somebody's media box.
+        my $already = taken();
+        foreach my $found (@live) {
+
+            # In the pool only.  The table holds whatever the hypervisor has
+            # spoken to lately, most of which is none of our business: an
+            # address we could never hand out is not worth a row saying so.
+            next unless $in_pool{ $found->{ip} };
+
+            # Answering, and not one of ours -- no guest was configured with it
+            # and libvirt did not claim it.  Somebody else's machine, so it is
+            # spoken for whatever we think.
+            next if $already->{ $found->{ip} };
+            $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
+        }
     }
 
     return $recorded;
@@ -378,14 +391,33 @@ sub _guest_addresses {
         "printf '%s\\t%s\\n' '$q' \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' '$dir/$q/provision.conf' 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
     } @names;
 
+    # And what libvirt says each guest is answering on, which catches one whose
+    # provision.conf is missing or unreadable.
+    #
+    # Through virsh on the hypervisor rather than through Sys::Virt over the
+    # connection we already hold, because the ARP source resolves against the
+    # *client's* neighbour table: asked from here, where this machine is not on
+    # the guests' bridge, it reports the NAT address and nothing else.  Asked on
+    # the hypervisor it reports the bridged one.  That is the whole difference,
+    # and it is why this shells out.
+    $script .= "\n" . join "\n", map {
+        ( my $q = $_ ) =~ s/'/'\\''/g;
+        "virsh domifaddr '$q' --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$q\t|\"";
+    } @names;
+
     ( my $quoted = $script ) =~ s/'/'\\''/g;
     my $said = $hv->capture("sudo sh -c '$quoted'") // q{};
 
-    my @found;
+    my ( @found, %seen );
     foreach my $line ( split "\n", $said ) {
         my ( $domain, $ip ) = split "\t", $line, 2;
         next unless defined $domain && length $domain;
         next unless defined $ip     && $ip =~ m/\A[0-9]+(?:[.][0-9]+){3}\z/;
+
+        # A domain answers on the NAT bridge as well, so it turns up more than
+        # once.  Which of its addresses belongs to the pool is decided by the
+        # caller, which is the only thing that knows what the pool is.
+        next if $seen{"$domain\t$ip"}++;
         push( @found, { domain => $domain, ip => $ip } );
     }
 
@@ -411,20 +443,43 @@ sub _live_addresses {
     return () unless @$pool;
 
     my $bridge = eval { $hv->bridge_device } or return ();
-    my $sweep  = join q{ }, map { "ping -c1 -W1 '$_' >/dev/null 2>&1 &" } @$pool;
 
-    my $said = $hv->capture("sudo sh -c '$sweep wait; ip -4 neigh show dev $bridge'") // q{};
+    # Two signals, because one of them is not trustworthy on its own.
+    #
+    # Whether the ping was answered is the reliable one: three identical sweeps
+    # reported twelve, twelve and twelve.  Whether the neighbour table says
+    # REACHABLE is not: the same three sweeps read twelve, twelve and two, the
+    # entries having decayed to STALE between the sweep and the read.  So the
+    # ping reports for itself, and the table is consulted for a second opinion
+    # and for the hardware address.
+    #
+    # STALE is deliberately not a signal.  It outlives the machine that put it
+    # there -- addresses belonging to guests destroyed days earlier were still
+    # in this table, and reserving those would leak the pool a little at a time.
+    #
+    # Unquoted addresses, then the whole script quoted once: these come out of
+    # the pool as numbers and need no quoting of their own, and quoting them
+    # individually closed the sh -c around them, so the sweep never ran at all.
+    my @addresses = grep { m/\A[0-9]+(?:[.][0-9]+){3}\z/ } @$pool;
+    my $script    = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } @addresses;
+    $script .= " wait; ip -4 neigh show dev $bridge";
 
-    my @live;
+    ( my $quoted = $script ) =~ s/'/'\\''/g;
+    my $said = $hv->capture("sudo sh -c '$quoted'") // q{};
+
+    my ( %live, %mac );
     foreach my $line ( split "\n", $said ) {
+        if ( my ($answered) = $line =~ m/\ALIVE\s+([0-9]+(?:[.][0-9]+){3})\z/ ) {
+            $live{$answered} = 1;
+            next;
+        }
 
-        # FAILED and INCOMPLETE are the answers for an address nothing is on.
-        next if $line =~ m/\b(?:FAILED|INCOMPLETE)\b/;
-        my ( $ip, $mac ) = $line =~ m/\A([0-9]+(?:[.][0-9]+){3})\s+lladdr\s+(\S+)/ or next;
-        push( @live, { ip => $ip, mac => $mac } );
+        my ( $ip, $hw ) = $line =~ m/\A([0-9]+(?:[.][0-9]+){3})\s+lladdr\s+(\S+)/ or next;
+        $mac{$ip}  = $hw;
+        $live{$ip} = 1 if $line =~ m/\bREACHABLE\b/;
     }
 
-    return @live;
+    return map { { ip => $_, mac => $mac{$_} // 'unknown' } } sort keys %live;
 }
 
 # Numeric already, or whatever the resolver says.  undef rather than a die: a
