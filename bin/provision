@@ -66,6 +66,22 @@ in its directory.  Normally F<bin/new_config> is run first, which is what
 writes F<provision.conf> and packs F<data.tar.gz>; pass this when you want to
 build exactly what is on disk.
 
+=item B<--salvage-gaps-ok>
+
+Rebuild the guest even though state that is on it did not come off it.
+
+Without this, a salvage that found a directory on the guest and came away with
+nothing stops the run before anything is destroyed -- that is what an
+unreadable directory looks like, and rebuilding would lose the only copy.  Pass
+this when the state really is gone, or you do not want it, and the guest should
+be rebuilt regardless.
+
+Only ever typed.  There is no environment variable and no configuration key for
+it, because the whole point is that somebody read what it is about to lose.
+
+A directory the guest has never written does not trip this, and neither does a
+domain that has no guest yet, so a new machine never needs it.
+
 =item B<--recipes> FILE
 
 Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/recipes.yaml>.
@@ -212,18 +228,19 @@ sub main {
     ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
-    my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials );
+    my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok );
     GetOptionsFromArray(
         \@args,
-        'existing=s'  => \$reuse,
-        'domaindir=s' => \$domain_dir,
-        'dryrun'      => \$dryrun,
-        'connect=s'   => \$uri,
-        'hvconf=s'    => \$hvconf,
-        'no-config'   => \$no_config,
-        'recipes=s'   => \$recipes,
-        'ipmap=s'     => \$ipmap,
-        'credentials' => \$credentials,
+        'existing=s'      => \$reuse,
+        'domaindir=s'     => \$domain_dir,
+        'dryrun'          => \$dryrun,
+        'connect=s'       => \$uri,
+        'hvconf=s'        => \$hvconf,
+        'no-config'       => \$no_config,
+        'recipes=s'       => \$recipes,
+        'ipmap=s'         => \$ipmap,
+        'credentials'     => \$credentials,
+        'salvage-gaps-ok' => \$salvage_gaps_ok,
     );
 
     # Before anything that could want one, and only when asked: see
@@ -250,6 +267,12 @@ sub main {
             ipmap      => $ipmap,
             hvconf     => $hvconf,
             uri        => $uri,
+
+            # Typed, every time, by somebody who has read what it is about to
+            # lose.  No environment variable and no config key: this is the
+            # difference between rebuilding a guest and destroying the only copy
+            # of what was on it.
+            salvage_gaps_ok => $salvage_gaps_ok,
         }
     ) unless $no_config;
 
@@ -382,7 +405,51 @@ sub generate_config {
     my $result = Trog::Provisioner::Config::Generator::main( '--recipes', $recipes, '--ipmap', $ipmap, $domain );
 
     die "Could not generate the configuration for $domain\n" if $result;
+
+    refuse_on_salvage_gaps( $opts->{salvage_gaps_ok} );
     return 1;
+}
+
+=head2 refuse_on_salvage_gaps($allowed)
+
+Stop before anything is destroyed when the salvage came away without state the
+guest still has.
+
+The generator says so and carries on, which is right for what it is -- it
+writes configuration, and it runs from cron to take backups where quitting over
+one unreadable directory would abandon every domain after it.  This program is
+the one that calls clean_domain_resources, so this is where the warning has to
+turn into a refusal.
+
+Only the gaps that mean something was there and could not be read.  A path the
+guest has never written has nothing to salvage, which is what every first build
+of a recipe looks like, and a domain with no guest yet is never salvaged at all
+-- so a new machine cannot trip this.
+
+=cut
+
+sub refuse_on_salvage_gaps {
+    my ($allowed) = @_;
+
+    my %gaps = Trog::Provisioner::Config::Generator::salvage_gaps();
+    return 1 unless %gaps;
+
+    my $detail = join(
+        q{},
+        map {
+            my $domain = $_;
+            map { "    $domain: $_->{recipe} read nothing out of $_->{remote}\n" } @{ $gaps{$domain} }
+        } sort keys %gaps
+    );
+
+    # Loud, and then carry on, because somebody said to.
+    if ($allowed) {
+        warn "Continuing past " . scalar( keys %gaps ) . " domain(s) whose state could not be read, because --salvage-gaps-ok says to:\n" . $detail;
+        return 1;
+    }
+
+    die "Refusing to rebuild: state that is on the guest did not come off it.\n\n" . $detail
+      . "\nEach of those exists on the guest and came away empty, which is what an\nunreadable directory looks like -- the fetch runs unprivileged.  Rebuilding now\ndestroys the only copy.\n\nFix the permissions and run again, or pass --salvage-gaps-ok if that state is\ngone for good and you want the guest rebuilt without it.\n";
 }
 
 # Which hypervisor does this guest belong on?
