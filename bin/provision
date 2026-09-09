@@ -108,7 +108,22 @@ building a new one.
 
 =item B<--dryrun>
 
-Write out everything that would be applied, but don't apply it.
+Write the domain's configuration out and change nothing anywhere else.
+
+F<network-config>, F<user-data>, F<meta-data>, F<setup.sh> and F<rsyslog.conf>
+land in the domain directory as they always would, and everything that reaches
+past it is described instead of done: the hypervisor's rsyslog is not
+reconfigured, no disk or cloud-init seed is made, the domain is neither
+destroyed nor defined, and this machine's C<authorized_keys> is left alone.
+
+A domain that already has a key keeps it.  The guest that is up has the public
+half, so replacing the private one here would be losing the way in to a machine
+this was not going to touch.  A domain with no key yet gets one, since
+F<user-data> is written out of it.
+
+F<domain.xml> is the one thing a dry run does not produce.  It is built out of
+the paths to the storage pool, the base image, the guest's disk and its seed --
+so writing it means making all four, which is the opposite of the point.
 
 =back
 
@@ -578,13 +593,27 @@ sub provision_domain {
         return ( $reuser, $old_ssh_ip );
     }
 
+    # A dry run stops here, which is further up than it used to.  It stopped
+    # after clean_domain_resources and after mongle_domain_xml, so it annihilated
+    # the domain, deleted both its volumes, made a fresh disk and a seed ISO, and
+    # then reported that it had applied nothing.
+    #
+    # Nothing below this line only writes into the domain directory.
+    # mongle_domain_xml makes the storage pool, the base image, this guest's disk
+    # and its cloud-init seed on the hypervisor -- the XML it returns is built out
+    # of the paths to those, so there is no rendering it without making them --
+    # and everything after that defines and starts the domain.
+    if ($dryrun) {
+        print "Would terminate the existing $domain and delete its volumes\n" if $hv->domain_exists($domain);
+        print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $hv->describe . ", then define and start $domain\n";
+        return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $old_ip ) );
+    }
+
     # Anything already answering to this name has to go before we define one.
     clean_domain_resources($domain);
 
     my ( $xml, $file ) = mongle_domain_xml( $config, \%seed );
     print "Wrote $file\n";
-
-    return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $old_ip ) ) if $dryrun;
 
     print "Defining and starting $domain...\n";
     $hv->define_domain($xml);
@@ -1297,9 +1326,19 @@ sub mongle_cloud_init {
 
     # Generate a new key for the child.  This used to pipe yes(1) in to answer
     # the overwrite prompt; removing the old key first means there is no prompt.
+    #
+    # Not on a dry run that already has one.  The guest that is up has this
+    # key's public half in its authorized_keys, so replacing the private half
+    # here is losing the way in to a machine nobody asked us to touch -- and a
+    # dry run is the one thing that is supposed to touch nothing.  A domain with
+    # no key yet has nothing to lose and gets one, because user-data below is
+    # written out of it and that is what the flag is for.
     my $key = "$domain_dir/$domain/key.rsa";
-    unlink $key, "$key.pub";
-    IPC::Run3::run3( [ qw{ssh-keygen -t rsa -f}, $key, qw{-N}, '', qw{-q} ], \undef, \undef, undef );
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    unless ( $dryrun && -f $key && -f "$key.pub" ) {
+        unlink $key, "$key.pub";
+        IPC::Run3::run3( [ qw{ssh-keygen -t rsa -f}, $key, qw{-N}, '', qw{-q} ], \undef, \undef, undef );
+    }
     close _must_read( $key,       "ssh-keygen made no key for $domain" );
     close _must_read( "$key.pub", "ssh-keygen made no pubkey for $domain" );
     chmod 0600, "$domain_dir/$domain/key.rsa";
@@ -1308,11 +1347,17 @@ sub mongle_cloud_init {
     # Authorize the key with the transfer user *here*.  This is the box the guest
     # scps its payload out of, and it is this one because the payload is written
     # here and is not copied anywhere else.
+    #
+    # A change to this machine, so a dry run does not make it.  bin/destroy is
+    # what takes these back out again, and it would know nothing about one left
+    # by a run that was supposed to apply nothing.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
-    my $this_machine = Trog::Local->new();
-    $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
-      or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
+    unless ($dryrun) {
+        my $this_machine = Trog::Local->new();
+        $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
+          or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
+    }
 
     my $pkgs = _coerce_array( $config->param('packages') );
 
@@ -1483,16 +1528,25 @@ sub mongle_logging_config {
     $local_config_template =~ s/%DOMAIN%/$domain/gmx;
 
     # The guest ships its logs at the HV, so the collector config goes there too.
+    #
+    # Which is a change to the hypervisor, so a dry run says what it would write
+    # and writes none of it.  The guest's own half is still rendered below: that
+    # lands in the domain directory, which is what a dry run is for.
     my $lcf = "/etc/rsyslog.d/10-$domain.conf";
-    $hv->write_text( $lcf, $local_config_template, sudo => 1 );
-    print "Wrote $lcf\n";
+    if ($dryrun) {
+        print "Would write $lcf and /etc/logrotate.d/vms.conf on " . $hv->describe . ", and restart rsyslog there\n";
+    }
+    else {
+        $hv->write_text( $lcf, $local_config_template, sudo => 1 );
+        print "Wrote $lcf\n";
 
-    $hv->put_file( "$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => 1 );
-    print "Wrote /etc/logrotate.d/vms.conf\n";
+        $hv->put_file( "$FindBin::Bin/../rsyslog-logrotate.tmpl", "/etc/logrotate.d/vms.conf", sudo => 1 );
+        print "Wrote /etc/logrotate.d/vms.conf\n";
 
-    #TODO die if these fail
-    $hv->run_sudo(qw{systemctl restart rsyslog});
-    print "Restarted rsyslogd\n";
+        #TODO die if these fail
+        $hv->run_sudo(qw{systemctl restart rsyslog});
+        print "Restarted rsyslogd\n";
+    }
 
     my $config_template = File::Slurper::read_text("$FindBin::Bin/../rsyslog-guest.tmpl");
     $config_template =~ s/%LOGHOST%/$ship_to/gmx;

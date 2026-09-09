@@ -154,6 +154,75 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
     like( join( q{}, @said ), qr{redis read nothing out of /var/lib/redis}, 'still saying what is being lost' );
 };
 
+# It used to stop after clean_domain_resources and after mongle_domain_xml, so a
+# dry run annihilated the domain, deleted both its volumes, made a fresh disk and
+# a seed, and then reported that it had applied nothing.
+subtest 'a dry run applies nothing' => sub {
+
+    # The SUT is a modulino required at runtime, so its `our` is not in scope
+    # while this file compiles and perl calls the one mention a typo.
+    no warnings 'once';
+    local $Trog::Bin::Provisioner::dryrun = 1;
+    use warnings 'once';
+
+    my @applied;
+    my $hv  = Test::MockModule->new('Trog::HV');
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my $loc = Test::MockModule->new('Trog::Local');
+
+    # Everything that reaches past the domain directory, named so a failure says
+    # which one it was rather than that a mock died.
+    $hv->redefine( domain_exists     => sub { 1 } );
+    $hv->redefine( annihilate_domain => sub { push( @applied, 'annihilate_domain' ); 1 } );
+    $hv->redefine( delete_volume     => sub { push( @applied, 'delete_volume' );     1 } );
+    $hv->redefine( create_disk       => sub { push( @applied, 'create_disk' );       1 } );
+    $hv->redefine( cloudinit_iso     => sub { push( @applied, 'cloudinit_iso' );     1 } );
+    $hv->redefine( define_domain     => sub { push( @applied, 'define_domain' );     1 } );
+    $hv->redefine( write_text        => sub { push( @applied, 'write_text' );        1 } );
+    $hv->redefine( put_file          => sub { push( @applied, 'put_file' );          1 } );
+    $hv->redefine( run_sudo          => sub { push( @applied, 'run_sudo' );          0 } );
+    $loc->redefine( append_line => sub { push( @applied, 'append_line' ); 1 } );
+
+    # The parts a dry run is supposed to do, faked out so the run reaches the end.
+    $hv->redefine( virbr_device => sub { 'virbr0' } );
+    $hv->redefine( virbr_ip     => sub { '192.168.122.1' } );
+    $hv->redefine( sshd_port    => sub { 22 } );
+    $hv->redefine( guest_mac    => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip     => sub { '192.168.122.50' } );
+    $hv->redefine( is_local     => sub { 1 } );
+    $hv->redefine( describe     => sub { 'the hypervisor' } );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    $hv->redefine( domain_dir => sub { $dir } );
+    mkdir "$dir/vm.test";
+
+    # A key that is already there, which a dry run must not replace: the guest
+    # that is up has its public half.
+    File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: doge\n" );
+
+    my $config = Config::Simple->new( syntax => 'simple' );
+    $config->param( $_->[0], $_->[1] )
+      for (
+        [ domain      => 'vm.test' ],       [ contact_email => 'nobody@vm.test' ],
+        [ ips         => '192.168.1.9' ],   [ gateway       => '192.168.1.254' ],
+        [ resolvers   => '192.168.1.254' ], [ admin_user    => 'doge' ],
+        [ size        => 21474836480 ],     [ cpus          => 2 ],      [ memory        => 4096 ],
+        [ transfer_ip => '192.168.1.49' ],  [ transfer_user => 'doge' ], [ transfer_port => 22 ],
+      );
+
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+
+    is_deeply( \@applied, [], 'nothing outside the domain directory was touched' )
+      or diag "applied: @applied";
+    is( File::Slurper::read_text("$dir/vm.test/key.rsa"), "PRIVATE\n", 'the existing key is still the existing key' );
+
+    # And it still wrote what there is to look at.
+    ok( -s "$dir/vm.test/user-data", 'user-data was written' );
+    ok( -s "$dir/vm.test/setup.sh",  'and the setup script' );
+};
+
 subtest 'a domain directory with no recipes is built as it stands' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 
