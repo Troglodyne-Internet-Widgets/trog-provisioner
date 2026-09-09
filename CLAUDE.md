@@ -124,4 +124,13 @@ able to tell them why.  Which is also why the *why* goes there rather than in a
 comment.
 
 When you have verified something, say what you ran and what it said.  A claim
-that a guest came up is worth the log line that shows it.
+that a guest came up is worth the log line that shows it.  So is a claim about
+work you did: the URL `gh pr create` gave back, the sha `git push` reported.  A
+PR number nobody can open is worse than no number.
+
+Stack a branch on another only when the *code* depends on it, never when only
+the verification does.  The tcms checkout needed the postrun fix before a guest
+would go green, so its PR was opened against that branch -- while touching none
+of the same files.  It merged into a branch that had already delivered its own
+payload to `master`, and sat there.  Open against `master` and say in the
+description what has to land first.
