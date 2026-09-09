@@ -267,12 +267,10 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     # reads now.  Deliberately recognisable, so that finding it in the seed says
     # it came off disk rather than being rebuilt here.
     my %wrote = (
-        'user-data'              => "#cloud-config\nfqdn: vm.test\n",
-        'meta-data'              => "instance-id: vm.test\n",
-        'network-config'         => "network:\n  version: 1\n",
-        'rsyslog-collector.conf' => "collector for vm.test\n",
-        'logrotate.conf'         => "rotate\n",
-        'key.rsa.pub'            => "ssh-rsa AAAA nobody\n",
+        'user-data'      => "#cloud-config\nfqdn: vm.test\n",
+        'meta-data'      => "instance-id: vm.test\n",
+        'network-config' => "network:\n  version: 1\n",
+        'key.rsa.pub'    => "ssh-rsa AAAA nobody\n",
     );
     File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
 
@@ -299,7 +297,14 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
 
     ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
     ok( ( grep { $_ eq 'append_line' } @applied ),   "the guest's key was authorized on the machine holding the payload" );
-    ok( ( grep { $_ eq 'run_sudo' } @applied ),      'and the hypervisor was told to collect its logs' );
+
+    # Deliberately not pre-written above: the collector configuration is one of
+    # the vm recipe's generated files, so this only works if it is installed
+    # after the recipe has generated it.  It was installed before, and a real
+    # provision died reading a file nothing had written.
+    ok( ( grep { $_ eq 'write_text' } @applied ), 'the collector configuration reached the hypervisor' );
+    ok( ( grep { $_ eq 'run_sudo' } @applied ),   'which was told to reload rsyslog for it' );
+    like( File::Slurper::read_text("$dir/vm.test/rsyslog-collector.conf"), qr/vm\.test/, 'and the vm recipe is what generated it' );
 
     is( $user, 'doge',           'the admin user comes back' );
     is( $ip,   '192.168.122.50', 'with the address the guest leased' );
