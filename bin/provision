@@ -523,11 +523,11 @@ sub provision_domain {
     # Set this to simplify calling conventions
     $config->param( 'domain', $domain );
 
-    # What bin/new_config wrote beside the domain, and the two changes to other
-    # machines that go with it: the hypervisor collects this guest's logs, and
-    # this machine lets its key in to fetch the payload.
+    # What bin/new_config wrote beside the domain, and the change to this machine
+    # that goes with it: the guest fetches its payload from here, so its key has
+    # to be let in.  The hypervisor's half is install_log_collector, further
+    # down, because what it installs is one of the vm recipe's generated files.
     my %seed = read_seed($config);
-    install_log_collector($config);
     authorize_guest_key($config);
 
     # If the domain is already up, let's find the IP.
@@ -616,6 +616,7 @@ sub provision_domain {
     if ($dryrun) {
         print "Would terminate the existing $domain and delete its volumes\n" if $hv->domain_exists($domain);
         print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $hv->describe . ", then define and start $domain\n";
+        print "Would write /etc/rsyslog.d/10-$domain.conf and /etc/logrotate.d/vms.conf there too, and restart rsyslog\n";
         return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $old_ip ) );
     }
 
@@ -624,6 +625,10 @@ sub provision_domain {
 
     my $file = build_domain( $config, \%seed );
     print "Wrote $file\n";
+
+    # After build_domain, because the collector configuration is one of the
+    # files it generates.
+    install_log_collector($config);
 
     print "Defining and starting $domain...\n";
     $hv->define_domain( File::Slurper::read_text($file) );
@@ -775,13 +780,17 @@ sub distro_recipe {
 Set the hypervisor up to receive this guest's logs.
 
 The guest ships its syslog at the hypervisor, so the collector configuration goes
-there -- which is a change to the hypervisor, so a dry run says what it would
-write and writes none of it.  The guest's own half of this is one of the distro
-recipe's generated files and lands in the domain directory either way.
+there.  The guest's own half of this is one of the distro recipe's generated
+files and lands in the domain directory with the rest of them.
 
-The files themselves come from L<Provisioner::Recipe::vm>, which is the recipe
-that describes the machine rather than the guest.  See issue #80, which is about
-making where a guest ships its logs a recipe rather than always the hypervisor.
+Called after C<build_domain>, because what it installs is one of
+L<Provisioner::Recipe::vm>'s generated files -- that recipe describes the
+machine rather than the guest, and this is a change to the machine.  Which is
+also why a dry run does not reach it: it stops before anything outside the
+domain directory is touched, and says there what it would have written here.
+
+See issue #80, which is about making where a guest ships its logs a recipe
+rather than always the hypervisor.
 
 =cut
 
@@ -792,11 +801,6 @@ sub install_log_collector {
     my $domain  = $config->param('domain');
     my $dir     = $hv->domain_dir . "/$domain";
     my $drop_in = "/etc/rsyslog.d/10-$domain.conf";
-
-    if ($dryrun) {
-        print "Would write $drop_in and /etc/logrotate.d/vms.conf on " . $hv->describe . ", and restart rsyslog there\n";
-        return 0;
-    }
 
     $hv->write_text( $drop_in, File::Slurper::read_text("$dir/rsyslog-collector.conf"), sudo => 1 );
     print "Wrote $drop_in\n";
