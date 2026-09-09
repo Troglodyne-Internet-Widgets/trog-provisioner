@@ -5,17 +5,29 @@
 # that would not start printed its failure into the log and the provision still
 # exited 0.  Every task runs, because stopping at the first would leave later
 # recipes' deferred work undone, and the exit code is the answer at the end.
-[ -s /root/post_install.sh ] || exit 0
+# The queue, which is only ever anywhere else under test.
+QUEUE=${POST_INSTALL_QUEUE:-/root/post_install.sh}
+
+[ -s "$QUEUE" ] || exit 0
 
 rc=0
 while IFS= read -r task; do
     [ -n "$task" ] || continue
     echo "postrun: $task"
-    if ! bash -c "$task"; then
+    # stdin closed, or the task reads the queue.  This loop is fed the task list
+    # on stdin and bash -c inherits it, so anything that reads -- cpanm pulling
+    # a distribution's dependencies is the one that did it -- swallows every
+    # line after itself and the loop ends at end of input.  No error, no failed
+    # task, just deferred work that silently stops happening: on a tcms guest
+    # that was the service never being built or started, and ufw never being
+    # reloaded, so the firewall the guest ran was not the one configured for it.
+    #
+    # Deferred work has nowhere to read input from anyway.
+    if ! bash -c "$task" < /dev/null; then
         echo "postrun FAILED: $task" >&2
         rc=1
     fi
-done < /root/post_install.sh
+done < "$QUEUE"
 
 [ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
 exit "$rc"
