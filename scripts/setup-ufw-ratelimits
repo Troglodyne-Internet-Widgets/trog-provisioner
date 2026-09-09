@@ -27,6 +27,25 @@ RULES=/etc/ufw/before.rules
 BEGIN='# BEGIN trog-provisioner rate limits'
 END='# END trog-provisioner rate limits'
 
+# Our own chain, jumped into from ufw-before-input, rather than rules appended
+# to ufw-before-input itself.
+#
+# This is what an exemption needs to be able to say "skip the limits" without
+# also saying "skip everything after them".  RETURN leaves the chain it is in,
+# and the last rule of ufw-before-input is the jump to ufw-user-input, where
+# every `ufw allow` lives -- so an exemption written directly into
+# ufw-before-input returned past the allow rules, fell through to
+# ufw-reject-input, and was dropped by the default deny.  Naming an admin
+# network locked that network out of the guest, which is the exact opposite of
+# what it is for, and it was invisible because ESTABLISHED is accepted earlier:
+# the connection that configured the firewall stayed up, and only the next new
+# one was refused.
+#
+# From inside a chain of our own, RETURN goes back to ufw-before-input and
+# carries on to ufw-user-input, which is what "not rate limited" was always
+# supposed to mean.
+CHAIN=trog-ratelimit
+
 [ -f "$RULES" ] || { echo "setup-ufw-ratelimits: no $RULES" >&2; exit 1; }
 
 # Take out whatever was put there last time, however many times.
@@ -38,6 +57,12 @@ fi
 
 block="$BEGIN\n"
 
+# Declared, then jumped into, before anything is added to it: iptables-restore
+# reads this file in order and a jump to a chain it has not seen yet is an
+# error that aborts the whole table.
+block="$block:$CHAIN - [0:0]\n"
+block="$block-A ufw-before-input -j $CHAIN\n"
+
 # The exemptions first, because iptables takes the first rule that matches and
 # a source let past has to be let past before anything counts it.
 for pair in "$@"; do
@@ -47,7 +72,7 @@ for pair in "$@"; do
     esac
     net=${pair##*=}
     echo "Never rate limiting $net"
-    block="$block-A ufw-before-input -s $net -j RETURN\n"
+    block="$block-A $CHAIN -s $net -j RETURN\n"
 done
 
 for pair in "$@"; do
@@ -79,7 +104,7 @@ for pair in "$@"; do
     # lately rather than a SYN.  That is still the thing worth counting -- a
     # reflection flood is new flows -- but it is why a udp rate is not a tcp
     # rate written twice.
-    block="$block-A ufw-before-input -p $proto --dport $port -m conntrack --ctstate NEW -m hashlimit --hashlimit-above $hits/sec --hashlimit-burst $hits --hashlimit-mode srcip --hashlimit-name trog$proto$port -j DROP\n"
+    block="$block-A $CHAIN -p $proto --dport $port -m conntrack --ctstate NEW -m hashlimit --hashlimit-above $hits/sec --hashlimit-burst $hits --hashlimit-mode srcip --hashlimit-name trog$proto$port -j DROP\n"
 done
 block="$block$END"
 

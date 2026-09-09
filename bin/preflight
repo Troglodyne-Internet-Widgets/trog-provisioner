@@ -14,11 +14,14 @@ use FindBin::libs;
 
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
+use File::Which();
 
 use Sys::Virt();
 
 use Trog::Config();
+use Provisioner::Cookbook();
 use Trog::HV();
+use Trog::Local();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -85,6 +88,9 @@ sub main {
         \&check_reachable,
         \&check_passwordless_sudo,
         \&check_iso_builder,
+        \&check_rsync,
+        \&check_transfer_ip,
+        \&check_fetch_sources,
         \&check_libvirt,
         \&check_sys_virt_in_step,
         \&check_config,
@@ -190,6 +196,121 @@ cloud-init reads its configuration off a small ISO, and something has to make
 it:
 
     sudo apt install xorriso
+FIX
+}
+
+# Both ends, because both ends run one.  A domain's data directory goes up to the
+# hypervisor over rsync and comes off the guest being replaced over rsync, and
+# rsync is the only thing in this toolkit that has to exist on the machine
+# driving a run as well as on the machine being driven.
+#
+# Guests are not asked and do not need to be: every one this tool builds installs
+# rsync among its base packages, and one that has not been built yet has nothing
+# to salvage.
+sub check_rsync {
+    my ($hv) = @_;
+
+    my @missing;
+    push( @missing, 'this machine' ) unless File::Which::which('rsync');
+    push( @missing, $hv->describe ) if !$hv->is_local && $hv->run( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
+
+    return report( 1, 'rsync on both ends', q{} ) unless @missing;
+
+    my $where = join( ' and ', @missing );
+    return report( 0, "No rsync on $where", <<"FIX" );
+A domain's data directory is shipped to the hypervisor and salvaged off the old
+guest with it, and both of those compare before they transfer -- which is what
+keeps a re-provision from moving twenty gigabytes of video it already has.
+
+    sudo apt install rsync
+
+on $where.
+FIX
+}
+
+# A guest fetches its payload from this machine, over ssh, so it has to have an
+# address of ours to fetch from.  Which of ours depends on how this machine is
+# attached to the hypervisor's networks, and on a workstation that is not on any
+# of them there is no answer -- which is the whole run failing at the guest's
+# first target rather than here, so it is worth a question up front.
+#
+# This asks the routing table, which cannot see a firewall in between or a route
+# that only works one way.  It says there is an address to try, not that the
+# guest will get through on it.
+sub check_transfer_ip {
+    my ($hv) = @_;
+
+    my $virbr = eval { $hv->virbr_ip };
+    return report( 0, 'Could not ask the hypervisor for its NAT bridge', <<"FIX" ) unless $virbr;
+$@
+Guests are built on that network and fetch their payload across it, so this has
+to answer before anything can be worked out about reaching them.
+FIX
+
+    my $ours = eval { Trog::Local->new()->transfer_ip($virbr) };
+    return report( 1, "Guests fetch their payload from $ours", q{} ) if $ours;
+
+    return report( 0, "No address of ours is reachable from a guest on $virbr", <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  Nothing routes to the
+hypervisor's guest network from here.
+
+Put this machine on that network, or name the address yourself in the [global]
+section of ipmap.cfg:
+
+    transfer_ip = 192.0.2.10
+FIX
+}
+
+# A recipe that ships an operator's own files names a directory nothing here
+# creates: adminconfig's skel, openvpnclient's cert_dir.  The guest rsyncs those
+# out of this machine, so an absent one fails that recipe's target part way
+# through a build -- and rsync's error for it names neither the recipe that
+# asked nor the domain it was for.
+#
+# Asked of every domain rather than of one, because preflight is about the
+# machine and because skel is usually said once in _base for the whole fleet.
+# Read raw, without validating or enriching: a configuration with a CHANGEME
+# still in it is one somebody is in the middle of writing, and refusing to look
+# at it would withhold exactly the answer they need next.
+sub check_fetch_sources {
+    my ($hv) = @_;
+
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+    my %wanted;
+
+    foreach my $domain ( grep { !m/\A_/ } sort keys %$conf ) {
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+
+        foreach my $name ( sort keys %$recipes ) {
+            my $class = eval { Provisioner::Cookbook->load($name) } or next;
+            next unless $class->can('fetch_sources');
+
+            my $opts = $recipes->{$name} // {};
+            next unless ref $opts eq 'HASH';
+
+            foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
+                next unless defined $path && length $path;
+                $wanted{$path}{$name} = 1;
+            }
+        }
+    }
+
+    return report( 1, 'No recipe fetches a directory of yours', q{} ) unless %wanted;
+
+    my @missing = grep { !-d } sort keys %wanted;
+    return report( 1, scalar( keys %wanted ) . ' fetched ' . ( keys %wanted == 1 ? 'directory is' : 'directories are' ) . ' here', q{} ) unless @missing;
+
+    my $detail = join( q{}, map { "    $_ (" . join( ', ', sort keys %{ $wanted{$_} } ) . ")\n" } @missing );
+    return report( 0, scalar(@missing) . ' fetched ' . ( @missing == 1 ? 'directory is' : 'directories are' ) . ' not on this machine', <<"FIX" );
+A guest rsyncs these out of this machine, and the recipe that wants one fails
+when it is not there:
+
+$detail
+They used to be read off the hypervisor, so on an installation that predates
+that change they are still over there.  Bring them here:
+
+    rsync -a @{[ $hv->ssh_host // 'the-hypervisor' ]}:<path>/ <path>/
 FIX
 }
 

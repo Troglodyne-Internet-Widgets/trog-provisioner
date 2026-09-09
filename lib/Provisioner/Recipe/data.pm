@@ -1,6 +1,6 @@
 package Provisioner::Recipe::data;
 
-#ABSTRACT: Schlep data from the hypervisor onto the guest.
+#ABSTRACT: Schlep a domain's data onto the guest.
 
 use 5.041;
 
@@ -25,17 +25,23 @@ to it comes from are C<_global>'s to say, in recipes.yaml:
     somedomain:
         deluged:
 
-and in ipmap.cfg:
+and, optionally, in ipmap.cfg:
 
     transfer_user=whoever_runs_trog_provisioner
+    transfer_ip=192.0.2.10
+
+Neither is required.  The guest fetches from the machine running this tool, as
+the account running it, at whichever of that machine's addresses a guest can
+reach -- and all three are worked out unless something here overrides them.  See
+L<Trog::Local>.
 
 C<somedomain> above gets this recipe without asking for it, because C<deluged>
 has state to put back and depends on the thing that puts it there.
 
 =head2 DESCRIPTION
 
-Schlep data from the hypervisor onto the guest, and put back whatever the
-recipes salvaged off the last one.
+Schlep a domain's data onto the guest, and put back whatever the recipes
+salvaged off the last one.
 
 It reads C<install_dir> and C<data_source> and has no fields of its own.  They
 used to be this recipe's C<to> and C<from>, which meant every recipe that

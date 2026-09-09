@@ -39,10 +39,24 @@ ns1=ns1.test.test
 ns2=ns2.test.test
 ```
 
-`basedir` is where the generated configuration for each domain lands **on the
-hypervisor**, one directory per fully qualified name. It is easy to confuse with
+`basedir` is where the generated configuration for each domain lands **on this
+machine**, one directory per fully qualified name. It is easy to confuse with
 the `data` recipe's `to`, which is where things land **on the guest**; they are
 frequently both `/opt/domains`, and they are not the same directory.
+
+Two optional settings say how a guest reaches back here for its payload, and
+neither is normally needed:
+
+```
+transfer_user=whoever_runs_trog_provisioner
+transfer_ip=192.0.2.10
+transfer_port=22
+```
+
+The account defaults to whoever is running the tool, the port to what this
+machine's `sshd_config` says, and the address to whichever of ours a guest on
+the hypervisor's network can route to. Set `transfer_ip` when this machine has
+more than one way to be reached and the kernel picks the wrong one.
 
 `bin/new_config tickle.test.test` writes a configuration for that name at that
 address. It populates a `users.yaml` creating the admin user, granting them
@@ -145,10 +159,17 @@ running machine.
 
 ## Data directories
 
-The `data` recipe rsyncs `from/<domain>` on the hypervisor to `to/<domain>` on
-the guest, and that path is what templates see as `data_dir`. With the example
-above, `/opt/client-data/tickle.test.test` on the hypervisor arrives at
+The `data` recipe rsyncs `from/<domain>` on this machine to `to/<domain>` on the
+guest, and that path is what templates see as `data_dir`. With the example
+above, `/opt/client-data/tickle.test.test` here arrives at
 `/opt/domains/tickle.test.test` on the guest.
+
+The guest fetches it from here directly. It used to be shipped to the
+hypervisor first so the guest could pull it from there, which meant a domain's
+data crossed the network twice per provision and the guest's private key lived
+on the hypervisor; neither is true now. What that costs is a requirement: a
+guest has to be able to reach this machine, and `bin/preflight` says whether it
+can.
 
 It is also where `remote_files` puts what it salvages off an existing guest, so
 the data directory is both what you restore from and what a backup tars up.

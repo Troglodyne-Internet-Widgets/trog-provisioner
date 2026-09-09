@@ -1,7 +1,7 @@
 mkdir -p [% install_dir %]/[% domain %]
 # We install the key to whatever user ran bin/provision from trog-provisioner.
 # This needs to be set up in your global config.
-rsync -av -e 'ssh -p[% hv_ssh_port %]' [% transfer_user %]@[% hv_ip %]:[% data_source %]/[% domain %]/ [% install_dir %]/[% domain %]/
+rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]:[% data_source %]/[% domain %]/ [% install_dir %]/[% domain %]/
 chown -R [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 chmod -R 0750 [% install_dir %]/[% domain %]
 [%# And then put back whatever the recipes said they salvaged.  Here rather than

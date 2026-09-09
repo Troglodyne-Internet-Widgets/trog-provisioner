@@ -32,11 +32,36 @@ use File::Temp  qw(tempdir);
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
+use File::Path();
+use File::Rsync();
 use File::Basename();
 use File::Slurper();
+use File::Slurper::Temp();
 use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
+
+# Whether a salvage would bring a file down, asked of the thing that decides.
+#
+# remote_skip holds rsync patterns rather than regexes, and a pattern that reads
+# exactly right and filters nothing is the failure worth catching -- which no
+# amount of matching the pattern against a string can find, because the string
+# is not what rsync is going to be given.  So this builds the relative path in a
+# scratch tree, runs a real local rsync with the recipe's excludes, and answers
+# with whether it arrived.
+sub salvage_brings_down {
+    my ( $relative, @skip ) = @_;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path( File::Basename::dirname("$dir/src/$relative") );
+    File::Slurper::Temp::write_text( "$dir/src/$relative", "x\n" );
+
+    my $rsync = File::Rsync->new( archive => 1, ( @skip ? ( exclude => \@skip ) : () ) );
+    $rsync->exec( src => "$dir/src/", dest => "$dir/dst/" )
+      or die "rsync failed in the test itself: " . join( '', @{ $rsync->err || [] } );
+
+    return -f "$dir/dst/$relative" ? 1 : 0;
+}
 
 # Global vars bin/new_config injects into every template render.
 my %G = (
@@ -51,8 +76,8 @@ my %G = (
     admin_email                => 'admin@test.test',
     main_ip                    => '192.168.1.100',
     tld_ip                     => '192.168.1.1',
-    hv_ip                      => '192.168.122.1',
-    hv_ssh_port                => 22,
+    transfer_ip                => '192.168.122.251',
+    transfer_port              => 22,
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     full_aliases               => ['www.test.test.test'],
@@ -232,11 +257,12 @@ foreach my $recipe (@available) {
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
 
-# The guest rsyncs its payload off the hypervisor, so every one of these has to
-# name it.  When the host came out empty the recipe still rendered, and still
-# looked plausible -- 'doge@:/opt/data/...' -- and only failed on the guest,
-# hours later, at the point where it had already been told the build succeeded.
-subtest 'every rsync off the hypervisor names it' => sub {
+# The guest rsyncs its payload off whoever is holding it -- this machine -- so
+# every one of these has to name it.  When the host came out empty the recipe
+# still rendered, and still looked plausible -- 'doge@:/opt/data/...' -- and only
+# failed on the guest, hours later, at the point where it had already been told
+# the build succeeded.
+subtest 'every rsync of a payload names the machine holding it' => sub {
     my %seen;
     foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
         foreach my $tt ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" ) {
@@ -254,7 +280,7 @@ subtest 'every rsync off the hypervisor names it' => sub {
             next unless index( $out, 'rsync' ) >= 0;
             $seen{$recipe}++;
             unlike( $out, qr/\@:/, "$recipe: no empty host between the user and the path" );
-            like( $out, qr/\@\Q$G{hv_ip}\E:/, "$recipe: rsyncs from $G{hv_ip}" );
+            like( $out, qr/\@\Q$G{transfer_ip}\E:/, "$recipe: rsyncs from $G{transfer_ip}" );
         }
     }
     ok( scalar keys %seen, 'and there were rsyncing recipes to check' );
@@ -756,10 +782,15 @@ subtest 'a secret placed from the store is never salvaged back' => sub {
             my @covering = grep { index( $path, $_ ) == 0 } keys %salvaged;
             next unless @covering;
 
-            ok(
-                ( grep { $path =~ $_ } @skip ),
-                "$recipe: $path is kept out of the salvage that would take it"
-            ) or diag "salvaged by: @covering, and remote_skip has: @skip";
+            # Each root separately: rsync matches a pattern relative to the
+            # transfer it is running, so a file that is kept out of one salvage
+            # is not thereby kept out of another that also reaches it.
+            foreach my $root ( sort @covering ) {
+                ok(
+                    !salvage_brings_down( substr( $path, length($root) ), @skip ),
+                    "$recipe: $path is kept out of the salvage of $root"
+                ) or diag "remote_skip has: @skip";
+            }
         }
     }
 };
@@ -840,6 +871,35 @@ subtest 'no cron template redirects with &>' => sub {
     }
 };
 
+# bin/preflight asks this of a configuration nobody has finished writing yet, so
+# a recipe whose path is not filled in has to answer with nothing rather than
+# with undef or with a die.
+subtest 'a recipe names the directories it fetches, and copes with not being told' => sub {
+    foreach my $recipe ( sort @available ) {
+        my $class = eval { Provisioner::Cookbook->load($recipe) } or next;
+
+        my @unasked = eval { $class->fetch_sources() };
+        is( $@, q{}, "$recipe: asking with nothing at all does not die" );
+        is_deeply( [ grep { defined } @unasked ], [], "$recipe: and names no directory" );
+    }
+
+    # The two that do name one.  Both are the operator's own files, which is why
+    # nothing here creates them and something has to check they are there.
+    my $adminconfig   = Provisioner::Cookbook->load('adminconfig');
+    my $openvpnclient = Provisioner::Cookbook->load('openvpnclient');
+
+    is_deeply(
+        [ $adminconfig->fetch_sources( skel => '/bogus/dotfiles/somebody' ) ],
+        ['/bogus/dotfiles/somebody'],
+        'adminconfig fetches the skel it was given'
+    );
+    is_deeply(
+        [ $openvpnclient->fetch_sources( cert_dir => '/bogus/vpn-certs/one' ) ],
+        ['/bogus/vpn-certs/one'],
+        'openvpnclient fetches its certificate directory'
+    );
+};
+
 subtest 'what a rebuild is not allowed to carry over' => sub {
     require Provisioner::Recipe;
     require Provisioner::Recipe::tcms;
@@ -856,13 +916,13 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     ok( $config, 'tCMS salvages its config directory' );
 
     my @skip = Provisioner::Recipe::tcms->remote_skip();
-    ok( scalar(@skip),                                   'and says something in it must stay behind' );
-    ok( ( grep { "${config}secrets.key" =~ $_ } @skip ), 'which is the vault key' );
+    ok( scalar(@skip),                                'and says something in it must stay behind' );
+    ok( !salvage_brings_down( 'secrets.key', @skip ), 'which is the vault key' );
 
     # And nothing else out of that directory, since the rest of it is the state
     # the salvage exists for.
     foreach my $keep (qw{auth.db main.cfg has_users}) {
-        ok( !( grep { "$config$keep" =~ $_ } @skip ), "$keep still comes over" );
+        ok( salvage_brings_down( $keep, @skip ), "$keep still comes over" );
     }
 };
 

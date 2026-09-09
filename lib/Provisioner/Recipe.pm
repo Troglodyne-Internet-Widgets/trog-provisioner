@@ -453,10 +453,35 @@ sub enrich {
     return %opts;
 }
 
+=head3 @paths = $recipe->fetch_sources(%opts)
+
+Directories on I<this machine> that the guest will rsync out of, so that
+something can check they are there before a run starts.
+
+A recipe that ships an operator's own files -- C<adminconfig>'s C<skel>,
+C<openvpnclient>'s C<cert_dir> -- names a path that nothing here creates and
+nothing here validates.  The fragment rsyncs it, so an absent one fails that
+recipe's target twenty minutes into a build, and the error rsync gives for it
+says nothing about which recipe asked or which domain it was for.
+
+Called with the recipe's raw options rather than its validated ones, and before
+a build rather than during one, so it has to cope with a configuration that is
+not finished: return nothing for a field that is absent instead of assuming it
+is there.  C<bin/preflight> is the caller.
+
+Not to be confused with C<datadirs>, which are directories under the data
+directory that this tool makes for the recipe.  These are the ones somebody
+else made and we only read.
+
+=cut
+
+sub fetch_sources {
+    return ();
+}
+
 =head3 @patterns = $recipe->remote_skip()
 
-Regexes for paths under C<remote_files> which must not come down, whatever
-directory they are inside.
+rsync exclude patterns for paths under C<remote_files> which must not come down.
 
 C<remote_files> salvages directories, not files, so a directory that is mostly
 state worth keeping can still hold something that is not.  A key which exists so
@@ -467,6 +492,17 @@ beside the database it protects it would be no key at all.
 Anything matching is left where it is.  The guest keeps it, and the rebuilt guest
 makes a new one -- which is the point, and is what whatever generated it is
 expected to cope with.
+
+Two things about the vocabulary, both of which decide what a pattern means.  A
+pattern with no slash in it matches that basename at any depth, and one with a
+slash is anchored at the top of the transfer rather than at the root of the
+filesystem.  And the list is handed to every path in the recipe's
+C<remote_files>, not to one of them -- a pattern is relative to whichever
+transfer is running, so C<secrets.key> keeps that name out of all four of
+tCMS's salvages and not only out of the configuration directory.
+
+Erring towards leaving a file behind is the right way to err here, which is why
+that last one is not worth working around.
 
 =cut
 

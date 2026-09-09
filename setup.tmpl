@@ -5,7 +5,7 @@
 # Wait until clown-init is done
 cloud-init status --wait
 
-# Make sure we can SSH into the HV ok
+# Make sure we can SSH to whoever is holding this guest's payload
 cat > /root/.ssh/config << EOF
 Host *
 Compression yes

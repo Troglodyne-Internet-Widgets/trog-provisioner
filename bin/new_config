@@ -33,6 +33,10 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
+use Trog::Guest();
+use Trog::HV();
+use Trog::Hypervisors();
+use Trog::Local();
 use File::Copy qw{copy};
 use Hash::Merge();
 use File::Find();
@@ -265,13 +269,10 @@ my @HV_SETTINGS = qw{
 sub choose_hypervisor {
     my ( $domain, $requirements ) = @_;
 
-    require Trog::HV;
-
     # Somebody who said --connect has already decided; do not place around them.
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
-    require Trog::Hypervisors;
     my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
     return $chosen unless $fleet->configured;
 
@@ -373,19 +374,28 @@ sub handle_domain {
     # The recipe says how much memory, disk and CPU the guest wants, which is
     # everything placement needs -- so this is decided here rather than after
     # provision.conf is written, and provision.conf never has to carry it.
-    #
-    # Required rather than used at the top: reaching a hypervisor over SSH is
-    # not something a run about to fail on a typo should do, and Trog::HV
-    # brings an SSH and a DNS stack with it.
     $hv //= choose_hypervisor( $domain, $global_config );
 
-    # The hypervisor answers for itself now.  These used to come out of the
-    # global section and out of this machine's own sshd_config, which was only
-    # ever right because the tool ran on the hypervisor it was building for.
+    # Who the guest fetches its payload from, and where it reaches them: us, on
+    # all three counts.  Nothing is copied to the hypervisor for the guest to
+    # pull from; it comes to this machine for it.
+    my $this_machine  = Trog::Local->new();
     my $tld_ip        = $hv->virbr_ip;
-    my $hv_ssh_port   = $hv->sshd_port;
-    my $transfer_user = $global_conf->{transfer_user} // $hv->hv_user;
-    die "Could not work out the transfer user for " . $hv->describe . "\n" unless $transfer_user;
+    my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
+    my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
+    die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
+
+    # Which of our addresses is a question about how this machine is attached to
+    # the networks the guest will be on, so it is asked rather than assumed --
+    # and overridable, because a machine with several routes to the same place
+    # is not something the kernel can pick between on our behalf.
+    #
+    # The guest's own address first, then the hypervisor's NAT bridge: we may
+    # share either with it, and sharing the static subnet is the case a
+    # workstation that is not itself a guest is in.
+    my $transfer_ip = $global_conf->{transfer_ip} // $this_machine->transfer_ip( $static_ip, $tld_ip );
+    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and neither $static_ip nor $tld_ip routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
+      unless $transfer_ip;
 
     # The same fold as anything else asking what a domain is configured with,
     # over this copy rather than the file, so the secrets resolved above survive
@@ -527,13 +537,9 @@ sub handle_domain {
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
 
-    # The guest rsyncs its payload off the hypervisor before it has working DNS,
-    # so this has to be an address and not a name.  virbr_ip asks the hypervisor
-    # for it over the connection -- reading virbr0 off whichever machine ran the
-    # generator is how this came out empty in the first place -- and the NAT
-    # bridge is directly attached to the guest, so it needs no routing or
-    # resolution to reach.
-    $global_config->{hv_ip}         = $hv->virbr_ip;
+    # The guest rsyncs its payload before it has working DNS, so this has to be
+    # an address and not a name.
+    $global_config->{transfer_ip}   = $transfer_ip;
     $global_config->{tld}           = $tld;
     $global_config->{admin_user}    = $admin_user;
     $global_config->{admin_email}   = $admin_email;
@@ -545,7 +551,7 @@ sub handle_domain {
     $global_config->{main_ip}       = $static_ip;
     $global_config->{tld_ip}        = $tld_ip;
     $global_config->{transfer_user} = $transfer_user;
-    $global_config->{hv_ssh_port}   = $hv_ssh_port;
+    $global_config->{transfer_port} = $transfer_port;
 
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up
@@ -576,7 +582,13 @@ sub handle_domain {
     $global_config->{packager_up_invocation}     = $pkgr_up;
     $global_config->{packager_remove_invocation} = $pkgr_rm;
 
-    # Figure out whether the remote host is actually up
+    # Figure out whether the remote host is actually up.
+    #
+    # Over sftp, and only sftp: opening the connection is the probe, and
+    # _salvage_gap asks the same handle afterwards whether a directory that
+    # salvaged nothing was missing or merely unreadable -- which is one status
+    # code here and two sudo round trips anywhere else.  Nothing is fetched over
+    # it.  That is _salvage_guest's job.
     my ( $ssh, $target_is_up );
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $skip_ssh;
 
@@ -705,41 +717,28 @@ sub handle_domain {
             # looks like now rather than whenever its cron last ran.
             refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $global_config->{install_dir}, $fqdn ) ], [ sort keys %tg ] );
             foreach my $to_fetch ( sort keys(%tg) ) {
-                print "Writing remote file $to_fetch as $data_dir/$tg{$to_fetch}\n";
+                print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
-                # XXX deal with connection drops
-                ($ssh) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $ssh;
-                my $num_copied = $ssh->rget(
+                # Not checked, on purpose.  A salvage that came away with
+                # nothing is what _salvage_gap below is for, and it says
+                # something more useful about why than a return value does; one
+                # that came away with some of it has still left the domain
+                # better off than abandoning the rest would.
+                _salvage_guest( $static_ip, $admin_user, $cfg_dir )->get_dir(
                     $to_fetch,
                     "$data_dir/$tg{$to_fetch}",
 
-                    # These are directories, and a recipe can have something in one
-                    # that is meant to stay on the machine it was made on -- see
-                    # remote_skip in Provisioner::Recipe.  Left behind rather than
-                    # fetched and deleted: this runs against a live guest, and the
-                    # guest still wants it.
-                    wanted => sub {
-                        my ( undef, $entry ) = @_;
-                        my $path = $entry->{filename} // '';
-                        foreach my $pattern (@skip) {
-                            next unless $path =~ $pattern;
-                            print "Leaving $path where it is\n";
-                            return 0;
-                        }
-                        return 1;
-                    },
+                    # These are directories, and a recipe can have something in
+                    # one that is meant to stay on the machine it was made on --
+                    # see remote_skip in Provisioner::Recipe.  Left behind rather
+                    # than fetched and deleted: this runs against a live guest,
+                    # and the guest still wants it.
+                    exclude => \@skip,
 
-                    # Most of what arrives here really is normal operation: a
-                    # directory listing that raced the guest, a file already
-                    # newer here than there.  rget recovers and carries on, and
-                    # so do we -- what one of these means on its own is not
-                    # knowable from inside the callback.  What a whole salvage
-                    # of nothing means is, and _salvage_gap below says it.
-                    on_error   => sub { print $ssh->error() . "\n" },
-                    overwrite  => 1,
-                    newer_only => 1,
+                    # What the sftp fetch called newer_only.  A guest's copy that
+                    # is older than ours stays where it is.
+                    update => 1,
                 );
-                print "Wrote $num_copied files.\n";
 
                 my $gap = _salvage_gap(
                     ssh         => $ssh,
@@ -879,6 +878,9 @@ sub handle_domain {
         admin_user=$admin_user
         gateway=$gateway
         resolvers=$r_text
+        transfer_ip=$transfer_ip
+        transfer_user=$transfer_user
+        transfer_port=$transfer_port
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
 
@@ -936,16 +938,12 @@ sub handle_domain {
 
     $tar->write( "$cfg_dir/data.tar.gz", Archive::Tar::COMPRESS_GZIP() ) or die "Could not write $cfg_dir/data.tar.gz: " . Archive::Tar->error();
 
-    # The guest rsyncs its payload out of the data directory on the hypervisor,
-    # and this is the end of the run that owns that directory: it makes the
-    # datadirs the recipes asked for, and writes back whatever remote_files were
-    # fetched off the last guest.  So it goes over now.
-    #
-    # It goes over even when there is nothing in it.  A domain that has never
-    # existed has no data of its own yet, and rsync fails rather than shrugging
-    # when the source directory is not there -- which fails the data target, and
-    # takes the rest of the Makefile with it before any other recipe has run.
-    $hv->sync_dir($data_dir);
+    # The data directory has to exist even when there is nothing in it.  A domain
+    # that has never existed has no data of its own yet, and the guest's rsync
+    # fails rather than shrugging when the source directory is not there -- which
+    # fails the data target and takes the rest of the Makefile with it before any
+    # other recipe has run.
+    make_path($data_dir) unless -d $data_dir;
 
     # Nobody remembers the one line in the middle of a run this long, so the
     # empty salvages get said again where the run ends and the operator is
@@ -990,25 +988,52 @@ dies, before anything is fetched.
 
 =cut
 
+# The guest a salvage talks to: the one about to be rebuilt, reached as the admin
+# user with the key this run has already written into the config directory.
+#
+sub _salvage_guest {
+    my ( $static_ip, $admin_user, $cfg_dir ) = @_;
+
+    # The address may be a cidr, which is not a thing to connect to.
+    ( my $host = $static_ip ) =~ s{/.*\z}{};
+
+    # One connection per guest, and not one per recipe.  Both callers ask for
+    # this inside the loop over the modules -- refresh_salvage once a module and
+    # the fetch once for each thing that module salvages -- and leaving the
+    # keeping of it to them means an ssh handshake apiece against a machine
+    # that is about to be thrown away.
+    #
+    # Keyed on everything that decides which machine this is and how it is
+    # reached, because one run configures several domains and each is a
+    # different guest.  Process wide rather than hung on an object, since there
+    # is no object here to hang it on.
+    state %guest;
+    my $id = join( "\0", $host, $admin_user // q{}, $cfg_dir // q{} );
+    return $guest{$id} if $guest{$id};
+
+    # The key may not be here yet, in which case say nothing about one rather
+    # than name a file that is not there: ssh has an agent and a config of its
+    # own, and either is a better answer than an -i nothing can read.
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    my $key = "$cfg_dir/key.rsa";
+    undef $key unless -f $key;
+
+    return $guest{$id} = Trog::Guest->new(
+        name => $host,
+        host => $host,
+        user => $admin_user,
+        ( $key ? ( key_path => $key ) : () ),
+    );
+}
+
 sub refresh_salvage {
     my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @_;
 
     return unless @$commands;
     $watched //= [];
 
-    # Required rather than used at the top, the way Trog::HV is: it brings an
-    # SSH stack with it, and a run whose recipes ask for nothing should not pay
-    # for that -- nor should the tests, which mock the filesystem out from under
-    # anything that reads one while loading.
-    require Trog::Guest;
-
-    ( my $host = $static_ip ) =~ s{/.*\z}{};
-    my $guest = Trog::Guest->new(
-        name     => $host,
-        host     => $host,
-        user     => $admin_user,
-        key_path => "$cfg_dir/key.rsa",
-    );
+    my $guest = _salvage_guest( $static_ip, $admin_user, $cfg_dir );
+    my $host  = $guest->name;
 
     my %seen = _salvage_mtimes( $guest, $watched );
 
@@ -1147,16 +1172,16 @@ sub pack_scripts {
 
 # Say whether a salvage that landed nothing is a problem, and what kind.
 #
-# Ask the destination rather than the transfer.  rget returns what it copied on
-# this pass, and newer_only means a second run against an unchanged guest
-# legitimately copies zero, having already taken the lot the first time -- so the
-# count says nothing about whether the salvage has anything in it.
+# Ask the destination rather than the transfer.  A transfer reports what it moved
+# on this pass, and a second run against an unchanged guest legitimately moves
+# nothing, having taken the lot the first time -- so what moved says nothing
+# about whether the salvage has anything in it.
 #
 # An empty destination is one of two things and only the guest can tell them
 # apart.  If the path is not there, the service has not generated its state yet,
 # which is what every first build looks like and is no cause for alarm.  If the
 # path is there and we still came away with nothing, the fetch could not read it:
-# remote_files comes down as admin_user over sftp with no sudo, and a service
+# remote_files comes down as admin_user over rsync with no sudo, and a service
 # keeps its state in a directory it owns and nobody else can open -- redis is
 # 0750 redis:redis, slapd.d is 0700 openldap, a PKI is 0600 root.  That case is
 # indistinguishable from a clean run from the outside, which is how it stays
@@ -1175,7 +1200,7 @@ sub _salvage_gap {
     my $missing = !$found && ( ( $ssh->status // -1 ) == SSH2_FX_NO_SUCH_FILE );
 
     my $message = "$args{recipe}: $args{remote} is not on $args{host} yet, so there is nothing to salvage.";
-    $message = "$args{recipe}: salvaged nothing out of $args{remote} on $args{host}, and $args{destination} is empty." . "  The fetch runs as $args{user} over sftp with no sudo, so the likeliest reason is that" . " the directory belongs to the service and $args{user} cannot read it."
+    $message = "$args{recipe}: salvaged nothing out of $args{remote} on $args{host}, and $args{destination} is empty." . "  The fetch runs as $args{user} over rsync with no sudo, so the likeliest reason is that" . " the directory belongs to the service and $args{user} cannot read it."
       unless $missing;
 
     return {

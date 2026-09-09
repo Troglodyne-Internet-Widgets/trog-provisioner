@@ -12,6 +12,7 @@ use FindBin();
 use FindBin::libs;
 use Config::Simple();
 use Trog::HV();
+use Trog::Local();
 use Trog::Hypervisors();
 use Trog::Guest();
 use Trog::Config();
@@ -436,10 +437,6 @@ sub provision_domain {
     $seed{'user-data'} = mongle_cloud_init($config);
     $seed{'meta-data'} = mongle_meta_data($config);
     print "Wrote the cloud-init configuration for $domain\n";
-
-    # Everything the domain dir is going to hold now holds it, so the HV can
-    # have its copy.  The guest pulls its payload from there.
-    $hv->sync_domain_dir($domain);
 
     # If the domain is already up, let's find the IP.
     # We can't guarantee we have a static IP, so use the internal.
@@ -1241,12 +1238,14 @@ sub mongle_cloud_init {
     chmod 0600, "$domain_dir/$domain/key.rsa";
     chmod 0600, "$domain_dir/$domain/key.rsa.pub";
 
-    # Authorize the key with the transfer user *on the hypervisor* -- that's the
-    # box the guest will scp its payload back from.
+    # Authorize the key with the transfer user *here*.  This is the box the guest
+    # scps its payload out of, and it is this one because the payload is written
+    # here and is not copied anywhere else.
     my $pubkey = File::Slurper::read_text("$domain_dir/$domain/key.rsa.pub");
     chomp $pubkey;
-    $hv->append_line( $hv->authorized_keys, $pubkey )
-      or die "Could not authorize the key for $domain on the hypervisor";
+    my $this_machine = Trog::Local->new();
+    $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
+      or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
 
     my $pkgs = _coerce_array( $config->param('packages') );
 
@@ -1376,17 +1375,21 @@ sub mongle_setup_script {
     my $domain_dir = $hv->domain_dir;
 
     my $domain          = $config->param('domain');
-    my $hvip            = $config->param('hv_internal_ip');
-    my $hv_ssh_port     = $config->param('hv_sshd_port');
     my $pre_make_script = $config->param('pre_make_script');
 
-    my $username = $hv->hv_user();
-    die "Could not determine the transfer user on the hypervisor" unless $username;
+    # Us, not the hypervisor.  bin/new_config worked out which of our addresses
+    # a guest built on this hypervisor can reach, and wrote all three into
+    # provision.conf; the tarball never leaves this machine.
+    my $transfer_ip   = $config->param('transfer_ip');
+    my $transfer_port = $config->param('transfer_port') // 22;
+    my $username      = $config->param('transfer_user');
+    die "provision.conf for $domain says nothing about where the guest fetches its payload from;\n" . "re-run bin/new_config for it\n"
+      unless $transfer_ip && $username;
     chomp $username;
 
     my $script_template = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
-    $script_template =~ s/%THISIP%/$hvip/gmx;
-    $script_template =~ s/%PORT%/$hv_ssh_port/gmx;
+    $script_template =~ s/%THISIP%/$transfer_ip/gmx;
+    $script_template =~ s/%PORT%/$transfer_port/gmx;
     $script_template =~ s/%DOMAIN%/$domain/gmx;
     $script_template =~ s/%THISDIR%/$domain_dir/gmx;
     $script_template =~ s/%USER%/$username/gmx;
