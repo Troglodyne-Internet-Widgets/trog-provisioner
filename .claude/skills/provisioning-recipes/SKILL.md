@@ -168,11 +168,21 @@ a port answers -- `postconf -h`, `configd status`, `nginx -t`, `ss -lnt`. It is
 the same "ask nginx, do not reason about nginx" rule with somewhere to put it.
 
 **Batch the questions into one call.** Every invocation is a fresh SSH
-connection, and ufw's `OpenSSH LIMIT` rule rejects a source that opens six in
-thirty seconds -- so a run of small questions locks you out of the guest, and it
-looks exactly like the guest dying: `Connection refused` on 22 while every other
-port still answers. Wait it out, or put your workstation in `admin_networks`,
-which is what that setting is for.
+connection, and the answer to several small questions is one command with
+several small questions in it.
+
+ufw's own `OpenSSH LIMIT` -- six connections in thirty seconds -- is what used
+to make that a hard rule, and it is not applied any more: `setup-ufw-rules`
+allows ssh like everything else and `setup-ufw-ratelimits` limits port 22 at
+whatever `Provisioner::Recipe::ufw`'s `rate_limits` says, sixty-four new
+connections a second by default. Asking a guest a dozen questions will not lock
+you out of it.
+
+So if a guest stops answering on 22 while other ports still do, do not write it
+off as a rate limit you have hit. That is a firewall or a routing question and
+it has an answer: `iptables -S ufw-before-input` and `iptables -S
+trog-ratelimit` say what the guest is actually enforcing, and `admin_networks`
+says who is exempt from the limits.
 
 ## When the guest never comes up at all
 
@@ -400,7 +410,66 @@ named was broken: `nvm` compared two empty strings, `matrix`'s chrony test ran
 before the config it checks was applied, and asking `systemctl is-active nginx`
 says nothing about a config file nginx has not read yet — `nginx -t` does.
 
-## Two things about the harness
+## A few things about the harness
+
+**One background command per thing you are waiting for, and not two.** A
+provision takes ten to twenty minutes, so it goes in the background -- and the
+harness tells you when a background command exits. Starting a poll loop *as well*
+(`until ! pgrep -f bin/provision; do sleep 30; done`) buys nothing: the
+completion notification arrives first, you act on it, and the loop keeps spinning
+until something reaps it.
+
+So: put `bin/provision` in the background, wait for *its* notification, and write
+no second waiter. Where you genuinely have to wait on something the harness
+cannot see, make that one backgrounded command which exits when the condition is
+true, and do not run a foreground `sleep` to pass the time either.
+
+The reason is that it buys nothing and hides failures, not that it is expensive.
+Measured, a waiter is the cheapest thing in the picture:
+
+| | resident |
+|---|---|
+| an idle poll loop, `bash` plus its `sleep` | 5.6M |
+| an `ssh` client, while connected | 8.6M |
+| `bin/provision`, at its peak | 119M |
+| the agent's own process | 285M to 461M, and almost all of it private |
+
+So a dozen idle waiters is around 67M -- a rounding error beside one agent
+process, and half of one provision. If you are deciding how far to fan out,
+those are the two numbers that matter and the waiters are not in the running.
+
+Do the arithmetic against the host rather than carrying a rule of thumb. The
+guests themselves usually do not enter into it: they are the hypervisor's
+memory, not this machine's, and a hypervisor built for the job has far more of
+it than a workstation does -- `bin/preflight` and `Trog::HV`'s capacity
+arithmetic are what answer that question.
+
+**And when what you are waiting on is the guest, wait on the guest.** Put the
+loop on the far side of one ssh connection rather than reconnecting from here on
+a timer. `Trog::Guest::wait_for_makefile` is the shape, and it is already in the
+tree:
+
+    sudo timeout 90m bash -c 'until [ $(atq | wc -l) = 0 ]; do sleep 1; done;'
+
+One command, one connection, blocking until the guest says so. The alternative
+-- `until ask_guest "$D" atq | grep -q ...; do sleep 60; done` -- opens a fresh
+connection every iteration, and that costs three things:
+
+- **It cannot tell you what is wrong.** A connection that is refused, dropped or
+  filtered looks exactly like "not finished yet", so a firewall problem and a
+  slow build are the same observation. Held open, a failure is a failure and you
+  find out at once.
+- **It does not survive the guest configuring its own firewall.** ufw's chain
+  accepts `RELATED,ESTABLISHED` near the top, so a connection already open rides
+  through the reload that postrun does; the next new one meets whatever rules the
+  guest just installed. That is the difference between `wait_for_makefile` never
+  once being locked out and a reconnecting poller timing out on a guest that was
+  building perfectly well.
+- **It spends connections for nothing.** Not enough to trip the rate limit --
+  ssh is limited at whatever `Provisioner::Recipe::ufw`'s `rate_limits` says,
+  sixty-four new connections a second by default, and a poll loop on a timer is
+  nowhere near that. It is simply a handshake a minute buying an answer one
+  blocking command would have given.
 
 **Never edit a script while it is running.** bash reads a script incrementally,
 by byte offset, so editing one mid-run resumes it somewhere meaningless. Editing
