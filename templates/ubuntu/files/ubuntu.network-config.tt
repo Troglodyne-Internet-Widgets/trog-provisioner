@@ -1,0 +1,54 @@
+[%# cloud-init network-config v1 for a guest, rendered by
+    Provisioner::Recipe::ubuntu.
+
+    Two interfaces: the outbound bridge, which carries the addresses this guest
+    is reached at, and the libvirt NAT, which is how the hypervisor finds it
+    before those work.
+
+    Matched on MAC rather than on name.  The names below are what each ends up
+    called; which card is which is decided by the address, because that is the
+    one thing about an interface we choose and the guest cannot disagree with.
+
+    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    string and swallows the template as far as the next quote. -%]
+---
+network:
+  version: 1
+  config:
+    - type: physical
+      name: [% bridge_devname | yaml %]
+      mac_address: [% bridge_mac | yaml %]
+[% IF gateway -%]
+      gateway4: [% gateway | yaml %]
+[% END -%]
+      nameservers:
+        search:
+          - [% domain | yaml %]
+        addresses:
+[% FOR resolver IN resolvers -%]
+          - [% resolver | yaml %]
+[% END -%]
+      subnets:
+[% IF ips.size() -%]
+[% FOR ip IN ips -%]
+        - type: static
+          address: [% ip | yaml %]
+          gateway: [% gateway | yaml %]
+          dns_search:
+            - [% domain | yaml %]
+          dns_nameservers:
+[% FOR resolver IN resolvers -%]
+            - [% resolver | yaml %]
+[% END -%]
+[% END -%]
+[% ELSE -%]
+[%# No addresses configured, so the bridge asks for one the same way the NAT
+    side does.  Which is rarely what you want on the outbound side, and is what
+    a guest with no ips in its provision.conf gets. -%]
+        - type: dhcp
+[% END -%]
+    - type: physical
+      name: [% dhcp_devname | yaml %]
+      mac_address: [% nat_mac | yaml %]
+      subnets:
+        - type: dhcp

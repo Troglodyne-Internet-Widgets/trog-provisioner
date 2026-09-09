@@ -245,4 +245,104 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
     );
 };
 
+subtest 'a distribution version of a recipe answers to the same name' => sub {
+    my $tdir = tempdir( CLEANUP => 1 );
+
+    {
+
+        package Provisioner::Recipe::widget;
+        use parent -norequire, 'Provisioner::Recipe';
+    }
+    {
+
+        package Provisioner::Recipe::Ubuntu::widget;
+        use parent -norequire, 'Provisioner::Recipe::widget';
+    }
+
+    # The name is taken from the last component of the class, so a subclass
+    # renders the same fragment as the recipe it specialises.  Sharing the
+    # fragment is the point: what a distribution changes is deps.
+    my $specific = Provisioner::Recipe::Ubuntu::widget->new( template_dirs => [$tdir], output_dir => $tdir );
+    is( $specific->{template},        'widget.tt',        'the subclass looks for the recipe fragment' );
+    is( $specific->{global_template}, 'widget.global.tt', 'and its global one' );
+
+    {
+
+        package Provisioner::Recipe::Ubuntu::Deeper::widget;
+        use parent -norequire, 'Provisioner::Recipe::widget';
+    }
+    like(
+        exception { Provisioner::Recipe::Ubuntu::Deeper::widget->new( template_dirs => [$tdir], output_dir => $tdir ) },
+        qr/Could not extract recipe name/,
+        'but only one level deep, so a class name that is not a recipe name is refused'
+    );
+};
+
+subtest 'render_raw renders without going back through validate' => sub {
+    my $tdir = tempdir( CLEANUP => 1 );
+    open( my $fh, '>', "$tdir/inner.tt" ) or die $!;
+    print $fh 'inner sees [% thing %]';
+    close $fh;
+
+    # What an enrich needs: it runs inside validate, so asking for a render that
+    # validates would call it again, and again.  This one asserts that by
+    # counting -- an enrich that recursed would never finish.
+    {
+
+        package Provisioner::Recipe::embedder;
+        use parent -norequire, 'Provisioner::Recipe';
+
+        # A package variable rather than a closed-over lexical: a named sub does
+        # not close over one declared in an enclosing block at runtime.
+        our $CALLS = 0;
+
+        sub enrich {
+            my ( $self, %opts ) = @_;
+            $CALLS++;
+            $opts{embedded} = $self->render_raw( 'inner.tt', %opts );
+            return %opts;
+        }
+    }
+
+    my $r = Provisioner::Recipe::embedder->new( template_dirs => [$tdir], output_dir => $tdir );
+    open( $fh, '>', "$tdir/embedder.tt" ) or die $!;
+    print $fh 'outer got: [% embedded %]';
+    close $fh;
+
+    is( $r->render( thing => 'a value' ),      'outer got: inner sees a value', 'a recipe can put one of its templates inside another' );
+    is( $Provisioner::Recipe::embedder::CALLS, 1,                               'and enrich ran once rather than recursing' );
+};
+
+subtest 'generate_files writes what template_files names' => sub {
+    my $tdir = tempdir( CLEANUP => 1 );
+    my $out  = tempdir( CLEANUP => 1 );
+
+    mkdir "$tdir/files";
+    open( my $fh, '>', "$tdir/files/gen.rendered.tt" ) or die $!;
+    print $fh 'for [% domain %]';
+    close $fh;
+
+    # A name that does not end in .tt is copied rather than rendered, which is
+    # what you want for something with no variables in it.
+    open( $fh, '>', "$tdir/files/gen.verbatim.conf" ) or die $!;
+    print $fh 'left [% alone %]';
+    close $fh;
+
+    {
+
+        package Provisioner::Recipe::gen;
+        use parent -norequire, 'Provisioner::Recipe';
+
+        sub template_files {
+            return ( 'gen.rendered.tt' => 'rendered.conf', 'gen.verbatim.conf' => 'verbatim.conf' );
+        }
+    }
+
+    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.com' );
+
+    is_deeply( [ sort @written ], [qw{rendered.conf verbatim.conf}], 'and says what it wrote, relative to where' );
+    is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.com', 'a .tt is rendered' );
+    is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',   'and anything else is copied' );
+};
+
 done_testing();

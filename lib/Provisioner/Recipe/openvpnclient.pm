@@ -56,17 +56,6 @@ holds the only copy that has to exist.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-
-        # It fetches its certificates over rsync, so it needs what does the
-        # fetching as much as it needs openvpn.
-        return qw{openvpn openssh-client rsync};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         required   => [qw{server cert_dir}],

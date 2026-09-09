@@ -1,0 +1,5 @@
+[%# NoCloud wants an instance-id, and keeping it stable across rebuilds is what
+    stops cloud-init deciding it has already run and skipping everything. -%]
+---
+instance-id: [% domain %]
+local-hostname: [% domain %]

@@ -80,14 +80,6 @@ sub required_recipes {
     return ( letsencrypt => sub { () }, $self->SUPER::required_recipes(%opts) );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{curl gnupg};
-    }
-    die "Unsupported packager";
-}
-
 sub rate_limits {
 
     # One client streaming opens a handful; a household opens a few handfuls.

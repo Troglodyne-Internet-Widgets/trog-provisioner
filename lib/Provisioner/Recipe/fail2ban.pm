@@ -27,14 +27,6 @@ Currently very limited: it configures a jail for tpsgi and nothing else.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{fail2ban};
-    }
-    die "Unsupported packager";
-}
-
 sub template_files {
     my ($self) = @_;
 

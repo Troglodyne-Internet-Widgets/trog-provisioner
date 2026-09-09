@@ -62,20 +62,6 @@ Check L<https://github.com/nvm-sh/nvm/releases> for available versions.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-
-        # libatomic1 because the node builds nvm downloads link against
-        # libatomic.so.1, which Ubuntu does not install by default.  Without it
-        # node is present and unrunnable -- "error while loading shared
-        # libraries" on every invocation -- and a test that only asks
-        # `command -v node` sees a path and calls it installed.
-        return qw{curl libatomic1};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         properties => {

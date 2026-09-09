@@ -133,37 +133,6 @@ sub required_recipes {
     );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{
-          python3-cryptography
-          python3-bcrypt
-          python3-pil
-          python3-twisted
-          python3-yaml
-          python3-jsonschema
-          python3-netaddr
-          python3-phonenumbers
-          python3-prometheus-client
-          python3-bleach
-          python3-jinja2
-          python3-sortedcontainers
-          python3-treq
-          python3-service-identity
-          python3-signedjson
-          python3-canonicaljson
-          python3-attr
-          python3-txacme
-          python3-matrix-common
-          python3-unpaddedbase64
-          python3-pymacaroons
-          python3-msgpack
-        };
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     my ($self) = @_;
     return (

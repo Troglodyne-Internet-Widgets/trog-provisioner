@@ -1,0 +1,5 @@
+# Rsyslog ingest for [% domain %]
+
+if $hostname == '[% domain %]' then {
+	action(type="omfile" file="/var/log/hosts/[% domain %].log")
+}

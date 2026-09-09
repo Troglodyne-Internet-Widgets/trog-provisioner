@@ -122,14 +122,6 @@ L<Provisioner::Recipe>.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{curl liblmdb0};
-    }
-    die "Unsupported packager";
-}
-
 sub _latest_garage_version {
 
     # Tags rather than releases: the GitHub repository is a mirror and has never

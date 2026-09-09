@@ -41,6 +41,54 @@ use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
 
+# The search path bin/new_config builds: a distribution's own directory first,
+# then the generic one.  Every fragment lives under ubuntu/ today, being written
+# against apt and systemd; templates/ holds makefile.tt and what is genuinely
+# shared.  Asking Cookbook for it is what keeps this test looking where the
+# thing it is testing looks.
+my $DISTRO        = 'ubuntu';
+my @template_dirs = @{ Provisioner::Cookbook->template_dirs($DISTRO) };
+
+# Every makefile fragment there is, wherever on the search path it lives.
+#
+# The assertions that sweep these used to glob one directory, with no check that
+# the glob found anything -- so moving the fragments would have left two real
+# invariants unchecked and the suite green.  Every caller counts what came back.
+sub fragments {
+    my @found;
+    foreach my $dir (@template_dirs) {
+        push( @found, glob("$dir/*.tt") );
+    }
+    return sort @found;
+}
+
+# Where a recipe's fragment actually is, out of that path, or undef.
+#
+# Not a hardcoded path: several assertions below read a fragment and skip
+# quietly when they cannot find one, so a lookup that goes to the wrong place is
+# a test that passes by checking nothing.
+# Any template, by its path relative to a search-path directory.
+sub fragment_file {
+    my ($relative) = @_;
+
+    foreach my $dir (@template_dirs) {
+        ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+        return "$dir/$relative" if -f "$dir/$relative";
+    }
+    die "No $relative anywhere in " . join( ', ', @template_dirs ) . "\n";
+}
+
+sub fragment_for {
+    my ( $recipe, $suffix ) = @_;
+    $suffix //= 'tt';
+
+    foreach my $dir (@template_dirs) {
+        ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+        return "$dir/$recipe.$suffix" if -f "$dir/$recipe.$suffix";
+    }
+    return undef;
+}
+
 # Whether a salvage would bring a file down, asked of the thing that decides.
 #
 # remote_skip holds rsync patterns rather than regexes, and a pattern that reads
@@ -96,7 +144,8 @@ my %G = (
 
 my %PROV = (
     target_packager => 'deb',
-    template_dirs   => [$template_dir],
+    distro          => $DISTRO,
+    template_dirs   => \@template_dirs,
 
     # bin/new_config always sets this and nothing here did, so a recipe reading
     # it got undef: garage interpolated it into a path and died on the warning,
@@ -112,9 +161,16 @@ sub renders_ok {
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
     subtest $desc => sub {
-        use_ok("Provisioner::Recipe::$name");
+
+        # Through Cookbook, so this exercises the distro's version of the recipe
+        # -- which is where the package names are -- rather than the generic
+        # class, which no build ever instantiates.
+        my $class;
+        my $res = exception { $class = Provisioner::Cookbook->load( $name, distro => $DISTRO ) };
+        is( $res, undef, "$name loads" ) or return;
+
         my $r;
-        my $res = exception { $r = "Provisioner::Recipe::$name"->new(%PROV) };
+        $res = exception { $r = $class->new(%PROV) };
         is( $res, undef, "$name->new() succeeds" );
 
         # We may or may not have global/domain specific templates, but we need at least one.
@@ -123,12 +179,12 @@ sub renders_ok {
         # whether or not the render threw -- which made this pass for every
         # recipe including the one whose minimum viable input did not validate.
         my $has_template;
-        if ( -f "$template_dir/$name.tt" ) {
+        if ( fragment_for($name) ) {
             $res = exception { $r->render( %G, %$extra ) };
             is( $res, undef, "$name->render() succeeds" );
             $has_template++;
         }
-        if ( -f "$template_dir/$name.global.tt" ) {
+        if ( fragment_for( $name, 'global.tt' ) ) {
             $res = exception { $r->render_global( %G, %$extra ) };
             is( $res, undef, "$name->render_global() succeeds" );
             $has_template++;
@@ -234,19 +290,14 @@ my %required_config = (
     },
 );
 
-# test everything available.
-my @available;
-File::Find::find(
-    {
-        wanted => sub {
-            my $object = $_;
-            return unless ( -f $object && $object =~ m/\.pm$/ );
-            my ($name) = $object =~ m/(.+)\.pm$/;
-            push( @available, $name );
-        },
-    },
-    "lib/Provisioner/Recipe/"
-);
+# Every recipe there is, asked of the thing that already answers it.
+#
+# This walked lib/Provisioner/Recipe/ with File::Find and no prune, which stopped
+# working the moment a distribution got a subdirectory of its own: Ubuntu/pdns.pm
+# pushed a second `pdns`, every loop below ran twice, and both runs tested the
+# generic class rather than the subclass.  Cookbook->names prunes, and leaves out
+# the two recipes that direct a build rather than running in one.
+my @available = Provisioner::Cookbook->names();
 
 #
 # Crank dat minimum viable case
@@ -265,13 +316,13 @@ foreach my $recipe (@available) {
 subtest 'every rsync of a payload names the machine holding it' => sub {
     my %seen;
     foreach my $recipe (qw{data adminconfig makefile openvpnclient}) {
-        foreach my $tt ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" ) {
+        foreach my $tt ( grep { defined } ( fragment_for($recipe), fragment_for( $recipe, 'global.tt' ) ) ) {
             next unless -f $tt;
 
             # Configured the way new_config configures it, bridge and all;
             # a bare Xslate cannot render the ones using TT2 vmethods.
             my $xslate = Text::Xslate->new(
-                path     => [$template_dir],
+                path     => \@template_dirs,
                 syntax   => 'TTerse',
                 module   => [qw{Text::Xslate::Bridge::TT2}],
                 function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
@@ -661,7 +712,7 @@ subtest 'no template comment leaves a quote open' => sub {
 # a recipe that was asked to do nothing.
 subtest 'every guest test renders to a Perl script that says something' => sub {
     my $xslate = Text::Xslate->new(
-        path     => [$template_dir],
+        path     => \@template_dirs,
         syntax   => 'TTerse',
         module   => [qw{Text::Xslate::Bridge::TT2}],
         function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
@@ -731,7 +782,7 @@ subtest 'a recipe that salvages state puts it back' => sub {
         my %salvaged = eval { $class->remote_files( $install, $domain ) };
         next unless %salvaged;
 
-        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+        my $fragments = join "\n", map { File::Slurper::read_text($_) } grep { defined } ( fragment_for($recipe), fragment_for( $recipe, 'global.tt' ) );
 
         # Where a recipe says its salvage goes back, which data walks so the
         # fragment does not have to.  redis and plexmediaserver still say it in
@@ -809,7 +860,7 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
         next unless @prepare;
 
         my %generated = eval { $class->template_files() };
-        my $fragments = join "\n", map { -f $_ ? File::Slurper::read_text($_) : '' } ( "$template_dir/$recipe.tt", "$template_dir/$recipe.global.tt" );
+        my $fragments = join "\n", map { File::Slurper::read_text($_) } grep { defined } ( fragment_for($recipe), fragment_for( $recipe, 'global.tt' ) );
 
         foreach my $command (@prepare) {
             my ($program) = $command =~ m{\A(\S+)};
@@ -1167,12 +1218,29 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
 
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
 
-    # setup.tmpl unpacks the payload and runs make from inside it.  With that in
-    # /tmp, mounting a tmpfs over /tmp strands the tree and the tarball -- make
-    # carries on, because its cwd is a directory it holds open, but the cleanup
-    # afterwards silently removes nothing.  Found on a guest, where 196K of
-    # payload was still sitting under the new mount.
-    my $setup = File::Slurper::read_text("$FindBin::Bin/../setup.tmpl");
+    # The setup script unpacks the payload and runs make from inside it.  With
+    # that in /tmp, mounting a tmpfs over /tmp strands the tree and the tarball
+    # -- make carries on, because its cwd is a directory it holds open, but the
+    # cleanup afterwards silently removes nothing.  Found on a guest, where 196K
+    # of payload was still sitting under the new mount.
+    #
+    # It is the distro recipe's now, and a template rather than the %TOKEN% file
+    # it used to be -- so this renders it and asserts on what the guest actually
+    # gets, which is what these paths were ever about.
+    my $setup = Text::Xslate->new(
+        path   => \@template_dirs,
+        syntax => 'TTerse',
+        module => [qw{Text::Xslate::Bridge::TT2}],
+    )->render(
+        "files/$DISTRO.setup.sh.tt",
+        {
+            domain        => 'vm.example.com',
+            transfer_ip   => '192.168.122.251',
+            transfer_port => 22,
+            transfer_user => 'transfer',
+            payload_dir   => '/opt/domains',
+        }
+    );
 
     like( $setup, qr{data\.tar\.gz /var/tmp$}m,            'the payload is fetched into /var/tmp' );
     like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'unpacked there' );
@@ -1535,7 +1603,10 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     # reason ldap looked like it worked was that slapd ships a profile covering
     # the port it defaults to.  Profiles live in /etc/ufw/applications.d, which
     # the reset leaves alone, and setup-ufw-rules allows every one it finds.
-    foreach my $tt ( sort glob("$template_dir/*.tt") ) {
+    my @fragments = fragments();
+    ok( scalar @fragments, 'there are fragments to check' );
+
+    foreach my $tt (@fragments) {
         next if $tt =~ m{/ufw(?:[.]global)?[.]tt\z};
 
         my $body = File::Slurper::read_text($tt);
@@ -1664,7 +1735,10 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
     # stop being true.
     my @allowed = qw{data redis plexmediaserver};
 
-    foreach my $tt ( sort glob("$template_dir/*.tt") ) {
+    my @fragments = fragments();
+    ok( scalar @fragments, 'there are fragments to check' );
+
+    foreach my $tt (@fragments) {
         my $name = File::Basename::basename( $tt, '.tt' );
         $name =~ s/[.]global\z//;
         next if grep { $_ eq $name } @allowed;
@@ -1673,6 +1747,91 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
         $body =~ s/\[%#.*?%\]//gs;
 
         unlike( $body, qr{/restore_state\b}, "$name leaves the restoring to data" );
+    }
+};
+
+# --- Where the package names live --------------------------------------------
+#
+# A recipe used to name its packages behind `if ($self->{target_packager} eq
+# 'deb')`, with a die on a branch nothing could reach.  They live in a subclass
+# per distribution now, and the failure this replaces it with is quieter: a
+# recipe with no subclass for the distribution in hand inherits the base class's
+# empty deps() and installs nothing at all, which nothing notices until a
+# service will not start twenty minutes into a build.
+#
+# So this is what notices.  It runs for every distribution there is, so adding
+# one and forgetting a recipe fails here rather than on a guest.
+subtest 'every recipe that needs packages has them, for every distribution' => sub {
+    my @distros = Provisioner::Cookbook->distros();
+    ok( scalar @distros, 'there is at least one distribution' );
+
+    foreach my $distro (@distros) {
+        my %provisioner = ( %PROV, distro => $distro, template_dirs => Provisioner::Cookbook->template_dirs($distro) );
+
+        foreach my $recipe ( sort @available ) {
+            my $generic  = "Provisioner::Recipe::$recipe";
+            my $specific = Provisioner::Cookbook->load( $recipe, distro => $distro );
+
+            # Nothing to say for a recipe that installs nothing: most of them
+            # reach the network through something that does.
+            next if $specific eq $generic && !$generic->can('deps');
+
+            my @deps = $specific->new(%provisioner)->deps( %{ $required_config{$recipe} // {} } );
+            next unless @deps;
+
+            isnt( $specific, $generic, "$recipe names its $distro packages in a $distro subclass" );
+            ok( $specific->isa($generic), "which is a $generic" );
+        }
+    }
+};
+
+subtest 'no recipe still asks which packager it is being built for' => sub {
+
+    # There was one packager, set two lines after it was read, so the question
+    # had one answer and the die on the other branch was unreachable.  The
+    # answer is the subclass now; the question should be gone.
+    my @asking;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                return unless m/[.]pm\z/;
+                push( @asking, $File::Find::name ) if index( File::Slurper::read_text($File::Find::name), 'target_packager' ) >= 0;
+            },
+        },
+        "$FindBin::Bin/../lib/Provisioner/Recipe"
+    );
+
+    is_deeply( \@asking, [], 'target_packager is nowhere in the recipes' ) or diag "still asking: @asking";
+};
+
+subtest 'a distribution gets its own version of a recipe, or the generic one' => sub {
+
+    # The lookup that decides which class a build actually instantiates.
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'the subclass where there is one' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'plan9' ),  'Provisioner::Recipe::nginx',         'and the recipe itself where there is not' );
+    is( Provisioner::Cookbook->load('nginx'), 'Provisioner::Recipe::nginx', 'as with no distribution named at all' );
+
+    # The fragment is shared: what a distribution changes is deps, not the
+    # makefile, so a subclass has to answer to the same template name.
+    my $r = Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->new(%PROV);
+    is( $r->{template},        'nginx.tt',        'and looks for the same fragment' );
+    is( $r->{global_template}, 'nginx.global.tt', 'and the same global one' );
+};
+
+subtest 'the two enumerations of what a recipe is agree' => sub {
+
+    # Cookbook->names answers by name, because it deliberately loads nothing;
+    # is_module answers by asking the class.  Two mechanisms for one fact is
+    # two mechanisms that can drift.
+    foreach my $recipe (@available) {
+        ok( Provisioner::Cookbook->load($recipe)->new(%PROV)->is_module, "$recipe is offered as something to put on a guest, and is one" );
+    }
+
+    foreach my $director ( Provisioner::Cookbook->directors() ) {
+        my $class = Provisioner::Cookbook->load($director);
+        ok( !$class->new( %PROV, template_dirs => [] )->is_module, "$director is not offered, and directs the build instead" );
+        ok( Provisioner::Cookbook->has($director),                 "though it is still a recipe you can ask for by name" );
     }
 };
 

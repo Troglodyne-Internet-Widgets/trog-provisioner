@@ -47,13 +47,16 @@ sub args {
     );
 }
 
+# The only deps() left in a generic recipe, and the only one that belongs in
+# one: these package names are the operator's own, out of their configuration,
+# rather than anything this recipe knows about a distribution.  So there is
+# nothing for a Provisioner::Recipe::Ubuntu::adminconfig to say -- and if the
+# names an operator writes here turn out to need saying per distribution, that
+# is a change to what pkgs means and not to where this lives.
 sub deps {
     my ( $self, %opts ) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return @{ $opts{pkgs} } if ref $opts{pkgs} eq 'ARRAY';
-        return ();
-    }
-    die "Unsupported packager";
+    return @{ $opts{pkgs} } if ref $opts{pkgs} eq 'ARRAY';
+    return ();
 }
 
 sub fetch_sources {

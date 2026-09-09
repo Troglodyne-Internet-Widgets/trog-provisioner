@@ -27,14 +27,6 @@ TODO: allow specification of version.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{perlbrew libcarp-always-perl};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type => 'object',

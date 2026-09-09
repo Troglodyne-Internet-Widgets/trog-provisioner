@@ -34,14 +34,6 @@ TODO integrate this into some manner of IDS mechanism.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{auditd};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

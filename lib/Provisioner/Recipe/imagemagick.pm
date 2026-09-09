@@ -24,14 +24,6 @@ Builds and installs ImageMagick from source with Perl bindings.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{ghostscript libjpeg-dev libpng-dev libtiff-dev liblzma-dev libxml2-dev libdjvulibre-dev libfreetype-dev libperl-dev libjxl-dev libtcmalloc-minimal4t64 g++ pkg-config};
-    }
-    die "Unsupported packager";
-}
-
 # The bindings are built against the perl the perl recipe installs under
 # /opt/perl5.  Nothing said so, so on a guest that did not happen to have one
 # build_imagick.sh ran everything against "/opt/perl5//bin/perl".

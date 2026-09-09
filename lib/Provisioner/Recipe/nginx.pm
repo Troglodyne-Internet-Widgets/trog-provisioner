@@ -28,14 +28,6 @@ In general it is best to use this as a dependency to other nginx recipes.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{nginx-full};
-    }
-    die "Unsupported packager";
-}
-
 sub rate_limits {
 
     # What a browser does to one origin on a single page load is dozens of

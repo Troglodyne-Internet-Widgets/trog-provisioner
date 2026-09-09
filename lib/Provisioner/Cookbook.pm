@@ -62,6 +62,38 @@ same answer from a checkout and from an installed dist.
 
 sub recipe_dir { return File::Basename::dirname(__FILE__) . '/Recipe' }
 
+=head2 template_dir
+
+Where the templates are, found relative to this file for the same reason
+C<recipe_dir> is.
+
+=cut
+
+sub template_dir { return Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../templates' ) }
+
+=head2 template_dirs($distro, @libdirs)
+
+The template search path for a build, in the order a renderer should try it.
+
+A distribution's own directory comes before the generic one, so
+F<templates/ubuntu/nginx.tt> wins over F<templates/nginx.tt> by being found
+first -- which is the whole mechanism, and needs no code that knows about it.
+Every fragment is written against apt and systemd today and so lives under
+F<ubuntu/>; F<templates/> holds what is genuinely shared, which is
+F<makefile.tt> and most of F<files/> and F<tests/>.
+
+The same for each vendor F<libdir>, after the checkout, since a vendor recipe
+adds to what ships here rather than overruling it.
+
+=cut
+
+sub template_dirs {
+    my ( $class, $distro, @libdirs ) = @_;
+
+    my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
+    return [ map { ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ } @bases ];
+}
+
 =head2 names
 
 Every recipe you can ask a domain to be built with, sorted.

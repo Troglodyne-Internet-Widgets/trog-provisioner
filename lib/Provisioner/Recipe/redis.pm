@@ -67,14 +67,6 @@ afterwards.  C<templates/redis.global.tt> says how, at length.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{redis-server};
-    }
-    die "Unsupported packager";
-}
-
 sub required_recipes {
     my ( $self, %opts ) = @_;
 

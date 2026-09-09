@@ -72,14 +72,6 @@ sub args {
     );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{libpithub-perl git};
-    }
-    die "Unsupported packager";
-}
-
 sub tests {
     return qw{admincode.tt};
 }

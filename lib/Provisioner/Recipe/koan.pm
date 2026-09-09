@@ -227,33 +227,6 @@ sub required_recipes {
     return ( claude => sub { () } );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        my @pkgs = qw{
-          git
-          python3
-          python3-venv
-          python3-pip
-          python3-dev
-          nodejs
-          npm
-          gh
-          ca-certificates
-          make
-          build-essential
-        };
-
-        # libolm is only strictly required when messaging_provider=matrix
-        # with E2EE on, but it's small and the host is single-purpose
-        # always include so the pip install of matrix-nio[e2e] never
-        # fails for want of a header.
-        push @pkgs, qw{libolm-dev libffi-dev};
-        return @pkgs;
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',
