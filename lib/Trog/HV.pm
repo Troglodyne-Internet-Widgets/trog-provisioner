@@ -805,9 +805,31 @@ two guests colliding is possible in principle -- at a few thousand of them.
 
 =head2 nic_slots
 
-Which PCI slots the two interfaces sit in, in order.  Pinned because systemd
-names a PCI NIC after its hotplug slot: these are what make the guest call them
-C<ens3> and C<ens4> rather than whatever this month's device ordering implies.
+Which PCI slots the two interfaces sit in, in order.  Pinned rather than left to
+allocation order, because systemd names a PCI NIC after its hotplug slot: left
+alone, the names move whenever the device list does.
+
+=head2 nic_prefix
+
+What a guest here calls a PCI network interface, before the slot number.
+
+A property of the machine type rather than of the guest, which is why it is
+asked of the hypervisor rather than assumed by whatever is writing a network
+configuration.  The domain XML asks for i440fx, where systemd's predictable
+naming gives C<ensN> for a device in hotplug slot N.  Another topology gives
+another scheme -- C<enpNsM> is the common one, and some emulated models are
+stranger still -- so a hypervisor that builds its guests differently overrides
+this.
+
+=head2 nic_names
+
+The names a guest's two interfaces end up with, NAT first.
+
+A prediction rather than a decision: cloud-init matches each interface on its
+MAC, which is the one thing about it we choose and the guest cannot disagree
+with, and renames it to the name it was given.  So a guest whose kernel names
+things some other way still gets the right configuration on the right card, and
+this is only what they are called afterwards.
 
 =cut
 
@@ -819,7 +841,14 @@ sub guest_mac {
     return join( ':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/ );
 }
 
-sub nic_slots { return ( 3, 4 ) }
+sub nic_slots  { return ( 3, 4 ) }
+sub nic_prefix { return 'ens' }
+
+sub nic_names {
+    my ($self) = @_;
+    my $prefix = $self->nic_prefix;
+    return map { "$prefix$_" } $self->nic_slots;
+}
 
 =head1 SNAPSHOTS
 

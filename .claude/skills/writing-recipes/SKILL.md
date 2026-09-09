@@ -127,10 +127,6 @@ recipe -- `Provisioner::Recipe::Ubuntu::nginx`, a subclass of
 `Provisioner::Recipe::nginx`, holding a `deps()` and nothing else.  The recipe
 itself keeps everything that is true wherever it is installed.
 
-There used to be an `if ($self->{target_packager} eq 'deb')` in every one of
-them, with a `die` on the other branch that nothing could reach.  Do not add
-another; `t/recipes.t` will notice.
-
 The failure to know about is quiet: a recipe with no subclass for the
 distribution in hand inherits the base class's empty `deps()` and installs
 nothing at all.  `t/recipes.t` asserts every recipe that needs packages has them

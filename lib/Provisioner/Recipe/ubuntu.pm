@@ -11,6 +11,7 @@ use re '/aa';
 use parent qw{Provisioner::DistroRecipe};
 
 use File::Slurper();
+use HTTP::Tiny();
 use IPC::Run3();
 use List::Util qw{any uniq};
 use Provisioner::Utils();
@@ -69,12 +70,60 @@ path is common enough and not worth failing an entire build over.
 =cut
 
 sub packager                   { return 'deb' }
-sub base_image                 { return 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img' }
+sub release                    { return 'noble' }
+sub base_image                 { my ($self) = @_; return $self->image_for( $self->release ) }
 sub packager_up_invocation     { return 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy' }
 sub packager_remove_invocation { return 'DEBIAN_FRONTEND="noninteractive" apt-get remove -y' }
 
 sub packager_invocation {
     return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options=--force-confdef -o Dpkg::Options=--force-confold -o Dpkg::Options=--force-overwrite --autoremove';
+}
+
+=head2 $url = $recipe->image_for($release)
+
+Where the cloud image for a named release lives.
+
+=head2 $url = $recipe->current_image()
+
+The image for whichever LTS Canonical currently says is supported, or undef if
+it could not be asked.  See L<Provisioner::DistroRecipe/current_image>.
+
+=head2 $codename = $recipe->current_release()
+
+That release's codename, out of F<meta-release-lts> -- the file Ubuntu's own
+upgrader reads, so it is the answer rather than an inference from one.  The last
+entry marked supported is the current one; the file lists the next LTS before it
+ships, with C<Supported: 0>, which is exactly the entry a "highest version wins"
+reading would pick wrongly.
+
+Undef if the fetch fails.  Nothing here is worth failing a preflight over.
+
+=cut
+
+sub image_for {
+    my ( $self, $release ) = @_;
+    return "https://cloud-images.ubuntu.com/$release/current/$release-server-cloudimg-amd64.img";
+}
+
+sub current_image {
+    my ($self) = @_;
+    my $release = $self->current_release or return undef;
+    return $self->image_for($release);
+}
+
+sub current_release {
+    my ($self) = @_;
+
+    my $res = HTTP::Tiny->new( timeout => 10 )->get('https://changelogs.ubuntu.com/meta-release-lts');
+    return undef unless $res->{success};
+
+    my ( $current, $dist );
+    foreach my $line ( split( "\n", $res->{content} ) ) {
+        $dist    = $1    if $line =~ m/\A\s*Dist:\s*(\S+)/;
+        $current = $dist if $line =~ m/\A\s*Supported:\s*1\s*\z/ && defined $dist;
+    }
+
+    return $current;
 }
 
 =head2 @pkgs = $recipe->deps()
@@ -90,20 +139,36 @@ sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail}
 
 =head1 METHODS
 
+=head2 BLOCK_SCALAR_INDENT
+
+How far in the body of a C<|> block scalar starts.
+
+YAML wants it deeper than the key that introduces it, and every C<content: |>
+in the user-data sits four spaces in -- a C<- path:> entry at two, its keys at
+four -- so the body has to begin at five or more.  Six is the next step on the
+two-space rhythm the rest of the document keeps.
+
+One depth, so one filter.  The rsyslog configuration was nested a level deeper
+than the rest and would have needed a second filter differing only in this
+number; its C<configs:> list is written at the same indent as its key instead,
+which brings it back to this depth.
+
+=cut
+
+sub BLOCK_SCALAR_INDENT { return 6 }
+
 =head2 @fmts = $recipe->formatters()
 
-C<yaml> and C<yaml_block> hand a value to L<YAML::XS> and put back what it says,
-at column 0 and indented by two -- the two positions a value appears at in these
-documents.  C<indent> is for a file carried inside another as a block scalar.
+C<yaml> hands a value to L<YAML::XS> and puts back what it says, for the places
+a document takes one.  C<indent> is for a whole file carried inside another as a
+block scalar.
 
 =cut
 
 sub formatters {
     return (
-        yaml       => Text::Xslate::html_builder( sub { return _yaml( shift, 0 ) } ),
-        yaml_block => Text::Xslate::html_builder( sub { return _yaml( shift, 2 ) } ),
-        ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
-        indent => Text::Xslate::html_builder( sub { return _indent( shift, 6 ) } ),
+        yaml   => Text::Xslate::html_builder( sub { return _yaml(shift) } ),
+        indent => Text::Xslate::html_builder( sub { return _indent( shift, BLOCK_SCALAR_INDENT ) } ),
     );
 }
 
@@ -111,12 +176,12 @@ sub formatters {
 # neither is wanted where this is being pasted into a document that already has
 # both.
 sub _yaml {
-    my ( $value, $indent ) = @_;
+    my ($value) = @_;
 
     my $text = YAML::XS::Dump($value);
     $text =~ s/\A---[ \t]*\n?//;
     $text =~ s/\n\z//;
-    return _indent( $text, $indent );
+    return $text;
 }
 
 sub _indent {
@@ -167,9 +232,9 @@ sub enrich {
     # renames the interface to the name below -- so a guest whose kernel names
     # things some other way still gets the right configuration on the right
     # card.  dhcp_devname and bridge_devname override what it ends up called.
-    my ( $nat_slot, $bridge_slot ) = $hv->nic_slots;
-    $opts{dhcp_devname}   //= "ens$nat_slot";
-    $opts{bridge_devname} //= "ens$bridge_slot";
+    my ( $nat_name, $bridge_name ) = $hv->nic_names;
+    $opts{dhcp_devname}   //= $nat_name;
+    $opts{bridge_devname} //= $bridge_name;
     $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
     $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
     $opts{hv_internal_ip} //= $hv->virbr_ip;

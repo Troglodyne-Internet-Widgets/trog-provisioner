@@ -678,8 +678,8 @@ sub primary_adapter {
         return $name if lc $match->{macaddress} eq lc $mac;
     }
 
-    my ( undef, $bridge_slot ) = Trog::HV->new()->nic_slots;
-    my $named = $config->param('bridge_devname') // "ens$bridge_slot";
+    my ( undef, $bridge_name ) = Trog::HV->new()->nic_names;
+    my $named = $config->param('bridge_devname') // $bridge_name;
     return $named if ref $ethernets->{$named} eq 'HASH';
 
     die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is no $named either.  It has: " . join( ', ', sort keys %$ethernets ) . "\n";

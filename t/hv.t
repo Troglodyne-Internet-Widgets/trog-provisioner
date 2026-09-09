@@ -865,7 +865,30 @@ subtest 'a guest MAC is derived from its name and does not move' => sub {
         'and so does another hypervisor'
     );
 
-    is_deeply( [ $hv->nic_slots ], [ 3, 4 ], 'the slots are pinned, which is what makes ens3/ens4 true' );
+    is_deeply( [ $hv->nic_slots ], [ 3, 4 ], 'the slots are pinned, so a guest calls its interfaces the same thing every time' );
+};
+
+subtest 'what a guest will call its interfaces is the hypervisor to say' => sub {
+    my $hv = fresh();
+
+    is_deeply( [ $hv->nic_names ], [qw{ens3 ens4}], 'the prefix and the pinned slots, NAT first' );
+
+    # 'ens' is systemd's answer for a PCI NIC on the i440fx the domain XML asks
+    # for.  Another machine type names them another way -- enp0s3 is the common
+    # one -- so the two places that write a network configuration ask for the
+    # name rather than building one out of a prefix they assumed.
+    {
+
+        package Trog::HV::Weird;
+        use parent -norequire, 'Trog::HV';
+        sub nic_prefix { return 'enp0s' }
+    }
+
+    is_deeply(
+        [ bless( {%$hv}, 'Trog::HV::Weird' )->nic_names ],
+        [qw{enp0s3 enp0s4}],
+        'and a hypervisor whose guests name them otherwise says so once'
+    );
 };
 
 subtest 'leases are looked up by MAC, not by name' => sub {

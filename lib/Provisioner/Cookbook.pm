@@ -289,6 +289,28 @@ sub properties {
     return ref $spec->{properties} eq 'HASH' ? $spec->{properties} : {};
 }
 
+=head2 defaults($name, %opts)
+
+What a recipe's schema declares as defaults, as a hash of field to value.
+
+For the callers that have to fill a field in themselves rather than letting the
+validator do it -- C<bin/new_config> writing F<provision.conf>, C<bin/new_guest>
+writing a domain block -- so that the number they write is the one the recipe
+would have used and not a second opinion about it.
+
+Only the top level, and only fields that declare one.  A nested default belongs
+to the object it is declared in and is the validator's to apply; see
+L<Provisioner::Recipe/args>.
+
+=cut
+
+sub defaults {
+    my ( $class, $name, %opts ) = @_;
+
+    my $props = $class->properties( { $class->spec( $name, %opts ) } );
+    return map { exists $props->{$_}{default} ? ( $_ => $props->{$_}{default} ) : () } keys %$props;
+}
+
 =head2 PLACEHOLDER
 
 What goes in a field the recipe requires and has no default for.  It is a

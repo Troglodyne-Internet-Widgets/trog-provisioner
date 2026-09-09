@@ -116,13 +116,14 @@ sub args {
             },
             memory => {
                 type        => 'integer',
-                default     => 4092,
-                description => 'Memory promised to the guest, in MB.  Counted against the hypervisor as committed rather than used, since a guest promised 8G is holding 8G whether it touches it or not.',
+                default     => 8092,
+                description =>
+                  'Memory promised to the guest, in MB.  Counted against the hypervisor as committed rather than used, since a guest promised 8G is holding 8G whether it touches it or not.  The default is what a domain carrying the perl recipe needs: that builds perl from source and installs Perl::Critic and friends with their test suites, which in 2GB thrashes rather than fails -- a provision takes hours with nothing in any log to say why.',
             },
             cpus => {
                 type        => 'integer',
-                default     => 2,
-                description => 'Virtual CPUs.  Overcommitted across the fleet, unlike memory; see hypervisors.conf.',
+                default     => 4,
+                description => 'Virtual CPUs.  Overcommitted across the fleet, unlike memory; see hypervisors.conf.  Defaulted alongside memory, and for the same build.',
             },
             size => {
                 type        => 'integer',
@@ -284,6 +285,11 @@ sub enrich {
 
     $opts{tuning} = \%tuning;
     $opts{tpm}    = $self->_tpm;
+
+    # Where the two interfaces sit, as libvirt spells a PCI slot.  The
+    # hypervisor decides, because the names the guest ends up calling them are
+    # derived from these -- see Trog::HV::nic_names.
+    ( $opts{nat_slot}, $opts{bridge_slot} ) = map { sprintf '0x%02x', $_ } $hv->nic_slots;
 
     my ( $disks, $filesystems, $devices ) = $self->_devices( \%opts, \%tuning );
     $opts{disks}       = $disks;

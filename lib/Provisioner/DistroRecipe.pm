@@ -116,6 +116,24 @@ friends, which is why F<templates/makefile.tt> can stay distribution-neutral.
 
 =cut
 
+=head2 $url = $distro->current_image()
+
+The image this distribution would have a guest built on today, or C<undef>.
+
+C<base_image> is what guests are actually built on, and it is pinned on purpose:
+a release moves and a fleet does not have to move with it.  This is the other
+half of that -- what the distribution itself says is current, so that
+C<bin/preflight> can point out a pin that has fallen a release behind.
+
+B<Undef is a real answer> and the default one.  It means either that this
+distribution has no way of being asked, or that it was asked and did not
+answer -- a preflight run has no business failing because a mirror was down.
+So a caller treats undef as "no opinion" and says nothing.
+
+=cut
+
+sub current_image { return undef }
+
 sub packager_invocation        { return shift->_unanswered('packager_invocation') }
 sub packager_up_invocation     { return shift->_unanswered('packager_up_invocation') }
 sub packager_remove_invocation { return shift->_unanswered('packager_remove_invocation') }

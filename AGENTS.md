@@ -62,9 +62,8 @@ sub deps { return qw{package1 package2} }
 ```
 
 A package name is a fact about a distribution rather than about the software.
-This used to be one `if ($self->{target_packager} eq 'deb')` per recipe, with a
-`die` on a branch nothing could reach. `t/recipes.t` fails if a recipe that needs
-packages has no version for some distribution.
+`t/recipes.t` fails if a recipe that needs packages has no version for some
+distribution.
 
 Everything else stays in the recipe itself:
 

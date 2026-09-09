@@ -444,4 +444,20 @@ subtest 'load with a distribution' => sub {
     is( Provisioner::Cookbook->load( 'nginx', distro => '../../evil' ), 'Provisioner::Recipe::nginx', 'and a distribution name that is not one is not a path to load from' );
 };
 
+subtest 'the defaults a schema declares, for the callers that fill fields in themselves' => sub {
+    my %vm = Provisioner::Cookbook->defaults('vm');
+
+    # bin/new_config writes these into provision.conf and bin/new_guest writes
+    # them into a domain block; both read them from here so a guest that says
+    # nothing and a guest scaffolded by hand are the same guest.
+    is( $vm{memory}, 8092, 'memory' );
+    is( $vm{cpus},   4,    'cpus' );
+    ok( $vm{size} > 0, 'and a disk size' );
+
+    # Only fields that declare one: a field with no default is the operator's
+    # to supply, and reporting undef for it would read as an answer.
+    ok( !exists $vm{disk_cache}, 'a field with no default is not offered one' );
+    ok( !exists $vm{image},      'nor a required field' );
+};
+
 done_testing();

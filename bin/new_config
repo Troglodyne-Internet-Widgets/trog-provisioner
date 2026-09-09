@@ -490,8 +490,7 @@ sub handle_domain {
     # The distribution's own directory first, so templates/ubuntu/nginx.tt wins
     # over templates/nginx.tt by being found first -- which is the whole
     # mechanism, and needs no code that knows about it.
-    my $paths = Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs );
-    my @paths = @$paths;
+    my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
     # Read, not deleted.  It used to be lifted out of the configuration entirely,
     # which is what kept it from being a recipe the depsolver could see -- and so
@@ -909,11 +908,23 @@ sub handle_domain {
     # its logs.  Ordinary template_files of the distro recipe, rendered the way
     # every other recipe's generated files are.
     #
-    # Here, and not in the loop above, for two reasons.  The user-data lists
-    # @pkgs, which is only complete once every recipe's deps have been collected;
-    # and none of these may go into the payload.  user-data carries the private
-    # half of the guest's key, and setup.sh reaches the guest inside cloud-init
-    # rather than in the tarball it is the script for fetching.
+    # After the loop rather than in it, because the user-data lists the packages
+    # passed in below, and @pkgs is not final until every recipe's deps have
+    # been collected and the conflicts ejected.
+    #
+    # Being last inside the loop would answer that too, and is how a dependency
+    # normally gets its turn -- lastuniq puts a recipe after the last thing that
+    # dragged it in.  It is the worse option because it only holds while every
+    # recipe on the guest drags this one in: it would mean injecting the
+    # dependency into every recipe in the distribution's namespace, and
+    # trusting that nothing outside it -- a vendor recipe, some later
+    # required_recipes -- ever sorts after them.  An explicit pass needs no such
+    # trust.
+    #
+    # It also keeps these out of the payload, which they have to be: user-data
+    # carries the private half of the guest's key, and setup.sh reaches the
+    # guest inside cloud-init rather than in the tarball it is the script for
+    # fetching.  In the loop that would be a special case in the loop.
     #
     # The distro recipe's, and only its.  The other director is the vm recipe,
     # whose one file names a storage volume, a base image and a seed ISO by
@@ -937,19 +948,14 @@ sub handle_domain {
 
     # Build a provision.conf
 
-    # The image is the distribution's to name, and the size, cpus and memory
-    # defaults are the vm recipe's, which is also what `bin/recipes vm` prints.
-    #
-    # bin/new_guest still carries a second, different set of these (8092/4/20G
-    # against 4092/2/40G here).  It always writes them into _global, so the two
-    # never disagree about one domain -- but they are two answers to one
-    # question, and the second should come here too.  Not in this change:
-    # that would quietly resize everybody's scratch guests.
+    # The image is the distribution's to name, and how big the guest is is the vm
+    # recipe's -- the same schema bin/new_guest writes a domain block from and
+    # `bin/recipes vm` prints.
     my $image = $distro->base_image;
-    my %vm    = %{ Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } ) };
-    my $size  = $global_config->{size}   // $vm{size}{default};
-    my $cpus  = $global_config->{cpus}   // $vm{cpus}{default};
-    my $mem   = $global_config->{memory} // $vm{memory}{default};
+    my %vm    = Provisioner::Cookbook->defaults('vm');
+    my $size  = $global_config->{size}   // $vm{size};
+    my $cpus  = $global_config->{cpus}   // $vm{cpus};
+    my $mem   = $global_config->{memory} // $vm{memory};
 
     my $pconf = qq(
         distro=$distro_name

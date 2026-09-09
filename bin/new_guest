@@ -45,8 +45,12 @@ nobody else has and a TLD reserved for exactly this (RFC 2606).
 
 =item B<--memory> MB, B<--cpus> N, B<--size> BYTES
 
-What to ask the hypervisor for.  Defaults to 8092MB, 4 CPUs and 20GB.  These are
-what placement reads to decide where the guest fits.
+What to ask the hypervisor for.  These are what placement reads to decide where
+the guest fits.
+
+Each defaults to what the C<vm> recipe declares, which is what a domain that
+says nothing gets -- C<bin/recipes vm> prints them, and they are settable in one
+place rather than two.
 
 =item B<--user> NAME
 
@@ -203,10 +207,14 @@ sub base_config {
 sub build {
     my ( $hostname, $recipes, $opts ) = @_;
 
+    # The vm recipe's, which is what bin/new_config would have used had these
+    # been left out of the block entirely.  Written out anyway, because this
+    # file is meant to be read and edited.
+    my %vm     = Provisioner::Cookbook->defaults('vm');
     my %global = (
-        memory => $opts->{memory} // 8092,
-        cpus   => $opts->{cpus}   // 4,
-        size   => $opts->{size}   // 20 * 1024 * 1024 * 1024,
+        memory => $opts->{memory} // $vm{memory},
+        cpus   => $opts->{cpus}   // $vm{cpus},
+        size   => $opts->{size}   // $vm{size},
     );
     $global{user} = $opts->{user} if defined $opts->{user};
 
