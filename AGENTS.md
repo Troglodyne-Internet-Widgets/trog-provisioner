@@ -50,15 +50,25 @@ See STYLE.md
 ### Recipe Development
 
 #### Required Methods
-```perl
-sub deps {
-    my ($self) = @_;
-    if ($self->{target_packager} eq 'deb') {
-        return qw{package1 package2};
-    }
-    die "Unsupported packager";
-}
 
+Packages go in the distribution's version of the recipe, not in the recipe --
+`lib/Provisioner/Recipe/Ubuntu/example.pm` beside `lib/Provisioner/Recipe/example.pm`:
+
+```perl
+package Provisioner::Recipe::Ubuntu::example;
+use parent qw{Provisioner::Recipe::example};
+
+sub deps { return qw{package1 package2} }
+```
+
+A package name is a fact about a distribution rather than about the software.
+This used to be one `if ($self->{target_packager} eq 'deb')` per recipe, with a
+`die` on a branch nothing could reach. `t/recipes.t` fails if a recipe that needs
+packages has no version for some distribution.
+
+Everything else stays in the recipe itself:
+
+```perl
 sub validate {
     my ($self, %opts) = @_;
     # Validate configuration options
@@ -85,11 +95,28 @@ sub remote_files {
 
 ### Template Style (Text::Xslate TTerse)
 
+Fragments live in `templates/$distro/`, since every one of them is written
+against apt and systemd today; `templates/` holds `makefile.tt` and what is
+genuinely shared, which is most of `files/` and `tests/`. The distribution's
+directory is searched first, so putting a file there overrides the generic one.
+
 - Use `[% %]` for template tags
 - Variables: `[% variable_name %]`
 - Loops: `[% FOR item IN list %]...[% END %]`
 - Conditionals: `[% IF condition %]...[% END %]`
 - Raw output: `[% var | mark_raw %]`
+
+Two traps, both of which fail silently:
+
+- **No apostrophe in a `[%# ... %]` comment.** Xslate lexes the inside of a
+  directive, so one opens a string that runs to the next quote and swallows
+  everything between. A comment reading "every domain's aliases" emptied a whole
+  nginx vhost.
+- **Whitespace before `[%#` is emitted.** Indenting a comment to match the block
+  it documents indents the line after it too, which in YAML is a different
+  document.
+
+`t/recipes.t` catches the first.
 
 ### Makefile Generation
 
@@ -104,12 +131,18 @@ trog-provisioner/
 ├── bin/              # Executable scripts
 ├── lib/              # Perl modules
 │   └── Provisioner/
-│       ├── Recipe.pm # Base class
-│       └── Recipe/   # Recipe implementations
+│       ├── Recipe.pm       # Base class
+│       ├── DistroRecipe.pm # Base class for the recipe naming a distribution
+│       └── Recipe/         # Recipe implementations
+│           └── Ubuntu/     # ...and the package names Ubuntu gives them
 ├── scripts/          # Helper scripts deployed to VMs
 ├── templates/        # Template files
-│   ├── *.tt          # Main recipe templates (makefile target fragments)
-│   └── files/        # Config file templates
+│   ├── makefile.tt   # The guest makefile, which is distribution-neutral
+│   ├── files/        # Config file templates, shared unless a distro says otherwise
+│   ├── tests/        # Guest test templates
+│   └── ubuntu/       # Ubuntu's makefile fragments, searched before the above
+│       ├── *.tt      # Main recipe templates (makefile target fragments)
+│       └── files/    # ...including the five files a guest first boots from
 ├── docs/             # Documentation
 ├── vendor/           # Custom/private modules (gitignored)
 ├── recipes.yaml      # File that controls what recipes to load when provisioning any given guest (gitignored due to necessarily containing sensitive information)

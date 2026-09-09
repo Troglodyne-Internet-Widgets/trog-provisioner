@@ -65,6 +65,11 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 [% state_dir %]/test:
 	prove -vm
 
+[%# The one target here that is not distribution-neutral: /etc/mail/sendmail.mc
+    and friends are where Debian puts them, and the packager invocations above
+    are what keeps the rest of this file portable.  Left where it is rather than
+    moved into templates/ubuntu/makefile.tt, because with one distribution in
+    existence there is nothing to check the split against -- see issue #36. -%]
 [% state_dir %]/sendmail:
 	# Make sure mailing works by forcing send-only lo and enabling starttls
 	! grep starttls.m4 /etc/mail/sendmail.mc && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc; /bin/true

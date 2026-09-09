@@ -60,9 +60,15 @@ the makefile it renders is the same one.
 =head3 Where the packages are named
 
 C<deps> belongs in the distro subclass, because a package name is a fact about
-a distribution rather than about the software.  The generic class declares the
-method and dies, so a recipe reached with no distro answering for it fails
-loudly rather than installing nothing.
+a distribution rather than about the software.  The recipe itself does not
+declare one at all; it inherits the empty C<deps> below.
+
+Which means the failure to know about is a quiet one: a recipe that needs
+packages and has no subclass for the distribution in hand installs none of them,
+and nothing says so until a service will not start.  C<t/recipes.t> is what
+notices -- it asserts that every recipe with packages has them for every
+distribution there is, so forgetting one while adding a distribution fails there
+rather than on a guest.
 
 This used to be one C<if ($self-E<gt>{target_packager} eq 'deb')> per recipe,
 with a C<die> on the other branch that nothing could ever reach: there was one
@@ -70,8 +76,8 @@ packager, set in C<bin/new_config> two lines after it was read.
 
 =head3 The fragment is a makefile, not a shell script
 
-Each recipe renders C<templates/E<lt>nameE<gt>.tt> into a fragment of the
-makefile that runs on the guest.  Write it with no leading tab; that is added
+Each recipe renders C<templates/E<lt>distroE<gt>/E<lt>nameE<gt>.tt> into a
+fragment of the makefile that runs on the guest.  Write it with no leading tab; that is added
 for you.  Everything else about it is make's rules rather than a shell's, and
 the differences bite:
 
@@ -100,8 +106,8 @@ install its own.
 
 A guest can host several domains, and some of what a recipe does is per domain
 while some of it happens once for the machine.  A recipe with a
-C<templates/E<lt>nameE<gt>.global.tt> gets that fragment run once no matter how
-many domains are provisioned into the guest; the per-domain fragment runs for
+C<E<lt>nameE<gt>.global.tt> beside its fragment gets that one run once no matter
+how many domains are provisioned into the guest; the per-domain fragment runs for
 each.  Configuration for a service with no C<conf.d> directory tends to belong
 in the global half, since two domains cannot each rewrite the same file.
 
@@ -136,6 +142,20 @@ genuinely has to come earlier says so with an C<order> in its configuration, but
 that is for things like repairing networking before anything needs it.  For
 "this needs that to exist first", use C<[% script_dir %]/queue_postrun_task>
 rather than ordering, which does not survive C<make -j>.
+
+=head3 Where a template is looked for
+
+Fragments live in F<templates/E<lt>distroE<gt>/>, since every one of them is
+written against apt and systemd today; F<templates/> holds F<makefile.tt> and
+what is genuinely shared, which is most of F<files/> and F<tests/>.  The
+distribution's directory comes first on the search path, so putting a file there
+overrides the generic one and nothing has to know why.
+
+Two things about writing one that fail silently.  An apostrophe in a
+C<[%# ... %]> comment opens a string that runs to the next quote, swallowing
+whatever is between -- C<t/recipes.t> catches that one.  And whitespace before
+the C<[%#> is emitted, so indenting a comment to match the block it documents
+indents the line after it too, which in a YAML document means something else.
 
 =head3 Recipes you do not intend to publish
 
@@ -231,8 +251,8 @@ answers here instead.
 
 Empty by default, which is the right answer for a recipe that installs nothing.
 A recipe that does need packages and has no subclass for the distro in hand is
-a recipe that will silently install none of them, which is what C<bin/recipes>
-and C<t/recipes.t> are there to notice.
+a recipe that will silently install none of them, which is what C<t/recipes.t>
+is there to notice.
 
 =cut
 
