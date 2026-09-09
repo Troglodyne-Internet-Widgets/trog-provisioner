@@ -66,11 +66,34 @@ foreach my $spec (sort keys %limits) {
         "$proto port $port is rate limited at $limits{$spec} a second") or diag $before;
 }
 
+# An exemption has to sit in a chain of our own, and this is the assertion that
+# says so rather than saying a rule with the right words in it exists somewhere.
+#
+# RETURN leaves the chain it is in.  The last rule of ufw-before-input is the
+# jump to ufw-user-input, where every `ufw allow` lives -- so an exemption
+# appended to ufw-before-input returned past the allow rules, fell through to
+# ufw-reject-input, and was dropped by the default deny.  Naming an admin
+# network locked that network out of the guest entirely, and ESTABLISHED being
+# accepted higher up hid it: the connection that configured the firewall stayed
+# up, and only the next new one was refused.
+my $before_chain = `iptables -S ufw-before-input 2>/dev/null`;
+
+unlike($before_chain, qr/^-A ufw-before-input -s \S+ -j RETURN/m,
+    'no exemption returns straight out of ufw-before-input, past the allow rules')
+    or diag $before_chain;
+
+like($before_chain, qr/-j trog-ratelimit\b.*-j ufw-user-input\b/s,
+    'the rate limits are entered before the allow rules and do not replace them')
+    or diag $before_chain;
+
+my $limit_chain = `iptables -S trog-ratelimit 2>/dev/null`;
+
 [% FOR net IN admin_networks %]
 # Named as an admin network, so it is let past the limit rather than counted by
 # it -- which is what makes that setting mean anything now that ssh is limited
 # here rather than by ufw.
-like($before, qr/-s \Q[% net %]\E .*-j RETURN/, '[% net %] is exempt from the rate limits');
+like($limit_chain, qr{-s \Q[% net %]\E(?:/32)? -j RETURN}, '[% net %] is exempt from the rate limits')
+    or diag $limit_chain;
 [% END -%]
 
 # Once, however many times this guest has been provisioned.
