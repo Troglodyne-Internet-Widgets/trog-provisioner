@@ -900,6 +900,44 @@ subtest 'a recipe names the directories it fetches, and copes with not being tol
     );
 };
 
+# The provisioner reaches a guest from more than one address of ours, and which
+# one depends on the hypervisor: a remote one is administered over the guest's
+# static address and a local one over its NAT lease.  Exempting only the address
+# the payload came from left the other counted by the guest's rate limit -- and
+# nothing here asserted on the value at all, which is how that survived being
+# wrong in two different directions.
+subtest 'ufw exempts every address the provisioner arrives from' => sub {
+    my $ufw = Provisioner::Cookbook->load('ufw')->new(%PROV);
+
+    my %got = $ufw->enrich( transfer_ips => [ '192.168.1.49', '192.168.122.251' ] );
+    is_deeply(
+        $got{admin_networks},
+        [ '192.168.1.49', '192.168.122.251' ],
+        'both of ours are exempt, not just the one the payload came from'
+    );
+
+    # What an operator wrote stays, and ours go in front of it.
+    %got = $ufw->enrich(
+        transfer_ips   => ['192.168.1.49'],
+        admin_networks => ['10.0.0.0/8'],
+    );
+    is_deeply( $got{admin_networks}, [ '192.168.1.49', '10.0.0.0/8' ], 'and what was already named is kept' );
+
+    # Said twice is still one rule.
+    %got = $ufw->enrich(
+        transfer_ips   => [ '192.168.1.49', '192.168.122.251' ],
+        admin_networks => ['192.168.1.49'],
+    );
+    is_deeply( $got{admin_networks}, [ '192.168.122.251', '192.168.1.49' ], 'an address named twice is exempt once' );
+
+    # A configuration written before there was a list of them.
+    %got = $ufw->enrich( transfer_ip => '192.168.122.1' );
+    is_deeply( $got{admin_networks}, ['192.168.122.1'], 'a single transfer_ip still works on its own' );
+
+    %got = $ufw->enrich();
+    is_deeply( $got{admin_networks}, [], 'and nothing at all exempts nothing' );
+};
+
 subtest 'what a rebuild is not allowed to carry over' => sub {
     require Provisioner::Recipe;
     require Provisioner::Recipe::tcms;

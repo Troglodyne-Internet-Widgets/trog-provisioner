@@ -21,7 +21,7 @@ Trog::Local - this machine, as something a guest can fetch from
     my $this_machine = Trog::Local->new();
 
     $this_machine->append_line( $this_machine->authorized_keys, $pubkey );
-    my $reachable = $this_machine->transfer_ip( $guest_ip, $hv->virbr_ip );
+    my @reachable = $this_machine->transfer_ips( $guest_ip, $hv->virbr_ip );
 
 =head1 DESCRIPTION
 
@@ -78,21 +78,23 @@ sub describe { return 'this machine' }
 
 =head1 REACHABILITY
 
-=head2 transfer_ip(@towards)
+=head2 transfer_ips(@towards)
 
-The address of ours that a guest can reach us at, or undef when none of
-C<@towards> routes anywhere.
+Every address of ours that reaches a guest, in the order C<@towards> asked
+about and without repeats.  Empty when none of them routes anywhere.
 
-C<@towards> is the addresses that guest will have, best first.  A guest has more
-than one and they are on different networks: the static address it is
-configured with, and the lease it takes off the hypervisor's NAT bridge.  Which
-of them we share with it is not knowable from here -- a workstation may sit on
-the bridge, on the static subnet, on both, or reach one through a router -- so
-each is tried in turn and the first that routes decides.
+C<@towards> is the addresses that guest will have.  A guest has more than one
+and they are on different networks: the static address it is configured with,
+and the lease it takes off the hypervisor's NAT bridge.  Which of them we share
+with it is not knowable from here -- a workstation may sit on the bridge, on
+the static subnet, on both, or reach one through a router -- and we may well
+answer for more than one, from a different address each time.
 
-Order matters, and the guest's own address is the one to put first: it is the
-address we ssh to, so answering for that network gives one address that is both
-where the guest fetches from and where it sees us coming from.
+All of them, rather than the first, because more than one is the truth.  A
+guest is fetched from over one of these and administered over another: which
+one depends on whether its hypervisor is us, and the firewall on the guest has
+to expect every address we might arrive from rather than the one we happened to
+pick for the payload.  See C<admin_networks> in L<Provisioner::Recipe::ufw>.
 
 Asked of the kernel rather than worked out from a list of interfaces.  A
 connected UDP socket picks the source address the routing table would use for a
@@ -102,15 +104,28 @@ being on it.  Nothing is sent; C<connect> on a datagram socket only fixes the
 peer.
 
 Which is also its limit.  Routing is not symmetric and a firewall in between
-says nothing to a socket in here, so this is what to try rather than a promise
-that the guest will get through.  F<bin/preflight> is where that is checked.
+says nothing to a socket in here, so these are what to try rather than a
+promise that the guest will get through.  F<bin/preflight> is where that is
+checked.
+
+=head2 transfer_ip(@towards)
+
+The first of C<transfer_ips>, or undef when there is none.  What a guest is
+told to fetch its payload from, which has to be a single address because the
+rsync in the template names one.
+
+Put the guest's own address first when asking: it is the address we ssh to on a
+remote hypervisor, so the answer is then both where the guest fetches from and
+where it sees us coming from.
 
 =cut
 
-sub transfer_ip {
+sub transfer_ips {
     my ( $self, @towards ) = @_;
 
     die "Which addresses a guest would reach us on has to be given\n" unless @towards;
+
+    my ( @ours, %seen );
 
     foreach my $towards (@towards) {
         next unless defined $towards && length $towards;
@@ -135,10 +150,21 @@ sub transfer_ip {
         next unless $me;
 
         my ( undef, $address ) = Socket::unpack_sockaddr_in($me);
-        return Socket::inet_ntoa($address);
+        my $ours = Socket::inet_ntoa($address);
+
+        # Two of the guest's addresses can be reached from one of ours, and a
+        # firewall rule per duplicate is noise in somebody's before.rules.
+        next if $seen{$ours}++;
+        push( @ours, $ours );
     }
 
-    return undef;
+    return @ours;
+}
+
+sub transfer_ip {
+    my ( $self, @towards ) = @_;
+    my ($first) = $self->transfer_ips(@towards);
+    return $first;
 }
 
 =head1 SEE ALSO

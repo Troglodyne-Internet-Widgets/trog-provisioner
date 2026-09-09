@@ -41,11 +41,18 @@ sub deps {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Whoever holds the payload is always one, whether or not anybody said so:
-    # the guest fetches from it over ssh, repeatedly, and it is also the machine
-    # doing the provisioning.
+    # Every address the provisioner can arrive from is one, whether or not
+    # anybody said so: it fetches the payload over ssh repeatedly and then
+    # administers the guest over ssh again, and those are not always the same
+    # address of ours -- a remote hypervisor is reached over the guest's static
+    # address and a local one over its NAT lease.  Naming only the one the
+    # payload came from leaves the other counted by the limit.
     my @nets = @{ $opts{admin_networks} // [] };
-    unshift @nets, $opts{transfer_ip} if $opts{transfer_ip} && !grep { $_ eq $opts{transfer_ip} } @nets;
+    my @ours = @{ $opts{transfer_ips}   // [] };
+    push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
+
+    my %named = map { $_ => 1 } @nets;
+    unshift( @nets, grep { defined $_ && length $_ && !$named{$_}++ } @ours );
     $opts{admin_networks} = \@nets;
 
     return %opts;
