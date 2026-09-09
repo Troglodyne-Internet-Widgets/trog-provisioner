@@ -39,6 +39,17 @@ use JSON::Validator::Schema::Troglodyne;
 # We have to use any deps of the SUT that actually touch files in BEGIN
 use Text::Xslate;
 use Config::Simple;
+
+# This one, and not the Trog::Machine that reaches it.  It loads File::HomeDir
+# in a BEGIN block, which stats the filesystem looking for xdg-user-dir, and
+# compiled after MockFile that is a fatal unmocked stat rather than a lookup
+# nobody cares about.
+#
+# Trog::Machine would fix that too and break something else: it uses
+# File::Slurper, so loading it here would compile File::Slurper's opens before
+# MockFile could replace them, and every read the SUT does through
+# Provisioner::Cookbook would go to the real filesystem and fail on /bogus.
+use Net::OpenSSH::More;
 ## use critic
 
 # It is important to use MockFile last

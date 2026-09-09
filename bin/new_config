@@ -33,6 +33,10 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
+use Trog::Guest();
+use Trog::HV();
+use Trog::Hypervisors();
+use Trog::Local();
 use File::Copy qw{copy};
 use Hash::Merge();
 use File::Find();
@@ -265,13 +269,10 @@ my @HV_SETTINGS = qw{
 sub choose_hypervisor {
     my ( $domain, $requirements ) = @_;
 
-    require Trog::HV;
-
     # Somebody who said --connect has already decided; do not place around them.
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
-    require Trog::Hypervisors;
     my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
     return $chosen unless $fleet->configured;
 
@@ -373,25 +374,11 @@ sub handle_domain {
     # The recipe says how much memory, disk and CPU the guest wants, which is
     # everything placement needs -- so this is decided here rather than after
     # provision.conf is written, and provision.conf never has to carry it.
-    #
-    # Required rather than used at the top: reaching a hypervisor over SSH is
-    # not something a run about to fail on a typo should do, and Trog::HV
-    # brings an SSH and a DNS stack with it.
     $hv //= choose_hypervisor( $domain, $global_config );
 
     # Who the guest fetches its payload from, and where it reaches them: us, on
     # all three counts.  Nothing is copied to the hypervisor for the guest to
     # pull from; it comes to this machine for it.
-    #
-    # Required rather than used at the top because Net::OpenSSH::More, which
-    # Trog::Machine loads, reads the filesystem from a BEGIN block --
-    # File::HomeDir looks for xdg-user-dir on the way in.  t/new_config.t loads
-    # this modulino under Test::MockFile in strict mode, where an unmocked stat
-    # is fatal, so a top-level use of anything descending from Trog::Machine
-    # stops the test loading at all.  Nothing here does work at load time; the
-    # dependency four levels down does.
-    require Trog::Local;
-
     my $this_machine  = Trog::Local->new();
     my $tld_ip        = $hv->virbr_ip;
     my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
@@ -1004,13 +991,8 @@ dies, before anything is fetched.
 # The guest a salvage talks to: the one about to be rebuilt, reached as the admin
 # user with the key this run has already written into the config directory.
 #
-# Trog::Guest is required rather than used at the top for the reason given where
-# Trog::Local is: Net::OpenSSH::More stats the filesystem from a BEGIN block, and
-# t/new_config-salvage.t loads this under Test::MockFile.
 sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
-
-    require Trog::Guest;
 
     # The address may be a cidr, which is not a thing to connect to.
     ( my $host = $static_ip ) =~ s{/.*\z}{};
