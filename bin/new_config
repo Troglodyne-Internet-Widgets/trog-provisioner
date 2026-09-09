@@ -393,7 +393,13 @@ sub handle_domain {
     # The guest's own address first, then the hypervisor's NAT bridge: we may
     # share either with it, and sharing the static subnet is the case a
     # workstation that is not itself a guest is in.
-    my $transfer_ip = $global_conf->{transfer_ip} // $this_machine->transfer_ip( $static_ip, $tld_ip );
+    # Every address of ours that reaches the guest, not only the one it fetches
+    # from.  Which one we arrive on depends on the hypervisor -- a remote one is
+    # administered over the guest's static address and a local one over its NAT
+    # lease -- so the guest's firewall has to expect all of them.  The fetch
+    # takes the first, because the rsync in the template names one address.
+    my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : $this_machine->transfer_ips( $static_ip, $tld_ip );
+    my $transfer_ip  = $transfer_ips[0];
     die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and neither $static_ip nor $tld_ip routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
       unless $transfer_ip;
 
@@ -540,6 +546,7 @@ sub handle_domain {
     # The guest rsyncs its payload before it has working DNS, so this has to be
     # an address and not a name.
     $global_config->{transfer_ip}   = $transfer_ip;
+    $global_config->{transfer_ips}  = \@transfer_ips;
     $global_config->{tld}           = $tld;
     $global_config->{admin_user}    = $admin_user;
     $global_config->{admin_email}   = $admin_email;

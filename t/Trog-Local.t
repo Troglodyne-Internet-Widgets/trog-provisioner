@@ -42,6 +42,35 @@ subtest 'there is only one machine we are running on' => sub {
     isnt( Trog::Local->new(), $first, 'and forgetting is how a test gets a fresh one' );
 };
 
+# A guest is fetched from over one of our addresses and administered over
+# another, and which is which depends on whether its hypervisor is us.  Taking
+# only the first left the other one counted by the guest's rate limit.
+subtest 'every address of ours that reaches the guest, not just the first' => sub {
+    my $this_machine = Trog::Local->new();
+
+    my @all = $this_machine->transfer_ips( '127.0.0.1', '127.0.0.2' );
+    is_deeply( \@all, ['127.0.0.1'], 'two peers down one interface are one address of ours, not two' );
+
+    is_deeply(
+        [ $this_machine->transfer_ips( 'not an address', '127.0.0.1' ) ],
+        ['127.0.0.1'],
+        'a peer that routes nowhere drops out rather than ending the list'
+    );
+
+    is_deeply( [ $this_machine->transfer_ips('not an address') ], [], 'and nothing that routes is an empty list' );
+
+    like(
+        exception { $this_machine->transfer_ips() },
+        qr/has to be given/,
+        'asking without saying which addresses is an error rather than a guess'
+    );
+
+    # The single-value form is what the payload rsync is told, because the
+    # template names one address.
+    is( $this_machine->transfer_ip( 'not an address', '127.0.0.1' ), '127.0.0.1', 'transfer_ip is the first of them' );
+    is( $this_machine->transfer_ip('not an address'),                undef,       'and undef when there are none' );
+};
+
 subtest 'which of our addresses a guest would reach us at' => sub {
     my $this_machine = Trog::Local->new();
 
