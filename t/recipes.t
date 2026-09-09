@@ -949,9 +949,20 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     # key is supposed to die with its machine: carried over it would outlive the
     # machine it was made for, and in a backup beside the database it protects it
     # would not be protecting anything.
-    my %files = Provisioner::Recipe::tcms->remote_files( '/opt/domains', 'test.test.test' );
-    my ($config) = grep { m{/tCMS/config/$} } keys(%files);
-    ok( $config, 'tCMS salvages its config directory' );
+    my %files  = Provisioner::Recipe::tcms->remote_files( '/opt/domains', 'test.test.test' );
+    my $wanted = '/opt/domains/test.test.test/tCMS/config/';
+    ok(
+        ( grep { index( $wanted, $_ ) == 0 } keys(%files) ),
+        'tCMS salvages its config directory, whichever root covers it'
+    ) or diag "salvages: " . join( ', ', sort keys %files );
+
+    # And the checkout it sits in, which is state as much as the content is: a
+    # site pinned to a revision, or carrying a patch nobody pushed, came back as
+    # whatever master was that morning without this.
+    ok(
+        ( grep { index( '/opt/domains/test.test.test/tCMS/.git', $_ ) == 0 } keys(%files) ),
+        'and the checkout, so a rebuild serves the commit the guest was serving'
+    ) or diag "salvages: " . join( ', ', sort keys %files );
 
     my @skip = Provisioner::Recipe::tcms->remote_skip();
     ok( scalar(@skip),                                'and says something in it must stay behind' );

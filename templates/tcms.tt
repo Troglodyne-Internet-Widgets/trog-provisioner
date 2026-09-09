@@ -1,2 +1,9 @@
+[%# Only when there is nothing there at all.  A checkout that came down from the
+    last guest is the site somebody is running, and cloning over it would take
+    config/ -- which is partly tracked -- back to whatever master says today.
+    Absent means a domain that has never existed, which is the case this recipe
+    could not build at all before.  See Provisioner::Recipe::tcms. -%]
+[ -e '[% install_dir %]/[% domain %]/tCMS' ] || git clone https://github.com/Troglodyne-Internet-Widgets/tCMS.git '[% install_dir %]/[% domain %]/tCMS'
+chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/tCMS'
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/tCMS'
 [% script_dir %]/queue_postrun_task "[% install_dir %]/[% domain %]/bin/cpanm --installdeps [% install_dir %]/[% domain %]/tCMS"
