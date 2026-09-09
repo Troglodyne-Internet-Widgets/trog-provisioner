@@ -1,6 +1,6 @@
 [%# cloud-init user-data for a guest, rendered by Provisioner::Recipe::ubuntu.
 
-    The shape of the document is here; every value that is not a fixed literal
+    The structure of the document is here; every value that is not a fixed literal
     goes through the yaml filter, which is YAML::XS doing the quoting.  That is
     deliberate -- these carry an operator account names, GECOS fields and a
     contact address, and one of them holding a colon or an apostrophe would

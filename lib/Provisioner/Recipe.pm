@@ -70,9 +70,8 @@ notices -- it asserts that every recipe with packages has them for every
 distribution there is, so forgetting one while adding a distribution fails there
 rather than on a guest.
 
-This used to be one C<if ($self-E<gt>{target_packager} eq 'deb')> per recipe,
-with a C<die> on the other branch that nothing could ever reach: there was one
-packager, set in C<bin/new_config> two lines after it was read.
+Do not reintroduce a C<target_packager> check to get around it; C<t/recipes.t>
+refuses one.
 
 =head3 The fragment is a makefile, not a shell script
 
@@ -213,6 +212,11 @@ C<bin/new_config> depsolves those two like anything else, so they are configured
 and can be depended upon, and then leaves them out of the module list.  Which
 matters for more than the makefile: C<modules> is handed to every template and
 every recipe as the list of what is on this guest, and neither of these is.
+
+They are also the only two that talk to a L<Trog::HV>, and each reaches it
+itself rather than through an accessor here.  That is deliberate: loading
+L<Trog::HV> loads L<Sys::Virt>, and C<bin/recipes> would then need libvirt
+installed to print a schema.
 
 =cut
 

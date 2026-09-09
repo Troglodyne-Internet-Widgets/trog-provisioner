@@ -408,10 +408,9 @@ sub handle_domain {
     my $global_config = delete $rconf->{$domain}{_global} // {};
     $global_config = { %$base_globals, %$global_config };
 
-    # Which distribution is this guest?  Named in _global, and the answer to
-    # everything that used to be hardcoded: the base image, the packager and its
-    # invocations, which templates are searched first, and which version of each
-    # recipe supplies the package names.
+    # Which distribution is this guest?  Named in _global, and what decides the
+    # base image, the packager and its invocations, which templates are searched
+    # first, and which version of each recipe supplies the package names.
     #
     # Checked here rather than at the require twenty lines down, because a typo'd
     # `distro: unbuntu` that quietly fell back to the generic recipes would build
@@ -597,7 +596,7 @@ sub handle_domain {
     # it.  Note this is a different variable from the $subdomain above: it is
     # every domain in the map, not the one we are building.
     foreach my $each_domain ( keys(%$ip_conf) ) {
-        $alias_conf->{$each_domain} = _coerce_arrayref( $alias_conf->{$each_domain} );
+        $alias_conf->{$each_domain} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$each_domain} );
         push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
@@ -1372,12 +1371,6 @@ sub _get_sftp {
     );
     $ssh->error or $target_is_up = 1;
     return ( $ssh, $target_is_up );
-}
-
-sub _coerce_arrayref {
-    my ($input) = @_;
-    return [] unless $input;
-    return ref $input eq 'ARRAY' ? $input : [$input];
 }
 
 sub get_dns_provider_token {

@@ -35,15 +35,12 @@ C<_global>, and that names a recipe:
         _global:
             distro: ubuntu
 
-That recipe is this class.  It answers the handful of questions the build has to
-have settled before there is a guest at all -- which image to lay the disk over,
-which packager the recipes are naming packages for, how to invoke it -- and it
-renders the files a guest is built from: the network configuration, the
-cloud-init user-data and meta-data, the setup script the guest runs, and the
-rsyslog configuration that points its logs at the hypervisor.
-
-All of which used to be spread between a hardcoded URL, three hardcoded strings,
-and ten C<mongle_*> subs in F<bin/provision> that built YAML and XML by hand.
+That recipe is this class.  It answers the questions the build has to have
+settled before there is a guest at all -- which image to lay the disk over, which
+packager the recipes are naming packages for, how to invoke it -- and it renders
+the files a guest is built from: the network configuration, the cloud-init
+user-data and meta-data, the setup script the guest runs, and the rsyslog
+configuration that points its logs at the hypervisor.
 
 =head2 It is a recipe, in the ordinary way
 

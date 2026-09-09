@@ -1224,9 +1224,8 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # cleanup afterwards silently removes nothing.  Found on a guest, where 196K
     # of payload was still sitting under the new mount.
     #
-    # It is the distro recipe's now, and a template rather than the %TOKEN% file
-    # it used to be -- so this renders it and asserts on what the guest actually
-    # gets, which is what these paths were ever about.
+    # Rendered rather than read: these paths are about what the guest ends up
+    # running, and the fragment they are in is a template.
     my $setup = Text::Xslate->new(
         path   => \@template_dirs,
         syntax => 'TTerse',
@@ -1752,12 +1751,10 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
 
 # --- Where the package names live --------------------------------------------
 #
-# A recipe used to name its packages behind `if ($self->{target_packager} eq
-# 'deb')`, with a die on a branch nothing could reach.  They live in a subclass
-# per distribution now, and the failure this replaces it with is quieter: a
-# recipe with no subclass for the distribution in hand inherits the base class's
-# empty deps() and installs nothing at all, which nothing notices until a
-# service will not start twenty minutes into a build.
+# Packages live in a subclass per distribution, and the failure mode that buys
+# is a quiet one: a recipe with no subclass for the distribution in hand
+# inherits the base class's empty deps() and installs nothing at all, which
+# nothing notices until a service will not start twenty minutes into a build.
 #
 # So this is what notices.  It runs for every distribution there is, so adding
 # one and forgetting a recipe fails here rather than on a guest.
@@ -1787,9 +1784,7 @@ subtest 'every recipe that needs packages has them, for every distribution' => s
 
 subtest 'no recipe still asks which packager it is being built for' => sub {
 
-    # There was one packager, set two lines after it was read, so the question
-    # had one answer and the die on the other branch was unreachable.  The
-    # answer is the subclass now; the question should be gone.
+    # The subclass is the answer now, so nothing should still be asking.
     my @asking;
     File::Find::find(
         {

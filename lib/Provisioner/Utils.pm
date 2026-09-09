@@ -96,6 +96,28 @@ sub files_in {
     return sort @found;
 }
 
+=head3 coerce_arrayref($value)
+
+C<$value> as an arrayref, whatever it arrived as.
+
+C<Config::Simple> hands back a bare string for a single-valued key and an
+arrayref for a comma separated one, and a recipe's configuration is written by
+hand -- so the same field is a list in one domain and a string in the next.
+Everything downstream wants a list.
+
+An absent value and one that is present and empty both come back as an empty
+list.  C<Config::Simple> tells those apart -- a missing key is undef, a bare
+C<key=> is the empty string -- and nothing that asks this cares.
+
+=cut
+
+sub coerce_arrayref {
+    my ($value) = @_;
+    return [] unless defined $value && length $value;
+    return $value if ref $value eq 'ARRAY';
+    return [$value];
+}
+
 =head3 dirs_in($dir)
 
 The names of the directories directly in C<$dir>, sorted, with no leading path.

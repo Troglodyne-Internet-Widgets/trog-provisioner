@@ -13,6 +13,8 @@ use parent qw{Provisioner::DistroRecipe};
 use File::Slurper();
 use IPC::Run3();
 use List::Util qw{any uniq};
+use Provisioner::Utils();
+use Trog::HV();
 use Text::Xslate();
 use YAML::XS();
 
@@ -29,10 +31,7 @@ Provisioner::Recipe::ubuntu - what it means for a guest to be an Ubuntu guest.
 =head1 DESCRIPTION
 
 The distribution every guest here has been built on since before there was
-anywhere to say so.  Which is the point of this recipe existing: the image URL,
-the packager, and its three invocations used to be four hardcoded values in
-C<bin/new_config>, and the files a guest first boots from used to be five
-C<mongle_*> subs in C<bin/provision> building YAML by hand.
+anywhere to say so.
 
 See L<Provisioner::DistroRecipe> for what a distro recipe is and what it has to
 answer.
@@ -45,9 +44,9 @@ search domains it was given.  A template writing those out unquoted is a
 template that produces a file cloud-init rejects the moment one of them holds a
 colon or an apostrophe -- and the guest then fails to boot with nothing to read.
 
-So the shape of each document is the template, which is what makes it something
-you can read and a distribution can override, and every value that is not a
-fixed literal goes through the C<yaml> formatter, which is L<YAML::XS> doing the
+So the structure of each document is the template, which is what makes it
+readable and lets a distribution override it, and every value that is not a fixed
+literal goes through the C<yaml> formatter, which is L<YAML::XS> doing the
 quoting.  That is also why nothing here interpolates a bare C<[% var %]> into
 YAML: Xslate escapes for HTML by default, so an ampersand in a GECOS would
 arrive on the guest as C<&amp;>.
@@ -65,7 +64,7 @@ The install invocation is as forgiving as it can be made: retries, because an
 apt mirror behind nginx does occasionally drop one; C<--force-confdef> and
 C<--force-confold>, because a package asking which config file to keep has
 nobody to ask; and C<--force-overwrite>, because two packages shipping the same
-path is a thing that happens and is not worth failing an entire build over.
+path is common enough and not worth failing an entire build over.
 
 =cut
 
@@ -129,6 +128,19 @@ sub _indent {
     return $text;
 }
 
+=head2 $hv = $recipe->hv()
+
+The hypervisor this guest is being built for, out of the singleton the run
+already established -- unless one was handed to the constructor, which is what a
+test does.
+
+Reached here rather than from L<Provisioner::Recipe>, so that loading an
+ordinary recipe does not load L<Sys::Virt> along with it.
+
+=cut
+
+sub hv { my ($self) = @_; return $self->{hv} //= Trog::HV->new() }
+
 =head2 %opts = $recipe->enrich(%opts)
 
 Work out everything the five templates read that is not simply handed to every
@@ -162,8 +174,8 @@ sub enrich {
     $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
     $opts{hv_internal_ip} //= $hv->virbr_ip;
 
-    $opts{ips}       = _list( $opts{ips} );
-    $opts{resolvers} = _list( $opts{resolvers} );
+    $opts{ips}       = Provisioner::Utils::coerce_arrayref( $opts{ips} );
+    $opts{resolvers} = Provisioner::Utils::coerce_arrayref( $opts{resolvers} );
 
     die "MUST SET gateway in provision.conf when ips are set\n"
       if @{ $opts{ips} } && !( defined $opts{gateway} && length $opts{gateway} );
@@ -192,16 +204,6 @@ sub enrich {
     return %opts;
 }
 
-# Config::Simple hands back a bare string for a single-valued key and an
-# arrayref for a comma separated one; a template wants the same shape either way.
-sub _list {
-    my ($value) = @_;
-    return [] unless defined $value;
-    return $value if ref $value eq 'ARRAY';
-    return [] unless length $value;
-    return [$value];
-}
-
 # What cloud-init installs before the makefile runs, which is not quite what the
 # recipes asked for.
 #
@@ -211,7 +213,7 @@ sub _list {
 sub _first_boot_packages {
     my ($packages) = @_;
 
-    my @pkgs = @{ _list($packages) };
+    my @pkgs = @{ Provisioner::Utils::coerce_arrayref($packages) };
     push( @pkgs, 'sendmail' ) unless any { $_ eq 'postfix' } @pkgs;
     push( @pkgs, qw{at make} );
 
@@ -227,7 +229,7 @@ sub _first_boot_packages {
 sub _users {
     my ( $self, %opts ) = @_;
 
-    my $users = _list( $opts{users} );
+    my $users = Provisioner::Utils::coerce_arrayref( $opts{users} );
     return $users unless defined $opts{admin_user};
 
     foreach my $user (@$users) {
@@ -283,16 +285,5 @@ sub guest_keypair {
         public  => ( File::Slurper::read_text("$path.pub") =~ s/\n\z//r ),
     };
 }
-
-=head2 $hv = $recipe->hv()
-
-The hypervisor this guest is being built for, out of the singleton the run
-already established.  What is asked of it here is the NAT bridge address the
-guest fetches packages and ships logs to; the MACs and the PCI slots are worked
-out from the name rather than asked.
-
-=cut
-
-sub hv { my ($self) = @_; return $self->{hv} //= Trog::HV->new() }
 
 1;

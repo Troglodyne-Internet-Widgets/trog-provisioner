@@ -41,9 +41,8 @@ by C<bin/new_config>.  See L</WHEN IT IS GENERATED>.
 
 Its settings live in a domain's C<_global>, and are copied from there into
 F<provision.conf>, which is what C<bin/provision> reads.  C<bin/recipes vm>
-prints this schema, and that is now the description of them -- they used to be a
-comment block in F<example.test/provision.conf> and a second, hardcoded list of
-key names in C<bin/new_config>.
+prints this schema, which is the description of them: F<example.test/provision.conf>
+lists the keys and points here.
 
 =head2 It directs the build rather than running in it
 
@@ -238,11 +237,12 @@ sub create_storage {
 
 =head2 $hv = $recipe->hv()
 
-The hypervisor this guest is being built on.
-
-Picked up from the singleton the run already established, the same way every
-other caller does, unless one was handed in at construction -- which is what a
+The hypervisor this guest is being built for, out of the singleton the run
+already established -- unless one was handed to the constructor, which is what a
 test does.
+
+Reached here rather than from L<Provisioner::Recipe>, so that loading an
+ordinary recipe does not load L<Sys::Virt> along with it.
 
 =cut
 
