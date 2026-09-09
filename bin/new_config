@@ -576,12 +576,11 @@ sub handle_domain {
         }
     ) || die "Could not initialize template dir";
 
-    my $distro = Provisioner::Cookbook->load($distro_name)->new(
-        distro        => $distro_name,
-        script_loc    => $root_scripts,
-        output_dir    => $cfg_dir,
-        template_dirs => \@paths,
-    );
+    # The class, not an instance: everything asked of it here is a fact about the
+    # distribution rather than about this guest, and the object that renders its
+    # files is built by the depsolver below like every other recipe's.  Two
+    # objects for one recipe would be two chances to generate the guest's key.
+    my $distro = Provisioner::Cookbook->load($distro_name);
 
     my %provisioner_opts = (
         distro          => $distro_name,

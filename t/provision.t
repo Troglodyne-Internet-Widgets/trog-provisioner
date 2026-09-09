@@ -226,6 +226,85 @@ subtest 'a dry run applies nothing' => sub {
     ok( -s "$dir/vm.test/setup.sh",  'and the setup script' );
 };
 
+# The unit half of this -- every disk knob against every libvirt version -- is
+# t/Provisioner-Recipe-vm.t.  What is left here is the integration claim: that a
+# real provision still reaches the recipe, and that what bin/new_config wrote
+# beside the domain is what ends up in the seed.
+subtest 'a real provision reaches the vm recipe with what new_config wrote' => sub {
+    my @applied;
+    my $hv  = Test::MockModule->new('Trog::HV');
+    my $loc = Test::MockModule->new('Trog::Local');
+
+    my %seeded;
+    $hv->redefine( domain_exists        => sub { 0 } );
+    $hv->redefine( delete_volume        => sub { 1 } );
+    $hv->redefine( pool                 => sub { 1 } );
+    $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
+    $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
+    $hv->redefine( bridge_device        => sub { 'br0' } );
+    $hv->redefine( has_tpm              => sub { 0 } );
+    $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip             => sub { '192.168.122.50' } );
+    $hv->redefine( is_local             => sub { 1 } );
+    $hv->redefine( describe             => sub { 'the hypervisor' } );
+    $hv->redefine( virbr_ip             => sub { '192.168.122.1' } );
+    $hv->redefine( libvirt_version      => sub { 10_000_000 } );
+    $hv->redefine( qemu_version         => sub { 9_000_000 } );
+    $hv->redefine( pool_takes_direct_io => sub { 1 } );
+    $hv->redefine( pool_fstype          => sub { 'ext4' } );
+    $hv->redefine( write_text           => sub { push( @applied, 'write_text' ); 1 } );
+    $hv->redefine( put_file             => sub { push( @applied, 'put_file' ); 1 } );
+    $hv->redefine( run_sudo             => sub { push( @applied, 'run_sudo' ); 0 } );
+    $hv->redefine( define_domain        => sub { push( @applied, 'define_domain' ); 1 } );
+    $hv->redefine( cloudinit_iso        => sub { my ( undef, undef, %f ) = @_; %seeded = %f; return '/bogus/pool/seed.iso' } );
+    $loc->redefine( append_line => sub { push( @applied, 'append_line' ); 1 } );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    $hv->redefine( domain_dir => sub { $dir } );
+    mkdir "$dir/vm.test";
+
+    # What bin/new_config leaves beside a domain, which is all this program
+    # reads now.  Deliberately recognisable, so that finding it in the seed says
+    # it came off disk rather than being rebuilt here.
+    my %wrote = (
+        'user-data'              => "#cloud-config\nfqdn: vm.test\n",
+        'meta-data'              => "instance-id: vm.test\n",
+        'network-config'         => "network:\n  version: 1\n",
+        'rsyslog-collector.conf' => "collector for vm.test\n",
+        'logrotate.conf'         => "rotate\n",
+        'key.rsa.pub'            => "ssh-rsa AAAA nobody\n",
+    );
+    File::Slurper::Temp::write_text( "$dir/vm.test/$_", $wrote{$_} ) for keys %wrote;
+
+    my $config = Config::Simple->new(
+        _conf(
+            domain     => 'vm.test',   memory => 2048, cpus => 2,
+            size       => 42949672960, image  => 'https://example.test/img',
+            admin_user => 'doge',      distro => 'ubuntu',
+        )
+    );
+
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+
+    is_deeply(
+        \%seeded,
+        { map { $_ => $wrote{$_} } qw{user-data meta-data network-config} },
+        'the seed is the three files new_config wrote, unaltered'
+    );
+
+    my $xml = File::Slurper::read_text("$dir/vm.test/domain.xml");
+    like( $xml, qr{<name>vm\.test</name>},                  'the vm recipe wrote the domain XML' );
+    like( $xml, qr{<source file='/bogus/pool/seed\.iso'/>}, 'naming the seed it just made' );
+    unlike( $xml, qr/\[%/, 'with nothing of the template left in it' );
+
+    ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
+    ok( ( grep { $_ eq 'append_line' } @applied ),   "the guest's key was authorized on the machine holding the payload" );
+    ok( ( grep { $_ eq 'run_sudo' } @applied ),      'and the hypervisor was told to collect its logs' );
+
+    is( $user, 'doge',           'the admin user comes back' );
+    is( $ip,   '192.168.122.50', 'with the address the guest leased' );
+};
+
 subtest 'a domain directory with no recipes is built as it stands' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 

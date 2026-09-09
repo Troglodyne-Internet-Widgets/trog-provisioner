@@ -13,6 +13,7 @@ t/Provisioner-DistroRecipe.t - what a distribution has to answer for
 =cut
 
 use Test::More;
+use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 
@@ -106,5 +107,7 @@ subtest 'the five files a guest boots from are ordinary template_files' => sub {
     # rather than by overriding this.
     ok( ( grep { m/\Aubuntu[.]/ } keys %files ) == scalar keys %files, 'out of that distribution own directory' );
 };
+
+Test::NoWarnings::had_no_warnings();
 
 done_testing;
