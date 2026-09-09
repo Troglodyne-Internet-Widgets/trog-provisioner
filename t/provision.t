@@ -114,6 +114,46 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 # --- Adopting the state a hypervisor already had -----------------------------
 # --- Adopting what libvirt already has ---------------------------------------
 # --- The config generator runs first -----------------------------------------
+# The warning the generator prints is the most it can do: it writes
+# configuration and destroys nothing, and it runs from cron to take backups.
+# This program is the one that calls clean_domain_resources, so refusing is its
+# job.
+subtest 'a salvage that came away empty stops the run before anything is destroyed' => sub {
+
+    # The real generator, so this is pinned to the interface it actually
+    # publishes.  A defined stub would go on passing after somebody renamed
+    # salvage_gaps out from under the caller.
+    require "$FindBin::Bin/../bin/new_config";    ## no critic (Modules::RequireBarewordIncludes)
+    my $gen = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
+
+    # Nothing unreadable: every first build of a machine looks like this, and a
+    # domain with no guest yet is never salvaged at all.
+    $gen->redefine( salvage_gaps => sub { () } );
+    is( Trog::Bin::Provisioner::refuse_on_salvage_gaps(0), 1, 'no gaps, no refusal' );
+
+    # A directory that is on the guest and came away empty.
+    $gen->redefine(
+        salvage_gaps => sub {
+            return ( 'vm.test' => [ { recipe => 'redis', remote => '/var/lib/redis' } ] );
+        }
+    );
+
+    my $why = exception { Trog::Bin::Provisioner::refuse_on_salvage_gaps(0) };
+    like( $why, qr/Refusing to rebuild/,                      'it refuses' );
+    like( $why, qr{redis read nothing out of /var/lib/redis}, 'naming the recipe and the path' );
+    like( $why, qr/vm[.]test/,                                'and the domain it was on' );
+    like( $why, qr/--salvage-gaps-ok/,                        'and the way past it' );
+
+    # Said out loud, and then allowed, because somebody typed the flag.
+    my @said;
+    my $ok = do {
+        local $SIG{__WARN__} = sub { push( @said, $_[0] ) };
+        Trog::Bin::Provisioner::refuse_on_salvage_gaps(1);
+    };
+    is( $ok, 1, 'the override lets it through' );
+    like( join( q{}, @said ), qr{redis read nothing out of /var/lib/redis}, 'still saying what is being lost' );
+};
+
 subtest 'a domain directory with no recipes is built as it stands' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 

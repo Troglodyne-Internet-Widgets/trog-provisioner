@@ -220,8 +220,36 @@ sub expand_dependent_domains {
     return $d;
 }
 
+=head2 %gaps = salvage_gaps()
+
+What the last C<main> could not read off the guests it salvaged, keyed by
+domain, and empty when there was nothing to report.
+
+Not a return value, because this program exits 0 on these deliberately.  It
+writes configuration and destroys nothing, so failing here would withhold the
+configuration somebody needs in order to go and fix the permissions -- and it
+runs from cron to take backups, where quitting over one unreadable directory
+would abandon every domain after it.  F<bin/provision> is the program that
+destroys the guest, so it is the one that has to refuse, and this is what it
+asks.
+
+Only the alarming ones: a path that is not on the guest at all has nothing to
+salvage and never did, which is what every first build looks like.  See
+C<_salvage_gap>.
+
+=cut
+
+our %SALVAGE_GAPS;
+
+sub salvage_gaps { return %SALVAGE_GAPS }
+
 sub main {
     my @args = @_;
+
+    # This run's, not the last one's.  main() is called more than once in a
+    # process by the tests, and would be by anything else that generated two
+    # configurations.
+    %SALVAGE_GAPS = ();
 
     my $credentials;
     GetOptionsFromArray(
@@ -966,6 +994,11 @@ sub handle_domain {
     # not to run it yet.
     if (@empty_salvage) {
         warn "\n" . scalar(@empty_salvage) . " salvage(s) on $fqdn came back with nothing:\n" . join( q{}, map { "    $_->{recipe} read nothing out of $_->{remote}\n" } @empty_salvage ) . "None of that state is in $data_dir.  Rebuilding $fqdn now loses it.\n";
+
+        # Kept for whoever is going to act on it.  Saying so on the way past is
+        # the most this program can do about it; refusing to destroy the guest
+        # is bin/provision's to do, and this is how it finds out.
+        $SALVAGE_GAPS{$fqdn} = [@empty_salvage];
     }
 
     print "Done.\n";
