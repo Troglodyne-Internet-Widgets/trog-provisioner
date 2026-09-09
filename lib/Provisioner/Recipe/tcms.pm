@@ -19,12 +19,22 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Runs the needed installation steps for a tCMS installation inside of the install_dir.
-The install dir is expected to be an existing tCMS installation inside of the data dir (can simply be a fresh clone).
+Runs the needed installation steps for a tCMS installation inside of the
+install_dir.
 
 If you want the system to come up right away, it's a good idea to set the order of this higher than that of the tpsgi target.
 
-Your tCMS install MUST be in the tCMS/ directory in the DATA 'from' dir.
+The checkout lives in C<tCMS/> under the domain's directory.  It gets there one
+of two ways and neither of them is yours to do: C<remote_files> brings the one
+off the guest being replaced, and the fragment clones master when there is none
+-- a domain that has never existed, or one whose data directory somebody has
+emptied.
+
+A checkout that is already there is left exactly as it is, whatever state it is
+in.  It is the site somebody has been running, and it is not this recipe's to
+reset, update or reconcile: C<config/> is partly tracked, so anything that wrote
+into the working tree would be overwriting a live configuration with whatever
+master says today.
 
 TODO: allow specification of specific SHA to check out.
 
@@ -77,10 +87,15 @@ sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
         # tCMS stores some persistent logs in the tpsgi log dir.
-        "$install_dir/$domain/log"              => "log/",
-        "$install_dir/$domain/tCMS/www/assets/" => "tCMS/www/assets/",
-        "$install_dir/$domain/tCMS/config/"     => "tCMS/config/",
-        "$install_dir/$domain/tCMS/data/"       => "tCMS/data",
+        "$install_dir/$domain/log" => "log/",
+
+        # The whole checkout, rather than the three directories inside it that
+        # hold content.  Which commit the guest was actually serving is state as
+        # much as the assets are -- a site pinned to a revision, or carrying a
+        # patch that has not been pushed, came back as whatever master happened
+        # to be that morning.  The .git is what says which, and it is small
+        # beside the assets that were coming down anyway.
+        "$install_dir/$domain/tCMS/" => "tCMS/",
     );
 }
 
