@@ -13,6 +13,8 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
+use File::Copy();
+use File::Slurper::Temp();
 
 use JSON::Validator::Schema::Troglodyne;
 
@@ -47,6 +49,24 @@ in L<docs/CONFIGURATION.md|https://github.com/Troglodyne-Internet-Widgets/trog-p
 The last component of the package name must be lowercase --
 C<Provisioner::Recipe::nginx>, never C<::Nginx>.  The makefile has uppercase
 targets of its own, and the case is what keeps a recipe from colliding with one.
+
+A recipe may have one specialisation per distribution, under a capitalised
+namespace named for it: C<Provisioner::Recipe::Ubuntu::nginx>, a subclass of
+C<Provisioner::Recipe::nginx>.  It answers to the same name, is looked up by
+C<Provisioner::Cookbook/load> out of the C<distro> a domain is configured with,
+and shares the parent's fragment -- what a distribution changes is C<deps>, and
+the makefile it renders is the same one.
+
+=head3 Where the packages are named
+
+C<deps> belongs in the distro subclass, because a package name is a fact about
+a distribution rather than about the software.  The generic class declares the
+method and dies, so a recipe reached with no distro answering for it fails
+loudly rather than installing nothing.
+
+This used to be one C<if ($self-E<gt>{target_packager} eq 'deb')> per recipe,
+with a C<die> on the other branch that nothing could ever reach: there was one
+packager, set in C<bin/new_config> two lines after it was read.
 
 =head3 The fragment is a makefile, not a shell script
 
@@ -136,8 +156,12 @@ Create new recipe instance.
 sub new {
     my ( $class, %opts ) = @_;
 
-    my ($tname) = $class =~ m/^Provisioner::Recipe::(\w+)$/;
-    die "Could not extract recipe name.  Recipes must be of form Provisioner::Recipe::*" unless $tname;
+    # The last component, so that a distro's specialisation of a recipe --
+    # Provisioner::Recipe::Ubuntu::pdns -- answers to the same name and looks
+    # for the same fragment as the recipe it specialises.  Sharing the fragment
+    # is the point: what a distro changes is the package list, not the makefile.
+    my ($tname) = $class =~ m/\AProvisioner::Recipe::(?:\w+::)?(\w+)\z/;
+    die "Could not extract recipe name.  Recipes must be of form Provisioner::Recipe::* or Provisioner::Recipe::<Distro>::*" unless $tname;
 
     $opts{template}        = "$tname.tt";
     $opts{global_template} = "$tname.global.tt";
@@ -155,6 +179,24 @@ sub new {
 }
 
 =head2 METHODS (you will possibly want to override)
+
+=head3 $bool = $recipe->is_module()
+
+Whether this recipe is one of the modules the guest's makefile is built out of.
+
+True for every recipe that installs something, which is nearly all of them.
+False for the two that direct the build instead of taking part in it --
+L<Provisioner::DistroRecipe> and L<Provisioner::Recipe::vm> -- whose whole job
+happens before there is a guest to run a makefile on.
+
+C<bin/new_config> depsolves those two like anything else, so they are configured
+and can be depended upon, and then leaves them out of the module list.  Which
+matters for more than the makefile: C<modules> is handed to every template and
+every recipe as the list of what is on this guest, and neither of these is.
+
+=cut
+
+sub is_module { return 1 }
 
 =head3 %args = $recipe->args()
 
@@ -180,7 +222,17 @@ sub formatters {
 
 =head3 @pkgs = $recipe->deps(%recipe_config)
 
-Define system package dependencies.  SHOULD die in the event of an unsupported platform.
+The system packages this recipe needs installed.
+
+B<Override this in the distro subclass>, not here -- see L</Where the packages
+are named>.  A recipe whose packages are the same everywhere because they are
+not packages at all, C<adminconfig>'s operator-supplied list being the one,
+answers here instead.
+
+Empty by default, which is the right answer for a recipe that installs nothing.
+A recipe that does need packages and has no subclass for the distro in hand is
+a recipe that will silently install none of them, which is what C<bin/recipes>
+and C<t/recipes.t> are there to notice.
 
 =cut
 
@@ -312,8 +364,11 @@ and for those the override should say why it is safe.
 sub resolve_conflict {
     my ( $self, $path, $mine, $theirs ) = @_;
 
+    # The distro's namespace comes off too.  This names the key an operator has
+    # to go and set, and there is no 'Ubuntu::ufw' to set anything under -- the
+    # configuration only ever says 'ufw'.
     my $recipe = Scalar::Util::blessed($self) || $self;
-    $recipe =~ s/\AProvisioner::Recipe:://;
+    $recipe =~ s/\AProvisioner::Recipe::(?:\w+::)?//;
     my $field = join( '.', @$path );
 
     die <<"CONFLICT";
@@ -800,8 +855,90 @@ Render specified template file.
 
 sub render_file {
     my ( $self, $file ) = ( shift, shift );
-    my %vars = $self->validated( $self->vars(), @_ );
+    return $self->render_raw( $file, $self->validated( $self->vars(), @_ ) );
+}
+
+=head3 $output = $recipe->render_raw($file, %template_vars)
+
+Render a template against variables that have B<already> been through
+C<validate>.
+
+C<render_file> is the one to call.  This is for the one caller that cannot:
+C<enrich>, which runs inside C<validate> and so cannot ask for a render that
+validates -- C<render_file> would re-enter C<validate>, which would call
+C<enrich>, which would ask for another render.
+
+Which a recipe needs when one of its generated files has to appear inside
+another.  A distro's cloud-init carries the setup script by value, in a
+C<write_files> entry, so the script has to be rendered before the user-data
+that quotes it -- and the answer is a template variable rather than an ordering
+between two C<template_files> entries, because nothing about C<template_files>
+promises an order.
+
+=cut
+
+sub render_raw {
+    my ( $self, $file, %vars ) = @_;
     return $self->{tt}->render( $file, \%vars );
+}
+
+=head3 @written = $recipe->generate_files($output_dir, %template_vars)
+
+Render everything in C<template_files> into C<$output_dir>, and hand back what
+was written, relative to it.
+
+A name ending in C<.tt> is rendered and anything else is copied, which is what
+C<template_files> already documents.  Both callers are here rather than in one
+of them: C<bin/new_config> generates a recipe's files while it walks the
+modules, and C<bin/provision> generates the ones that cannot be written until a
+hypervisor has answered for itself -- see C<Provisioner::Recipe::vm>.
+
+=cut
+
+sub generate_files {
+    my ( $self, $output_dir, %vars ) = @_;
+
+    my %files = $self->template_files( @{ $vars{modules} // [] } );
+    my @written;
+
+    foreach my $template ( sort keys %files ) {
+        my $destination = "$output_dir/$files{$template}";
+
+        if ( $template =~ m/[.]tt$/ ) {
+            File::Slurper::Temp::write_binary( $destination, $self->render_file( "files/$template", %vars ) );
+        }
+        else {
+            my $source = $self->template_path("files/$template");
+            File::Copy::copy( $source, $destination ) or die "Could not copy static file $source to $destination: $!\n";
+        }
+
+        push( @written, $files{$template} );
+    }
+
+    return @written;
+}
+
+=head3 $path = $recipe->template_path($file)
+
+Where a template actually is, out of C<template_dirs>, or dies naming what it
+looked through.
+
+The renderer finds a template by name on its own; this is for the ones that are
+not rendered -- a file with no variables in it, which C<template_files> copies
+rather than renders -- and for a caller that has to hand the path to something
+else.
+
+=cut
+
+sub template_path {
+    my ( $self, $file ) = @_;
+
+    foreach my $dir ( @{ $self->{template_dirs} } ) {
+        ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+        return "$dir/$file" if -f "$dir/$file";
+    }
+
+    die "Could not find the template $file in " . join( ', ', @{ $self->{template_dirs} } ) . "\n";
 }
 
 =head3 %vars = $recipe->validated(%opts)
