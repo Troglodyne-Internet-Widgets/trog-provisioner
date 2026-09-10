@@ -1,0 +1,76 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+# What this asserts is the configuration, never that the mirror is populated.
+# The first sync runs in the background for hours, so a test that waited for it
+# would fail every mirror host on the build that created it.
+
+my $spool  = '[% spool %]';
+my $root   = '[% mirror_root %]';
+my $path   = '[% path %]';
+my $listen = '[% main_ip %]';
+
+# --- nginx serves it ---------------------------------------------------------
+chomp( my $nginx_active = `systemctl is-active nginx 2>/dev/null` );
+is( $nginx_active, 'active', 'nginx is running' );
+
+my $nginx_t = `nginx -t 2>&1`;
+like( $nginx_t, qr/test is successful/, 'and its configuration is valid' ) or diag $nginx_t;
+
+# The spool is served by address, because a guest fetching packages has one and
+# does not yet have a resolver.  Asking with the address as the Host is the only
+# way to find out that nginx routes it here rather than to some other server.
+chomp( my $code = `curl -s -o /dev/null -w '%{http_code}' -H 'Host: $listen' 'http://127.0.0.1$path/' 2>/dev/null` );
+is( $code, '200', "the mirror answers at $path for a request addressed by IP" );
+
+# --- apt-mirror is configured ------------------------------------------------
+ok( -x '/usr/bin/apt-mirror', 'apt-mirror is installed' );
+
+my $conf = do { open( my $fh, '<', '/etc/apt/mirror.list' ) or die $!; local $/; <$fh> };
+like( $conf, qr/^set base_path\s+\Q$spool\E$/m, 'mirror.list points at the configured spool' );
+
+[% FOR suite IN suites %]
+[% FOR arch IN arches %]
+like( $conf, qr/^deb-\Q[% arch %]\E \S+ \Q[% suite %]\E /m, 'mirror.list covers [% suite %] on [% arch %]' );
+[% END %]
+[% END %]
+
+ok( -d $root, 'the directory nginx serves exists, so the vhost is not pointing at nothing' );
+
+# --- the sync is a unit, and one that will not be killed mid-flight ----------
+chomp( my $loaded = `systemctl show -p LoadState --value apt-mirror.service 2>/dev/null` );
+is( $loaded, 'loaded', 'the sync is a systemd unit' );
+
+# The default is ninety seconds.  A sync that gets killed leaves a partial spool
+# that nginx serves as though it were a mirror, which degrades quietly.
+chomp( my $timeout = `systemctl show -p TimeoutStartUSec --value apt-mirror.service 2>/dev/null` );
+is( $timeout, 'infinity', 'and systemd will not time it out' );
+
+# --- it refreshes -------------------------------------------------------------
+my $cron = eval { do { open( my $fh, '<', '/etc/cron.d/apt-mirror' ) or die $!; local $/; <$fh> } } // '';
+like( $cron, qr/\Q[% refresh %]\E/, 'the refresh is scheduled' );
+like( $cron, qr/systemctl start --no-block apt-mirror/, 'through the same unit, so two cannot run at once' );
+
+my @cron_stat = stat('/etc/cron.d/apt-mirror');
+is( $cron_stat[4], 0, 'the cron file is root-owned, or cron would ignore it' );
+is( sprintf( '%04o', $cron_stat[2] & 07777 ), '0644', 'and is not group or world writable, for the same reason' );
+
+# --- room to put a mirror in --------------------------------------------------
+[% IF require_free_gb %]
+chomp( my $free_kb = `df -Pk '$spool' 2>/dev/null | awk 'NR==2 {print \$4}'` );
+my $free_gb = int( ( $free_kb || 0 ) / 1024 / 1024 );
+cmp_ok( $free_gb, '>=', [% require_free_gb %], "at least [% require_free_gb %]GB free for the mirror" )
+  or diag "Only ${free_gb}GB free under $spool.  A mirror of [% components.join(' ') %] "
+  . "for [% suites.join(' ') %] is far larger than that -- see perldoc Provisioner::Recipe::aptmirror "
+  . "for the sizes, and raise `size` in this domain's _global.";
+[% END %]
+
+# Where the sync actually got to, so the provision log says.  Not an assertion:
+# an empty mirror on the build that created it is expected.
+chomp( my $syncing = `systemctl is-active apt-mirror.service 2>/dev/null` );
+my $last = eval { do { open( my $fh, '<', "$spool/var/last_sync" ) or die $!; local $/; <$fh> } };
+diag( "apt-mirror is '$syncing'; last completed sync: " . ( $last // 'none yet' ) );
+
+done_testing();

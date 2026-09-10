@@ -1,0 +1,18 @@
+[Unit]
+Description=Mirror [% upstream %]
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=apt-mirror
+Group=apt-mirror
+ExecStart=/usr/bin/apt-mirror
+# Without this systemd kills the sync at DefaultTimeoutStartSec, which is ninety
+# seconds, and leaves a half-written spool that nginx will serve as though it
+# were a mirror -- apt then 404s per package and falls through to the archive,
+# so it degrades quietly instead of failing.
+TimeoutStartSec=0
+# A sync is hours of disk and network that nothing is waiting on.
+Nice=10
+IOSchedulingClass=idle

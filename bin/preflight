@@ -96,7 +96,7 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image );
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror );
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -424,6 +424,72 @@ and the current release is
 Guests already built are unaffected; this is about the next one.  Change the
 release in the distro recipe when you want to move, and rebuild -- see
 perldoc Provisioner::DistroRecipe.
+FIX
+}
+
+# Is anything telling guests where to get their packages?
+#
+# Two things worth saying and they are not the same.  Having built a mirror and
+# pointed nothing at it is the more annoying of the two, because the work is
+# already done and the fleet is still paying for it every build.
+#
+# Reads the configuration and nothing else.  In particular it does not ask the
+# ip pool whether a named mirror has an address -- that would have a read-only
+# command create ips.db, and it is bin/new_config's question to answer anyway.
+sub note_apt_mirror {
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+
+    my @domains = grep { !m/\A_/ } sort keys %$conf;
+    return { ok => 1 } unless @domains;
+
+    my %distro = map { $_ => 1 } Provisioner::Cookbook->distros();
+    my ( $pointed, @mirrors );
+
+    foreach my $domain ( @domains, undef ) {
+        my $global  = eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {};
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+
+        $pointed = 1 if length( $global->{mirror} // q{} );
+
+        foreach my $name ( sort keys %$recipes ) {
+            my $opts = $recipes->{$name};
+            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && length( $opts->{mirror} // q{} );
+            push( @mirrors, $domain ) if $name eq 'aptmirror' && defined $domain;
+        }
+    }
+
+    return { ok => 1 } if $pointed;
+
+    if (@mirrors) {
+        my $built = join( ', ', sort keys %{ { map { $_ => 1 } @mirrors } } );
+        return { ok => 0, what => "$built mirrors the archive, and nothing points at it", fix => <<"FIX" };
+Every guest still fetches every package over the internet on every build, this
+one included.  Name it in the _global that the fleet shares:
+
+    _base:
+        _global:
+            mirror: $built
+
+A bare name is resolved out of the ip pool, because a guest runs cloud-init
+before it has DNS.  A mirror somewhere else is named as a URL instead.
+FIX
+    }
+
+    my ($parent) = map { m/\A[^.]+[.](.+)\z/ ? $1 : () } @domains;
+    my $suggested = 'aptmirror.' . ( $parent // 'example.com' );
+
+    return { ok => 0, what => 'No package mirror is configured', fix => <<"FIX" };
+Every guest downloads its packages over the internet on every provision, and
+again on every autoupdate.  Across a fleet that is the same few hundred
+megabytes per guest per build.
+
+A mirror is a guest like any other:
+
+    bin/new_guest --hostname $suggested aptmirror
+
+and then, once it has synced, point the fleet at it with `mirror:` in _base's
+_global.  Nothing depends on that recipe, and a fleet without one builds exactly
+as it does now -- only slower.
 FIX
 }
 

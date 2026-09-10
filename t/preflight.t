@@ -274,4 +274,33 @@ subtest 'a distro pinned to an image that has moved on is worth saying so about'
     is_deeply( Trog::Bin::Preflight::note_stale_image(), { ok => 1 }, 'and a distribution that could not be asked says nothing either' );
 };
 
+subtest 'a fleet with no package mirror is told what that costs' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    my $write = sub {
+        File::Slurper::Temp::write_text( "$dir/recipes.yaml", $_[0] );
+        Provisioner::Cookbook->forget();
+        return Trog::Bin::Preflight::note_apt_mirror();
+    };
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    # A fresh installation has no domains, and so nothing to say this about.
+    is_deeply( $write->("---\n_base:\n    nosnap:\n"), { ok => 1 }, 'nothing configured yet, nothing said' );
+
+    my $note = $write->("---\nweb.troglodyne.net:\n    nginx:\n");
+    ok( !$note->{ok}, 'domains but no mirror is worth saying' );
+    like( $note->{fix}, qr/bin\/new_guest --hostname aptmirror\.troglodyne\.net aptmirror/, 'naming the command, under the parent the fleet already uses' );
+
+    # The more annoying of the two: the work is done and nothing is using it.
+    $note = $write->("---\nweb.troglodyne.net:\n    nginx:\naptmirror.troglodyne.net:\n    aptmirror:\n        releases: [noble]\n");
+    ok( !$note->{ok}, 'a mirror nobody points at is worth saying louder' );
+    like( $note->{what}, qr/aptmirror\.troglodyne\.net mirrors the archive/, 'naming the guest that is doing the mirroring' );
+    like( $note->{fix},  qr/mirror: aptmirror\.troglodyne\.net/,             'and the line that would use it' );
+
+    # Either spelling counts as pointing at one.
+    is_deeply( $write->("---\n_base:\n    _global:\n        mirror: aptmirror.troglodyne.net\nweb.troglodyne.net:\n    nginx:\n"), { ok => 1 }, 'a mirror in _base _global is enough' );
+    is_deeply( $write->("---\nweb.troglodyne.net:\n    ubuntu:\n        mirror: http://m.test/ubuntu\n"),                          { ok => 1 }, 'as is one in a domain distro block' );
+};
+
 done_testing();

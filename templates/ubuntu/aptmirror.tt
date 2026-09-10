@@ -1,0 +1,36 @@
+[%# The spool lives outside install_dir on purpose: the data target chowns and
+    chmods install_dir/domain recursively on every provision, and this is a few
+    million files.  See perldoc Provisioner::Recipe::aptmirror. -%]
+mkdir -p '[% spool %]'
+chown apt-mirror:apt-mirror '[% spool %]'
+[%# Created as the user that will own them rather than made as root and chowned
+    back: -R over this directory is a recursive walk of the whole mirror, which
+    is the cost the spool was put outside install_dir to avoid in the first
+    place. -%]
+runuser -u apt-mirror -- mkdir -p '[% mirror_root %]' '[% spool %]/skel' '[% spool %]/var'
+[%# A dpkg conffile whose packaged copy is nothing but commented-out defaults.
+    Overwriting it survives a package upgrade because the apt invocation in
+    Provisioner::Recipe::ubuntu passes --force-confold. -%]
+install -o root -g root -m 0644 aptmirror.mirror.list /etc/apt/mirror.list
+install -o apt-mirror -g apt-mirror -m 0755 aptmirror.postmirror.sh '[% spool %]/var/postmirror.sh'
+install -o root -g root -m 0644 aptmirror.service /etc/systemd/system/apt-mirror.service
+[%# Root-owned, or cron ignores it: a file moved out of the payload keeps the
+    transfer user as its owner, and cron applies owner restrictions to cron.d.
+    Replacing the packaged file rather than adding one beside it, so there is a
+    single answer to when a sync happens; the packaged one schedules nothing,
+    being entirely commented out. -%]
+install -o root -g root -m 0644 aptmirror.cron /etc/cron.d/apt-mirror
+systemctl daemon-reload
+install -o root -g root -m 0644 aptmirror.nginx.conf /etc/nginx/sites-enabled/[% domain %]-aptmirror.conf
+[%# Deferred for the reason nginxdirindex defers it: nginx is a dependency of
+    this recipe, so its own target has run, but the global configuration it
+    writes is not in place until the postrun. -%]
+[% script_dir %]/queue_postrun_task systemctl restart nginx
+[%# Started and not waited on.  bin/provision allows ninety minutes for the
+    whole makefile and the postrun queue together, and a first sync is hours and
+    hundreds of gigabytes -- so this returns as soon as systemd has queued the
+    job, and the unit outlives the build. -%]
+systemctl start --no-block apt-mirror.service
+echo 'aptmirror: the first sync runs in the background and takes hours.'
+echo 'aptmirror: watch it with "journalctl -u apt-mirror -f" here,'
+echo 'aptmirror: or ask from anywhere with "curl http://[% domain %]/mirror-status".'

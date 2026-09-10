@@ -1,0 +1,25 @@
+[%# Configuration for apt-mirror, written by Provisioner::Recipe::aptmirror.
+
+    base_path is written out rather than left to the packaged default, so
+    nothing here depends on a value in a file this tree does not read.
+
+    run_postmirror is already the default, and is written out because it is what
+    the postmirror.sh installed beside this file relies on.  That script is
+    where clean.sh gets run: apt-mirror regenerates clean.sh every sync and
+    never executes it, and ships no postmirror.sh to do so, so a spool left
+    alone keeps every package the archive has ever dropped. -%]
+set base_path    [% spool %]
+set nthreads     [% nthreads %]
+set _tilde       0
+set run_postmirror 1
+
+[% FOR suite IN suites -%]
+[% FOR arch IN arches -%]
+deb-[% arch %] [% upstream %] [% suite %] [% components.join(' ') %]
+[% END -%]
+[% IF sources -%]
+deb-src [% upstream %] [% suite %] [% components.join(' ') %]
+[% END -%]
+[% END -%]
+
+clean [% upstream %]
