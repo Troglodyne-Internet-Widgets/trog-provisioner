@@ -46,6 +46,20 @@ install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/
 # and a runner does not have to.  Sourced by every login shell either way, so
 # whoever ends up on this guest gets the checkout on their PATH.
 install -o root -g root -m 0644 trogrunner.profile /etc/profile.d/trogrunner.sh
+
+# Net::OpenSSH::More refuses to start at all on an ssh config wider than 0600 --
+# "[FATAL] Permissions on ... are not correct: got=0775, expected=0600" -- and
+# every remote thing this tool does goes through it.  The dotfiles adminconfig
+# installs ship one 0775, so a runner that had never opened an ssh connection
+# was configured to fail the first time it tried.
+#
+# Fixed here rather than in adminconfig because the file belongs to whoever
+# wrote those dotfiles, and this is the recipe that makes a guest care.  Only
+# the mode is touched; what is in the file is theirs.
+#
+# Measured on a guest: plain ssh to the hypervisor worked and bin/preflight
+# could not reach it, which is the shape of failure that costs an afternoon.
+h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'trogrunner: no home directory for [% user %]' >&2; exit 1; fi; install -d -o '[% user %]' -g '[% user %]' -m 0700 "$$h/.ssh"; test -f "$$h/.ssh/config" && chmod 0600 "$$h/.ssh/config" || true
 [% IF hypervisor_access != 'none' %]
 # The key a hypervisor is asked to trust.
 #
@@ -67,7 +81,7 @@ test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% insta
 # linked-to copy stays canonical, because that is the path guest_secrets writes
 # and remote_skip keeps out of the salvage; the link is a no-op when the two
 # are the same directory.
-h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'trogrunner: no home directory for [% user %]' >&2; exit 1; fi; install -d -o '[% user %]' -g '[% user %]' -m 0700 "$$h/.ssh"; [ "$$h" = '[% install_dir %]/[% domain %]' ] || ln -sfn '[% install_dir %]/[% domain %]/.ssh/id_ed25519' "$$h/.ssh/id_ed25519"
+h="$$(getent passwd '[% user %]' | cut -d: -f6)"; [ "$$h" = '[% install_dir %]/[% domain %]' ] || ln -sfn '[% install_dir %]/[% domain %]/.ssh/id_ed25519' "$$h/.ssh/id_ed25519"
 [% FOR name IN hypervisors.keys().sort() %]
 [% SET hv = hypervisors.$name %]
 [% IF hv.ssh_host %]

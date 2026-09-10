@@ -264,8 +264,9 @@ runner.example.com:
             - /srv/code/trog-provisioner
 
         config:
-            gateway:   192.168.1.254
             resolvers: "192.168.1.254, 1.1.1.1"
+            addresses: 192.168.1.180-192.168.1.199
+            cidr:      192.168.1.0/24
 
         hypervisors:
             hydra:
@@ -282,7 +283,13 @@ runner.example.com:
                     install_dir: /opt/domains
 ```
 
-Nothing in it is required.  Four parts are worth knowing before writing one.
+Nothing in it is required, and `config` inherits `admin_user`, `admin_email`,
+`admin_key` and `gateway` from the guest's own -- a runner administers what it
+builds the way this installation administers it, unless told otherwise. Give it
+`addresses` and `cidr` though: without an address pool it has none to hand out,
+and every guest it tries to build stops on "cannot auto-assign IP".
+
+Four more parts are worth knowing before writing one.
 
 **It takes longer than the default budget allows.** A runner builds perl from
 source, runs the test suite of every distribution that goes on top of it, and

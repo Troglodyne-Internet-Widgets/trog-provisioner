@@ -609,11 +609,19 @@ sub handle_domain {
 
     # The guest rsyncs its payload before it has working DNS, so this has to be
     # an address and not a name.
-    $global_config->{transfer_ip}   = $transfer_ip;
-    $global_config->{transfer_ips}  = \@transfer_ips;
-    $global_config->{tld}           = $tld;
-    $global_config->{admin_user}    = $admin_user;
-    $global_config->{admin_email}   = $admin_email;
+    $global_config->{transfer_ip}  = $transfer_ip;
+    $global_config->{transfer_ips} = \@transfer_ips;
+    $global_config->{tld}          = $tld;
+    $global_config->{admin_user}   = $admin_user;
+    $global_config->{admin_email}  = $admin_email;
+
+    # The other two halves of who administers a guest and where it sits, out of
+    # the same [global] block as the two above.  They were the only members of
+    # it a recipe could not see, which read as an oversight rather than a
+    # decision -- Provisioner::Recipe::trogrunner is what noticed, needing to
+    # write an ipmap.cfg of its own and having no way to ask what this one says.
+    $global_config->{admin_key}     = $admin_key;
+    $global_config->{gateway}       = $gateway;
     $global_config->{domain}        = $fqdn;
     $global_config->{ipmap}         = $ip_conf;
     $global_config->{subdomain}     = $domain;

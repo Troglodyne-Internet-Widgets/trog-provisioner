@@ -111,10 +111,19 @@ SKIP: {
     # Where ssh actually looks.  Nothing on a libvirt qemu+ssh URI can point it
     # anywhere else, and the domain directory is this user home only when the
     # domain names a service user.
-    chomp( my $home = `getent passwd $user | cut -d: -f6` );
-    ok( -e "$home/.ssh/id_ed25519", "and reachable at $home/.ssh/id_ed25519, which is where ssh will look" );
+    chomp( my $keyhome = `getent passwd $user | cut -d: -f6` );
+    ok( -e "$keyhome/.ssh/id_ed25519", "and reachable at $keyhome/.ssh/id_ed25519, which is where ssh will look" );
 }
 [% END %]
+
+# Net::OpenSSH::More will not start on an ssh config wider than this, and every
+# remote thing the runner does goes through it.  adminconfig ships one 0775.
+chomp( my $home = `getent passwd $user | cut -d: -f6` );
+SKIP: {
+    skip 'no ssh config to check', 1 unless -e "$home/.ssh/config";
+    my @stat = stat "$home/.ssh/config";
+    is( sprintf( '%04o', $stat[2] & 07777 ), '0600', "$home/.ssh/config is narrow enough for Net::OpenSSH::More" );
+}
 
 # Reported rather than asserted.  Most of what preflight checks is about the
 # hypervisor, and failing this guest over the state of somebody else machine
@@ -122,7 +131,9 @@ SKIP: {
 # in the provision log rather than nowhere.
 diag "bin/preflight on this guest:";
 [% IF checkout %]
-diag $_ for split( "\n", `cd '$dir/[% checkout_dir %]' && $bin/perl -Ilib bin/preflight 2>&1` );
+# As the service user, not as root: the key a hypervisor trusts is in that
+# user's ~/.ssh, and root asking would only ever report that it cannot connect.
+diag $_ for split( "\n", `runuser -u $user -- sh -c "cd '$dir/[% checkout_dir %]' && $bin/perl -Ilib bin/preflight" 2>&1` );
 [% ELSE %]
 diag 'skipped: no checkout here to run it from';
 [% END %]

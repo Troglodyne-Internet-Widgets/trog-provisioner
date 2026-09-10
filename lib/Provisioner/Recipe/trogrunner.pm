@@ -26,8 +26,15 @@ use File::Temp();
             libvirt_version: "10.0.0"
 
             config:
-                gateway:   "192.168.1.254"
+                # Inherited from this guest's own when unset: admin_user,
+                # admin_email, admin_key and gateway.
                 resolvers: "192.168.1.254, 1.1.1.1"
+
+                # The pool the runner hands addresses out of.  Without these it
+                # has none to give, and every guest it tries to build stops on
+                # "cannot auto-assign IP".
+                addresses: "192.168.1.180-192.168.1.199"
+                cidr:      "192.168.1.0/24"
 
             hypervisors:
                 hydra:
@@ -274,10 +281,21 @@ made to write one.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The runner administers its guests as whoever administers this one, unless
-    # it was told otherwise.  Both come out of _global, so they are here.
+    # The runner administers its guests as whoever administers this one, on the
+    # same network, unless it was told otherwise.  All four come out of the
+    # [global] block this guest was built from, so they are here.
+    #
+    # These are not decoration: bin/new_config refuses to generate anything
+    # without admin_user, admin_key, admin_gecos, admin_email, gateway and
+    # resolvers, so a runner that defaulted any of them to empty could not build
+    # a single guest.  Measured on one, which is how the missing two were found.
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};
+
+    foreach my $inherited (qw{admin_key gateway}) {
+        $opts{config}{$inherited} = $opts{$inherited}
+          unless length( $opts{config}{$inherited} // q{} );
+    }
 
     # The schema defaults this to empty rather than leaving it absent, so an
     # empty string is what "nobody said" looks like here.

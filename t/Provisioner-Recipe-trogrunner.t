@@ -48,6 +48,8 @@ sub built {
         script_dir  => '/root/bin',
         admin_user  => 'doge',
         admin_email => 'doge@test.test',
+        admin_key   => 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey doge',
+        gateway     => '192.168.1.254',
         main_ip     => '192.168.1.50',
         %extra,
     );
@@ -93,6 +95,20 @@ subtest 'the four sections of an ipmap Config::Simple will read back' => sub {
     like( $cfg, qr/^admin_user=doge$/m,              'the admin comes from the guest own' );
     like( $cfg, qr/^admin_email=doge\@test\.test$/m, 'and so does the address' );
     like( $cfg, qr/^ip=192\.168\.1\.50$/m,           'and the address it serves payloads from' );
+};
+
+subtest 'a runner told nothing at all can still build a guest' => sub {
+
+    # bin/new_config refuses to generate anything for a domain unless all six of
+    # these are set, so a default that comes out empty is a runner that cannot
+    # do the one thing it exists for.  Measured on a guest: two of them did.
+    my ($dir) = built();
+    my $cfg = slurp( $dir, 'trogrunner.ipmap.cfg' );
+
+    foreach my $required (qw{admin_user admin_key admin_gecos admin_email gateway resolvers}) {
+        like( $cfg, qr/^\Q$required\E=\S/m, "$required is not empty" )
+          or diag "bin/new_config on the runner would die: Must set $required in global section";
+    }
 };
 
 subtest 'a secret in the runner recipes never becomes a password in a file' => sub {
