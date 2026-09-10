@@ -460,6 +460,18 @@ C<exclude> takes an arrayref of rsync patterns for things that must not come
 down -- see C<remote_skip> in L<Provisioner::Recipe>, which is where the ones we
 use are written.  C<update> leaves a file alone when our copy is the newer one.
 
+C<sudo> runs the far end as root, for a tree the connecting user cannot read.  A
+service keeps its state in a directory it owns and nobody else can open, and an
+unprivileged fetch of one walks the tree, makes the local directories, copies
+nothing out of them and exits happy -- which is indistinguishable from a guest
+that has no state yet.  It needs passwordless sudo on the far side and fails
+rather than waiting when there is none.
+
+What arrives is owned by whoever is running this, not by the uids it had on the
+guest: rsync only restores ownership when the B<receiving> end is root, and this
+end is not.  Putting it back where the service wants it, as whoever the service
+runs as, is C<scripts/restore_state>'s job and it is told the owner explicitly.
+
 =back
 
 =cut
@@ -736,6 +748,17 @@ sub _rsync {
 
         ( $self->is_local ? ()                       : ( rsh => $self->_rsh ) ),
         ( @exclude        ? ( exclude => \@exclude ) : () ),
+
+        # As root at the far end, for a fetch of something the connecting user
+        # cannot read.  A service keeps its state in a directory it owns and
+        # nobody else can open, so an unprivileged rsync walks the tree, makes
+        # the local directories, copies nothing out of them and exits happy.
+        #
+        # sudo -n rather than sudo: there is no terminal on the other end of
+        # this, so a sudo that decides to ask for a password would sit there
+        # until the timeout rather than failing.  -n makes it exit instead, and
+        # rsync reports that as a failure the caller can see.
+        ( $opts{sudo} ? ( 'rsync-path' => 'sudo -n rsync' ) : () ),
 
         # Whatever the guest has that is older than our copy stays where it is.
         # Carried over from the sftp fetch this replaced, which asked for the

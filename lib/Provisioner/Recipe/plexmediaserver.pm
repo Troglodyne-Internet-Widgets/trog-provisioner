@@ -66,9 +66,10 @@ top.  A rebuilt guest therefore comes back as the same server to Plex rather
 than as a new one waiting to be claimed, and C<claim_token> is wanted only by a
 server that has never been linked at all.
 
-The directory is left owned C<plex:>I<admin_user> at 0750 so the next salvage
-can read it.  The fetch is an sftp session as the admin user with no sudo, and a
-library Plex keeps to itself comes back empty without saying so.
+The directory is left owned C<plex:>I<admin_user> at 0750, from when the fetch
+ran as that user and a library Plex kept to itself came back empty without saying
+so.  The fetch reads the guest as root now and no longer needs it; taking it out
+is issue #98.
 
 =cut
 

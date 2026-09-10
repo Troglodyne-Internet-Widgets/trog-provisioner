@@ -42,10 +42,12 @@ key went missing with them it spends the registration as well -- the old
 certificates stay valid, but nothing can revoke them and the guest is a stranger
 to the CA again.
 
-The fetch is an sftp session as the admin user with no sudo, and dehydrated
-writes every private key it makes C<0600 root>. So the guest has to leave them
-readable by that account or the fetch returns an empty directory and says
-nothing anybody reads. That is done in two places, and it has to be both:
+dehydrated writes every private key it makes C<0600 root>, and the guest leaves
+them readable by the admin account -- from when the fetch ran as that user and
+would otherwise return an empty directory and say nothing anybody reads.  The
+fetch reads the guest as root now and no longer needs that; taking it out is
+issue #98, and it is a private key in every backup until somebody does.  It is
+done in two places, and it has to be both:
 C<get_cert> after the provision, and the C<exit_hook> in this domain's dehydrated
 hook after B<every> dehydrated run, because the nightly renewal writes a fresh
 private key and never goes near C<get_cert>.

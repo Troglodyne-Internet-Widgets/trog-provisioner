@@ -90,16 +90,48 @@ subtest 'what get_dir asks rsync for' => sub {
     my @asked;
     $mock->redefine( _rsync => sub { shift; push( @asked, [@_] ); 1 } );
 
-    ok( remote()->get_dir( '/bogus/lib/deluged', "$dir/deep/deluged", exclude => ['secrets.key'], update => 1 ), 'it comes' );
+    ok( remote()->get_dir( '/bogus/lib/deluged', "$dir/deep/deluged", exclude => ['secrets.key'], update => 1, sudo => 1 ), 'it comes' );
 
     is( $asked[0][0], 'doge@hv.test:/bogus/lib/deluged/', 'the guest is the source' );
     is( $asked[0][1], "$dir/deep/deluged/",               'and we are the destination' );
-    is_deeply( { @{ $asked[0] }[ 2 .. $#{ $asked[0] } ] }, { exclude => ['secrets.key'], update => 1 }, 'with what must not come down, and what must not come back' );
+    is_deeply(
+        { @{ $asked[0] }[ 2 .. $#{ $asked[0] } ] },
+        { exclude => ['secrets.key'], update => 1, sudo => 1 },
+        'with what must not come down, what must not come back, and who to read it as'
+    );
 
     # rsync makes the last component of a destination and nothing above it, and
     # a salvage is pointed two or three levels into a data directory that may
     # itself be new this run.
     ok( -d "$dir/deep/deluged", 'the path above the destination is ours to make' );
+};
+
+subtest 'a privileged fetch asks the far end to be root, and not to wait for a password' => sub {
+
+    # A real destination, because get_dir makes the path above it before rsync
+    # is reached -- see the subtest above.
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $mock = Test::MockModule->new('File::Rsync');
+    my %built;
+    $mock->redefine( new  => sub { my ( $class, %args ) = @_; %built = %args; return bless {}, $class } );
+    $mock->redefine( exec => sub { return 1 } );
+    $mock->redefine( out  => sub { return [] } );
+
+    remote()->get_dir( '/bogus/lib/redis', "$dir/redis", sudo => 1 );
+
+    # A service keeps its state in a directory it owns and nobody else can open,
+    # so an unprivileged rsync walks the tree, makes the local directories,
+    # copies nothing out of them and exits happy -- which cannot be told from a
+    # guest that has no state yet.
+    is( $built{'rsync-path'}, 'sudo -n rsync', 'root at the far end' );
+
+    # -n, because there is no terminal on the other end of this: a sudo that
+    # decided to ask for a password would sit there until the timeout instead of
+    # failing where somebody can see it.
+    like( $built{'rsync-path'}, qr/\s-n\b/, 'and it fails rather than waiting when sudo would ask' );
+
+    remote()->get_dir( '/bogus/lib/deluged', "$dir/deluged" );
+    ok( !exists $built{'rsync-path'}, 'an ordinary fetch stays unprivileged' );
 };
 
 subtest 'rsync moves what changed and nothing else' => sub {

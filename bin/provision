@@ -456,10 +456,10 @@ one unreadable directory would abandon every domain after it.  This program is
 the one that calls clean_domain_resources, so this is where the warning has to
 turn into a refusal.
 
-Only the gaps that mean something was there and could not be read.  A path the
-guest has never written has nothing to salvage, which is what every first build
-of a recipe looks like, and a domain with no guest yet is never salvaged at all
--- so a new machine cannot trip this.
+Only the gaps where the guest still holds files that did not come off it.  A
+path with nothing under it has nothing to salvage, which is what every first
+build of a recipe looks like, and a domain with no guest yet is never salvaged at
+all -- so a new machine cannot trip this.
 
 =cut
 
@@ -484,7 +484,7 @@ sub refuse_on_salvage_gaps {
     }
 
     die "Refusing to rebuild: state that is on the guest did not come off it.\n\n" . $detail
-      . "\nEach of those exists on the guest and came away empty, which is what an\nunreadable directory looks like -- the fetch runs unprivileged.  Rebuilding now\ndestroys the only copy.\n\nFix the permissions and run again, or pass --salvage-gaps-ok if that state is\ngone for good and you want the guest rebuilt without it.\n";
+      . "\nThe guest was asked, and it still has files under each of those -- so this is\na fetch that did not bring them, not a service that has nothing.  Rebuilding now\ndestroys the only copy.\n\nThe salvage reads them as root over sudo, so the usual cause is sudo being\nrefused on the guest or the fetch failing partway.  Look at what it said above,\nfix it and run again, or pass --salvage-gaps-ok if that state is gone for good\nand you want the guest rebuilt without it.\n";
 }
 
 # Which hypervisor does this guest belong on?
