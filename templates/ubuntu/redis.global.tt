@@ -24,20 +24,16 @@ install -m 0644 -o root -g root redis_ufw.conf /etc/ufw/applications.d/redis-ser
 [%# The RDB and the AOF -- whatever redis was being used for beyond a cache --
     live in /var/lib/redis, and the package leaves that directory redis:redis
     0750.  Both legs of the round trip remote_files promises run into that, and
-    neither of them used to happen.
+    neither of them used to happen until the fetch read the guest as root (see
+    issue #76): a 0750 directory owned by redis came back empty over an
+    unprivileged sftp session and said so to nobody.
 
-    The fetch is an sftp session as the admin user with no sudo, so a 0750
-    directory owned by redis comes back empty and says so to nobody.  The group
-    is handed to the admin user here rather than a readable copy being staged
-    the way the openvpn pki and the DKIM keys are: those are written once and a
-    snapshot of one is as good as the original, where an RDB is rewritten every
-    time redis saves, and a copy taken at provision time would be however many
-    weeks stale by the time anybody wanted it.  It is the same trade either
-    way -- the state is readable by whoever holds the admin account from here
-    on, and travels into the data directory and into any backup taken of it.
-    The setgid bit is what keeps the arrangement true tomorrow rather than only
-    today: the packaged unit sets UMask=007, so the files redis writes are 0660,
-    and setgid is what makes the group on them the admin user rather than redis.
+    Reading as root ended that, and with it the reason to hand the directory's
+    group to the admin user: issue #98.  What restore_state moves in still needs
+    to end up owned by redis rather than whoever ran the fetch locally --
+    rsync only restores ownership when the receiving end is root, and the local
+    end of a fetch is not -- so the chown below stays; only the admin group and
+    the setgid bit that kept it on files redis wrote afterwards are gone.
 
     Restoring has an ordering problem the other recipes do not.  redis is
     already up by the time this runs -- cloud-init installs the package, and
@@ -61,8 +57,7 @@ if [ -n "$$(find /var/lib/redis -mindepth 1 -print -quit 2>/dev/null)" ]; then H
 systemctl stop redis-server || /bin/true; \
 if [ -z "$$HAD_STATE" ]; then rm -rf /var/lib/redis/*; fi
 [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/redis' /var/lib/redis
-chown -R redis:[% admin_user %] /var/lib/redis
-find /var/lib/redis -type d -exec chmod 2750 {} +
+chown -R redis:redis /var/lib/redis
 [%# Up again here rather than only at the end with the rest of the deferred
     work.  redis was running for the whole provision before any of this existed,
     since cloud-init starts it, and anything later in the makefile is entitled

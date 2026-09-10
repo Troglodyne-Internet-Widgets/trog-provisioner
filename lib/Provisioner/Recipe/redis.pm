@@ -49,19 +49,21 @@ C</var/lib/redis> is salvaged off a running guest and put back on the one that
 replaces it, so a redis holding anything more than a cache comes up with the
 keyspace it had rather than an empty one.
 
-That costs something worth saying out loud.  The package leaves the directory
-C<redis:redis> 0750, so the fragment gives it the admin user as its group and
-sets the setgid bit so the files redis writes afterwards land in that group too:
-the keyspace is readable from here on by whoever holds the admin account, and
-goes into the data directory and into any backup taken of it.
+That used to cost something worth saying out loud: the fetch ran as the admin
+user with no sudo, so the package's own C<redis:redis> 0750 directory came back
+empty and said nothing about it, and the fragment bought the salvage by handing
+the directory its group and setting the setgid bit so files redis wrote
+afterwards kept it -- the keyspace readable from then on by whoever held the
+admin account, in the data directory and in any backup taken of it.
 
-B<That is no longer needed for the salvage.>  The fetch reads the guest as root
-now, so a directory redis keeps to itself comes off it whatever the group says.
-Taking the widening out is issue #98, one recipe at a time and each on a guest,
-because setgid on a directory a service writes into for the rest of its life is
-not something to remove without watching it start again.  A guest where redis is
-only a cache pays none of that and should say C<save: 0>, which turns
-persistence off and leaves nothing to salvage.
+The fetch reads the guest as root now (issue #76), so a directory redis keeps to
+itself comes off it whatever the group says, and issue #98 took the widening
+back out: the directory is C<redis:redis> again, no admin group and no setgid.
+C<restore_state> still lands what it moves in owned by whoever ran the fetch
+locally rather than by redis, so the fragment still chowns it back to
+C<redis:redis> afterwards -- that part was never about the fetch's privileges. A
+guest where redis is only a cache pays none of this and should say C<save: 0>,
+which turns persistence off and leaves nothing to salvage.
 
 Putting it back is the fiddly end.  redis is installed and started by cloud-init
 long before any fragment runs, so it owns the destination before there is
@@ -137,8 +139,7 @@ sub remote_files {
     # the only thing about a redis guest that cannot be built again out of the
     # configuration.  Naming it here is half the job and the half that is
     # invisible when the other half is missing -- see the long comment in
-    # templates/redis.global.tt, which is what makes this directory readable to
-    # the account the fetch runs as, and what puts the contents back on a guest
+    # templates/redis.global.tt, which is what puts the contents back on a guest
     # that has just been rebuilt.
     return (
         '/var/lib/redis/' => 'redis/',
