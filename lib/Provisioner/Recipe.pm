@@ -152,7 +152,9 @@ overrides the generic one and nothing has to know why.
 
 Two things about writing one that fail silently.  An apostrophe in a
 C<[%# ... %]> comment opens a string that runs to the next quote, swallowing
-whatever is between -- C<t/recipes.t> catches that one.  And whitespace before
+whatever is between; a second apostrophe closes it only when it is on the same
+line, since a string literal cannot span a newline -- C<t/recipes.t> checks each
+line of a comment for that.  And whitespace before
 the C<[%#> is emitted, so indenting a comment to match the block it documents
 indents the line after it too, which in a YAML document means something else.
 

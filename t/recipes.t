@@ -696,10 +696,23 @@ subtest 'no template comment leaves a quote open' => sub {
                 index( $comment, '[%', 2 ) < 0,
                 "$name: no directive inside a comment"
             ) or diag $comment;
-            foreach my $quote ( q{'}, q{"} ) {
-                my $count = () = $comment =~ m/\Q$quote\E/g;
-                ok( $count % 2 == 0, "$name: a comment closes every $quote it opens" )
-                  or diag $comment;
+
+            # Per line, not per comment.  A quote opened on one line and
+            # closed on the next balances across the whole block and still
+            # swallows the file: Xslate does not let a string literal span a
+            # newline, so the pairing shifts by one and the last quote in the
+            # comment runs on to whatever quote comes next in the template.
+            # Two apostrophes one line apart -- "the package's copy" and
+            # "Provisioner::Recipe::ubuntu's packager invocation" -- ate two
+            # install lines out of the aptmirror fragment that way.
+            my $line = 0;
+            foreach my $text ( split( m/\n/, $comment ) ) {
+                $line++;
+                foreach my $quote ( q{'}, q{"} ) {
+                    my $count = () = $text =~ m/\Q$quote\E/g;
+                    ok( $count % 2 == 0, "$name: line $line of a comment closes every $quote it opens" )
+                      or diag $text;
+                }
             }
         }
     }

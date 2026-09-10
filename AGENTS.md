@@ -110,7 +110,10 @@ Two traps, both of which fail silently:
 - **No apostrophe in a `[%# ... %]` comment.** Xslate lexes the inside of a
   directive, so one opens a string that runs to the next quote and swallows
   everything between. A comment reading "every domain's aliases" emptied a whole
-  nginx vhost.
+  nginx vhost. Pairing them off does not save you: a string literal cannot span
+  a newline, so two apostrophes on *different* lines of one comment balance
+  across the block and still eat the file -- which cost the aptmirror fragment
+  two of its `install` lines. The rule is per line.
 - **Whitespace before `[%#` is emitted.** Indenting a comment to match the block
   it documents indents the line after it too, which in YAML is a different
   document.
