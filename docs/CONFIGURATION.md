@@ -154,6 +154,53 @@ is refused up front, rather than quietly falling back to recipes that name no
 packages at all. `perldoc Provisioner::DistroRecipe` is what a distribution has
 to answer for; adding one is adding files.
 
+`mirror` names a package mirror for guests to prefer over the distribution's own
+archive. Two shapes:
+
+```yaml
+_base:
+    _global:
+        mirror: aptmirror.example.com          # a domain here, resolved to its address
+        # mirror: http://mirror.example.net/ubuntu   # or a URL, used as written
+```
+
+To have one of your own to name, give a domain the `aptmirror` recipe and build
+it like any other guest; `perldoc Provisioner::Recipe::aptmirror` covers how big
+a mirror is and how to seed one from a mirror you already have. Nothing requires
+that recipe, and nothing points at the guest until you write it in here.
+
+A **URL** is used exactly as given, which is how you name a mirror this
+installation does not run. **Anything else is a domain name**, and is resolved to
+that domain's address out of the ip pool with the distribution's path appended --
+not through DNS, because a guest runs cloud-init before it has a resolver, so a
+name would be no use to it. A bare name the pool has no address for is an error
+saying to use a URL instead.
+
+Whichever you give, the distribution's own archive stays configured behind it, so
+a mirror that is behind, incomplete or down costs a fallback rather than a build.
+
+**Empty by default, and empty means no mirror**: the guest uses whatever sources
+its image shipped with, which is a per-region archive cloud-init chose, and gets
+no `/etc/apt/mirrorlist` at all.
+
+> **Upgrading.** Guests used to be told unconditionally that there was a mirror
+> on their hypervisor's NAT address, whether or not one was running. If yours
+> *is*, set it explicitly to keep it -- `mirror: http://192.168.122.1/ubuntu`,
+> using that hypervisor's bridge address. If you run one on each hypervisor and
+> they are on different subnets, no single value can name them all; the honest
+> answer there is one mirror guest that the whole fleet points at.
+
+`mirror_insecure` lets apt install from a repository it cannot verify. It
+defaults to on when a mirror is configured and off when one is not, which is what
+every guest has had. Turn it off against a mirror that carries the archive's own
+signed indices -- one built by the `aptmirror` recipe does, being a byte-for-byte
+copy.
+
+Nothing depends on the `aptmirror` recipe. A fleet without a mirror builds
+exactly as it always has, only slower, and `bin/preflight` says so rather than
+failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
+first thing to know before building one.
+
 ## `_base`
 
 A top-level `_base` holds recipes every host gets. A domain's own configuration

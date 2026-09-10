@@ -153,7 +153,9 @@ That means:
 
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
 
-5. **The HV still has to be set up as a hypervisor**: apt-mirror behind nginx, rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+5. **The HV still has to be set up as a hypervisor**: rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+
+    It no longer has to run an apt mirror.  That used to be assumed of every hypervisor and compiled into every guest; a mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### One repository, one run
 
@@ -380,11 +382,14 @@ to its host key, and tPSGI's vault key with it.
 
 ## UBUNTU DEPS
 
-virt-manager bridge-utils apt-mirror nginx
+virt-manager bridge-utils
 
 `swtpm swtpm-tools` as well, on a hypervisor with a TPM -- see above.
 
-Expects the HV to be an apt-mirror obviously.
+An apt mirror is no longer among them.  A guest running the `aptmirror` recipe
+is one, and `_global`'s `mirror` is what points the fleet at it -- so nothing is
+assumed of the hypervisor that nobody said.  `bin/preflight` says when a fleet
+has no mirror configured, and what it costs.
 
 ## IF YOU ENCOUNTER MYSTERIOUS 'cannot access image' issues
 

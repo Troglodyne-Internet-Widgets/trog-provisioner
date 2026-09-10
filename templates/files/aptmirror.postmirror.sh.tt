@@ -1,0 +1,11 @@
+#!/bin/sh
+# Run by apt-mirror itself at the end of a successful sync, because mirror.list
+# says run_postmirror 1.
+
+# apt-mirror writes clean.sh every run and never runs it, so without this the
+# spool keeps every package upstream has ever dropped.
+[ -x '[% spool %]/var/clean.sh' ] && '[% spool %]/var/clean.sh'
+
+# The one thing somebody outside the guest can ask.  Written last, so it only
+# ever records a sync that finished.
+date -Is > '[% spool %]/var/last_sync'

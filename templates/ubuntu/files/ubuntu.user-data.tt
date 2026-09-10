@@ -18,11 +18,19 @@ package_upgrade: true
 packages:
 [% packages | yaml %]
 
-[%# The mirror on the hypervisor first and the archive after it, so a guest
-    still builds when the mirror is behind or missing a package.  Insecure
-    repositories are allowed because the mirror is not signed; it is reached
-    over the NAT bridge, which nothing else is on. -%]
+[%# A configured mirror first and the archive after it, so a guest still builds
+    when the mirror is behind, incomplete or down -- the mirrorlist below is
+    what puts them in that order.
+
+    With no mirror configured, none of this is emitted and the guest uses
+    whatever sources the image shipped with, which is a per-region archive
+    cloud-init picked.  Redirecting that at a list of the archive and nothing
+    else would be a longer way of saying the same thing and a worse one.
+
+    conf is outside the condition and has to stay there: apt with no keys under
+    it is an empty mapping, which is not the same document. -%]
 apt:
+[% IF mirror_uri -%]
   primary:
     - arches:
         - default
@@ -31,11 +39,14 @@ apt:
     - arches:
         - default
       uri: "mirror+file:/etc/apt/mirrorlist"
+[% END -%]
   conf: |
     Acquire {
         Retries "12";
         Force-IPv4: true;
+[% IF mirror_insecure -%]
         AllowInsecureRepositories: true;
+[% END -%]
     }
     APT {
         Get {
@@ -48,7 +59,8 @@ users:
 [% users | yaml %]
 
 [%# Everything here is deferred except the mirrorlist, which apt needs before
-    the packages above are installed rather than after. -%]
+    the packages above are installed rather than after -- and which is only
+    written at all when a mirror is configured. -%]
 write_files:
   - path: /root/.ssh/id_rsa
     owner: root:root
@@ -68,14 +80,17 @@ write_files:
     defer: true
     content: |
 [% setup_script | indent %]
+[% IF mirror_uri -%]
+[%# Tabs, not spaces: this is apt mirror+file format and it is tab separated. -%]
   - path: /etc/apt/mirrorlist
     owner: root:root
     permissions: '0644'
     defer: false
     content: |
-      http://[% hv_internal_ip | mark_raw %]/ubuntu	priority:1
+      [% mirror_uri | mark_raw %]	priority:1
       http://archive.ubuntu.com/ubuntu	priority:2
       http://security.ubuntu.com/ubuntu	priority:3
+[% END -%]
 
 rsyslog:
   install_rsyslog: true

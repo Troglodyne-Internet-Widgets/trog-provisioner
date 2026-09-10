@@ -20,8 +20,15 @@ pm_to_blib
 blib/
 cover_db/
 .build
-Provisioner-Recipe-*
-trog-provisioner-*
+# What `dzil build` leaves at the root: the dist named in dist.ini, at its
+# version, as a directory and as a tarball.  Anchored and version-shaped rather
+# than a bare Provisioner-Recipe-* glob, which matches at any depth and so also
+# swallowed t/Provisioner-Recipe-vm.t and its neighbours -- silently, which is
+# how two test files went missing from a merged PR.
+/Provisioner-Recipe-[0-9]*/
+/Provisioner-Recipe-[0-9]*.tar.gz
+/trog-provisioner-[0-9]*/
+/trog-provisioner-[0-9]*.tar.gz
 
 # Robot foo
 .claude/worktrees
