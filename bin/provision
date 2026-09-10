@@ -375,6 +375,10 @@ sub main {
 
     # Everything the hypervisor knows about itself comes off provision.conf, so
     # we have to find that the hard way first.
+    # Kept, because the default below makes "given" and "defaulted"
+    # indistinguishable afterwards, and only one of them should beat what the
+    # hypervisor says.
+    my $domain_dir_from_cli = $domain_dir;
     $domain_dir //= '/opt/domains';
     $domain =~ s/\///g;
 
@@ -398,6 +402,13 @@ sub main {
         }
     ) unless $no_config;
 
+    # generate_config picked the hypervisor, and where a domain's directory is
+    # can come from its block in hypervisors.conf -- so ask it.  Reading the
+    # default here instead was right only while every hypervisor used
+    # /opt/domains.
+    $domain_dir = Trog::HV->new()->domain_dir
+      unless $no_config || defined $domain_dir_from_cli;
+
     my $cfile = "$domain_dir/$domain/provision.conf";
     close _must_read( $cfile, "No provision.conf for $domain" );
 
@@ -420,8 +431,13 @@ sub main {
     print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     # The storage pool is the hypervisor's, and it may not have one yet.
-    $hv->mkpath( $hv->pool_path )
-      or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
+    # Guarded because a backend whose guests get their disks from the service has
+    # no pool, and because such a hypervisor is is_local -- so unguarded this
+    # would make a directory on the machine running the provisioner.
+    if ( !$hv->builds_by_api ) {
+        $hv->mkpath( $hv->pool_path )
+          or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
+    }
 
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
@@ -429,7 +445,10 @@ sub main {
 
     # Start off by fixing a sillyness in virtiofs.  This runs as part of the
     # qemu process, so it has to land on the hypervisor, not on us.
-    if ( !$hv->file_exists('/usr/libexec/virtiofs-better') ) {
+    # Same guard, and the same reason: virtiofs runs inside the qemu process, so a
+    # backend with no qemu has nowhere to put this -- and writing it would write
+    # into /usr/libexec on the machine running the provisioner.
+    if ( !$hv->builds_by_api && !$hv->file_exists('/usr/libexec/virtiofs-better') ) {
         $hv->put_file( "$FindBin::Bin/../virtiofs-better", '/usr/libexec/virtiofs-better', sudo => 1 )
           or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
         $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
@@ -453,7 +472,7 @@ sub main {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
             $guest->wait_for_ssh();
             $guest->wait_for_cloud_init($domain);
-            $hv->eject_cdrom($depends);
+            $hv->eject_cdrom($depends) unless $hv->builds_by_api;
             $guest->wait_for_makefile($depends);
         }
 
@@ -484,7 +503,9 @@ sub main {
     # might want to read it, which is until it says it is finished; pulling it
     # out any earlier leaves the guest with no user, no keys and no netplan, and
     # the pulling-out is only to stop the guest booting off it next time.
-    $hv->eject_cdrom($domain);
+    # A guest with no cdrom took its cloud-init from the metadata service and has
+    # no drive to clear.
+    $hv->eject_cdrom($domain) unless $hv->builds_by_api;
 
     $guest->wait_for_makefile($domain);
 
@@ -622,6 +643,11 @@ sub provision_domain {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
+    # Everything below this is libvirt: a MAC derived from the domain name, a DHCP
+    # lease to look up, and a domain to define from XML.  A cloud has none of
+    # them, and creates the guest from the seed we have just written.
+    return provision_cloud_guest( $config, $domain, \%seed, $reuse ) if $hv->builds_by_api;
+
     # If the domain is already up, let's find the IP.
     # We can't guarantee we have a static IP, so use the internal.
     my $qdn = $domain;
@@ -746,6 +772,51 @@ sub provision_domain {
     print "\nDefined and started; $domain should come up at $new_ip\n";
 
     return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $new_ip ) );
+}
+
+=head2 provision_cloud_guest($config, $domain, $seed, $reuse)
+
+Ask a cloud for the guest, and hand back where it turned up.
+
+There is no XML to render and no lease to wait for: the seed goes to the service
+as C<user_data>, and the address comes back with the server.  Everything after
+this -- waiting for ssh, the secrets, the makefile -- is C<main>'s, and is the
+same for either kind of guest.
+
+=cut
+
+sub provision_cloud_guest {
+    my ( $config, $domain, $seed, $reuse ) = @_;
+
+    my $hv = Trog::HV->new();
+
+    my $existing = $hv->domain_exists($domain);
+
+    # Refused rather than rebuilt.  The libvirt path undefines the domain and
+    # defines it again, which is cheap because the disk is a file it keeps; the
+    # equivalent here deletes the server, and its disk goes with it.
+    die "$domain already exists on " . $hv->describe . ".\n" . "Pass --existing to provision onto it, or bin/destroy it first.\n"
+      if $existing && !$reuse;
+
+    my $user = $config->param('admin_user') // 'root';
+
+    if ($dryrun) {
+        print 'Would ' . ( $existing ? 'reprovision' : 'build' ) . " $domain on " . $hv->describe . "\n";
+        return ( $user, $existing ? $hv->guest_ssh_ip( $config, $domain ) : '(not built)' );
+    }
+
+    if ($existing) {
+        print "$domain is already on " . $hv->describe . "; provisioning onto it\n";
+    }
+    else {
+        print 'Asking ' . $hv->describe . " for $domain...\n";
+        $hv->create_guest( name => $domain, user_data => $seed->{'user-data'} );
+    }
+
+    my $ip = $hv->guest_ssh_ip( $config, $domain );
+    print "$domain is at $ip\n";
+
+    return ( $user, $ip );
 }
 
 # Which entry in the guest's netplan is the outbound interface?

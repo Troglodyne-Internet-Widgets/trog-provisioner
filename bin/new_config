@@ -387,19 +387,6 @@ sub handle_domain {
     # Seeded here for the same reason -- the first call builds the database out
     # of what every hypervisor is running, which is not work to do on behalf of
     # a domain that has no recipe.
-    Provisioner::IPPool::ensure_seeded($pool_conf);
-
-    # One transaction, so a fan-out of provisions cannot hand two guests the
-    # same address.  Idempotent, so re-provisioning keeps what this domain has.
-    my $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
-    my $ip_conf   = Provisioner::IPPool::assignments();
-
-    # Every domain is spelled out, so a bare label is a leftover from when there
-    # was a tld to append and is worth saying so about rather than quietly
-    # letting it into a zone file.
-    my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
-    die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
-      if @unqualified;
 
     # A recipe carries a note saying where a password is, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
@@ -445,11 +432,35 @@ sub handle_domain {
     # provision.conf is written, and provision.conf never has to carry it.
     $hv //= choose_hypervisor( $domain, $global_config );
 
+    # A hypervisor that addresses its own guests leaves the pool nothing to do:
+    # there is no address of ours to hand out, and taking one would reserve it
+    # against a guest that will never answer at it.
+    my ( $static_ip, $ip_conf ) = ( undef, {} );
+    if ( !$hv->manages_addresses ) {
+        Provisioner::IPPool::ensure_seeded($pool_conf);
+
+        # One transaction, so a fan-out of provisions cannot hand two guests the
+        # same address.  Idempotent, so re-provisioning keeps what this domain has.
+        $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
+        $ip_conf   = Provisioner::IPPool::assignments();
+
+        # Every domain is spelled out, so a bare label is a leftover from when there
+        # was a tld to append and is worth saying so about rather than quietly
+        # letting it into a zone file.
+        my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
+        die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
+          if @unqualified;
+    }
+
     # Who the guest fetches its payload from, and where it reaches them: us, on
     # all three counts.  Nothing is copied to the hypervisor for the guest to
     # pull from; it comes to this machine for it.
-    my $this_machine  = Trog::Local->new();
-    my $tld_ip        = $hv->virbr_ip;
+    my $this_machine = Trog::Local->new();
+
+    # The hypervisor's NAT bridge, which is one of the networks we may share
+    # with the guest.  A cloud has no such bridge, and no address of its own
+    # that a guest is reached over.
+    my $tld_ip        = $hv->manages_addresses ? undef : $hv->virbr_ip;
     my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
     my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
     die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
@@ -467,9 +478,19 @@ sub handle_domain {
     # administered over the guest's static address and a local one over its NAT
     # lease -- so the guest's firewall has to expect all of them.  The fetch
     # takes the first, because the rsync in the template names one address.
-    my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : $this_machine->transfer_ips( $static_ip, $tld_ip );
+    my @towards = grep { defined $_ && length $_ } ( $static_ip, $tld_ip );
+
+    my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
     my $transfer_ip  = $transfer_ips[0];
-    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and neither $static_ip nor $tld_ip routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
+
+    # Nothing to aim at is a different problem from nothing that reaches.  A
+    # cloud allocates the guest's address when it creates it, so at this point
+    # there is no address to ask the routing table about -- and the answer has
+    # to be given rather than worked out.
+    die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "[global] section of ipmap.cfg.\n"
+      if !$transfer_ip && !@towards;
+
+    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
       unless $transfer_ip;
 
     # The same fold as anything else asking what a domain is configured with,
@@ -683,7 +704,12 @@ sub handle_domain {
     # cannot answer without the privileges the fetch already uses.  Nothing is
     # fetched over this.  That is _salvage_guest's job.
     my ( $ssh, $target_is_up );
-    ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $skip_ssh;
+
+    # Only if we know of an address to try.  A guest whose hypervisor allocates
+    # its own has none until it has been built, and there is nothing to salvage
+    # off a guest that does not exist yet.
+    ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir )
+      if !$skip_ssh && defined $static_ip && length $static_ip;
 
     # Build a makefile based on our configured recipes.
     #
@@ -1017,7 +1043,7 @@ sub handle_domain {
         %$global_config,
         %{ $rconf->{$domain}{$distro_name} // {} },
         packages      => \@pkgs,
-        ips           => [$static_ip],
+        ips           => [ grep { defined } $static_ip ],
         gateway       => $gateway,
         contact_email => $admin_email,
         payload_dir   => $basedir,
@@ -1044,7 +1070,7 @@ sub handle_domain {
         memory=$mem
         packages=$extra_packages
         contact_email=$admin_email
-        ips=$static_ip
+        ips=@{[ $static_ip // q{} ]}
         admin_user=$admin_user
         gateway=$gateway
         resolvers=$r_text

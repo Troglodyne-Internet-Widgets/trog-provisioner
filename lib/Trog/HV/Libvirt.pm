@@ -295,6 +295,17 @@ The domain's XML description, or undef if there is no such domain.
 
 =cut
 
+=head2 guest_names
+
+Every domain libvirt knows about here, defined or running.
+
+=cut
+
+sub guest_names {
+    my ($self) = @_;
+    return map { $_->get_name } $self->vmm->list_all_domains();
+}
+
 sub domain_exists     { return defined $_[0]->_domain( $_[1] )                      ? 1 : 0 }
 sub domain_is_running { my $d = $_[0]->_domain( $_[1] ); return $d && $d->is_active ? 1 : 0 }
 

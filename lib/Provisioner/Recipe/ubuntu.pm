@@ -248,11 +248,20 @@ sub enrich {
     # renames the interface to the name below -- so a guest whose kernel names
     # things some other way still gets the right configuration on the right
     # card.  dhcp_devname and bridge_devname override what it ends up called.
-    my ( $nat_name, $bridge_name ) = $hv->nic_names;
-    $opts{dhcp_devname}   //= $nat_name;
-    $opts{bridge_devname} //= $bridge_name;
-    $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
-    $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+    #
+    # All four of those are things we know because we defined the machine.  A
+    # guest a service created is not one we defined: it assigns the MAC and the
+    # image decides the interface name, and neither is knowable before the guest
+    # exists.  So they are left unset, and the network-config says to leave the
+    # network alone -- which is what a cloud image expects, its addressing
+    # coming from the platform rather than from a seed.
+    unless ( $hv->builds_by_api ) {
+        my ( $nat_name, $bridge_name ) = $hv->nic_names;
+        $opts{dhcp_devname}   //= $nat_name;
+        $opts{bridge_devname} //= $bridge_name;
+        $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
+        $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+    }
 
     # Which mirror, and whether apt is allowed to install from it unverified.
     # The second follows from the first and so cannot be a schema default; see

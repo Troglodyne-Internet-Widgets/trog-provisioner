@@ -50,7 +50,8 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 # Test::MockModule in strict mode has methods to find.  The backend rather than
 # Trog::HV, because that is where the libvirt methods these mocks replace live,
 # and Trog::HV requires it lazily.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
 
 my $DOMAIN    = 'vm.test.test';
@@ -109,6 +110,31 @@ sub loaded {
     my ( $dir, $file ) = @_;
     return YAML::XS::Load( File::Slurper::read_binary("$dir/$file") );
 }
+
+subtest 'a guest a service made has no interfaces of ours to match on' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    Trog::HV->forget();
+    my $cloud = Trog::HV->new( cloud => 'testcloud' );
+
+    my $recipe = Provisioner::Cookbook->load('ubuntu')->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $dir,
+        hv            => $cloud,
+    );
+
+    # enrich asks the hypervisor what a guest will call its interfaces and what
+    # MACs it will have.  A cloud refuses both -- it assigned the MAC and the
+    # image chose the name -- so the question has to not be asked rather than
+    # answered wrongly.
+    my @written = $recipe->generate_files( $dir, settings( ips => [], gateway => undef ) );
+    is scalar @written, 4, 'the four files are still written';
+
+    is_deeply loaded( $dir, 'network-config' ), { network => { config => 'disabled' } },
+      'and the network is left to the platform, which is what a cloud image expects';
+
+    Trog::HV->forget();
+};
 
 subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     my ( $dir, $written ) = generated();
