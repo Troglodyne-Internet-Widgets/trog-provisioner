@@ -219,6 +219,7 @@ my %required_config = (
     aptmirror   => { releases => ['noble'] },
     data        => { from     => '/opt/data', to => '/opt/domains' },
     imagemagick => { version  => '7.1.1-47' },
+    logshipper  => { host     => 'logs.test.test' },
     mariadb     => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
@@ -1858,6 +1859,20 @@ subtest 'the two halves of the mirror path agree' => sub {
             "aptmirror serves the path $distro tells its guests to fetch from"
         );
     }
+};
+
+subtest 'the two halves of the log path agree about the port' => sub {
+
+    # A guest is told to send to <host>:<port> by logshipper, and the collector
+    # listens on the port logcollector was told.  They are one number written in
+    # two files, and a fleet whose halves disagree ships everything into a closed
+    # port and says nothing about it -- which is exactly the failure this pair
+    # was written to end.
+    my %ship    = Provisioner::Cookbook->defaults('logshipper');
+    my %collect = Provisioner::Cookbook->defaults('logcollector');
+
+    is( $ship{port},     $collect{port},     'logshipper sends where logcollector listens' );
+    is( $ship{protocol}, $collect{protocol}, 'over the transport it is accepting' );
 };
 
 Test::NoWarnings::had_no_warnings();

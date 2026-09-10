@@ -31,7 +31,7 @@ Trog::HV - the hypervisor we are provisioning against
     my $hv = Trog::HV->new();
 
     $hv->annihilate_domain('vm.example.com');
-    $hv->write_text('/etc/rsyslog.d/10-vm.conf', 'some config', sudo => 1);
+    $hv->write_text('/etc/libvirt/hooks/qemu', 'some hook', sudo => 1);
     print $hv->pool_path, "\n";
 
 =head1 DESCRIPTION
@@ -48,8 +48,7 @@ connection URI can name and needs no shell to do it.
 the libvirt lease helper).
 
 =item * files that have to live I<on> the HV (the storage pool dir,
-virtiofs-better, rsyslog drop-ins, the domain directory the guest pulls its
-payload from).
+virtiofs-better, the domain directory the guest pulls its payload from).
 
 =item * the paths those things live at, and the HV-derived facts (bridge
 device, internal IP, sshd port) the templates need.

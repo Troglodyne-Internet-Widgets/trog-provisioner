@@ -27,8 +27,8 @@ Trog::Machine - a machine we reach over SSH and put files on
     # Trog::Machine and answers to all of this.
     my $machine = Trog::HV->new();
 
-    $machine->run_sudo(qw{systemctl restart rsyslog});
-    $machine->write_text('/etc/rsyslog.d/10-vm.conf', 'some config', sudo => 1);
+    $machine->run_sudo(qw{systemctl restart libvirtd});
+    $machine->write_text('/etc/libvirt/hooks/qemu', 'some hook', sudo => 1);
     $machine->put_file('setup.sh', '/root/setup.sh', sudo => 1, mode => '0755');
 
 =head1 DESCRIPTION

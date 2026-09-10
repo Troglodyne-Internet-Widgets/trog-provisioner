@@ -1,0 +1,67 @@
+use strict;
+use warnings;
+
+use Test::More;
+use IO::Socket::INET();
+
+# The point of this file is the connection test below.
+#
+# A destination that is not listening and one that is look identical from the
+# guest: rsyslog queues, retries, suspends the action and discards the messages
+# without logging a word about any of it.  That is how the arrangement this
+# replaced went years without anyone noticing it had never once worked -- every
+# guest shipping everything at a hypervisor with nothing bound to the port.
+#
+# So this asks the question that was never asked.
+
+my $target   = '[% target %]';
+my $port     = '[% port %]';
+my $protocol = '[% protocol %]';
+my $conf     = '/etc/rsyslog.d/10-logshipper.conf';
+
+[% IF target %]
+subtest 'the forwarder is installed and says where it is sending' => sub {
+    ok( -f $conf, "$conf exists" ) or return;
+
+    my $body = do { open( my $fh, '<', $conf ) or die $!; local $/; <$fh> };
+    like( $body, qr/\Qtarget="$target"\E/,     'naming the destination it was configured with' );
+    like( $body, qr/\Qport="$port"\E/,         'on the configured port' );
+    like( $body, qr/\Qprotocol="$protocol"\E/, 'over the configured protocol' );
+};
+
+subtest 'rsyslog accepts the configuration' => sub {
+
+    # -N1 parses everything under /etc/rsyslog.d without starting anything, so
+    # this catches a directive this distribution's rsyslog does not know -- which
+    # otherwise shows up as a service that will not start, long after the build.
+    my $out = `rsyslogd -N1 2>&1`;
+    unlike( $out, qr/error|could not|unknown|invalid/i, 'rsyslogd -N1 finds nothing to complain about' )
+      or diag $out;
+};
+
+subtest 'and something is actually listening at the other end' => sub {
+[% IF protocol == 'udp' %]
+
+    # UDP cannot answer this question: there is no handshake, so a socket to a
+    # dead port succeeds and tells you nothing.  Saying that is worth more than
+    # an assertion that cannot fail.
+    ok( 1, 'nothing to connect to over UDP; this guest cannot tell whether the destination exists' );
+    diag "protocol is udp, so delivery is unverifiable from here -- use tcp if you want this checked";
+[% ELSE %]
+    my $sock = IO::Socket::INET->new( PeerAddr => $target, PeerPort => $port, Proto => 'tcp', Timeout => 10 );
+    ok( $sock, "$target:$port accepts a connection" )
+      or diag "Could not reach $target:$port -- $!.  rsyslog will queue, retry, suspend and then drop every message, silently, so nothing else on this guest will ever tell you.";
+    close($sock) if $sock;
+[% END %]
+};
+[% ELSE %]
+subtest 'a guest that is its own destination forwards nothing' => sub {
+
+    # The natural way to turn this on for a fleet is one _base block, which
+    # necessarily covers the collector too.  Forwarding to its own listener is a
+    # loop, so the recipe installs nothing at all here.
+    ok( !-f $conf, "no forwarder at $conf" );
+};
+[% END %]
+
+done_testing();

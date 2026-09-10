@@ -149,10 +149,9 @@ in the user-data sits four spaces in -- a C<- path:> entry at two, its keys at
 four -- so the body has to begin at five or more.  Six is the next step on the
 two-space rhythm the rest of the document keeps.
 
-One depth, so one filter.  The rsyslog configuration was nested a level deeper
-than the rest and would have needed a second filter differing only in this
-number; its C<configs:> list is written at the same indent as its key instead,
-which brings it back to this depth.
+One depth, so one filter.  Everything carried by value in this document is
+written at that depth for exactly this reason: a block that sat a level deeper
+would want a second filter differing from this one only in a number.
 
 =cut
 
@@ -226,12 +225,12 @@ sub hv { my ($self) = @_; return $self->{hv} //= Trog::HV->new() }
 Work out everything the five templates read that is not simply handed to every
 recipe.
 
-The two files that travel I<inside> another are rendered here rather than being
-left to an ordering between C<template_files> entries: cloud-init carries the
-setup script and the rsyslog configuration by value, in C<write_files>, and
-nothing about C<template_files> promises which of them is rendered first.
-C<render_raw> is what makes that possible without recursing back through
-C<validate>; see L<Provisioner::Recipe/render_raw>.
+The setup script travels I<inside> another file rather than beside it --
+cloud-init carries it by value, in C<write_files> -- so it is rendered here
+instead of being left to an ordering between C<template_files> entries, which
+promises nothing about which of them is rendered first.  C<render_raw> is what
+makes that possible without recursing back through C<validate>; see
+L<Provisioner::Recipe/render_raw>.
 
 =cut
 
@@ -252,7 +251,6 @@ sub enrich {
     $opts{bridge_devname} //= $bridge_name;
     $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
     $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
-    $opts{hv_internal_ip} //= $hv->virbr_ip;
 
     # Which mirror, and whether apt is allowed to install from it unverified.
     # The second follows from the first and so cannot be a schema default; see
@@ -283,9 +281,8 @@ sub enrich {
     ];
 
     # Straight out of the recipe's own templates, so a distribution that wants a
-    # different setup script or a different log shipper writes one and gets it.
-    $opts{setup_script}  = $self->render_raw( "files/$sub.setup.sh.tt",     %opts );
-    $opts{rsyslog_guest} = $self->render_raw( "files/$sub.rsyslog.conf.tt", %opts );
+    # different setup script writes one and gets it.
+    $opts{setup_script} = $self->render_raw( "files/$sub.setup.sh.tt", %opts );
 
     return %opts;
 }

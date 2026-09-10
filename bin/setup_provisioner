@@ -8,9 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aa';
-use File::Slurper();
-use IPC::Run3();
-use File::Slurper::Temp();
 
 # Basically our 'install script'
 
@@ -28,10 +25,15 @@ setup_provisioner - prepare this machine to be a hypervisor
 
 The install script: everything a machine needs before it can host guests.
 
-Most of it is still a stub.  What works today is the rsyslog step, which makes
-the machine willing to collect the logs its guests ship at it; the rest returns
-true and says what it ought to be doing.  Each step's number is what main()
-returns when that step fails.
+Every step is still a stub: each returns true and says what it ought to be
+doing.  Each step's number is what main() returns when that step fails.
+
+There used to be an rsyslog step here, which opened a syslog listener by editing
+/etc/rsyslog.conf on whatever machine you ran this from -- while every guest was
+told to ship its logs to the hypervisor, which is a different machine on any
+fleet with more than one.  Where a guest sends its logs is now
+Provisioner::Recipe::logshipper, and the listener at the other end is
+Provisioner::Recipe::logcollector, so there is nothing for this to set up.
 
 =cut
 
@@ -44,12 +46,11 @@ sub main {
 
     setup_kvm()                  or return 1;
     setup_public_bridge()        or return 2;
-    setup_rsyslog()              or return 3;
-    setup_auditd()               or return 4;
-    setup_management_interface() or return 5;
-    setup_firewall()             or return 6;
-    setup_fail2ban()             or return 7;
-    setup_crons()                or return 8;
+    setup_auditd()               or return 3;
+    setup_management_interface() or return 4;
+    setup_firewall()             or return 5;
+    setup_fail2ban()             or return 6;
+    setup_crons()                or return 7;
     return 0;
 }
 
@@ -61,35 +62,6 @@ sub setup_kvm {
 # TODO Setup a bridge device on a public IP
 sub setup_public_bridge {
     1;
-}
-
-# TODO ensure rsyslog is configured to ingest logs & configured properly locally
-sub setup_rsyslog {
-    my $rs_conf = eval { File::Slurper::read_text('/etc/rsyslog.conf') };
-    die "Could not read /etc/rsyslog.conf, unsupported configuration: $@" unless defined $rs_conf;
-
-    my @must_have;
-    foreach my $type (qw{imudp imtcp}) {
-        push( @must_have, qq{module(load="$type")}, qq{input(type="$type" port="514")} );
-    }
-
-    # Either we have the lines, or we get to EOF and have to add them.
-    my $changed;
-    foreach my $subj (@must_have) {
-        if ( $rs_conf !~ m/^\s*\Q$subj\E\s*$/gm ) {
-
-            # Place at top of file.
-            $rs_conf = "$subj\n" . $rs_conf;
-            $changed = 1;
-        }
-    }
-    if ($changed) {
-        File::Slurper::Temp::write_text( '/etc/rsyslog.conf', $rs_conf );
-
-        # TODO check this worked
-        IPC::Run3::run3( [qw{systemctl restart rsyslogd}], \undef, undef, undef );
-    }
-    return 1;
 }
 
 # TODO: ensure auditd is configured to ingest logs & configured properly locally

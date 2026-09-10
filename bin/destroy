@@ -63,8 +63,7 @@ Say what would be removed without removing any of it.
 =head1 DESCRIPTION
 
 Undoes what C<provision> did: stops and undefines the VM, destroys the
-disks belonging to it, and removes the hypervisor-side rsyslog config and
-authorized key it left behind.  Shared resources -- the base image and the
+disks belonging to it, and removes the authorized key it left behind.  Shared resources -- the base image and the
 storage pool -- are left alone.
 
 =cut
@@ -108,13 +107,10 @@ sub main {
     # 2. Remove the disks it was using
     destroy_disks( $domain, $dryrun );
 
-    # 3. Remove HV-side rsyslog config
-    remove_rsyslog_config( $domain, $dryrun );
-
-    # 4. Remove the domain's SSH pubkey from the HV's authorized_keys
+    # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
     remove_authorized_key( $domain, $dryrun );
 
-    # 5. Optionally purge the domain directory
+    # 4. Optionally purge the domain directory
     if ($purge) {
         purge_domain_dir( $domain, $dryrun );
     }
@@ -122,7 +118,7 @@ sub main {
         print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
     }
 
-    # 6. Give the address back to the pool
+    # 5. Give the address back to the pool
     release_ip( $domain, $dryrun );
 
     print "Done.\n";
@@ -186,24 +182,6 @@ sub destroy_disks {
         next unless $hv->volume($volume);
         print "Removing volume $volume\n";
         $hv->delete_volume($volume) unless $dryrun;
-    }
-    return;
-}
-
-sub remove_rsyslog_config {
-    my ( $domain, $dryrun ) = @_;
-
-    my $hv   = Trog::HV->new();
-    my $conf = "/etc/rsyslog.d/10-$domain.conf";
-    unless ( $hv->file_exists($conf) ) {
-        print "No rsyslog config found at $conf, skipping.\n";
-        return;
-    }
-
-    print "Removing rsyslog config $conf\n";
-    unless ($dryrun) {
-        $hv->run_sudo( qw{rm -f}, $conf );
-        $hv->run_sudo(qw{systemctl restart rsyslog});
     }
     return;
 }

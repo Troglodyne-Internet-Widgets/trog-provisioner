@@ -303,4 +303,65 @@ subtest 'a fleet with no package mirror is told what that costs' => sub {
     is_deeply( $write->("---\nweb.troglodyne.net:\n    ubuntu:\n        mirror: http://m.test/ubuntu\n"),                          { ok => 1 }, 'as is one in a domain distro block' );
 };
 
+subtest 'a fleet with nothing keeping its logs is told so, once there is a sink' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+
+    # No leftovers on the hypervisor for most of this: the upgrade case has its
+    # own subtest below, and it short-circuits everything else when it fires.
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( list_dir => sub { return () } );
+    $hv->redefine( describe => sub { return 'the hypervisor' } );
+
+    my $write = sub {
+        File::Slurper::Temp::write_text( "$dir/recipes.yaml", $_[0] );
+        Provisioner::Cookbook->forget();
+        return Trog::Bin::Preflight::note_log_destination( Trog::HV->new() );
+    };
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    # Logging is opt-in, so a fleet that has not asked for it has nothing said
+    # about it -- unlike a mirror, which every guest pays for not having.
+    is_deeply( $write->("---\nweb.troglodyne.net:\n    nginx:\n"), { ok => 1 }, 'no collector and no shipper says nothing' );
+
+    my $note = $write->("---\nlogs.troglodyne.net:\n    logcollector:\n");
+    ok( !$note->{ok}, 'a sink with nothing shipping to it is worth saying' );
+    like( $note->{what}, qr/logs\.troglodyne\.net collects logs/, 'naming the guest doing the collecting' );
+    like( $note->{fix},  qr/host: logs\.troglodyne\.net/,         'and the line that would use it' );
+
+    is_deeply(
+        $write->("---\n_base:\n    logshipper:\n        host: logs.troglodyne.net\nlogs.troglodyne.net:\n    logcollector:\n"),
+        { ok => 1 }, 'and nothing once the fleet points at it'
+    );
+};
+
+subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.troglodyne.net:\n    nginx:\nold.troglodyne.net:\n    nginx:\n" );
+    Provisioner::Cookbook->forget();
+
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( describe => sub { return 'the hypervisor' } );
+
+    # Only the per-domain ones this tool wrote.  20-ufw.conf and 50-default.conf
+    # are the distribution's, and a 10- file for a domain nobody has configured
+    # is somebody else's business.
+    $hv->redefine(
+        list_dir => sub {
+            return qw{10-web.troglodyne.net.conf 10-old.troglodyne.net.conf 10-notours.example.conf 20-ufw.conf 50-default.conf};
+        }
+    );
+
+    my $note = Trog::Bin::Preflight::note_log_destination( Trog::HV->new() );
+    ok( !$note->{ok}, 'leftovers are worth a note' );
+    like( $note->{what}, qr/\A2 rsyslog drop-ins/, 'counting only the ones written for a domain we know about' );
+    unlike( $note->{fix}, qr/notours|20-ufw|50-default/, 'and leaving everything else on that machine alone' );
+
+    # Comma-joined with no spaces, or the brace expansion it prints cannot be
+    # pasted into a shell.
+    like( $note->{fix}, qr/\Q{old.troglodyne.net,web.troglodyne.net}\E/, 'the removal command is one that would actually run' );
+};
+
 done_testing();

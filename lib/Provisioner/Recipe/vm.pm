@@ -178,16 +178,14 @@ sub args {
 
 =head2 %files = $recipe->template_files()
 
-The domain XML, and the hypervisor's half of the guest's logging.
+The domain XML and the device map.
 
 =cut
 
 sub template_files {
     return (
-        'vm.domain.xml.tt'             => 'domain.xml',
-        'vm.devices.map.tt'            => 'devices.map',
-        'vm.rsyslog-collector.conf.tt' => 'rsyslog-collector.conf',
-        'vm.logrotate.conf'            => 'logrotate.conf',
+        'vm.domain.xml.tt'  => 'domain.xml',
+        'vm.devices.map.tt' => 'devices.map',
     );
 }
 

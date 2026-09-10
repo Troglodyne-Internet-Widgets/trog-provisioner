@@ -1,0 +1,31 @@
+[%# The syslog listener for the fleet.  Provisioner::Recipe::logcollector has the
+    reasoning; the two things worth knowing from in here:
+
+    The input has a ruleset of its own, so what arrives from the network is
+    written once, to the file named for its sender, and never reaches the
+    default rules.  That is what keeps this guest own /var/log/syslog its own,
+    and what confines the stop below to remote messages -- an unscoped one would
+    swallow this guest local logging as well.
+
+    secpath-replace is not decoration.  HOSTNAME is whatever the sender put in
+    the message, so without it a sender could call itself ../../etc/cron.d/oops
+    and choose where this guest writes. -%]
+[% IF protocol == 'tcp' || protocol == 'both' -%]
+module(load="imtcp")
+input(type="imtcp" port="[% port %]" ruleset="logcollector")
+[% END -%]
+[% IF protocol == 'udp' || protocol == 'both' -%]
+module(load="imudp")
+input(type="imudp" port="[% port %]" ruleset="logcollector")
+[% END -%]
+[% FOR sender IN allowed_senders -%]
+$AllowedSender TCP, [% sender %]
+$AllowedSender UDP, [% sender %]
+[% END -%]
+
+template(name="logcollector-perhost" type="string" string="[% log_dir %]/%HOSTNAME:::secpath-replace%.log")
+
+ruleset(name="logcollector") {
+    action(type="omfile" dynaFile="logcollector-perhost" dirCreateMode="0755" fileCreateMode="0640")
+    stop
+}

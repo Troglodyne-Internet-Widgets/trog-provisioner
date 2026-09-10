@@ -39,8 +39,7 @@ That recipe is this class.  It answers the questions the build has to have
 settled before there is a guest at all -- which image to lay the disk over, which
 packager the recipes are naming packages for, how to invoke it -- and it renders
 the files a guest is built from: the network configuration, the cloud-init
-user-data and meta-data, the setup script the guest runs, and the rsyslog
-configuration that points its logs at the hypervisor.
+user-data and meta-data, and the setup script the guest runs.
 
 =head2 It is a recipe, in the ordinary way
 
@@ -295,7 +294,6 @@ sub template_files {
         "$sub.network-config.tt" => 'network-config',
         "$sub.meta-data.tt"      => 'meta-data',
         "$sub.setup.sh.tt"       => 'setup.sh',
-        "$sub.rsyslog.conf.tt"   => 'rsyslog.conf',
         "$sub.user-data.tt"      => 'user-data',
     );
 }

@@ -96,7 +96,7 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror );
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror, \&note_log_destination );
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -167,9 +167,9 @@ sub check_passwordless_sudo {
     my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
 
     return report( 0, "No passwordless sudo for $user on $target", <<"FIX" );
-Provisioning writes to the storage pool, defines domains, and edits the
-rsyslog config, all through sudo.  A password prompt in the middle of that
-has nowhere to be answered from, and the run hangs rather than failing.
+Provisioning writes to the storage pool and defines domains, all through
+sudo.  A password prompt in the middle of that has nowhere to be answered
+from, and the run hangs rather than failing.
 
 On $target:
 
@@ -490,6 +490,76 @@ A mirror is a guest like any other:
 and then, once it has synced, point the fleet at it with `mirror:` in _base's
 _global.  Nothing depends on that recipe, and a fleet without one builds exactly
 as it does now -- only slower.
+FIX
+}
+
+# Is anything keeping the logs the fleet produces?
+#
+# Two things worth saying.  A collector built and nothing shipping to it is the
+# more annoying: the sink exists and every guest is still talking to itself.
+# Leftover drop-ins on the hypervisor are the upgrade case -- provisioning used
+# to write one per guest there, for a listener that on most installations was
+# never opened.
+#
+# Reads the configuration, and asks the hypervisor only what it already has a
+# connection for.  It does not ask the ip pool anything: that would have a
+# read-only command create ips.db.
+sub note_log_destination {
+    my ($hv) = @_;
+
+    my $conf    = eval { Provisioner::Cookbook->configuration() } // {};
+    my @domains = grep { !m/\A_/ } sort keys %$conf;
+
+    my ( $shipping, %collectors );
+    foreach my $domain (@domains) {
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+        $shipping            = 1 if exists $recipes->{logshipper};
+        $collectors{$domain} = 1 if exists $recipes->{logcollector};
+    }
+
+    # What provisioning used to write, for a listener it never opened.  Only the
+    # per-domain ones this tool made: everything else in there is the
+    # distribution's or another recipe's.
+    my %known = map       { $_ => 1 } @domains;
+    my @stale = sort grep { $known{$_} }
+      map { m/\A10-(.+)[.]conf\z/ ? $1 : () } eval { $hv->list_dir('/etc/rsyslog.d') };
+
+    if (@stale) {
+
+        # Comma-joined with no spaces on purpose: that is a brace expansion the
+        # operator can paste, and one with spaces in it is not.
+        my $braces = join( ',',  @stale );
+        my $listed = join( "\n", map { "    $_" } @stale );
+        my $where  = $hv->describe;
+        return { ok => 0, what => scalar(@stale) . " rsyslog drop-ins on the hypervisor are left over from before logging was a recipe", fix => <<"FIX" };
+$where still carries a per-domain collector configuration for:
+
+$listed
+
+Provisioning wrote those, and no longer does -- where a guest sends its logs is
+Provisioner::Recipe::logshipper now, and the listener at the other end is
+Provisioner::Recipe::logcollector.  They route nothing unless something on that
+machine is listening for syslog, which this tool no longer arranges.  Remove
+them once you are satisfied nothing else put them to use:
+
+    sudo rm /etc/rsyslog.d/10-{$braces}.conf
+    sudo systemctl restart rsyslog
+FIX
+    }
+
+    return { ok => 1 } unless %collectors;
+    return { ok => 1 } if $shipping;
+
+    my $built = join( ', ', sort keys %collectors );
+    return { ok => 0, what => "$built collects logs, and nothing ships to it", fix => <<"FIX" };
+Every guest is keeping its logs to itself, on its own disk, where they go when
+the guest does.  Point the fleet at the collector:
+
+    _base:
+        logshipper:
+            host: $built
+
+Nothing depends on that recipe, and a guest that does not run it ships nowhere.
 FIX
 }
 

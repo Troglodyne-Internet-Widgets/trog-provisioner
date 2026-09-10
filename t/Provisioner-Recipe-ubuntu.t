@@ -105,12 +105,12 @@ sub loaded {
     return YAML::XS::Load( File::Slurper::read_binary("$dir/$file") );
 }
 
-subtest 'the five files are written, and the three YAML ones are YAML' => sub {
+subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     my ( $dir, $written ) = generated();
 
     is_deeply(
         [ sort @$written ],
-        [qw{meta-data network-config rsyslog.conf setup.sh user-data}],
+        [qw{meta-data network-config setup.sh user-data}],
         'every file a guest boots from is generated'
     );
 
@@ -210,6 +210,12 @@ CONF
     is_deeply( $user_data->{apt}, {}, 'and nothing else under apt, there being no mirror to point at' );
     delete $user_data->{apt};
 
+    # Where a guest sends its logs is Provisioner::Recipe::logshipper now, so the
+    # distro recipe configures no forwarder at all.  It used to write one here
+    # unconditionally, aimed at the hypervisor whether or not anything there was
+    # listening -- and nothing on the guest could tell the difference.
+    ok( !exists $user_data->{rsyslog}, 'and no log forwarder, which is a recipe rather than a fact about the distribution' );
+
     cmp_deeply(
         $user_data,
         {
@@ -247,12 +253,6 @@ CONF
                 # No mirrorlist, and so nothing left that cloud-init has to write
                 # before it installs anything: it was the only defer: false entry.
             ],
-
-            rsyslog => {
-                install_rsyslog => bool(1),
-                config_dir      => '/etc/rsyslog.d',
-                configs         => [ { filename => '10-ship_logs_to_hv.conf', content => re(qr/omfwd.*192\.168\.122\.1/s) } ],
-            },
 
             # The newline in the middle of the first of these is as it has always
             # been, and is why runcmd is built as a list rather than written out

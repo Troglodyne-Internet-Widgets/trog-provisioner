@@ -94,12 +94,12 @@ subtest 'a distribution names its own template directory' => sub {
     is( Provisioner::Cookbook->load('ubuntu')->template_subdir, 'ubuntu',       'asked of the class as readily as of an object' );
 };
 
-subtest 'the five files a guest boots from are ordinary template_files' => sub {
+subtest 'the four files a guest boots from are ordinary template_files' => sub {
     my %files = Provisioner::Cookbook->load('ubuntu')->new( template_dirs => [], output_dir => tempdir( CLEANUP => 1 ) )->template_files();
 
     is_deeply(
         [ sort values %files ],
-        [qw{meta-data network-config rsyslog.conf setup.sh user-data}],
+        [qw{meta-data network-config setup.sh user-data}],
         'declared the way any other recipe declares what it generates'
     );
 
