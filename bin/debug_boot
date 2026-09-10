@@ -130,6 +130,12 @@ Which hypervisor is holding the guest.  Without either, the fleet is asked.
 
 our $LOG_DIR = '/tmp';
 
+# How much of a screenshot to take off the libvirt stream at a time.
+our $STREAM_CHUNK = 65_536;
+
+# A screenshot's file extension, by the MIME type libvirt reports for it.
+my %EXTENSION = ( 'image/png' => 'png', 'image/x-portable-pixmap' => 'ppm' );
+
 sub main {
     my @args = @_;
 
@@ -280,35 +286,56 @@ sub fetch {
     return 0;
 }
 
+# The screen as it is now, streamed through libvirt, so the image comes straight
+# here rather than being written to the hypervisor's disk and fetched back.
 sub shot {
     my ( $hv, $domain, $opt ) = @_;
 
-    my $remote = "$LOG_DIR/$domain-screen.ppm";
-    $hv->run( qw{virsh -c qemu:///system screenshot}, $domain, $remote ) == 0
+    my $vmm = $hv->vmm;
+    my $dom = eval { $vmm->get_domain_by_name($domain) }
+      or die "No domain called $domain on " . $hv->describe . "\n";
+
+    my $stream = $vmm->new_stream(0);
+    my $mime   = eval { $dom->screenshot( $stream, 0 ) }
       or die "Could not screenshot $domain.\n";
 
-    my $into = $opt->{into} // "/tmp/$domain-screen.ppm";
-    $hv->get_file( $remote, $into ) or die "Could not fetch the screenshot.\n";
+    my $image = q{};
+    while (1) {
+        my $chunk;
+        last if $stream->recv( $chunk, $STREAM_CHUNK ) <= 0;
+        $image .= $chunk;
+    }
+    $stream->finish();
+
+    my $into = $opt->{into} // screen_file( $domain, $mime );
+    File::Slurper::Temp::write_binary( $into, $image );
 
     print {*STDERR} "Console of $domain as it is right now.\n";    ## no critic (ProhibitPrintSTDERR)
     print "$into\n";
     return 0;
 }
 
+# Named for what libvirt says it handed over.  qemu sends a PNG -- measured on
+# libvirt 10.0.0 -- which the virsh path this replaced wrote to a file ending
+# .ppm regardless.
+sub screen_file {
+    my ( $domain, $mime ) = @_;
+    return "/tmp/$domain-screen." . ( $EXTENSION{ $mime // q{} } // 'img' );
+}
+
 sub vnc {
     my ( $hv, $domain ) = @_;
 
-    my $display = $hv->capture("virsh -c qemu:///system domdisplay '$domain'");
-    chomp $display if defined $display;
-    die "$domain has no display to connect to.\n" unless $display;
+    my $dom = eval { $hv->vmm->get_domain_by_name($domain) }
+      or die "No domain called $domain on " . $hv->describe . "\n";
 
-    my ($port) = $display =~ m/:(\d+)\z/;
-    my $vnc = 5900 + ( $port // 0 );
+    my $vnc = vnc_port( $dom->get_xml_description() )
+      or die "$domain has no display to connect to.\n";
 
     # It listens on the hypervisor's loopback, which is the right place for it
     # to listen; getting there is a tunnel's job.
     ## no critic (ProhibitPrintSTDERR)
-    print {*STDERR} "$domain is on $display, which is the hypervisor's loopback.\n\n";
+    print {*STDERR} "$domain has VNC on port $vnc, on the hypervisor's loopback.\n\n";
     print {*STDERR} "  ssh -N -L $vnc:127.0.0.1:$vnc " . ( $hv->ssh_target // 'localhost' ) . "\n";
     print {*STDERR} "  then point a VNC client at 127.0.0.1:$vnc\n\n";
     ## use critic
@@ -317,13 +344,31 @@ sub vnc {
     return 0;
 }
 
+# The port a running domain's VNC display is on, out of its live definition.
+# An autoport display reads port='-1' until the domain is running, and that is
+# the absence of a port rather than a port.
+sub vnc_port {
+    my ($xml) = @_;
+
+    foreach my $graphics ( $xml =~ m{<graphics\b[^>]*>}g ) {
+        next unless index( $graphics, q{type='vnc'} ) >= 0;
+        my ($port) = $graphics =~ m{\bport='(-?\d+)'};
+        return $port if defined $port && $port > 0;
+    }
+
+    return undef;
+}
+
 sub keys_to {
     my ( $hv, $domain, @keys ) = @_;
 
     @keys = qw{KEY_ESC} unless @keys;
     print {*STDERR} "Sending @keys to $domain\n";    ## no critic (ProhibitPrintSTDERR)
 
-    $hv->run( qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys ) == 0
+    # virsh rather than Sys::Virt::Domain::send_key, which takes numeric
+    # keycodes.  The table that turns a name like KEY_ESC into one is inside
+    # virsh, and Sys::Virt exposes nothing that reaches it.
+    $hv->run( qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys ) == 0    ## no critic (PreferredBinaries)
       or die "Could not send @keys to $domain.\n";
 
     return 0;

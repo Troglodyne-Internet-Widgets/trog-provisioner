@@ -14,6 +14,8 @@ t/debug_boot.t - bin/debug_boot: the XML it rewrites, and the grub line it edits
 use Test::More;
 use Test::MockModule qw{strict};
 
+use File::Temp();
+use File::Slurper();
 use FindBin;
 use FindBin::libs;
 
@@ -184,16 +186,85 @@ subtest 'the kernel command line edit leaves the newline alone' => sub {
     is( $removed, $line, 'and taking it off again gives back exactly what we started with' );
 };
 
-subtest 'the vnc port comes off the display libvirt names' => sub {
+# libvirt, faked at the level debug_boot talks to it: a connection that finds a
+# domain and opens a stream, a domain with a definition and a screen, and a
+# stream that hands its bytes over a piece at a time.
+{
+
+    package FakeVMM;
+    sub new                { my ( $class, %fake ) = @_; return bless {%fake}, $class }
+    sub get_domain_by_name { return $_[0]{dom} }
+    sub new_stream         { return $_[0]{stream} }
+
+    package FakeDom;
+    sub new                 { my ( $class, %fake ) = @_; return bless {%fake}, $class }
+    sub get_xml_description { return $_[0]{xml} }
+    sub screenshot          { return $_[0]{mime} }
+
+    package FakeStream;
+    sub new { my ( $class, @chunks ) = @_; return bless { chunks => \@chunks, finished => 0 }, $class }
+
+    # Named for what it fakes, Sys::Virt::Stream::recv, which writes into the
+    # caller's first argument and returns how much it wrote -- 0 at the end.
+    sub recv {    ## no critic (ProhibitBuiltinHomonyms)
+        my $self  = shift;
+        my $chunk = shift @{ $self->{chunks} };
+        return 0 unless defined $chunk;
+        $_[0] = $chunk;
+        return length $chunk;
+    }
+    sub finish { $_[0]{finished}++; return 1 }
+}
+
+sub with_vmm {
+    my (%fake) = @_;
     my $hv = Test::MockModule->new('Trog::HV');
-    $hv->redefine( capture    => sub { "vnc://127.0.0.1:10\n" } );
-    $hv->redefine( ssh_target => sub { 'doge@hv.example.net' } );
+    $hv->redefine( vmm        => sub { FakeVMM->new(%fake) } );
+    $hv->redefine( ssh_target => sub { 'doge@hv.test' } );
+    $hv->redefine( describe   => sub { 'hv.test' } );
+    return $hv;
+}
+
+subtest 'the vnc port comes out of the live definition' => sub {
+    my $mock = with_vmm( dom => FakeDom->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) );
 
     open( my $capture, '>', \my $out ) or die $!;
     do { local *STDOUT = $capture; Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV' ), 'vm.test' ) };
     close $capture;
 
-    is( $out, "5910\n", 'display 10 is port 5910' );
+    is( $out, "5910\n", 'the port libvirt allocated, as libvirt reports it' );
+};
+
+subtest 'a domain with no running display says so' => sub {
+
+    # Measured on libvirt 10.0.0: an autoport display reads port='-1' until the
+    # domain is running.  That is the absence of a port, not port -1.
+    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>}), undef, 'port -1 is no port' );
+    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics type='spice' port='5901'>}),                               undef, 'and a display that is not vnc is not this one' );
+    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics port='5905' type='vnc'>}),                                 5905,  'in whichever order the attributes come' );
+
+    my $mock = with_vmm( dom => FakeDom->new( xml => q{<graphics type='vnc' port='-1'>} ) );
+    ok( !eval { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV' ), 'vm.test' ); 1 }, 'vnc stops rather than printing a port' );
+    like( $@, qr/has no display to connect to/, 'and says why' );
+};
+
+subtest 'a screenshot is streamed straight here, and named for what it is' => sub {
+    my $dir    = File::Temp::tempdir( CLEANUP => 1 );
+    my $stream = FakeStream->new( "\x89PNG", 'rest-of-it' );
+    my $mock   = with_vmm( dom => FakeDom->new( mime => 'image/png' ), stream => $stream );
+
+    open( my $capture, '>', \my $out ) or die $!;
+    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV' ), 'vm.test', { into => "$dir/screen" } ) };
+    close $capture;
+
+    is( $out,                                      "$dir/screen\n",     'the path printed is the one written' );
+    is( File::Slurper::read_binary("$dir/screen"), "\x89PNGrest-of-it", 'every piece of the stream, in order' );
+    ok( $stream->{finished}, 'and the stream is finished rather than left open' );
+
+    # Measured: qemu on libvirt 10.0.0 sends image/png, which the virsh path
+    # this replaced wrote to a file ending .ppm regardless.
+    is( Trog::Bin::DebugBoot::screen_file( 'vm.test', 'image/png' ),               '/tmp/vm.test-screen.png', 'a PNG is named .png' );
+    is( Trog::Bin::DebugBoot::screen_file( 'vm.test', 'image/x-portable-pixmap' ), '/tmp/vm.test-screen.ppm', 'and a PPM .ppm' );
 };
 
 done_testing();
