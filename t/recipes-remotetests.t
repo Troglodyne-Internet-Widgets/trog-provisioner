@@ -17,6 +17,7 @@ t/recipes-remotetests.t - the recipes, against a real guest (AUTHOR_TESTING only
 
 use FindBin;
 use FindBin::libs;
+use Provisioner::Utils();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -26,7 +27,6 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use YAML::XS();
 use File::Find;
 use File::Temp qw{tempdir tempfile};
-use IPC::Run3();
 use File::Touch;
 use File::Copy;
 
@@ -83,7 +83,7 @@ mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
 mkdir "$tmpdir/data/backup.test.test";
 mkdir "$tmpdir/data/backupdestination.test.test";
-IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", qw{-N}, '', qw{-q} ], \undef, \undef, undef );
+Provisioner::Utils::write_ssh_keypair( "$tmpdir/data/backup.test.test/backup.rsa", RSA => 2048, 'recipes-remotetests.t' );
 die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
 File::Copy::copy( "$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa" );
 File::Touch::touch("$tmpdir/dotfiles/test");
