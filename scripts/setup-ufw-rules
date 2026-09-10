@@ -7,15 +7,18 @@ use warnings;
 
 =head2 SYNOPSIS
 
-    setup-ufw-rules [--dry-run] [NETWORK ...]
+    setup-ufw-rules [--dry-run]
 
 =head2 DESCRIPTION
 
 Configure UFW firewall rules based on available applications.
 
-Every application profile is allowed out and rate limited in.  Any networks
-named on the command line are allowed in without the rate limit, which is what
-keeps the provisioner from throttling itself out of the guest it is building.
+Every application profile is allowed in and out.  A profile is how a recipe says
+this guest talks on a port, and the C<allow out> is the only thing granting
+egress on a guest that defaults to denying it.
+
+Rate limiting is not done here -- see C<setup-ufw-ratelimits>, which is passed
+what to limit and the networks exempt from it.
 
 =cut
 
@@ -45,37 +48,26 @@ my @rules = (
     [qw{default deny incoming}],
 );
 
-# Rate limit ssh, and only ssh.
+# Allow, and do not limit.  ufw's own `limit` is not used here at all, and the
+# numbers are why: it denies a source that opens six connections in thirty
+# seconds, hardcoded in ufw itself, with no per-profile knob to soften it.  That
+# is the conventional anti-brute-force setting for somebody typing at an ssh
+# prompt now and again, and it fits nothing this builds.
 #
-# ufw's limit denies a source that opens six connections in thirty seconds.
-# That is the classic anti-brute-force setting for ssh and nonsense for anything
-# a browser talks to: one page load opens more than six, so applying it to
-# Nginx Full rate limited real visitors off the site.  It was applied to every
-# application profile there was.
+# It is nonsense for anything a browser talks to -- one page load opens more than
+# six, so applied to Nginx Full it rate limited real visitors off the site.  And
+# it is wrong for ssh here too, because ssh here is not a person: a provision
+# opens far more than six connections to the guest it is building, so the
+# provisioner locked itself out partway through its own run and every step after
+# that failed as "connection refused" on an address that had been working a
+# minute earlier.  A fleet that is administered by automation never wanted ufw's
+# number on port 22 either, which is why rate_limits overrides it by default.
 #
-# templates/files/ufw.user.rules.tt says what was meant -- 1024 hits a second on
-# 22, 80 and 443 -- but nothing has ever installed that file, so what took
-# effect was ufw's default.
-#
-# Even for ssh the limit is too tight for us: a provision opens far more than
-# six connections, so the provisioner locks itself out partway through its own
-# run and every step after that fails as "connection refused" on an address that
-# was working a minute earlier.  Which is what it kept doing, because
-# admin_networks is empty unless somebody fills it in, and an exemption nobody
-# has is no exemption.
-#
-# So ssh is allowed like everything else and rate limited like everything else:
-# through setup-ufw-ratelimits, which limits port 22 at whatever
-# Provisioner::Recipe::ufw's rate_limits says -- sixty-four new connections a
-# second by default, rather than six in thirty.  That is a limit a person
-# administering the guest never reaches and a brute force still does, and it is
-# the same mechanism every other port here is limited by instead of a second one
-# sitting in front of it a hundred times tighter.
-#
-# The admin networks stay exempt from that limit, and are passed to
-# setup-ufw-ratelimits to be let past it.
-my @admin        = grep { m{\A[0-9a-fA-F:.]+(?:/\d+)?\z}a } @ARGV;
-my %rate_limited = ();
+# Limiting is setup-ufw-ratelimits' job instead, which writes hashlimit rules
+# into before.rules at whatever Provisioner::Recipe::ufw's rate_limits says --
+# port 22 at sixty-four new connections a second by default rather than six in
+# thirty, which a person administering the guest never reaches and a brute force
+# still does.  The admin networks are exempted there, where the limits are.
 
 foreach my $app (@apps) {
 
@@ -91,14 +83,7 @@ foreach my $app (@apps) {
     system( qw{ufw --force delete limit out}, $app );
 
     push( @rules, [ "allow", "out", $app ] );
-
-    unless ( $rate_limited{$app} ) {
-        push( @rules, [ "allow", "in", $app ] );
-        next;
-    }
-
-    push( @rules, [ "allow", "from", $_, "to", "any", "app", $app ] ) for @admin;
-    push( @rules, [ "limit", "in", $app ] );
+    push( @rules, [ "allow", "in",  $app ] );
 }
 
 @rules = map { unshift( @{$_}, '--dry-run' ); $_ } @rules if $DRY_RUN;

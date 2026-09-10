@@ -13,10 +13,14 @@
 # than by ufw: somebody administering the guest goes as fast as they like, and
 # everybody else meets the limit.
 #
-# ufw's own `limit` is six connections in thirty seconds, which is right for ssh
-# and absurd for a web server -- it rate limited real visitors off the site when
-# it was applied to every application profile.  setup-ufw-rules therefore limits
-# only OpenSSH and allows the rest, and the real limits are these.
+# ufw's own `limit` is six connections in thirty seconds, hardcoded.  That suits
+# a person typing at an ssh prompt now and again and nothing else here: it is
+# absurd for a web server, where it rate limited real visitors off the site when
+# it was applied to every application profile, and it is wrong on port 22 as
+# well, because ssh on this fleet is automation rather than a person -- it locked
+# the provisioner out of guests it had just built.  Which is why port 22 is
+# overridden here by default rather than left to ufw.  setup-ufw-rules therefore
+# allows profiles and limits none of them; these are the only limits.
 #
 # In before.rules with our own chain, not in user.rules: ufw owns user.rules and
 # rewrites it whenever a rule changes, and the ufw-user-limit chains it defines

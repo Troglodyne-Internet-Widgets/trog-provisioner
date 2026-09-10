@@ -36,11 +36,14 @@ foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/nul
     unlike($rules, qr/^\s*\Q$web\E\s+LIMIT/mi, "$web is not rate limited");
 }
 
-# The real rate limits.  ufw's own `limit` is six connections in thirty seconds
-# -- right for ssh, and it rate limited real visitors off the site when it was
-# applied to every application profile -- so setup-ufw-rules limits only OpenSSH
-# and these carry the actual numbers.  They were rendered into a
-# ufw.user.rules that nothing installed, and could not have been: ufw owns
+# The real rate limits.  ufw's own `limit` is six connections in thirty seconds,
+# which suits a person typing at an ssh prompt and nothing this builds -- it rate
+# limited real visitors off the site when it was applied to every application
+# profile, and it locked the provisioner out of guests when it was applied to
+# port 22, which is why 22 is overridden here rather than left to ufw.  So
+# setup-ufw-rules allows profiles and limits none of them, and these carry the
+# actual numbers.  They were rendered
+# into a ufw.user.rules that nothing installed, and could not have been: ufw owns
 # user.rules and rewrites it whenever a rule changes.
 my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
 
