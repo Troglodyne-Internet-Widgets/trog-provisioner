@@ -161,8 +161,9 @@ sub BLOCK_SCALAR_INDENT { return 6 }
 =head2 @fmts = $recipe->formatters()
 
 C<yaml> hands a value to L<YAML::XS> and puts back what it says, for the places
-a document takes one.  C<indent> is for a whole file carried inside another as a
-block scalar.
+a document takes one -- with one correction, for a scalar PyYAML would read as a base-60
+number and libyaml would not.
+C<indent> is for a whole file carried inside another as a block scalar.
 
 =cut
 
@@ -173,6 +174,17 @@ sub formatters {
     );
 }
 
+# Everything these documents are written for is read by cloud-init, which is
+# PyYAML, and PyYAML still implements YAML 1.1 sexagesimals while the libyaml
+# under YAML::XS does not.  So a scalar of colon-separated numbers -- which is
+# what a MAC address with no hex letters in it is -- comes back out of Dump bare,
+# because libyaml sees a string, and is read on the guest as a base-60 integer.
+# cloud-init then calls .lower() on it, the whole network stage dies, and the
+# guest sits on systemd-networkd-wait-online forever without ever saying why.
+#
+# Quoting it costs nothing for the parsers that were already right.
+my $SEXAGESIMAL = qr/\A[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+(?:[.][0-9_]*)?\z/;
+
 # YAML::XS always leads with a document marker and always ends with a newline;
 # neither is wanted where this is being pasted into a document that already has
 # both.
@@ -182,6 +194,8 @@ sub _yaml {
     my $text = YAML::XS::Dump($value);
     $text =~ s/\A---[ \t]*\n?//;
     $text =~ s/\n\z//;
+
+    return "'$text'" if !ref $value && $text =~ $SEXAGESIMAL;
     return $text;
 }
 

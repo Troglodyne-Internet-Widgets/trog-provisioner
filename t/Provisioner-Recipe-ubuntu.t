@@ -263,6 +263,34 @@ CONF
     );
 };
 
+subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
+
+    # guest_mac takes the first six hex digits of a SHA of the domain name, so
+    # roughly one domain in twenty-six gets a MAC whose octets are all decimal
+    # digits.  YAML 1.1 reads colon-separated numbers as a base-60 integer and
+    # PyYAML still does; the libyaml under YAML::XS does not, so it sees a
+    # string and writes it bare.  cloud-init then calls .lower() on an int, the
+    # network stage dies, and the guest hangs on systemd-networkd-wait-online
+    # having never written a netplan or asked for a lease.
+    #
+    # Asserted on the rendered text rather than by loading it, because the whole
+    # defect is that the parser available here disagrees with the one on the
+    # guest about what that text means.
+    my ( $dir, undef ) = generated( nat_mac => '52:54:00:11:44:22', bridge_mac => '52:54:00:f8:83:fc' );
+    my $config = File::Slurper::read_text("$dir/network-config");
+
+    like( $config, qr/^\s+mac_address: '52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
+    like( $config, qr/^\s+mac_address: 52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
+
+    # 59 is the last sexagesimal digit, so the quoting stops at exactly the
+    # point PyYAML stops misreading.
+    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:59:22'), q{'52:54:00:11:59:22'}, '59 is still a base-60 digit' );
+    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:60:22'), '52:54:00:11:60:22',    'and 60 is not, so it needs no quoting' );
+
+    # It is a scalar rule, and must not reach into a structure being dumped.
+    is( Provisioner::Recipe::ubuntu::_yaml( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );
+};
+
 subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub {
     my ( $dir, undef ) = generated( ips => [], gateway => undef );
 
