@@ -179,11 +179,15 @@ Set them in a domain's C<_global>, which every recipe is handed:
         _global:
             mirror: aptmirror.example.com
 
-B<Not> under a C<_base> block for the distro recipe itself.  Recipe blocks merge
-with C<STORAGE_PRECEDENT> -- see L<Provisioner::Cookbook/domain_config> -- which
-takes C<_base>'s side, so a value written there could never be overridden by a
-domain that wanted a different one.  C<_global> merges the other way.  A single
-domain's own C<< <domain>: <distro>: { mirror: ... } >> does work and beats both.
+C<_global> rather than a C<_base> block for the distro recipe itself, because a
+mirror is a fact about the guest that several recipes are handed rather than
+something the distro recipe owns.  Either works: a domain overrides what
+C<_base> says, whichever of the two it was written in.
+
+It did not always.  That merge took C<_base>'s side until it was corrected, so a
+value written under C<< _base: <distro>: >> could not be overridden by a domain
+that wanted a different one, and C<_global> was the only place that behaved.
+See L<Provisioner::Cookbook/domain_config>.
 
 =cut
 

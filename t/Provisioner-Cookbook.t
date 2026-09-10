@@ -127,13 +127,39 @@ subtest 'domain_config folds _base into the domain, the way a provision reads it
     );
 };
 
-subtest 'where _base and a domain disagree, _base wins' => sub {
+subtest 'where _base and a domain disagree, the domain wins' => sub {
     my $conf = {
-        _base      => { ntp => { pool => 'base.pool' } },
+        _base      => { ntp => { pool => 'base.pool', iburst => 1 } },
         'one.test' => { ntp => { pool => 'domain.pool' } },
     };
 
-    is( Provisioner::Cookbook->domain_config( 'one.test', $conf )->{ntp}{pool}, 'base.pool', 'which is what a provision has always done with it' );
+    # _base is a base of defaults.  It took _base's side until this was fixed,
+    # so a domain could not override anything _base named and the value it wrote
+    # was discarded without a word -- see the account in domain_config.
+    my $one = Provisioner::Cookbook->domain_config( 'one.test', $conf );
+    is( $one->{ntp}{pool}, 'domain.pool', 'the domain value is the one that survives' );
+
+    # Key by key, not block for block: saying one thing about a recipe does not
+    # throw away everything else _base said about it.
+    is( $one->{ntp}{iburst}, 1, 'and the rest of what _base said about that recipe is still there' );
+};
+
+subtest 'a list in _base is added to rather than replaced' => sub {
+    my $conf = {
+        _base      => { adminconfig => { pkgs => [qw{vim tig}] } },
+        'one.test' => { adminconfig => { pkgs => ['emacs'] } },
+    };
+
+    # Every Hash::Merge behaviour concatenates arrays, including the one this
+    # used to have, so fixing the precedence did not change this and no
+    # precedence could.  Asserted rather than left to be discovered: it is the
+    # one place _base does not behave the way the rest of it now does, and it
+    # decides whether a list belongs in _base at all.
+    is_deeply(
+        Provisioner::Cookbook->domain_config( 'one.test', $conf )->{adminconfig}{pkgs},
+        [qw{vim tig emacs}],
+        'both, in that order'
+    );
 };
 
 subtest 'the data source, and a domain inside it' => sub {
@@ -147,9 +173,14 @@ subtest 'the data source, and a domain inside it' => sub {
     is_deeply( Provisioner::Cookbook->data_config( undef, $conf ), { from => '/opt/data', to => '/opt/domains' }, 'what every domain gets' );
     is( Provisioner::Cookbook->data_dir( 'one.test', $conf ), '/opt/data/one.test', 'and the directory one of them owns' );
 
-    # A domain may add to the data configuration; where it contradicts _base,
-    # domain_config's answer is the one a provision would use.
-    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{to}, '/opt/domains', 'a domain does not get to move the install dir out from under _base' );
+    # Where a domain contradicts _base, domain_config's answer is the one a
+    # provision would use -- and that is now the domain's, _base being a base of
+    # defaults.  Which also makes the two spellings agree: install_dir in
+    # _global has always been the domain's to override, and this is the older
+    # one it falls back to.
+    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{to},   '/srv',      'a domain can put its install dir somewhere else' );
+    is( Provisioner::Cookbook->install_dir( 'own.test', $conf ),         '/srv',      'and install_dir agrees, reading through to it' );
+    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{from}, '/opt/data', 'without disturbing what _base said about the rest' );
 
     is( Provisioner::Cookbook->data_dir( undef,      $conf ), undef, 'no domain, no directory' );
     is( Provisioner::Cookbook->data_dir( 'one.test', {} ),    undef, 'and none when nothing says where the data source is' );
@@ -276,8 +307,8 @@ subtest 'all => 1 is the full menu' => sub {
 
 subtest 'provided fields are left alone' => sub {
 
-    # _base wins the merge, so writing a placeholder over something it supplies
-    # would be silently discarded rather than stopping anything.
+    # There is nothing to fill in when _base supplies it, and asking is how a
+    # generated file grows a field pinning what the fleet was meant to decide.
     my ( $config, @todo ) = scaffold_of( provided => { needed => 'from _base' } );
 
     ok( !exists $config->{needed},                      'not written' );
