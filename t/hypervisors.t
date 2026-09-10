@@ -26,6 +26,10 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
+
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 use Trog::Hypervisors();
 
 my $GB = 1024 * 1024 * 1024;
@@ -60,7 +64,7 @@ sub guest_conf {
 # Capacity comes from libvirt, so hand Trog::HV a made-up one.
 sub with_capacity {
     my (%by_name) = @_;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine(
         capacity => sub {
             my ($self) = @_;
@@ -142,7 +146,7 @@ subtest 'a file with no blocks is an error' => sub {
 subtest 'hosting asks each hypervisor' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
     my $found = $fleet->hosting('vm.example.test');
@@ -155,7 +159,7 @@ subtest 'hosting asks each hypervisor' => sub {
 subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine(
         domain_exists => sub {
             die "connection refused\n" if $_[0]->name eq 'hv1';
@@ -226,7 +230,7 @@ subtest 'an unreachable hypervisor is reported as such, not skipped silently' =>
 subtest 'a guest that already exists stays where it is' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv1' ? 1 : 0 } );
     $mock->redefine( capacity      => sub { die "placement should not have been asked\n" } );
 
@@ -238,7 +242,7 @@ subtest 'a guest that already exists stays where it is' => sub {
 subtest 'provision.conf can pin a guest to a hypervisor' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { 0 } );
     $mock->redefine( capacity      => sub { capacity() } );
 
@@ -250,7 +254,7 @@ subtest 'provision.conf can pin a guest to a hypervisor' => sub {
 subtest 'a pin to a hypervisor that cannot take it is an error' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { 0 } );
     $mock->redefine( capacity      => sub { capacity( memory_free => 128 ) } );
 
@@ -278,7 +282,7 @@ subtest 'find' => sub {
     );
     ok( $no_fleet->is_local, 'with no fleet we are back to the local hypervisor' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
     Trog::HV->forget();
@@ -297,7 +301,7 @@ subtest 'capacity counts what is committed, not what is used' => sub {
     Trog::HV->forget();
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1', reserve_memory => 2048, reserve_cpus => 2 );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm       => sub { FakeVMM->new() } );
     $mock->redefine( pool_free => sub { 200 * $GB } );
 
@@ -318,7 +322,7 @@ subtest 'shortfalls and headroom' => sub {
     Trog::HV->forget();
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( capacity => sub { capacity( memory_free => 8192, cpus_free => 4, disk_free => 100 * $GB ) } );
 
     is_deeply(

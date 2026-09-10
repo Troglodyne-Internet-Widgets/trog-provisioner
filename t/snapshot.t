@@ -21,6 +21,10 @@ use Pod::Usage();
 use FindBin;
 use FindBin::libs;
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
@@ -50,7 +54,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 
 # libvirt refuses to snapshot -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { 0 } );
     $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
@@ -60,7 +64,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 
 # No current snapshot after create -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
@@ -70,7 +74,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 
 # Current snapshot unchanged -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { 'same-snap' } );
 
@@ -81,7 +85,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 # Happy path -- nothing was current before
 {
     my $call    = 0;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'new-snap' } );
 
@@ -94,7 +98,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 # Happy path -- before differs from after
 {
     my $call    = 0;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? 'old-snap' : 'new-snap' } );
 
@@ -108,7 +112,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
 {
     my @captured;
     my $call    = 0;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( create_snapshot       => sub { @captured = @_; return 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'mysnap' } );
 

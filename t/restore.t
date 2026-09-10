@@ -37,6 +37,10 @@ use Pod::Usage();
 use FindBin;
 use FindBin::libs;
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
@@ -81,7 +85,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 
 # No snapshots -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { () } );
 
     eval { main_restore( '--latest', 'myvm.lan' ) };
@@ -90,7 +94,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 
 # --name for nonexistent snapshot -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { ( 'snap-a', 'snap-b' ) } );
 
     eval { main_restore(qw{--name snap-z myvm.lan}) };
@@ -99,7 +103,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 
 # Revert fails -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 0 } );
 
@@ -109,7 +113,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 
 # Missing provision.conf -> dies
 {
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 1 } );
 
@@ -140,7 +144,7 @@ sub _make_conf {
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { qw{snap-a snap-b snap-c} } );
     $hv_mock->redefine( revert_snapshot => sub { @reverted = @_; return 1 } );
     my $guest_mock = Test::MockModule->new('Trog::Guest');
@@ -156,7 +160,7 @@ sub _make_conf {
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { qw{snap-a snap-b snap-c} } );
     $hv_mock->redefine( revert_snapshot => sub { @reverted = @_; return 1 } );
     my $guest_mock = Test::MockModule->new('Trog::Guest');
@@ -172,7 +176,7 @@ sub _make_conf {
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my @reverted;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { qw{snap-a snap-b snap-c} } );
     $hv_mock->redefine( revert_snapshot => sub { @reverted = @_; return 1 } );
     my $guest_mock = Test::MockModule->new('Trog::Guest');
@@ -189,7 +193,7 @@ sub _make_conf {
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.42' );
 
     my $connected;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 1 } );
     my $guest_mock = Test::MockModule->new('Trog::Guest');
@@ -208,7 +212,7 @@ sub _make_conf {
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
 
     my $seen;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { $seen = $_[0]->uri; return ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 1 } );
     my $guest_mock = Test::MockModule->new('Trog::Guest');

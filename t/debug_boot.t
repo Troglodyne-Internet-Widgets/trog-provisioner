@@ -23,9 +23,11 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
-# Loaded so that blessing into it in the mocks below is blessing into something
-# real, and so Test::MockModule in strict mode has methods to find.
-use Trog::HV();    ## no critic (ProhibitUnusedImports)
+# Loaded so that blessing into it below blesses into something real, and so
+# Test::MockModule in strict mode has methods to find.  The backend rather than
+# Trog::HV, because that is where the libvirt methods these mocks replace live,
+# and Trog::HV requires it lazily.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)    ## no critic (ProhibitUnusedImports)
 
 my $script = "$FindBin::Bin/../bin/debug_boot";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
@@ -93,7 +95,7 @@ subtest '--console points the serial at a file' => sub {
 
             # Not actually waiting out the boot.
             no warnings 'redefine';    ## no critic (ProhibitNoWarningsRedefine)
-            Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV' ), 'vm.test', { wait => 0 } );
+            Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 0 } );
         }
     );
 
@@ -109,7 +111,7 @@ subtest '--console refuses a guest already set up for it' => sub {
         with_domain(
             $xml,
             sub {
-                Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV' ), 'vm.test', { wait => 0 } );
+                Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 0 } );
             }
         );
     };
@@ -123,7 +125,7 @@ subtest '--hold adds a boot menu, once' => sub {
         sub {
             my ( $seen, $bin ) = @_;
             $bin->redefine( vnc => sub { 0 } );
-            Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV' ), 'vm.test', { timeout => 15000 } );
+            Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { timeout => 15000 } );
         }
     );
 
@@ -136,7 +138,7 @@ subtest '--hold adds a boot menu, once' => sub {
         sub {
             my ( $seen, $bin ) = @_;
             $bin->redefine( vnc => sub { 0 } );
-            Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV' ), 'vm.test', { timeout => 15000 } );
+            Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { timeout => 15000 } );
         }
     );
     is( count_of( $again->{defined}, '<bootmenu' ), 1, 'never twice' );
@@ -154,9 +156,9 @@ subtest '--restore undoes both, through what libvirt gives back' => sub {
         sub {
             my ( $seen, $bin ) = @_;
             $bin->redefine( guest_tool => sub { ( q{}, 0 ) } );
-            my $hv = Test::MockModule->new('Trog::HV');
+            my $hv = Test::MockModule->new('Trog::HV::Libvirt');
             $hv->redefine( vmm => sub { undef } );
-            Trog::Bin::DebugBoot::restore( bless( {}, 'Trog::HV' ), 'vm.test' );
+            Trog::Bin::DebugBoot::restore( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' );
         }
     );
 
@@ -218,7 +220,7 @@ subtest 'the kernel command line edit leaves the newline alone' => sub {
 
 sub with_vmm {
     my (%fake) = @_;
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( vmm        => sub { FakeVMM->new(%fake) } );
     $hv->redefine( ssh_target => sub { 'doge@hv.test' } );
     $hv->redefine( describe   => sub { 'hv.test' } );
@@ -229,7 +231,7 @@ subtest 'the vnc port comes out of the live definition' => sub {
     my $mock = with_vmm( dom => FakeDom->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) );
 
     open( my $capture, '>', \my $out ) or die $!;
-    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV' ), 'vm.test' ) };
+    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
     close $capture;
 
     is( $out, "5910\n", 'the port libvirt allocated, as libvirt reports it' );
@@ -244,7 +246,7 @@ subtest 'a domain with no running display says so' => sub {
     is( Trog::Bin::DebugBoot::vnc_port(q{<graphics port='5905' type='vnc'>}),                                 5905,  'in whichever order the attributes come' );
 
     my $mock = with_vmm( dom => FakeDom->new( xml => q{<graphics type='vnc' port='-1'>} ) );
-    ok( !eval { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV' ), 'vm.test' ); 1 }, 'vnc stops rather than printing a port' );
+    ok( !eval { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ); 1 }, 'vnc stops rather than printing a port' );
     like( $@, qr/has no display to connect to/, 'and says why' );
 };
 
@@ -254,7 +256,7 @@ subtest 'a screenshot is streamed straight here, and named for what it is' => su
     my $mock   = with_vmm( dom => FakeDom->new( mime => 'image/png' ), stream => $stream );
 
     open( my $capture, '>', \my $out ) or die $!;
-    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV' ), 'vm.test', { into => "$dir/screen" } ) };
+    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { into => "$dir/screen" } ) };
     close $capture;
 
     is( $out,                                      "$dir/screen\n",     'the path printed is the one written' );
