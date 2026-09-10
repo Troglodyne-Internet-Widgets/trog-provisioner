@@ -157,6 +157,111 @@ False.  See L</It directs the build rather than running in it>.
 
 sub is_module { return 0 }
 
+=head2 %args = $distro->args()
+
+What a distribution takes.
+
+=over 4
+
+=item * C<mirror> -- a package mirror for guests to prefer over the
+distribution's own archive.  Empty by default, which is no mirror at all.
+
+=item * C<mirror_insecure> -- whether to let apt install from a repository it
+cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
+C<enrich> turns it on when a mirror is configured and off when one is not, which
+is what every guest has had.  A schema default cannot say "the same as whether
+that other field is set".
+
+=back
+
+Set them in a domain's C<_global>, which every recipe is handed:
+
+    _base:
+        _global:
+            mirror: aptmirror.example.com
+
+B<Not> under a C<_base> block for the distro recipe itself.  Recipe blocks merge
+with C<STORAGE_PRECEDENT> -- see L<Provisioner::Cookbook/domain_config> -- which
+takes C<_base>'s side, so a value written there could never be overridden by a
+domain that wanted a different one.  C<_global> merges the other way.  A single
+domain's own C<< <domain>: <distro>: { mirror: ... } >> does work and beats both.
+
+=cut
+
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+            mirror => {
+                type        => 'string',
+                default     => q{},
+                description =>
+                  'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
+            },
+            mirror_insecure => {
+                type        => 'boolean',
+                description => 'Let apt install from a repository it cannot verify.  Defaults to on when a mirror is configured and off when one is not, which is what every guest has had.  Turn it off against a mirror that carries the archive own signed indices -- one built by the aptmirror recipe does, being a verbatim copy.',
+            },
+        },
+    );
+}
+
+=head2 $path = $distro->mirror_path()
+
+What this distribution appends to a mirror named as a bare domain, so that
+C<aptmirror.example.com> becomes a URL a guest can fetch from.
+
+Empty here.  A distribution that serves its archive under a path -- Ubuntu's
+C</ubuntu> -- says so.
+
+=cut
+
+sub mirror_path { return q{} }
+
+=head2 $uri = $distro->mirror_uri(%opts)
+
+The mirror this guest should prefer, as a URL, or empty for none.
+
+Two shapes, told apart by whether there is a scheme.  A URL is used as written,
+which is how a mirror outside this installation is named.  Anything else is a
+domain name and is resolved to that domain's address out of the ip pool, because
+a guest runs cloud-init before it has DNS -- so a name is no use to it and the
+address has to be baked in.
+
+Dies on a name the pool has no address for.  Resolving it to nothing would
+otherwise write C<http:///...> into the guest's apt configuration and fail at
+first boot, a long way from the line that caused it.
+
+Empty for a guest that is its own mirror.  The natural way to configure this is
+one line in C<_base>'s C<_global>, which necessarily includes the mirror host --
+and on the build that makes it, there is nothing there to fetch from yet.
+
+=cut
+
+sub mirror_uri {
+    my ( $self, %opts ) = @_;
+
+    my $mirror = $opts{mirror} // q{};
+    return q{} unless length $mirror;
+
+    # The scheme, rather than counting dots: aptmirror.example.com and
+    # mirror.example.net are both dotted, and only one of them says how to get
+    # there.
+    return $mirror if $mirror =~ m{\A[a-z][a-z\d+.-]*://}i;
+
+    my $domain = $opts{domain} // q{};
+    if ( $domain eq $mirror ) {
+        print "$domain is the mirror, so it is built from the archive rather than from itself.\n";
+        return q{};
+    }
+
+    my $address = ( $opts{ipmap} // {} )->{$mirror};
+    die "No address for '$mirror', which $domain is configured to use as its package mirror.\n" . "A bare name is resolved out of the ip pool, because a guest runs cloud-init before\n" . "it has DNS -- so it has to be a domain this installation assigns an address to.\n" . "A mirror anywhere else is named as a URL instead:\n\n" . "    mirror: http://$mirror" . $self->mirror_path . "\n"
+      unless defined $address && length $address;
+
+    return "http://$address" . $self->mirror_path;
+}
+
 =head2 %files = $distro->template_files()
 
 The five files a guest is built from, as any other recipe declares its generated

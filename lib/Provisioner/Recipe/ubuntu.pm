@@ -71,6 +71,7 @@ path is common enough and not worth failing an entire build over.
 
 sub packager                   { return 'deb' }
 sub release                    { return 'noble' }
+sub mirror_path                { return '/ubuntu' }
 sub base_image                 { my ($self) = @_; return $self->image_for( $self->release ) }
 sub packager_up_invocation     { return 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy' }
 sub packager_remove_invocation { return 'DEBIAN_FRONTEND="noninteractive" apt-get remove -y' }
@@ -238,6 +239,12 @@ sub enrich {
     $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
     $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
     $opts{hv_internal_ip} //= $hv->virbr_ip;
+
+    # Which mirror, and whether apt is allowed to install from it unverified.
+    # The second follows from the first and so cannot be a schema default; see
+    # Provisioner::DistroRecipe.
+    $opts{mirror_uri} = $self->mirror_uri(%opts);
+    $opts{mirror_insecure} //= length $opts{mirror_uri} ? 1 : 0;
 
     $opts{ips}       = Provisioner::Utils::coerce_arrayref( $opts{ips} );
     $opts{resolvers} = Provisioner::Utils::coerce_arrayref( $opts{resolvers} );
