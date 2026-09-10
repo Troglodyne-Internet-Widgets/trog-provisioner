@@ -59,6 +59,11 @@ sub args {
         properties => {
             targets  => { type => 'object' },
             key_file => { type => 'string' },
+            excludes => {
+                type        => 'object',
+                default     => {},
+                description => 'Per-target rsync exclude patterns, space separated.  Added to what the recipes themselves say must not travel; see remote_skip in Provisioner::Recipe.',
+            },
         },
     );
 }
@@ -66,18 +71,36 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my %default_targets;
+    my ( %default_targets, %default_skips );
     foreach my $module ( @{ $opts{modules} } ) {
         require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
         my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
+        my @skip     = "Provisioner::Recipe::$module"->remote_skip();
         my @ts       = sort keys(%mtargets);
         foreach my $t ( 1 .. @ts ) {
             $default_targets{"$module$t"} = $ts[ $t - 1 ];
+            $default_skips{"$module$t"}   = join( ' ', @skip ) if @skip;
         }
     }
 
     my $targets = $opts{targets};
     %$targets = ( %default_targets, %$targets );
+
+    # What each recipe says must not travel, against the target that recipe's
+    # remote_files produced.  remote_skip exists to keep a key out of a backup
+    # sitting beside the database it protects -- Provisioner::Recipe says so in
+    # as many words -- and the salvage has always honoured it while this side
+    # carried the file anyway.
+    #
+    # Added to what an operator wrote rather than replaced by it: these are not
+    # a default to be overridden, and somebody excluding one more directory
+    # should not silently start backing up a signing key.
+    my $excludes = $opts{excludes} // {};
+    foreach my $target ( sort keys %default_skips ) {
+        my @both = grep { length } ( $default_skips{$target}, $excludes->{$target} );
+        $excludes->{$target} = join( ' ', @both ) if @both;
+    }
+    $opts{excludes} = $excludes;
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
 

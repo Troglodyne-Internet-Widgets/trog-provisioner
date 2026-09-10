@@ -822,6 +822,56 @@ subtest 'a recipe that salvages state puts it back' => sub {
     }
 };
 
+# The other half of that, on the side that actually writes backups.
+#
+# remote_skip is documented as keeping a key out of "a backup sitting beside the
+# database it protects", and the salvage has always honoured it -- but the backup
+# recipe serves the same directories over rsyncd as root, and carried the file
+# anyway.  Its own exclude was spelled `excludes`, which is not an rsyncd module
+# parameter at all: rsyncd neither honours nor complains about it, so every
+# pattern written there was handed to the client.
+subtest 'what a recipe refuses to salvage is refused to the backup as well' => sub {
+    my @skippers = grep {
+        my $c = eval { Provisioner::Cookbook->load($_) };
+        $c && eval { scalar $c->remote_skip() } && eval { scalar $c->remote_files( '/opt/domains', 'vm.test' ) }
+    } @available;
+
+    ok( scalar @skippers, 'there are recipes that refuse to hand something back' ) or return;
+
+    my $backup = Provisioner::Cookbook->load('backup')->new(%PROV);
+    my $conf   = $backup->render_file(
+        'files/backup.rsyncd.conf.tt', %G,
+        %{ $required_config{backup} },
+        modules => \@skippers,
+    );
+
+    # Singular.  The plural is silently served to the client instead.
+    unlike( $conf, qr/^excludes\s*=/m, 'the module uses the parameter rsyncd actually has' );
+
+    foreach my $recipe (@skippers) {
+        foreach my $pattern ( Provisioner::Cookbook->load($recipe)->remote_skip() ) {
+            like( $conf, qr/^exclude = .*\Q$pattern\E/m, "$recipe: $pattern is kept out of the backup too" );
+        }
+    }
+};
+
+subtest 'an operator exclude is added to those rather than replacing them' => sub {
+    my $backup = Provisioner::Cookbook->load('backup')->new(%PROV);
+
+    # A target named for matrix's first salvage, which is what enrich calls it.
+    my %opts = $backup->validated(
+        %G, %{ $required_config{backup} },
+        modules  => ['matrix'],
+        excludes => { matrix1 => 'some/other/dir' },
+    );
+
+    # Somebody excluding one more directory must not silently start backing up a
+    # signing key, so these concatenate.  The recipe's own patterns are not a
+    # default for an operator to override.
+    like( $opts{excludes}{matrix1}, qr/homeserver\.signing\.key/, 'what the recipe refuses is still refused' );
+    like( $opts{excludes}{matrix1}, qr{some/other/dir},           'and what the operator asked for is there too' );
+};
+
 # A file placed out of the secret store is one the guest must never hand back:
 # salvaged, it would land in the domain directory and in every backup taken of
 # it, which is the exposure keeping it in the store avoids in the first place.
