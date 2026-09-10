@@ -156,7 +156,7 @@ Every backend class, loaded.
 sub backends {
     my ($class) = @_;
 
-    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt};
+    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack};
 
     # Required rather than used at the top of the file: every backend is a
     # subclass of this class, so loading one from here at compile time is a
@@ -181,7 +181,18 @@ hypervisor is a subclass; this is the sentence that decides you get one.
 sub backend_for {
     my ( $class, %opts ) = @_;
 
-    my ($backend) = $class->backends;
+    # A cloud is named; a libvirt hypervisor is reached at a URI.  Naming both,
+    # or neither, is a configuration that cannot be satisfied rather than one to
+    # pick a winner from.
+    my $named_cloud = defined $opts{cloud} && length $opts{cloud};
+    my $named_uri   = defined $opts{uri}   && length $opts{uri};
+
+    die "A hypervisor is either a libvirt_uri or a cloud, and this has both.\n"
+      if $named_cloud && $named_uri;
+
+    my $wanted = __PACKAGE__ . ( $named_cloud ? '::OpenStack' : '::Libvirt' );
+
+    my ($backend) = grep { $_ eq $wanted } $class->backends;
 
     return $backend;
 }
@@ -235,7 +246,10 @@ own names.
 # can be asked.
 my %CONFIG_KEY = (
     uri => 'libvirt_uri',
-    map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device partition},
+    map { $_ => $_ } qw{
+      pool_path pool_name domain_dir bridge_device virbr_device partition
+      cloud flavor image network floating_network availability_zone security_group keypair
+    },
 );
 
 sub from_config {
