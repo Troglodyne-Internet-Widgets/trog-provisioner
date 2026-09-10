@@ -296,11 +296,8 @@ subtest 'the key is declared always, and never salvaged' => sub {
     my @skip = $recipe->remote_skip();
     ok( ( grep { $_ eq 'id_ed25519' } @skip ), 'and excluded from the salvage' );
 
-    # The rendered copy is the truth.  A salvaged one is whatever the last build
-    # wrote, and it would land on top of the new one.
-    ok( ( grep { $_ eq 'ipmap.cfg' } @skip ),        'ipmap.cfg is not salvaged either' );
-    ok( ( grep { $_ eq 'recipes.yaml' } @skip ),     'nor recipes.yaml' );
-    ok( ( grep { $_ eq 'hypervisors.conf' } @skip ), 'nor the fleet' );
+    # The other thing that must never come off a guest into a backup of it.
+    ok( ( grep { $_ eq 'secrets.kdbx' } @skip ), 'and so is the runner own store' );
 };
 
 subtest 'what the block asks for by way of hypervisor access' => sub {
@@ -326,8 +323,18 @@ subtest 'what comes back off the guest being replaced' => sub {
     my ( undef, $recipe ) = built();
 
     my %files = $recipe->remote_files( $INSTALL, $DOMAIN );
-    is( $files{"$INSTALL/$DOMAIN/etc/trog-provisioner/"}, 'etc/trog-provisioner/', 'the configuration directory, for ips.db' );
+    is( $files{"$INSTALL/$DOMAIN/etc/trog-provisioner/"}, 'etc/trog-provisioner/', 'the configuration directory, which is where ips.db is' );
     is( $files{"$INSTALL/$DOMAIN/trog-provisioner/"},     'trog-provisioner/',     'and the checkout, if there was one' );
+
+    # Measured on a guest, twice.  bin/new_config fetches these with get_dir,
+    # so naming the file rather than the directory is an rsync that fails --
+    # and skipping every file in the directory makes the fetch come away empty,
+    # which the salvage-gap check refuses to rebuild over.  Either way, every
+    # second provision stopped.
+    my %skipped = map { $_ => 1 } $recipe->remote_skip();
+    ok( !$skipped{'ipmap.cfg'},    'the rendered configuration is not skipped' );
+    ok( !$skipped{'recipes.yaml'}, 'nor is the recipe list' );
+    ok( $skipped{'secrets.kdbx'},  'but the store is, which is what remote_skip is for' );
 
     # datadirs makes it before the fragment runs, so the address pool has a
     # directory it can create ips.db in that is not owned by root.

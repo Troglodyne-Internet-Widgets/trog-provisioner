@@ -51,7 +51,11 @@ chomp( my $libvirt = `pkg-config --modversion libvirt 2>/dev/null` );
 chomp( my $sysvirt = `$bin/perl -MSys::Virt -e 'print Sys::Virt->VERSION' 2>&1` );
 my ($want) = $libvirt =~ m/^(\d+\.\d+)/;
 my ($have) = $sysvirt =~ m/^v?(\d+\.\d+)/;
-is( $have, $want, "Sys::Virt $sysvirt matches the libvirt-dev this guest has ($libvirt)" );
+
+# The name says what is being asked, not what came back: an unreadable
+# Sys::Virt answers with a page of @INC, and a test name is one line.
+is( $have, $want, "Sys::Virt matches the libvirt-dev this guest has ($libvirt)" )
+    or diag "Sys::Virt said: $sysvirt";
 
 # The two files bin/preflight insists on, plus the question it does not ask:
 # the address pool creates ips.db in this directory on first use, so a

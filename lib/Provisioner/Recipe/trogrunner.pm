@@ -478,6 +478,14 @@ sub _hypervisor_key {
 The configuration directory and the checkout, salvaged off the guest being
 replaced.
 
+What is worth having out of the first is C<ips.db>, which the runner made the
+first time it assigned an address and which is the only record of which of its
+guests holds what.  Losing it hands the next guest an address something already
+has.
+
+The directory rather than that one file: C<bin/new_config> fetches these with
+C<get_dir>, so an entry here is a directory or it is an rsync that fails.
+
 Both unconditionally: this is a class method and cannot see C<checkout>, and
 salvaging a path that is not there has been quiet since the salvage gap was
 closed.
@@ -495,17 +503,24 @@ sub remote_files {
 
 =head3 remote_skip
 
-The private key, and the three configuration files this recipe renders.
+The private key, and the runner's own secret store.  A secret salvaged off a
+guest lands in the domain directory, and from there into C<data.tar.gz> and
+into every backup taken of it; keeping them here is the whole of what
+C<remote_skip> is for.
 
-The key because that is what C<remote_skip> is for -- a secret salvaged off a
-guest lands in the domain directory and from there into every backup of it.
-The configuration because the rendered copy is the truth: a salvaged one is
-whatever the last build wrote, and it would come back on top of the new one.
+B<Not> the three configuration files, which are rendered afresh every
+provision and so are stale on the guest by definition.  Two reasons, and the
+second is the one that bites: the C<data> target unpacks the payload before any
+recipe fragment runs, so the rendered copy is installed over the salvaged one
+either way -- and a directory every file of which is skipped comes off the
+guest empty, which is indistinguishable from a fetch that failed.  The
+salvage-gap check refuses to rebuild over exactly that, so skipping them made
+every second provision stop.
 
 =cut
 
 sub remote_skip {
-    return qw{id_ed25519 ipmap.cfg recipes.yaml hypervisors.conf};
+    return qw{id_ed25519 secrets.kdbx};
 }
 
 sub tests {
