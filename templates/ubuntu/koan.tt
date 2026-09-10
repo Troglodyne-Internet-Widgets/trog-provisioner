@@ -93,16 +93,27 @@ if [ ! -f '[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env' 
 fi
 [% END %]
 
-[% IF github_ssh_privkey %]
+[% IF github_ssh_identity %]
 # Bot SSH identity - paired pubkey is registered on the bot's GitHub
 # account both as an Auth key (push) and Signing key (commit verify).
 # Lives under ~[% user %]/.ssh (the user $HOME, NOT KOAN_ROOT) so it
 # survives re-clones of the repo.
+#
+# The key is already here: bin/provision placed it out of the secret store
+# before this makefile started, root-owned 0600, because the account below did
+# not exist yet.  So this gives it away rather than installing it -- there is
+# no copy of it in the payload to install from.
 install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
-install -o '[% user %]' -g '[% user %]' -m 0600 koan-ssh-privkey '[% install_dir %]/[% domain %]/.ssh/id_koan'
+chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_koan'
+chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_koan'
 runuser -u '[% user %]' -- ssh-keygen -y -f '[% install_dir %]/[% domain %]/.ssh/id_koan' > '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
 chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
 chmod 0644 '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
+[%# Printed because somebody has to put it on GitHub, and the private half is
+    now made here rather than pasted in -- so this is the only place the pubkey
+    appears where anybody will see it. -%]
+echo 'koan: register this as an Authentication key and a Signing key on the bot GitHub account:'
+cat '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
 
 # Trust github.com host keys non-interactively (skip if already present).
 if ! runuser -u '[% user %]' -- ssh-keygen -F github.com -f '[% install_dir %]/[% domain %]/.ssh/known_hosts' >/dev/null 2>&1; then \
