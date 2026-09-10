@@ -1,0 +1,101 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::GuestKey;
+
+use v5.41;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use File::Copy();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage;
+
+use FindBin::libs;
+
+use Trog::GuestKey();
+use Trog::HV();
+
+=head1 NAME
+
+guest_key - hand back the key a guest is reached with.
+
+=head1 USAGE
+
+    guest_key DOMAIN [--out FILE]
+
+=head1 DESCRIPTION
+
+The private half of a guest's key lives in the secret store rather than in the
+domain directory -- see L<Trog::GuestKey>.  Everything that provisions, restores
+or asks a guest something gets it from there without being told to, so this is
+not needed for any of that.
+
+It is for the times you want to be the one holding it: an ssh by hand, an rsync
+this tool does not do, a debugging session.
+
+    ssh -i "$(bin/guest_key vm.example.com)" admin@vm.example.com
+
+With no C<--out> the key is written to a private temporary file, and B<the path
+is printed rather than the key>.  That file belongs to this process and goes
+away when it exits -- which is what the shell substitution above wants, since
+ssh has opened it by then.
+
+C<--out> writes it somewhere of your choosing and leaves it there.  That is a
+copy of the credential for the machine, back on a disk, which is the thing
+keeping it in the store avoids; it exists because sometimes that is what you
+need, and it says so on the way past.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--out> FILE
+
+Write the key here and keep it, rather than to a temporary file that goes away.
+Created 0600, and refused if something is already there.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $out, $help );
+    GetOptionsFromArray(
+        \@args,
+        'out=s' => \$out,
+        'help'  => \$help,
+    ) or pod2usage( -exitval => 2 );
+    pod2usage( -exitval => 0, -verbose => 2 ) if $help;
+
+    my $domain = shift @args or pod2usage( -exitval => 2, -message => "Which domain?\n" );
+
+    # Where it used to be kept, which is still where it is for a domain that has
+    # not been provisioned since sealing.
+    my $on_disk = Trog::HV->new()->domain_dir . "/$domain/key.rsa";
+    my $path    = Trog::GuestKey->path( $domain, $on_disk );
+
+    die "No key for $domain, in the store or at $on_disk.\n" . "A domain that has never been provisioned has none yet.\n"
+      unless defined $path;
+
+    return _print($path) unless defined $out;
+
+    # Refused rather than overwritten: the usual reason to find something here
+    # is that the last person to do this forgot to remove it.
+    die "$out is already there.  Move it aside, or pick another name.\n" if -e $out;
+
+    File::Copy::copy( $path, $out ) or die "Could not write $out: $!\n";
+    chmod 0600, $out or die "Could not make $out private: $!\n";    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+
+    warn "$out is the way in to $domain, and it will stay there until you remove it.\n";
+    return _print($out);
+}
+
+sub _print { print "$_[0]\n"; return 0 }
+
+exit main(@ARGV) unless caller;
+
+1;
