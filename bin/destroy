@@ -177,6 +177,12 @@ sub destroy_disks {
     my ( $domain, $dryrun ) = @_;
     my $hv = Trog::HV->new();
 
+    # A cloud has no volumes of this shape -- no qcow2 overlay and no seed ISO --
+    # and the ones it does have went with the server, which is where the decision
+    # about which of them are ours to delete lives.  See
+    # Trog::HV::OpenStack::annihilate_domain.
+    return if $hv->builds_by_api;
+
     # The guest's own overlay and its cloud-init seed.  The base image is
     # shared by every guest on the hypervisor and is emphatically not ours to
     # remove; nor is the pool.

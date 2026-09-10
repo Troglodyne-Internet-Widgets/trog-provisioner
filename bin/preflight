@@ -15,6 +15,7 @@ use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use File::Which();
+use Config::Simple();
 
 use Sys::Virt();
 
@@ -84,7 +85,26 @@ sub main {
     # Every check runs even once one has failed: being told about the sudo and
     # then, a fix later, about the missing xorriso is two round trips where one
     # would do.
-    my @failed = grep { !$_->{ok} } map { $_->($hv) } (
+    # Which checks mean anything depends on the backend.  Asked of a cloud, the
+    # libvirt ones produce failures that say nothing about whether a guest can be
+    # built -- no passwordless sudo on a machine that does not exist, no ISO
+    # builder for a seed that is never made, no libvirt to answer -- and the
+    # procedure around this tool says to stop when it reports one.  Crying wolf
+    # is worse than not looking.
+    #
+    # rsync, the fetch sources and the configuration are asked of both: the first
+    # is about this machine, and the other two are about what the recipes say.
+    my @checks = $hv->builds_by_api
+      ? (
+        \&check_cloud_reachable,
+        \&check_cloud_resources,
+        \&check_cloud_quota,
+        \&check_rsync,
+        \&check_cloud_transfer_ip,
+        \&check_fetch_sources,
+        \&check_config,
+      )
+      : (
         \&check_reachable,
         \&check_passwordless_sudo,
         \&check_iso_builder,
@@ -94,9 +114,19 @@ sub main {
         \&check_libvirt,
         \&check_sys_virt_in_step,
         \&check_config,
-    );
+      );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror, \&note_log_destination, \&note_pool_quota );
+    my @failed = grep { !$_->{ok} } map { $_->($hv) } @checks;
+
+    # note_libguestfs and note_swtpm are about tools installed on the hypervisor,
+    # note_log_destination about leftovers in its /etc, and note_pool_quota about
+    # its storage pool.  None has anywhere to look when there is no such machine.
+    my @note_checks =
+      $hv->builds_by_api
+      ? ( \&note_stale_image, \&note_apt_mirror )
+      : ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror, \&note_log_destination, \&note_pool_quota );
+
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } @note_checks;
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -398,6 +428,141 @@ Either bring this machine to $there:
 or provision from a machine whose libvirt already does.  Installing a Sys::Virt
 that does not match the local libvirt-dev will not build.
 
+FIX
+}
+
+# The cloud equivalent of "can we reach the hypervisor": whether the credential
+# in clouds.yaml gets us a token, and whether the catalogue that comes back has
+# the three services a guest needs.  Everything below needs this to have worked.
+sub check_cloud_reachable {
+    my ($hv) = @_;
+
+    my @services = eval { $hv->api->auth->services };
+    return report( 0, 'Could not authenticate to ' . $hv->describe, <<"FIX" ) unless @services;
+$@
+The cloud is named '@{[ $hv->cloud ]}', so this is the entry of that name in
+clouds.yaml.  Check the application credential has not been revoked or expired:
+
+    openstack --os-cloud @{[ $hv->cloud ]} token issue
+FIX
+
+    my %offered = map  { $_ => 1 } @services;
+    my @missing = grep { !$offered{$_} } qw{compute image network};
+
+    return report( 0, 'The catalogue is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
+A guest needs Nova to run on, Glance to boot from and Neutron to be addressed
+on.  A credential scoped to a project without all three cannot build one.
+FIX
+
+    return report( 1, 'Authenticated; the catalogue offers ' . scalar(@services) . ' services', q{} );
+}
+
+# Whether the flavor, image and network hypervisors.conf names are things this
+# cloud has.  Each is a name it has to recognise, and one wrong fails a provision
+# minutes in, with an error from the API rather than from us.
+sub check_cloud_resources {
+    my ($hv) = @_;
+
+    my %wanted = (
+        flavor  => $hv->flavor,
+        image   => $hv->image,
+        network => $hv->network,
+    );
+    $wanted{floating_network} = $hv->floating_network if defined $hv->floating_network;
+
+    my @unset = grep { !defined $wanted{$_} || !length $wanted{$_} } sort keys %wanted;
+    return report( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
+The cloud's block in hypervisors.conf has to say what to build guests as.  What
+exists is the cloud's to say, so ask it rather than guessing:
+
+    openstack flavor list
+    openstack image list
+    openstack network list
+FIX
+
+    my %found;
+    $found{flavor}           = eval { scalar $hv->api->look_by_id_or_name( flavors  => $wanted{flavor} ) };
+    $found{network}          = eval { scalar $hv->api->look_by_id_or_name( networks => $wanted{network} ) };
+    $found{image}            = eval { $hv->api->image_from_name( $wanted{image} ) };
+    $found{floating_network} = eval { scalar $hv->api->look_by_id_or_name( networks => $wanted{floating_network} ) }
+      if exists $wanted{floating_network};
+
+    my @absent = grep { !$found{$_} } sort keys %found;
+    return report( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
+Ask the cloud what it has:
+
+    openstack flavor list
+    openstack image list
+    openstack network list
+FIX
+
+    return report( 1, "Builds as $wanted{flavor} from $wanted{image} on $wanted{network}", q{} );
+}
+
+# Whether there is room for one more guest.  A quota is what a cloud has instead
+# of hardware, and running out of it is what will stop a provision.
+sub check_cloud_quota {
+    my ($hv) = @_;
+
+    my $have = eval { $hv->capacity };
+    return report( 0, 'Could not read the quota for ' . $hv->describe, "$@" ) unless $have;
+
+    my @full;
+    push @full, 'instances' if $hv->max_guests && $have->{guests} >= $hv->max_guests;
+    push @full, 'memory'    if $have->{memory_free} <= 0;
+    push @full, 'cpus'      if $have->{cpus_free} <= 0;
+    push @full, 'disk'      if $have->{disk_free} <= 0;
+
+    return report( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
+The project holds @{[ $have->{guests} ]} of @{[ $hv->max_guests ]} instances,
+@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} ]}MB of memory and
+@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} ]} cores.
+
+Destroy a guest you have finished with, or ask for more quota.  Note that the
+reserves in hypervisors.conf are held back out of the quota, so a project that
+looks like it has room may not once they are counted.
+FIX
+
+    return report(
+        1,
+        sprintf(
+            'Quota: %d/%d instances used, %dMB memory and %d cores free',
+            $have->{guests}, $hv->max_guests, $have->{memory_free}, $have->{cpus_free}
+        ),
+        q{}
+    );
+}
+
+# The same question check_transfer_ip asks, which a cloud cannot answer the same
+# way.  There, the guest's network is the hypervisor's NAT bridge and is known
+# before any guest exists; here the cloud allocates the address when it creates
+# the server, so there is nothing to ask the routing table about until there is
+# a guest -- and by then the seed naming the address has already been written.
+#
+# So it has to be given, and this is where being told that is cheap.
+sub check_cloud_transfer_ip {
+    my ($hv) = @_;
+
+    my $ipmap  = Trog::Config->path('ipmap.cfg');
+    my $config = eval { Config::Simple->new($ipmap) };
+    my $named  = $config ? $config->param('global.transfer_ip') : undef;
+    $named = $named->[0] if ref $named eq 'ARRAY';
+
+    return report( 1, "Guests fetch their payload from $named", q{} ) if defined $named && length $named;
+
+    return report( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  On a hypervisor that address is
+worked out by asking the routing table about the guest's network -- but
+@{[ $hv->describe ]} allocates a guest's address when it creates it, so there is
+nothing to ask about until the guest exists, and the seed naming the address is
+written before that.
+
+Name it in the [global] section of $ipmap:
+
+    transfer_ip = 192.0.2.10
+
+It has to be an address of this machine that a guest on the cloud can reach.
 FIX
 }
 

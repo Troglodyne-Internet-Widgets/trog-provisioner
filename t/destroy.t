@@ -34,7 +34,8 @@ use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 
 require_ok("$FindBin::Bin/../bin/destroy")
   or BAIL_OUT('bin/destroy does not load; the install is incomplete');
@@ -246,6 +247,19 @@ subtest 'purge_domain_dir dryrun leaves directory intact' => sub {
 
 # --- main: missing domain ---
 # pod2usage exits, so this has to be a real run.
+subtest 'a cloud keeps its own volumes' => sub {
+    Trog::HV->forget();
+    my $cloud = Trog::HV->new( cloud => 'testcloud' );
+
+    # volume and delete_volume are libvirt nouns the cloud backend refuses to
+    # pretend to; the volumes a cloud guest had went with the server, which is
+    # where the decision about which of them were ours to delete lives.
+    ok !defined Trog::Bin::Destroy::destroy_disks( 'vm.example.com', 0 ),
+      'no volumes are looked for on a hypervisor that has none of that shape';
+
+    Trog::HV->forget();
+};
+
 subtest 'main exits with the usage when given no domain' => sub {
     my $out = q{};
     IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", '--dryrun' ], \undef, \$out, \$out );

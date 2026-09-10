@@ -12,6 +12,15 @@
     No apostrophes in an Xslate comment: the lexer reads one as opening a
     string and swallows the template as far as the next quote. -%]
 ---
+[% IF !bridge_mac -%]
+[%# Nothing here defined this machine, so its MACs and interface names are not
+    ours to know: a service assigned them when it created the guest.  There is
+    no way to write a config matched on a MAC we were never told, and the
+    platform has already addressed the guest -- so say so, which is cloud-init
+    for leave the network alone. -%]
+network:
+  config: disabled
+[% ELSE -%]
 network:
   version: 1
   config:
@@ -52,3 +61,4 @@ network:
       mac_address: [% nat_mac | yaml %]
       subnets:
         - type: dhcp
+[% END -%]

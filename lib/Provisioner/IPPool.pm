@@ -372,6 +372,12 @@ sub seed {
 
         my $hv = $fleet->hypervisor($name);
 
+        # A hypervisor that addresses its own guests has nothing this pool needs
+        # to know.  Its guests are not holding addresses out of the pool, so
+        # there is nothing to record and nothing to collide with -- and asking
+        # would mean asking a cloud for a libvirt domain list.
+        next if $hv->manages_addresses;
+
         # The sweep first, because what comes after reads the neighbour table it
         # fills: libvirt only knows a guest's bridged address if the host has
         # spoken to it lately.
