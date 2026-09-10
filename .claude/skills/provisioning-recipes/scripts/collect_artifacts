@@ -20,6 +20,7 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
 use Trog::Guest();
+use Trog::GuestKey();
 use Trog::HV();
 use Trog::Hypervisors();
 
@@ -218,7 +219,7 @@ sub connect_to {
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$domain";
 
-    $key  //= "$cfg_dir/key.rsa";
+    $key  //= Trog::GuestKey->path( $domain, "$cfg_dir/key.rsa" );
     $user //= admin_user("$cfg_dir/provision.conf");
 
     # The guest answers on its NAT lease whether or not its static address ever

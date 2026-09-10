@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Config::Simple();
 use Trog::Guest();
+use Trog::GuestKey();
 use Trog::HV();
 use Trog::Hypervisors();
 
@@ -53,7 +54,7 @@ sub main {
     my $host    = $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) )
       or die "Could not find a lease for $domain, so there is nothing to ask.\n";
 
-    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => "$cfg_dir/key.rsa" );
+    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => Trog::GuestKey->path( $domain, "$cfg_dir/key.rsa" ) );
 
     # Quoted the same way collect_artifacts does, so a command containing an
     # awk program does not close the quoting early and get answered with a

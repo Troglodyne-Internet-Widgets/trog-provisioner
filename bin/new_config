@@ -33,6 +33,7 @@ use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
 use Trog::Guest();
+use Trog::GuestKey();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Local();
@@ -1025,6 +1026,13 @@ sub handle_domain {
         modules       => \@modules,
     );
 
+    # And the private half of the key it just made goes into the store rather
+    # than staying in the domain directory.  After generate_files, because that
+    # is what mints it -- and not on a dry run, where guest_keypair deliberately
+    # leaves the existing key alone and taking it off the disk would be losing
+    # the way into a guest nobody asked us to touch.
+    Trog::GuestKey->seal( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
+
     # Build a provision.conf
 
     # The image is the distribution's to name, and how big the guest is is the vm
@@ -1192,9 +1200,7 @@ sub _salvage_guest {
     # The key may not be here yet, in which case say nothing about one rather
     # than name a file that is not there: ssh has an agent and a config of its
     # own, and either is a better answer than an -i nothing can read.
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    my $key = "$cfg_dir/key.rsa";
-    undef $key unless -f $key;
+    my $key = Trog::GuestKey->path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     return $guest{$id} = Trog::Guest->new(
         name => $host,
@@ -1467,11 +1473,11 @@ sub _get_sftp {
     $static_ip =~ s|/.*$||;
     my $target_is_up = 0;
 
-    my $key2use = "$cfg_dir/key.rsa";
-
-    # Key may not be here yet
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    $key2use = undef unless -f $key2use;
+    # The old guest's key, which is the one that gets us in to the guest that is
+    # up -- this runs before generate_files rotates it.  Out of the store unless
+    # a domain provisioned before sealing still has one on disk.  The domain is
+    # the last component of the config directory, which is what it is made from.
+    my $key2use = Trog::GuestKey->path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     my $ssh = Net::SFTP::Foreign->new(
         host     => $static_ip,

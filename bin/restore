@@ -13,6 +13,7 @@ use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Guest();
+use Trog::GuestKey();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -138,7 +139,7 @@ sub main {
 
     Trog::Guest->new(
         name     => $domain, host => $ip, user => $user,
-        key_path => "$domain_dir/$domain/key.rsa"
+        key_path => Trog::GuestKey->path( $domain, "$domain_dir/$domain/key.rsa" )
     )->wait_for_ssh();
 
     print "SSH verified. $domain is up at $ip.\n";
