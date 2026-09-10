@@ -116,9 +116,9 @@ subtest 'every domain gets a data recipe, because new_config requires one' => su
     my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
     ok( exists $config->{'vm.test'}{data}, 'added even though it was not asked for' );
 
-    # But not when _base already configures it.  _base wins the merge, so
-    # writing placeholders over it would be silently discarded rather than
-    # stopping anything -- worse than not writing them.
+    # But not when _base already configures it: there is nothing to fill in, and
+    # a generated file that pins what the fleet supplies is a file that stops
+    # following it.
     ($config) = Trog::Bin::NewGuest::build(
         'vm.test', ['ntp'],
         { base => { data => { from => '/opt/data', to => '/opt/domains' } } }

@@ -338,10 +338,9 @@ the full menu, for when you are going to edit it anyway.
 
 C<provided> is configuration that is already coming from somewhere else -- the
 C<_base> block of F<recipes.yaml>, usually.  Those fields are left out and are
-not reported as needing anything.  This matters more than it sounds: the merge
-is STORAGE_PRECEDENT, so C<_base> wins over a domain's own block, and a
-placeholder written over a field C<_base> supplies would be quietly discarded
-rather than stopping at validation.
+not reported as needing anything, because there is nothing to fill in: asking
+for a value that is already supplied is how a generated file grows fields
+nobody meant to pin.
 
 Returns undef for a recipe that needs nothing, which is how the config files
 already spell it: a bare C<nosnap:> with nothing under it.
@@ -444,11 +443,20 @@ sub placeholders_in {
     return ();
 }
 
+# Two merges, wanting opposite things, so two mergers.
+#
 # Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
 # behaviour, so the functional interface means one thing inside that script and
-# the default anywhere else.  This is the one the merged configuration has
-# always had -- where two of these disagree, the more general one wins.
-sub _merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
+# the default anywhere else.
+#
+# _base is a base of defaults and a domain overrides it, so that merge takes the
+# right.  It took the left until this was fixed, which meant a domain could not
+# override anything _base named -- see the account in domain_config.
+#
+# The file merge keeps the left, and that one is deliberate: a domain's own file
+# adds to what recipes.yaml says rather than overruling it.  See configuration().
+sub _base_merger { state $merger = Hash::Merge->new('RIGHT_PRECEDENT');   return $merger }
+sub _file_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
 =head2 configuration($path)
 
@@ -483,7 +491,7 @@ sub configuration {
 
     my $conf = YAML::XS::Load( File::Slurper::read_binary($path) );
 
-    my $merger = _merger();
+    my $merger = _file_merger();
     my $extra  = File::Basename::dirname($key) . '/recipes.d';
     File::Find::find(
         {
@@ -518,9 +526,22 @@ references in it, say -- passes it, so that work is not thrown away and the two
 of you cannot end up merging the same file differently.  What comes back is a
 copy, so fold it, delete out of it, hand it to a recipe.
 
+A domain overrides what C<_base> says: C<_base> is a base of defaults, and a
+domain naming the same field gets its own value.  Nested objects merge key by
+key, so a domain saying one thing about a recipe keeps everything else C<_base>
+said about it.  B<Lists concatenate rather than replace> -- a domain adding to a
+list C<_base> names gets both, which is what every C<Hash::Merge> behaviour does
+and is worth knowing before putting a list in C<_base>.
+
+That is a correction.  Until it was made this merge took C<_base>'s side, so a
+domain could not override anything C<_base> named and the value it wrote was
+discarded without a word.  Both C<set_behavior> calls arrived together in
+C<027e1cf>, which meant to make inheritance deeper and inverted it instead: the
+first said the domain wins, and the second, being process-wide, said the
+opposite.
+
 C<_global> is not part of it.  It says what the guest is rather than what a
-recipe takes, and the two halves of it combine the other way round: the
-domain's own wins there, where C<_base> wins here.
+recipe takes, and it has always merged this way round -- see C<global_config>.
 
 =cut
 
@@ -533,7 +554,7 @@ sub domain_config {
     delete $base->{_global};
     delete $own->{_global};
 
-    return _merger()->merge( $base, $own );
+    return _base_merger()->merge( $base, $own );
 }
 
 =head2 global_config($domain, $conf)

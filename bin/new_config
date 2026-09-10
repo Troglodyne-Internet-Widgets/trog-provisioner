@@ -50,7 +50,15 @@ use Provisioner::Cookbook();
 # Better stack traces
 use Carp::Always;
 
-Hash::Merge::set_behavior('RIGHT_PRECEDENT');
+# For the two merges below that accumulate what several recipes asked of a
+# shared dependency -- not for _base against a domain, which Provisioner::Cookbook
+# does with a merger of its own and the opposite precedence.
+#
+# The left is kept here on purpose: these build up a dependency's options one
+# requester at a time, and where two of them genuinely disagree it is reconcile
+# that settles it, having been shown both sides.  A second set_behavior naming
+# the other precedence used to sit under this line and silently undo it, which
+# is what inverted _base for everything.
 Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
 =head1 USAGE
