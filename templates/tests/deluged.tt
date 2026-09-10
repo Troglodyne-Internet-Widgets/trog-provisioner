@@ -31,15 +31,14 @@ ok(!-e '/etc/nginx/sites-enabled/files.[% domain %].conf',
 # started at all.
 ok(-d '/var/lib/deluged/config/state', 'the torrent state directory is there before deluged makes it');
 
-# And the path down to it walkable by the admin user, since the salvage that
-# preserves it is an sftp session as that user with no sudo.  One directory in
-# this list owned debian-deluged:debian-deluged is a fetch that comes back empty
-# and does not say why.
+# The path down to it used to be walkable by the admin user too, since the
+# salvage was an sftp session as that user with no sudo. The fetch reads the
+# guest as root now (issue #76), so issue #98 took that back out: the whole
+# path stays debian-deluged:debian-deluged, and nobody else can walk it.
 foreach my $dir (qw{/var/lib/deluged /var/lib/deluged/config /var/lib/deluged/config/state}) {
     my @st = stat($dir);
-    is(scalar getgrgid($st[5] // -1), '[% admin_user %]', "$dir has the admin user as its group");
-    is($st[2] & 0050, 0050, "$dir can be read and walked by that group");
-    ok(!($st[2] & 0007), "$dir is closed to everybody else");
+    is(scalar getgrgid($st[5] // -1), 'debian-deluged', "$dir is still group debian-deluged");
+    ok(!($st[2] & 0007), "$dir is closed to everybody outside that account");
 }
 
 # The group stops there: core.conf is this domain configuration, rewritten from

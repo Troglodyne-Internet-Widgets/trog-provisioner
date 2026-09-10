@@ -19,15 +19,14 @@ fi
     is a guest that is still running, and it keeps what it has. -%]
 mkdir -p /var/lib/deluged/config/state
 chown -R debian-deluged:debian-deluged /var/lib/deluged/config
-[%# And now open the path down to the state to the admin user, because the
-    salvage that preserves it is an sftp session as that user with no sudo: a
-    tree owned debian-deluged:debian-deluged is one it can neither list nor
-    walk into, and what comes back is an empty directory and no complaint.  The
-    group stops at the state -- core.conf holds this domain configuration and
-    nothing off the guest needs to read it. -%]
-chown debian-deluged:[% admin_user %] /var/lib/deluged /var/lib/deluged/config
-chmod 0750 /var/lib/deluged /var/lib/deluged/config
-chown -R debian-deluged:[% admin_user %] /var/lib/deluged/config/state
+[%# The path down to the state used to be opened to the admin user here as
+    well, because the salvage was an sftp session as that user with no sudo: a
+    tree owned debian-deluged:debian-deluged was one it could neither list nor
+    walk into, and what came back was an empty directory and no complaint. The
+    fetch reads the guest as root now, so a tree debian-deluged keeps to itself
+    comes off it whatever the group says; issue #98 took the widening back out,
+    which leaves the chown above -- debian-deluged:debian-deluged, no admin
+    group -- as the whole of it. -%]
 [%# Spelled out per type rather than with u=rwX,g=rX.  A capital X sets execute
     on a directory, or on anything that already has it -- and the data target
     lands the whole domain directory 0750, so every restored file arrives with

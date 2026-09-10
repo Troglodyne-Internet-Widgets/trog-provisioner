@@ -52,13 +52,17 @@ restoring one half of that pair gives a web UI that cannot talk to the daemon it
 is running against; generated fresh together they agree.  Something that
 regenerates correctly does not belong in C<remote_files>.
 
-The fragment gives the admin user the group on the path down to C<state/>, 0750
-on the directories and 0640 on what is in them -- from when the fetch ran as that
-user.  It reads the guest as root now and no longer needs it; taking it out is
-issue #98.  Salvaging the whole config directory, which is what this recipe asked
-for before, could not work for the same reason: it is
-owned C<debian-deluged:debian-deluged> throughout, so what came back was an
-empty directory and no complaint about it.
+The fragment used to give the admin user the group on the path down to
+C<state/>, 0750 on the directories and 0640 on what is in them -- from when the
+fetch ran as that user and a tree owned C<debian-deluged:debian-deluged> came
+back empty and said nothing about it. The fetch reads the guest as root now
+(issue #76), so that is no longer needed, and issue #98 took it back out: the
+path stays C<debian-deluged:debian-deluged>, mode unchanged. Salvaging the
+whole config directory, which is what this recipe asked for before, would still
+be wrong even though the fetch could now read it: C<core.conf> is rewritten
+from its own template on every provision, and C<auth> is regenerated together
+with the web UI's copy of it, so a salvage of either preserves nothing worth
+having.
 
 =cut
 
