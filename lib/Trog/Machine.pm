@@ -549,13 +549,19 @@ sub read_text {
     # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
     # of the file.
     #
+    # In scalar context, explicitly.  _unhang calls what it is given in list
+    # context and hands a scalar caller the first element back -- and capture in
+    # list context is one element per line, so without this every file read off
+    # a remote machine came back as its first line.  Whether that was noticed
+    # depended entirely on the file: a one-line one read perfectly.
+    #
     # The exit status decides, not $ssh->error.  That is sticky -- it holds the
     # last error from anything on this connection -- so a command that failed
     # earlier on purpose, like the sudo -n probe, would make a cat that worked
     # perfectly well look like a failure.
     my $content = $self->_unhang(
         "cat $path",
-        sub { $self->ssh->capture( { timeout => $TIMEOUT }, 'cat', $path ) }
+        sub { scalar $self->ssh->capture( { timeout => $TIMEOUT }, 'cat', $path ) }
     );
 
     return $? >> 8 ? undef : $content;
