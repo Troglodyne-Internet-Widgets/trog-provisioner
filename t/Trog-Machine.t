@@ -106,6 +106,29 @@ subtest 'what get_dir asks rsync for' => sub {
     ok( -d "$dir/deep/deluged", 'the path above the destination is ours to make' );
 };
 
+subtest 'a salvage never removes our copy of something the guest stopped having' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$dir/src");
+    File::Slurper::Temp::write_text( "$dir/src/state.db", "state\n" );
+
+    my ( $machine, $mock ) = here();
+
+    ok( $machine->get_dir( "$dir/src", "$dir/dst" ), 'the first fetch works' );
+    ok( -f "$dir/dst/state.db",                      'and brings the state down' );
+
+    # The guest stops producing it -- the service was reconfigured, or the file
+    # was only ever there once.
+    unlink("$dir/src/state.db") or die "could not remove the source: $!";
+
+    $machine->get_dir( "$dir/src", "$dir/dst" );
+
+    # rsync could delete it and must not.  This is the only copy: the domain
+    # directory is where a salvage lands and nothing else keeps a history of it.
+    # A backup mirrors its source and deletes on purpose, having yesterday to
+    # fall back on; this has nothing behind it.
+    ok( -f "$dir/dst/state.db", 'and a second fetch leaves behind what the guest no longer has' );
+};
+
 subtest 'a privileged fetch asks the far end to be root, and not to wait for a password' => sub {
 
     # A real destination, because get_dir makes the path above it before rsync
