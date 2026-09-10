@@ -46,13 +46,14 @@ if [ -n "$$(find '[% install_dir %]/[% domain %]/plexmediaserver' -mindepth 1 -p
     rm -rf /var/lib/plexmediaserver; \
 fi
 [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/plexmediaserver' /var/lib/plexmediaserver
-[%# The admin user owns the group here deliberately, over whatever was restored
-    as much as over a fresh install: the salvage is an sftp session as that user
-    with no sudo, and a library Plex keeps to itself comes back empty without
-    saying so. -%]
+[%# plex:plex, over whatever was restored as much as over a fresh install. The
+    admin user used to own the group here instead, because the salvage was an
+    sftp session as that user with no sudo and a library Plex kept to itself
+    came back empty without saying so. The fetch reads the guest as root now
+    (issue #76), so that is no longer needed; issue #98 took it back out. -%]
 # Plex data directory
 mkdir -p '/var/lib/plexmediaserver/Library/Application Support'
-chown -R plex:[% admin_user %] /var/lib/plexmediaserver
+chown -R plex:plex /var/lib/plexmediaserver
 chmod -R 0750 /var/lib/plexmediaserver
 [% IF claim_token %]
 # Write claim token for initial server linking (consumed on first start)
@@ -87,7 +88,7 @@ PLEX_USER='[% plex_login_name %]' \
 PLEX_MAIL='[% admin_mail %]' \
 PREFS_PATH="$$PREFS_DIR/Preferences.xml" \
 python3 -c "import xml.etree.ElementTree as ET, os; p = os.environ['PREFS_PATH']; root = ET.parse(p).getroot() if os.path.exists(p) else ET.Element('Preferences'); root.set('customCertificatePath', os.environ['PLEX_CERT']); root.set('PlexOnlineUsername', os.environ['PLEX_USER']); root.set('PlexOnlineMail', os.environ['PLEX_MAIL']); ET.ElementTree(root).write(p, encoding='unicode', xml_declaration=True)"; \
-chown -R plex:[% admin_user %] "$$PREFS_DIR"; \
+chown -R plex:plex "$$PREFS_DIR"; \
 chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
