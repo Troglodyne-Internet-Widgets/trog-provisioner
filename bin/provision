@@ -109,10 +109,9 @@ building a new one.
 
 Write the domain's configuration out and change nothing anywhere else.
 
-F<network-config>, F<user-data>, F<meta-data>, F<setup.sh> and F<rsyslog.conf>
-land in the domain directory as they always would, and everything that reaches
-past it is described instead of done: the hypervisor's rsyslog is not
-reconfigured, no disk or cloud-init seed is made, the domain is neither
+F<network-config>, F<user-data>, F<meta-data> and F<setup.sh> land in the domain
+directory as they always would, and everything that reaches past it is described
+instead of done: no disk or cloud-init seed is made, the domain is neither
 destroyed nor defined, and this machine's C<authorized_keys> is left alone.
 
 A domain that already has a key keeps it.  The guest that is up has the public
@@ -616,7 +615,6 @@ sub provision_domain {
     if ($dryrun) {
         print "Would terminate the existing $domain and delete its volumes\n" if $hv->domain_exists($domain);
         print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $hv->describe . ", then define and start $domain\n";
-        print "Would write /etc/rsyslog.d/10-$domain.conf and /etc/logrotate.d/vms.conf there too, and restart rsyslog\n";
         return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $old_ip ) );
     }
 
@@ -625,10 +623,6 @@ sub provision_domain {
 
     my $file = build_domain( $config, \%seed );
     print "Wrote $file\n";
-
-    # After build_domain, because the collector configuration is one of the
-    # files it generates.
-    install_log_collector($config);
 
     print "Defining and starting $domain...\n";
     $hv->define_domain( File::Slurper::read_text($file) );
@@ -773,45 +767,6 @@ sub distro_recipe {
         distro        => $distro,
         hv            => $hv,
     );
-}
-
-=head2 install_log_collector($config)
-
-Set the hypervisor up to receive this guest's logs.
-
-The guest ships its syslog at the hypervisor, so the collector configuration goes
-there.  The guest's own half of this is one of the distro recipe's generated
-files and lands in the domain directory with the rest of them.
-
-Called after C<build_domain>, because what it installs is one of
-L<Provisioner::Recipe::vm>'s generated files -- that recipe describes the
-machine rather than the guest, and this is a change to the machine.  Which is
-also why a dry run does not reach it: it stops before anything outside the
-domain directory is touched, and says there what it would have written here.
-
-See issue #80, which is about making where a guest ships its logs a recipe
-rather than always the hypervisor.
-
-=cut
-
-sub install_log_collector {
-    my ($config) = @_;
-
-    my $hv      = Trog::HV->new();
-    my $domain  = $config->param('domain');
-    my $dir     = $hv->domain_dir . "/$domain";
-    my $drop_in = "/etc/rsyslog.d/10-$domain.conf";
-
-    $hv->write_text( $drop_in, File::Slurper::read_text("$dir/rsyslog-collector.conf"), sudo => 1 );
-    print "Wrote $drop_in\n";
-
-    $hv->put_file( "$dir/logrotate.conf", '/etc/logrotate.d/vms.conf', sudo => 1 );
-    print "Wrote /etc/logrotate.d/vms.conf\n";
-
-    #TODO die if these fail
-    $hv->run_sudo(qw{systemctl restart rsyslog});
-    print "Restarted rsyslogd\n";
-    return 1;
 }
 
 =head2 authorize_guest_key($config)

@@ -1,0 +1,12 @@
+[%# Root-owned and 0640: what lands here is every other guest entire log stream,
+    which is not something the world reads.  rsyslog creates the files itself, so
+    this only has to get the directory right. -%]
+install -d -o root -g adm -m 0750 '[% log_dir %]'
+install -o root -g root -m 0644 logcollector.conf /etc/rsyslog.d/09-logcollector.conf
+[%# Root-owned, or logrotate ignores it: a file moved out of the payload keeps
+    the transfer user as its owner, and logrotate applies owner restrictions to
+    what it will read.  templates/ubuntu/backupdestination.tt has the account. -%]
+install -o root -g root -m 0644 logcollector.logrotate /etc/logrotate.d/logcollector
+install -o root -g root -m 0644 logcollector_ufw.conf /etc/ufw/applications.d/logcollector
+[% script_dir %]/queue_postrun_task systemctl restart rsyslog
+echo 'logcollector: listening on [% port %]/[% protocol %], one file per sender under [% log_dir %].'

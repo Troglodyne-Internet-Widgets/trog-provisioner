@@ -143,10 +143,7 @@ sub template_files {
     mkdir $dir;
 
     # Only render the profiles this guest actually needs
-    my %ret = (
-        'ufw.rsyslog.tt' => 'ufw/rsyslog',
-        'ufw.http.tt'    => 'ufw/http',
-    );
+    my %ret = ( 'ufw.http.tt' => 'ufw/http' );
 
     return %ret unless @recipes;
 

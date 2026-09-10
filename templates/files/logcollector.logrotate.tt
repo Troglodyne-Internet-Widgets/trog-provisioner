@@ -1,0 +1,18 @@
+[% log_dir %]/*.log {
+    rotate [% retain %]
+    [% rotate %]
+[% IF compress -%]
+    compress
+    delaycompress
+[% END -%]
+    missingok
+    notifempty
+    create 0640 root adm
+    sharedscripts
+[%# Without this nothing tells rsyslog to reopen what was rotated out from under
+    it, and it keeps writing to the renamed file forever.  The configuration this
+    replaced had an empty postrotate/endscript pair, which does nothing at all. -%]
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}

@@ -201,10 +201,64 @@ exactly as it always has, only slower, and `bin/preflight` says so rather than
 failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
+## Where a guest sends its logs
+
+Two recipes, and neither reaches onto the other's machine. `logshipper` goes on
+the guests that send; `logcollector` goes on the guest that keeps what arrives.
+
+```yaml
+_base:
+    logshipper:
+        host: logs.example.com        # every guest ships
+
+logs.example.com:
+    logcollector:
+        retain: 52
+```
+
+`logshipper`'s **`host` is required and has no default**. There is no "off"
+setting, because a guest that does not run the recipe already ships nowhere and
+keeps its own logs -- so a guest that names the recipe and does not say where to
+send is a mistake, and the build stops rather than forwarding nothing. `port`
+(514), `protocol` (`tcp`) and `selector` (`*.*`) are settings rather than
+constants; the selector is where you decide how much of a guest's log stream is
+worth sending at all.
+
+**A name the ip pool has an address for is resolved to that address**, so logs
+from inside this installation do not need DNS to arrive -- including the logs
+that would tell you DNS is down. Anything else is used as written, which is how
+you name a syslog service somebody else runs. A guest configured to ship to
+itself ships nowhere and says so, since one `_base` block necessarily covers the
+collector too.
+
+`logcollector` writes one file per sending host under `log_dir`
+(`/var/log/hosts`), routing on the hostname in each message rather than on a
+list of senders -- it is built before most of the guests that will ship to it
+exist, so it cannot have one. A new guest starts logging there the moment it is
+built, and nothing has to be added anywhere.
+
+Nothing depends on either recipe, and `bin/preflight` says so rather than
+failing when a collector is built and nothing points at it.
+
+> **Upgrading.** Guests used to be told, unconditionally, that their logs went to
+> their hypervisor's NAT address, and provisioning wrote a per-domain collector
+> configuration onto the hypervisor to match. Neither half asked whether anything
+> there was listening, and a guest cannot tell: rsyslog queues, retries, suspends
+> and discards without logging a word. If your hypervisor **is** a working
+> collector, keep using it with `logshipper: { host: <its bridge address> }` --
+> an address, since it is not a domain the pool knows. Otherwise build a
+> `logcollector` guest. `bin/preflight` lists the drop-ins left on the hypervisor
+> and the command to remove them.
+
 ## `_base`
 
 A top-level `_base` holds recipes every host gets. A domain's own configuration
-is merged over it, so anything it sets wins.
+is merged over it, so anything it sets is meant to win.
+
+> **It does not, today.** The merge takes `_base`'s side, so a domain naming a key
+> `_base` also names keeps `_base`'s value. Nothing in this installation relies on
+> overriding one, which is why it has gone unnoticed; see issue #93. Until that
+> lands, put in `_base` only what the whole fleet should share.
 
 ## `_shared`
 

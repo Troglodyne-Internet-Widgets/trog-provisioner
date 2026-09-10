@@ -1,0 +1,11 @@
+[%# rsyslog forwarder for this guest.  Provisioner::Recipe::logshipper has the
+    account of why the destination is configured rather than assumed, and of why
+    the guest test opens a socket to it.
+
+    target is empty for a guest that is its own destination, which renders this
+    file empty rather than making it forward to its own listener. -%]
+[% IF target -%]
+[% selector %]  action(type="omfwd" target="[% target %]" port="[% port %]" protocol="[% protocol %]"
+            action.resumeRetryCount="[% retry %]"
+            queue.type="linkedList" queue.size="[% queue_size %]")
+[% END -%]

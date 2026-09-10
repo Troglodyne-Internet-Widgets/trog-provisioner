@@ -51,14 +51,6 @@ sub make_domain_dir {
     return $dir;
 }
 
-# --- remove_rsyslog_config ---
-subtest 'remove_rsyslog_config skips missing file cleanly' => sub {
-
-    # Just verify it doesn't die when the file doesn't exist
-    eval { Trog::Bin::Destroy::remove_rsyslog_config( 'nonexistent.example', 1 ) };
-    is( $@, '', 'no exception for missing rsyslog config in dryrun' );
-};
-
 # --- destroy_disks ---
 subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     my $domain = 'test.example';

@@ -298,13 +298,14 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
     ok( ( grep { $_ eq 'append_line' } @applied ),   "the guest's key was authorized on the machine holding the payload" );
 
-    # Deliberately not pre-written above: the collector configuration is one of
-    # the vm recipe's generated files, so this only works if it is installed
-    # after the recipe has generated it.  It was installed before, and a real
-    # provision died reading a file nothing had written.
-    ok( ( grep { $_ eq 'write_text' } @applied ), 'the collector configuration reached the hypervisor' );
-    ok( ( grep { $_ eq 'run_sudo' } @applied ),   'which was told to reload rsyslog for it' );
-    like( File::Slurper::read_text("$dir/vm.test/rsyslog-collector.conf"), qr/vm\.test/, 'and the vm recipe is what generated it' );
+    # Provisioning used to write a per-domain rsyslog drop-in onto the hypervisor
+    # and restart rsyslog there, on every build, for a listener that on this
+    # installation had never been opened.  Where a guest sends its logs is
+    # Provisioner::Recipe::logshipper now and the far end is
+    # Provisioner::Recipe::logcollector, so a provision configures nothing
+    # outside the guest it is building.
+    ok( !( grep { $_ eq 'write_text' } @applied ), 'nothing is written to the hypervisor for logging' );
+    ok( !-e "$dir/vm.test/rsyslog-collector.conf", 'and the vm recipe no longer generates a collector configuration' );
 
     is( $user, 'doge',           'the admin user comes back' );
     is( $ip,   '192.168.122.50', 'with the address the guest leased' );

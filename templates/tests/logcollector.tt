@@ -1,0 +1,90 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+my $port     = '[% port %]';
+my $protocol = '[% protocol %]';
+my $log_dir  = '[% log_dir %]';
+
+subtest 'rsyslog is running and accepts its configuration' => sub {
+    chomp( my $active = `systemctl is-active rsyslog 2>/dev/null` );
+    is( $active, 'active', 'rsyslog is running' );
+
+    my $out = `rsyslogd -N1 2>&1`;
+    unlike( $out, qr/error|could not|unknown|invalid/i, 'rsyslogd -N1 finds nothing to complain about' )
+      or diag $out;
+};
+
+subtest 'it is listening where it said it would' => sub {
+
+    # Configured rather than 514, because a collector that was moved and a
+    # collector that is broken look the same if you only ever ask about 514.
+    my $listening = `ss -lntu 2>/dev/null`;
+[% IF protocol == 'udp' %]
+    like( $listening, qr/udp\s+\S+\s+\S+\s+\S*:$port\b/, "something is bound to $port/udp" ) or diag $listening;
+[% ELSE %]
+    like( $listening, qr/tcp\s+\S+\s+\S+\s+\S*:$port\b/, "something is bound to $port/tcp" ) or diag $listening;
+[% END %]
+};
+
+subtest 'the firewall profile is one ufw will actually use' => sub {
+
+    # ufw silently skips a profile whose section name is also in /etc/services,
+    # so a profile can be present, syntactically perfect, and never make a rule.
+    my $profiles = `ufw app list 2>&1`;
+    like( $profiles, qr/logcollector/, 'ufw lists the profile' ) or diag $profiles;
+};
+
+subtest 'rotation is configured and logrotate will read it' => sub {
+    my $conf = '/etc/logrotate.d/logcollector';
+    ok( -f $conf, "$conf exists" ) or return;
+
+    # logrotate ignores a config that is not root-owned or is group-writable,
+    # and says so only in -d output.  templates/tests/backup.tt does the same.
+    my $out = `logrotate -d $conf 2>&1`;
+    unlike( $out, qr/Ignoring/, 'logrotate does not ignore it' ) or diag $out;
+    like( $out, qr/rsyslog-rotate/, 'and rotation signals rsyslog, so it reopens the files it was writing' ) or diag $out;
+};
+
+# The whole path, on one machine: a message over the port, through the listener
+# ruleset, into the file named for whoever sent it.
+#
+# It has to go over the port.  A plain `logger` writes through the default rules
+# and never enters the collector ruleset, so it would prove nothing about the
+# thing under test -- which is exactly the mistake that would make this file
+# pass on a guest that receives nothing.
+subtest 'a message sent over the port lands in the file named for its sender' => sub {
+    chomp( my $host = `hostname` );
+    my $marker = "logcollector-selftest-$$-" . time;
+    my $target = "$log_dir/$host.log";
+
+[% IF protocol == 'udp' %]
+    system( 'logger', '-n', '127.0.0.1', '-P', $port, '-d', '-t', 'logcollector-test', $marker );
+[% ELSE %]
+    system( 'logger', '-n', '127.0.0.1', '-P', $port, '-T', '-t', 'logcollector-test', $marker );
+[% END %]
+
+    # rsyslog writes asynchronously; a bare check races it and fails on a
+    # collector that is working perfectly well.
+    my $found = 0;
+    foreach ( 1 .. 20 ) {
+        last if $found = ( -f $target && `grep -c '$marker' '$target' 2>/dev/null` + 0 );
+        select( undef, undef, undef, 0.5 );
+    }
+
+    ok( $found, "the marker arrived in $target" )
+      or diag "Nothing matching $marker under $log_dir after 10s.  Directory holds: " . ( `ls -la '$log_dir' 2>&1` // 'nothing' );
+};
+
+subtest 'the fleet logs do not also land in this guest own syslog' => sub {
+
+    # The listener has a ruleset of its own ending in stop, so a sender message
+    # is written once.  Without that scoping the collector would keep a second
+    # copy of everything in /var/log/syslog, and rotate only one of them.
+    my $conf = do { open( my $fh, '<', '/etc/rsyslog.d/09-logcollector.conf' ) or die $!; local $/; <$fh> };
+    like( $conf, qr/ruleset="logcollector"/, 'the input is bound to its own ruleset' );
+    like( $conf, qr/secpath-replace/,        'and a sender cannot choose the path it is written to' );
+};
+
+done_testing();

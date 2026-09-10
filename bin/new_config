@@ -935,15 +935,14 @@ sub handle_domain {
         $cfg_dir,
         %$global_config,
         %{ $rconf->{$domain}{$distro_name} // {} },
-        packages       => \@pkgs,
-        ips            => [$static_ip],
-        gateway        => $gateway,
-        resolvers      => $resolvers,
-        contact_email  => $admin_email,
-        hv_internal_ip => $tld_ip,
-        payload_dir    => $basedir,
-        dryrun         => $dryrun,
-        modules        => \@modules,
+        packages      => \@pkgs,
+        ips           => [$static_ip],
+        gateway       => $gateway,
+        resolvers     => $resolvers,
+        contact_email => $admin_email,
+        payload_dir   => $basedir,
+        dryrun        => $dryrun,
+        modules       => \@modules,
     );
 
     # Build a provision.conf

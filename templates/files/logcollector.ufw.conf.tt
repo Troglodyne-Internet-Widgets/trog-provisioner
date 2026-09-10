@@ -1,0 +1,12 @@
+[%# Not named syslog: ufw skips a profile whose section name is also a service
+    name in /etc/services -- syslog is 514/udp there -- and says so only as a
+    warning on stderr, so the profile is absent from `ufw app list`, no rule is
+    ever made from it, and nothing fails. -%]
+[logcollector]
+title=Log collector
+description=Syslog collection for the fleet, on the port this guest configured
+[% IF protocol == 'both' -%]
+ports=[% port %]/tcp|[% port %]/udp
+[% ELSE -%]
+ports=[% port %]/[% protocol %]
+[% END -%]

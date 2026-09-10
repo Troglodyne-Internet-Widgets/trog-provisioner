@@ -133,7 +133,7 @@ Without a `hypervisors.conf`, `libvirt_uri` in a guest's `provision.conf` still 
 
 ### What that actually does
 
-The URI is used for every libvirt call we make, which all go through `Sys::Virt` -- no `virsh`, so libvirt's own transports do the work.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, writing the rsyslog collector config, putting the domain directory somewhere the guest can fetch it from -- and all of it has to happen *on the hypervisor*.  So for a remote URI we open one `Net::OpenSSH::More` connection there and do it over that, commands and file transfers alike.
+The URI is used for every libvirt call we make, which all go through `Sys::Virt` -- no `virsh`, so libvirt's own transports do the work.  Beyond that, a fair amount of what this tool does is not libvirt at all -- discovering the bridge devices, dropping `virtiofs-better` in `/usr/libexec`, putting the domain directory somewhere the guest can fetch it from -- and all of it has to happen *on the hypervisor*.  So for a remote URI we open one `Net::OpenSSH::More` connection there and do it over that, commands and file transfers alike.
 
 The hypervisor and the guest are reached the same way, so both are subclasses of `Trog::Machine`, which holds the connection, the commands and the file operations.  `Trog::HV` adds libvirt and the paths; `Trog::Guest` adds the waiting a freshly built VM needs; `Trog::Local` is us, which matters because a guest fetches its payload from here rather than from the hypervisor.  Nothing in either goes over sftp: `Net::SFTP::Foreign` hangs rather than failing when the far side refuses a write, so files are poured down the standard input of a command instead, and `sudo` goes in front of the write rather than in front of a move afterwards.
 
@@ -153,9 +153,9 @@ That means:
 
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
 
-5. **The HV still has to be set up as a hypervisor**: rsyslog listening, the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
+5. **The HV still has to be set up as a hypervisor**: the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
-    It no longer has to run an apt mirror.  That used to be assumed of every hypervisor and compiled into every guest; a mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+    It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### One repository, one run
 
@@ -277,8 +277,8 @@ fleet would pick.
 
 Two of these are worth the trouble because of how they fail otherwise:
 
-**Passwordless sudo.** Provisioning writes to the storage pool, defines domains
-and edits the rsyslog config, all through `sudo`. A password prompt in the
+**Passwordless sudo.** Provisioning writes to the storage pool and defines
+domains, all through `sudo`. A password prompt in the
 middle of that has nowhere to be answered from, so the run *hangs* rather than
 failing, and you find out by waiting.
 

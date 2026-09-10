@@ -49,8 +49,8 @@ everything else, so a scratch run builds on the same hypervisor a real one
 would.)
 
 **If it reports no passwordless sudo, stop.** Print its guidance to the user and
-go no further. Provisioning writes to the storage pool, defines domains and
-edits the rsyslog config, all through sudo — a password prompt in the middle of
+go no further. Provisioning writes to the storage pool and defines domains, all
+through sudo — a password prompt in the middle of
 that has nowhere to be answered from, so the run *hangs* rather than failing,
 and you will sit there until it times out. The fix is the user's to make: it is
 a standing grant of root on a hypervisor, and not a decision to take for them.

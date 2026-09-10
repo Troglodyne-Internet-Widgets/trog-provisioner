@@ -92,17 +92,6 @@ write_files:
       http://security.ubuntu.com/ubuntu	priority:3
 [% END -%]
 
-rsyslog:
-  install_rsyslog: true
-  config_dir: /etc/rsyslog.d
-[%# At the same depth as write_files below, so one indent filter serves both:
-      a block scalar has to sit deeper than the key it belongs to, and two
-      nestings would want two filters that differ only in a number. -%]
-  configs:
-  - filename: 10-ship_logs_to_hv.conf
-    content: |
-[% rsyslog_guest | indent %]
-
 [%# Last, and in this order: root mail has to go somewhere before anything the
     setup script runs can fail and try to report it. -%]
 runcmd:
