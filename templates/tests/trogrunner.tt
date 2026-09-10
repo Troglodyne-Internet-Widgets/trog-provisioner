@@ -17,9 +17,13 @@ my $confdir = "$dir/etc/trog-provisioner";
 # here that does not depend on the domain naming a service user.  The home
 # directory of an admin user is /home/<them> and not the domain directory, and
 # assuming otherwise is what perl.tt already had to be fixed for.
+# \$( escaped twice over: unescaped it is perl's real-GID variable, which
+# interpolates into the backticks as a list of numbers and leaves the shell a
+# command substitution that never opened.
 chomp( my $bin = `dirname \$(readlink -f /root/bin/cpanm) 2>/dev/null` );
-ok( $bin && $bin ne '.' && -d $bin, "the built perl is in $bin" )
-    or BAIL_OUT('no perl was built, or /root/bin/cpanm does not point at one');
+ok( $bin && $bin ne '.' && -d $bin, 'the perl recipe built a perl, and /root/bin/cpanm points into it' )
+    or BAIL_OUT( 'no perl was built, or cpanm does not point at one: ' . ( $bin // 'nothing' ) );
+diag "the built perl is in $bin" if $bin;
 
 # The version, as a number, because that is the thing that was wrong: every
 # module in the distribution declares `use 5.041`, and a 5.38 toolchain cannot

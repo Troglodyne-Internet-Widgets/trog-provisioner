@@ -319,7 +319,7 @@ sub _under_the_domain {
     die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
       if index( $path, '/' ) == 0;
     die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
-      if grep { $_ eq '..' } split( m{/}, $path );
+      if grep { $_ eq '..' } split( q{/}, $path );
 
     return 1;
 }
@@ -335,8 +335,11 @@ sub _restore_refs {
     return { map { $_ => _restore_refs( $node->{$_} ) } keys %$node } if ref $node eq 'HASH';
     return $node                                                      if ref $node || !defined $node;
 
-    ( my $rewritten = $node ) =~ s/\Astore:/secret:/;
-    return $rewritten;
+    return $node unless index( $node, 'store:' ) == 0;
+
+    # The same test Trog::Secrets::needed makes of a secret: reference, and for
+    # the same reason: a prefix, at the start, and nothing cleverer.
+    return 'secret:' . substr( $node, length 'store:' );
 }
 
 # The ssh half of a libvirt connection URI.  URI knows nothing about the
