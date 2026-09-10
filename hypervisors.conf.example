@@ -67,3 +67,47 @@ max_guests     = 20
 [hv2]
 libvirt_uri    = qemu+ssh://root@hv2.example.net/system
 reserve_memory = 8192
+
+; ---------------------------------------------------------------------------
+; A cloud, rather than a machine.
+;
+; A block is one kind of hypervisor or the other, and which one is decided by
+; what is in it: libvirt_uri above, or cloud here.  A block naming both, or
+; neither, is an error naming the block -- a block naming neither would
+; otherwise fall through to libvirt's default connection, which is this
+; machine, and that is the one placement nobody writing this file meant.
+;
+; Nothing here is a path or a device, because there is no filesystem to reach
+; and no bridge to detect.  A guest gets a flavor rather than a memory figure
+; and a disk size, and what flavors exist is the cloud's to say -- ask it, with
+; `openstack flavor list` or Horizon, rather than guessing.
+
+[cloud1]
+; Which entry in clouds.yaml to authenticate with.  The only required key.
+; See Trog::OpenStack::Config for where clouds.yaml is looked for.
+cloud             = openstack
+
+; What to build guests as.  Each can be a name or an id, and each can be
+; overridden per guest in provision.conf.
+flavor            = m1.medium
+image             = ubuntu-24.04
+
+; The tenant network the guest gets an address on, and the external network a
+; floating IP is taken from.  Without floating_network a guest comes up with
+; only a fixed address, which routes nowhere we can reach -- so provisioning
+; will stop and tell you to set this.
+network           = internal
+floating_network  = public
+
+; Optional.  security_group defaults to 'default', which every project has.
+availability_zone = nova
+security_group    = default
+keypair           = buildkey
+
+; The limits mean the same as they do for a machine, and are read the same way,
+; because placement is shared.  For a cloud they are held back from the
+; project's quota rather than from a host's hardware: a quota is already what
+; you may run, so cpu_overcommit is 1 and setting it higher only invents
+; headroom the cloud will refuse.  max_guests defaults to the instance quota.
+reserve_memory    = 4096
+reserve_cpus      = 2
