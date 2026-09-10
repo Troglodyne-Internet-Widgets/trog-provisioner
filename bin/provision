@@ -19,6 +19,7 @@ use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
 use Provisioner::Cookbook();
+use Provisioner::Utils();
 use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
@@ -314,8 +315,10 @@ sub authorize_runner_key {
     return 1;
 }
 
-# ssh-keygen, because OpenSSH is what defines both halves of this format and a
-# key it will not read is no use to anybody.
+# Provisioner::Utils::ssh_pubkey_from_private, which already does this and did
+# before any of this was written: CryptX rather than a process, for RSA, Ed25519
+# and ECDSA alike.  It takes a path and what is in hand here is the value out of
+# the store, so the only thing left to do is put it where it can be read from.
 sub _public_half {
     my ( $domain, $private ) = @_;
 
@@ -324,20 +327,11 @@ sub _public_half {
     print {$tmp} "$private\n";
     $tmp->flush();
 
-    # A list-form pipe rather than qx: the filename is ours, but a list open
-    # needs no quoting to be right about it and there is no shell to get it
-    # wrong.  ssh-keygen because OpenSSH is what defines this format.
-    ## no critic (ProhibitPipeOpen) -- a list-form pipe, so there is no shell and nothing to quote.
-    open( my $fh, '-|', qw{ssh-keygen -y -f}, $tmp->filename )
-      or die "Could not run ssh-keygen to read the public half of $domain's hypervisor key: $!\n";
-    my $pubkey = <$fh>;
-    close($fh);
+    my $pubkey = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
+    die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
+      unless defined $pubkey && length $pubkey;
 
-    chomp $pubkey if defined $pubkey;
-    die "ssh-keygen would not read $domain's hypervisor key; the store may be holding something that is not one\n"
-      unless defined $pubkey && $pubkey =~ m/\Assh-/;
-
-    # Named, because ssh-keygen -y prints the key and nothing else -- so without
+    # Named, because what comes back is the key and nothing else -- so without
     # this, what lands in somebody's authorized_keys is an anonymous line that
     # nobody reading that file can attribute or safely remove by hand.
     return "$pubkey trog-provisioner runner $domain";

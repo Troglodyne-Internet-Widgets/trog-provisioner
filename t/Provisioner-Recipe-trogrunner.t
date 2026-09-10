@@ -18,6 +18,8 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Temp();
+use Provisioner::Utils();
 
 use FindBin::libs;
 
@@ -289,6 +291,33 @@ subtest 'a path meant to be under the domain directory has to be' => sub {
     # own repositories never uses the field.
     my ( undef, $recipe, $vars ) = built( checkout => 0, checkout_dir => '/srv/code' );
     ok( $recipe->render(%$vars), 'and not checked at all when nothing is being cloned' );
+};
+
+subtest 'the key it generates is one both readers of these agree on' => sub {
+    my ( undef, $recipe ) = built();
+    my %secrets = $recipe->guest_secrets( $INSTALL, $DOMAIN );
+    my ($path) = keys %secrets;
+
+    my $key = $secrets{$path}{generate}->();
+    like( $key, qr/\A-----BEGIN OPENSSH PRIVATE KEY-----\n/, 'an OpenSSH private key' );
+
+    # Net::SSH::Perl::Key writes the whole payload on one line.  OpenSSH reads
+    # that; CryptX -- which is what Provisioner::Utils uses to derive the public
+    # half out of the store later -- refuses it as "Invalid input packet", and
+    # RFC 7468 puts the limit at 64, so the strict reader is the correct one.
+    my @body = grep { !m/^-----/ } split( "\n", $key );
+    ok( ( scalar @body > 1 ), 'wrapped rather than written as one line' );
+    is( scalar( grep { length($_) > 64 } @body ), 0, 'at no more than 64 columns, which is what RFC 7468 asks' );
+
+    # The assertion that would have caught it: the key has to survive the round
+    # trip through the store and back out as a public half.
+    my $tmp = File::Temp->new( UNLINK => 1 );
+    print {$tmp} "$key\n";
+    $tmp->flush();
+    chmod 0600, $tmp->filename;
+
+    my $pub = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
+    like( $pub // "died: $@", qr/\Assh-ed25519 /, 'and bin/provision can derive its public half' );
 };
 
 subtest 'the key is declared always, and never salvaged' => sub {

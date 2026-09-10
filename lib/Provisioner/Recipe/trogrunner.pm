@@ -11,6 +11,9 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use YAML::XS();
+use Text::Xslate();
+use File::Slurper();
+use Net::SSH::Perl::Key();
 use URI();
 use URI::Split();
 use File::Temp();
@@ -62,11 +65,9 @@ distribution, the CPAN modules that distribution declares, an
 F</etc/trog-provisioner> of its own, and -- when asked for one -- a key a
 hypervisor will let in.
 
-This is what C<bin/setup_provisioner> was a stub of: the machine that I<runs>
-the provisioner is a guest like any other, and the only thing that was ever
-special about it was that nothing built it.  What remains in that script is
-about the machine that I<hosts> what gets built, which is a different machine
-and a different set of problems.
+The machine that I<runs> the provisioner is a guest like any other.
+F<bin/setup_provisioner> is about the machine that I<hosts> what gets built,
+which is a different machine and a different set of problems.
 
 The checkout is optional (C<checkout: 0>) because a runner that manages its own
 repositories -- a coding agent, say -- already has one, and a second copy under
@@ -150,6 +151,8 @@ guest.  Say which of the two you have before telling anyone the runner is
 capped.
 
 =cut
+
+my $ED25519_BITS = 256;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
@@ -267,14 +270,24 @@ sub args {
     );
 }
 
+=head3 formatters
+
+C<yaml>, which dumps a structure and writes its C<store:> references back as
+C<secret:> on the way out.  See L</SECRETS IN recipes> for why the indirection
+exists.
+
+=cut
+
+sub formatters {
+    return (
+        yaml => Text::Xslate::html_builder( sub { return YAML::XS::Dump( _restore_refs( $_[0] ) ) } ),
+    );
+}
+
 =head3 enrich
 
-Fills the runner's identity in from the guest's, works each hypervisor's URI
-apart into the host, user and port an C<ssh-keyscan> needs, and dumps
-C<recipes> to YAML with its C<store:> references written back as C<secret:>.
-
-The YAML is done here because Xslate has no dumper and a template should not be
-made to write one.
+Fills the runner's identity in from the guest's, and works each hypervisor's URI
+apart into the host, user and port an C<ssh-keyscan> needs.
 
 =cut
 
@@ -325,8 +338,6 @@ sub enrich {
 
         @{$block}{qw{ssh_host ssh_user ssh_port}} = @{$parts}{qw{host user port}};
     }
-
-    $opts{recipes_yaml} = YAML::XS::Dump( _restore_refs( $opts{recipes} ) );
 
     return %opts;
 }
@@ -437,6 +448,8 @@ salvaged onto the next rebuild.
 
 =cut
 
+# Relative to install_dir/domain, which is what datadirs takes -- the guest's
+# /etc/trog-provisioner is a symlink to this, made by the fragment.
 sub datadirs {
     return qw{etc/trog-provisioner};
 }
@@ -471,27 +484,42 @@ sub guest_secrets {
     );
 }
 
-# ssh-keygen rather than a perl key generator: OpenSSH defines this format, and
-# the file has to be one ssh itself will load without argument.  ed25519 for the
-# same reason bin/preflight suggests it -- short enough that an authorized_keys
-# line stays readable.
+# Net::SSH::Perl::Key rather than shelling out to ssh-keygen: it is the same
+# format and there is no process to get the quoting of.  ed25519 for the reason
+# bin/preflight suggests it -- short enough that an authorized_keys line stays
+# readable.
+#
+# Rewrapped afterwards, which is not optional.  write_private emits the whole
+# base64 payload on one line; OpenSSH reads that quite happily, and CryptX --
+# which is what Provisioner::Utils::ssh_pubkey_from_private uses to derive the
+# public half out of the store later -- refuses it as "pem_decode_openssh
+# failed: Invalid input packet".  RFC 7468 puts the limit at 64, so the strict
+# reader is the correct one.  Measured: the decoded bytes are identical, and
+# rewrapping the same key makes both read it.
 sub _hypervisor_key {
+    my $key = Net::SSH::Perl::Key->keygen( 'Ed25519', $ED25519_BITS );
+    $key->{comment} = 'trog-provisioner runner';
+
     my $dir  = File::Temp::tempdir( CLEANUP => 1 );
     my $path = "$dir/id_ed25519";
+    $key->write_private($path);
 
-    ## no critic (ProhibitShellDispatch) -- OpenSSH defines this format, and nothing on CPAN writes one ssh will load without argument.
-    # The empty -N is what makes the key passphrase-less, which it has to be:
-    # nothing is going to be there to type one in.
-    my @keygen = ( qw{ssh-keygen -q -t ed25519 -N}, q{}, qw{-C trog-provisioner -f}, $path );
-    system(@keygen) == 0
-      or die "trogrunner: could not generate a hypervisor key with ssh-keygen\n";
+    my $written = File::Slurper::read_text($path);
+    return _rewrap_pem($written);
+}
 
-    open( my $fh, '<', $path ) or die "trogrunner: could not read the key ssh-keygen just wrote: $!\n";
-    my $key = do { local $/ = undef; <$fh> };
-    close($fh);
+# PEM at 64 columns, which is what RFC 7468 asks for and what every other writer
+# of these does.
+sub _rewrap_pem {
+    my ($pem) = @_;
 
-    chomp $key;
-    return $key;
+    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}s
+      or die "trogrunner: the key that was just generated is not in PEM form\n";
+
+    $body =~ s/\s//g;
+    my @lines = ( $body =~ m/(.{1,64})/g );
+
+    return join( "\n", $head, @lines, $tail );
 }
 
 =head3 remote_files

@@ -301,8 +301,13 @@ guest and carries on after `bin/provision` has stopped waiting.
 
 **`checkout` is optional** because a runner that manages its own repositories --
 a coding agent, say -- already has one, and a second copy under `install_dir` is
-a second copy to get out of step.  Set it to `0` and name the path it does clone
+a second copy to get out of step. Set it to `0` and name the path it does clone
 to in `deps_from`; the dependencies get installed either way.
+
+`deps_from` is additive rather than an alternative, so it is optional whichever
+way `checkout` is set: every path in it gets `dzil authordeps` and `dzil
+listdeps` run against it, and the checkout this recipe makes gets the same
+treatment when there is one. A runner with both ends up with the union.
 
 **Secrets in `recipes` are written `store:`, not `secret:`.** `bin/new_config`
 resolves every `secret:` reference in the whole configuration before any recipe

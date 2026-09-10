@@ -16,9 +16,7 @@ Provisioner::Recipe::Ubuntu::trogrunner - Ubuntu's C<deps> for L<Provisioner::Re
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else the recipe does is in the class this
-inherits from.
+=head2 deps
 
 These are all here to let something on CPAN build.  A guest running a
 source-built perl has no binary package to fall back on for any of it, so a
