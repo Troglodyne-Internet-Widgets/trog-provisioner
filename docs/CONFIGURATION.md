@@ -112,16 +112,16 @@ See [EXAMPLE.md](../EXAMPLE.md) for a worked one, and each recipe's own POD
 
 `_global` also carries the settings that describe how the **hypervisor** builds
 the guest rather than what goes on it: `size`, `memory` and `cpus`, and
-optionally `cpu_mode` and the `disk_*` keys. Those are copied into the guest's
-`provision.conf`, which is where `bin/provision` reads them; every one of them is
-commented in [example.test/provision.conf](../example.test/provision.conf), which
-is the reference for what each does.
+optionally `cpu_mode` and the `disk_*` keys. Those belong to the `vm` recipe, so
+`bin/recipes vm` prints what each of them is and what it defaults to. They are
+copied into the guest's `provision.conf`, which is where `bin/provision` reads
+them.
 
-The `disk_*` ones are all optional and none of them are emitted blind --
-`bin/provision` asks the hypervisor's libvirt and qemu what they will accept and
-leaves out anything they will not, so the same `recipes.yaml` builds on a machine
-that has not been reinstalled since 20.04 and on one that has. The guest's own
-side of the same disk is the `diskqueue` recipe.
+The `disk_*` ones are all optional and none of them are emitted blind -- the `vm`
+recipe asks the hypervisor's libvirt and qemu what they will accept and leaves
+out anything they will not, so the same `recipes.yaml` builds on a machine that
+has not been reinstalled since 20.04 and on one that has. The guest's own side of
+the same disk is the `diskqueue` recipe.
 
 A password is never written here. `secret:GROUP/ENTRY/FIELD` names an entry in
 `secrets.kdbx` and is resolved when the configuration is read -- see
@@ -134,6 +134,25 @@ Variables every recipe's templates for that domain can see.
 `user` is the one to know about: the service account the application runs as,
 which recipes set ownership to. Leaving it unset gives you the admin user, which
 is what you want while developing; a production host generally names one.
+
+`distro` is the other. It names the distribution the guest is built on, which
+decides three things nothing else can: the cloud image its disk is layered over,
+the packager the makefile invokes, and which version of each recipe supplies the
+package names -- `Provisioner::Recipe::Ubuntu::nginx` rather than
+`Provisioner::Recipe::nginx`. It defaults to `ubuntu`, which is what every guest
+built before there was anywhere to say so is running, so an existing
+`recipes.yaml` needs no change:
+
+```yaml
+_base:
+    _global:
+        distro: ubuntu
+```
+
+A name that is not one of `lib/Provisioner/Recipe/`'s distribution directories
+is refused up front, rather than quietly falling back to recipes that name no
+packages at all. `perldoc Provisioner::DistroRecipe` is what a distribution has
+to answer for; adding one is adding files.
 
 ## `_base`
 

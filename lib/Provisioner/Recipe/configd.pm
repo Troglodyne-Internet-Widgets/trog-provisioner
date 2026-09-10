@@ -109,14 +109,6 @@ C<version>, because a source is not asked what it is until it is unpacked.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{cpanminus make};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

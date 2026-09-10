@@ -82,14 +82,6 @@ sub required_recipes {
     );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{deluged deluge-web};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

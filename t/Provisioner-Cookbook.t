@@ -408,4 +408,56 @@ subtest 'where a domain lives is _global to say, not the data recipe' => sub {
     is( Provisioner::Cookbook->data_source( 'a.test', {} ), undef,          'and data_source deliberately has none' );
 };
 
+subtest 'the recipes that direct a build are not offered as things to put on one' => sub {
+    my %named = map { $_ => 1 } Provisioner::Cookbook->names();
+
+    foreach my $director ( Provisioner::Cookbook->directors() ) {
+        ok( !$named{$director},                                 "names() does not offer $director" );
+        ok( Provisioner::Cookbook->has($director),              "but has() still finds $director" );
+        ok( defined Provisioner::Cookbook->abstract($director), "and it says what it is for" );
+    }
+
+    ok( $named{nginx}, 'while an ordinary recipe is offered' );
+};
+
+subtest 'a distribution is a directory of recipes, and is found by being one' => sub {
+    my @distros = Provisioner::Cookbook->distros();
+
+    ok( scalar( grep { $_ eq 'ubuntu' } @distros ), 'ubuntu is a distribution here' );
+    is_deeply( [@distros], [ sort @distros ], 'and they come back sorted' );
+
+    # Read off the directory rather than listed anywhere, so adding a
+    # distribution is adding files.
+    foreach my $distro (@distros) {
+        ok( Provisioner::Cookbook->has($distro), "$distro has a distro recipe of its own, not just a directory" );
+    }
+};
+
+subtest 'load with a distribution' => sub {
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'a recipe with a version for this distribution' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'Ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'however it is capitalised' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'nosuch' ), 'Provisioner::Recipe::nginx',         'and the recipe itself where there is no version for it' );
+
+    # Absence is the only thing that falls back.  A subclass that does not
+    # compile, or one that forgot its parent, must take the run down rather than
+    # quietly leaving the guest with the base class's empty deps().
+    is( Provisioner::Cookbook->load( 'nginx', distro => '../../evil' ), 'Provisioner::Recipe::nginx', 'and a distribution name that is not one is not a path to load from' );
+};
+
+subtest 'the defaults a schema declares, for the callers that fill fields in themselves' => sub {
+    my %vm = Provisioner::Cookbook->defaults('vm');
+
+    # bin/new_config writes these into provision.conf and bin/new_guest writes
+    # them into a domain block; both read them from here so a guest that says
+    # nothing and a guest scaffolded by hand are the same guest.
+    is( $vm{memory}, 8092, 'memory' );
+    is( $vm{cpus},   4,    'cpus' );
+    ok( $vm{size} > 0, 'and a disk size' );
+
+    # Only fields that declare one: a field with no default is the operator's
+    # to supply, and reporting undef for it would read as an answer.
+    ok( !exists $vm{disk_cache}, 'a field with no default is not offered one' );
+    ok( !exists $vm{image},      'nor a required field' );
+};
+
 done_testing();

@@ -38,14 +38,6 @@ TODO: allow specification of specific SHA to check out.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{git autotools-dev autoconf libseccomp-dev libtool libtool-bin};
-    }
-    die "Unsupported packager";
-}
-
 sub required_recipes {
     return (
         perl       => sub { () },

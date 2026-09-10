@@ -37,8 +37,8 @@ use Trog::Guest();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Local();
-use File::Copy qw{copy};
 use Hash::Merge();
+use File::Copy qw{copy};
 use File::Find();
 
 # For secret getting/setting
@@ -127,6 +127,18 @@ and get out configs such that `bin/provision shared.host.name` in trog-provision
 _base and _shared sections in recipes.d/*.yaml are ignored.
 This is to prevent hard to diagnose issues with configuration merging.
 
+=head2 DRY RUNS
+
+C<--dryrun> here means one thing and only one: an existing F<key.rsa> is kept
+rather than replaced.  Everything else this program writes it still writes.
+
+That is narrower than F<bin/provision>'s flag of the same name, which is the one
+an operator passes, and it is narrow on purpose.  This program writes
+configuration and destroys nothing, so there is little for a dry run to protect
+-- except that key, whose public half is on a guest that is currently up.
+Replacing the private half here would be losing the way in to a machine nobody
+asked us to touch.  F<bin/provision> passes it through for exactly that.
+
 =head2 IP POOL
 
 To track which static IPs are available for new VMs, add an C<[ip_pool]> section
@@ -177,7 +189,7 @@ Where each path component past 'secret:' corresponds to group/key/parameter in a
 
 =cut
 
-my ( $cfile, $sfile, $pfile, $skip_ssh );
+my ( $cfile, $sfile, $pfile, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
@@ -259,6 +271,7 @@ sub main {
         'recipes=s'   => \$pfile,
         'skip_ssh'    => \$skip_ssh,
         'credentials' => \$credentials,
+        'dryrun'      => \$dryrun,
     );
 
     # The passphrase to the secrets database, for a run with no terminal to ask
@@ -281,16 +294,14 @@ sub main {
 
 # Settings that describe how the hypervisor should build the guest rather than
 # what goes on it, and so belong in provision.conf rather than in a template.
-# Every one of them is optional; see example.test/provision.conf for what each
-# does and docs/CONFIGURATION.md for where to put them.
-my @HV_SETTINGS = qw{
-  cpu_mode
-  disk_cache disk_io disk_detect_zeroes
-  disk_iothreads disk_queues
-  disk_logical_block_size disk_physical_block_size
-  disk_total_bytes_sec disk_read_bytes_sec disk_write_bytes_sec
-  disk_total_iops_sec  disk_read_iops_sec  disk_write_iops_sec
-};
+#
+# Asked of the recipe that consumes them rather than listed here.  There used to
+# be a hardcoded list, and a comment block in example.test/provision.conf saying
+# what each one did, and neither knew about the other -- so a knob added to one
+# was a knob missing from the other.  bin/recipes vm prints the answer now.
+sub hv_settings {
+    return sort keys %{ Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } ) };
+}
 
 # Where does this guest go?  Whichever hypervisor already has it, else
 # whichever has room, else -- with no fleet configured -- this machine.
@@ -397,6 +408,17 @@ sub handle_domain {
     my $global_config = delete $rconf->{$domain}{_global} // {};
     $global_config = { %$base_globals, %$global_config };
 
+    # Which distribution is this guest?  Named in _global, and what decides the
+    # base image, the packager and its invocations, which templates are searched
+    # first, and which version of each recipe supplies the package names.
+    #
+    # Checked here rather than at the require twenty lines down, because a typo'd
+    # `distro: unbuntu` that quietly fell back to the generic recipes would build
+    # a guest with no packages on it at all.
+    my $distro_name = $global_config->{distro} // 'ubuntu';
+    die "There is no '$distro_name' distro recipe, which $domain asks for as its distro.\n" . 'There is: ' . join( ', ', Provisioner::Cookbook->distros() ) . "\n"
+      unless any { $_ eq $distro_name } Provisioner::Cookbook->distros();
+
     # Which hypervisor is this going on?
     #
     # The recipe says how much memory, disk and CPU the guest wants, which is
@@ -459,15 +481,16 @@ sub handle_domain {
     die "Still unfilled in the configuration for $domain:\n" . join( '', map { "  $_\n" } @unfilled ) . "Each of these is a " . Provisioner::Cookbook->PLACEHOLDER . " that new_guest left for you.\n" if @unfilled;
 
     # Include site-specific stuff
-    my @paths   = qw{templates};
-    my $libdirs = $global_config->{libdir};
-    if ($libdirs) {
-        foreach my $libdir (@$libdirs) {
-            print "Including vendor libs from $libdir/lib\n";
-            push( @INC,   "$libdir/lib" );
-            push( @paths, "$libdir/templates" );
-        }
+    my $libdirs = $global_config->{libdir} // [];
+    foreach my $libdir (@$libdirs) {
+        print "Including vendor libs from $libdir/lib\n";
+        push( @INC, "$libdir/lib" );
     }
+
+    # The distribution's own directory first, so templates/ubuntu/nginx.tt wins
+    # over templates/nginx.tt by being found first -- which is the whole
+    # mechanism, and needs no code that knows about it.
+    my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
     # Read, not deleted.  It used to be lifted out of the configuration entirely,
     # which is what kept it from being a recipe the depsolver could see -- and so
@@ -551,9 +574,15 @@ sub handle_domain {
         }
     ) || die "Could not initialize template dir";
 
-    # TODO stop hardcoding some things, and document this in P::R
+    # The class, not an instance: everything asked of it here is a fact about the
+    # distribution rather than about this guest, and the object that renders its
+    # files is built by the depsolver below like every other recipe's.  Two
+    # objects for one recipe would be two chances to generate the guest's key.
+    my $distro = Provisioner::Cookbook->load($distro_name);
+
     my %provisioner_opts = (
-        target_packager => 'deb',
+        distro          => $distro_name,
+        target_packager => $distro->packager,
         script_loc      => $root_scripts,
         output_dir      => $cfg_dir,
         template_dirs   => \@paths,
@@ -566,7 +595,7 @@ sub handle_domain {
     # it.  Note this is a different variable from the $subdomain above: it is
     # every domain in the map, not the one we are building.
     foreach my $each_domain ( keys(%$ip_conf) ) {
-        $alias_conf->{$each_domain} = _coerce_arrayref( $alias_conf->{$each_domain} );
+        $alias_conf->{$each_domain} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$each_domain} );
         push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
@@ -602,20 +631,11 @@ sub handle_domain {
     my ( @pkgs, @generated );
 
     # Regrettably, we may be running this on an existing system so we gotta install pkgs anyways.
-    my ( $pkgr_invoc, $pkgr_up, $pkgr_rm );
-    if ( $provisioner_opts{target_packager} eq 'deb' ) {
-        push( @pkgs, qw{openssl openssh-server openssh-client rsync retry sendmail} );
-        $pkgr_invoc = 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options=--force-confdef -o Dpkg::Options=--force-confold -o Dpkg::Options=--force-overwrite --autoremove';
-        $pkgr_up    = 'DEBIAN_FRONTEND="noninteractive" apt-get upgrade -Uy';
-        $pkgr_rm    = 'DEBIAN_FRONTEND="noninteractive" apt-get remove -y';
-    }
-    else {
-        die "unsupported packager!";
-    }
+    push( @pkgs, $distro->deps() );
 
-    $global_config->{packager_invocation}        = $pkgr_invoc;
-    $global_config->{packager_up_invocation}     = $pkgr_up;
-    $global_config->{packager_remove_invocation} = $pkgr_rm;
+    $global_config->{packager_invocation}        = $distro->packager_invocation;
+    $global_config->{packager_up_invocation}     = $distro->packager_up_invocation;
+    $global_config->{packager_remove_invocation} = $distro->packager_remove_invocation;
 
     # Figure out whether the remote host is actually up.
     #
@@ -627,8 +647,13 @@ sub handle_domain {
     my ( $ssh, $target_is_up );
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $skip_ssh;
 
-    # Build a makefile based on our configured recipes
-    my @modules = sort { ( $rconf->{$domain}{$a}{order} // 'ZZZ' ) cmp ( $rconf->{$domain}{$b}{order} // 'ZZZ' ) } sort keys( %{ $rconf->{$domain} } );
+    # Build a makefile based on our configured recipes.
+    #
+    # The distro recipe goes in the list so that it is depsolved like anything
+    # else -- it is what pulls the vm recipe in, and both of them are configured
+    # by the same merge every other recipe is.  Neither ends up a module; they
+    # are partitioned back out below.
+    my @modules = ( $distro_name, sort { ( $rconf->{$domain}{$a}{order} // 'ZZZ' ) cmp ( $rconf->{$domain}{$b}{order} // 'ZZZ' ) } sort keys( %{ $rconf->{$domain} } ) );
 
     my %mf_vars;
     my @testdeps;
@@ -642,12 +667,8 @@ sub handle_domain {
 
     # First, run thru the modules and depsolve.
     for ( my $i = 0; $i < scalar(@modules); $i++ ) {
-        my $module = $modules[$i];
-        if ( !Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm") ) {
-            require "Provisioner/Recipe/$module.pm" or die "Could not load provisioner recipe $module";
-        }
-        my $builder = $builders{$module} // "Provisioner::Recipe::$module"->new(%provisioner_opts);
-        $builders{$module} //= $builder;
+        my $module  = $modules[$i];
+        my $builder = $builders{$module} //= Provisioner::Cookbook->load( $module, distro => $distro_name )->new(%provisioner_opts);
 
         my $pconf = $rconf->{$domain}{$module} // {};
 
@@ -677,10 +698,7 @@ sub handle_domain {
             # Hash::Merge picks a side where two dependants disagree.  The recipe
             # being depended on is the only thing that knows whether either side
             # is right, so it gets asked -- and dies if it does not know.
-            if ( !Provisioner::Utils::already_required("Provisioner/Recipe/$required.pm") ) {
-                require "Provisioner/Recipe/$required.pm" or die "Could not load provisioner recipe $required";
-            }
-            "Provisioner::Recipe::$required"->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
+            Provisioner::Cookbook->load( $required, distro => $distro_name )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
         }
 
         # Merge the configuration provided by all things depending on this.
@@ -696,6 +714,16 @@ sub handle_domain {
     # Deps should be processed after the last thing that dragged them in, and not before.
     # This is sometimes the case when we have multiple recipes depending on the same thing!
     @modules = Provisioner::Utils::lastuniq(@modules);
+
+    # And out come the two that direct the build rather than running in it --
+    # the distro recipe and the vm recipe it depends on.  Dropped here rather
+    # than never added, because they had to go through the depsolve above to be
+    # configured and to pull each other in.
+    #
+    # They are left out of @modules for more than the makefile, which skips a
+    # recipe with no fragment anyway: `modules` is handed to every template and
+    # every recipe as the list of what is on this guest, and neither of these is.
+    @modules = grep { $builders{$_}->is_module } @modules;
 
     my %guest_secrets;
 
@@ -795,25 +823,9 @@ sub handle_domain {
             }
         }
 
-        # Now build the various templates for the recipes
-        my %tf = $builder->template_files(@modules);
-        foreach my $template ( sort keys(%tf) ) {
-            my $destination = "$cfg_dir/$tf{$template}";
-
-            # If it's a template, render it.  Otherwise just copy it over.
-            if ( $template =~ m/\.tt$/ ) {
-                print "Rendering $template...\n";
-                my $rendered = $builder->render_file( "files/$template", %$global_config, %$pconf, full_aliases => $full_aliases, modules => \@modules );
-                print "Writing $template as $destination\n";
-                File::Slurper::Temp::write_binary( $destination, $rendered );
-            }
-            else {
-                print "Copying $template to $destination\n";
-                my $tloc = resolve_template_loc( $global_config->{libdir}, "files/$template" );
-                copy( $tloc, $destination ) or die "Could not copy static file $tloc to $destination";
-            }
-            push( @generated, $tf{$template} );
-        }
+        # Now build the various templates for the recipes.  These go in the
+        # payload, which is what separates them from the director's files below.
+        push( @generated, $builder->generate_files( $cfg_dir, %$global_config, %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
 
         # Write tests if any exist
         my @tests = $builder->tests();
@@ -891,19 +903,63 @@ sub handle_domain {
 
     my $r_text = join( ', ', @$resolvers );
 
+    # The files a guest first boots from: its network configuration, its
+    # cloud-init, the setup script that fetches the payload, and where it ships
+    # its logs.  Ordinary template_files of the distro recipe, rendered the way
+    # every other recipe's generated files are.
+    #
+    # After the loop rather than in it, because the user-data lists the packages
+    # passed in below, and @pkgs is not final until every recipe's deps have
+    # been collected and the conflicts ejected.
+    #
+    # Being last inside the loop would answer that too, and is how a dependency
+    # normally gets its turn -- lastuniq puts a recipe after the last thing that
+    # dragged it in.  It is the worse option because it only holds while every
+    # recipe on the guest drags this one in: it would mean injecting the
+    # dependency into every recipe in the distribution's namespace, and
+    # trusting that nothing outside it -- a vendor recipe, some later
+    # required_recipes -- ever sorts after them.  An explicit pass needs no such
+    # trust.
+    #
+    # It also keeps these out of the payload, which they have to be: user-data
+    # carries the private half of the guest's key, and setup.sh reaches the
+    # guest inside cloud-init rather than in the tarball it is the script for
+    # fetching.  In the loop that would be a special case in the loop.
+    #
+    # The distro recipe's, and only its.  The other director is the vm recipe,
+    # whose one file names a storage volume, a base image and a seed ISO by
+    # paths that do not exist until a hypervisor has made them -- so that one is
+    # generated by bin/provision, which is the program that has one in hand.
+    print "Writing what $fqdn first boots from, out of the $distro_name recipe\n";
+    $builders{$distro_name}->generate_files(
+        $cfg_dir,
+        %$global_config,
+        %{ $rconf->{$domain}{$distro_name} // {} },
+        packages       => \@pkgs,
+        ips            => [$static_ip],
+        gateway        => $gateway,
+        resolvers      => $resolvers,
+        contact_email  => $admin_email,
+        hv_internal_ip => $tld_ip,
+        payload_dir    => $basedir,
+        dryrun         => $dryrun,
+        modules        => \@modules,
+    );
+
     # Build a provision.conf
 
-    # Default to 40gb
-    my $size = $global_config->{size} // 42949672960;
-
-    # Default to 2 cpus
-    my $cpus = $global_config->{cpus} // 2;
-
-    # Default to 4g ram (mb)
-    my $mem = $global_config->{memory} // 4092;
+    # The image is the distribution's to name, and how big the guest is is the vm
+    # recipe's -- the same schema bin/new_guest writes a domain block from and
+    # `bin/recipes vm` prints.
+    my $image = $distro->base_image;
+    my %vm    = Provisioner::Cookbook->defaults('vm');
+    my $size  = $global_config->{size}   // $vm{size};
+    my $cpus  = $global_config->{cpus}   // $vm{cpus};
+    my $mem   = $global_config->{memory} // $vm{memory};
 
     my $pconf = qq(
-        image=https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+        distro=$distro_name
+        image=$image
         size=$size
         cpus=$cpus
         memory=$mem
@@ -916,6 +972,7 @@ sub handle_domain {
         transfer_ip=$transfer_ip
         transfer_user=$transfer_user
         transfer_port=$transfer_port
+        payload_dir=$basedir
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
 
@@ -925,8 +982,10 @@ sub handle_domain {
     # bin/provision, and a key that is absent means "whatever it decides".
     #
     # Absent rather than empty, because Config::Simple hands back an empty string
-    # for a bare `key=` and an empty string is not the same as no answer.
-    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { defined $global_config->{$_} && length $global_config->{$_} } @HV_SETTINGS );
+    # for a bare `key=` and an empty string is not the same as no answer.  And
+    # never one of the keys written out above, which would be a duplicate.
+    my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( "\n", $pconf );
+    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && defined $global_config->{$_} && length $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
@@ -1320,12 +1379,6 @@ sub _get_sftp {
     return ( $ssh, $target_is_up );
 }
 
-sub _coerce_arrayref {
-    my ($input) = @_;
-    return [] unless $input;
-    return ref $input eq 'ARRAY' ? $input : [$input];
-}
-
 sub get_dns_provider_token {
     my ($rconf) = @_;
     my @known_dns_providers = qw{pdns};
@@ -1333,16 +1386,6 @@ sub get_dns_provider_token {
         return $rconf->{$provider}{api_key} if exists $rconf->{$provider} && ( ref( $rconf->{$provider} ) eq 'HASH' );
     }
     return '';
-}
-
-sub resolve_template_loc {
-    my ( $libdirs, $template ) = @_;
-    foreach my $libdir ( '.', @$libdirs ) {
-        my $possibiru = "$libdir/templates/$template";
-        ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-        return $possibiru if -f $possibiru;
-    }
-    die "Could not find relevant template $template!";
 }
 
 main(@ARGV) unless caller;

@@ -52,30 +52,6 @@ Requires the nginx recipe.
 
 =cut
 
-sub deps {
-    my ( $self, %opts ) = @_;
-    return qw{
-      dbconfig-common
-      enchant-2
-      libapr1t64
-      libaprutil1-dbd-sqlite3
-      libaprutil1-ldap
-      libaprutil1t64
-      libenchant-2-2
-      php
-      php-fpm
-      php-auth-sasl
-      php-common
-      php-enchant
-      php-gd
-      php-intl
-      php-mbstring
-      php-sqlite3
-      php-zip
-      sqlite3
-    };
-}
-
 sub required_recipes {
     return ( nginx => sub { () } );
 }

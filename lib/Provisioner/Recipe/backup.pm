@@ -52,14 +52,6 @@ TODO: Make this module consult all the other loaded recipes to know what uid/gid
 
 =cut
 
-sub deps {
-    my ( $self, %opts ) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{rsync openssh-server};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

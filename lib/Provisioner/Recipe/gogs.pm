@@ -128,14 +128,6 @@ sub required_recipes {
     );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{git curl};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         required   => [qw{version admin_password}],

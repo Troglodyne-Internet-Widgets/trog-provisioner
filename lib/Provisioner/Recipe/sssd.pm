@@ -53,14 +53,6 @@ sub args {
     );
 }
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{sssd sssd-ldap libpam-sss libnss-sss};
-    }
-    die "Unsupported packager";
-}
-
 sub template_files {
     my ($self) = @_;
     return (

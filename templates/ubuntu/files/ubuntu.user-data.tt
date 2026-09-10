@@ -1,0 +1,94 @@
+[%# cloud-init user-data for a guest, rendered by Provisioner::Recipe::ubuntu.
+
+    The structure of the document is here; every value that is not a fixed literal
+    goes through the yaml filter, which is YAML::XS doing the quoting.  That is
+    deliberate -- these carry an operator account names, GECOS fields and a
+    contact address, and one of them holding a colon or an apostrophe would
+    otherwise produce a file cloud-init rejects and a guest that never boots.
+
+    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    string and swallows the template as far as the next quote. -%]
+#cloud-config
+fqdn: [% domain | yaml %]
+manage_etc_hosts: localhost
+final_message: Boot configuration complete.
+
+package_update: true
+package_upgrade: true
+packages:
+[% packages | yaml %]
+
+[%# The mirror on the hypervisor first and the archive after it, so a guest
+    still builds when the mirror is behind or missing a package.  Insecure
+    repositories are allowed because the mirror is not signed; it is reached
+    over the NAT bridge, which nothing else is on. -%]
+apt:
+  primary:
+    - arches:
+        - default
+      uri: "mirror+file:/etc/apt/mirrorlist"
+  security:
+    - arches:
+        - default
+      uri: "mirror+file:/etc/apt/mirrorlist"
+  conf: |
+    Acquire {
+        Retries "12";
+        Force-IPv4: true;
+        AllowInsecureRepositories: true;
+    }
+    APT {
+        Get {
+            Assume-Yes "true";
+            Fix-Broken "true";
+        }
+    }
+
+users:
+[% users | yaml %]
+
+[%# Everything here is deferred except the mirrorlist, which apt needs before
+    the packages above are installed rather than after. -%]
+write_files:
+  - path: /root/.ssh/id_rsa
+    owner: root:root
+    permissions: '0600'
+    defer: true
+    content: |
+[% guest_key.private | indent %]
+  - path: /root/.ssh/id_rsa.pub
+    owner: root:root
+    permissions: '0600'
+    defer: true
+    content: |
+[% guest_key.public | indent %]
+  - path: /root/setup.sh
+    owner: root:root
+    permissions: '0775'
+    defer: true
+    content: |
+[% setup_script | indent %]
+  - path: /etc/apt/mirrorlist
+    owner: root:root
+    permissions: '0644'
+    defer: false
+    content: |
+      http://[% hv_internal_ip | mark_raw %]/ubuntu	priority:1
+      http://archive.ubuntu.com/ubuntu	priority:2
+      http://security.ubuntu.com/ubuntu	priority:3
+
+rsyslog:
+  install_rsyslog: true
+  config_dir: /etc/rsyslog.d
+[%# At the same depth as write_files below, so one indent filter serves both:
+      a block scalar has to sit deeper than the key it belongs to, and two
+      nestings would want two filters that differ only in a number. -%]
+  configs:
+  - filename: 10-ship_logs_to_hv.conf
+    content: |
+[% rsyslog_guest | indent %]
+
+[%# Last, and in this order: root mail has to go somewhere before anything the
+    setup script runs can fail and try to report it. -%]
+runcmd:
+[% runcmd | yaml %]

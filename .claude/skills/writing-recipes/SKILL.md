@@ -119,6 +119,20 @@ Note what the key is when you write one.  `53` and `53/udp` are two limits
 rather than one, because the key is the port *and* the protocol -- so a
 conflict resolver keyed on the whole string needs no special case for them.
 
+## Packages are not configuration
+
+`deps()` is the one method that does not live in the recipe.  A package name is
+a fact about a distribution, so it goes in that distribution's version of the
+recipe -- `Provisioner::Recipe::Ubuntu::nginx`, a subclass of
+`Provisioner::Recipe::nginx`, holding a `deps()` and nothing else.  The recipe
+itself keeps everything that is true wherever it is installed.
+
+The failure to know about is quiet: a recipe with no subclass for the
+distribution in hand inherits the base class's empty `deps()` and installs
+nothing at all.  `t/recipes.t` asserts every recipe that needs packages has them
+for every distribution there is, which is what turns that into a test failure
+rather than a service that will not start twenty minutes into a build.
+
 ## The rest of writing a recipe
 
 Not repeated here, because it is written down:

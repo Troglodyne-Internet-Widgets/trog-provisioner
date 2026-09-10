@@ -55,19 +55,6 @@ it.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-
-        # deps is the list cloud-init installs at first boot, so it can only
-        # name Ubuntu packages: the PGDG repository is not added until the
-        # global fragment runs, which installs the versioned server-dev package
-        # from it.
-        return qw{postgresql-common pigz};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

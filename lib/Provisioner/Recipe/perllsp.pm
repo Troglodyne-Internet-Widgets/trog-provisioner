@@ -61,14 +61,6 @@ the admin user's C<~/.vim/> directory.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{nodejs npm vim git};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         properties => {

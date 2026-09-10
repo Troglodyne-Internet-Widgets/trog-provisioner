@@ -1,6 +1,9 @@
 #!/bin/bash
 
-# ATD script to actually do what we need to get set up
+# ATD script to actually do what we need to get set up.
+#
+# Rendered by Provisioner::Recipe::ubuntu and carried onto the guest inside
+# cloud-init's write_files, which is why it is not in the payload it fetches.
 
 # Wait until clown-init is done
 cloud-init status --wait
@@ -11,7 +14,7 @@ Host *
 Compression yes
 ForwardAgent yes
 
-Host %THISIP%
+Host [% transfer_ip %]
 StrictHostKeyChecking no
 UserKnownHostsFile=/dev/null
 User root
@@ -27,16 +30,16 @@ chmod 0600 /root/.ssh/config
 # build tree are then unreachable by path and the rm below silently removes
 # nothing.  /var/tmp is where the FHS puts a working directory that has to
 # outlive that sort of thing anyway.
-scp -P %PORT% -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %USER%\@%THISIP%:%THISDIR%/%DOMAIN%/data.tar.gz /var/tmp
+scp -P [% transfer_port %] -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null [% transfer_user %]\@[% transfer_ip %]:[% payload_dir %]/[% domain %]/data.tar.gz /var/tmp
 
 cd /var/tmp
-mkdir domainsetup_%DOMAIN%
-tar -zxf data.tar.gz -C /var/tmp/domainsetup_%DOMAIN%
+mkdir domainsetup_[% domain %]
+tar -zxf data.tar.gz -C /var/tmp/domainsetup_[% domain %]
 
-cd /var/tmp/domainsetup_%DOMAIN%
+cd /var/tmp/domainsetup_[% domain %]
 
 # Run the makefile
-make 2>&1 | tee /var/log/%DOMAIN%.setup.log
+make 2>&1 | tee /var/log/[% domain %].setup.log
 
 cd /
-rm -rf /var/tmp/domainsetup_%DOMAIN% /var/tmp/data.tar.gz
+rm -rf /var/tmp/domainsetup_[% domain %] /var/tmp/data.tar.gz

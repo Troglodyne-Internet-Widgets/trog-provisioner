@@ -104,20 +104,6 @@ binlogs, which is what the pinning is for.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-
-        # The mariadb packages are deliberately absent: cloud-init installs
-        # deps before the makefile runs, so naming them here would install
-        # Ubuntu's and leave the pin to downgrade them.  install_mariadb.sh
-        # takes the set from the pinned repository instead.  pigz is the backup
-        # script's.
-        return qw{pigz};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

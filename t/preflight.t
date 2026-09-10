@@ -254,4 +254,24 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/6 things to fix first/, 'counted, all in one run' );
 };
 
+subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {
+    my $ubuntu = Test::MockModule->new('Provisioner::Recipe::ubuntu');
+
+    # Current, so there is nothing to report.
+    $ubuntu->redefine( current_release => sub { return 'noble' } );
+    is_deeply( Trog::Bin::Preflight::note_stale_image(), { ok => 1 }, 'a pin that is current says nothing' );
+
+    # A release behind.
+    $ubuntu->redefine( current_release => sub { return 'plucky' } );
+    my $note = Trog::Bin::Preflight::note_stale_image();
+    ok( !$note->{ok}, 'a pin that has fallen behind is reported' );
+    like( $note->{fix}, qr/noble/,  'naming what it builds on' );
+    like( $note->{fix}, qr/plucky/, 'and what it would build on now' );
+
+    # A mirror that will not answer is not a reason to hold up a provision, so
+    # a distribution with no answer gets no note rather than a wrong one.
+    $ubuntu->redefine( current_release => sub { return undef } );
+    is_deeply( Trog::Bin::Preflight::note_stale_image(), { ok => 1 }, 'and a distribution that could not be asked says nothing either' );
+};
+
 done_testing();

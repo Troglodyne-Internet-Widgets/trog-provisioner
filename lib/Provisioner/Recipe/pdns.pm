@@ -38,14 +38,6 @@ use Text::Xslate;
 use Net::IP;
 use File::Slurper;
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl python3-requests-unixsocket};
-    }
-    die "Unsupported packager";
-}
-
 sub rate_limits {
 
     # A resolver asks over UDP and asks often; a recursor in front of this one

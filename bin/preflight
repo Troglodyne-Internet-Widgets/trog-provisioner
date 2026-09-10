@@ -96,7 +96,7 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm );
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image );
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -386,6 +386,47 @@ FIX
 # run over its absence would refuse runs that would have worked.  It is the
 # difference between guessing at why a guest will not boot and reading its disk,
 # so it is worth saying it is missing.
+# Is the image guests are built on still the one the distribution would put them
+# on?  A note rather than a check: a pin one release behind is a decision
+# somebody may well have made on purpose, and a mirror that will not answer is
+# no reason to refuse to build anything.
+sub note_stale_image {
+    my @stale;
+
+    foreach my $name ( Provisioner::Cookbook->distros() ) {
+        my $distro = Provisioner::Cookbook->load($name);
+
+        # Undef means the distribution has no way of being asked, or was asked
+        # and did not answer.  Either way there is nothing to report.
+        my $current = $distro->current_image or next;
+        next if $current eq $distro->base_image;
+
+        push( @stale, { name => $name, have => $distro->base_image, want => $current } );
+    }
+
+    return { ok => 1 } unless @stale;
+
+    my $fix = join(
+        q{},
+        map {
+            "$_->{name} builds on
+  $_->{have}
+and the current release is
+  $_->{want}
+"
+        } @stale
+    );
+
+    return {
+        ok   => 0,
+        what => 'A distro recipe is pinned to an image that is no longer current',
+        fix  => $fix . <<'FIX' };
+Guests already built are unaffected; this is about the next one.  Change the
+release in the distro recipe when you want to move, and rebuild -- see
+perldoc Provisioner::DistroRecipe.
+FIX
+}
+
 sub note_libguestfs {
     my ($hv) = @_;
 

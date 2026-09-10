@@ -30,14 +30,6 @@ Optionally set up port forwarding.
 
 use File::Path qw{rmtree};
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{ufw};
-    }
-    die "Unsupported packager";
-}
-
 sub enrich {
     my ( $self, %opts ) = @_;
 

@@ -16,6 +16,7 @@ t/new_guest.t - bin/new_guest and bin/recipes, the two front ends to the cookboo
 =cut
 
 use Test::More;
+use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
@@ -65,13 +66,20 @@ subtest 'the domain block asks the hypervisor for enough to build with' => sub {
     my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
     my $global = $config->{'vm.test'}{_global};
 
-    # 8092 and 4, not the 2048 and 2 this scaffolded before.  A domain carrying
-    # the perl recipe builds perl from source and installs Perl::Critic and
-    # friends with their test suites; in 2GB that thrashes rather than fails,
-    # and a provision takes hours with nothing in any log to say why.
-    is( $global->{memory}, 8092,         'memory' );
-    is( $global->{cpus},   4,            'cpus' );
-    is( $global->{size},   20 * 1024**3, 'and 20GB of disk' );
+    # The vm recipe's, rather than a second set of numbers here: a domain block
+    # that leaves these out gets exactly the same guest, because bin/new_config
+    # falls back to the same schema.  The reason for these particular ones is
+    # written down where they now live.
+    my %vm = Provisioner::Cookbook->defaults('vm');
+    is( $global->{memory}, $vm{memory}, 'memory is the vm recipe default' );
+    is( $global->{cpus},   $vm{cpus},   'as are cpus' );
+    is( $global->{size},   $vm{size},   'and the disk' );
+
+    # And they are the ones that matter, said once so that changing them here
+    # is a deliberate act rather than a drift.
+    is( $vm{memory}, 8092,         'enough memory to build perl in' );
+    is( $vm{cpus},   4,            'and enough CPUs' );
+    is( $vm{size},   40 * 1024**3, 'on a 40GB overlay' );
     ok( !exists $global->{user}, 'no service account unless asked for: a scratch guest wants none' );
 
     ($config) = Trog::Bin::NewGuest::build(

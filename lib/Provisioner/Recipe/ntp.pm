@@ -42,21 +42,6 @@ offset exceeds 1 second during the first 3 clock updates.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{chrony};
-    }
-    die "Unsupported packager";
-}
-
-sub dep_conflicts {
-    my ($self) = @_;
-
-    # Remove anything that conflicts with chrony
-    return qw{ntp ntpdate systemd-timesyncd};
-}
-
 sub args {
     return (
         type       => 'object',

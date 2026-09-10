@@ -52,14 +52,6 @@ You'll probably want to use a separate disk mounted as the base_dir via L<Provis
 
 =cut
 
-sub deps {
-    my ( $self, %opts ) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{rsync openssh-server};
-    }
-    die "Unsupported packager";
-}
-
 sub args {
     return (
         type       => 'object',

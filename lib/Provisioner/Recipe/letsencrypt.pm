@@ -64,14 +64,6 @@ already, and C<restore_state> will not write over one.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{certbot lexicon dehydrated};
-    }
-    die "Unsupported packager";
-}
-
 sub template_files {
     my ($self) = @_;
 

@@ -96,6 +96,64 @@ sub files_in {
     return sort @found;
 }
 
+=head3 coerce_arrayref($value)
+
+C<$value> as an arrayref, whatever it arrived as.
+
+C<Config::Simple> hands back a bare string for a single-valued key and an
+arrayref for a comma separated one, and a recipe's configuration is written by
+hand -- so the same field is a list in one domain and a string in the next.
+Everything downstream wants a list.
+
+An absent value and one that is present and empty both come back as an empty
+list.  C<Config::Simple> tells those apart -- a missing key is undef, a bare
+C<key=> is the empty string -- and nothing that asks this cares.
+
+=cut
+
+sub coerce_arrayref {
+    my ($value) = @_;
+    return [] unless defined $value && length $value;
+    return $value if ref $value eq 'ARRAY';
+    return [$value];
+}
+
+=head3 dirs_in($dir)
+
+The names of the directories directly in C<$dir>, sorted, with no leading path.
+
+C<files_in>'s other half, and the same rules: top level only, and nothing for a
+directory that is not there.  Both prune rather than walk, because the question
+is what is I<in> a directory rather than what is under it.
+
+=cut
+
+sub dirs_in {
+    my ($dir) = @_;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
+    return () unless defined $dir && -d $dir;
+
+    my @found;
+    File::Find::find(
+        {
+            no_chdir => 1,
+            wanted   => sub {
+                my $path = $File::Find::name;
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
+                return unless -d $path;
+                return if $path eq $dir;
+
+                $File::Find::prune = 1;
+                ( my $name = $path ) =~ s{\A\Q$dir\E/}{};
+                push( @found, $name );
+            },
+        },
+        $dir
+    );
+
+    return sort @found;
+}
+
 =head3 lastuniq(@array)
 
 List::Util::uniq, but with the last occurrence's order preserved instead of the first.

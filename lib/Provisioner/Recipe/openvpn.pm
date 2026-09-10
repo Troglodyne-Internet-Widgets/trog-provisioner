@@ -98,14 +98,6 @@ is, which is what keeps the certificate working.
 
 =cut
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{openvpn easy-rsa};
-    }
-    die "Unsupported packager";
-}
-
 sub rate_limits {
     my ( $self, %opts ) = @_;
 

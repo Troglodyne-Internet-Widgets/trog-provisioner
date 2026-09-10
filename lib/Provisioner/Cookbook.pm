@@ -62,9 +62,45 @@ same answer from a checkout and from an installed dist.
 
 sub recipe_dir { return File::Basename::dirname(__FILE__) . '/Recipe' }
 
+=head2 template_dir
+
+Where the templates are, found relative to this file for the same reason
+C<recipe_dir> is.
+
+=cut
+
+sub template_dir { return Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../templates' ) }
+
+=head2 template_dirs($distro, @libdirs)
+
+The template search path for a build, in the order a renderer should try it.
+
+A distribution's own directory comes before the generic one, so
+F<templates/ubuntu/nginx.tt> wins over F<templates/nginx.tt> by being found
+first -- which is the whole mechanism, and needs no code that knows about it.
+Every fragment is written against apt and systemd today and so lives under
+F<ubuntu/>; F<templates/> holds what is genuinely shared, which is
+F<makefile.tt> and most of F<files/> and F<tests/>.
+
+The same for each vendor F<libdir>, after the checkout, since a vendor recipe
+adds to what ships here rather than overruling it.
+
+=cut
+
+sub template_dirs {
+    my ( $class, $distro, @libdirs ) = @_;
+
+    my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
+    return [ map { ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ } @bases ];
+}
+
 =head2 names
 
-Every recipe there is, sorted.
+Every recipe you can ask a domain to be built with, sorted.
+
+Not quite every module under F<Recipe/>: the two that direct a build rather than
+taking part in it are left out, since neither is something to write under a
+domain.  See C<directors>.
 
 =cut
 
@@ -74,7 +110,47 @@ sub names {
     my $dir = $class->recipe_dir;
     die "Could not read $dir\n" unless -d $dir;
 
-    return map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
+    my %director = map { $_ => 1 } $class->directors();
+    return grep { !$director{$_} }
+      map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
+}
+
+=head2 directors
+
+The recipes that direct a build instead of running in one: C<vm>, and the
+distro recipe for every distribution there is a namespace for.
+
+They are recipes in every way that counts -- they declare C<args>, they are
+configured out of F<recipes.yaml>, C<bin/recipes> will print their schema -- but
+naming one under a domain would be as odd as naming the hypervisor there, so
+C<names> does not offer them.  C<has> and C<load> still answer for them.
+
+Answered by name rather than by asking each module its C<is_module>, because
+C<names> deliberately loads nothing: that is the whole reason C<abstract> reads
+the file instead.  C<t/recipes.t> holds the two answers against each other.
+
+=cut
+
+sub directors {
+    my ($class) = @_;
+    return ( 'vm', $class->distros() );
+}
+
+=head2 distros
+
+The distributions there are recipes for, lowercased -- the C<distro> a domain's
+C<_global> may name.
+
+One per capitalised subdirectory of the recipe directory: C<Recipe/Ubuntu/>
+holds Ubuntu's specialisations, and C<Recipe/ubuntu.pm> is the distro recipe
+itself.  Read off the directory rather than listed, so adding a distribution is
+adding files.
+
+=cut
+
+sub distros {
+    my ($class) = @_;
+    return sort map { lc } Provisioner::Utils::dirs_in( $class->recipe_dir );
 }
 
 =head2 has($name)
@@ -92,16 +168,30 @@ sub has {
     return 1;
 }
 
-=head2 load($name)
+=head2 load($name, %opts)
 
 Load the recipe and hand back its class name.  Dies naming the recipe, and
 saying what there is instead, because a typo here is the likeliest reason to
 be calling it.
 
+C<distro> asks for that distribution's specialisation of the recipe --
+C<Provisioner::Recipe::Ubuntu::nginx> rather than C<Provisioner::Recipe::nginx>
+-- and is how the package names for a build get chosen.  A recipe with no
+specialisation for that distribution comes back as itself, which is right: most
+recipes install nothing, and a shared C<deps> is a shared C<deps>.
+
+B<Absence is the only thing that falls back.>  The subclass is looked for on
+disk and then C<require>d outright, so a subclass that does not compile takes
+the run down.  Wrapping that in an C<eval> and falling back on failure would
+turn a typo in F<Ubuntu/mail.pm> into a guest with no postfix on it and nothing
+said about why -- and the same goes for a subclass that forgot its C<parent>,
+which is what the second C<isa> catches: it would otherwise inherit the base
+class's empty C<deps> and install nothing, quietly.
+
 =cut
 
 sub load {
-    my ( $class, $name ) = @_;
+    my ( $class, $name, %opts ) = @_;
 
     die "No recipe named '" . ( $name // '' ) . "'.\n" . "Try `bin/recipes` for the ones there are.\n"
       unless $class->has($name);
@@ -112,7 +202,19 @@ sub load {
     die "$module loaded but is not a Provisioner::Recipe\n"
       unless $module->isa('Provisioner::Recipe');
 
-    return $module;
+    return $module unless defined $opts{distro} && $opts{distro} =~ m/\A\w+\z/;
+
+    my $namespace = ucfirst lc $opts{distro};
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    return $module unless -f $class->recipe_dir . "/$namespace/$name.pm";
+
+    my $specific = "Provisioner::Recipe::${namespace}::$name";
+    require "Provisioner/Recipe/$namespace/$name.pm";    ## no critic (Modules::RequireBarewordIncludes)
+
+    die "$specific loaded but is not a $module.  A distro's version of a recipe has to\ninherit from it -- add `use parent qw{$module}`.\n"
+      unless $specific->isa($module);
+
+    return $specific;
 }
 
 =head2 abstract($name)
@@ -185,6 +287,28 @@ sub properties {
     my ( $class, $spec ) = @_;
     return {} unless ref $spec eq 'HASH';
     return ref $spec->{properties} eq 'HASH' ? $spec->{properties} : {};
+}
+
+=head2 defaults($name, %opts)
+
+What a recipe's schema declares as defaults, as a hash of field to value.
+
+For the callers that have to fill a field in themselves rather than letting the
+validator do it -- C<bin/new_config> writing F<provision.conf>, C<bin/new_guest>
+writing a domain block -- so that the number they write is the one the recipe
+would have used and not a second opinion about it.
+
+Only the top level, and only fields that declare one.  A nested default belongs
+to the object it is declared in and is the validator's to apply; see
+L<Provisioner::Recipe/args>.
+
+=cut
+
+sub defaults {
+    my ( $class, $name, %opts ) = @_;
+
+    my $props = $class->properties( { $class->spec( $name, %opts ) } );
+    return map { exists $props->{$_}{default} ? ( $_ => $props->{$_}{default} ) : () } keys %$props;
 }
 
 =head2 PLACEHOLDER

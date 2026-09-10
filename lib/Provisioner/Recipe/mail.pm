@@ -157,14 +157,6 @@ use UUID                  qw{uuid};
 use MIME::Base64          qw{encode_base64};
 use Crypt::Digest::SHA512 qw{sha512};
 
-sub deps {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{postfix postfix-pcre dovecot-imapd dovecot-pop3d dovecot-antispam dovecot-sieve dovecot-lmtpd postgrey opendmarc opendkim spamassassin clamav amavisd-new rpm2cpio 7zip bzip2 lrzip lzop unrar-free};
-    }
-    die "Unsupported packager";
-}
-
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
@@ -174,14 +166,6 @@ sub required_recipes {
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
         $self->SUPER::required_recipes(%opts),
     );
-}
-
-sub dep_conflicts {
-    my ($self) = @_;
-    if ( $self->{target_packager} eq 'deb' ) {
-        return qw{sendmail};
-    }
-    die "Unsupported packager";
 }
 
 sub args {
