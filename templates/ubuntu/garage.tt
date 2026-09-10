@@ -4,17 +4,14 @@ id garage 2>/dev/null || useradd -r -d [% data_dir %] -s /usr/sbin/nologin garag
     garage node that is not already in garage.toml, and the two things
     remote_files names.  Neither leg of that round trip used to happen.
 
-    The fetch is an sftp session as the admin user with no sudo, and these were
-    garage:garage 0750, which it reads nothing out of and says nothing about.
-    The group goes to the admin user rather than a readable copy being
-    staged the way the openvpn pki is: an object store is the wrong size to keep
-    two of, and a snapshot taken at provision time would be stale the moment
-    anything was written to a bucket.  Setgid, with the UMask in
-    garage.service, is what keeps that true for the files garage writes later
-    rather than only for the ones sitting here now.  The trade is the usual one
-    and worth saying out loud: the objects are readable from here on by whoever
-    holds the admin account, and travel into the data directory and into any
-    backup taken of it.
+    The fetch reads the guest as root now (issue #76), so a directory garage
+    keeps to itself comes off it whatever the group says; issue #98 took back
+    the admin group and the setgid bit these used to be given for the same
+    reason redis's directory was -- an unprivileged sftp fetch reading
+    garage:garage 0750 and finding nothing, with nothing said about why.
+    restore_state still lands what it moves in owned by whoever ran the fetch
+    locally, not by garage, so the chown below stays; only the group it chowns
+    to changed.
 
     Restoring is simpler here than it is for redis, because garage is not
     running yet -- it is downloaded further down and started from a postrun task
@@ -35,8 +32,8 @@ if [ -n "$$NEWEST" ] && [ ! -e '[% metadata_dir %]/db.lmdb' ]; then \
     cp -a "$$NEWEST" '[% metadata_dir %]/db.lmdb'; \
     echo "garage: started from the snapshot at $$NEWEST"; \
 fi
-chown -R garage:[% admin_user %] '[% data_dir %]' '[% metadata_dir %]'
-find '[% data_dir %]' '[% metadata_dir %]' -type d -exec chmod 2750 {} +
+chown -R garage:garage '[% data_dir %]' '[% metadata_dir %]'
+chmod 0750 '[% data_dir %]' '[% metadata_dir %]'
 # Download garage binary (idempotent - skipped if same version already installed)
 if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/null | grep -qF '[% version %]'; then \
     curl -fsSL \
