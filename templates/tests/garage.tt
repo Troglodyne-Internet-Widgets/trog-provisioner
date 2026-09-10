@@ -35,10 +35,10 @@ foreach my $bucket (qw{[% buckets.join(' ') %]}) {
     like($info, qr/Bucket:/, "bucket $bucket exists") or diag $info;
 }
 
-# Both halves of remote_files, starting with the one that fails without a word:
-# bin/new_config comes for these over sftp as [% admin_user %] with no sudo, and
-# garage:garage 0750 reads back as an empty directory rather than as a refusal.
-# A node can look perfectly well backed up right up until somebody rebuilds it.
+# Both halves of remote_files. bin/new_config fetches these as root now (issue
+# #76), so the package's own garage:garage 0750 is enough for the fetch to read
+# them -- and issue #98 took back the admin group and the setgid bit that used
+# to buy that when the fetch had neither.
 # The objects, and the snapshot of the metadata rather than the metadata itself:
 # LMDB writes db.lmdb 0600 whatever the directory says, so what garage is asked
 # to snapshot is what can be carried off the guest.
@@ -50,15 +50,9 @@ my %garage_dirs = (
 foreach my $what (sort keys %garage_dirs) {
     my $dir = $garage_dirs{$what};
     my @st = stat $dir;
-    is(scalar getgrgid($st[5] // -1), '[% admin_user %]', "the $what directory is group [% admin_user %]");
-    ok($st[2] & 02000, "and setgid, so what garage writes into it next is too")
+    is(scalar getgrgid($st[5] // -1), 'garage', "the $what directory is still group garage");
+    ok(!($st[2] & 02000), "and not setgid, since nothing needs the group carried onto new files")
         or diag sprintf('%s is mode %04o', $dir, $st[2] & 07777);
-
-    # Asked as the account that will be doing the asking.  garage.service sets
-    # UMask=0027 so the files underneath are 0640, and the group above is the
-    # whole of what makes them readable at all.
-    my $denied = `su -s /bin/sh -c 'find "$dir" ! -readable -print' [% admin_user %] 2>&1`;
-    is($denied, '', "[% admin_user %] can read everything under $dir") or diag $denied;
 }
 
 # And the restore half.  restore_state moves the salvage out of the domain
