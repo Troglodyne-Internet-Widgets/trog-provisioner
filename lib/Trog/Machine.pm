@@ -467,6 +467,14 @@ nothing out of them and exits happy -- which is indistinguishable from a guest
 that has no state yet.  It needs passwordless sudo on the far side and fails
 rather than waiting when there is none.
 
+B<Nothing is ever deleted here.>  rsync could, and this is the only direction
+left that it could apply to -- the two pushes that used to go to the hypervisor
+are gone, so C<get_dir> is the only caller.  It must not: this is a salvage, and
+the copy it is writing into is the only one there is.  A guest that stopped
+producing something, or that could not be read on one run, would take our copy
+of it with it.  The backup is the thing that mirrors a source and it deletes on
+purpose, having history to fall back on; this has neither.
+
 What arrives is owned by whoever is running this, not by the uids it had on the
 guest: rsync only restores ownership when the B<receiving> end is root, and this
 end is not.  Putting it back where the service wants it, as whoever the service
