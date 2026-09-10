@@ -57,14 +57,20 @@ the one that replaces it, before garage is started, so a rebuilt node comes up
 with its buckets and their contents rather than as an empty single-node cluster
 with a fresh layout.
 
-Both directories are owned C<garage> with the admin user as their group and the
-setgid bit set, and C<garage.service> is given a C<UMask> that leaves what garage
-writes readable to that group.  The objects are therefore readable by whoever
-holds the admin account, and travel into the data directory and into whatever
-backup is taken of it.
+Both directories used to be owned C<garage> with the admin user as their group
+and the setgid bit set, from when the fetch was an sftp session as that user
+with no sudo and C<garage:garage> 0750 read back as an empty directory and said
+nothing about it: the objects were readable from then on by whoever held the
+admin account, and travelled into the data directory and into whatever backup
+was taken of it.
 
-B<That is no longer needed for the salvage.>  The fetch reads the guest as root
-now.  Taking the widening out is issue #98.
+The fetch reads the guest as root now (issue #76), so that is no longer needed,
+and issue #98 took it back out: both directories are C<garage:garage> again, no
+admin group and no setgid.  C<restore_state> still lands what it moves in owned
+by whoever ran the fetch locally, not by garage, so the fragment still chowns
+them back to C<garage:garage> afterwards.  C<garage.service> keeps its
+C<UMask=0027> regardless -- narrower than the systemd default either way, and
+no longer tied to a group nothing reads through anymore.
 
 Only the default paths are salvaged.  C<remote_files> is called without the
 domain configuration, so a node told to keep its data somewhere else is fetched
@@ -242,9 +248,7 @@ sub remote_files {
     # produces a database with a torn page in it that restores looking fine.
     # garage-snapshot.sh asks garage for one nightly; see garage.tt for the leg
     # that puts it back.
-    # templates/garage.tt is the other half: it gives both directories the admin
-    # user as their group -- which the fetch no longer needs, now that it reads
-    # the guest as root; see issue #98 -- and it calls restore_state on each of
+    # templates/garage.tt is the other half: it calls restore_state on each of
     # them before garage is started.
     #
     # The defaults in practice, whatever the domain configured.  Nothing hands
