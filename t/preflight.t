@@ -101,11 +101,11 @@ subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
 subtest 'passwordless sudo is the one that would hang the run' => sub {
     my $hv = Test::MockModule->new('Trog::HV');
 
-    $hv->redefine( run => sub { 0 } );
+    $hv->redefine( run_cmd => sub { 0 } );
     my ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
     ok( $result->{ok}, 'sudo -n succeeding passes' );
 
-    $hv->redefine( run => sub { 1 } );
+    $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
     ok( !$result->{ok}, 'and failing does not' );
     like( $result->{fix}, qr/NOPASSWD/,                  'the guidance is the sudoers line' );
@@ -121,13 +121,13 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     $hv->redefine( describe => sub { 'doge@hv.test' } );
 
     # Both there.
-    $hv->redefine( run => sub { 0 } );
+    $hv->redefine( run_cmd => sub { 0 } );
     $which->redefine( which => sub { '/usr/bin/rsync' } );
     my ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
     ok( $result->{ok}, 'rsync at both ends passes' );
 
     # Missing on the hypervisor.
-    $hv->redefine( run => sub { 1 } );
+    $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
     ok( !$result->{ok}, 'missing on the hypervisor fails' );
     like( $result->{what}, qr/doge\@hv[.]test/,   'naming the end that has not got it' );
@@ -135,7 +135,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 
     # Missing here, which is just as fatal and much easier to overlook: this is
     # the machine that runs the rsync, not the one it talks to.
-    $hv->redefine( run => sub { 0 } );
+    $hv->redefine( run_cmd => sub { 0 } );
     $which->redefine( which => sub { undef } );
     ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
     ok( !$result->{ok}, 'missing here fails too' );
@@ -143,7 +143,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 
     # A local hypervisor is one machine, and is not asked twice about it.
     $hv->redefine( is_local => sub { 1 } );
-    $hv->redefine( run      => sub { die 'a local hypervisor should not be asked over ssh' } );
+    $hv->redefine( run_cmd  => sub { die 'a local hypervisor should not be asked over ssh' } );
     $which->redefine( which => sub { '/usr/bin/rsync' } );
     ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
     ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
@@ -237,7 +237,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     # xorriso, is two round trips where one would do.
     my $hv = Test::MockModule->new('Trog::HV');
     $hv->redefine( is_local  => sub { 1 } );
-    $hv->redefine( run       => sub { 1 } );              # no passwordless sudo
+    $hv->redefine( run_cmd   => sub { 1 } );              # no passwordless sudo
     $hv->redefine( iso_maker => sub { die "none\n" } );
     $hv->redefine( vmm       => sub { die "no\n" } );
 

@@ -263,7 +263,7 @@ sub fetch {
     my $log = log_path($domain);
 
     # Root's, because libvirt wrote it.
-    my $content = $hv->capture("sudo cat '$log'");
+    my $content = $hv->capture_cmd("sudo cat '$log'");
     unless ( defined $content && length $content ) {
         print {*STDERR} "Nothing at $log on the hypervisor.\n" . "Was this started with --console?\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
@@ -368,7 +368,7 @@ sub keys_to {
     # virsh rather than Sys::Virt::Domain::send_key, which takes numeric
     # keycodes.  The table that turns a name like KEY_ESC into one is inside
     # virsh, and Sys::Virt exposes nothing that reaches it.
-    $hv->run( qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys ) == 0    ## no critic (PreferredBinaries)
+    $hv->run_cmd( qw{virsh -c qemu:///system send-key}, $domain, qw{--holdtime 100}, @keys ) == 0
       or die "Could not send @keys to $domain.\n";
 
     return 0;
@@ -380,7 +380,7 @@ sub keys_to {
 sub guest_tool {
     my ( $hv, $tool, @args ) = @_;
 
-    my $out = $hv->capture( join ' ', 'sudo', $tool, map { _shq($_) } @args );
+    my $out = $hv->capture_cmd( join ' ', 'sudo', $tool, map { _shq($_) } @args );
     my $rc  = $? >> 8;
 
     die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install guestfs-tools\n" if $rc == 127;

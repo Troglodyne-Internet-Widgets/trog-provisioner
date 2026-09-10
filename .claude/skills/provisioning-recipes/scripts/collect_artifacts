@@ -17,7 +17,7 @@ use File::Path qw{make_path};
 use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 
 use Trog::Guest();
 use Trog::HV();
@@ -111,8 +111,9 @@ which one has it, the same way C<bin/destroy> finds a guest to destroy.
 sub main {
     my @args = @_;
 
-    my ($into, $user, $key, $host, $uri, $hvconf, $help);
-    GetOptionsFromArray(\@args,
+    my ( $into, $user, $key, $host, $uri, $hvconf, $help );
+    GetOptionsFromArray(
+        \@args,
         'into=s'    => \$into,
         'user=s'    => \$user,
         'key=s'     => \$key,
@@ -121,31 +122,30 @@ sub main {
         'hvconf=s'  => \$hvconf,
         'help'      => \$help,
     );
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     my $domain = shift @args;
-    pod2usage(-exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed')
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $guest = connect_to($domain, $user, $key, $host, $uri, $hvconf);
+    my $guest = connect_to( $domain, $user, $key, $host, $uri, $hvconf );
 
-    $into //= File::Temp::tempdir("trog-artifacts-$domain-XXXXXX", TMPDIR => 1);
+    $into //= File::Temp::tempdir( "trog-artifacts-$domain-XXXXXX", TMPDIR => 1 );
     make_path($into);
 
     # Asked for, not read: a failed `systemctl restart` says only "Job for
     # nginx.service failed", and the sentence that says why is in the journal.
     # Three recipes were stuck on one nginx message for a whole sweep because
     # nothing collected it.
-    my @results = map { capture_to($guest, $_->[0], "$into/$_->[1]") } probes();
-    push @results, map { fetch($guest, $domain, $_, $into) } artifacts($domain);
+    my @results = map { capture_to( $guest, $_->[0], "$into/$_->[1]" ) } probes();
+    push @results, map { fetch( $guest, $domain, $_, $into ) } artifacts($domain);
 
     print {*STDERR} "\n";
     printf {*STDERR} "%-34s %s\n", $_->{remote},
-        ($_->{ok} ? "-> $_->{local} ($_->{bytes} bytes)" : $_->{why}) for @results;
+      ( $_->{ok} ? "-> $_->{local} ($_->{bytes} bytes)" : $_->{why} ) for @results;
 
     my @absent = grep { !$_->{ok} } @results;
-    print {*STDERR} "\n" . scalar(@absent) . " of " . scalar(@results)
-      . " not there, which is itself worth reading something into.\n" if @absent;
+    print {*STDERR} "\n" . scalar(@absent) . " of " . scalar(@results) . " not there, which is itself worth reading something into.\n" if @absent;
 
     print "$into\n";
     return 0;
@@ -172,46 +172,49 @@ sub artifacts {
 sub probes {
     return (
         # Which units are unhappy, and what they said when they gave up.
-        [ 'systemctl --failed --no-pager --no-legend',        'failed-units.log' ],
+        [ 'systemctl --failed --no-pager --no-legend', 'failed-units.log' ],
+
         # warning, not err: a daemon that refuses to start usually explains
         # itself below error level, and systemd's own "Failed to start" -- which
         # is all err catches -- says nothing at all.
-        [ 'journalctl -b --no-pager -p warning',              'journal-errors.log' ],
+        [ 'journalctl -b --no-pager -p warning', 'journal-errors.log' ],
 
         # And the units that are down or flapping, with the log lines that go
         # with them.  A service in auto-restart is not "failed" yet, so it does
         # not show up in systemctl --failed while it is still trying.
-        [ q{for u in $(systemctl list-units --type=service --state=failed,auto-restart,activating}
-          . q{ --no-legend --plain 2>/dev/null | awk '{print $1}'); }
-          . q{do systemctl status --no-pager -l -n 40 "$u"; done},
-          'unhappy-units.log' ],
+        [
+            q{for u in $(systemctl list-units --type=service --state=failed,auto-restart,activating} . q{ --no-legend --plain 2>/dev/null | awk '{print $1}'); } . q{do systemctl status --no-pager -l -n 40 "$u"; done},
+            'unhappy-units.log'
+        ],
 
         # nginx will not tell you what is wrong with a configuration by failing
         # to start; it will tell you immediately if you ask it.
-        [ 'command -v nginx >/dev/null && nginx -t 2>&1 || echo "no nginx here"',
-          'nginx-t.log' ],
+        [
+            'command -v nginx >/dev/null && nginx -t 2>&1 || echo "no nginx here"',
+            'nginx-t.log'
+        ],
     );
 }
 
 sub capture_to {
-    my ($guest, $command, $local) = @_;
+    my ( $guest, $command, $local ) = @_;
 
     # Single quotes escaped the POSIX way, because the command goes inside a
     # pair of them: a probe containing an awk '{print $1}' otherwise closed the
     # quoting early and the guest answered with a syntax error instead.
     ( my $quoted = $command ) =~ s/'/'\\''/g;
 
-    my $content = eval { $guest->capture("sudo sh -c '$quoted'") } // q{};
-    File::Slurper::Temp::write_text($local, $content);
+    my $content = eval { $guest->capture_cmd("sudo sh -c '$quoted'") } // q{};
+    File::Slurper::Temp::write_text( $local, $content );
 
     return { remote => "\$ $command", ok => 1, local => $local, bytes => length $content };
 }
 
 # Everything about how to reach the guest, from the configuration that built it.
 sub connect_to {
-    my ($domain, $user, $key, $host, $uri, $hvconf) = @_;
+    my ( $domain, $user, $key, $host, $uri, $hvconf ) = @_;
 
-    my $hv         = hypervisor($domain, $uri, $hvconf);
+    my $hv         = hypervisor( $domain, $uri, $hvconf );
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$domain";
 
@@ -220,24 +223,20 @@ sub connect_to {
 
     # The guest answers on its NAT lease whether or not its static address ever
     # came up, which is the case that matters when something went wrong.
-    $host //= $hv->lease_ip('default', mac => $hv->guest_mac($domain, 0));
-    die "Could not find a lease for $domain, so there is nothing to connect to.\n"
-      . "Pass --host if you know where it is.\n" unless $host;
+    $host //= $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) );
+    die "Could not find a lease for $domain, so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
 
     print {*STDERR} "Collecting from $domain at $user\@$host\n";
 
-    my $guest = Trog::Guest->new(name => $domain, host => $host, user => $user, key_path => $key);
+    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => $key );
 
     # Prove the connection before reading anything through it.  Without this a
     # guest that cannot be reached at all reports every artifact as absent,
     # which reads like a guest that got nowhere rather than a collector that
     # did -- and those want opposite things done about them.
-    my $whoami = eval { $guest->capture('whoami') };
+    my $whoami = eval { $guest->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
-    die "Could not get a shell on $user\@$host for $domain.\n"
-      . "  key:  $key\n"
-      . "  host: $host (the NAT lease; --host overrides)\n"
-      . "Try it by hand: ssh -i $key $user\@$host\n"
+    die "Could not get a shell on $user\@$host for $domain.\n" . "  key:  $key\n" . "  host: $host (the NAT lease; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
       unless defined $whoami && length $whoami;
 
     return $guest;
@@ -246,16 +245,15 @@ sub connect_to {
 # Which machine is holding this guest.  The same question bin/destroy asks, and
 # the same answer: whichever one in the fleet actually has it.
 sub hypervisor {
-    my ($domain, $uri, $hvconf) = @_;
+    my ( $domain, $uri, $hvconf ) = @_;
 
-    return Trog::HV->new(uri => $uri) if $uri;
+    return Trog::HV->new( uri => $uri ) if $uri;
 
-    my $fleet = Trog::Hypervisors->load($hvconf // Trog::Hypervisors->default_path());
+    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
     return Trog::HV->new() unless $fleet->configured;
 
     my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in the fleet has $domain.\n"
-      . "Pass --connect if it is somewhere the fleet does not list.\n";
+      or die "No hypervisor in the fleet has $domain.\n" . "Pass --connect if it is somewhere the fleet does not list.\n";
 
     return $hv;
 }
@@ -264,8 +262,7 @@ sub admin_user {
     my ($path) = @_;
 
     my $config = eval { Config::Simple->new($path) }
-      or die "No provision.conf at $path to read the admin user out of.\n"
-      . "Pass --user, or point --domaindir somewhere that has one.\n";
+      or die "No provision.conf at $path to read the admin user out of.\n" . "Pass --user, or point --domaindir somewhere that has one.\n";
 
     return $config->param('admin_user') // 'root';
 }
@@ -274,7 +271,7 @@ sub admin_user {
 # Makefile running as root.  The guest's admin user has NOPASSWD, set up by the
 # cloud-init that built it.
 sub fetch {
-    my ($guest, $domain, $remote, $into) = @_;
+    my ( $guest, $domain, $remote, $into ) = @_;
 
     # Asked separately from the read, so that "not there" and "there and empty"
     # are told apart.  An empty new-outblocked.log means the firewall stopped
@@ -282,11 +279,11 @@ sub fetch {
     return { remote => $remote, ok => 0, why => 'not there' }
       unless $guest->file_exists($remote);
 
-    my $content = eval { $guest->capture("sudo cat '$remote'") } // q{};
+    my $content = eval { $guest->capture_cmd("sudo cat '$remote'") } // q{};
 
     my $name  = $remote =~ s{.*/}{}r;
     my $local = "$into/$name";
-    File::Slurper::Temp::write_text($local, $content);
+    File::Slurper::Temp::write_text( $local, $content );
 
     return { remote => $remote, ok => 1, local => $local, bytes => length $content };
 }

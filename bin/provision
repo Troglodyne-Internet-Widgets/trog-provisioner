@@ -657,12 +657,12 @@ sub provision_domain {
 
         # Remove the semaphore that says this was run, then run the needed targets
         $guest->run_sudo( qw{rm}, "$ci_dir/sem/cc_package_update_upgrade_install" );
-        print $guest->capture('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
+        print $guest->capture_cmd('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
         $guest->run_sudo( qw{rm}, "$ci_dir/sem/cc_users_groups" );
-        print $guest->capture('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
+        print $guest->capture_cmd('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
 
         my $ips         = _coerce_array( $config->param('ips') );
-        my $existing_nc = $guest->capture('sudo cat /etc/netplan/50-cloud-init.yaml');
+        my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
         my $parsed      = YAML::XS::Load($existing_nc);
 
         my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $domain, 1 ) );
@@ -680,7 +680,7 @@ sub provision_domain {
             # home directory and being moved and chmodded afterwards.
             $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
               or die "Could not install the netplan config on $domain";
-            $output = $guest->capture('sudo netplan apply');
+            $output = $guest->capture_cmd('sudo netplan apply');
             chomp $output;
             print "$output\n" if $output;
         }
@@ -690,7 +690,7 @@ sub provision_domain {
           or die "Could not ship the setup script to $domain";
         place_guest_secrets( $guest, $domain );
         print "Scheduling job to run setup script\n";
-        print $guest->capture("sudo at now -f /root/setup-$domain.sh");
+        print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
         print "Done.\n";
         return ( $reuser, $old_ssh_ip );
     }

@@ -1204,7 +1204,7 @@ sub _salvage_mtimes {
     } @$watched;
 
     ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $guest->capture("sudo sh -c '$quoted'") // q{};
+    my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my %mtime;
     foreach my $line ( split "\n", $said ) {

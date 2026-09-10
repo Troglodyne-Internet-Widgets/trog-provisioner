@@ -451,7 +451,7 @@ sub _guest_addresses {
     } @names;
 
     ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $hv->capture("sudo sh -c '$quoted'") // q{};
+    my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my ( @found, %seen );
     foreach my $line ( split "\n", $said ) {
@@ -510,7 +510,7 @@ sub _live_addresses {
     $script .= " wait; ip -4 neigh show dev $bridge";
 
     ( my $quoted = $script ) =~ s/'/'\\''/g;
-    my $said = $hv->capture("sudo sh -c '$quoted'") // q{};
+    my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my ( %live, %mac );
     foreach my $line ( split "\n", $said ) {

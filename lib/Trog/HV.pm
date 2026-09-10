@@ -644,10 +644,10 @@ sub base_image {
     # To a partial name first: a half-downloaded file that libvirt has already
     # noticed is worse than no file at all.
     my $partial = "$path.partial";
-    $self->run( qw{curl -fL --retry 3 -o}, $partial, $url ) == 0
+    $self->run_cmd( qw{curl -fL --retry 3 -o}, $partial, $url ) == 0
       or die "Could not fetch $url onto " . $self->describe . "\n";
 
-    $self->run( 'mv', $partial, $path ) == 0 or die "Could not put the base image in place\n";
+    $self->run_cmd( 'mv', $partial, $path ) == 0 or die "Could not put the base image in place\n";
     $self->refresh_pool();
 
     return $self->volume_path($name) // $path;
@@ -759,12 +759,12 @@ sub cloudinit_iso {
 
     # -volid cidata is not decoration: NoCloud finds its seed by that label.
     my @cmd = $maker eq 'xorriso' ? ( $maker, '-as', 'mkisofs' ) : ($maker);
-    my $rc  = $self->run(
+    my $rc  = $self->run_cmd(
         @cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
         map { "$workdir/$_" } sort keys %files
     );
 
-    $self->run( qw{rm -rf}, $workdir );
+    $self->run_cmd( qw{rm -rf}, $workdir );
     die "Could not build the cloud-init seed for $domain\n" if $rc;
 
     $self->refresh_pool();
@@ -782,7 +782,7 @@ sub iso_maker {
     return $self->{_iso_maker} if $self->{_iso_maker};
 
     foreach my $maker (qw{xorriso genisoimage mkisofs}) {
-        next if $self->run( 'sh', '-c', "command -v $maker >/dev/null 2>&1" );
+        next if $self->run_cmd( 'sh', '-c', "command -v $maker >/dev/null 2>&1" );
         return $self->{_iso_maker} = $maker;
     }
 
@@ -1008,7 +1008,7 @@ sub has_tpm {
     # tpmrm0 rather than tpm0: the resource manager is what anything on a modern
     # kernel actually opens, and its absence on a machine that has tpm0 means the
     # kernel did not bring the TPM up properly anyway.
-    my $answer = $self->capture(q{test -c /dev/tpmrm0 && command -v swtpm > /dev/null && echo yes});
+    my $answer = $self->capture_cmd(q{test -c /dev/tpmrm0 && command -v swtpm > /dev/null && echo yes});
     chomp $answer if defined $answer;
 
     return $self->{has_tpm} = ( ( $answer // '' ) eq 'yes' ) ? 1 : 0;
@@ -1131,7 +1131,7 @@ sub qemu_img_options {
     return $self->{qemu_img_options} if $self->{qemu_img_options};
 
     # -o help lists the options for the format and exits; it wants no filename.
-    my $help    = $self->capture('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
+    my $help    = $self->capture_cmd('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
     my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gmx );
 
     print "Could not ask qemu-img on " . $self->describe . " which qcow2 options it takes,\n" . "so this disk gets none of the optional ones.\n"
@@ -1160,7 +1160,7 @@ sub pool_fstype {
     # configuration file rather than from us.
     ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
 
-    my $type = $self->capture("stat -f -c %T '$quoted' 2>/dev/null") // '';
+    my $type = $self->capture_cmd("stat -f -c %T '$quoted' 2>/dev/null") // '';
     chomp $type;
 
     return $self->{pool_fstype} = $type;
@@ -1196,7 +1196,7 @@ sub pool_takes_direct_io {
     # asked to have anything installed on, and coreutils is not a dependency
     # the way an interpreter would be.  It opens with O_DIRECT and writes a
     # block, so a filesystem that refuses either one fails here.
-    my $taken = $self->run(
+    my $taken = $self->run_cmd(
         'sh', '-c',
         'dd if=/dev/zero of="$1" bs=4096 count=1 oflag=direct >/dev/null 2>&1; status=$?; rm -f "$1"; exit $status',
         'sh', $probe,
@@ -1220,7 +1220,7 @@ sub zfs_version {
     my ($self) = @_;
     return $self->{zfs_version} if exists $self->{zfs_version};
 
-    my $version = $self->capture('cat /sys/module/zfs/version 2>/dev/null') // '';
+    my $version = $self->capture_cmd('cat /sys/module/zfs/version 2>/dev/null') // '';
     chomp $version;
 
     return $self->{zfs_version} = length $version ? $version : undef;
@@ -1298,7 +1298,7 @@ sub bridge_device {
     my ($self) = @_;
     return $self->{bridge_device} if defined $self->{bridge_device};
 
-    my $device = $self->capture(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
+    my $device = $self->capture_cmd(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
     die "Could not determine outbound bridge device on " . $self->uri . "!\n" . "Set bridge_device in provision.conf if autodetection can't find it.\n"
       unless $device;
@@ -1310,7 +1310,7 @@ sub virbr_device {
     my ($self) = @_;
     return $self->{virbr_device} if defined $self->{virbr_device};
 
-    my $device = $self->capture(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
+    my $device = $self->capture_cmd(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
     die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in provision.conf if autodetection can't find it.\n"
       unless $device;
@@ -1323,7 +1323,7 @@ sub virbr_ip {
     return $self->{virbr_ip} if defined $self->{virbr_ip};
 
     my $device = $self->virbr_device;
-    my $ip     = $self->capture("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
+    my $ip     = $self->capture_cmd("ip addr show dev $device | grep inet | head -n1 | awk '{print \$2}'");
     die "Could not determine IP address for $device\n" unless $ip;
     chomp $ip;
     $ip =~ s{/\d+\z}{};

@@ -157,7 +157,7 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
     package FakeHV;
     sub new           { my ( $class, $said ) = @_; return bless { said => $said }, $class }
     sub bridge_device { return 'br0' }
-    sub capture       { return $_[0]->{said} }
+    sub capture_cmd   { return $_[0]->{said} }
 }
 
 subtest 'what is answering on the wire' => sub {

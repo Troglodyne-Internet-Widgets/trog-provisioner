@@ -59,7 +59,7 @@ sub main {
     # awk program does not close the quoting early and get answered with a
     # syntax error.
     ( my $quoted = join( q{ }, @command ) ) =~ s/'/'\\''/g;
-    print $guest->capture("sudo sh -c '$quoted'") // q{};
+    print $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     return 0;
 }
