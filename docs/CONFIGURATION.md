@@ -295,7 +295,8 @@ Four more parts are worth knowing before writing one.
 source, runs the test suite of every distribution that goes on top of it, and
 only then installs the forty-odd this repository declares. Measured on a
 four-CPU guest that does not fit the ninety minutes `Trog::Guest` allows, so
-build one with `TROG_SETUP_TIMEOUT=3h bin/provision <domain>`. Forgetting costs
+build one with `TROG_SETUP_TIMEOUT=3h bin/provision <domain>`. (How much of that
+is avoidable is #123.) Forgetting costs
 you the guest test result and nothing else -- the queue runs under `atd` on the
 guest and carries on after `bin/provision` has stopped waiting.
 
