@@ -10,9 +10,11 @@ use re '/aa';
 
 use parent qw{Provisioner::DistroRecipe};
 
+# What ssh-keygen defaults to for RSA, which is what this used to shell out to.
+my $RSA_BITS = 3072;
+
 use File::Slurper();
 use HTTP::Tiny();
-use IPC::Run3();
 use List::Util qw{any uniq};
 use Provisioner::Utils();
 use Trog::HV();
@@ -334,6 +336,10 @@ whichever machine is holding the payload -- which is the caller's to do, not
 this recipe's, since it is a change to a machine rather than to a domain
 directory.  C<bin/destroy> is what takes it back out.
 
+In perl rather than through C<ssh-keygen>: see
+L<Provisioner::Utils/write_ssh_keypair>, which is where the one thing that is
+not obvious about writing these lives.
+
 A real run rotates the key, which is fine: the guest is rebuilt around whatever
 is written here.  A dry run does not, because the guest that is up has the
 public half of the existing one, so replacing the private half here would be
@@ -347,17 +353,15 @@ sub guest_keypair {
 
     my $path = "$self->{output_dir}/key.rsa";
 
-    # This used to pipe yes(1) in to answer the overwrite prompt; removing the
-    # old key first means there is no prompt.
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     unless ( $opts{dryrun} && -f $path && -f "$path.pub" ) {
         unlink $path, "$path.pub";
-        IPC::Run3::run3( [ qw{ssh-keygen -t rsa -f}, $path, qw{-N}, q{}, qw{-q} ], \undef, \undef, undef );
+        Provisioner::Utils::write_ssh_keypair( $path, RSA => $RSA_BITS, $opts{domain} );
     }
 
     foreach my $half ( $path, "$path.pub" ) {
         ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-        die "ssh-keygen made no $half for $opts{domain}\n" unless -f $half;
+        die "No $half was made for $opts{domain}\n" unless -f $half;
         ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
         chmod 0600, $half;
     }

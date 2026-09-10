@@ -38,6 +38,7 @@ use Test::MockModule qw{strict};
 use YAML::XS();
 
 use FindBin::libs;
+use Provisioner::Utils();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -246,7 +247,10 @@ CONF
             ],
 
             write_files => [
-                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/BEGIN OPENSSH PRIVATE KEY/) },
+
+                # Any private key container ssh will load: Net::SSH::Perl::Key
+                # writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.
+                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\A-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/) },
                 { path => '/root/.ssh/id_rsa.pub', owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\Assh-rsa /) },
                 { path => '/root/setup.sh',        owner => 'root:root', permissions => '0775', defer => bool(1), content => re(qr/cloud-init status --wait/) },
 
@@ -330,7 +334,18 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
     };
 
     my $first = $build->();
-    like( $first, qr/BEGIN OPENSSH PRIVATE KEY/, 'a domain with no key gets one' );
+
+    # A private key ssh will load, rather than one particular container:
+    # Provisioner::Utils::write_ssh_keypair goes through Net::SSH::Perl::Key,
+    # which writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.  Both
+    # load; what matters is that the halves belong together, which is what
+    # ssh_pubkey_from_private answers.
+    like( $first, qr/\A-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/, 'a domain with no key gets one' );
+    is(
+        Provisioner::Utils::ssh_pubkey_from_private("$dir/key.rsa"),
+        ( File::Slurper::read_text("$dir/key.rsa.pub") =~ s/ [^ ]*\n?\z//r ),
+        'and its public half is the one written beside it'
+    );
 
     # The guest that is up has the public half of this, so a run that is meant
     # to change nothing must not replace the private half.

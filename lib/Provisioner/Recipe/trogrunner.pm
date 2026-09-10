@@ -13,7 +13,7 @@ use parent qw{Provisioner::Recipe};
 use YAML::XS();
 use Text::Xslate();
 use File::Slurper();
-use Net::SSH::Perl::Key();
+use Provisioner::Utils();
 use URI();
 use URI::Split();
 use File::Temp();
@@ -487,42 +487,17 @@ sub guest_secrets {
     );
 }
 
-# Net::SSH::Perl::Key rather than shelling out to ssh-keygen: it is the same
-# format and there is no process to get the quoting of.  ed25519 for the reason
-# bin/preflight suggests it -- short enough that an authorized_keys line stays
-# readable.
-#
-# Rewrapped afterwards, which is not optional.  write_private emits the whole
-# base64 payload on one line; OpenSSH reads that quite happily, and CryptX --
-# which is what Provisioner::Utils::ssh_pubkey_from_private uses to derive the
-# public half out of the store later -- refuses it as "pem_decode_openssh
-# failed: Invalid input packet".  RFC 7468 puts the limit at 64, so the strict
-# reader is the correct one.  Measured: the decoded bytes are identical, and
-# rewrapping the same key makes both read it.
+# Provisioner::Utils::write_ssh_keypair, which is where the rewrap that makes
+# these readable by both OpenSSH and CryptX lives -- see its POD.  ed25519 for
+# the reason bin/preflight suggests it: short enough that an authorized_keys
+# line stays readable.
 sub _hypervisor_key {
-    my $key = Net::SSH::Perl::Key->keygen( 'Ed25519', $ED25519_BITS );
-    $key->{comment} = 'trog-provisioner runner';
-
     my $dir  = File::Temp::tempdir( CLEANUP => 1 );
     my $path = "$dir/id_ed25519";
-    $key->write_private($path);
 
-    my $written = File::Slurper::read_text($path);
-    return _rewrap_pem($written);
-}
+    Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => $ED25519_BITS, 'trog-provisioner runner' );
 
-# PEM at 64 columns, which is what RFC 7468 asks for and what every other writer
-# of these does.
-sub _rewrap_pem {
-    my ($pem) = @_;
-
-    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}s
-      or die "trogrunner: the key that was just generated is not in PEM form\n";
-
-    $body =~ s/\s//g;
-    my @lines = ( $body =~ m/(.{1,64})/g );
-
-    return join( "\n", $head, @lines, $tail );
+    return ( File::Slurper::read_text($path) =~ s/\n\z//r );
 }
 
 =head3 remote_files
