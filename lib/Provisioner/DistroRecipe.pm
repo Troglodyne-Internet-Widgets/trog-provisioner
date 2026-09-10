@@ -256,8 +256,17 @@ sub mirror_uri {
     }
 
     my $address = ( $opts{ipmap} // {} )->{$mirror};
-    die "No address for '$mirror', which $domain is configured to use as its package mirror.\n" . "A bare name is resolved out of the ip pool, because a guest runs cloud-init before\n" . "it has DNS -- so it has to be a domain this installation assigns an address to.\n" . "A mirror anywhere else is named as a URL instead:\n\n" . "    mirror: http://$mirror" . $self->mirror_path . "\n"
-      unless defined $address && length $address;
+    if ( !defined $address || !length $address ) {
+        my $url = 'http://' . $mirror . $self->mirror_path;
+        die <<"NOPE";
+No address for '$mirror', which $domain is configured to use as its package mirror.
+A bare name is resolved out of the ip pool, because a guest runs cloud-init before
+it has DNS -- so it has to be a domain this installation assigns an address to.
+A mirror anywhere else is named as a URL instead:
+
+    mirror: $url
+NOPE
+    }
 
     return "http://$address" . $self->mirror_path;
 }

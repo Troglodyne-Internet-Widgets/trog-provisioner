@@ -161,9 +161,9 @@ sub BLOCK_SCALAR_INDENT { return 6 }
 =head2 @fmts = $recipe->formatters()
 
 C<yaml> hands a value to L<YAML::XS> and puts back what it says, for the places
-a document takes one -- with one correction, for a scalar PyYAML would read as a base-60
-number and libyaml would not.
-C<indent> is for a whole file carried inside another as a block scalar.
+a document takes one -- with one correction, for a scalar PyYAML would read as
+a base-60 number and libyaml would not.  C<indent> is for a whole file carried
+inside another as a block scalar.
 
 =cut
 
