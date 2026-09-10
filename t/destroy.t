@@ -32,6 +32,10 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 require_ok("$FindBin::Bin/../bin/destroy")
   or BAIL_OUT('bin/destroy does not load; the install is incomplete');
 
@@ -58,7 +62,7 @@ subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     my ( @deleted, %exists );
     %exists = map { $_ => 1 } ( "$domain-qcow2", "$domain-cloudinit.iso", 'baseimage-qcow2' );
 
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( volume        => sub { $exists{ $_[1] } } );
     $hv_mock->redefine( delete_volume => sub { push @deleted, $_[1]; return 1 } );
 

@@ -27,6 +27,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 my $script = "$FindBin::Bin/../bin/preflight";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
@@ -60,7 +64,7 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
 
     # Sys::Virt binds the API of the libvirt release it was built against, so a
     # mismatch shows up as a missing constant rather than as a version error.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     my $sv = Test::MockModule->new('Sys::Virt');
 
     $hv->redefine( vmm                 => sub { bless {}, 'Sys::Virt' } );
@@ -87,7 +91,7 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
 };
 
 subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( vmm => sub { die "no route to host\n" } );
 
     my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_libvirt( Trog::HV->new() ) } );
@@ -99,7 +103,7 @@ subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
 };
 
 subtest 'passwordless sudo is the one that would hang the run' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
 
     $hv->redefine( run_cmd => sub { 0 } );
     my ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
@@ -114,7 +118,7 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
 };
 
 subtest 'rsync is the one thing both ends have to have' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $which = Test::MockModule->new('File::Which');
 
     $hv->redefine( is_local => sub { 0 } );
@@ -150,7 +154,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 };
 
 subtest 'a guest has to have an address of ours to fetch from' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $local = Test::MockModule->new('Trog::Local');
 
     $hv->redefine( virbr_ip => sub { '192.168.122.1' } );
@@ -181,7 +185,7 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
 # domain.
 subtest 'a directory a recipe fetches has to be on this machine' => sub {
     my $dir = tempdir( CLEANUP => 1 );
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( ssh_host => sub { 'hv.test' } );
 
     my $present = "$dir/dotfiles";
@@ -235,7 +239,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
 
     # Being told about the sudo, and then a fix later about the missing
     # xorriso, is two round trips where one would do.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( is_local  => sub { 1 } );
     $hv->redefine( run_cmd   => sub { 1 } );              # no passwordless sudo
     $hv->redefine( iso_maker => sub { die "none\n" } );
@@ -308,7 +312,7 @@ subtest 'a fleet with nothing keeping its logs is told so, once there is a sink'
 
     # No leftovers on the hypervisor for most of this: the upgrade case has its
     # own subtest below, and it short-circuits everything else when it fires.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( list_dir => sub { return () } );
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
@@ -342,7 +346,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.troglodyne.net:\n    nginx:\nold.troglodyne.net:\n    nginx:\n" );
     Provisioner::Cookbook->forget();
 
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
     # Only the per-domain ones this tool wrote.  20-ufw.conf and 50-default.conf

@@ -33,6 +33,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Trog::HV();
 use Provisioner::Cookbook();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # No skip_all if the prereqs are missing: a suite that passes because it never
 # ran is worse than one that fails.  bin/provision uses XML::Twig,
 # Net::OpenSSH::More and Net::EmptyPort itself, so this explodes and tells you
@@ -83,7 +87,7 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     # The config generator runs first now; this test is about what happens
     # after it, so there is nothing for it to generate from.
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( mkpath      => sub { 1 } );
     $hv_mock->redefine( file_exists => sub { 1 } );
 
@@ -171,7 +175,7 @@ subtest 'a dry run applies nothing' => sub {
     use warnings 'once';
 
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     my $loc = Test::MockModule->new('Trog::Local');
 
@@ -234,7 +238,7 @@ subtest 'a dry run applies nothing' => sub {
 # beside the domain is what ends up in the seed.
 subtest 'a real provision reaches the vm recipe with what new_config wrote' => sub {
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc = Test::MockModule->new('Trog::Local');
 
     my %seeded;
@@ -318,7 +322,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
 
 subtest 'a rebuild releases the leases the guests before it held' => sub {
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc = Test::MockModule->new('Trog::Local');
 
     # A guest already there, and two leases on file for its MAC: the one it has,
@@ -485,7 +489,7 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
 
     my @order;
 
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( mkpath      => sub { 1 } );
     $hv_mock->redefine( file_exists => sub { 1 } );
     $hv_mock->redefine( domain_dir  => sub { $dir } );

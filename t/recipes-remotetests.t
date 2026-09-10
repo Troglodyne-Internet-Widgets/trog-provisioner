@@ -46,7 +46,11 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 # happens to be one -- so the two facts the generator wants off it are answered
 # here instead.
 require Trog::HV;
-my $hv_mock = Test::MockModule->new('Trog::HV');
+
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
+my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
 

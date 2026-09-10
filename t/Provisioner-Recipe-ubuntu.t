@@ -46,7 +46,11 @@ use Provisioner::Utils();
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
-use Trog::HV();
+# Loaded so that blessing into it below blesses into something real, and so
+# Test::MockModule in strict mode has methods to find.  The backend rather than
+# Trog::HV, because that is where the libvirt methods these mocks replace live,
+# and Trog::HV requires it lazily.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
 
 my $DOMAIN    = 'vm.test.test';
@@ -87,8 +91,8 @@ sub settings {
 sub generated {
     my (%extra) = @_;
 
-    my $hv = Test::MockModule->new('Trog::HV');
-    $hv->redefine( new      => sub { return bless {}, 'Trog::HV' } );
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( new      => sub { return bless {}, 'Trog::HV::Libvirt' } );
     $hv->redefine( virbr_ip => sub { return '192.168.122.1' } );
 
     my $dir    = tempdir( CLEANUP => 1 );
@@ -155,7 +159,7 @@ subtest 'the documents a guest with no mirror is built from' => sub {
                     {
                         type        => 'physical',
                         name        => 'ens4',
-                        mac_address => Trog::HV->guest_mac( $DOMAIN, 1 ),
+                        mac_address => Trog::HV::Libvirt->guest_mac( $DOMAIN, 1 ),
                         gateway4    => '192.168.1.254',
                         nameservers => { search => [$DOMAIN], addresses => $RESOLVERS },
                         subnets     => [
@@ -171,7 +175,7 @@ subtest 'the documents a guest with no mirror is built from' => sub {
                     {
                         type        => 'physical',
                         name        => 'ens3',
-                        mac_address => Trog::HV->guest_mac( $DOMAIN, 0 ),
+                        mac_address => Trog::HV::Libvirt->guest_mac( $DOMAIN, 0 ),
                         subnets     => [ { type => 'dhcp' } ],
                     },
                 ],
@@ -319,8 +323,8 @@ subtest 'a guest with addresses and no gateway is refused' => sub {
 };
 
 subtest 'the key is rotated on a real run and kept on a dry one' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
-    $hv->redefine( new      => sub { return bless {}, 'Trog::HV' } );
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( new      => sub { return bless {}, 'Trog::HV::Libvirt' } );
     $hv->redefine( virbr_ip => sub { return '192.168.122.1' } );
 
     my $dir   = tempdir( CLEANUP => 1 );

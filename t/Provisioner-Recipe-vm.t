@@ -41,6 +41,10 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Trog::HV();
+
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
 
 # What bin/provision does with the recipe, in one call: make the storage the XML
@@ -95,7 +99,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     );
 
     my %got;
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( bridge_device => sub { 'br0' } );
     $hv_mock->redefine( has_tpm       => sub { 0 } );
     $hv_mock->redefine( pool          => sub { 1 } );
@@ -180,7 +184,7 @@ sub _tuned_xml {
         )
     );
 
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( bridge_device        => sub { 'br0' } );
     $hv_mock->redefine( has_tpm              => sub { 0 } );
     $hv_mock->redefine( pool                 => sub { 1 } );
