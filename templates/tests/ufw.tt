@@ -38,9 +38,9 @@ foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/nul
 
 # The real rate limits.  ufw's own `limit` is six connections in thirty seconds
 # -- right for ssh, and it rate limited real visitors off the site when it was
-# applied to every application profile -- so setup-ufw-rules limits only OpenSSH
-# and these carry the actual numbers.  They were rendered into a
-# ufw.user.rules that nothing installed, and could not have been: ufw owns
+# applied to every application profile -- so setup-ufw-rules allows profiles and
+# limits none of them, and these carry the actual numbers.  They were rendered
+# into a ufw.user.rules that nothing installed, and could not have been: ufw owns
 # user.rules and rewrites it whenever a rule changes.
 my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
 

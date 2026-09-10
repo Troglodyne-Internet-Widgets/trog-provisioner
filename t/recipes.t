@@ -433,9 +433,9 @@ subtest 'ufw rejects malformed port_forwards' => sub {
 subtest 'ssh is rate limited whatever else the guest listens on' => sub {
     my $r = 'Provisioner::Recipe::ufw'->new(%PROV);
 
-    # setup-ufw-rules stopped applying ufw's own `limit` to OpenSSH, because six
+    # setup-ufw-rules applies ufw's own `limit` to nothing, because six
     # connections in thirty seconds locks a provision out of the guest it is
-    # building.  This is the limit that was supposed to cover it instead.
+    # building.  This is the limit that covers ssh instead.
     my %bare = $r->validate();
     is( $bare{rate_limits}{22}, 64, 'a guest listening on nothing still limits ssh' );
 
@@ -1642,6 +1642,38 @@ subtest 'the firewall reset is one that can actually run' => sub {
     # read EOF, printed "Aborted", and the first thing the target did was
     # nothing.  Everything after it in that list is only true if this runs.
     like( $script, qr/\[qw\{--force reset\}\]/, 'the reset is forced' );
+};
+
+subtest 'ufw own limit is applied to nothing, and cannot come back by accident' => sub {
+    my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-rules");
+    ( my $code = $script ) =~ s/^\s*#.*$//gm;
+
+    # Six connections in thirty seconds, hardcoded in ufw with no per-profile
+    # knob.  Applied to a web profile it rate limited real visitors off the site
+    # after one page load; applied to ssh it locked the provisioner out of the
+    # guest it was building, because a provision opens far more than six.
+    #
+    # It stopped being applied to anything, and then sat here for two rounds of
+    # changes as a branch under a hash nothing ever filled -- reading exactly
+    # like the mechanism while being unreachable.  This is what makes putting it
+    # back a decision rather than an oversight.
+    unlike( $code, qr/^\s*push\(.*"limit"/m, 'no rule is pushed with ufw limit' );
+
+    # The delete is not the same thing and has to stay: it takes off limits an
+    # older provision left on a profile, which ufw keeps alongside an allow
+    # rather than displacing with it.
+    like( $code, qr/\Qufw --force delete limit in\E/, 'while an older limit is still cleaned off' );
+
+    # Rate limiting lives in the other script, and the exemptions with it.
+    my $limits = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-ratelimits");
+    like( $limits, qr/hashlimit/, 'the real limits are hashlimit rules elsewhere' );
+    like( $limits, qr/EXEMPT/,    'and that is where admin networks are exempted' );
+
+    # So the fragment must not hand networks to a script with nothing to exempt
+    # them from.  They were still being passed after the branch went dead.
+    my $fragment = File::Slurper::read_text( fragment_file('ubuntu/ufw.tt') );
+    unlike( $fragment, qr{setup-ufw-rules\S*\s*\[%\s*FOR}, 'and none are passed to the script that no longer limits' );
+    like( $fragment, qr/setup-ufw-ratelimits.*EXEMPT/, 'only to the one that does' );
 };
 
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {
