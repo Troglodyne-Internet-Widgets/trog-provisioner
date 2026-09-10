@@ -12,6 +12,8 @@ use parent 'Trog::Machine';
 
 use Trog::Config();
 use Provisioner::Cookbook();
+use File::Slurper();
+use YAML::XS();
 
 use File::Which();
 
@@ -793,6 +795,81 @@ FIX
 
 # Whether a path can be opened for reading, which is all 'is the configuration
 # there' amounts to.
+# Is anything a secret sitting in the configuration in the clear?
+#
+# The store exists so that a password is a reference and the value is somewhere
+# encrypted -- and most of what wants one already is.  What this looks for is the
+# ones written literally, which nothing else would ever mention: they validate,
+# they render, and they work.
+#
+# Names the file and the field and never the value.  A note that prints a
+# password to fix a password being printed would be its own answer.
+sub note_plaintext_secrets {
+
+    # Read as it sits on disk rather than through Cookbook: this is about what is
+    # written in the files, and a merged view cannot say which one to edit.
+    my $dir = Trog::Config->dir;
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- which of these a configuration actually has
+    my @files = grep { -f } ( "$dir/recipes.yaml", glob("$dir/recipes.d/*.yaml") );
+
+    my @found;
+    foreach my $file (@files) {
+        my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($file) ) } or next;
+        push( @found, map { { file => $file, at => $_ } } _plaintext_in( $conf, q{} ) );
+    }
+    return { ok => 1 } unless @found;
+
+    my $listed = join( "\n", map { "    $_->{file}\n        $_->{at}" } @found );
+    return { ok => 0, what => scalar(@found) . ' secret(s) are written into the configuration in the clear', fix => <<"FIX" };
+$listed
+
+Each of those is a value the secret store could be holding instead, so that what
+is in the file is a reference and the thing itself is somewhere encrypted.  Most
+of this installation already works that way.
+
+Put it in the store and point at it:
+
+    bin/add_secret --group GROUP --title TITLE -- 'the value'
+
+then replace the value with secret:GROUP/TITLE/password.  add_secret will not
+overwrite, so it is safe to run against a store that may already have one.
+
+Rotate anything that has been sitting in a file long enough to have been read.
+FIX
+}
+
+# Where a secret is written out rather than referred to.
+#
+# Two ways of telling, because neither catches the other.  A field named for a
+# password holding something that is not a reference is the common one; and
+# anything at all that is a private key is one wherever it is written, which is
+# how a key pasted into a field named for something else gets found.
+sub _plaintext_in {
+    my ( $node, $path ) = @_;
+
+    return map { _plaintext_in( $node->[$_], "$path\[$_]" ) } 0 .. $#$node                       if ref $node eq 'ARRAY';
+    return map { _plaintext_in( $node->{$_}, length $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
+    return () if ref $node || !defined $node || !length $node;
+
+    # Already a reference, or a placeholder bin/new_guest wrote for somebody to
+    # fill in -- which new_config refuses to build from, so it is not a secret
+    # sitting anywhere.
+    return ()      if $node =~ m/\Asecret:/;
+    return ($path) if $node =~ m/-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+    return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
+
+    my ($field) = $path =~ m/([^.\[\]]+)\z/;
+    return () unless defined $field;
+
+    # _file and _path name where something is, not what it is: backup's key_file
+    # holds a filename, and telling somebody to put "backup.rsa" in the store
+    # would be advice about nothing.
+    return ()      if $field =~ m/_(?:file|path)\z/;
+    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)key\z/;
+
+    return ();
+}
+
 sub readable {
     my ($path) = @_;
     open( my $fh, '<', $path ) or return 0;

@@ -183,8 +183,17 @@ sub args {
                     type       => 'object',
                     required   => [qw{password gecos}],
                     properties => {
-                        password => { type => 'string' },
-                        gecos    => { type => 'string' },
+                        password => {
+                            type => 'string',
+
+                            # A secret: reference rather than the password
+                            # itself.  What is rendered from this is a
+                            # salted_sha_512 hash, so the payload never carries
+                            # the plaintext -- but the configuration file does,
+                            # and bin/preflight says so.
+                            description => 'The mailbox password.  Write it as a secret: reference; the value belongs in the store rather than in recipes.d.',
+                        },
+                        gecos => { type => 'string' },
 
                         # The mailboxes doveadm makes for this account beyond
                         # INBOX.  It has been in the SYNOPSIS and read by the
