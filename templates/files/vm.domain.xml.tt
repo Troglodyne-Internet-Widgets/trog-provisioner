@@ -11,6 +11,16 @@
   <memory unit='MiB'>[% memory %]</memory>
   <currentMemory unit='MiB'>[% memory %]</currentMemory>
   <vcpu placement='static'>[% cpus %]</vcpu>
+[% IF partition -%]
+[%# The systemd slice the guest is placed in.  libvirt writes /machine here
+      when nothing names one, so this is only ever a narrowing -- and it caps
+      nothing by itself: the limits are set on the slice with `systemctl
+      set-property`, once, by whoever owns the hypervisor.  Trog::HV::partition
+      is where it comes from and hypervisors.conf is where it is written. -%]
+  <resource>
+    <partition>[% partition %]</partition>
+  </resource>
+[% END -%]
 [% IF tuning.iothreads -%]
 [%# Threads qemu processes virtio-blk requests on: without any, submission
       runs on the main loop in qemu, serialised against everything else that

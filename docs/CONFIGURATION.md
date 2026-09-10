@@ -250,6 +250,71 @@ failing when a collector is built and nothing points at it.
 > `logcollector` guest. `bin/preflight` lists the drop-ins left on the hypervisor
 > and the command to remove them.
 
+## A guest that builds guests
+
+`trogrunner` makes a guest able to run this software: a perl new enough to load
+it, the CPAN dependencies, an `/etc/trog-provisioner` of its own, and -- when
+asked for one -- a key a hypervisor will trust.
+
+```yaml
+runner.example.com:
+    trogrunner:
+        checkout: 0                   # this one manages its own repositories
+        deps_from:
+            - /srv/code/trog-provisioner
+
+        config:
+            gateway:   192.168.1.254
+            resolvers: "192.168.1.254, 1.1.1.1"
+
+        hypervisors:
+            hydra:
+                libvirt_uri: qemu+ssh://runner@hydra.example.com/system
+                pool_path:   /pool/vm-disks/runner
+                pool_name:   runner_disks
+                partition:   /machine/runner
+
+        hypervisor_access: least
+
+        recipes:
+            _base:
+                _global:
+                    install_dir: /opt/domains
+```
+
+Nothing in it is required.  Four parts are worth knowing before writing one.
+
+**It takes longer than the default budget allows.** A runner builds perl from
+source, runs the test suite of every distribution that goes on top of it, and
+only then installs the forty-odd this repository declares. Measured on a
+four-CPU guest that does not fit the ninety minutes `Trog::Guest` allows, so
+build one with `TROG_SETUP_TIMEOUT=3h bin/provision <domain>`. Forgetting costs
+you the guest test result and nothing else -- the queue runs under `atd` on the
+guest and carries on after `bin/provision` has stopped waiting.
+
+**`checkout` is optional** because a runner that manages its own repositories --
+a coding agent, say -- already has one, and a second copy under `install_dir` is
+a second copy to get out of step.  Set it to `0` and name the path it does clone
+to in `deps_from`; the dependencies get installed either way.
+
+**Secrets in `recipes` are written `store:`, not `secret:`.** `bin/new_config`
+resolves every `secret:` reference in the whole configuration before any recipe
+is built, so one written in here would arrive resolved and be dumped into the
+runner's `recipes.yaml`, into `data.tar.gz` and into every backup of the domain.
+`store:GROUP/TITLE/FIELD` passes through untouched and comes out the other end
+as `secret:GROUP/TITLE/FIELD` -- a reference, like a hand-written `recipes.yaml`
+holds, which the runner resolves against its own store.
+
+**`hypervisor_access` defaults to `none`.** `least` is a sudo grant for the
+libvirt lease helper plus libvirt group membership, which is all a provision
+needs; `full` is `NOPASSWD:ALL`, which is only wanted for a first-ever
+`virtiofs-better` install.  The key itself is made either way and kept in the
+secret store, so a rebuild reuses it rather than accumulating a new one;
+`bin/provision` is what writes the public half into each hypervisor's
+`authorized_keys`, and `bin/destroy` is what takes it out again.  What the
+runner still cannot be held to is a quota -- see the hypervisor section of the
+[README](../README.md), and `perldoc Provisioner::Recipe::trogrunner`.
+
 ## `_base`
 
 A top-level `_base` holds recipes every host gets. A domain's own configuration

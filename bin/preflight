@@ -96,7 +96,7 @@ sub main {
         \&check_config,
     );
 
-    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror, \&note_log_destination );
+    my @notes = grep { !$_->{ok} } map { $_->($hv) } ( \&note_libguestfs, \&note_swtpm, \&note_stale_image, \&note_apt_mirror, \&note_log_destination, \&note_pool_quota );
 
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
@@ -158,10 +158,33 @@ key already trusted there; nothing here can answer a password prompt.
 FIX
 }
 
+# The lease helper is the whole of what a provision still needs root on a
+# hypervisor for, bar a one-off install of virtiofs-better and bin/nuke_pool.
+# So "no sudo" and "exactly enough sudo" are different answers, and `sudo -n
+# true` cannot tell them apart -- it fails for the second as loudly as for the
+# first, and the fix it then prints is a standing grant of root that was not
+# needed.
+my $LEASE_HELPER = '/usr/lib/libvirt/libvirt_leaseshelper';
+
 sub check_passwordless_sudo {
     my ($hv) = @_;
 
-    return report( 1, 'Passwordless sudo', q{} ) if $hv->run(qw{sudo -n true}) == 0;
+    if ( $hv->run(qw{sudo -n true}) == 0 ) {
+        my $allowed = eval { $hv->capture('sudo -n -l 2>/dev/null') } // q{};
+        my $whole   = $allowed =~ m/NOPASSWD:\s*ALL/;
+
+        return report( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
+        return report( 1, 'Passwordless sudo',                 q{} );
+    }
+
+    # Narrowed rather than absent: enough for a provision, not enough for
+    # bin/nuke_pool, which is the correct shape for a grant handed to something
+    # that builds guests unattended.
+    return report( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
+bin/nuke_pool will not work for this account, which is deliberate at this
+level.  Widen the grant if you need it.
+FIX
+      if $hv->run( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
 
     my $user   = $hv->ssh_user // 'you';
     my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
@@ -182,6 +205,17 @@ Then check it took:
 
 This is a real grant of root on a hypervisor.  If that is not something you
 want standing, make it, use it, and take it away again afterwards.
+
+There is a narrower one that is enough to build guests with.  Everything else
+a provision does is the libvirt API -- which wants group membership, not root
+-- or a write into the storage pool:
+
+    echo '$user ALL=(root) NOPASSWD: $LEASE_HELPER' | sudo tee /etc/sudoers.d/90-$user
+    sudo usermod -aG libvirt $user
+
+That leaves bin/nuke_pool needing root it does not have, and needs
+/usr/libexec/virtiofs-better already in place -- bin/provision installs it on
+first use, which is the one step that wants the wider grant.
 FIX
 }
 
@@ -379,6 +413,61 @@ sub check_config {
 These are where an installation says which machines exist and what every guest
 gets.  See Trog::Config for where this directory is and how to point it
 somewhere else.
+FIX
+}
+
+# What the guests built here can actually be held to, which is a question worth
+# asking before handing an unattended runner a key.
+#
+# Nothing in libvirt counts what anybody has allocated, and on the system URI
+# every guest runs as libvirt-qemu whoever defined it, so there is no UID for a
+# disk quota to attach to.  The pool being on a filesystem with a limit is the
+# only thing that makes one real -- and a pool whose capacity is the whole
+# filesystem is a pool that can fill the hypervisor root.
+#
+# A note rather than a check: this is what every hypervisor looks like today,
+# and refusing to build anything over it would be wrong.
+sub note_pool_quota {
+    my ($hv) = @_;
+
+    # Asked of libvirt directly rather than through Trog::HV::pool, which
+    # defines and starts a pool it cannot find.  A check that builds something
+    # is not a check.
+    my $name = $hv->pool_name;
+    my $info = eval { $hv->vmm->get_storage_pool_by_name($name)->get_info() } or return { ok => 1 };
+
+    # -B1 without -P, which df refuses alongside --output; the last line is the
+    # mount, and its second field is the size in bytes.
+    my $path    = $hv->pool_path;
+    my $said    = eval { $hv->capture("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
+    my ($bytes) = $said =~ m/\A\S+\s+(\d+)\s/;
+
+    # Within a gigabyte of the filesystem it sits on means it is not a limit,
+    # it is the filesystem -- the pool is a directory, and libvirt reports what
+    # statvfs says about whatever it is mounted on.
+    return { ok => 1 }
+      unless defined $bytes && abs( $bytes - ( $info->{capacity} // 0 ) ) < 1_073_741_824;
+
+    return {
+        ok   => 0,
+        what => sprintf( 'The %s pool has no quota: its %.1fGB is all of %s', $name, ( $info->{capacity} // 0 ) / 1_073_741_824, $path ),
+        fix  => <<"FIX" };
+Guests built here are limited by nothing but the filesystem, and by
+reserve_disk in hypervisors.conf -- which is this tool asking itself for
+permission, and says nothing to anybody driving virsh directly.
+
+To make it real, give the pool a filesystem of its own with a limit on it:
+
+    zfs create -o quota=500G tank/vm-disks/$name
+
+then name both halves in hypervisors.conf, because libvirt looks a pool up by
+name and a pool_path beside an existing pool's name is silently ignored:
+
+    pool_path = /tank/vm-disks/$name
+    pool_name = $name
+
+This matters most for a hypervisor an unattended runner can build on.  See
+QUOTAS in Provisioner::Recipe::trogrunner.
 FIX
 }
 

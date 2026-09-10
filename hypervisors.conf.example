@@ -20,9 +20,36 @@ libvirt_uri    = qemu+ssh://root@hv1.example.net/system
 bridge_device  = br0
 virbr_device   = virbr0
 
-; Where the tf_disks pool lives on that machine.  Default /opt/terraform/disks
-; -- historical, from when terraform put it there; any path will do.
+;
+; Where the storage pool lives on that machine, and what it is called.  The
+; defaults are tf_disks at /opt/terraform/disks -- historical, from when
+; terraform put it there.
+;
+; Name both or neither.  libvirt looks a pool up by name, so a pool_path given
+; beside the name of a pool that already exists somewhere else is ignored and
+; every volume lands in the existing one.
+;
+; This is also the only quota a guest can be held to.  Nothing in libvirt
+; counts what a user has allocated, and on the system URI every guest runs as
+; libvirt-qemu whoever defined it, so there is no UID for a disk quota to
+; attach to.  What does work is a pool of its own on a filesystem with a limit
+; -- `zfs create -o quota=500G tank/vm-disks/somebody` and point pool_path at
+; it -- after which the kernel enforces it and `zfs list` accounts for it.
 pool_path      = /opt/terraform/disks
+pool_name      = tf_disks
+
+; The cgroup partition guests built here are placed in.  Unset means libvirt's
+; own /machine, along with every other VM on the box.  Naming one, say
+; /machine/somebody, puts them all in machine-somebody.slice, which is then a
+; single thing to cap:
+;
+;     systemctl set-property machine-somebody.slice CPUQuota=400%
+;
+; This sets no limit by itself -- it makes there be something to set one on.
+; Memory is the exception: a MemoryMax on a slice full of VMs kills one rather
+; than refusing the next, so leave memory to reserve_memory below, which is the
+; knob that actually refuses.
+;partition      = /machine/somebody
 
 ; What to keep back from guests.  Memory in MB, disk in bytes.  Memory is
 ; counted as committed rather than used: a guest promised 8G is holding 8G

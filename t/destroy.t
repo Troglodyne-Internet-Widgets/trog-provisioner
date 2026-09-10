@@ -31,6 +31,8 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
+## no critic (ProhibitUnusedImports) -- Test::MockModule in strict mode will not mock a package that is not loaded.
+use Provisioner::Cookbook();
 
 require_ok("$FindBin::Bin/../bin/destroy")
   or BAIL_OUT('bin/destroy does not load; the install is incomplete');
@@ -115,6 +117,87 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
 
     my $after = File::Slurper::read_text($ak);
     like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );
+};
+
+# --- remove_runner_key ---
+#
+# The counterpart of authorize_runner_key in bin/provision.  It reads the public
+# half beside the domain rather than the store, so a destroy never stops to ask
+# for a passphrase -- one that did is one nobody would run.
+subtest 'a runner key comes off every hypervisor it was let in to' => sub {
+    my $domain = 'runner.example';
+    my $dir    = make_domain_dir($domain);
+
+    my $pubkey = 'ssh-ed25519 AAAAC3Nz runner-key';
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "$pubkey\n" );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine(
+        domain_config => sub {
+            return {
+                trogrunner => {
+                    hypervisor_access => 'least',
+                    hypervisors       => {
+                        one => { libvirt_uri => 'qemu+ssh://runner@one.test.test/system' },
+                        two => { libvirt_uri => 'qemu+ssh://runner@two.test.test/system' },
+                    },
+                },
+            };
+        }
+    );
+
+    my %files = map { +( "$_.test.test" => "ssh-rsa BBBB somebody-else\n$pubkey\n" ) } qw{one two};
+    my $hv    = Test::MockModule->new('Trog::HV');
+    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
+    $hv->redefine( file_exists     => sub { exists $files{ $_[1] } } );
+    $hv->redefine( read_text       => sub { $files{ $_[1] } } );
+    $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
+
+    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+
+    foreach my $host (qw{one.test.test two.test.test}) {
+        unlike( $files{$host}, qr/\Qrunner-key\E/, "taken off $host" );
+        like( $files{$host}, qr/somebody-else/, "and the other line on $host is still there" );
+    }
+};
+
+subtest 'a rewrite that would drop more than the one line is refused' => sub {
+    my $domain = 'runner-greedy.example';
+    my $dir    = make_domain_dir($domain);
+
+    # The same guard remove_authorized_key has, and for the same reason: this
+    # is somebody's authorized_keys on a machine that is not the guest, and
+    # getting it wrong locks them out of it.
+    my $pubkey = 'ssh-ed25519 AAAAC3Nz runner-key';
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "$pubkey\n" );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
+
+    my %files = ( 'one.test.test' => "$pubkey\n$pubkey\n" );
+    my $hv    = Test::MockModule->new('Trog::HV');
+    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
+    $hv->redefine( file_exists     => sub { exists $files{ $_[1] } } );
+    $hv->redefine( read_text       => sub { $files{ $_[1] } } );
+    $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
+
+    eval { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) };
+    like( $@, qr/would drop 2 lines, not 1; refusing/, 'said what it would have done, and did not' );
+    is( $files{'one.test.test'}, "$pubkey\n$pubkey\n", 'the file is untouched' );
+};
+
+subtest 'a domain that is not a runner is nothing to do' => sub {
+    my $domain = 'plain.example';
+    make_domain_dir($domain);
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $asked    = 0;
+    $cookbook->redefine( domain_config => sub { $asked++; return {} } );
+
+    # No hypervisor-key.pub beside it, so it returns before it asks anything at
+    # all -- which is what every guest that is not a runner looks like.
+    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+    is( $asked, 0, 'the configuration is not even consulted' );
 };
 
 # --- purge_domain_dir ---

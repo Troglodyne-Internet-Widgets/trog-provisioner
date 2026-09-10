@@ -39,6 +39,8 @@ per hypervisor, named however you like:
     bridge_device  = br0
     virbr_device   = virbr0
     pool_path      = /opt/terraform/disks
+    pool_name      = tf_disks
+    partition      = /machine/hv1
     reserve_memory = 4096
     reserve_cpus   = 2
     cpu_overcommit = 4
@@ -48,7 +50,12 @@ per hypervisor, named however you like:
     libvirt_uri    = qemu+ssh://root@hv2.example.net/system
 
 Every key but C<libvirt_uri> is optional; see L<Trog::HV> for what they mean and
-what they default to.
+what they default to.  Two of them are worth knowing about before they are
+needed: C<pool_name> beside C<pool_path> is how a hypervisor gets a storage pool
+of its own, which -- on a filesystem carrying a quota -- is the only limit a
+guest can actually be held to, and C<partition> puts every guest built here in
+one systemd slice, which is the only place CPU and I/O can be capped for the lot
+of them.  Neither imposes anything by itself.
 
 When the file doesn't exist there is no fleet, everything behaves exactly as it
 did before, and the hypervisor is whatever F<provision.conf> or C<--connect>
@@ -187,7 +194,7 @@ sub hypervisor {
         uri  => $block->{libvirt_uri},
         map { $_ => $block->{$_} }
           grep { defined $block->{$_} }
-          qw{pool_path domain_dir bridge_device virbr_device
+          qw{pool_path pool_name domain_dir bridge_device virbr_device partition
           reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
     );
 }

@@ -16,7 +16,7 @@ use Trog::Hypervisors();
 
 =head1 NAME
 
-nuke_pool - tear down the tf_disks storage pool and everything in it
+nuke_pool - tear down a hypervisor's storage pool and everything in it
 
 =head1 SYNOPSIS
 
@@ -46,12 +46,14 @@ The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
 
 =item B<--pool> NAME
 
-Which pool to nuke.  Defaults to C<tf_disks>.
+Which pool to nuke.  Defaults to the C<pool_name> the hypervisor is
+configured with, which is C<tf_disks> unless F<hypervisors.conf> says otherwise.
 
 =item B<--poolpath> DIR
 
-Where that pool's backing store lives on the hypervisor.  Defaults to
-F</opt/terraform/disks>.
+Where that pool's backing store lives on the hypervisor.  Defaults to the
+C<pool_path> the hypervisor is configured with, and to F</opt/terraform/disks>
+when nothing is.
 
 =back
 
@@ -93,7 +95,7 @@ sub main {
         $hv = Trog::HV->new( uri => $uri, pool_path => $pool_path );
     }
     $hv->{pool_path} = $pool_path if defined $pool_path;
-    $hv->nuke_pool( $pool // 'tf_disks' );
+    $hv->nuke_pool( $pool // $hv->pool_name );
     return 0;
 }
 

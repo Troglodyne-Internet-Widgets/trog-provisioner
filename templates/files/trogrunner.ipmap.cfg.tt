@@ -1,0 +1,45 @@
+[%# The runner ipmap.cfg: what it thinks the network is, and who administers
+    the guests it builds.
+
+    Config::Simple reads this, so the shape is fixed -- a [section] header,
+    then key=value with no quoting of any kind.  A comma-separated value comes
+    back as a list, which is why resolvers is written as one.
+
+    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    string and swallows the template as far as the next quote. -%]
+[ip_pool]
+addresses=[% config.addresses %]
+cidr=[% config.cidr %]
+
+[ips]
+[% FOR name IN config.ips.keys().sort() -%]
+[% name %]=[% config.ips.$name %]
+[% END -%]
+
+[aliases]
+[% FOR name IN config.aliases.keys().sort() -%]
+[% name %]=[% config.aliases.$name %]
+[% END -%]
+
+[nameservers]
+[% FOR name IN config.nameservers.keys().sort() -%]
+[% name %]=[% config.nameservers.$name %]
+[% END -%]
+
+[global]
+basedir=[% config.basedir %]
+admin_user=[% config.admin_user %]
+admin_email=[% config.admin_email %]
+admin_gecos=[% config.admin_gecos %]
+admin_key=[% config.admin_key %]
+gateway=[% config.gateway %]
+resolvers=[% config.resolvers %]
+dhcp_devname=[% config.dhcp_devname %]
+bridge_devname=[% config.bridge_devname %]
+ip=[% config.ip %]
+[% IF config.transfer_user %]transfer_user=[% config.transfer_user %]
+[% END -%]
+[% IF config.transfer_ip %]transfer_ip=[% config.transfer_ip %]
+[% END -%]
+[% IF config.transfer_port %]transfer_port=[% config.transfer_port %]
+[% END -%]

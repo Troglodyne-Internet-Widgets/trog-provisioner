@@ -1,0 +1,11 @@
+[%# The runner recipes.yaml, dumped whole by the recipe.
+
+    YAML::XS::Dump rather than anything written here: Xslate has no dumper, and
+    a recipes.yaml is an arbitrarily deep structure that a template has no
+    business trying to indent correctly.
+
+    Every store: reference in it was turned back into a secret: on the way
+    through enrich, so what lands here names entries in the runner own keepass
+    database and holds no passwords.  See SECRETS IN recipes in
+    Provisioner::Recipe::trogrunner for why the indirection is spelled twice. -%]
+[% recipes_yaml | mark_raw %]

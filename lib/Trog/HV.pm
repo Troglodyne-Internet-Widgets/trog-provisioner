@@ -84,9 +84,9 @@ process, or a fresh local one if there wasn't any.  Called with options it
 builds a new hypervisor and makes I<that> the instance from then on, so the
 configuration only has to be read once.
 
-Options: C<uri>, C<pool_path>, C<domain_dir>, C<bridge_device>,
-C<virbr_device>.  Undefined and empty values are ignored, which lets callers
-pass unset command line options straight through.
+Options: C<uri>, C<pool_path>, C<pool_name>, C<domain_dir>, C<bridge_device>,
+C<virbr_device>, C<partition>.  Undefined and empty values are ignored, which
+lets callers pass unset command line options straight through.
 
 =cut
 
@@ -156,15 +156,16 @@ Build the hypervisor from a L<Config::Simple> object, with anything passed in
 C<%override> (i.e. from the command line) winning over what the file says.  A
 false C<$config> is fine and means "everything is defaulted".
 
-Reads C<libvirt_uri> for the URI, and C<pool_path>, C<domain_dir>,
-C<bridge_device> and C<virbr_device> under their own names.
+Reads C<libvirt_uri> for the URI, and C<pool_path>, C<pool_name>,
+C<domain_dir>, C<bridge_device>, C<virbr_device> and C<partition> under their
+own names.
 
 =cut
 
 # Constructor option => the provision.conf key it reads.
 my %CONFIG_KEY = (
     uri => 'libvirt_uri',
-    map { $_ => $_ } qw{pool_path domain_dir bridge_device virbr_device},
+    map { $_ => $_ } qw{pool_path pool_name domain_dir bridge_device virbr_device partition},
 );
 
 sub from_config {
@@ -301,15 +302,36 @@ we delete things out of this path, and a pool somebody made somewhere else is
 not a reason to be wrong about it.  Falls back to F</opt/terraform/disks>, which
 is where the volumes on a hypervisor built by the old tool actually are.
 
+=head2 pool_name
+
+Which storage pool this hypervisor's guests are built in.  C<tf_disks> unless
+F<hypervisors.conf> says otherwise.
+
+Configurable because it is the only way C<pool_path> can mean anything: libvirt
+looks a pool up by name, so a path given beside the name of a pool that already
+exists somewhere else is ignored, silently, and every volume lands where the
+existing pool points.  Giving a hypervisor its own pool -- on a filesystem with
+a quota on it, which is the only quota libvirt guests can be held to -- is
+naming both.
+
+=head2 partition
+
+The cgroup partition its guests are placed in, or undef for libvirt's own
+default of C</machine>.  Sets nothing: it puts every guest built here in one
+systemd slice, which is where an operator can then cap CPU and I/O for the lot
+of them at once.
+
 =cut
 
 sub domain_dir { return $_[0]->{domain_dir} // '/opt/domains' }
+sub pool_name  { return $_[0]->{pool_name}  // 'tf_disks' }
+sub partition  { return $_[0]->{partition} }
 
 sub pool_path {
     my ($self) = @_;
     return $self->{pool_path} if defined $self->{pool_path};
 
-    return $self->{_pool_path} //= ( $self->pool_target('tf_disks') // '/opt/terraform/disks' );
+    return $self->{_pool_path} //= ( $self->pool_target( $self->pool_name ) // '/opt/terraform/disks' );
 }
 
 =head2 pool_target($name)
@@ -321,7 +343,7 @@ undef if there is no such pool to ask about.
 
 sub pool_target {
     my ( $self, $name ) = @_;
-    $name //= 'tf_disks';
+    $name //= $self->pool_name;
 
     my $xml = eval {
         my $vmm  = $self->vmm;
@@ -544,13 +566,13 @@ opinion at bay.
 =head2 pool($name)
 
 The storage pool object, made if it is not there yet: defined, started, and set
-to start with the host.  C<$name> defaults to C<tf_disks>.
+to start with the host.  C<$name> defaults to L</pool_name>.
 
 =cut
 
 sub pool {
     my ( $self, $name ) = @_;
-    $name //= 'tf_disks';
+    $name //= $self->pool_name;
     return $self->{_pools}{$name} if $self->{_pools}{$name};
 
     my $vmm  = $self->vmm;
@@ -1399,7 +1421,7 @@ nothing has built yet has no space in it, which is the honest answer.
 
 sub pool_free {
     my ( $self, $name ) = @_;
-    $name //= 'tf_disks';
+    $name //= $self->pool_name;
 
     my $vmm  = $self->vmm;
     my $pool = eval { $vmm->get_storage_pool_by_name($name) } or return 0;

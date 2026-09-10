@@ -157,6 +157,22 @@ That means:
 
     It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+    It does not have to be the machine you run this from either.  The machine that *runs* the provisioner is itself a guest, built with the `trogrunner` recipe: perl, the CPAN dependencies, `/etc/trog-provisioner`, and a key a hypervisor will trust.  `perldoc Provisioner::Recipe::trogrunner`.
+
+6. **Nothing holds a guest to a budget unless you give it one.**  There is no quota in libvirt -- no accounting, no limit -- and on the system URI every guest runs as `libvirt-qemu` whoever defined it, so there is no UID for a disk quota to attach to.  `reserve_memory`, `reserve_disk` and `max_guests` in `hypervisors.conf` are this tool asking itself for permission, which is enough for a fleet you drive yourself and nothing at all against something driving `virsh` directly.
+
+    What the kernel *will* enforce is a storage pool on a filesystem with a limit on it, and a systemd slice.  Both are named in the hypervisor's block:
+
+        pool_path = /pool/vm-disks/runner
+        pool_name = runner_disks
+        partition = /machine/runner
+
+    Name `pool_name` as well as `pool_path` -- libvirt looks a pool up by name, so a path given beside the name of a pool that already exists elsewhere is ignored and every volume lands in the existing one.  Then `zfs create -o quota=500G` (or any other filesystem that can carry one) under that path, and `systemctl set-property machine-runner.slice CPUQuota=400%` for the slice.  `bin/preflight` says whether the pool you have is actually limited or is just the whole filesystem.
+
+    Leave memory to `reserve_memory`: a `MemoryMax` on a slice full of VMs kills one rather than refusing the next.
+
+    Neither stops a determined guest naming a different pool or partition; that takes libvirt's polkit access driver, which ships disabled.  These bound the accident, not the adversary, and it is worth knowing which you have before telling anybody a runner is capped.
+
 ### One repository, one run
 
 `bin/new_config` and `bin/provision` used to live in separate repositories and be run one after the other: generate a domain's configuration, then build the VM.  That held together while the generator could assume it was running *on* the hypervisor it was writing about -- it read the internal IP and the sshd port straight off the local machine.  Once which hypervisor to use became a choice, both halves had to agree on the answer, and the only honest way for them to agree is to be one program.
@@ -394,3 +410,5 @@ has no mirror configured, and what it costs.
 ## IF YOU ENCOUNTER MYSTERIOUS 'cannot access image' issues
 
 It's almost certainly that you need to add an override for those dirs in either an apparmor config for libvirt-qemu or selinux.
+
+This and a profile for `/usr/libexec/virtiofs-better` -- which has none anywhere -- are the two apparmor items still left to an operator.  They are the last of what `bin/setup_provisioner` is for; everything else that script used to claim is either a recipe now or the runner's own business.

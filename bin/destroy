@@ -10,6 +10,7 @@ use warnings FATAL => 'all';
 use re '/aa';
 use FindBin::libs;
 use Provisioner::IPPool();
+use Provisioner::Cookbook();
 use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
@@ -109,6 +110,7 @@ sub main {
 
     # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
     remove_authorized_key( $domain, $dryrun );
+    remove_runner_key( $domain, $dryrun );
 
     # 4. Optionally purge the domain directory
     if ($purge) {
@@ -221,6 +223,64 @@ sub remove_authorized_key {
       unless scalar(@after) == scalar(@before) - 1;
 
     $this_machine->write_text( $ak, join( "\n", @after ) . "\n" );
+    return;
+}
+
+=head2 remove_runner_key($domain, $dryrun)
+
+Take a runner's key back off every hypervisor it was let in to.
+
+The counterpart of C<authorize_runner_key> in F<bin/provision>, and the reason
+the public half is written beside the domain rather than only kept in the
+store: this needs no passphrase, and a destroy that stops to prompt for one is
+a destroy nobody runs.
+
+Which hypervisors is a configuration question, so the Cookbook answers it.  The
+same refusal as above applies to each: a rewrite that would drop anything other
+than the one line is a rewrite of somebody's F<authorized_keys> that nobody
+asked for.
+
+=cut
+
+sub remove_runner_key {
+    my ( $domain, $dryrun ) = @_;
+
+    my $domain_dir = Trog::HV->new()->domain_dir;
+    my $pubkey     = eval { File::Slurper::read_text("$domain_dir/$domain/hypervisor-key.pub") };
+    return unless defined $pubkey;
+    chomp $pubkey;
+
+    my $config      = eval { Provisioner::Cookbook->domain_config($domain) } // {};
+    my $hypervisors = ( $config->{trogrunner} // {} )->{hypervisors}         // {};
+    return unless ref $hypervisors eq 'HASH' && %$hypervisors;
+
+    foreach my $name ( sort keys %$hypervisors ) {
+        my $uri     = $hypervisors->{$name}{libvirt_uri}          or next;
+        my $machine = eval { Trog::HV->candidate( uri => $uri ) } or next;
+
+        my $ak = eval { $machine->authorized_keys } or next;
+        next unless $machine->file_exists($ak);
+
+        my $contents = $machine->read_text($ak);
+        die "Could not read $ak on $name; refusing to rewrite it blind\n"
+          unless defined $contents && length $contents;
+
+        unless ( $contents =~ m/\Q$pubkey\E/ ) {
+            print "$domain's key is not in $ak on $name, skipping.\n";
+            next;
+        }
+
+        print "Removing $domain's key from $ak on $name\n";
+        next if $dryrun;
+
+        my @before = split( "\n", $contents );
+        my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
+        die "Removing the key for $domain from $ak on $name would drop " . ( scalar(@before) - scalar(@after) ) . " lines, not 1; refusing\n"
+          unless scalar(@after) == scalar(@before) - 1;
+
+        $machine->write_text( $ak, join( "\n", @after ) . "\n" );
+    }
+
     return;
 }
 

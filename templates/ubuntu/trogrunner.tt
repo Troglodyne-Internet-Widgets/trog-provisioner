@@ -1,0 +1,161 @@
+[%# trog-provisioner, on a guest that can run it.
+
+    A makefile fragment, so: one shell per line, dash rather than bash, `$$`
+    for anything the shell should expand, `\` on every continued line, and no
+    heredocs.  See Provisioner::Recipe.
+
+    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    string and swallows the template as far as the next quote.
+
+    Layout, under the domain directory:
+      etc/trog-provisioner/   ipmap.cfg, recipes.yaml, ips.db
+      the checkout dir        when there is one
+      .ssh/id_ed25519         the key a hypervisor trusts, linked into the home
+    and /etc/trog-provisioner is a symlink to the first of those. -%]
+
+# The configuration directory, and /etc pointing at it.
+#
+# A symlink rather than the real thing so that ips.db -- which the address pool
+# creates in there on first use, and which is the runner memory of who holds
+# what -- lives under install_dir, gets salvaged onto the next rebuild, and is
+# writable by the user doing the assigning rather than by root alone.
+#
+# -n on ln, or a re-provision fails: without it the second run puts the link
+# inside the directory the first run made.
+install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/etc/trog-provisioner'
+ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisioner
+
+install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.ipmap.cfg    '[% install_dir %]/[% domain %]/etc/trog-provisioner/ipmap.cfg'
+install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
+[% IF hypervisors.keys().size() %]
+# Rendered always, installed only when a fleet was named: no file at all means
+# "this machine", which is what libvirt does anyway and what a runner that is
+# its own hypervisor wants.  An empty file would mean the same thing far less
+# obviously.
+install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
+[% END %]
+[% IF store %]
+# The runner own secret store, out of this domain data directory.  Not
+# generated here and not generated on the guest: a new keepass database is a
+# new set of passwords, and every guest the runner has already built is
+# configured against the old ones.
+install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/[% store %]' '[% install_dir %]/[% domain %]/etc/trog-provisioner/secrets.kdbx'
+[% END %]
+# /etc/profile.d rather than a dotfile in the domain directory: that directory
+# is the home of whoever the domain runs as only when it names a service user,
+# and a runner does not have to.  Sourced by every login shell either way, so
+# whoever ends up on this guest gets the checkout on their PATH.
+install -o root -g root -m 0644 trogrunner.profile /etc/profile.d/trogrunner.sh
+[% IF hypervisor_access != 'none' %]
+# The key a hypervisor is asked to trust.
+#
+# bin/provision put it here before this makefile started, out of the secret
+# store and owned by root -- which is what guest_secrets promises and why this
+# gives it away rather than installing it.  The mode is re-asserted because the
+# data target chmods this tree and ssh refuses a key any wider than 0600.
+install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
+test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2
+test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || true
+[% script_dir %]/queue_postrun_task "test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519'"
+
+# And in the home directory, which is where ssh will look for it -- ssh reads
+# ~/.ssh whoever it is run by, and nothing on the command line of a libvirt
+# qemu+ssh URI can tell it otherwise.
+#
+# Asked of passwd rather than assumed: the domain directory is the home only
+# when the domain names a service user, and a runner does not have to.  The
+# linked-to copy stays canonical, because that is the path guest_secrets writes
+# and remote_skip keeps out of the salvage; the link is a no-op when the two
+# are the same directory.
+h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'trogrunner: no home directory for [% user %]' >&2; exit 1; fi; install -d -o '[% user %]' -g '[% user %]' -m 0700 "$$h/.ssh"; [ "$$h" = '[% install_dir %]/[% domain %]' ] || ln -sfn '[% install_dir %]/[% domain %]/.ssh/id_ed25519' "$$h/.ssh/id_ed25519"
+[% FOR name IN hypervisors.keys().sort() %]
+[% SET hv = hypervisors.$name %]
+[% IF hv.ssh_host %]
+# Host keys for [% name %].  Not optional and not the same question ssh asks:
+# the qemu+ssh transport verifies host keys where Net::OpenSSH::More does not,
+# so an unseeded known_hosts is a hypervisor that refuses on first contact
+# while a plain ssh to the same machine works fine.
+#
+# runuser rather than root, and into the home rather than the domain directory,
+# for the same reason as above: both halves have to be the file ssh will read.
+h="$$(getent passwd '[% user %]' | cut -d: -f6)"; runuser -u '[% user %]' -- ssh-keygen -F '[% hv.ssh_host %]' >/dev/null 2>&1 || runuser -u '[% user %]' -- sh -c "ssh-keyscan -p '[% hv.ssh_port %]' '[% hv.ssh_host %]' >> '$$h/.ssh/known_hosts'"
+[% END %]
+[% END %]
+[% END %]
+[% IF checkout %]
+# The checkout.  Only when there is nothing there at all: one that came down
+# from the guest being replaced is what somebody was working in, and cloning
+# over it would throw that away.  koan.tt has the same guard for the same
+# reason.
+#
+# A subdirectory rather than the domain directory itself -- service_user made
+# that before this ran, and git clone refuses a target that is not empty.
+#
+# HOME= on every git: this runs out of atd, which seeds no environment at all,
+# and git as root with no HOME does not merely warn.
+[ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ] || HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
+[% END %]
+# Everything below installs from CPAN, through the perl the perl recipe builds
+# rather than the system one, and all of it is queued rather than run here --
+# that perl does not exist yet.  The makefile target above this one is what
+# compiles it.
+#
+# Which is also why the bin directory is resolved inside each task rather than
+# written into it.  build_latest_perl.sh installs to /opt/perl5/$version, the
+# version being whatever was current the day the guest was built, and it links
+# cpanm into /root/bin unconditionally -- that link is the only path here that
+# is true before the build has happened.  Resolving it at makefile time gave
+# `dirname` an empty string and put ./cpanm in the queue.
+#
+# /root/bin rather than the user home: build_latest_perl.sh links into the home
+# of whoever the perl is for, and that is the domain directory only when the
+# domain names a service user.  This recipe does not require one.
+#
+# \$$ so that make hands the shell a literal $ and the expansion happens when
+# the task runs.
+#
+# Sys::Virt first, and pinned, before anything that resolves dependencies.
+# Left to the dependency list, cpanm takes the newest, whose Makefile.PL wants
+# a libvirt-dev far newer than this guest has -- and says so forty minutes into
+# the queue, in a message about pkg-config rather than about ordering.  Pinning
+# it to what the guest actually has is what bin/preflight tells an operator to
+# do by hand.
+[% IF libvirt_version %]
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest 'Sys::Virt@[% libvirt_version %]'"
+[% ELSE %]
+# No version was named, so the guest is asked.  Right whenever the runner and
+# the hypervisor are on the same distribution, which is the usual case and the
+# only one this can answer -- a recipe cannot ask a hypervisor anything.
+#
+# Resolved here rather than in the task, because libvirt-dev is installed by
+# the time this makefile runs and post_install.sh is more use naming a version
+# than naming a command.
+v="$$(pkg-config --modversion libvirt 2>/dev/null)"; if [ -z "$$v" ]; then echo 'trogrunner: pkg-config knows no libvirt, so there is no Sys::Virt version to pin' >&2; exit 1; fi; [% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest 'Sys::Virt@$$v'"
+[% END %]
+# Dist::Zilla, because nothing else installs it and it is how this distribution
+# declares what it needs -- and the link in the same task, because
+# build_latest_perl.sh links only what is already there and until this has run
+# there is no dzil for it to have found.
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest Dist::Zilla && ln -sfn \$$p/dzil /root/bin/dzil"
+[% IF checkout %]
+# authordeps before listdeps: dist.ini names plugins, and dzil cannot read its
+# own configuration to answer listdeps until the plugins it names are there.
+#
+# --notest throughout.  Forty distributions worth of test suites under a
+# source-built perl does not fit the ninety minutes a guest gets for its
+# makefile and postrun queue together, and the guest test is the check that
+# matters here.
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% install_dir %]/[% domain %]/[% checkout_dir %]' && \$$p/dzil authordeps --missing | \$$p/cpanm --notest"
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% install_dir %]/[% domain %]/[% checkout_dir %]' && \$$p/dzil listdeps --missing | \$$p/cpanm --notest"
+[% END %]
+[% FOR path IN deps_from %]
+# A checkout this recipe did not make -- the runner manages its own, and the
+# operator says where it lands.
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% path %]' && \$$p/dzil authordeps --missing | \$$p/cpanm --notest"
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% path %]' && \$$p/dzil listdeps --missing | \$$p/cpanm --notest"
+[% END %]
+[% FOR module IN extra_modules %]
+[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest '[% module %]'"
+[% END %]

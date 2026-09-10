@@ -1,0 +1,515 @@
+package Provisioner::Recipe::trogrunner;
+
+#ABSTRACT: Make a guest that can run trog-provisioner itself.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aa';
+
+use parent qw{Provisioner::Recipe};
+
+use YAML::XS();
+use URI();
+use URI::Split();
+use File::Temp();
+
+=head1 Provisioner::Recipe::trogrunner
+
+=head2 SYNOPSIS
+
+    runner.test.test:
+        trogrunner:
+            # Everything below is optional.
+            checkout: 1
+            libvirt_version: "10.0.0"
+
+            config:
+                gateway:   "192.168.1.254"
+                resolvers: "192.168.1.254, 1.1.1.1"
+
+            hypervisors:
+                hydra:
+                    libvirt_uri: "qemu+ssh://runner@hydra.test.test/system"
+                    pool_path:   "/pool/vm-disks/runner"
+                    pool_name:   "runner_disks"
+                    partition:   "/machine/runner"
+
+            hypervisor_access: least
+
+            # The runner's own recipes.yaml, dumped verbatim.  Secrets are
+            # written store: here, never secret: -- see L</SECRETS IN recipes>.
+            recipes:
+                _base:
+                    _global:
+                        install_dir: /opt/domains
+                someguest.test.test:
+                    nginx:
+                        cert_password: "store:someguest/tls/password"
+
+=head2 DESCRIPTION
+
+A guest that can build guests.  It gets a perl new enough to load this
+distribution, the CPAN modules that distribution declares, an
+F</etc/trog-provisioner> of its own, and -- when asked for one -- a key a
+hypervisor will let in.
+
+This is what C<bin/setup_provisioner> was a stub of: the machine that I<runs>
+the provisioner is a guest like any other, and the only thing that was ever
+special about it was that nothing built it.  What remains in that script is
+about the machine that I<hosts> what gets built, which is a different machine
+and a different set of problems.
+
+The checkout is optional (C<checkout: 0>) because a runner that manages its own
+repositories -- a coding agent, say -- already has one, and a second copy under
+C<install_dir> is a second copy to get out of step.  Point C<deps_from> at
+whatever path it clones to instead and the dependencies still get installed.
+
+=head3 What it needs from the guest, and how long it takes
+
+Four vCPUs and 8GB.  Two works and is slow, and the slowness is the problem:
+
+A runner builds perl from source, installs what F<scripts/build_latest_perl.sh>
+asks for on top of it -- running each distribution's own test suite, which is
+where most of the time goes -- and only then starts on C<Sys::Virt>,
+C<Dist::Zilla> and the forty-odd distributions this one declares.  Measured on
+a four-CPU guest, that does not fit the ninety minutes C<Trog::Guest> allows a
+makefile and its whole postrun queue.
+
+So build one with the budget raised:
+
+    TROG_SETUP_TIMEOUT=3h bin/provision runner.example.com
+
+Nothing breaks if you forget.  C<bin/provision> stops waiting and says so; the
+queue carries on regardless, because F<scripts/post_install> is run by C<atd>
+and not by anything on this end.  What you lose is the guest test result, which
+is the thing you provisioned it to see.
+
+=head3 SECRETS IN recipes
+
+The C<recipes> argument is the runner's whole F<recipes.yaml>, and it is a trap
+worth understanding before writing one.
+
+C<bin/new_config> resolves every C<secret:> reference in the I<whole>
+configuration before any recipe is constructed.  So a C<secret:> written inside
+C<recipes> is resolved on the way in, and this recipe would be handed the
+password itself -- which would then be dumped into the runner's
+F<recipes.yaml>, into its C<data.tar.gz>, onto the guest and into every backup
+taken of the domain, one level of indirection below anything that looks for
+plaintext.
+
+So write C<store:> instead.  Nothing resolves it, it arrives here as written,
+and L</enrich> turns it back into C<secret:> on the way out -- leaving the
+runner a F<recipes.yaml> full of references, exactly like a hand-written one.
+The runner resolves them against its own store, which is what C<store> is for.
+
+=head3 QUOTAS
+
+A runner can build guests, and a guest costs disk, CPU and memory on somebody
+else's machine.  Nothing in libvirt will hold it to a budget: there is no
+accounting and no limit, and on the system URI every guest runs as
+C<libvirt-qemu> whoever defined it, so there is no UID for a disk quota to
+attach to either.
+
+What does work is written in the hypervisor blocks above and enforced by the
+kernel:
+
+=over 4
+
+=item * C<pool_path> and C<pool_name> together give the runner a storage pool
+of its own.  Put that path on a filesystem with a limit on it -- C<zfs create
+-o quota=500G tank/vm-disks/runner> -- and the limit is real.  Name both:
+libvirt looks a pool up by name, so a path beside the name of a pool that
+already exists elsewhere is ignored and every volume lands in the existing one.
+
+=item * C<partition> puts every guest the runner builds into one systemd slice,
+which the operator then caps once with C<systemctl set-property
+machine-runner.slice CPUQuota=400%>.
+
+Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice full of virtual
+machines kills one rather than refusing the next, and the per-domain
+equivalent is worse -- libvirt's own documentation warns that
+C<< <memtune><hard_limit> >> gets guests OOM-killed.  What actually refuses a
+guest for want of memory is C<reserve_memory> in F<hypervisors.conf>, which
+already exists.
+
+=back
+
+Both are limits a cooperating runner respects.  Neither stops it naming a
+different pool or partition: that takes libvirt's polkit access driver, which
+is off by default, and which is a change to the hypervisor rather than to this
+guest.  Say which of the two you have before telling anyone the runner is
+capped.
+
+=cut
+
+my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
+
+sub required_recipes {
+
+    # perl only, and it is the whole of what a runner was missing: it builds
+    # /opt/perl5/$version and puts perl, cpanm, prove and perlcritic in the
+    # user's bin.  Everything else here is CPAN or configuration.
+    return ( perl => sub { () } );
+}
+
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+
+            # Not required: Provisioner::Recipe::validate fills it in from
+            # admin_user, and it does that after validation -- a required field
+            # cannot be satisfied by something that runs later.
+            user => { type => 'string' },
+
+            checkout => { type => 'boolean', default => 1 },
+
+            # Relative to install_dir/domain, and never the domain directory
+            # itself: the service_user target creates that before the fragment
+            # runs, and git clone refuses a target that is not empty.
+            checkout_dir => { type => 'string', default => 'trog-provisioner' },
+
+            # HTTPS rather than ssh: a guest that has just been built has no key
+            # registered anywhere.
+            repo_url    => { type => 'string', default => $REPO },
+            repo_branch => { type => 'string', default => 'master' },
+
+            # Which Sys::Virt to pin.  Empty means ask the guest what its
+            # libvirt-dev is, which is right whenever the runner and the
+            # hypervisor are on the same distribution.
+            #
+            # Deliberately not a number: this recipe must not load Trog::HV to
+            # ask a hypervisor (see Provisioner::Recipe on why recipes do not),
+            # so anything written here would be a guess that goes stale.
+            libvirt_version => { type => 'string', default => q{} },
+
+            # Absolute paths to run cpanm --installdeps against, for a checkout
+            # this recipe did not make.  Named by the operator rather than
+            # worked out from another recipe: a runner that manages its own
+            # repositories is the case this exists for, and only the person who
+            # configured that knows where they land.
+            deps_from     => { type => 'array', items => { type => 'string' }, default => [] },
+            extra_modules => { type => 'array', items => { type => 'string' }, default => [] },
+
+            # The runner's ipmap.cfg.  Defaults sit on the members rather than
+            # on config itself, or a domain that sets one member would lose the
+            # rest.
+            config => {
+                type       => 'object',
+                default    => {},
+                properties => {
+                    basedir        => { type => 'string', default => '/opt/domains' },
+                    admin_user     => { type => 'string' },
+                    admin_email    => { type => 'string' },
+                    admin_gecos    => { type => 'string', default => 'Administrator' },
+                    admin_key      => { type => 'string', default => q{} },
+                    gateway        => { type => 'string', default => q{} },
+                    resolvers      => { type => 'string', default => '1.1.1.1, 8.8.8.8' },
+                    dhcp_devname   => { type => 'string', default => 'ens3' },
+                    bridge_devname => { type => 'string', default => 'ens4' },
+                    ip             => { type => 'string', default => q{} },
+                    transfer_user  => { type => 'string', default => q{} },
+                    transfer_ip    => { type => 'string', default => q{} },
+                    transfer_port  => { type => 'string', default => q{} },
+                    addresses      => { type => 'string', default => q{} },
+                    cidr           => { type => 'string', default => q{} },
+                    nameservers    => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
+                    ips            => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
+                    aliases        => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
+                },
+            },
+
+            # Empty is a legitimate answer and means the runner is its own
+            # hypervisor, which is what libvirt does when nothing says
+            # otherwise.
+            hypervisors => {
+                type                 => 'object',
+                default              => {},
+                additionalProperties => {
+                    type       => 'object',
+                    required   => [qw{libvirt_uri}],
+                    properties => {
+                        libvirt_uri    => { type => 'string' },
+                        pool_path      => { type => 'string' },
+                        pool_name      => { type => 'string' },
+                        partition      => { type => 'string' },
+                        domain_dir     => { type => 'string' },
+                        bridge_device  => { type => 'string' },
+                        virbr_device   => { type => 'string' },
+                        reserve_memory => { type => 'integer' },
+                        reserve_cpus   => { type => 'integer' },
+                        reserve_disk   => { type => 'integer' },
+                        cpu_overcommit => { type => 'integer' },
+                        max_guests     => { type => 'integer' },
+                    },
+                },
+            },
+
+            recipes => { type => 'object', default => {} },
+
+            # A keepass database in this domain's data directory to install as
+            # the runner's own.  Empty is fine: bin/preflight wants ipmap.cfg
+            # and recipes.yaml, and nothing else.
+            store => { type => 'string', default => q{} },
+
+            hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
+            restrict_key_to_ip => { type => 'boolean', default => 1 },
+        },
+    );
+}
+
+=head3 enrich
+
+Fills the runner's identity in from the guest's, works each hypervisor's URI
+apart into the host, user and port an C<ssh-keyscan> needs, and dumps
+C<recipes> to YAML with its C<store:> references written back as C<secret:>.
+
+The YAML is done here because Xslate has no dumper and a template should not be
+made to write one.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    # The runner administers its guests as whoever administers this one, unless
+    # it was told otherwise.  Both come out of _global, so they are here.
+    $opts{config}{admin_user}  //= $opts{admin_user};
+    $opts{config}{admin_email} //= $opts{admin_email};
+
+    # The schema defaults this to empty rather than leaving it absent, so an
+    # empty string is what "nobody said" looks like here.
+    $opts{config}{ip} = $opts{main_ip} unless length( $opts{config}{ip} // q{} );
+
+    die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
+      if $opts{checkout} && ( !length( $opts{checkout_dir} // q{} ) || $opts{checkout_dir} eq '.' );
+
+    # Both of these are written into a path under the domain directory, so an
+    # absolute one silently means somewhere else entirely: `store:
+    # /etc/trog-provisioner/secrets.kdbx` is the obvious thing to write and
+    # renders as /opt/domains/<domain>//etc/..., which fails as a missing file
+    # rather than as the mistake it is.
+    _under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
+    _under_the_domain( $opts{store},        'store' )        if length( $opts{store} // q{} );
+
+    foreach my $name ( sort keys %{ $opts{hypervisors} } ) {
+        my $block = $opts{hypervisors}{$name};
+        my $parts = _ssh_parts( $block->{libvirt_uri} )
+          or die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n";
+
+        # A remote hypervisor has to be reachable over ssh -- the runner needs
+        # its filesystem as well as its libvirt, which is Trog::HV's rule and
+        # not one worth discovering on the guest.
+        die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$parts->{host}/system\n"
+          if $parts->{host} && !$parts->{ssh};
+
+        @{$block}{qw{ssh_host ssh_user ssh_port}} = @{$parts}{qw{host user port}};
+    }
+
+    $opts{recipes_yaml} = YAML::XS::Dump( _restore_refs( $opts{recipes} ) );
+
+    return %opts;
+}
+
+sub _under_the_domain {
+    my ( $path, $field ) = @_;
+
+    die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
+      if index( $path, '/' ) == 0;
+    die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
+      if grep { $_ eq '..' } split( m{/}, $path );
+
+    return 1;
+}
+
+# store:GROUP/TITLE/FIELD back to secret:GROUP/TITLE/FIELD, everywhere in the
+# structure.  See SECRETS IN recipes: the indirection exists so that
+# bin/new_config does not resolve these on the way in and dump the answers into
+# a file that ends up in every backup of this domain.
+sub _restore_refs {
+    my ($node) = @_;
+
+    return [ map { _restore_refs($_) } @$node ]                       if ref $node eq 'ARRAY';
+    return { map { $_ => _restore_refs( $node->{$_} ) } keys %$node } if ref $node eq 'HASH';
+    return $node                                                      if ref $node || !defined $node;
+
+    ( my $rewritten = $node ) =~ s/\Astore:/secret:/;
+    return $rewritten;
+}
+
+# The ssh half of a libvirt connection URI.  URI knows nothing about the
+# driver+transport scheme and hands back something with no authority accessors,
+# so split it generically and re-parse the authority under a scheme it does
+# understand -- the same trick, and for the same reason, as Trog::HV::_parse_uri.
+sub _ssh_parts {
+    my ($uri) = @_;
+    return undef unless defined $uri && length $uri;
+
+    my ( $scheme, $authority ) = URI::Split::uri_split($uri);
+    return undef unless defined $scheme && length $scheme;
+
+    my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
+    my $server = ( defined $authority && length $authority ) ? URI->new("ssh://$authority") : undef;
+
+    return {
+        ssh  => ( defined $transport && $transport eq 'ssh' ) ? 1             : 0,
+        host => $server                                       ? $server->host : undef,
+        user => $server                                       ? $server->user : undef,
+        port => $server                                       ? $server->port : undef,
+    };
+}
+
+=head3 %grant = Provisioner::Recipe::trogrunner->grant($block)
+
+What a domain's C<trogrunner> block asks for by way of hypervisor access:
+C<access>, C<restrict> and C<hypervisors>.  An empty list when it asks for
+none, which is the default and the usual answer.
+
+Here rather than in F<bin/provision>, which is what acts on it, because the
+defaults are in C<args()> and a second copy of them in a script is a second copy
+to drift.  Reading them back out of the schema is what keeps there being one.
+
+Takes the block as written rather than a validated one: this is asked of a
+domain long after C<bin/new_config> ran, from a script that has a configuration
+and no recipe object.
+
+=cut
+
+sub grant {
+    my ( $class, $block ) = @_;
+    return () unless ref $block eq 'HASH';
+
+    my %args   = $class->args();
+    my $props  = $args{properties};
+    my $access = $block->{hypervisor_access} // $props->{hypervisor_access}{default};
+
+    return () if !defined $access || $access eq 'none';
+
+    return (
+        access      => $access,
+        restrict    => $block->{restrict_key_to_ip} // $props->{restrict_key_to_ip}{default},
+        hypervisors => ( ref $block->{hypervisors} eq 'HASH' ? $block->{hypervisors} : {} ),
+    );
+}
+
+sub template_files {
+    return (
+        'trogrunner.ipmap.cfg.tt'        => 'trogrunner.ipmap.cfg',
+        'trogrunner.recipes.yaml.tt'     => 'trogrunner.recipes.yaml',
+        'trogrunner.hypervisors.conf.tt' => 'trogrunner.hypervisors.conf',
+        'trogrunner.profile.tt'          => 'trogrunner.profile',
+    );
+}
+
+=head3 datadirs
+
+The configuration directory, made before the fragment runs and owned the way
+the rest of the domain is owned.
+
+C<ips.db> is created in there the first time the runner assigns an address, and
+it is the runner's memory of which guest holds what.  A root-owned directory
+turns that into an unreadable SQLite error on the runner's first
+C<bin/new_config>; being under C<install_dir> is what gets the database
+salvaged onto the next rebuild.
+
+=cut
+
+sub datadirs {
+    return qw{etc/trog-provisioner};
+}
+
+=head3 guest_secrets
+
+The key a hypervisor is asked to trust, kept in the secret store rather than in
+the domain directory.
+
+Declared whether or not C<hypervisor_access> was asked for, because this is a
+class method and has no way to ask -- L</remote_files> has the same constraint.
+That is not a hole: what the setting decides is whether C<bin/provision> writes
+the public half into anybody's F<authorized_keys>, and a private key sitting
+0600 on a guest no machine trusts opens nothing.
+
+Keeping it in the store rather than making one per provision is what lets the
+grant survive a rebuild: the same key comes back, and the line the hypervisor
+already has still matches it.
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain ) = @_;
+
+    return (
+        "$install_dir/$domain/.ssh/id_ed25519" => {
+            ref      => "secret:trogrunner/$domain-hypervisor-key/password",
+            generate => \&_hypervisor_key,
+            owner    => 'root:root',
+            mode     => '0600',
+        },
+    );
+}
+
+# ssh-keygen rather than a perl key generator: OpenSSH defines this format, and
+# the file has to be one ssh itself will load without argument.  ed25519 for the
+# same reason bin/preflight suggests it -- short enough that an authorized_keys
+# line stays readable.
+sub _hypervisor_key {
+    my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+    my $path = "$dir/id_ed25519";
+
+    ## no critic (ProhibitShellDispatch) -- OpenSSH defines this format, and nothing on CPAN writes one ssh will load without argument.
+    # The empty -N is what makes the key passphrase-less, which it has to be:
+    # nothing is going to be there to type one in.
+    my @keygen = ( qw{ssh-keygen -q -t ed25519 -N}, q{}, qw{-C trog-provisioner -f}, $path );
+    system(@keygen) == 0
+      or die "trogrunner: could not generate a hypervisor key with ssh-keygen\n";
+
+    open( my $fh, '<', $path ) or die "trogrunner: could not read the key ssh-keygen just wrote: $!\n";
+    my $key = do { local $/ = undef; <$fh> };
+    close($fh);
+
+    chomp $key;
+    return $key;
+}
+
+=head3 remote_files
+
+The configuration directory and the checkout, salvaged off the guest being
+replaced.
+
+Both unconditionally: this is a class method and cannot see C<checkout>, and
+salvaging a path that is not there has been quiet since the salvage gap was
+closed.
+
+=cut
+
+sub remote_files {
+    my ( $self, $install_dir, $domain ) = @_;
+
+    return (
+        "$install_dir/$domain/etc/trog-provisioner/" => 'etc/trog-provisioner/',
+        "$install_dir/$domain/trog-provisioner/"     => 'trog-provisioner/',
+    );
+}
+
+=head3 remote_skip
+
+The private key, and the three configuration files this recipe renders.
+
+The key because that is what C<remote_skip> is for -- a secret salvaged off a
+guest lands in the domain directory and from there into every backup of it.
+The configuration because the rendered copy is the truth: a salvaged one is
+whatever the last build wrote, and it would come back on top of the new one.
+
+=cut
+
+sub remote_skip {
+    return qw{id_ed25519 ipmap.cfg recipes.yaml hypervisors.conf};
+}
+
+sub tests {
+    return qw{trogrunner.tt};
+}
+
+1;
