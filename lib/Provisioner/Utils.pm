@@ -220,7 +220,8 @@ packet>, which means C<ssh_pubkey_from_private> below cannot read back a key thi
 module just wrote.  RFC 7468 puts the limit at 64, so the strict reader is the
 correct one.
 
-Reported upstream; the rewrap goes when a fixed release is out.
+Reported upstream as L<briandfoy/net-ssh-perl#76|https://github.com/briandfoy/net-ssh-perl/issues/76>;
+the rewrap goes when there is a release with the fix in it.
 
 =cut
 
