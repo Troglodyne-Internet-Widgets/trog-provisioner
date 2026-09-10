@@ -67,7 +67,14 @@ subtest 'a destination the pool knows is pinned to its address' => sub {
     like( conf($dir), qr/\Qtarget="192.168.1.9"\E/, 'resolved out of the ip pool' );
     like( conf($dir), qr/\Qport="514"\E/,           'on the default syslog port' );
     like( conf($dir), qr/\Qprotocol="tcp"\E/,       'over tcp, which can be checked for' );
-    like( conf($dir), qr/\A\Q*.*\E\s/,              'forwarding everything by default' );
+    like( conf($dir), qr/^\Q*.*\E\s+action/m,       'forwarding everything by default' );
+
+    # The collector files a message under the name the sender put in it, and
+    # rsyslog sends its short hostname unless told otherwise -- so a fleet with
+    # staging.example.com and staging.example.net would file both into
+    # staging.log and have neither whole.  Measured on a guest: off gives
+    # "logs", on gives "logs.test.test".
+    like( conf($dir), qr/\Qglobal(preserveFQDN="on")\E/, 'and sending its full name, so two guests with one short name do not collide' );
 };
 
 subtest 'a destination the pool does not know is used as written' => sub {
@@ -82,9 +89,24 @@ subtest 'a destination the pool does not know is used as written' => sub {
 subtest 'the three constants that were hardcoded are settings now' => sub {
     my ($dir) = generated( port => 5514, protocol => 'udp', selector => '*.warn;auth,authpriv.*' );
 
-    like( conf($dir), qr/\Qport="5514"\E/,              'the port' );
-    like( conf($dir), qr/\Qprotocol="udp"\E/,           'the protocol' );
-    like( conf($dir), qr/\A\Q*.warn;auth,authpriv.*\E/, 'and which facilities are sent at all' );
+    like( conf($dir), qr/\Qport="5514"\E/,                       'the port' );
+    like( conf($dir), qr/\Qprotocol="udp"\E/,                    'the protocol' );
+    like( conf($dir), qr/^\Q*.warn;auth,authpriv.*\E\s+action/m, 'and which facilities are sent at all' );
+};
+
+subtest 'the firewall is opened outwards, which is the half a sender needs' => sub {
+    my ( $dir, $recipe, $vars ) = generated( port => 5514 );
+
+    # These guests default to deny (outgoing), and setup-ufw-rules issues an
+    # allow out for every profile in /etc/ufw/applications.d.  Without one
+    # naming the destination port rsyslog cannot open the connection at all --
+    # and a sender that cannot connect looks exactly like a sender with nothing
+    # to say.
+    my $profile = File::Slurper::read_text("$dir/logshipper_ufw.conf");
+    like( $profile, qr/^\[logshipper\]$/m, 'a profile, not named syslog, which ufw would skip' );
+    like( $profile, qr{^ports=5514/tcp$}m, 'naming the port it sends to' );
+
+    like( $recipe->render(%$vars), qr{/etc/ufw/applications\.d/logshipper}, 'and the fragment installs it' );
 };
 
 subtest 'a guest that would ship to itself ships nowhere' => sub {

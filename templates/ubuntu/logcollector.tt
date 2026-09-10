@@ -1,7 +1,10 @@
-[%# Root-owned and 0640: what lands here is every other guest entire log stream,
-    which is not something the world reads.  rsyslog creates the files itself, so
-    this only has to get the directory right. -%]
-install -d -o root -g adm -m 0750 '[% log_dir %]'
+[%# Owned by syslog, because that is who rsyslog becomes: Ubuntu ships
+    PrivDropToUser syslog, so a root-owned directory here means rsyslog cannot
+    create a single file in it and says so once, to its own log, as
+    "open error: Permission denied".  Group adm and 0750 to match what the
+    distribution does with /var/log/syslog -- every other guest whole log stream
+    is not something the rest of this one reads. -%]
+install -d -o syslog -g adm -m 0750 '[% log_dir %]'
 install -o root -g root -m 0644 logcollector.conf /etc/rsyslog.d/09-logcollector.conf
 [%# Root-owned, or logrotate ignores it: a file moved out of the payload keeps
     the transfer user as its owner, and logrotate applies owner restrictions to

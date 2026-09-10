@@ -127,6 +127,17 @@ subtest 'the firewall hole is asked for on the port it actually listens on' => s
     is_deeply( [ sort keys %required ], ['ufw'], 'which is what pulls ufw in, rather than naming it' );
 };
 
+subtest 'the directory is writable by the user rsyslog becomes' => sub {
+    my ( undef, $recipe, $vars ) = generated();
+    my $fragment = $recipe->render(%$vars);
+
+    # Ubuntu ships PrivDropToUser syslog, so rsyslog is not root by the time it
+    # opens anything.  A root-owned directory here means it cannot create a
+    # single file and says so once, to its own log, as "open error: Permission
+    # denied" -- while everything else about the collector looks healthy.
+    like( $fragment, qr{install -d -o syslog -g adm -m 0750 '/var/log/hosts'}, 'created as syslog rather than as root' );
+};
+
 subtest 'the profile is one ufw will not silently skip' => sub {
     my ($dir) = generated( port => 5514 );
     my $profile = slurp( $dir, 'logcollector_ufw.conf' );

@@ -68,6 +68,19 @@ way to turn logging on for a fleet is one C<_base> block, which necessarily
 covers the collector as well -- and a collector forwarding to its own listener
 is a loop.
 
+=head2 It needs the firewall opened outwards, not inwards
+
+A guest this tool builds defaults to C<deny (outgoing)>, and
+C<scripts/setup-ufw-rules> issues an C<allow out> for every profile in
+C</etc/ufw/applications.d>.  So a sender needs a profile naming the destination
+port even though it listens on nothing -- without one rsyslog cannot open the
+connection at all, and being unable to is indistinguishable from having nothing
+to say.
+
+That profile opens the port inbound too, which is what that script does for
+every profile it finds.  Nothing is listening on it here, so the inbound half
+reaches a closed port.
+
 =head2 The failure this is shaped to make visible
 
 A misconfigured destination and a working one look identical from the guest:
@@ -153,7 +166,13 @@ sub args {
 =cut
 
 sub template_files {
-    return ( 'logshipper.conf.tt' => 'logshipper.conf' );
+    return (
+        'logshipper.conf.tt' => 'logshipper.conf',
+
+        # For the outbound half.  See the template, and L</It needs the firewall
+        # opened outwards, not inwards>.
+        'logshipper.ufw.conf.tt' => 'logshipper_ufw.conf',
+    );
 }
 
 =head2 @tests = $recipe->tests()

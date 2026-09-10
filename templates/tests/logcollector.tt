@@ -22,9 +22,9 @@ subtest 'it is listening where it said it would' => sub {
     # collector that is broken look the same if you only ever ask about 514.
     my $listening = `ss -lntu 2>/dev/null`;
 [% IF protocol == 'udp' %]
-    like( $listening, qr/udp\s+\S+\s+\S+\s+\S*:$port\b/, "something is bound to $port/udp" ) or diag $listening;
+    like( $listening, qr/^udp\s+UNCONN\s.*:$port\b/m, "something is bound to $port/udp" ) or diag $listening;
 [% ELSE %]
-    like( $listening, qr/tcp\s+\S+\s+\S+\s+\S*:$port\b/, "something is bound to $port/tcp" ) or diag $listening;
+    like( $listening, qr/^tcp\s+LISTEN\s.*:$port\b/m, "something is bound to $port/tcp" ) or diag $listening;
 [% END %]
 };
 
@@ -44,7 +44,13 @@ subtest 'rotation is configured and logrotate will read it' => sub {
     # and says so only in -d output.  templates/tests/backup.tt does the same.
     my $out = `logrotate -d $conf 2>&1`;
     unlike( $out, qr/Ignoring/, 'logrotate does not ignore it' ) or diag $out;
-    like( $out, qr/rsyslog-rotate/, 'and rotation signals rsyslog, so it reopens the files it was writing' ) or diag $out;
+
+    # Read the file rather than the -d output: with no logs rotated yet, -d
+    # says "not running postrotate script, since no logs were rotated", so
+    # asking it for the hook is a question that cannot come back yes on a
+    # collector that has just been built.
+    my $body = do { open( my $fh, '<', $conf ) or die $!; local $/; <$fh> };
+    like( $body, qr{postrotate\s+/usr/lib/rsyslog/rsyslog-rotate}s, 'and rotation signals rsyslog, so it reopens the files it was writing' );
 };
 
 # The whole path, on one machine: a message over the port, through the listener
@@ -54,10 +60,8 @@ subtest 'rotation is configured and logrotate will read it' => sub {
 # and never enters the collector ruleset, so it would prove nothing about the
 # thing under test -- which is exactly the mistake that would make this file
 # pass on a guest that receives nothing.
-subtest 'a message sent over the port lands in the file named for its sender' => sub {
-    chomp( my $host = `hostname` );
+subtest 'a message sent over the port lands in a file named for its sender' => sub {
     my $marker = "logcollector-selftest-$$-" . time;
-    my $target = "$log_dir/$host.log";
 
 [% IF protocol == 'udp' %]
     system( 'logger', '-n', '127.0.0.1', '-P', $port, '-d', '-t', 'logcollector-test', $marker );
@@ -67,14 +71,17 @@ subtest 'a message sent over the port lands in the file named for its sender' =>
 
     # rsyslog writes asynchronously; a bare check races it and fails on a
     # collector that is working perfectly well.
-    my $found = 0;
+    my @found;
     foreach ( 1 .. 20 ) {
-        last if $found = ( -f $target && `grep -c '$marker' '$target' 2>/dev/null` + 0 );
+        chomp( @found = split( m/\n/, `grep -l '$marker' '$log_dir'/*.log 2>/dev/null` // q{} ) );
+        last if @found;
         select( undef, undef, undef, 0.5 );
     }
 
-    ok( $found, "the marker arrived in $target" )
-      or diag "Nothing matching $marker under $log_dir after 10s.  Directory holds: " . ( `ls -la '$log_dir' 2>&1` // 'nothing' );
+    is( scalar @found, 1, 'the marker arrived, in exactly one per-sender file' )
+      or diag "Nothing matching $marker under $log_dir after 10s.  Directory holds: " . ( `ls -la '$log_dir' 2>&1` // 'nothing' )
+      . "\nrsyslog said: " . ( `journalctl -u rsyslog --no-pager -n 5 2>&1` // q{} );
+    diag "filed as $found[0]" if @found;
 };
 
 subtest 'the fleet logs do not also land in this guest own syslog' => sub {

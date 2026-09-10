@@ -1,0 +1,15 @@
+[%# This exists for the outbound half.  setup-ufw-rules issues "allow out" for
+    every profile in /etc/ufw/applications.d, and the guests this builds default
+    to deny outgoing -- so without a profile naming the destination port, rsyslog
+    cannot open a connection to the collector at all, and says nothing about it.
+
+    It opens the port inbound as well, which is what that script does for every
+    profile.  Nothing is listening on it here: a shipper loads no input module,
+    so the inbound half reaches a closed port.
+
+    Not named syslog, because ufw skips a profile whose section name is also a
+    service name in /etc/services and only warns about it on stderr. -%]
+[logshipper]
+title=Log shipper
+description=Outbound syslog to the collector this guest was configured with
+ports=[% port %]/[% protocol %]

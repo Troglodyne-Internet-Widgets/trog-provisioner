@@ -5,6 +5,12 @@
     target is empty for a guest that is its own destination, which renders this
     file empty rather than making it forward to its own listener. -%]
 [% IF target -%]
+[%# The collector files messages under the name the sender put in them, and
+    rsyslog sends its short hostname unless told otherwise -- so without this a
+    fleet with staging.example.com and staging.example.net files both into
+    staging.log and neither is complete.  Measured on a guest: off gives "logs",
+    on gives "logs.test.test". -%]
+global(preserveFQDN="on")
 [% selector %]  action(type="omfwd" target="[% target %]" port="[% port %]" protocol="[% protocol %]"
             action.resumeRetryCount="[% retry %]"
             queue.type="linkedList" queue.size="[% queue_size %]")
