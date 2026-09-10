@@ -164,6 +164,11 @@ _base:
         # mirror: http://mirror.example.net/ubuntu   # or a URL, used as written
 ```
 
+To have one of your own to name, give a domain the `aptmirror` recipe and build
+it like any other guest; `perldoc Provisioner::Recipe::aptmirror` covers how big
+a mirror is and how to seed one from a mirror you already have. Nothing requires
+that recipe, and nothing points at the guest until you write it in here.
+
 A **URL** is used exactly as given, which is how you name a mirror this
 installation does not run. **Anything else is a domain name**, and is resolved to
 that domain's address out of the ip pool with the distribution's path appended --
