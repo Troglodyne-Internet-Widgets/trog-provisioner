@@ -26,7 +26,6 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use List::Util qw{uniq any};
 use Net::SFTP::Foreign;
-use Net::SFTP::Foreign::Constants qw{SSH2_FX_NO_SUCH_FILE};
 use Archive::Tar();
 use File::Path   qw{make_path remove_tree};
 use Getopt::Long qw{GetOptionsFromArray};
@@ -647,11 +646,13 @@ sub handle_domain {
 
     # Figure out whether the remote host is actually up.
     #
-    # Over sftp, and only sftp: opening the connection is the probe, and
-    # _salvage_gap asks the same handle afterwards whether a directory that
-    # salvaged nothing was missing or merely unreadable -- which is one status
-    # code here and two sudo round trips anywhere else.  Nothing is fetched over
-    # it.  That is _salvage_guest's job.
+    # Over sftp because opening the connection is the probe, and that is all this
+    # handle is for now.  It used to answer _salvage_gap's question as well --
+    # whether a directory that salvaged nothing was missing or merely unreadable,
+    # which was one status code here -- but the fetch reads what the service owns
+    # now, so the question became whether the path holds anything, which sftp
+    # cannot answer without the privileges the fetch already uses.  Nothing is
+    # fetched over this.  That is _salvage_guest's job.
     my ( $ssh, $target_is_up );
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir ) unless $skip_ssh;
 
@@ -809,10 +810,19 @@ sub handle_domain {
                     # What the sftp fetch called newer_only.  A guest's copy that
                     # is older than ours stays where it is.
                     update => 1,
+
+                    # As root on the guest.  What a recipe salvages is a
+                    # service's own state directory, which the service owns and
+                    # nobody else can open -- redis is 0750 redis:redis, slapd.d
+                    # is 0700 openldap, a PKI is 0600 root.  Unprivileged, this
+                    # made the local directories, copied nothing into them and
+                    # reported success, which looks exactly like a guest that has
+                    # never run the service.
+                    sudo => 1,
                 );
 
                 my $gap = _salvage_gap(
-                    ssh         => $ssh,
+                    guest       => _salvage_guest( $static_ip, $admin_user, $cfg_dir ),
                     recipe      => $module,
                     host        => $fqdn,
                     user        => $admin_user,
@@ -1283,37 +1293,62 @@ sub pack_scripts {
 # nothing, having taken the lot the first time -- so what moved says nothing
 # about whether the salvage has anything in it.
 #
-# An empty destination is one of two things and only the guest can tell them
-# apart.  If the path is not there, the service has not generated its state yet,
-# which is what every first build looks like and is no cause for alarm.  If the
-# path is there and we still came away with nothing, the fetch could not read it:
-# remote_files comes down as admin_user over rsync with no sudo, and a service
-# keeps its state in a directory it owns and nobody else can open -- redis is
-# 0750 redis:redis, slapd.d is 0700 openldap, a PKI is 0600 root.  That case is
-# indistinguishable from a clean run from the outside, which is how it stays
-# unnoticed until somebody rebuilds the guest months later and the state is gone.
+# An empty destination is one of three things, and only the guest can tell them
+# apart.  The path may not be there at all, which is what every first build of a
+# recipe looks like.  It may be there and hold nothing, which is a service that
+# has started and not yet written anything.  Or it may hold files that did not
+# come down, which is the one worth stopping a rebuild over.
+#
+# Asked of the guest as root, for the same reason the fetch is: the paths a
+# recipe salvages belong to the service and nobody else can open them, so an
+# unprivileged look inside one cannot tell "empty" from "not mine to read" and
+# would call every one of them alarming.
+#
+# It used to be two things rather than three, because the fetch was
+# unprivileged and unreadable was the likely case -- so a directory that was
+# genuinely empty got a warning blaming permissions, and a directory that was
+# unreadable was the thing the warning was actually for.  Now that the fetch can
+# read them, the remaining alarming case is a fetch that failed.
 sub _salvage_gap {
     my (%args) = @_;
 
     return () if _dir_has_files( $args{destination} );
 
-    my $ssh   = $args{ssh};
-    my $found = defined $ssh->stat( $args{remote} );
+    # The path as an argument rather than interpolated into the command: this is
+    # a shell, and run_sudo escapes each element for us.
+    #
+    # find -print -quit stops at the first file rather than walking a state
+    # directory that may be very large, and says nothing for a path that is not
+    # there -- so one question covers both of the quiet cases, a path that was
+    # never created and one the service has not written into.
+    my $rc = $args{guest}->run_sudo(
+        'sh',          '-c', 'test -n "$(find "$1" -type f -print -quit 2>/dev/null)"',
+        'salvage-gap', $args{remote},
+    );
 
-    # Take the status code rather than the bare undef.  A guest that went away
-    # mid-run answers nothing to everything, and a connection that dropped is not
-    # a service that has never run.
-    my $missing = !$found && ( ( $ssh->status // -1 ) == SSH2_FX_NO_SUCH_FILE );
+    my %gap = ( recipe => $args{recipe}, remote => $args{remote} );
 
-    my $message = "$args{recipe}: $args{remote} is not on $args{host} yet, so there is nothing to salvage.";
-    $message = "$args{recipe}: salvaged nothing out of $args{remote} on $args{host}, and $args{destination} is empty." . "  The fetch runs as $args{user} over rsync with no sudo, so the likeliest reason is that" . " the directory belongs to the service and $args{user} cannot read it."
-      unless $missing;
+    # test exits 0 or 1 and nothing else, so anything else is the question not
+    # having been asked -- a guest that went away mid-run, or a sudo that was
+    # refused.  Filing that as a service which has never run would put the alarm
+    # out on state that is still there, which is the failure this whole sub
+    # exists to prevent.
+    return {
+        %gap,
+        alarming => 1,
+        message  => "$args{recipe}: could not ask $args{host} whether $args{remote} still holds anything" . " -- the check exited $rc as $args{user}.  Treating that as state that did not come off," . " because the alternative is calling a guest we cannot reach a guest with nothing on it.",
+    } if $rc > 1;
 
     return {
-        recipe   => $args{recipe},
-        remote   => $args{remote},
-        alarming => $missing ? 0 : 1,
-        message  => $message,
+        %gap,
+        alarming => 0,
+        message  => "$args{recipe}: nothing under $args{remote} on $args{host} yet, so there is nothing to salvage.",
+    } if $rc;
+
+    return {
+        %gap,
+        alarming => 1,
+        message  => "$args{recipe}: salvaged nothing out of $args{remote} on $args{host}, and $args{destination} is empty." . "  The guest still has files there, so this is a fetch that failed rather than a service with no state." . "  Rebuilding $args{host} now loses them.",
     };
 }
 

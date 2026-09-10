@@ -52,10 +52,11 @@ restoring one half of that pair gives a web UI that cannot talk to the daemon it
 is running against; generated fresh together they agree.  Something that
 regenerates correctly does not belong in C<remote_files>.
 
-The fetch is an sftp session as the admin user with no sudo, so the fragment
-gives that user the group on the path down to C<state/>, 0750 on the directories
-and 0640 on what is in them.  Salvaging the whole config directory, which is
-what this recipe asked for before, could not work for the same reason: it is
+The fragment gives the admin user the group on the path down to C<state/>, 0750
+on the directories and 0640 on what is in them -- from when the fetch ran as that
+user.  It reads the guest as root now and no longer needs it; taking it out is
+issue #98.  Salvaging the whole config directory, which is what this recipe asked
+for before, could not work for the same reason: it is
 owned C<debian-deluged:debian-deluged> throughout, so what came back was an
 empty directory and no complaint about it.
 

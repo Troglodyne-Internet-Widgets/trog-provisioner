@@ -51,10 +51,9 @@ from the recipe alone comes up with its users as they were on the day it was
 first provisioned, and nobody finds out until somebody cannot log in.
 
 C</var/lib/ldap> cannot simply be salvaged, and neither can C</etc/ldap/slapd.d>.
-The fetch is sftp as the admin user with no sudo, and the package ships both of
-those 0700 C<openldap:openldap>: named here, either comes back as an empty
-directory and nothing anywhere says why.  Nor would copying them be right if
-they could be read.  MDB is a private on-disk format, tied to the slapd that
+The package ships both 0700 C<openldap:openldap>, which the fetch can read now
+that it runs as root -- but copying them would still be wrong, and that is the
+half of the reason that does not go away.  MDB is a private on-disk format, tied to the slapd that
 wrote it and the architecture it was written on, and the point of a rebuild is
 that the new guest is not the old one.
 

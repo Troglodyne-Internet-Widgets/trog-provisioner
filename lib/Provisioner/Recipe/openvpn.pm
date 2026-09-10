@@ -81,11 +81,13 @@ nothing has an empty disk, sails past it and signs itself a new CA.  Restoring
 first is what closes that.
 
 What C<remote_files> names is a staged copy the fragment leaves at
-F</etc/openvpn/pki-salvage>, not the pki itself.  The fetch is an sftp session as
-the admin user with no sudo and easy-rsa keeps its pki at 0700 root with the keys
-at 0600, so naming the real thing came back with an empty directory and no
-complaint -- the salvage looked like it was working for as long as nobody
-rebuilt a guest.  The staged copy belongs to the admin user and is readable by
+F</etc/openvpn/pki-salvage>, not the pki itself.  easy-rsa keeps its pki at 0700
+root with the keys at 0600, and the fetch ran as the admin user -- so naming the
+real thing came back with an empty directory and no complaint, and the salvage
+looked like it was working for as long as nobody rebuilt a guest.  The fetch
+reads the guest as root now, so the real pki could be named; whether it should be
+is issue #98, the staged copy also being what keeps what travels apart from what
+the running VPN is using.  The staged copy belongs to the admin user and is readable by
 nobody else, which is the same trade the mail recipe makes to salvage the DKIM
 keys: the CA private key is now readable by whoever holds the admin account, and
 it travels into the data directory and into whatever backup is taken of that.

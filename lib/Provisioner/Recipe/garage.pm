@@ -57,13 +57,14 @@ the one that replaces it, before garage is started, so a rebuilt node comes up
 with its buckets and their contents rather than as an empty single-node cluster
 with a fresh layout.
 
-The fetch has no sudo, so both directories are owned C<garage> with the admin
-user as their group and the setgid bit set, and C<garage.service> is given a
-C<UMask> that leaves what garage writes readable to that group.  Left as
-C<garage:garage> 0750 they came back as empty directories and said nothing about
-it, which is the failure this arrangement buys off: the objects are readable
-from here on by whoever holds the admin account, and travel into the data
-directory and into whatever backup is taken of it.
+Both directories are owned C<garage> with the admin user as their group and the
+setgid bit set, and C<garage.service> is given a C<UMask> that leaves what garage
+writes readable to that group.  The objects are therefore readable by whoever
+holds the admin account, and travel into the data directory and into whatever
+backup is taken of it.
+
+B<That is no longer needed for the salvage.>  The fetch reads the guest as root
+now.  Taking the widening out is issue #98.
 
 Only the default paths are salvaged.  C<remote_files> is called without the
 domain configuration, so a node told to keep its data somewhere else is fetched
@@ -242,9 +243,9 @@ sub remote_files {
     # garage-snapshot.sh asks garage for one nightly; see garage.tt for the leg
     # that puts it back.
     # templates/garage.tt is the other half: it gives both directories the admin
-    # user as their group, because the fetch is an sftp session as that user
-    # with no sudo and 0750 garage:garage comes back empty without complaining,
-    # and it calls restore_state on each of them before garage is started.
+    # user as their group -- which the fetch no longer needs, now that it reads
+    # the guest as root; see issue #98 -- and it calls restore_state on each of
+    # them before garage is started.
     #
     # The defaults in practice, whatever the domain configured.  Nothing hands
     # this method the domain configuration: bin/new_config builds the recipe

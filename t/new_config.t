@@ -214,14 +214,16 @@ subtest 'a recipe that names rate limits depends on ufw for them' => sub {
 
 # A stand-in for the sftp session, which is the only part of the salvage check
 # that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
-# the path stats, and the status code behind a stat that did not.
+# what the guest said when asked whether the path still holds anything.
+#
+# run_sudo's convention, which is the opposite of the usual one: zero means the
+# command succeeded.  Here that is `test -n`, so zero means files are there.
 {
 
-    package MockSFTP;
+    package MockGuest;
 
-    sub new    { my ( $class, %args ) = @_; return bless {%args}, $class }
-    sub stat   { my ($self) = @_; return $self->{found} ? {} : undef }
-    sub status { my ($self) = @_; return $self->{status} }
+    sub new { my ( $class, %args ) = @_; return bless {%args}, $class }
+    sub run_sudo { my ($self) = @_; return $self->{rc} }
 }
 
 # Real directories under here, not mocks.  What the check asks is whether
@@ -253,42 +255,51 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # copies nothing at all, and that must not read as a failure.
     my $quiet = Trog::Provisioner::Config::Generator::_salvage_gap(
         %args,
-        ssh         => MockSFTP->new( found => 1 ),
+        guest       => MockGuest->new( rc => 0 ),
         destination => $landed,
     );
     ok( !$quiet, 'a destination with state in it is not complained about' );
 
-    # 2 is SSH2_FX_NO_SUCH_FILE: the service has not generated anything yet.
+    # Nothing under the path on the guest: either it was never created, or the
+    # service has not written into it.  Both are what a first build looks like,
+    # and the fetch reads what the service owns now, so neither is unreadable.
     my $absent = Trog::Provisioner::Config::Generator::_salvage_gap(
         %args,
-        ssh         => MockSFTP->new( found => 0, status => 2 ),
+        guest       => MockGuest->new( rc => 1 ),
         destination => $empty,
     );
-    ok( $absent,              'a path the guest does not have is still reported' );
+    ok( $absent,              'a path holding nothing is still reported' );
     ok( !$absent->{alarming}, 'but not as a problem, because that is what a first build looks like' );
     like( $absent->{message}, qr/nothing to salvage/, 'and it says why there was nothing' );
 
-    # The one that matters: the directory is there, and we came away with nothing.
-    my $unreadable = Trog::Provisioner::Config::Generator::_salvage_gap(
+    # The one that matters: the guest has files there and we came away with none.
+    my $lost = Trog::Provisioner::Config::Generator::_salvage_gap(
         %args,
-        ssh         => MockSFTP->new( found => 1 ),
+        guest       => MockGuest->new( rc => 0 ),
         destination => $empty,
     );
-    ok( $unreadable->{alarming}, 'a path that is there but yielded nothing is a problem' );
-    like( $unreadable->{message}, qr/redis/,              'the message names the recipe' );
-    like( $unreadable->{message}, qr{/var/lib/redis},     'and the path on the guest' );
-    like( $unreadable->{message}, qr/tester cannot read/, 'and who could not read it' );
-    like( $unreadable->{message}, qr/\Q$empty\E/,         'and where the nothing landed' );
-    is( $unreadable->{recipe}, 'redis', 'the recipe comes back out for the summary at the end of the run' );
+    ok( $lost->{alarming}, 'a path that still holds files but yielded nothing is a problem' );
+    like( $lost->{message}, qr/redis/,          'the message names the recipe' );
+    like( $lost->{message}, qr{/var/lib/redis}, 'and the path on the guest' );
+    like( $lost->{message}, qr/\Q$empty\E/,     'and where the nothing landed' );
 
-    # A guest that went away mid-run also fails to stat, and filing that as a
-    # service which has never run would silence the alarm on real state.
+    # No longer blamed on permissions.  The fetch runs as root at the far end, so
+    # saying the admin user could not read it would send somebody to fix
+    # something that is not broken.
+    unlike( $lost->{message}, qr/cannot read|unprivileged|no sudo/, 'and does not blame a permission that is no longer the cause' );
+    is( $lost->{recipe}, 'redis', 'the recipe comes back out for the summary at the end of the run' );
+
+    # test exits 0 or 1 and nothing else, so anything else is the question not
+    # having been asked -- a guest that went away mid-run, or a sudo refused.
+    # Filing that as a service which has never run would put the alarm out on
+    # state that is still there.
     my $dropped = Trog::Provisioner::Config::Generator::_salvage_gap(
         %args,
-        ssh         => MockSFTP->new( found => 0, status => 4 ),
+        guest       => MockGuest->new( rc => 255 ),
         destination => $empty,
     );
-    ok( $dropped->{alarming}, 'a stat that failed for any other reason stays a problem' );
+    ok( $dropped->{alarming}, 'a check that could not be run at all stays a problem' );
+    like( $dropped->{message}, qr/could not ask/, 'and says that is what happened, rather than guessing' );
 };
 
 subtest 'an empty tree of directories is not a salvage' => sub {

@@ -16,9 +16,10 @@
 #   - nothing was salvaged.  A guest being built for the first time has no
 #     previous guest to have taken anything off.
 #
-#   - what was salvaged is empty.  The fetch runs as the admin user over sftp
-#     with no sudo, so a directory the service keeps to itself comes back with
-#     nothing in it.  Restoring that over anything would be worse than useless.
+#   - what was salvaged is empty.  The service may not have written anything yet,
+#     or the fetch may have failed; either way, restoring nothing over something
+#     would be worse than useless.  bin/new_config asks the old guest which of
+#     the two it was and refuses to rebuild over the second.
 #
 #   - the destination already has something in it.  This is the important one.
 #     Re-provisioning a guest that is still running fetches its live state
