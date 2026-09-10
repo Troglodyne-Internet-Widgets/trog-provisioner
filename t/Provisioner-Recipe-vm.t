@@ -196,7 +196,11 @@ sub _tuned_xml {
     $hv_mock->redefine( qemu_img_options     => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
 
     Trog::HV->forget();
-    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+    Trog::HV->new(
+        uri        => 'qemu+ssh://root@hv/system',
+        domain_dir => $dir,
+        %{ $opts{hv} // {} },
+    );
 
     my %seed = (
         'user-data' => 'a', 'meta-data' => 'b', 'network-config' => 'c',
@@ -368,6 +372,30 @@ subtest 'a ZFS pool that refuses is told which of the two things it is' => sub {
         _tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs get direct/,
         'and 2.10 is read as later than 2.3, not earlier'
     );
+};
+
+# --- Where the guest is placed, and out of which pool -------------------------
+subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
+
+    # libvirt writes <resource><partition>/machine</partition></resource> into
+    # every domain when nobody says otherwise, so saying nothing has to keep
+    # meaning that -- a guest that quietly escapes the slice its hypervisor
+    # was given is the failure this asserts against.
+    my $default = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ) );
+    unlike( $default, qr/<partition>/, 'nothing written when the hypervisor names no partition' );
+    like( $default, qr/<source pool='tf_disks'/, 'and the pool everything has always used' );
+
+    # Both together, because both are named in one hypervisors.conf block and
+    # they are the only two limits a guest can be held to: the pool is where a
+    # filesystem quota bites, the partition is where a CPU cap does.  See
+    # QUOTAS in Provisioner::Recipe::trogrunner.
+    my $confined = _tuned_xml(
+        libvirt => _libvirt( 10, 0, 0 ),
+        qemu    => _libvirt( 9,  0, 0 ),
+        hv      => { partition => '/machine/runner', pool_name => 'runner_disks' },
+    );
+    like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );
+    like( $confined, qr/<source pool='runner_disks'/,                                       'out of the pool it was given, rather than the literal that used to be here' );
 };
 
 # --- Which netplan entry gets the static IP ----------------------------------

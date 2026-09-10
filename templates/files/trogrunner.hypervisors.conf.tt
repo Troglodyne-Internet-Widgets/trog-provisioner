@@ -1,0 +1,37 @@
+[%# The fleet the runner builds guests on.
+
+    Always rendered, installed only when there is a hypervisor to name: an
+    absent file means "this machine", which is the right answer for a runner
+    that is its own hypervisor, and an empty one would mean the same thing much
+    less obviously.
+
+    pool_name beside pool_path, and partition, are the only two limits a guest
+    can be held to -- see QUOTAS in Provisioner::Recipe::trogrunner. -%]
+[% FOR name IN hypervisors.keys().sort() -%]
+[% SET hv = hypervisors.$name -%]
+[[% name %]]
+libvirt_uri    = [% hv.libvirt_uri %]
+[% IF hv.pool_path %]pool_path      = [% hv.pool_path %]
+[% END -%]
+[% IF hv.pool_name %]pool_name      = [% hv.pool_name %]
+[% END -%]
+[% IF hv.partition %]partition      = [% hv.partition %]
+[% END -%]
+[% IF hv.domain_dir %]domain_dir     = [% hv.domain_dir %]
+[% END -%]
+[% IF hv.bridge_device %]bridge_device  = [% hv.bridge_device %]
+[% END -%]
+[% IF hv.virbr_device %]virbr_device   = [% hv.virbr_device %]
+[% END -%]
+[% IF hv.reserve_memory %]reserve_memory = [% hv.reserve_memory %]
+[% END -%]
+[% IF hv.reserve_cpus %]reserve_cpus   = [% hv.reserve_cpus %]
+[% END -%]
+[% IF hv.reserve_disk %]reserve_disk   = [% hv.reserve_disk %]
+[% END -%]
+[% IF hv.cpu_overcommit %]cpu_overcommit = [% hv.cpu_overcommit %]
+[% END -%]
+[% IF hv.max_guests %]max_guests     = [% hv.max_guests %]
+[% END -%]
+
+[% END -%]

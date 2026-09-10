@@ -18,6 +18,9 @@ use Data::Validate::Email();
 # can see that loading them is the whole point.
 ## no critic (ProhibitUnusedImports)
 use Crypt::PK::Ed25519();
+use Net::SSH::Perl::Key();
+use File::Slurper();
+use File::Slurper::Temp();
 use Crypt::PK::ECC();
 use Crypt::PK::RSA();
 ## use critic
@@ -194,6 +197,58 @@ sub qualify_address {
     return $value if Data::Validate::Email::is_email($value);
     return $value unless defined $domain && length $domain;
     return "$value\@$domain";
+}
+
+=head3 write_ssh_keypair($path, $type, $bits, $comment)
+
+Make an ssh keypair and write both halves: the private key to C<$path> and the
+public one to C<$path.pub>, in the form C<ssh-keygen> would have written them.
+
+C<$type> is a L<Net::SSH::Perl::Key> type -- C<RSA>, C<Ed25519>, C<ECDSA> --
+and C<$bits> is ignored by the types that have only one size.  The key is
+always passphrase-less: nothing here runs with somebody there to type one in.
+
+Returns the public half, without its trailing newline.
+
+B<Ed25519 private keys are rewrapped on the way out, and that is not
+cosmetic.>  L<Net::SSH::Perl::Key::Ed25519/write_private> encodes the body with
+C<Crypt::Misc::encode_b64>, which never wraps, so it emits the whole payload on
+one line -- every other key type in that distribution hands PEM generation to
+CryptX and comes out at 64 columns.  OpenSSH reads the unwrapped form quite
+happily; CryptX refuses it as C<pem_decode_openssh failed: Invalid input
+packet>, which means C<ssh_pubkey_from_private> below cannot read back a key this
+module just wrote.  RFC 7468 puts the limit at 64, so the strict reader is the
+correct one.
+
+Reported upstream as L<briandfoy/net-ssh-perl#76|https://github.com/briandfoy/net-ssh-perl/issues/76>;
+the rewrap goes when there is a release with the fix in it.
+
+=cut
+
+# PEM at 64 columns, which is what RFC 7468 asks for.
+sub _rewrap_pem {
+    my ($pem) = @_;
+
+    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}s
+      or return $pem;
+
+    $body =~ s/\s//g;
+    return join( "\n", $head, ( $body =~ m/(.{1,64})/g ), $tail ) . "\n";
+}
+
+sub write_ssh_keypair {
+    my ( $path, $type, $bits, $comment ) = @_;
+
+    my $key = Net::SSH::Perl::Key->keygen( $type, $bits );
+    $key->{comment} = $comment if defined $comment;
+
+    $key->write_private($path);
+    File::Slurper::Temp::write_text( $path, _rewrap_pem( File::Slurper::read_text($path) ) );
+
+    my $public = $key->dump_public;
+    File::Slurper::Temp::write_text( "$path.pub", "$public\n" );
+
+    return $public;
 }
 
 =head3 ssh_pubkey_from_private($path)

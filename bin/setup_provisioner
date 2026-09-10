@@ -15,7 +15,7 @@ use re '/aa';
 
 =head1 NAME
 
-setup_provisioner - prepare this machine to be a hypervisor
+setup_provisioner - prepare this machine to host guests
 
 =head1 SYNOPSIS
 
@@ -23,17 +23,30 @@ setup_provisioner - prepare this machine to be a hypervisor
 
 =head1 DESCRIPTION
 
-The install script: everything a machine needs before it can host guests.
+The install script for a I<hypervisor>: everything a machine needs before
+anything can build guests on it.
 
 Every step is still a stub: each returns true and says what it ought to be
 doing.  Each step's number is what main() returns when that step fails.
 
-There used to be an rsyslog step here, which opened a syslog listener by editing
-/etc/rsyslog.conf on whatever machine you ran this from -- while every guest was
-told to ship its logs to the hypervisor, which is a different machine on any
-fleet with more than one.  Where a guest sends its logs is now
-Provisioner::Recipe::logshipper, and the listener at the other end is
-Provisioner::Recipe::logcollector, so there is nothing for this to set up.
+=head2 What this is not
+
+The machine that B<runs> the provisioner is a guest like any other, and
+L<Provisioner::Recipe::trogrunner> is what builds it: perl, the CPAN
+dependencies, F</etc/trog-provisioner>, and a key a hypervisor will trust.  That
+is where the checkout, the toolchain and the configuration went.
+
+The rest went the same way, one recipe at a time -- C<auditd>, C<fail2ban>,
+C<cron> and C<tcms> are all recipes now, so a management interface or a log
+ingester is a guest to build rather than a step to run here.  There used to be
+an rsyslog step, which opened a syslog listener by editing F</etc/rsyslog.conf>
+on whatever machine you ran this from, while every guest was told to ship its
+logs to the hypervisor -- a different machine on any fleet with more than one.
+Where a guest sends its logs is L<Provisioner::Recipe::logshipper> now, and the
+listener at the other end is L<Provisioner::Recipe::logcollector>.
+
+What is left is the part that cannot be a guest, because it is the thing guests
+run on.
 
 =cut
 
@@ -44,13 +57,12 @@ sub main {
     #
     #    );
 
-    setup_kvm()                  or return 1;
-    setup_public_bridge()        or return 2;
-    setup_auditd()               or return 3;
-    setup_management_interface() or return 4;
-    setup_firewall()             or return 5;
-    setup_fail2ban()             or return 6;
-    setup_crons()                or return 7;
+    setup_kvm()           or return 1;
+    setup_public_bridge() or return 2;
+    setup_iso_builder()   or return 3;
+    setup_storage_pool()  or return 4;
+    setup_apparmor()      or return 5;
+    setup_firewall()      or return 6;
     return 0;
 }
 
@@ -64,28 +76,34 @@ sub setup_public_bridge {
     1;
 }
 
-# TODO: ensure auditd is configured to ingest logs & configured properly locally
-sub setup_auditd {
+# TODO: xorriso, which is what builds the cloud-init seed.  bin/preflight's
+# check_iso_builder is what notices it is missing, and it asks it of the
+# hypervisor rather than of the machine driving the run -- because this is
+# where the seed is actually made.
+sub setup_iso_builder {
     1;
 }
 
-# TODO: setup tcms based virtual machine manager (qaportal3)
-sub setup_management_interface {
+# TODO: the storage pool, and a filesystem under it that can carry a quota.
+# Nothing in libvirt counts what a user has allocated and every guest runs as
+# libvirt-qemu whoever defined it, so a pool of its own on a limited filesystem
+# is the only budget a guest can be held to -- see QUOTAS in
+# Provisioner::Recipe::trogrunner, and note_pool_quota in bin/preflight, which
+# says whether this machine has one.
+sub setup_storage_pool {
+    1;
+}
+
+# TODO: the two apparmor items nothing else does -- the libvirt-qemu profile
+# override that lets a guest read what it has been given, and a profile for
+# /usr/libexec/virtiofs-better, which has none anywhere.  bin/provision
+# installs the binary on first use; the profile is still the operator's.
+sub setup_apparmor {
     1;
 }
 
 # TODO: Configure firewall for all the above services
 sub setup_firewall {
-    1;
-}
-
-# TODO: setup relevant local fail2ban rules
-sub setup_fail2ban {
-    1;
-}
-
-# TODO: setup local crond stuff, make sure it can send us mail
-sub setup_crons {
     1;
 }
 

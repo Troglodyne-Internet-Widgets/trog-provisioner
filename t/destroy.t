@@ -117,6 +117,110 @@ subtest 'remove_authorized_key dryrun leaves file unchanged' => sub {
     like( $after, qr/\Qfake-key-$domain\E/, 'dryrun: key not removed' );
 };
 
+# --- remove_runner_key ---
+#
+# The counterpart of authorize_runner_key in bin/provision.  It reads the public
+# half beside the domain rather than the store, so a destroy never stops to ask
+# for a passphrase -- one that did is one nobody would run.
+subtest 'a runner key comes off every hypervisor it was let in to' => sub {
+    my $domain = 'runner.example';
+    my $dir    = make_domain_dir($domain);
+
+    my $pubkey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINOTAREALKEYbutlongenough runner-key';
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "$pubkey\n" );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine(
+        domain_config => sub {
+            return {
+                trogrunner => {
+                    hypervisor_access => 'least',
+                    hypervisors       => {
+                        one => { libvirt_uri => 'qemu+ssh://runner@one.test.test/system' },
+                        two => { libvirt_uri => 'qemu+ssh://runner@two.test.test/system' },
+                    },
+                },
+            };
+        }
+    );
+
+    my %files = map { +( "$_.test.test" => "ssh-rsa BBBB somebody-else\n$pubkey\n" ) } qw{one two};
+    my $hv    = Test::MockModule->new('Trog::HV');
+    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
+    $hv->redefine( file_exists     => sub { exists $files{ $_[1] } } );
+    $hv->redefine( read_text       => sub { $files{ $_[1] } } );
+    $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
+
+    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+
+    foreach my $host (qw{one.test.test two.test.test}) {
+        unlike( $files{$host}, qr/\Qrunner-key\E/, "taken off $host" );
+        like( $files{$host}, qr/somebody-else/, "and the other line on $host is still there" );
+    }
+};
+
+subtest 'the key material goes, however the line around it was written' => sub {
+    my $domain = 'runner-edited.example';
+    my $dir    = make_domain_dir($domain);
+
+    # Measured on a hypervisor: the same key had been authorized twice, once
+    # bare and once with a from= restriction and a comment, because the line
+    # bin/provision writes changed between two provisions.  Matching the whole
+    # line takes one of them and leaves the other standing for a guest that no
+    # longer exists.
+    my $material = 'AAAAC3NzaC1lZDI1NTE5AAAAIJtNOTAREALKEYbutlongenough';
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "ssh-ed25519 $material trog-provisioner runner $domain\n" );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
+
+    my %files = ( 'one.test.test' => qq{ssh-rsa BBBB somebody-else\nssh-ed25519 $material\nfrom="10.0.0.1" ssh-ed25519 $material trog-provisioner runner $domain\n} );
+    my $hv    = Test::MockModule->new('Trog::HV');
+    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
+    $hv->redefine( file_exists     => sub { exists $files{ $_[1] } } );
+    $hv->redefine( read_text       => sub { $files{ $_[1] } } );
+    $hv->redefine( write_text      => sub { $files{ $_[1] } = $_[2]; return 1 } );
+
+    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+
+    unlike( $files{'one.test.test'}, qr/\Q$material\E/, 'both of them are gone' );
+    like( $files{'one.test.test'}, qr/somebody-else/, 'and nobody else lost theirs' );
+};
+
+subtest 'a public key that is not one matches nothing, and says so' => sub {
+    my $domain = 'runner-bogus.example';
+    my $dir    = make_domain_dir($domain);
+
+    # An empty or truncated key would be a substring of half the file, which is
+    # the one way this can lock somebody out of their own hypervisor.
+    File::Slurper::Temp::write_text( "$dir/hypervisor-key.pub", "ssh-ed25519 short\n" );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
+
+    my $touched = 0;
+    my $hv      = Test::MockModule->new('Trog::HV');
+    $hv->redefine( write_text => sub { $touched++; return 1 } );
+
+    eval { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) };
+    like( $@, qr/does not look like one; refusing/, 'refused rather than matched' );
+    is( $touched, 0, 'and nothing was rewritten' );
+};
+
+subtest 'a domain that is not a runner is nothing to do' => sub {
+    my $domain = 'plain.example';
+    make_domain_dir($domain);
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    my $asked    = 0;
+    $cookbook->redefine( domain_config => sub { $asked++; return {} } );
+
+    # No hypervisor-key.pub beside it, so it returns before it asks anything at
+    # all -- which is what every guest that is not a runner looks like.
+    Trog::Bin::Destroy::remove_runner_key( $domain, 0 );
+    is( $asked, 0, 'the configuration is not even consulted' );
+};
+
 # --- purge_domain_dir ---
 subtest 'purge_domain_dir removes domain directory' => sub {
     my $domain = 'purge.example';

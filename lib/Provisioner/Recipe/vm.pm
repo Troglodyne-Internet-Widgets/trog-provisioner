@@ -224,7 +224,7 @@ sub create_storage {
     my %qcow2 = $hv->qcow2_tuning( $opts{size} );
 
     return (
-        pool_name      => 'tf_disks',
+        pool_name      => $hv->pool_name,
         disk_volume    => $volume,
         cloudinit      => $hv->cloudinit_iso( $domain, %{ $opts{seed} } ),
         bridge_device  => $hv->bridge_device,
@@ -283,6 +283,12 @@ sub enrich {
 
     $opts{tuning} = \%tuning;
     $opts{tpm}    = $self->_tpm;
+
+    # The cgroup partition every guest on this hypervisor is placed in.  libvirt
+    # writes /machine when nobody names one, so leaving it unset is the same
+    # thing said by omission -- and naming one is how an operator gets every
+    # guest built here into a single systemd slice they can then cap.
+    $opts{partition} = $hv->partition;
 
     # Where the two interfaces sit, as libvirt spells a PCI slot.  The
     # hypervisor decides, because the names the guest ends up calling them are

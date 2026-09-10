@@ -131,6 +131,29 @@ subtest 'pool and domain paths default the way they always did' => sub {
     is( $set->domain_dir, '/srv/domains', 'domain_dir override' );
 };
 
+subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
+
+    # Both default to what every hypervisor built by the old tool has, so a
+    # fleet that says nothing behaves exactly as it did.
+    my $hv = fresh();
+    is( $hv->pool_name, 'tf_disks', 'the pool everything has always used' );
+    is( $hv->partition, undef,      'and no partition, which libvirt reads as /machine' );
+
+    # Named because pool_path alone cannot do it: libvirt looks a pool up by
+    # name, so a path given beside the name of a pool that already exists
+    # somewhere else is ignored and every volume lands in the existing one --
+    # silently, which is somebody believing in a quota that is not there.
+    my $own = fresh(
+        uri       => 'qemu+ssh://hv/system',
+        pool_path => '/pool/vm-disks/runner',
+        pool_name => 'runner_disks',
+        partition => '/machine/runner',
+    );
+    is( $own->pool_name, 'runner_disks',          'the pool it was given' );
+    is( $own->pool_path, '/pool/vm-disks/runner', 'at the path it was given' );
+    is( $own->partition, '/machine/runner',       'and the slice its guests are placed in' );
+};
+
 subtest 'an existing pool says where it is, and is believed' => sub {
     my $mock = Test::MockModule->new('Trog::HV');
     $mock->redefine( vmm => sub { FakePoolVMM->new('/var/lib/libvirt/images') } );
@@ -257,6 +280,8 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
               pool_path=/srv/pool
               domain_dir=/srv/domains
               bridge_device=br7
+              pool_name=runner_disks
+              partition=/machine/runner
             }
           )
           . "\n"
@@ -271,6 +296,8 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     is( $from_conf->pool_path,     '/srv/pool',                         'pool_path from config' );
     is( $from_conf->domain_dir,    '/srv/domains',                      'domain_dir from config' );
     is( $from_conf->bridge_device, 'br7',                               'bridge_device from config, no probing' );
+    is( $from_conf->pool_name,     'runner_disks',                      'pool_name from config' );
+    is( $from_conf->partition,     '/machine/runner',                   'partition from config' );
 
     my $overridden = Trog::HV->from_config( $config, uri => 'qemu+ssh://cli/system' );
     is( $overridden->uri, 'qemu+ssh://cli/system', '--connect beats config' );

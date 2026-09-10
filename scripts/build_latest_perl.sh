@@ -50,19 +50,33 @@ if [ ! -d "$CLIENT_HOMEDIR" ]; then
 	exit 255
 fi
 
-# Build some symlinks to the perl for use by other? setup scripts
+# Symlinks to the perl, which is how every other recipe finds it -- the postrun
+# tasks in tcms, tpsgi and trogrunner call $CLIENT_HOMEDIR/bin/cpanm by name.
+#
+# Guarded on the target existing, not just on the link being absent.  The cpan
+# line above installs cpanminus, Test2, NYTProf, starman, Perl::Critic and
+# Perl::Tidy, and nothing else -- so yath (Test2::Harness) and dzil
+# (Dist::Zilla) were being linked to files that have never been there, on every
+# guest that runs the perl recipe.  A link to nothing is worse than no link: it
+# satisfies -e, so anything checking for the tool finds it and then fails at the
+# point of use.  Whatever installs those later gets its link on the next run.
 mkdir -p $CLIENT_HOMEDIR/bin
 mkdir -p /root/bin
-[ -L $CLIENT_HOMEDIR/bin/perl  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  $CLIENT_HOMEDIR/bin/perl
-[ -L $CLIENT_HOMEDIR/bin/prove  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/prove  $CLIENT_HOMEDIR/bin/prove
-[ -L $CLIENT_HOMEDIR/bin/yath  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/yath  $CLIENT_HOMEDIR/bin/yath
-[ -L $CLIENT_HOMEDIR/bin/dzil  ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/dzil  $CLIENT_HOMEDIR/bin/dzil
-[ -L $CLIENT_HOMEDIR/bin/cpanm ]   || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm $CLIENT_HOMEDIR/bin/cpanm
-[ -L $CLIENT_HOMEDIR/bin/starman ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/starman $CLIENT_HOMEDIR/bin/starman
-[ -L $CLIENT_HOMEDIR/bin/perlcritic ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perlcritic $CLIENT_HOMEDIR/bin/perlcritic
-[ -L $CLIENT_HOMEDIR/bin/perltidy ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perltidy $CLIENT_HOMEDIR/bin/perltidy
-[ -L $CLIENT_HOMEDIR/bin/nytprofmerge ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/nytprofmerge $CLIENT_HOMEDIR/bin/nytprofmerge
-[ -L $CLIENT_HOMEDIR/bin/nytprofhtml ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/nytprofhtml $CLIENT_HOMEDIR/bin/nytprofhtml
-[ -L /root/bin/perl  ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/perl  /root/bin/perl
-[ -L /root/bin/cpanm ] || ln -s /opt/perl5/$NICE_PERL_NAME/bin/cpanm /root/bin/cpanm
+link_tool() {
+	[ -e "/opt/perl5/$NICE_PERL_NAME/bin/$1" ] || return 0
+	[ -L "$2/$1" ] && return 0
+	ln -s "/opt/perl5/$NICE_PERL_NAME/bin/$1" "$2/$1"
+}
+link_tool perl "$CLIENT_HOMEDIR/bin"
+link_tool prove "$CLIENT_HOMEDIR/bin"
+link_tool yath "$CLIENT_HOMEDIR/bin"
+link_tool dzil "$CLIENT_HOMEDIR/bin"
+link_tool cpanm "$CLIENT_HOMEDIR/bin"
+link_tool starman "$CLIENT_HOMEDIR/bin"
+link_tool perlcritic "$CLIENT_HOMEDIR/bin"
+link_tool perltidy "$CLIENT_HOMEDIR/bin"
+link_tool nytprofmerge "$CLIENT_HOMEDIR/bin"
+link_tool nytprofhtml "$CLIENT_HOMEDIR/bin"
+link_tool perl /root/bin
+link_tool cpanm /root/bin
 

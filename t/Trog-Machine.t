@@ -199,5 +199,47 @@ subtest 'a transfer that fails says which one, and does not pretend' => sub {
     like( $warnings[0], qr{rsync}i,         'as rsync, so the exit status below it means something' );
 };
 
+subtest 'a file read off a remote machine comes back whole' => sub {
+
+    # Net::OpenSSH::capture returns one element per line in list context, and
+    # _unhang calls what it is given in list context and hands a scalar caller
+    # the first element -- so read_text came back as line one of the file.
+    # Measured against a 233-line authorized_keys: 608 bytes of 128667.
+    #
+    # A one-line file read perfectly, which is why nothing caught it: the
+    # callers that existed were reading a hypervisor's config values.
+    my $file = "alpha\nbeta\ngamma\n";
+
+    my $ssh  = FakeSSH->new($file);
+    my $mock = Test::MockModule->new('Trog::Machine');
+    $mock->redefine( is_local => sub { 0 } );
+    $mock->redefine( ssh      => sub { $ssh } );
+
+    my $got = remote()->read_text('/bogus/authorized_keys');
+    is( $got, $file, 'every line of it, with the trailing newline the file has' );
+
+    # The call has to say so itself; _unhang cannot know what its caller wanted.
+    ok( $ssh->{scalar_context}, 'because capture was asked in scalar context' );
+};
+
+{
+    # Net::OpenSSH's capture, in the one respect that matters here: a list of
+    # lines or the whole thing, depending on what it was asked for.
+    package FakeSSH;
+
+    sub new { my ( $class, $content ) = @_; return bless { content => $content }, $class }
+
+    sub capture {
+        my ($self) = @_;
+        $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read_text reads it, and a fake that does not set it tests nothing.
+        if (wantarray) {
+            $self->{scalar_context} = 0;
+            return map { "$_\n" } split( "\n", $self->{content} );
+        }
+        $self->{scalar_context} = 1;
+        return $self->{content};
+    }
+}
+
 Test::NoWarnings::had_no_warnings();
 done_testing();

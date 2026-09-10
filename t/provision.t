@@ -16,6 +16,7 @@ use Test::More;
 use Test::Fatal qw{exception};
 use IPC::Run3();
 use File::Temp qw{tempdir};
+use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Pod::Usage();
@@ -30,6 +31,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
+use Provisioner::Cookbook();
 
 # No skip_all if the prereqs are missing: a suite that passes because it never
 # ran is worse than one that fails.  bin/provision uses XML::Twig,
@@ -457,5 +459,111 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     my ($ci)    = grep { $order[$_] eq 'cloudinit' } 0 .. $#order;
     ok( $eject > $ci, 'and never on the strength of a lease alone' );
 };
+
+# --- Letting a runner in to a hypervisor --------------------------------------
+#
+# A change to a machine that is not the guest, which is the line --dryrun is
+# drawn on, and the reason this lives here rather than in the recipe that
+# declares the key.  It is done where the key has already come out of the store,
+# because doing it anywhere else means asking for the store password twice.
+subtest 'a runner is authorized on each hypervisor it was configured for' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $domain = 'runner.test.test';
+    mkdir "$dir/$domain";
+
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine(
+        domain_config => sub {
+            return {
+                trogrunner => {
+                    hypervisor_access  => 'least',
+                    restrict_key_to_ip => 0,
+                    hypervisors        => {
+                        one => { libvirt_uri => 'qemu+ssh://runner@one.test.test/system' },
+                        two => { libvirt_uri => 'qemu+ssh://runner@two.test.test/system' },
+                    },
+                },
+            };
+        }
+    );
+
+    my %appended;
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( authorized_keys => sub { $_[0]->ssh_host } );
+    $hv->redefine( append_line     => sub { push @{ $appended{ $_[1] } }, $_[2]; return 1 } );
+
+    my $private = _throwaway_key();
+    my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $private );
+
+    local $Trog::Bin::Provisioner::dryrun = 0;
+    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
+
+    is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
+    like( $appended{'one.test.test'}[0], qr/\Assh-ed25519 /, 'the public half, derived rather than stored' );
+    is( scalar @{ $appended{'one.test.test'} }, 1, 'once each' );
+
+    # A derived public key is the key and nothing else, so an unnamed line is
+    # one nobody reading that hypervisor's authorized_keys can attribute.
+    like( $appended{'one.test.test'}[0], qr/\Qtrog-provisioner runner runner.test.test\E\z/, 'and it says whose it is' );
+
+    # bin/destroy reads this rather than the store, so that taking the grant
+    # away never stops to ask for a passphrase.
+    my $written = File::Slurper::read_text("$dir/$domain/hypervisor-key.pub");
+    chomp $written;
+    is( $written, $appended{'one.test.test'}[0], 'and written beside the domain for the revoke' );
+};
+
+subtest 'a dry run reaches no hypervisor at all' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisor_access => 'full', hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
+
+    my $touched = 0;
+    my $hv      = Test::MockModule->new('Trog::HV');
+    $hv->redefine( append_line => sub { $touched++; return 1 } );
+
+    local $Trog::Bin::Provisioner::dryrun = 1;
+    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {} ), 0, 'nothing happens' );
+    is( $touched,                                                               0, 'and nobody authorized_keys is written' );
+};
+
+subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
+    my $touched = 0;
+    my $hv      = Test::MockModule->new('Trog::HV');
+    $hv->redefine( append_line => sub { $touched++; return 1 } );
+
+    local $Trog::Bin::Provisioner::dryrun = 0;
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { {} } );
+    is( Trog::Bin::Provisioner::authorize_runner_key( 'plain.test.test', {} ), 0, 'not a runner: nothing to do' );
+
+    # none is the default, and it is the whole of what turns the grant off:
+    # the recipe declares the key whether or not anybody trusts it.
+    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
+    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {} ), 0, 'a runner with the default access: still nothing' );
+
+    is( $touched, 0, 'neither of them reached a hypervisor' );
+};
+
+# The recipe's own generator, rather than a key made some other way here.  A
+# made-up string would only prove that CryptX rejects made-up strings, and a key
+# from ssh-keygen would not exercise the thing that actually goes in the store --
+# which has a rewrap in it precisely because the two do not agree by default.
+sub _throwaway_key {
+    my %secrets = Provisioner::Cookbook->load('trogrunner')->guest_secrets( '/bogus/domains', 'runner.test.test' );
+    my ($entry) = values %secrets;
+    return $entry->{generate}->();
+}
+
+sub _quietly {
+    my ($code) = @_;
+    open( my $capture, '>', \my $out ) or die $!;
+    my @result = do { local *STDOUT = $capture; $code->() };
+    close $capture;
+    return wantarray ? @result : $result[0];
+}
 
 done_testing;
