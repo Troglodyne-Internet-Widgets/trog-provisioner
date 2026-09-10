@@ -31,6 +31,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
+use Provisioner::Cookbook();
 
 # No skip_all if the prereqs are missing: a suite that passes because it never
 # ran is worse than one that fails.  bin/provision uses XML::Twig,
@@ -504,8 +505,8 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     like( $appended{'one.test.test'}[0], qr/\Assh-ed25519 /, 'the public half, derived rather than stored' );
     is( scalar @{ $appended{'one.test.test'} }, 1, 'once each' );
 
-    # ssh-keygen -y prints the key and nothing else, so an unnamed line is one
-    # nobody reading that hypervisor's authorized_keys can attribute.
+    # A derived public key is the key and nothing else, so an unnamed line is
+    # one nobody reading that hypervisor's authorized_keys can attribute.
     like( $appended{'one.test.test'}[0], qr/\Qtrog-provisioner runner runner.test.test\E\z/, 'and it says whose it is' );
 
     # bin/destroy reads this rather than the store, so that taking the grant
@@ -547,17 +548,14 @@ subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
     is( $touched, 0, 'neither of them reached a hypervisor' );
 };
 
-# An actual key, because the public half is derived with ssh-keygen and a
-# made-up string would only prove that ssh-keygen rejects made-up strings.
+# The recipe's own generator, rather than a key made some other way here.  A
+# made-up string would only prove that CryptX rejects made-up strings, and a key
+# from ssh-keygen would not exercise the thing that actually goes in the store --
+# which has a rewrap in it precisely because the two do not agree by default.
 sub _throwaway_key {
-    my $dir = tempdir( CLEANUP => 1 );
-    ## no critic (ProhibitShellDispatch) -- the same shell-out bin/provision makes, and for the same reason.
-    my @keygen = ( qw{ssh-keygen -q -t ed25519 -N}, q{}, qw{-C test -f}, "$dir/k" );
-    system(@keygen) == 0
-      or BAIL_OUT('ssh-keygen is not here, and bin/provision needs it to derive a public key');
-    my $key = File::Slurper::read_text("$dir/k");
-    chomp $key;
-    return $key;
+    my %secrets = Provisioner::Cookbook->load('trogrunner')->guest_secrets( '/bogus/domains', 'runner.test.test' );
+    my ($entry) = values %secrets;
+    return $entry->{generate}->();
 }
 
 sub _quietly {

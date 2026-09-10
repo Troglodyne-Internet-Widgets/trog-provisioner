@@ -31,8 +31,6 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
-## no critic (ProhibitUnusedImports) -- Test::MockModule in strict mode will not mock a package that is not loaded.
-use Provisioner::Cookbook();
 
 require_ok("$FindBin::Bin/../bin/destroy")
   or BAIL_OUT('bin/destroy does not load; the install is incomplete');
