@@ -748,7 +748,7 @@ sub remote_skip {
     return ();
 }
 
-=head3 %files = $recipe->guest_secrets($install_dir, $domain)
+=head3 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
 Files the guest has to have that must not travel in the payload, as a map of the
 path on the guest to how one gets there:
@@ -775,6 +775,13 @@ missing because the store could not be reached, and a fresh one is a new
 identity, which is the thing the store exists to prevent.
 
 C<ref> must name a field the store keeps, which is C<password> or C<username>.
+A multi-line value is kept and handed back exactly, so a private key is a
+password as far as the store is concerned.
+
+C<%opts> is what the recipe was configured with, for a secret only some domains
+want: a recipe that returns nothing for a domain that did not ask has none
+placed, and none generated.  A recipe whose secret is unconditional -- most of
+them -- can ignore it.
 
 C<owner> is what the file ends up owned by, not what it lands as.  Placement
 happens before the makefile, so the account usually belongs to a package that is

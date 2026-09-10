@@ -885,6 +885,43 @@ subtest 'an operator exclude is added to those rather than replacing them' => su
     like( $opts{excludes}{matrix1}, qr{some/other/dir},           'and what the operator asked for is there too' );
 };
 
+subtest 'a secret only some domains want is only placed for those' => sub {
+
+    # guest_secrets used to be handed the install dir and the domain and nothing
+    # else, so it could not tell whether this domain had asked for the thing it
+    # places.  koan's ssh identity is the case: most bots do not have one, and
+    # minting a key for a bot nobody registered it for is worse than useless.
+    my $koan = Provisioner::Cookbook->load('koan');
+
+    is_deeply( { $koan->guest_secrets( '/opt/domains', 'k.test.test' ) }, {}, 'a domain that did not ask gets nothing placed' );
+
+    my %placed = $koan->guest_secrets( '/opt/domains', 'k.test.test', github_ssh_identity => 1 );
+    is_deeply( [ keys %placed ], ['/opt/domains/k.test.test/.ssh/id_koan'], 'and one that did gets the identity' );
+
+    my $entry = $placed{'/opt/domains/k.test.test/.ssh/id_koan'};
+    is( $entry->{ref}, 'secret:koan/k.test.test-github-ssh/password', 'from the store, keyed on the domain' );
+
+    # bin/provision writes the value with a newline of its own, and ssh-keygen
+    # refuses a key with a blank line on the end.
+    my $key = $entry->{generate}->();
+    unlike( $key, qr/\n\z/, 'the generated key carries no trailing newline of its own' );
+    like( $key, qr/\A-----BEGIN OPENSSH PRIVATE KEY-----/, 'and is an OpenSSH private key' );
+};
+
+subtest 'the bot ssh key is not in the payload any more' => sub {
+    my $koan  = Provisioner::Cookbook->load( 'koan', distro => $DISTRO )->new(%PROV);
+    my %files = $koan->template_files();
+
+    # It was rendered into the domain directory and installed from there, which
+    # put a private key in the payload, in the tarball and on every machine that
+    # holds a copy of either.
+    ok( !( grep { index( $_, 'privkey' ) >= 0 } keys %files, values %files ), 'nothing named for a private key is generated' );
+
+    my $fragment = $koan->render( %G, %{ $required_config{koan} }, github_ssh_identity => 1 );
+    unlike( $fragment, qr/install\s+\S*\s*koan-ssh-privkey/, 'and the fragment installs no such file' );
+    like( $fragment, qr{chown \S+ '/opt/domains/\S+/\.ssh/id_koan'}, 'it gives away what bin/provision already placed' );
+};
+
 # A file placed out of the secret store is one the guest must never hand back:
 # salvaged, it would land in the domain directory and in every backup taken of
 # it, which is the exposure keeping it in the store avoids in the first place.

@@ -14,6 +14,9 @@ use parent qw{Provisioner::Recipe};
 our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
 
 use Crypt::PRNG();
+use File::Temp();
+use IPC::Run3();
+use File::Slurper();
 
 =head1 Provisioner::Recipe::koan
 
@@ -50,14 +53,13 @@ use Crypt::PRNG();
             #     SSH remotes and push goes through the key, not the PAT)
             #   - configures `git config --global` for ssh-format commit
             #     signing using the same key
-            # Register the matching pubkey under the bot's GitHub account
-            # both as an "Authentication key" (for push) AND a "Signing
-            # key" (so signed commits show as Verified in the UI).
-            # Must be passphrase-less  the bot runs unattended.
-            github_ssh_privkey: |
-                -----BEGIN OPENSSH PRIVATE KEY-----
-                ...
-                -----END OPENSSH PRIVATE KEY-----
+            # Give the bot an ssh identity for git push and commit signing.
+            # The key is made once, kept in the secret store and placed on
+            # the guest by bin/provision -- it never goes in the payload.
+            # Register the pubkey the build prints under the bot's GitHub
+            # account, both as an "Authentication key" (for push) AND a
+            # "Signing key" (so signed commits show as Verified).
+            github_ssh_identity: 1
 
             # Pretty-name for @mentions (defaults to github_user)
             github_nickname: "yourname-koan"
@@ -265,8 +267,8 @@ sub args {
             github_user             => { type => 'string' },
             github_token            => { type => 'string' },
             github_nickname         => { type => 'string' },
-            github_authorized_users => { type => 'array', items => { type => 'string' }, default => [] },
-            github_ssh_privkey      => { type => 'string' },
+            github_authorized_users => { type => 'array',   items   => { type => 'string' }, default => [] },
+            github_ssh_identity     => { type => 'boolean', default => 0, description => 'Give the bot an ssh identity for git push and commit signing.  The key itself lives in the secret store and is placed on the guest by bin/provision; it is never written into the payload.  Register the pubkey the first build prints under the bot GitHub account, as an Authentication key and a Signing key.' },
             max_runs_per_day        => { type => 'integer', default => 10 },
             interval_seconds        => { type => 'integer', default => 60 },
             start_on_pause          => { type => 'integer', default => 1 },
@@ -344,17 +346,6 @@ sub enrich {
     die "Must set claude_oauth_token in [koan] section when cli_provider=claude"
       if $opts{cli_provider} eq 'claude' && !$opts{claude_oauth_token};
 
-    # Optional ssh key for git push + commit signing.  Surface common
-    # mistakes early (wrong format, accidentally pasted a pubkey, an
-    # encrypted privkey we can't unlock unattended).
-    if ( $opts{github_ssh_privkey} ) {
-        die "github_ssh_privkey doesn't look like an OpenSSH private key (expected -----BEGIN ... PRIVATE KEY-----)"
-          unless $opts{github_ssh_privkey} =~ /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
-        die "github_ssh_privkey is passphrase-encrypted; the bot runs unattended, supply a passphrase-less key"
-          if $opts{github_ssh_privkey} =~ /^Proc-Type:.*ENCRYPTED/m
-          || $opts{github_ssh_privkey} =~ /DEK-Info:/m;
-    }
-
     # SMTP block is optional but must be all-or-nothing
     if ( $opts{smtp_host} || $opts{smtp_user} || $opts{email_to} ) {
         die "smtp_host, smtp_user, smtp_password and email_to must all be set together"
@@ -368,6 +359,61 @@ sub enrich {
     return %opts;
 }
 
+=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
+
+The bot's ssh identity, when C<github_ssh_identity> asks for one.
+
+The key is made once and kept in the secret store, so it is answered from there
+on every provision after and never travels in the payload -- it used to be a
+value the operator pasted into F<recipes.d>, which put a private key in the
+configuration, in the domain directory and in the tarball that goes to the guest.
+
+Nothing salvages it back: C<remote_files> does not name F<.ssh>, so the guest and
+the store are the only places it sits.
+
+B<A domain that had one before this needs its key put in the store first>, with
+C<bin/add_secret>, or the first build mints a new one and GitHub goes on
+expecting the old:
+
+    bin/add_secret --group koan --title <domain>-github-ssh -- "$(cat old_key)"
+
+=cut
+
+sub guest_secrets {
+    my ( $self, $install_dir, $domain, %opts ) = @_;
+
+    return () unless $opts{github_ssh_identity};
+
+    return (
+        "$install_dir/$domain/.ssh/id_koan" => {
+            ref => "secret:koan/$domain-github-ssh/password",
+
+            # ssh-keygen rather than a library: what has to come out is an
+            # OpenSSH private key, and it is the thing that defines the format.
+            # ed25519 because it is short enough to sit in a password field
+            # comfortably, and passphrase-less because the bot runs unattended.
+            generate => sub {
+                my $dir  = File::Temp::tempdir( CLEANUP => 1 );
+                my $path = "$dir/id_koan";
+                IPC::Run3::run3( [ qw{ssh-keygen -t ed25519 -N}, q{}, qw{-C koan -f}, $path, '-q' ], \undef, \undef, undef );
+                ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- asking whether ssh-keygen produced a file, which is what the test is for
+                die "ssh-keygen made no key for $domain\n" unless -f $path;
+
+                # Without the trailing newline: bin/provision writes the value
+                # with one of its own, and ssh-keygen refuses a key with a blank
+                # line on the end.
+                my $key = File::Slurper::read_binary($path);
+                $key =~ s/\n\z//;
+                return $key;
+            },
+
+            # root until the fragment gives it away: this is placed before the
+            # makefile runs, so the account does not exist yet.
+            mode => '0600',
+        },
+    );
+}
+
 sub template_files {
     return (
         'koan.env.tt'           => 'koan.env',
@@ -375,10 +421,6 @@ sub template_files {
         'koan.projects.yaml.tt' => 'koan.projects.yaml',
         'koan.service.tt'       => 'koan.service',
         'koan-awake.service.tt' => 'koan-awake.service',
-
-        # Always rendered; empty when github_ssh_privkey is unset.  The
-        # makefile fragment skips installing it in that case.
-        'koan-ssh-privkey.tt' => 'koan-ssh-privkey',
 
         # The ufw profile opening the matrix federation port outbound.
         # Always rendered; the fragment installs it only when this bot is

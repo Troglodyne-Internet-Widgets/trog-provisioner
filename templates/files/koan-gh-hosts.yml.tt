@@ -4,6 +4,6 @@
 # matches GH_TOKEN in the rendered .env, so the bot has a single source
 # of truth that we just replicate into the spot gh looks for it.
 github.com:
-    git_protocol: [% github_ssh_privkey ? 'ssh' : 'https' %]
+    git_protocol: [% github_ssh_identity ? 'ssh' : 'https' %]
     user: [% github_user %]
     oauth_token: [% github_token %]

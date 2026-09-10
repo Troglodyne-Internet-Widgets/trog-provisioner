@@ -810,7 +810,7 @@ sub handle_domain {
         # Files the guest has to have that must not travel in the payload: the
         # store holds them, bin/provision puts them there.  Collected here and
         # resolved in one go below, so a run wants the store password once.
-        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn ) );
+        %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ) );
 
         # Make dirs in the DATADIR needed by ssh
         foreach my $d ( $builder->datadirs() ) {
