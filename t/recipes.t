@@ -137,7 +137,12 @@ my %G = (
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',
     local_dns_access_token     => '',
-    users                      => [
+
+    # Every recipe is handed these now, not only the distro recipe: the fetch
+    # cache runs a resolver of its own and refuses to render without them.
+    resolvers => [ '192.168.1.253', '8.8.8.8' ],
+    cache_uri => '',
+    users     => [
         { name => 'admin', gecos => 'Admin User',  shell => '/bin/bash' },
         { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
     ],

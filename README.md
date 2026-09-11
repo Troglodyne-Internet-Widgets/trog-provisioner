@@ -155,7 +155,7 @@ That means:
 
 5. **The HV still has to be set up as a hypervisor**: the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
-    It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+    It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; so is a cache for everything else guests download, built with `fetchcache` and named in `_global`'s `cache`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
     It does not have to be the machine you run this from either.  The machine that *runs* the provisioner is itself a guest, built with the `trogrunner` recipe: perl, the CPAN dependencies, `/etc/trog-provisioner`, and a key a hypervisor will trust.  `perldoc Provisioner::Recipe::trogrunner`.
 

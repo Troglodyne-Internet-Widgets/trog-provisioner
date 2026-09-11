@@ -1,0 +1,11 @@
+[%# The store lives outside install_dir on purpose, for the reason the aptmirror
+    spool does; see perldoc Provisioner::Recipe::fetchcache.  nginx writes it as
+    www-data, which is who its workers run as. -%]
+mkdir -p '[% store %]'
+chown www-data:www-data '[% store %]'
+install -o root -g root -m 0644 fetchcache.nginx.conf /etc/nginx/sites-enabled/[% domain %]-fetchcache.conf
+[%# Deferred for the reason aptmirror defers it: the global configuration nginx
+    writes is not in place until the postrun. -%]
+[% script_dir %]/queue_postrun_task systemctl restart nginx
+echo 'fetchcache: point the fleet at this with "cache: [% domain %]" in _global,'
+echo 'fetchcache: and watch it with "tail -f /var/log/nginx/fetchcache.log" here.'

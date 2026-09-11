@@ -1,0 +1,113 @@
+[%# The fetch cache: https://HOST/PATH is served as http://this-guest/HOST/PATH,
+    fetched once and kept.  perldoc Provisioner::Recipe::fetchcache has the
+    account of why each of these is set; this is what nginx has to be told.
+
+    Everything above the server block is http context: files in sites-enabled
+    are included from inside it.
+
+    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    string and swallows the template as far as the next quote. -%]
+proxy_cache_path [% store %] levels=1:2 keys_zone=fetchcache:64m max_size=[% max_size_gb %]g inactive=[% inactive %] use_temp_path=off;
+
+log_format fetchcache '$remote_addr [$time_local] "$request" $status $body_bytes_sent $upstream_cache_status $request_time "$upstream_addr"';
+
+[%# The path to ask upstream for, out of the request as the guest sent it
+    rather than out of the location match, which nginx has already decoded --
+    a %2F in a URL would otherwise reach upstream as a slash.  The query string
+    comes with it. -%]
+map $request_uri $fetchcache_path {
+    "~^/[^/]+(/.*)$" $1;
+    default          /;
+}
+
+server {
+    listen 80[% IF backlog %] backlog=[% backlog %][% END %];
+[% IF ipv6 -%]
+    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
+[% END -%]
+[%# The address as well as the names: a guest reaches this by the address
+    Provisioner::DistroRecipe resolved out of the ip pool. -%]
+    server_name [% domain %] [% main_ip %][% FOR alias IN full_aliases %] [% alias %][% END %];
+
+    access_log /var/log/nginx/fetchcache.log fetchcache;
+
+    if ($request_method !~ "^(?:GET|HEAD)$") {
+        return 405;
+    }
+
+[%# Upstreams are looked up when they are fetched, which is what a variable in
+    proxy_pass means.  IPv4 only, as apt is told on every guest. -%]
+    resolver [% resolvers.join(' ') %] ipv6=off;
+    resolver_timeout 10s;
+
+    proxy_cache fetchcache;
+[%# The URL the guest asked for, which is also the key a followed redirect is
+    kept under: $request_uri does not change across the internal redirect to
+    the @follow locations. -%]
+    proxy_cache_key $request_uri;
+    proxy_cache_lock on;
+    proxy_cache_revalidate on;
+    proxy_cache_use_stale error timeout invalid_header updating http_403 http_404 http_429 http_500 http_502 http_503 http_504;
+    proxy_connect_timeout 10s;
+
+[%# Upstream says private and no-cache about release assets, so its opinion is
+    ignored and the TTLs below are the only ones.  X-Accel-* too, which would
+    otherwise let an upstream steer this nginx. -%]
+    proxy_ignore_headers Cache-Control Expires Set-Cookie Vary X-Accel-Expires X-Accel-Redirect X-Accel-Limit-Rate X-Accel-Buffering X-Accel-Charset;
+    proxy_hide_header Set-Cookie;
+
+[%# Nothing is fetched as anybody in particular.  No Range, so what is kept is
+    always the whole file, and ranges are served out of it; no Accept-Encoding,
+    so what is kept is the file and not one encoding of it. -%]
+    proxy_set_header Authorization "";
+    proxy_set_header Cookie "";
+    proxy_set_header Range "";
+    proxy_set_header If-Range "";
+    proxy_set_header Accept-Encoding "";
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    proxy_ssl_server_name on;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+
+    proxy_intercept_errors on;
+    recursive_error_pages on;
+
+    add_header X-Cache-Status $upstream_cache_status always;
+
+    location = /fetchcache-status {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+[%# One pair per kind of URL, most specific first, since the first regex
+    location to match wins.  The lookahead is the shape of the URL; the host
+    has to be an allowed upstream whatever the shape.  Quoted, because a
+    shape with {40} in it would otherwise open a block. -%]
+[% FOR class IN classes -%]
+    location ~ "^/[% IF class.shape %](?=(?:[% class.shape %]))[% END %](?<fetchcache_host>[% allow_re %])/" {
+        proxy_cache_valid 200 [% class.fresh %];
+        error_page 301 302 303 307 308 = @follow_[% class.name %];
+        proxy_pass https://$fetchcache_host$fetchcache_path;
+    }
+
+[%# A redirect, followed here rather than handed to the guest, and only to an
+    allowed upstream over https.  Set before the proxy_pass that replaces the
+    upstream it was read from; recursive_error_pages lets a second hop through. -%]
+    location @follow_[% class.name %] {
+        set $fetchcache_location $upstream_http_location;
+        if ($fetchcache_location !~ "^https://(?:[% allow_re %])/") {
+            return 502;
+        }
+        proxy_cache_valid 200 [% class.fresh %];
+        error_page 301 302 303 307 308 = @follow_[% class.name %];
+        proxy_pass $fetchcache_location;
+    }
+
+[% END -%]
+    location / {
+        return 404;
+    }
+}

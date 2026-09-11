@@ -201,6 +201,29 @@ exactly as it always has, only slower, and `bin/preflight` says so rather than
 failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
+`cache` names a fetch cache for guests to download through: release tarballs,
+install scripts, anything a recipe fetches with `scripts/fetch`. Named the same
+two ways as `mirror` -- a domain here, resolved to its address, or a URL used as
+written:
+
+```yaml
+_base:
+    _global:
+        cache: fetchcache.example.com
+```
+
+To have one to name, give a domain the `fetchcache` recipe. It fetches from a
+fixed list of upstreams on a guest's behalf, keeps what it fetched, and hands out
+what it already has when upstream is failing, which is the point of it: GitHub
+answering 503 for an hour stops being an hour of failed builds.
+`perldoc Provisioner::Recipe::fetchcache` has how long it keeps what, and how to
+add an upstream.
+
+A guest asks the cache first and upstream after it, so a cache that is down
+costs a few seconds a download rather than a build. **Empty by default**, which
+is every download going straight upstream, as it always has. Nothing requires
+the recipe, and the cache itself fetches from upstream rather than from itself.
+
 ## Where a guest sends its logs
 
 Two recipes, and neither reaches onto the other's machine. `logshipper` goes on
