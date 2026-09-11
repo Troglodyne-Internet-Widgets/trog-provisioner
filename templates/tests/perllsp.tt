@@ -17,7 +17,7 @@ ok(-f "$home/.vim/perllsp.vim", 'perllsp.vim vimrc snippet installed');
 {
     my $dir = "$home/.vim/pack/lsp/start/[% plugin.dir %]";
     ok( -d "$dir/autoload" || -d "$dir/plugin", '[% plugin.dir %] is unpacked, with vim files in it' );
-    my $ref = do { local $/; open( my $fh, '<', "$dir/.trog-ref" ) ? <$fh> : '' };
+    my $ref = do { local $/; my $fh; open( $fh, '<', "$dir/.trog-ref" ) ? <$fh> : '' };
     like( $ref, qr/\A[% plugin.ref %]\s*\z/, '[% plugin.dir %] is at [% plugin.ref %]' );
 }
 [% END -%]
