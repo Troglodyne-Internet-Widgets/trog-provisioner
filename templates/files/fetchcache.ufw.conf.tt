@@ -1,0 +1,9 @@
+[%# The firewall profile for the port the cache listens on, which is 80 unless
+    it shares its guest.  setup-ufw-rules allows whatever `ufw app list`
+    reports, and the nginx profile covers only 80 and 443.  Named fetchcache,
+    which /etc/services does not know, so ufw does not skip it -- see
+    redis.ufw.conf.tt for what happens to one it does. -%]
+[fetchcache]
+title=Fetch cache
+description=The fetch cache, on the port this guest configured
+ports=[% port %]/tcp

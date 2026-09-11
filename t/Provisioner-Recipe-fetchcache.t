@@ -53,7 +53,7 @@ sub generated {
     );
 
     $recipe->generate_files( $dir, %vars );
-    return ( File::Slurper::read_text("$dir/fetchcache.nginx.conf"), $recipe );
+    return ( File::Slurper::read_text("$dir/fetchcache.nginx.conf"), $recipe, $dir );
 }
 
 # The hosts the vhost will fetch from, read back out of the capture every
@@ -158,6 +158,34 @@ subtest 'a copy is removed for want of room, never for its age' => sub {
 
     my ($off) = generated( min_free_gb => 0 );
     unlike( $off, qr/min_free=/, 'and min_free can be turned off' );
+};
+
+subtest 'on a port of its own, it shares a guest with a package mirror' => sub {
+    my ( $vhost, $recipe, $dir ) = generated( port => 8080 );
+
+    like( $vhost,                                               qr/^\s+listen 8080 backlog=32768;$/m,        'it listens where it was told' );
+    like( $vhost,                                               qr/^\s+listen \[::\]:8080 backlog=32768;$/m, 'on IPv6 too' );
+    like( File::Slurper::read_text("$dir/fetchcache_ufw.conf"), qr{^ports=8080/tcp$}m,                       'with a firewall profile for that port' );
+    is_deeply( { $recipe->rate_limits( port => 8080 ) }, { 8080 => 1024 }, 'and a limit on it' );
+    is_deeply( { $recipe->rate_limits() },               { 80   => 1024 }, 'which is 80 when nothing says otherwise' );
+
+    # Measured on a guest: on one port, nginx refuses a second backlog outright
+    # and ignores the second server for names the first already has -- which
+    # both have, the guest name and its address.  So the mirror and the cache
+    # can share a guest only if they share no port.
+    my $mirror = tempdir( CLEANUP => 1 );
+    Provisioner::Cookbook->load( 'aptmirror', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $mirror,
+        distro        => 'ubuntu',
+    )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.168.1.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
+
+    my %ports;
+    foreach my $conf ( $vhost, File::Slurper::read_text("$mirror/aptmirror.nginx.conf") ) {
+        my %mine = map { $_ => 1 } $conf =~ m/^\s+listen (?:\[::\]:)?(\d+)/mg;
+        $ports{$_}++ for keys %mine;
+    }
+    is_deeply( [ grep { $ports{$_} > 1 } sort keys %ports ], [], 'and then it and the mirror share no port' );
 };
 
 subtest 'the vhost answers for the address, not only the name' => sub {

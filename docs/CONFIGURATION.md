@@ -204,7 +204,8 @@ first thing to know before building one.
 `cache` names a fetch cache for guests to download through: release tarballs,
 install scripts, anything a recipe fetches with `scripts/fetch`. Named the same
 two ways as `mirror` -- a domain here, resolved to its address, or a URL used as
-written:
+written. A domain may carry a port, for a cache that shares its guest with a
+mirror on port 80 (`cache: mirrors.example.com:8080`):
 
 ```yaml
 _base:

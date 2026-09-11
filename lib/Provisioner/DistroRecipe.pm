@@ -216,7 +216,7 @@ sub args {
                 type        => 'string',
                 default     => q{},
                 description =>
-                  'A fetch cache for guests to download through: a guest built by the fetchcache recipe, or anything serving the same layout.  Empty, the default, means none, and every download goes straight upstream.  Named the way mirror is -- a URL as written, a bare domain resolved out of the ip pool -- and a guest falls back to upstream whenever the cache cannot answer, so one that is down costs seconds rather than a build.',
+                  'A fetch cache for guests to download through: a guest built by the fetchcache recipe, or anything serving the same layout.  Empty, the default, means none, and every download goes straight upstream.  Named the way mirror is -- a URL as written, a bare domain resolved out of the ip pool, with a port after it if the cache is not on 80 -- and a guest falls back to upstream whenever the cache cannot answer, so one that is down costs seconds rather than a build.',
             },
             cpan_notest => {
                 type        => 'boolean',
@@ -320,6 +320,11 @@ resolves a mirror: a URL as written, a name in the ip pool as C<http://> and its
 address, and a name that is not in it dies.  A cache outside this installation
 is named as a URL.
 
+A bare name may carry a port -- C<mirrors.example.com:8080> -- which is how a
+cache sharing its guest with something else on port 80 is named: see
+L<Provisioner::Recipe::fetchcache>.  The port goes on the address the name
+resolves to.
+
 Empty for the guest that is the cache, which fetches from upstream -- it is
 filling itself, and on the build that makes it there is nothing there yet.
 
@@ -333,11 +338,18 @@ sub cache_uri {
     my ( $self, %opts ) = @_;
 
     my $domain = $opts{domain} // q{};
-    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $opts{cache}, domain => $domain, ipmap => $opts{ipmap} );
+
+    # A port on a bare name is taken off before the name is looked up, and put
+    # back on the address it resolves to.  A URL keeps its own.
+    my ( $name, $port ) = ( $opts{cache} // q{} ) =~ m{\A([^:/]+)(?::(\d+))?\z};
+    $name //= $opts{cache};
+    my $at = defined $port ? ":$port" : q{};
+
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $name, domain => $domain, ipmap => $opts{ipmap} );
 
     return q{}                  if $kind eq 'none';
     return $value =~ s{/+\z}{}r if $kind eq 'url';
-    return "http://$value"      if $kind eq 'address';
+    return "http://$value$at"   if $kind eq 'address';
 
     if ( $kind eq 'self' ) {
         print "$domain is the fetch cache, so it fetches from upstream rather than from itself.\n";
@@ -350,7 +362,7 @@ A bare name is resolved out of the ip pool, so it has to be a domain this
 installation assigns an address to.  A cache anywhere else is named as a URL
 instead:
 
-    cache: http://$value
+    cache: http://$value$at
 NOPE
 }
 

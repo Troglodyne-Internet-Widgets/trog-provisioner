@@ -4,8 +4,10 @@
 mkdir -p '[% store %]'
 chown www-data:www-data '[% store %]'
 install -o root -g root -m 0644 fetchcache.nginx.conf /etc/nginx/sites-enabled/[% domain %]-fetchcache.conf
+[%# What lets guests reach the port; see rate_limits. -%]
+install -o root -g root -m 0644 fetchcache_ufw.conf /etc/ufw/applications.d/fetchcache
 [%# Deferred for the reason aptmirror defers it: the global configuration nginx
     writes is not in place until the postrun. -%]
 [% script_dir %]/queue_postrun_task systemctl restart nginx
-echo 'fetchcache: point the fleet at this with "cache: [% domain %]" in _global,'
+echo 'fetchcache: point the fleet at this with "cache: [% domain %][% IF port != 80 %]:[% port %][% END %]" in _global,'
 echo 'fetchcache: and watch it with "tail -f /var/log/nginx/fetchcache.log" here.'

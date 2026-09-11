@@ -117,11 +117,29 @@ the system's certificate authorities, and never forwards a guest's
 C<Authorization> or C<Cookie> -- so nothing it keeps was fetched as anybody in
 particular.
 
-=head2 It wants a guest of its own
+=head2 Sharing a guest with a package mirror
 
-For the reasons L<Provisioner::Recipe::aptmirror> gives: its vhost answers for
-the guest's address, so it takes requests that would otherwise go unmatched,
-and it sets C<backlog> on port 80, which nginx refuses to see set twice.
+On a guest of its own the cache listens on 80.  Beside an
+L<Provisioner::Recipe::aptmirror> it needs a C<port> of its own, and
+C<_global.cache> names it with that port:
+
+    mirrors.example.com:
+        aptmirror:
+            releases: [noble]
+        fetchcache:
+            port: 8080
+
+    _base:
+        _global:
+            mirror: mirrors.example.com
+            cache:  mirrors.example.com:8080
+
+Both vhosts answer for the guest's name and its address, which is how a guest
+reaches them before it has DNS, and on one port nginx gives those names to only
+one server: it warns C<conflicting server name ... ignored> and the second never
+answers.  Both set C<backlog>, too, which nginx refuses outright to see set
+twice for one port.  On different ports neither arises.  C<rate_limits> declares
+the port, which is what puts a firewall profile and a limit on it.
 
 =head2 Seeing what it did
 
@@ -145,6 +163,9 @@ upstream, as it always has.
 =head2 %args = $recipe->args()
 
 =over 4
+
+=item * C<port> -- where it listens.  80, unless it shares its guest; see
+L</Sharing a guest with a package mirror>.
 
 =item * C<upstreams> -- the hosts it will fetch from, each true or false.  The
 defaults are the ones recipes here download from, each on by default; naming
@@ -232,6 +253,13 @@ sub args {
                 pattern     => $duration,
                 description => 'How long anything else is used before upstream is asked again.',
             },
+            port => {
+                type        => 'integer',
+                default     => 80,
+                minimum     => 1,
+                maximum     => 65535,
+                description => 'Where the cache listens.  80 unless it shares its guest with something else serving 80 -- an aptmirror -- in which case name another here, and name the cache with it in _global.cache: mirrors.example.com:8080.',
+            },
             ipv6 => {
                 type        => 'boolean',
                 default     => 1,
@@ -288,6 +316,19 @@ our @CLASSES = (
     { name => 'default', fresh => 'fresh_default' },
 );
 
+=head2 %limits = $recipe->rate_limits(%opts)
+
+The port it listens on.  Declaring it is what brings in C<ufw> with a limit on
+it; the profile that lets guests reach it at all is rendered here, since nginx's
+own covers only 80 and 443.
+
+=cut
+
+sub rate_limits {
+    my ( $self, %opts ) = @_;
+    return ( ( $opts{port} // 80 ) => 1024 );
+}
+
 =head2 %required = $recipe->required_recipes()
 
 C<nginx>, which is what fetches and serves.  C<ufw> arrives behind it, and the
@@ -304,7 +345,10 @@ sub required_recipes {
 =cut
 
 sub template_files {
-    return ( 'fetchcache.nginx.conf.tt' => 'fetchcache.nginx.conf' );
+    return (
+        'fetchcache.nginx.conf.tt' => 'fetchcache.nginx.conf',
+        'fetchcache.ufw.conf.tt'   => 'fetchcache_ufw.conf',
+    );
 }
 
 =head2 @tests = $recipe->tests()

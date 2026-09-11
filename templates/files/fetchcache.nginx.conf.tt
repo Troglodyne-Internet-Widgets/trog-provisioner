@@ -21,9 +21,9 @@ map $request_uri $fetchcache_path {
 }
 
 server {
-    listen 80[% IF backlog %] backlog=[% backlog %][% END %];
+    listen [% port %][% IF backlog %] backlog=[% backlog %][% END %];
 [% IF ipv6 -%]
-    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
+    listen [::]:[% port %][% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 [%# The address as well as the names: a guest reaches this by the address
     Provisioner::DistroRecipe resolved out of the ip pool. -%]

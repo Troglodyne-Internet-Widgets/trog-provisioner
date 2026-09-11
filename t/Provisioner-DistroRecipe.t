@@ -125,6 +125,8 @@ subtest 'cache_uri: the fetch cache, as a URL a guest can append a path to' => s
     is( $distro->cache_uri(%fleet), q{}, 'none configured is none' );
     is( $distro->cache_uri( %fleet, cache => 'http://cache.test.test:8080/' ), 'http://cache.test.test:8080', 'a URL as written, less the slash every path is appended after' );
     is( $distro->cache_uri( %fleet, cache => 'cache.test.test' ),              'http://192.168.1.9',          'a name in the pool is its address' );
+    is( $distro->cache_uri( %fleet, cache => 'cache.test.test:8080' ),         'http://192.168.1.9:8080',     'with its port, when it is not on 80' );
+    is( $distro->cache_uri( %fleet, cache => 'http://cache.test.test:8080' ),  'http://cache.test.test:8080', 'and a URL keeps its own' );
 
     my $said = q{};
     {
@@ -133,6 +135,13 @@ subtest 'cache_uri: the fetch cache, as a URL a guest can append a path to' => s
         is( $distro->cache_uri( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' );
     }
     like( $said, qr/guest\.test\.test is the fetch cache/, 'and says so' );
+
+    my $again = q{};
+    {
+        local *STDOUT;
+        open( STDOUT, '>', \$again ) or die $!;
+        is( $distro->cache_uri( %fleet, cache => 'guest.test.test:8080' ), q{}, 'on whatever port it was named with' );
+    }
 
     like(
         exception { $distro->cache_uri( %fleet, cache => 'nowhere.test.test' ) },

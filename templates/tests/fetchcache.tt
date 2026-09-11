@@ -10,7 +10,7 @@ my $listen = '[% main_ip %]';
 # the request here rather than to some other server.
 sub ask {
     my ($path) = @_;
-    my $out = `curl -s -o /dev/null -D - -H 'Host: $listen' 'http://127.0.0.1$path' 2>/dev/null`;
+    my $out = `curl -s -o /dev/null -D - -H 'Host: $listen' 'http://127.0.0.1:[% port %]$path' 2>/dev/null`;
     my ($code) = $out =~ m{\AHTTP/\S+ (\d+)};
     my ($status) = $out =~ m{^X-Cache-Status: (\S+)}mi;
     return ( $code // 'none', $status // 'none' );
