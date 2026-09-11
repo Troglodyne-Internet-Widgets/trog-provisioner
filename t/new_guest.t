@@ -228,6 +228,19 @@ subtest 'bin/recipes NAME dumps the schema' => sub {
     is_deeply( [ sort @{ $spec->{required} } ], [qw{dumpfile root_pw version}], 'required and all' );
 };
 
+subtest 'bin/recipes NAME says what it installs from CPAN' => sub {
+    my ( $out, $err, $rc ) = run_bin( 'recipes', 'tcms' );
+    is( $rc, 0, 'exits clean' );
+
+    # Under x-, beside the schema rather than in it, with what only a domain can
+    # say left as placeholders.
+    my $spec = eval { Cpanel::JSON::XS->new->decode($out) };
+    is_deeply( $spec->{'x-cpan-deps'}, [ { installdeps => '<install_dir>/<domain>/tCMS' } ], 'its cpan_deps' ) or diag $@;
+
+    ( $out, $err, $rc ) = run_bin( 'recipes', 'mariadb' );
+    ok( !exists Cpanel::JSON::XS->new->decode($out)->{'x-cpan-deps'}, 'and a recipe that installs nothing from CPAN says nothing' );
+};
+
 subtest 'bin/recipes on a name that is not one' => sub {
     my ( $out, $err, $rc ) = run_bin( 'recipes', 'nosuchrecipe' );
     isnt( $rc, 0, 'fails' );

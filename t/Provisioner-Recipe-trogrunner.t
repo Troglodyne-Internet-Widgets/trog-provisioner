@@ -192,66 +192,55 @@ subtest 'no fleet is a legitimate answer' => sub {
     unlike( $recipe->render(%$vars), qr/hypervisors\.conf/, 'and nothing installs it' );
 };
 
+# The queued CPAN tasks, in the order they will run, each as the words
+# cpan_install will be handed.
+sub cpan_steps {
+    my ( $recipe, $vars ) = @_;
+    my @queued = grep { index( $_, '/cpan_install' ) >= 0 } split( "\n", $recipe->render(%$vars) );
+    return map { [m/'([^']*)'/g] } @queued;
+}
+
 subtest 'Sys::Virt is pinned, and pinned before anything resolves dependencies' => sub {
     my ( undef, $recipe, $vars ) = built( libvirt_version => '10.0.0' );
-    my $fragment = $recipe->render(%$vars);
+    my @steps = cpan_steps( $recipe, $vars );
 
-    like( $fragment, qr/\QSys::Virt\E\@10\.0\.0/, 'pinned to what was asked for' );
+    # The ordering is the whole point.  Left to a dependency list cpanm takes
+    # the newest Sys::Virt, whose Makefile.PL wants a libvirt-dev far newer than
+    # a noble guest has -- and says so forty minutes in, in a message about
+    # pkg-config rather than about ordering.
+    is_deeply( [ @{ $steps[0] }[ -2, -1 ] ], [ 'install', 'Sys::Virt@10.0.0' ], 'pinned to what was asked for, and first' );
 
-    # The ordering is the whole point.  Left to the dependency list cpanm takes
-    # the newest Sys::Virt, whose Makefile.PL wants a libvirt-dev far newer
-    # than a noble guest has -- and says so forty minutes in, in a message
-    # about pkg-config rather than about ordering.
-    # The queued lines only.  Every one of these words appears in the comment
-    # above the line it explains, so a search of the whole fragment finds the
-    # prose rather than the command and passes whatever the order is.
-    my @lines  = grep { index( $_,         'queue_postrun_task' ) >= 0 } split( "\n", $fragment );
-    my ($virt) = grep { index( $lines[$_], 'Sys::Virt' ) >= 0 } 0 .. $#lines;
-    my ($deps) = grep { index( $lines[$_], 'authordeps' ) >= 0 } 0 .. $#lines;
-    ok( defined $virt && defined $deps && $virt < $deps, 'and queued ahead of the first authordeps' )
-      or diag "Sys::Virt at line $virt, authordeps at line $deps";
-
-    # authordeps before listdeps for the same class of reason: dist.ini names
-    # plugins, and dzil cannot read its own configuration to answer listdeps
-    # until they are installed.
-    my ($list) = grep { index( $lines[$_], 'listdeps' ) >= 0 } 0 .. $#lines;
-    ok( defined $list && $deps < $list, 'authordeps ahead of listdeps' );
-};
-
-subtest 'the perl is found at run time, and found somewhere that exists' => sub {
-    my ( undef, $recipe, $vars ) = built();
-    my @queued = grep { index( $_, 'queue_postrun_task' ) >= 0 } split( "\n", $recipe->render(%$vars) );
-    my @cpanm  = grep { index( $_, 'cpanm' ) >= 0 } @queued;
-
-    ok( scalar @cpanm, 'something is queued that installs from CPAN' );
-    foreach my $line (@cpanm) {
-
-        # Measured on a guest: resolving this at makefile time gave dirname an
-        # empty string, because the perl recipe had not built anything yet, and
-        # every task in the queue read ./cpanm.  The $ has to survive make and
-        # the shell so that the expansion happens when the task runs.
-        ok( index( $line, 'readlink -f /root/bin/cpanm' ) >= 0, 'the bin directory is resolved from a path that will exist' );
-        ok( index( $line, '\$$(dirname' ) >= 0,                 'and resolved when the task runs rather than when it is queued' );
-
-        # /root/bin because build_latest_perl.sh links there unconditionally.
-        # The other place it links is the home of whoever the perl is for, and
-        # that is the domain directory only when the domain names a service
-        # user -- which this recipe does not require.  perl.tt was fixed for
-        # the same assumption.
-        ok( index( $line, "$INSTALL/$DOMAIN/bin/cpanm" ) < 0, 'not through a home directory this domain may not have' );
-    }
+    # authordeps before listdeps is cpan_install's to keep, inside the one step.
+    my ($dzil) = grep { $steps[$_][-2] eq 'dzil' } 0 .. $#steps;
+    ok( defined $dzil && $dzil > 0, 'ahead of the checkout dependencies' );
+    is( $steps[$dzil][-1], "$INSTALL/$DOMAIN/trog-provisioner", 'which are the checkout it made' );
 };
 
 subtest 'an unnamed libvirt version is asked of the guest rather than guessed' => sub {
     my ( undef, $recipe, $vars ) = built();
-    my $fragment = $recipe->render(%$vars);
+    my @steps = cpan_steps( $recipe, $vars );
 
     # A recipe cannot load Trog::HV to ask a hypervisor, so a written-down
-    # default would be a guess that goes stale.  The guest can answer for
-    # itself, and does -- at makefile time, so post_install.sh names the
-    # version rather than a command.
-    like( $fragment, qr/pkg-config --modversion libvirt/,      'the guest is asked' );
-    like( $fragment, qr/there is no Sys::Virt version to pin/, 'and the build stops if it cannot answer' );
+    # default would be a guess that goes stale.  The guest answers for itself,
+    # when the task runs.
+    is_deeply( [ @{ $steps[0] }[ -3 .. -1 ] ], [qw{pin libvirt Sys::Virt}], 'at whatever pkg-config says the guest libvirt is' );
+};
+
+subtest 'Dist::Zilla is installed, and linked where the next step finds it' => sub {
+    my ( undef, $recipe, $vars ) = built();
+    my ($dzil) = grep { $_->[-1] eq 'Dist::Zilla' } cpan_steps( $recipe, $vars );
+
+    ok( $dzil, 'nothing else installs it' ) or return;
+    my %words = map { $_ => 1 } @$dzil;
+    ok( $words{'--link'} && $words{dzil}, 'and it is linked into /root/bin once it is there' );
+};
+
+subtest 'nothing reaches CPAN except through cpan_install' => sub {
+    my ( undef, $recipe, $vars ) = built();
+    my @queued = grep { index( $_, 'queue_postrun_task' ) >= 0 } split( "\n", $recipe->render(%$vars) );
+
+    ok( scalar @queued, 'something is queued' );
+    is_deeply( [ grep { index( $_, 'cpanm' ) >= 0 } @queued ], [], 'and none of it runs cpanm itself: all of it goes through cpan_install' );
 };
 
 subtest 'the checkout is optional, which is the case koan needs' => sub {
@@ -262,8 +251,8 @@ subtest 'the checkout is optional, which is the case koan needs' => sub {
     my $fragment = $without->render(%$ovars);
 
     unlike( $fragment, qr/git clone/, 'and not at all when the runner manages its own' );
-    like( $fragment, qr{cd '/srv/code/trog-provisioner' && .*dzil authordeps}, 'deps come from where it says instead' );
-    like( $fragment, qr{cd '/srv/code/trog-provisioner' && .*dzil listdeps},   'both halves of them' );
+    ok( ( grep { $_->[-2] eq 'dzil'                  && $_->[-1] eq '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'deps come from where it says instead' );
+    ok( !( grep { $_->[-1] =~ m{/trog-provisioner\z} && $_->[-1] ne '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'and not from a checkout that was never made' );
 };
 
 subtest 'the checkout cannot be the domain directory' => sub {

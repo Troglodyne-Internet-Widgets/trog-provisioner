@@ -1,6 +1,13 @@
 #!/bin/bash
 
+# build_latest_perl.sh USER [--notest] [MODULE ...]
 CLIENT=$1
+shift
+NOTEST=
+if [ "$1" = --notest ]; then
+    NOTEST=--notest
+    shift
+fi
 
 #XXX perlbrew = spooped when you run via clown-init
 export SHELL='/bin/bash';
@@ -30,7 +37,17 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     JOBS=$(nproc 2>/dev/null || echo 2)
     make -j"$JOBS"
     make -j"$JOBS" install
-    yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy
+
+    # Its cpanm, from the App::cpanminus release tarball.
+    "$WD/cpan_install" --bootstrap "/opt/perl5/$NICE_PERL_NAME/bin/perl" || exit 1
+fi
+
+# What the perl recipe says this perl comes with, installed every run rather
+# than only when it is built: cpanm skips what is already there, and a module
+# added to the list since reaches this guest now rather than never.  Before the
+# links below, which only link what is there.
+if [ $# -gt 0 ]; then
+    "$WD/cpan_install" $NOTEST --perl "/opt/perl5/$NICE_PERL_NAME/bin/perl" install "$@" || exit 1
 fi
 
 CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
@@ -50,12 +67,13 @@ if [ ! -d "$CLIENT_HOMEDIR" ]; then
 	exit 255
 fi
 
-# Symlinks to the perl, which is how every other recipe finds it -- the postrun
-# tasks in tcms, tpsgi and trogrunner call $CLIENT_HOMEDIR/bin/cpanm by name.
+# Symlinks to the perl, which is how everything else finds it --
+# scripts/cpan_install through /root/bin/cpanm, and people and services through
+# the user's bin.
 #
-# Guarded on the target existing, not just on the link being absent.  The cpan
-# line above installs cpanminus, Test2, NYTProf, starman, Perl::Critic and
-# Perl::Tidy, and nothing else -- so yath (Test2::Harness) and dzil
+# Guarded on the target existing, not just on the link being absent.  What is
+# installed above is cpanminus and the perl recipe's modules, and nothing else
+# -- so yath (Test2::Harness) and dzil
 # (Dist::Zilla) were being linked to files that have never been there, on every
 # guest that runs the perl recipe.  A link to nothing is worse than no link: it
 # satisfies -e, so anything checking for the tool finds it and then fails at the

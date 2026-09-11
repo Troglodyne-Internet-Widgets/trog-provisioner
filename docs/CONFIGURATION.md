@@ -201,6 +201,15 @@ exactly as it always has, only slower, and `bin/preflight` says so rather than
 failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
+`cpan_notest` skips the test suites of what recipes install from CPAN, and is
+**on by default**: a guest has ninety minutes for its makefile and deferred work
+together, and the suites of everything a recipe like `trogrunner` installs under
+a freshly built perl do not fit. Turn it off when what you are testing is what
+gets installed -- a recipe's `cpan_deps`, or the perl recipe -- and a failing
+suite is the thing to find; the provisioning-recipes skill's
+`scratch_config --cpan-tests` does that for a scratch build. What a recipe installs is its `cpan_deps`, which
+`bin/recipes <recipe>` shows.
+
 ## Where a guest sends its logs
 
 Two recipes, and neither reaches onto the other's machine. `logshipper` goes on

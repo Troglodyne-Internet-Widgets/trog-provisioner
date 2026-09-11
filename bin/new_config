@@ -299,6 +299,18 @@ sub main {
     return 0;
 }
 
+# The distribution's defaults, laid underneath what _global said.  _global
+# reaches every recipe unvalidated, so a default applied only when the distro
+# recipe is validated would reach no other recipe at all -- see
+# Provisioner::DistroRecipe/global_defaults.
+sub apply_global_defaults {
+    my ( $distro, $global_config ) = @_;
+
+    %$global_config = ( $distro->global_defaults, %$global_config );
+
+    return $global_config;
+}
+
 # Settings that describe how the hypervisor should build the guest rather than
 # what goes on it, and so belong in provision.conf rather than in a template.
 #
@@ -631,6 +643,8 @@ sub handle_domain {
     $global_config->{tld_ip}        = $tld_ip;
     $global_config->{transfer_user} = $transfer_user;
     $global_config->{transfer_port} = $transfer_port;
+
+    apply_global_defaults( $distro, $global_config );
 
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up

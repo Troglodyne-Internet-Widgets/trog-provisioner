@@ -167,6 +167,11 @@ What a distribution takes.
 =item * C<mirror> -- a package mirror for guests to prefer over the
 distribution's own archive.  Empty by default, which is no mirror at all.
 
+=item * C<cpan_notest> -- skip the test suites of what recipes install from
+CPAN.  B<On by default>, for time: see C<cpan_deps> in L<Provisioner::Recipe>.  Off is
+for a build testing what gets installed, where a suite that fails is the thing
+to find.
+
 =item * C<mirror_insecure> -- whether to let apt install from a repository it
 cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
 C<enrich> turns it on when a mirror is configured and off when one is not, which
@@ -203,12 +208,40 @@ sub args {
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
             },
+            cpan_notest => {
+                type        => 'boolean',
+                default     => 1,
+                description => 'Skip the test suites of what recipes install from CPAN.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs under a source-built perl do not fit.  Turn it off when what you are testing is what gets installed, and a suite that fails is the thing to find.',
+            },
             mirror_insecure => {
                 type        => 'boolean',
                 description => 'Let apt install from a repository it cannot verify.  Defaults to on when a mirror is configured and off when one is not, which is what every guest has had.  Turn it off against a mirror that carries the archive own signed indices -- one built by the aptmirror recipe does, being a verbatim copy.',
             },
         },
     );
+}
+
+=head2 %defaults = $distro->global_defaults()
+
+Every default C<args> declares, as a hash.
+
+These settings are read out of C<_global>, and C<_global> is handed to every
+recipe as it stands -- so a setting nobody wrote down would reach every recipe
+but this one as absent, the schema defaults being applied only when this recipe
+is validated.  C<bin/new_config> lays these under C<_global> instead, so the
+default is the one in the schema and there is no second copy of it to drift.
+
+A setting declaring no default, like C<mirror_insecure>, is left out: its absence
+is the answer.
+
+=cut
+
+sub global_defaults {
+    my ($class) = @_;
+
+    my %args       = $class->args();
+    my $properties = $args{properties} // {};
+    return map { $_ => $properties->{$_}{default} } grep { exists $properties->{$_}{default} } sort keys %$properties;
 }
 
 =head2 $path = $distro->mirror_path()

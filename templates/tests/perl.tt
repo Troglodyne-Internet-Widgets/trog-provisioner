@@ -31,8 +31,10 @@ SKIP: {
         or diag "built: $version  system: $system";
 }
 
-# The symlinks the build makes, which is how everything else finds it -- the
-# postrun tasks in tcms and tpsgi call $home/bin/cpanm by name.
+# The symlinks the build makes, which is how everything else finds it --
+# scripts/cpan_install through /root/bin/cpanm, which every recipe cpan_deps
+# task runs, and people and services through the user bin.
+ok(-x '/root/bin/cpanm', '/root/bin/cpanm is there for cpan_install to find this perl by');
 foreach my $tool (qw{perl cpanm prove}) {
     ok(-e "$home/bin/$tool", "$home/bin/$tool is there for other recipes to use");
 }

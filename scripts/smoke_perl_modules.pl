@@ -5,11 +5,13 @@ use warnings;
 
 use File::Basename qw{basename};
 
-my $REPO_BASEDIR = $ARGV[0];
-my $CPANM_PATH   = $ARGV[1];
+# The command that installs a distribution's dependencies, with the directory
+# to be appended: cpan_install's installdeps, as admincode queues it, the way every
+# recipe's cpan_deps are installed.
+my ( $REPO_BASEDIR, @INSTALLDEPS ) = @ARGV;
 
-die "Must pass repo basedir as first arg"          unless $REPO_BASEDIR;
-die "Must pass path to cpanm to use as second arg" unless $CPANM_PATH;
+die "Must pass repo basedir as first arg"                                     unless $REPO_BASEDIR;
+die "Must pass the command that installs a directory's dependencies after it" unless @INSTALLDEPS;
 
 opendir( my $dh, $REPO_BASEDIR );
 my @subdirs = grep { -d "$REPO_BASEDIR/$_" && !m/^\.+$/ } readdir($dh);
@@ -24,7 +26,7 @@ foreach my $REPO_DIR (@subdirs) {
 
     # TODO understand deps for dzil/MB
     next unless -f "$repo_dirname/Makefile.PL";
-    system( $CPANM_PATH, '--installdeps', "$repo_dirname/" );
+    system( @INSTALLDEPS, "$repo_dirname/" );
     my $rc = $? >> 8;
     if ($rc) {
         $had_failures++;

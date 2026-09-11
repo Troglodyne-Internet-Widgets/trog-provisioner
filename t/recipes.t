@@ -28,8 +28,9 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
-use File::Temp  qw(tempdir);
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw(tempdir);
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
@@ -41,6 +42,12 @@ use File::Slurper::Temp();
 use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
+
+# garage turns a version of latest into a release by asking for the tag list,
+# and every render here goes through its enrich.  Rendering is what is tested
+# here, not GitHub.
+my $garage = Test::MockModule->new('Provisioner::Recipe::garage');
+$garage->redefine( latest_version => sub { return 'v2.4.1' } );
 
 # The search path bin/new_config builds: a distribution's own directory first,
 # then the generic one.  Every fragment lives under ubuntu/ today, being written
@@ -137,7 +144,8 @@ my %G = (
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',
     local_dns_access_token     => '',
-    users                      => [
+
+    users => [
         { name => 'admin', gecos => 'Admin User',  shell => '/bin/bash' },
         { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
     ],
@@ -1684,6 +1692,47 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
 
         my ($offender) = $body =~ m/^([^\n]*\bufw\s+(?:allow|deny|limit|reject)\b[^\n]*)$/m;
         is( $offender, undef, ( File::Basename::basename($tt) ) . ' adds no firewall rule of its own' );
+    }
+};
+
+# bin/new_config renders every recipe with its configuration and then with
+# modules, the recipes on the guest, so a field by that name is one no domain can
+# set and whose value is never what the recipe meant.  The perl recipe had one,
+# and on a guest cpanm was asked to install nginx and ufw.
+#
+# full_aliases is written over the same way, and is not checked: mail declares
+# it to describe what new_config hands it, which is the same thing.
+subtest 'no recipe takes a field bin/new_config writes over' => sub {
+    foreach my $recipe ( sort @available ) {
+        my %spec = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        ok( !exists $spec{properties}{modules}, "$recipe takes no field called modules" );
+    }
+
+    # And what it builds from its own list, given the list new_config hands it.
+    my $out = Provisioner::Cookbook->load( 'perl', distro => $DISTRO )->new(%PROV)->render( %G, modules => [qw{nginx ufw perl}] );
+    my ($build) = grep { index( $_, 'build_latest_perl.sh' ) >= 0 } split( "\n", $out );
+    like( $build, qr/'Starman'/, 'perl installs its own module list' );
+    unlike( $build, qr/'nginx'|'ufw'/, 'and not the recipes on the guest' );
+};
+
+# The counterpart of the rule above, for CPAN.  A recipe says what it installs
+# in cpan_deps and scripts/cpan_install is the one thing that reaches CPAN, which
+# is what puts every install under cpan_notest.  A
+# fragment calling cpanm itself goes around both, and the build that finds out
+# is the one where CPAN is down.
+#
+# makefile.tt is not a recipe's: its testdeps target is a line nothing feeds.
+subtest 'no fragment calls cpanm itself' => sub {
+    my @fragments = grep { !m{/makefile[.]tt\z} } fragments();
+    ok( scalar @fragments, 'there are fragments to check' );
+
+    foreach my $tt (@fragments) {
+        my $body = File::Slurper::read_text($tt);
+        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/^\s*#.*$//gm;
+
+        my ($offender) = $body =~ m/^([^\n]*\bcpanm\b[^\n]*)$/m;
+        is( $offender, undef, ( File::Basename::basename($tt) ) . ' leaves CPAN to its cpan_deps' );
     }
 };
 

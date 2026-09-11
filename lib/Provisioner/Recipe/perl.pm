@@ -23,6 +23,10 @@ Downloads the latest perl, compiles it and slams it into /opt/perl5/$version
 
 Sets up a .bashrc in the install_dir which includes that perl's bindir in $PATH.
 
+Its cpanm comes from the App::cpanminus tarball, and C<cpan_modules> are installed
+into it straight after, both through F<scripts/cpan_install>.  What other recipes install into it is
+their C<cpan_deps>.
+
 TODO: allow specification of version.
 
 =cut
@@ -36,6 +40,23 @@ sub args {
         # by one.  It is always set by the time a template sees it.
         properties => {
             user => { type => 'string' },
+
+            # Installed while the perl is built rather than queued like a
+            # recipe's cpan_deps: build_latest_perl.sh links these tools into
+            # the user's bin once they are there, and starman has to be there
+            # before anything deferred starts a service with it.
+            #
+            # Module names, spelled as CPAN's index spells them: Starman, where
+            # MetaCPAN's search forgave `starman`.
+            #
+            # Not `modules`: bin/new_config hands every render a `modules` of its
+            # own, the recipes on the guest, after the recipe's configuration.
+            cpan_modules => {
+                type        => 'array',
+                items       => { type => 'string', pattern => '\A[\w:]+\z' },
+                default     => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}],
+                description => 'Modules installed into the new perl as it is built.  Every run, not only the first, so one added here reaches a guest whose perl is already built.',
+            },
         },
     );
 }

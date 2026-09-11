@@ -12,7 +12,6 @@ ln -s [% install_dir %]/[% domain %]/service/tpsgi.service /usr/lib/systemd/syst
 # We can't guarantee that perl has installed yet.
 # the PATH shenanigans here ensure we get the *right* perl
 [% script_dir %]/queue_postrun_task "PATH=[% install_dir %]/[% domain %]/bin:$$PATH build_service [% domain %] [% extra_env %]"
-[% script_dir %]/queue_postrun_task "[% install_dir %]/[% domain %]/bin/cpanm --installdeps [% install_dir %]/[% domain %]"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable [% domain %]
 [% script_dir %]/queue_postrun_task systemctl start [% domain %]

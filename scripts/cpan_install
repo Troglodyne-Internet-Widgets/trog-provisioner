@@ -1,0 +1,195 @@
+#!/usr/bin/perl
+
+package Trog::Script::CpanInstall;
+
+use strict;
+use warnings;
+
+use Cwd            ();
+use File::Basename ();
+use File::Temp     ();
+use Getopt::Long   ();
+
+=head1 cpan_install
+
+=head2 SYNOPSIS
+
+    cpan_install [--notest] [--link TOOL ...] install SPEC [SPEC ...]
+    cpan_install [--notest] [--link TOOL ...] installdeps DIR
+    cpan_install [--notest] [--link TOOL ...] dzil DIR
+    cpan_install [--notest] [--link TOOL ...] pin PKGCONFIG_PACKAGE MODULE
+    cpan_install [--notest] [--perl PERL] install SPEC [SPEC ...]
+    cpan_install --bootstrap PERL
+
+=head2 DESCRIPTION
+
+How a recipe's C<cpan_deps> are installed on a guest, into the perl the C<perl>
+recipe built.  L<Provisioner::Recipe>'s C<cpan_tasks> queues one call to this
+for each step a recipe declares, and the verbs are the steps':
+
+=over 4
+
+=item * C<install> -- anything cpanm takes in place of a module name.
+
+=item * C<installdeps> -- what the distribution in C<DIR> says it needs.
+
+=item * C<dzil> -- what C<dzil authordeps> and then C<dzil listdeps> say is
+missing in C<DIR>, in that order, because C<dist.ini> names plugins and dzil
+cannot read it to answer the second until the first are installed.
+
+=item * C<pin> -- C<MODULE> at the version pkg-config reports for
+C<PKGCONFIG_PACKAGE>, asked when this runs.  C<Sys::Virt> is why: it has to
+match the C<libvirt> it builds against.
+
+=back
+
+C<--link> links each tool out of that perl's bin into F</root/bin> once the
+step has succeeded, for a tool nothing else links.
+
+=head3 Which perl
+
+The one C</root/bin/cpanm> links into, found each time this runs rather than
+written into the task, because that perl's path is its version and the version
+is whatever was current the day the guest was built.  C<--perl> names one
+instead, for F<build_latest_perl.sh>, which installs before it has linked
+anything.
+
+C<--bootstrap> gives a freshly built perl its cpanm: App::cpanminus, from its
+release tarball.  Not the system cpanm run under the new perl: Debian unpacks it
+into F</usr/share/perl5>, which the new perl does not look in.
+
+Written for the system perl, which is what runs it.
+
+=cut
+
+our $CPANM_LINK = '/root/bin/cpanm';
+our $ROOT_BIN   = '/root/bin';
+
+# The cpanminus a new perl is given.  A release rather than whatever is newest,
+# so that every guest gets the same one.
+our $CPANMINUS = 'https://www.cpan.org/authors/id/M/MI/MIYAGAWA/App-cpanminus-1.7049.tar.gz';
+
+my $USAGE = "usage: cpan_install [--notest] [--link TOOL] [--perl PERL] install|installdeps|dzil|pin ARGS, or --bootstrap PERL\n";
+
+sub main {
+    my @args = @_;
+
+    my %opt = ( link => [] );
+    Getopt::Long::GetOptionsFromArray( \@args, \%opt, 'notest', 'link=s@', 'perl=s', 'bootstrap=s' )
+      or return usage();
+
+    return bootstrap( $opt{bootstrap} ) if defined $opt{bootstrap};
+
+    my ( $verb, @rest ) = @args;
+    return usage() unless defined $verb;
+
+    my $bin   = perl_bin( $opt{perl} );
+    my @cpanm = ( "$bin/cpanm", ( $opt{notest} ? '--notest' : () ) );
+
+    my $rc;
+    if ( $verb eq 'install' && @rest ) {
+        $rc = run_in( undef, @cpanm, @rest );
+    }
+    elsif ( $verb eq 'installdeps' && @rest == 1 ) {
+        $rc = run_in( undef, @cpanm, '--installdeps', $rest[0] );
+    }
+    elsif ( $verb eq 'dzil' && @rest == 1 ) {
+        foreach my $which (qw{authordeps listdeps}) {
+            my @missing = grep { length } map { s/\s+\z//r } capture_in( $rest[0], "$bin/dzil", $which, '--missing' );
+            next unless @missing;
+            $rc = run_in( undef, @cpanm, @missing ) and last;
+        }
+    }
+    elsif ( $verb eq 'pin' && @rest == 2 ) {
+        my ( $package, $module ) = @rest;
+        my ($version) = map { s/\s+\z//r } capture_in( undef, 'pkg-config', '--modversion', $package );
+        unless ( defined $version && length $version ) {
+            print {*STDERR} "cpan_install: pkg-config knows no $package, so there is no $module version to pin\n";
+            return 1;
+        }
+        $rc = run_in( undef, @cpanm, "$module\@$version" );
+    }
+    else {
+        return usage();
+    }
+    return $rc if $rc;
+
+    link_tools( $bin, @{ $opt{link} } );
+    return 0;
+}
+
+sub usage {
+    print {*STDERR} $USAGE;
+    return 2;
+}
+
+# The bin directory of the perl to install into.
+sub perl_bin {
+    my ($perl) = @_;
+    return File::Basename::dirname($perl) if defined $perl;
+
+    my $cpanm = Cwd::abs_path($CPANM_LINK);
+    die "cpan_install: $CPANM_LINK leads to no cpanm.  The perl recipe builds a perl and links its cpanm there; is it on this guest?\n"
+      unless defined $cpanm && -x $cpanm;
+    return File::Basename::dirname($cpanm);
+}
+
+sub link_tools {
+    my ( $bin, @tools ) = @_;
+
+    foreach my $tool (@tools) {
+        die "cpan_install: there is no $tool in $bin to link\n" unless -e "$bin/$tool";
+        unlink("$ROOT_BIN/$tool") if -l "$ROOT_BIN/$tool";
+        symlink( "$bin/$tool", "$ROOT_BIN/$tool" ) or die "cpan_install: could not link $ROOT_BIN/$tool: $!\n";
+    }
+    return;
+}
+
+sub bootstrap {
+    my ($perl) = @_;
+
+    my $dir     = File::Temp::tempdir( CLEANUP => 1 );
+    my $tarball = "$dir/cpanminus.tar.gz";
+
+    foreach my $step (
+        [ undef, qw{curl -fsSL --retry 3 --retry-all-errors -o}, $tarball, $CPANMINUS ],
+        [ undef, 'tar', '-xzf', $tarball, '--strip-components=1', '-C', $dir ],
+        [ $dir,  $perl, 'Makefile.PL' ],
+        [ $dir,  'make' ],
+        [ $dir,  'make', 'install' ],
+    ) {
+        my $rc = run_in(@$step);
+        return $rc if $rc;
+    }
+    return 0;
+}
+
+# The two ways this touches anything outside itself, so that a test can stand
+# in for both.  run_in answers with the exit code, capture_in with the lines.
+sub run_in {
+    my ( $dir, @cmd ) = @_;
+
+    my $was = Cwd::getcwd();
+    chdir $dir or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
+    print "cpan_install: @cmd\n";
+    system(@cmd);
+    my $rc = $? == -1 ? 127 : $? >> 8;
+    chdir $was if defined $dir;
+    return $rc;
+}
+
+sub capture_in {
+    my ( $dir, @cmd ) = @_;
+
+    my $was = Cwd::getcwd();
+    chdir $dir                 or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
+    open( my $fh, '-|', @cmd ) or die "cpan_install: cannot run $cmd[0]: $!\n";
+    my @lines = <$fh>;
+    close $fh;
+    chdir $was if defined $dir;
+    return @lines;
+}
+
+exit main(@ARGV) unless caller;
+
+1;

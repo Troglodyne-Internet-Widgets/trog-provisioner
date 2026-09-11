@@ -38,6 +38,13 @@ TODO: allow specification of specific SHA to check out.
 
 =cut
 
+# What the application says it needs, queued ahead of this fragment -- and so
+# ahead of build_service, which starts it.  See Provisioner::Recipe cpan_deps.
+sub cpan_deps {
+    my ( $self, %opts ) = @_;
+    return ( { installdeps => join( '/', map { $_ // q{} } @opts{qw{install_dir domain}} ) } );
+}
+
 sub required_recipes {
     return (
         perl       => sub { () },

@@ -135,6 +135,33 @@ echo "$TROG_SCRATCH_PASS" | bin/provision "$DOMAIN"
 This takes minutes. It is finished when it says so or when it dies; if it dies,
 **go straight to collecting artifacts** — a failed run is when they matter most.
 
+## CPAN test suites, when what you are testing is what gets installed
+
+A scratch build skips the test suites of what it installs from CPAN, as a real
+guest does -- `cpan_notest` is on by default. Most scratch builds are checking
+that a recipe's modules can be fetched and installed at all, through the fetch
+cache and pinned where they are pinned, and a suite adds nothing to that but
+time, and the chance that a failure in somebody else's distribution stops the
+build before the part you were checking.
+
+Turn them on when what you changed is what gets installed: a recipe's
+`cpan_deps`, the `perl` recipe or its `cpan_modules`, or anything whose
+correctness depends on a module actually working under the perl a guest builds.
+Then a failing suite is the finding.
+
+    eval "$(.claude/skills/provisioning-recipes/scripts/scratch_config --cpan-tests)"
+
+That writes `cpan_notest: 0` into the scratch `_base._global`. It costs time: a
+recipe that installs a lot from CPAN -- `trogrunner`, with Dist::Zilla and
+everything under it -- does not fit `bin/provision`'s default ninety minutes
+with its suites on, so give it more:
+
+    echo "$TROG_SCRATCH_PASS" | TROG_SETUP_TIMEOUT=3h bin/provision "$DOMAIN"
+
+A failing suite shows in `setup.log` as a `postrun FAILED:` naming a
+`cpan_install` task, with cpanm's build log path above it. Read which
+distribution failed and why before deciding anything, and report it.
+
 ## Read what happened
 
 ```

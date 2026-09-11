@@ -40,6 +40,13 @@ TODO: allow specification of specific SHA to check out.
 
 =cut
 
+# What the checkout says it needs, queued ahead of this fragment: see
+# Provisioner::Recipe cpan_deps.
+sub cpan_deps {
+    my ( $self, %opts ) = @_;
+    return ( { installdeps => join( '/', map { $_ // q{} } @opts{qw{install_dir domain}} ) . '/tCMS' } );
+}
+
 sub required_recipes {
     my ( $self, %opts ) = @_;
     return (

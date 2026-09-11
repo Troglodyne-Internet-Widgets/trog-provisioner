@@ -108,6 +108,16 @@ subtest 'the four files a guest boots from are ordinary template_files' => sub {
     ok( ( grep { m/\Aubuntu[.]/ } keys %files ) == scalar keys %files, 'out of that distribution own directory' );
 };
 
+subtest 'global_defaults: what _global holds when nobody wrote it down' => sub {
+    my %defaults = Provisioner::Cookbook->load('ubuntu')->global_defaults;
+
+    is_deeply( \%defaults, { mirror => q{}, cpan_notest => 1 }, 'every setting the schema defaults, at its default' );
+
+    # Its absence is how enrich knows to follow the mirror, so a default laid
+    # under _global would switch that off on every guest.
+    ok( !exists $defaults{mirror_insecure}, 'and nothing for the setting that declares none' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
