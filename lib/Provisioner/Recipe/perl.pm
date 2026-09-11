@@ -28,11 +28,13 @@ so everything that installs into this perl finds it under F</opt/perl5>
 instead.
 
 Three modules come with it whatever else is asked of this recipe, installed by
-F<scripts/build_latest_perl.sh> through the new perl's own C<cpan>: B<cpanm>,
-which everything below goes through, and B<Module::Build> and B<Dist::Zilla>,
-which a distribution needing either cannot install for itself.  Everything else
-is C<cpan_deps>, installed through F<scripts/cpan_install>, the one thing on a
-guest that reaches CPAN.
+F<scripts/build_latest_perl.sh>: B<cpanm>, from the new perl's own C<cpan>
+because nothing else can install one yet, and then B<Module::Build> and
+B<Dist::Zilla> through cpanm, which a distribution needing either cannot install
+for itself.  Everything else is C<cpan_deps>.  Both go through
+F<scripts/cpan_install>, the one thing on a guest that reaches CPAN -- CPAN.pm
+is asked for nothing but the cpanm it bootstraps, having once given up on a
+fetch two hundred distributions into Dist::Zilla's tree.
 
 TODO: allow specification of version.
 

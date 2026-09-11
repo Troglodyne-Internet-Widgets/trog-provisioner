@@ -37,16 +37,20 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     make -j"$JOBS" install
 fi
 
-# What this perl comes with whatever else is asked of it, from its own CPAN
-# client: cpanm, because everything installed into this perl afterwards goes
-# through it; Module::Build and Dist::Zilla, because a distribution needing
-# either cannot install it for itself.
+# Its cpanm, from the new perl's own CPAN client, since nothing else can install
+# one yet: -T so CPAN.pm skips the suite, and yes to answer its first-run
+# configuration.
 #
-# -T, so CPAN.pm installs without running each distribution's suite: Dist::Zilla
-# alone is most of a guest's wall clock with them on, and what the fleet wants
-# tested is its own code rather than the toolchain.  Every run rather than only
-# the first, so a module added to this line reaches a guest already built.
-yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus Module::Build Dist::Zilla || exit 1
+# cpanm and nothing else.  Measured on a guest: CPAN.pm two hundred
+# distributions into Dist::Zilla's tree lost a single fetch to "SSL connection
+# failed for cpan.org: SSL wants a read first", gave up, and took the build with
+# it.  cpanm is what every other install on a guest goes through, and it retries.
+yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus || exit 1
+
+# What a distribution needing either cannot install for itself, through the one
+# thing on a guest that reaches CPAN.  Every run rather than only the first, so a
+# module added here reaches a guest whose perl is already built.
+"$WD/cpan_install" --notest install Module::Build Dist::Zilla || exit 1
 
 # Where a person finds this perl.  Not where the build finds it: make runs its
 # recipe lines under a non-interactive sh out of an atd job, and systemd and
