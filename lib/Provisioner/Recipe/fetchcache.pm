@@ -291,8 +291,16 @@ freshness configured for it.
 
 Dies on a host that is not a plain DNS name, because it is written into the
 vhost as a regex, and on an empty list, which would be a cache that fetches
-nothing.  Dies without C<resolvers> too: nginx looks an upstream up when it
-fetches, and C<bin/new_config> always supplies them.
+nothing.
+
+C<resolvers> are the fleet's, less any loopback or IPv6 address, and it dies if
+none are left: nginx looks an upstream up when it fetches, and has to be given
+servers it can reach.  The fleet's list can lead with C<127.0.0.1>, which is
+right on a guest running the pdns recursor and on this one is nothing -- nginx
+rotates through the list, so every few lookups was a refused connection.  Not
+systemd-resolved's stub instead, which would fail over properly: the
+C<nostubresolver> recipe turns it off on these guests.  And IPv6 because nginx
+is told C<ipv6=off>, as apt is told to use IPv4.
 
 =cut
 
@@ -313,8 +321,10 @@ sub enrich {
         } @CLASSES
     ];
 
-    $opts{resolvers} = Provisioner::Utils::coerce_arrayref( $opts{resolvers} );
-    die "fetchcache needs resolvers to look its upstreams up with, and was given none.\n" unless @{ $opts{resolvers} };
+    my @given = @{ Provisioner::Utils::coerce_arrayref( $opts{resolvers} ) };
+    $opts{resolvers} = [ grep { !m/\A127\./ && index( $_, ':' ) < 0 } @given ];
+    die "fetchcache needs resolvers it can reach to look its upstreams up with, and of '@given' none are left once loopback and IPv6 are taken out.\n"
+      unless @{ $opts{resolvers} };
 
     return %opts;
 }

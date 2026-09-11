@@ -90,6 +90,8 @@ subtest 'what the vhost will not accept' => sub {
     like( exception { generated( upstreams => \%none ) }, qr/no upstreams turned on/, 'no hosts at all, which would fetch nothing' );
 
     like( exception { generated( resolvers => [] ) }, qr/needs resolvers/, 'and no resolvers to look them up with' );
+
+    like( exception { generated( resolvers => [ '127.0.0.1', '::1' ] ) }, qr/needs resolvers/, 'or none it can reach' );
 };
 
 subtest 'each kind of URL gets its own freshness, and its own redirect handling' => sub {
@@ -130,6 +132,17 @@ subtest 'upstream is trusted as little as possible' => sub {
     like( $vhost, qr/^\s+proxy_ignore_headers [^;]*\bCache-Control\b/m,           'and its caching headers do not decide what is kept' );
     like( $vhost, qr/^\s+proxy_cache_use_stale [^;]*\berror\b[^;]*\bhttp_503\b/m, 'what it had is served when upstream fails' );
     like( $vhost, qr/^\s+resolver 192\.168\.1\.253 8\.8\.8\.8 ipv6=off;$/m,       'looked up through the resolvers it was given' );
+
+    # The fleet's list, as a real ipmap.cfg has it: a loopback for guests that
+    # run the pdns recursor, which this one does not, and an IPv6 address nginx
+    # is told not to use.  Measured on a guest: nginx rotated onto 127.0.0.1
+    # and every few lookups was a refused connection.
+    my ($fleet) = generated( resolvers => [qw{127.0.0.1 192.168.1.254 8.8.8.8 2600:1700::1}] );
+    like( $fleet, qr/^\s+resolver 192\.168\.1\.254 8\.8\.8\.8 ipv6=off;$/m, 'and only the ones it can reach' );
+
+    # github.com sends five kilobytes of headers, which the default buffer turned
+    # into a 502 before the redirect in them was read.
+    like( $vhost, qr/^\s+proxy_buffer_size 16k;$/m, 'with room for GitHub headers' );
 };
 
 subtest 'the vhost answers for the address, not only the name' => sub {

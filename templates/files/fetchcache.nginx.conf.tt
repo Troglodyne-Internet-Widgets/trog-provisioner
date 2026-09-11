@@ -36,7 +36,8 @@ server {
     }
 
 [%# Upstreams are looked up when they are fetched, which is what a variable in
-    proxy_pass means.  IPv4 only, as apt is told on every guest. -%]
+    proxy_pass means.  IPv4 only, as apt is told on every guest, and only the
+    servers enrich kept: see Provisioner::Recipe::fetchcache. -%]
     resolver [% resolvers.join(' ') %] ipv6=off;
     resolver_timeout 10s;
 
@@ -66,6 +67,13 @@ server {
     proxy_set_header Accept-Encoding "";
     proxy_http_version 1.1;
     proxy_set_header Connection "";
+
+[%# Room for the response headers.  github.com sends five kilobytes of them, a
+    content-security-policy alone of three and a half, and the default buffer
+    of one page makes that a 502 before the redirect in it is ever read.  The
+    buffers have to be at least as large, or nginx refuses the arithmetic. -%]
+    proxy_buffer_size 16k;
+    proxy_buffers 8 16k;
 
     proxy_ssl_server_name on;
     proxy_ssl_verify on;
