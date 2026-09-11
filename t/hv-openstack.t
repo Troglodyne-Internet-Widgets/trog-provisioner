@@ -446,6 +446,16 @@ subtest 'volumes and the console' => sub {
       'and the console is readable, which is all there is when a guest never comes up';
 };
 
+subtest 'nothing to prepare, release or clear up after' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new;
+
+    is $hv->prepare_host('/nonexistent/virtiofs-better'), 1, 'no host to prepare';
+    is $hv->release_seed('vm.example.com'),               1, 'no drive to eject the seed from';
+    is_deeply [ $hv->guest_volumes('vm.example.com') ], [], 'and no volumes left once the server has gone';
+    is_deeply $FAKE->{calls},                           [], 'none of which asked the cloud anything';
+};
+
 subtest 'what it refuses to pretend to' => sub {
     my $hv = cloud();
 

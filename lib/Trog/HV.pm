@@ -73,10 +73,25 @@ that a directory belongs to something still running.
 
 =item * C<guest_ssh_ip>, the address a built guest is reached at.
 
+=item * C<prepare_host>, C<release_seed> and C<guest_volumes>: what has to be
+done to a hypervisor before it can build, to a guest once cloud-init has read
+its seed, and to a guest's disks once it is gone.  A backend with nothing to do
+for one says so by doing nothing, which is what lets the scripts above call all
+three without asking first which kind of hypervisor they have.
+
 =item * C<builds_by_api> and C<manages_addresses>, which are what F<bin/provision>
-and L<Provisioner::IPPool> branch on rather than on a class name.
+and L<Provisioner::IPPool> branch on rather than on a class name.  Only where
+the two kinds take genuinely different paths -- a guest defined from XML rather
+than asked of a service, an address we allocate rather than one we are given --
+and not for a step one of them merely has no use for.  That is what the three
+above are for.
 
 =back
+
+Every one of these is declared here, and dies naming the backend and the method
+it left out.  So a third backend that forgets one finds out at the call, in
+words, rather than as "Can't locate object method" from somewhere in
+F<bin/provision>.
 
 A method that means nothing to a backend should die saying so, rather than
 return an undef the caller will carry somewhere else before failing.
@@ -319,9 +334,12 @@ differently and which nothing up there should answer by looking at a class name.
 =head2 builds_by_api
 
 Whether a guest is created by asking a service for one, rather than by defining
-a domain from the XML L<Provisioner::Recipe::vm> renders.  What follows from it
-is the storage pool, the seed ISO and the cdrom, none of which a service-built
-guest has.
+a domain from the XML L<Provisioner::Recipe::vm> renders.  Which is a different
+path through F<bin/provision>, a different set of checks in F<bin/preflight>,
+and interfaces whose names nobody here chose.  What it is I<not> for is the
+storage pool, the seed ISO and the cdrom: those are L</prepare_host($virtiofs)>,
+L</release_seed($domain)> and L</guest_volumes($domain)>, which a service-built guest answers by
+having nothing to do.
 
 =head2 manages_addresses
 
@@ -336,6 +354,51 @@ the addresses it would find are not drawn from the pool it is protecting.
 
 sub builds_by_api     { return 0 }
 sub manages_addresses { return 0 }
+
+=head1 WHAT EVERY BACKEND ANSWERS
+
+Declared here so that leaving one out is an error that names itself.  See
+L</WHAT A BACKEND HAS TO PROVIDE> for what each is for.
+
+=head2 prepare_host($virtiofs)
+
+Whatever the hypervisor needs before a guest can be built on it.  C<$virtiofs>
+is our copy of F<virtiofs-better>, for a backend whose guests run in a qemu
+process that wants it.
+
+=head2 release_seed($domain)
+
+Called once the guest says cloud-init has finished, and not before: until then
+it may still be reading its seed.
+
+=head2 guest_volumes($domain)
+
+The volumes that are this guest's alone and ours to delete once it is gone.
+Never the base image, which every other guest is built on.
+
+=cut
+
+# Named, so the message says whose method is missing and that it is owed,
+# rather than that some object somewhere could not find it.
+sub _abstract {
+    my ( $self, $method ) = @_;
+    die( ( ref($self) || $self ) . " does not implement $method, which every backend has to\n" );
+}
+
+sub build                 { return $_[0]->_abstract('build') }
+sub config_keys           { return $_[0]->_abstract('config_keys') }
+sub domain_exists         { return $_[0]->_abstract('domain_exists') }
+sub domain_is_running     { return $_[0]->_abstract('domain_is_running') }
+sub annihilate_domain     { return $_[0]->_abstract('annihilate_domain') }
+sub guest_names           { return $_[0]->_abstract('guest_names') }
+sub guest_ssh_ip          { return $_[0]->_abstract('guest_ssh_ip') }
+sub snapshot_names        { return $_[0]->_abstract('snapshot_names') }
+sub snapshot_current_name { return $_[0]->_abstract('snapshot_current_name') }
+sub create_snapshot       { return $_[0]->_abstract('create_snapshot') }
+sub revert_snapshot       { return $_[0]->_abstract('revert_snapshot') }
+sub prepare_host          { return $_[0]->_abstract('prepare_host') }
+sub release_seed          { return $_[0]->_abstract('release_seed') }
+sub guest_volumes         { return $_[0]->_abstract('guest_volumes') }
 
 =head1 PLACEMENT
 
@@ -367,10 +430,7 @@ backend; L</WHAT A BACKEND HAS TO PROVIDE> lists the keys this expects back.
 
 =cut
 
-sub capacity {
-    my ($self) = @_;
-    die ref($self) . " does not know how to report its capacity\n";
-}
+sub capacity { return $_[0]->_abstract('capacity') }
 
 =head2 shortfalls(%needs)
 

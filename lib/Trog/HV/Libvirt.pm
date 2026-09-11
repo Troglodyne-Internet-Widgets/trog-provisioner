@@ -1337,6 +1337,47 @@ sub pool_free {
 
 =head1 PROVISIONING
 
+=head2 prepare_host($virtiofs)
+
+The storage pool's directory, which a hypervisor may not have yet, and
+F<virtiofs-better> in F</usr/libexec>.  That one runs as part of the qemu
+process, so it has to land on the hypervisor, not on us.
+
+=cut
+
+sub prepare_host {
+    my ( $self, $virtiofs ) = @_;
+
+    $self->mkpath( $self->pool_path )
+      or die "Could not create storage pool dir " . $self->pool_path . " on the hypervisor";
+
+    return 1 if $self->file_exists('/usr/libexec/virtiofs-better');
+
+    $self->put_file( $virtiofs, '/usr/libexec/virtiofs-better', sudo => 1 )
+      or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
+    $self->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
+
+    return 1;
+}
+
+=head2 release_seed($domain)
+
+Eject the cloud-init ISO, which is only so the guest does not boot off it next
+time.  See L</eject_cdrom($domain, $target)> for why this waits on cloud-init.
+
+=head2 guest_volumes($domain)
+
+The guest's own overlay and its seed, those of them there are.
+
+=cut
+
+sub release_seed { return $_[0]->eject_cdrom( $_[1] ) }
+
+sub guest_volumes {
+    my ( $self, $domain ) = @_;
+    return grep { $self->volume($_) } ( "$domain-qcow2", "$domain-cloudinit.iso" );
+}
+
 =head2 guest_ssh_ip($config, $lease_ip)
 
 Which address I<we> use to SSH into a guest.
