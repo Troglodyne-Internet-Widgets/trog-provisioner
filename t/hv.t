@@ -980,6 +980,9 @@ subtest 'a rebuilt guest can hold two leases, and the newest is the address it h
 
     local @FakeNet::LEASES = ( @now, @stale );
     is( $hv->lease_ip( 'default', mac => $mac ), '192.168.122.97', 'in whichever order dnsmasq lists them' );
+
+    # All of them, for releasing what the guests before this one left behind.
+    is_deeply( [ $hv->lease_ips( 'default', mac => $mac ) ], [qw{192.168.122.97 192.168.122.96}], 'and every one of them, newest first' );
 };
 
 subtest 'a command that names its own timeout is not called hung before it' => sub {

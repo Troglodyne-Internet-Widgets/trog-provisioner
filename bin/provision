@@ -714,22 +714,24 @@ sub provision_domain {
     # Anything already answering to this name has to go before we define one.
     clean_domain_resources($domain);
 
+    # And the addresses it held.  A rebuilt guest keeps its MAC, which is
+    # derived from its name, but it is a new DHCP client, so dnsmasq gives it a
+    # new address and keeps the old lease on file until that expires.  Left
+    # there, every rebuild holds one more address out of the NAT range, and the
+    # wait below finds the old lease already in the table and stops waiting for
+    # this guest to ask.
+    $hv->release_dhcp_lease($_) for $hv->lease_ips( 'default', mac => $nat_mac );
+
     my $file = build_domain( $config, \%seed );
     print "Wrote $file\n";
 
     print "Defining and starting $domain...\n";
     $hv->define_domain( File::Slurper::read_text($file) );
 
-    # We used to nuke the old lease here, because a rebuilt guest arrived with a
-    # freshly generated MAC and so took a second address while the first sat in
-    # the table until it expired.  Its MAC is derived from its name now, so it
-    # asks for the lease it already had and there is nothing to clean up --
-    # which also means we wait for that lease to appear rather than for a
-    # different address to.
-    # Its MAC is derived from its name, so a rebuilt guest asks for the lease it
-    # already had.  That also means the lease is usually already in the table
-    # before this guest has finished POSTing -- it is the previous boot's, for
-    # the same MAC and the same address.  So this finds the address; it does not
+    # The leases this MAC held were released above, so the one that appears is
+    # this guest asking for it.  Unless the release could not be done -- no
+    # lease helper on the hypervisor says so as it happens -- in which case this
+    # can find the old one; either way it finds an address and does not
     # establish that anything is running at it.  wait_for_ssh does that.
     print "Looking up the address for $domain...";
     my $new_ip = '';

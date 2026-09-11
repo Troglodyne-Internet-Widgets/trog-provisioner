@@ -238,15 +238,18 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     my $loc = Test::MockModule->new('Trog::Local');
 
     my %seeded;
-    $hv->redefine( domain_exists        => sub { 0 } );
-    $hv->redefine( delete_volume        => sub { 1 } );
-    $hv->redefine( pool                 => sub { 1 } );
-    $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
-    $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
-    $hv->redefine( bridge_device        => sub { 'br0' } );
-    $hv->redefine( has_tpm              => sub { 0 } );
-    $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
-    $hv->redefine( lease_ip             => sub { '192.168.122.50' } );
+    $hv->redefine( domain_exists => sub { 0 } );
+    $hv->redefine( delete_volume => sub { 1 } );
+    $hv->redefine( pool          => sub { 1 } );
+    $hv->redefine( base_image    => sub { '/bogus/pool/baseimage-qcow2' } );
+    $hv->redefine( create_disk   => sub { '/bogus/pool/vm.test-qcow2' } );
+    $hv->redefine( bridge_device => sub { 'br0' } );
+    $hv->redefine( has_tpm       => sub { 0 } );
+    $hv->redefine( guest_mac     => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip      => sub { '192.168.122.50' } );
+
+    # A guest never built before holds no lease to release.
+    $hv->redefine( lease_ips            => sub { () } );
     $hv->redefine( is_local             => sub { 1 } );
     $hv->redefine( describe             => sub { 'the hypervisor' } );
     $hv->redefine( virbr_ip             => sub { '192.168.122.1' } );
@@ -311,6 +314,64 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
 
     is( $user, 'doge',           'the admin user comes back' );
     is( $ip,   '192.168.122.50', 'with the address the guest leased' );
+};
+
+subtest 'a rebuild releases the leases the guests before it held' => sub {
+    my @applied;
+    my $hv  = Test::MockModule->new('Trog::HV');
+    my $loc = Test::MockModule->new('Trog::Local');
+
+    # A guest already there, and two leases on file for its MAC: the one it has,
+    # and one an earlier rebuild left behind.  Measured on hydra: a rebuilt
+    # guest keeps its MAC and still gets a new address, and dnsmasq keeps the
+    # old lease until it expires.
+    $hv->redefine( domain_exists        => sub { 1 } );
+    $hv->redefine( annihilate_domain    => sub { push( @applied, 'annihilate_domain' ); 1 } );
+    $hv->redefine( lease_ips            => sub { qw{192.168.122.97 192.168.122.96} } );
+    $hv->redefine( release_dhcp_lease   => sub { push( @applied, "release $_[1]" ); 1 } );
+    $hv->redefine( define_domain        => sub { push( @applied, 'define_domain' ); 1 } );
+    $hv->redefine( delete_volume        => sub { 1 } );
+    $hv->redefine( pool                 => sub { 1 } );
+    $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
+    $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
+    $hv->redefine( bridge_device        => sub { 'br0' } );
+    $hv->redefine( has_tpm              => sub { 0 } );
+    $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip             => sub { '192.168.122.98' } );
+    $hv->redefine( is_local             => sub { 1 } );
+    $hv->redefine( describe             => sub { 'the hypervisor' } );
+    $hv->redefine( virbr_ip             => sub { '192.168.122.1' } );
+    $hv->redefine( libvirt_version      => sub { 10_000_000 } );
+    $hv->redefine( qemu_version         => sub { 9_000_000 } );
+    $hv->redefine( pool_takes_direct_io => sub { 1 } );
+    $hv->redefine( pool_fstype          => sub { 'ext4' } );
+    $hv->redefine( write_text           => sub { 1 } );
+    $hv->redefine( put_file             => sub { 1 } );
+    $hv->redefine( run_sudo             => sub { 0 } );
+    $hv->redefine( cloudinit_iso        => sub { '/bogus/pool/seed.iso' } );
+    $loc->redefine( append_line => sub { 1 } );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    $hv->redefine( domain_dir => sub { $dir } );
+    mkdir "$dir/vm.test";
+    File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
+      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
+
+    my $config = Config::Simple->new(
+        _conf(
+            domain     => 'vm.test',   memory => 2048, cpus => 2,
+            size       => 42949672960, image  => 'https://example.test/img',
+            admin_user => 'doge',      distro => 'ubuntu',
+        )
+    );
+
+    quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+
+    is_deeply(
+        [ grep { $_ eq 'annihilate_domain' || m/\Arelease / || $_ eq 'define_domain' } @applied ],
+        [ 'annihilate_domain', 'release 192.168.122.97', 'release 192.168.122.96', 'define_domain' ],
+        'every lease the MAC held is released, after the old guest is gone and before the new one is defined'
+    ) or diag "applied: @applied";
 };
 
 subtest 'a domain directory with no recipes is built as it stands' => sub {
