@@ -37,8 +37,11 @@ teardown - take the throwaway guest and the throwaway configuration back out aga
 =head1 DESCRIPTION
 
 Destroys the guest, purges its domain directory from here and from the
-hypervisor, takes its data directory out of the data source on both, and
-removes the scratch configuration directory.
+hypervisor, takes its data directory out of the data source on both, and takes
+the domain out of the scratch configuration -- the configuration itself with the
+last domain in it.  One scratch configuration often builds several guests at
+once, a cache and the guest that uses it, and tearing one down must not take the
+secret store and the address pool the others are still built from.
 
 Run it even when the provision failed -- especially then.  A half-built guest
 still holds an address out of the pool, a disk in the storage pool and a
@@ -68,8 +71,9 @@ where its backups are restored from, and it is not this script's to touch.
 
 =item B<--keep-config>
 
-Leave the scratch configuration directory alone.  For when the next run should
-reuse the same throwaway secret store rather than building another.
+Leave the scratch configuration alone, this domain's file in it included.  For
+when the next run should reuse the same throwaway secret store rather than
+building another.  It is left anyway while another domain in it remains.
 
 =item B<--keep-data>
 
@@ -135,7 +139,7 @@ sub main {
     # the run whose leavings nobody comes back for.
     purge_data_dir( $data, $hv, $dryrun ) if $data;
 
-    $rc ||= remove_config($dryrun) unless $keep_config;
+    $rc ||= remove_config( $domain, $dryrun ) unless $keep_config;
 
     return $rc;
 }
@@ -188,7 +192,7 @@ sub data_dir {
 
     my $dir = Provisioner::Cookbook->data_dir($domain);
     unless ($dir) {
-        print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_base: data: from), so there is nothing to remove from it.\n";
+        print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so there is nothing to remove from it.\n";
         return ();
     }
 
@@ -306,25 +310,28 @@ sub sweep_orphans {
 =head2 sweep_roots(@hvs)
 
 The directories a run leaves things in: the data source, and the domain
-directory of each hypervisor.  Empty, having said why, when nothing says where
-the data source is.
+directory of each hypervisor.  Empty, having said why, only when there is
+neither.
 
-The domain directories come out of the fleet because that is where
-C<bin/destroy> gets the one it purges.  With no fleet and no C<--connect> there
-is nothing to ask, and the sweep is the data source alone.
+The data source is C<Provisioner::Cookbook>'s answer, which is C<_base>'s
+C<_global: data_source> or the C<data> recipe's C<from> before it.  Without one
+the domain directories are still swept: they come out of the fleet, because that
+is where C<bin/destroy> gets the one it purges, and a configuration that says
+nothing about data still builds guests into them.
 
 =cut
 
 sub sweep_roots {
     my (@hvs) = @_;
 
-    my $data = ( Provisioner::Cookbook->data_config() // {} )->{from};
-    unless ($data) {
-        print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_base: data: from), so there is nothing to sweep.\n";
-        return ();
-    }
+    my $data = Provisioner::Cookbook->data_source();
+    print {*STDERR} 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so only the domain directories are swept.\n"
+      unless $data;
 
-    return uniq( $data, map { $_->domain_dir } @hvs );
+    my @roots = uniq( grep { defined && length } $data, map { $_->domain_dir } @hvs );
+    print {*STDERR} "And there is no fleet to ask for a domain directory either, so there is nothing to sweep.\n" unless @roots;
+
+    return @roots;
 }
 
 =head2 where_they_are($copies)
@@ -340,14 +347,19 @@ sub where_they_are {
     return uniq( map { $_->[0]->is_local ? 'here' : ( $_->[0]->name // $_->[0]->describe ) } @$copies );
 }
 
-=head2 remove_config($dryrun)
+=head2 remove_config($domain, $dryrun)
 
-Take the scratch configuration directory out.
+Take the domain out of the scratch configuration: its file in C<recipes.d>, and
+the whole directory once that was the last one.
+
+Nothing at all unless the directory carries scratch_config's marker, which is
+what stops an unset or mistaken C<TROG_PROVISIONER_CONFIG> costing a real
+domain its configuration.
 
 =cut
 
 sub remove_config {
-    my ($dryrun) = @_;
+    my ( $domain, $dryrun ) = @_;
 
     my $dir = $ENV{TROG_PROVISIONER_CONFIG};
     unless ( defined $dir && length $dir ) {
@@ -355,8 +367,27 @@ sub remove_config {
         return 0;
     }
 
-    # scratch_config knows its own; it refuses anything that is not one, which
-    # is what stops an unset variable taking out /etc/trog-provisioner.
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    unless ( -f "$dir/$MARKER" ) {
+        print {*STDERR} "$dir is not a scratch configuration, so nothing in it is removed.\n";
+        return 1;
+    }
+
+    # Another domain in it may still have a guest, built out of this same
+    # secret store and address pool.
+    my @others = sort grep { $_ ne $domain } map { File::Basename::basename( $_, '.yaml' ) } glob("$dir/recipes.d/*.yaml");
+    if (@others) {
+        my $mine = "$dir/recipes.d/$domain.yaml";
+        if ($dryrun) {
+            print {*STDERR} "Would remove $mine, and keep the scratch config at $dir for " . join( ', ', @others ) . "\n";
+            return 0;
+        }
+        unlink $mine;
+        print {*STDERR} "Kept the scratch config at $dir, which still configures " . join( ', ', @others ) . "\n";
+        return 0;
+    }
+
+    # scratch_config knows its own; it refuses anything that is not one.
     my $scratch = File::Basename::dirname(__FILE__) . '/scratch_config';
 
     if ($dryrun) {

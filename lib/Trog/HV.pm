@@ -449,28 +449,46 @@ itself, which is a substring match and can be fooled: a guest named
 C<vm.example.com> matches a lease belonging to C<sub.vm.example.com>.  Prefer
 the MAC; C<guest_mac> exists so there always is one.
 
+Where several leases match, the one that expires last, which is the one granted
+or renewed most recently.  A MAC can hold several: a guest rebuilt under the same
+name gets a new address while its old lease stays on file until it runs out.
+
 =cut
 
 sub lease_ip {
     my ( $self, $network, %opts ) = @_;
+    my ($newest) = $self->lease_ips( $network, %opts );
+    return $newest;
+}
+
+=head2 @ips = lease_ips($network, %opts)
+
+Every address leased on C<$network> that matches, newest first, taking the same
+options as C<lease_ip>.  For when all of them are wanted: the leases a rebuilt
+guest's predecessors left behind, to release.
+
+=cut
+
+sub lease_ips {
+    my ( $self, $network, %opts ) = @_;
 
     my $vmm = $self->vmm;
-    my $net = eval { $vmm->get_network_by_name($network) } or return undef;
+    my $net = eval { $vmm->get_network_by_name($network) } or return ();
 
     # get_dhcp_leases filters by MAC on the far side, so with one we ask a
     # precise question rather than sifting the answer.
     my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
-    return undef unless @leases;
 
-    foreach my $lease (@leases) {
+    my @ips;
+    foreach my $lease ( sort { ( $b->{expirytime} // 0 ) <=> ( $a->{expirytime} // 0 ) } @leases ) {
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
         next
           if defined $opts{hostname}
           && !( defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/ );
         next if defined $opts{exclude} && $lease->{ipaddr} eq $opts{exclude};
-        return $lease->{ipaddr};
+        push @ips, $lease->{ipaddr};
     }
-    return undef;
+    return @ips;
 }
 
 =head2 release_dhcp_lease($ip, $bridge)
