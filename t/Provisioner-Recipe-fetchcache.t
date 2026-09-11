@@ -215,34 +215,41 @@ subtest 'a copy is removed for want of room, never for its age' => sub {
     unlike( $off, qr/min_free=/, 'and min_free can be turned off' );
 };
 
-subtest 'on 443 under the names of the hosts, so it shares a guest with a package mirror' => sub {
+subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a package mirror' => sub {
     my ( $vhost, undef, undef, $written ) = generated();
 
     like( $vhost, qr/^\s+listen 443 ssl;$/m,        'it listens on 443, with TLS' );
     like( $vhost, qr/^\s+listen \[::\]:443 ssl;$/m, 'on IPv6 too' );
-    unlike( $vhost, qr/default_server|backlog/, 'claiming neither default_server nor the backlog, which whatever else is on 443 may' );
+
+    # Measured on a guest: cpanm fetches CPAN over plain http, and pointed here
+    # by name it reached another server on 80 and unpacked a 404.
+    like( $vhost, qr/^\s+listen 80;$/m,        'and on 80, for what asks over plain http' );
+    like( $vhost, qr/^\s+listen \[::\]:80;$/m, 'on IPv6 too' );
+    is( scalar( () = $vhost =~ m/^server \{$/mg ), 1, 'with the same locations for both, being one server' );
+
+    unlike( $vhost, qr/default_server|backlog/, 'claiming neither default_server nor the backlog, which whatever else is on those ports may' );
     like( $vhost, qr{^\s+location = /fetchcache-status \{$}m, 'saying it is there, to whatever asks by one of those names' );
     is_deeply( [ sort @$written ], [qw{fetchcache.crt fetchcache.key fetchcache.nginx.conf}], 'the vhost, a certificate, and its key' );
 
     my ($v4) = generated( ipv6 => 0 );
     unlike( $v4, qr/listen \[::\]/, 'and IPv4 alone when told to' );
 
-    # An aptmirror answers on 80 to the guest name and its address, and on one
-    # port nginx ignores a second server for names the first already has -- so
-    # what lets the two share a guest is that they share no port.
+    # An aptmirror answers on 80 to the guest name and its address.  nginx
+    # routes a port between servers by name, and ignores a second server for a
+    # name the first already has -- so what lets the two share a guest is that
+    # they share no name, and that only one of them sets the backlog.
     my $mirror = tempdir( CLEANUP => 1 );
     Provisioner::Cookbook->load( 'aptmirror', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => $mirror,
         distro        => 'ubuntu',
     )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.168.1.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
+    my $theirs = File::Slurper::read_text("$mirror/aptmirror.nginx.conf");
 
-    my %ports;
-    foreach my $conf ( $vhost, File::Slurper::read_text("$mirror/aptmirror.nginx.conf") ) {
-        my %mine = map { $_ => 1 } $conf =~ m/^\s+listen (?:\[::\]:)?(\d+)/mg;
-        $ports{$_}++ for keys %mine;
-    }
-    is_deeply( [ grep { $ports{$_} > 1 } sort keys %ports ], [], 'it and the mirror share no port' );
+    my ($their_names) = $theirs =~ m/^\s+server_name ([^;]+);$/m;
+    my %ours = map { $_ => 1 } @{ allowed($vhost) };
+    is_deeply( [ grep { $ours{$_} } split( q{ }, $their_names // q{} ) ], [], 'it and the mirror answer to no name in common' );
+    like( $theirs, qr/listen 80 backlog=/, 'and the backlog on 80 is the mirror\'s alone' );
 };
 
 subtest 'the certificate names every host it answers to, and the authority signed it' => sub {

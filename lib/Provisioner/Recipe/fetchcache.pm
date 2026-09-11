@@ -156,9 +156,18 @@ fetched as anybody in particular.
 
 =head2 Sharing a guest with a package mirror
 
-It listens on 443 and answers only to the names of the hosts it fetches from,
-so it shares a guest with an L<Provisioner::Recipe::aptmirror> -- plain HTTP on
-80, under the guest's own name -- without either being told about the other:
+It listens on 443 and on 80 -- a guest pointed at it by name asks on whatever
+port it likes, and cpanm asks CPAN over plain http -- and answers only to the
+names of the hosts it fetches from.  So it shares a guest with an
+L<Provisioner::Recipe::aptmirror>, which answers on 80 to the guest's own name
+and address, without either being told about the other: nginx routes a port
+between servers by name, and fetchcache leaves 80's C<backlog>, which nginx
+takes once a port, to the mirror.  Upstream is fetched over https whichever
+port the guest asked on.
+
+Nothing else is answered.  A guest reaching one of those hosts on another port
+while it provisions -- git over ssh to C<github.com> -- reaches the cache
+instead, and fails.
 
     mirrors.example.com:
         aptmirror:

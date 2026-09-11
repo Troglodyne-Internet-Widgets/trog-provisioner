@@ -34,9 +34,16 @@ map "$host$request_uri" $fetchcache_class {
     default default;
 }
 
+[%# 80 as well as 443, and the same locations for both: a guest pointed here
+    by name reaches this on whatever port it asks, and cpanm asks CPAN over
+    plain http.  Upstream is fetched over https either way.  No backlog on
+    either: a mirror on 80 under the guest name sets it there, and nginx takes
+    that once a port. -%]
 server {
+    listen 80;
     listen 443 ssl;
 [% IF ipv6 -%]
+    listen [::]:80;
     listen [::]:443 ssl;
 [% END -%]
     server_name [% allow.join(' ') %];

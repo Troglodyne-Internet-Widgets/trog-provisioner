@@ -32,6 +32,10 @@ foreach my $host (@hosts) {
 }
 is( ( ask( 'not-an-upstream.test', '/anything', '-k' ) )[0], '421', 'and fetches nothing for a host it was not given' );
 
+# Plain http too, which is how cpanm asks CPAN.
+my $plain = `curl -s -o /dev/null -w '%{http_code}' --max-time 30 --resolve '$hosts[0]:80:127.0.0.1' 'http://$hosts[0]/fetchcache-status' 2>/dev/null`;
+is( $plain, '200', "and it answers to $hosts[0] over plain http" );
+
 # Through the cache for real, once: this is what proves the resolver, the
 # upstream TLS verification and the egress, none of which a configuration test
 # can.  A CPAN index, which every CPAN install through the cache asks for anyway.
