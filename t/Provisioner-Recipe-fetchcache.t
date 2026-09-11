@@ -162,9 +162,19 @@ subtest 'a followed redirect is kept under the URL the guest asked for, and goes
     like( $vhost, qr/^\s+proxy_cache_key \$host\$request_uri;$/m, 'the key is the host and the request, which no rewrite or internal redirect changes' );
     like( $vhost, qr/^\s+recursive_error_pages on;$/m,            'a second hop is followed too' );
 
-    my @guards = $vhost =~ m/if \(\$fetchcache_location !~ "\^https:\/\/\(\?:([^)]*)\)\/"\)/g;
+    my @guards = $vhost =~ m/if \(\$fetchcache_location ~ "\^https:\/\/\(\(\?:([^)]*)\)\)\/"\) \{\n\s+set \$fetchcache_next \$1;\n\s+\}\n\s+if \(\$fetchcache_next = ""\) \{\n\s+return 502;/g;
     ok( scalar @guards, 'a redirect is checked before it is followed' ) or return;
     is_deeply( alternatives($_), allowed($vhost), 'against the hosts it answers to, and only over https' ) for @guards;
+
+    # Measured on a guest: cpan.metacpan.org/src/5.0/, which perlbrew lists
+    # what perls there are from, redirects to www.cpan.org, which adds the
+    # slash back with an http:// Location -- and refusing that was a 502, and
+    # a guest with no perl.
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^http:\/\/\(\.\*\)\$"\) \{\n\s+set \$fetchcache_location "https:\/\/\$1";/,                  'a redirect to plain http is followed over https' );
+    like( $vhost, qr/^\s+set \$fetchcache_via \$host;$/m,                                                                                        'a redirect naming no host is on the host asked for' );
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/"\) \{\n\s+set \$fetchcache_location "https:\/\/\$fetchcache_via\$fetchcache_location";/, 'and made whole against it before it is checked' );
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/\/"\) \{\n\s+set \$fetchcache_location "https:\$fetchcache_location";/,                   'one naming no scheme is https' );
+    like( $vhost, qr/^\s+set \$fetchcache_via \$fetchcache_next;$/m,                                                                             'and after a hop, a relative one is on the host that hop went to' );
 };
 
 subtest 'upstream is trusted as little as possible' => sub {

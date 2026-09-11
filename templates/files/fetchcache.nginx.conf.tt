@@ -50,6 +50,10 @@ server {
         return 421;
     }
 
+[%# The host a redirect is relative to: the one asked for, to begin with, and
+    whichever the last followed redirect went to after that. -%]
+    set $fetchcache_via $host;
+
 [%# Upstreams are looked up when they are fetched, which is what a variable in
     proxy_pass means -- through real DNS, not the /etc/hosts of any guest.
     IPv4 only, as apt is told on every guest, and only the servers enrich
@@ -127,13 +131,30 @@ server {
     }
 
 [%# A redirect, followed here rather than handed to the guest, and only to an
-    allowed upstream over https.  Set before the proxy_pass that replaces the
-    upstream it was read from; recursive_error_pages lets a second hop through. -%]
+    allowed upstream -- over https, whatever it said: www.cpan.org adds the
+    slash to a directory with an http:// Location, and perlbrew lists what
+    perls there are through one.  One naming no host is on the host that sent
+    it, which HTTP allows.  Read before the proxy_pass that replaces the
+    upstream it came from; recursive_error_pages lets a second hop through. -%]
     location @follow_[% class.name %] {
         set $fetchcache_location $upstream_http_location;
-        if ($fetchcache_location !~ "^https://(?:[% allow_re %])/") {
+        if ($fetchcache_location ~ "^http://(.*)$") {
+            set $fetchcache_location "https://$1";
+        }
+        if ($fetchcache_location ~ "^//") {
+            set $fetchcache_location "https:$fetchcache_location";
+        }
+        if ($fetchcache_location ~ "^/") {
+            set $fetchcache_location "https://$fetchcache_via$fetchcache_location";
+        }
+        set $fetchcache_next "";
+        if ($fetchcache_location ~ "^https://((?:[% allow_re %]))/") {
+            set $fetchcache_next $1;
+        }
+        if ($fetchcache_next = "") {
             return 502;
         }
+        set $fetchcache_via $fetchcache_next;
         proxy_cache_valid 200 [% class.fresh %];
         error_page 301 302 303 307 308 = @follow_[% class.name %];
         proxy_pass $fetchcache_location;
