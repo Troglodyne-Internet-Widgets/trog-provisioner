@@ -54,9 +54,9 @@ place rather than two.
 
 =item B<--user> NAME
 
-The service account the recipes install things as.  Left out by default, which
-is the right answer for a scratch guest and wrong for anything that runs a
-service as itself.
+The service account the recipes install things as and run services under.
+Pass one for a scratch guest as for a real domain: most recipes are written for
+a service user, and without one C<user> falls back to the admin account.
 
 =item B<--all>
 

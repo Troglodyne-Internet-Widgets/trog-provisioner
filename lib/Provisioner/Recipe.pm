@@ -440,10 +440,10 @@ sub rate_limits {
 Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
 
 C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
-to get one.  On a production host you generally want to set it: the service user
-owns the domain's files and is what the application runs as.  When developing and
-testing it is useful to have the admin and the service user be the same account,
-and that is what leaving it unset gives you.
+to get one.  That default is a fallback rather than the intended configuration:
+the service user owns the domain's files and is what the application runs as,
+and most recipes are written for one that is not the admin -- so set it, on a
+guest built to test a recipe as on a production host.
 
 =cut
 

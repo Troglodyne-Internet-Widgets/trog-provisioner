@@ -106,11 +106,21 @@ echo "$TROG_SCRATCH_PASS" | bin/provision "$DOMAIN"
 ## Build the guest
 
 ```
-bin/new_guest <recipe> [<recipe> ...]
+bin/new_guest --user scratch <recipe> [<recipe> ...]
 ```
 
 With no `--hostname` you get a UUID under `.test`. Take the name out of its
 output — you need it for everything after.
+
+**Give it a service user: `--user`.** Most recipes are written to run as one,
+and every real domain names one in its `_global`. The `service_user` target
+makes that account with the domain directory as its home, and
+`build_latest_perl.sh` links the built perl's tools into `bin` there -- which is
+where tcms, tpsgi and trogrunner find `cpanm`, and the `bin` tpsgi puts on its
+service's `PATH`. Leave it out and `user` falls back to the admin: the domain
+directory becomes a symlink to a home under `/home`, and a recipe can fail for
+reasons that have nothing to do with it. Any name will do; the account is
+`nologin` and goes with the guest.
 
 If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
@@ -356,9 +366,9 @@ provide it. Do not quietly default it in `enrich` to make a recipe build;
 user, but that was a decision to put to somebody rather than one to infer.
 
 (`user` itself now defaults to `admin_user` in `Provisioner::Recipe::validate`,
-so no recipe needs an `enrich` for it. A production host generally names a
-service user; leaving it unset gives you the admin, which is what you want
-while developing and testing.)
+so no recipe needs an `enrich` for it. That default is a fallback, not the
+intended configuration: most recipes are meant to run under a service user, so
+build scratch guests with one -- see *Build the guest*.)
 
 **`enrich` must not write into what it was handed.** `validate` deep-copies its
 options first, so enrich may rewrite freely -- but only because of that copy.
@@ -477,13 +487,8 @@ by byte offset, so editing one mid-run resumes it somewhere meaningless. Editing
 an orphaned guest behind. Copy the harness to a new directory for the next batch
 instead.
 
-**Give the scratch guest a service user.** Every real domain sets one in its
-`_global`, and several recipes only line up when it exists: the `service_user`
-target gives that account the domain directory as its home, and
-`build_latest_perl.sh` symlinks `cpanm` into that home -- which is exactly where
-`tcms` and `tpsgi` look for it. Without one, the sweep falls back to the admin
-user, whose home is under `/home`, and those paths disagree for reasons that
-have nothing to do with the recipe.
+**A sweep's guests get a service user too** -- `--user` on every `new_guest`
+it runs, as in *Build the guest*.
 
 **A dummy value that is no longer needed is worse than none.** `perl.user` was
 pinned to `www-data` back when the field was required. It is filled in from the
