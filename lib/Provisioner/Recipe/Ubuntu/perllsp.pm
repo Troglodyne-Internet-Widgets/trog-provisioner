@@ -23,7 +23,7 @@ inherits from.
 =cut
 
 sub deps {
-    return qw{nodejs npm vim git};
+    return qw{nodejs npm vim};
 }
 
 1;
