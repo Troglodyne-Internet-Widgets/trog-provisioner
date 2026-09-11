@@ -18,7 +18,10 @@ use File::Slurper::Temp();
 use OpenStack::Client();
 use Time::Piece();
 
+use Trog::Config();
+use Trog::Credentials();
 use Trog::OpenStack::Config();
+use Trog::Secrets();
 
 # Loaded for its side effect, and named only as a string below: OpenStack::Client
 # takes the user agent as a class name and calls new() on it, so the class has to
@@ -98,6 +101,17 @@ cloud in the file.
 Dies naming the cloud when it is not configured for an application credential,
 rather than sending a request that cannot work.
 
+The secret can live in F<secrets.kdbx> rather than in F<clouds.yaml>, written as
+a reference the way a recipe writes one:
+
+    auth:
+      application_credential_id: 0123abcd
+      application_credential_secret: secret:openstack/credential/password
+
+It is looked up only if a token has to be asked for, so a run that finds one
+cached does not ask for the database's passphrase.  A run that does is asked
+once, as C<keepass>, which is the name everything else here asks for it by.
+
 =cut
 
 sub from_cloud {
@@ -108,10 +122,13 @@ sub from_cloud {
     die "Cloud '$cloud->{name}' in $cloud->{source} authenticates with '$cloud->{auth_type}'.\n" . "This only speaks v3applicationcredential.\n"
       unless $cloud->{auth_type} eq 'v3applicationcredential';
 
+    my $secret = $cloud->{application_credential_secret};
+    $secret = _from_keepass($secret) if defined $secret && index( $secret, 'secret:' ) == 0;
+
     return $class->new(
         $cloud->{auth_url},
         application_credential_id     => $cloud->{application_credential_id},
-        application_credential_secret => $cloud->{application_credential_secret},
+        application_credential_secret => $secret,
         region                        => $cloud->{region_name},
         interface                     => $cloud->{interface},
         %args,
@@ -121,6 +138,8 @@ sub from_cloud {
 =head2 new($endpoint, %args)
 
 Required: C<application_credential_id> and C<application_credential_secret>.
+The secret may be a code reference, called for it only if the cache cannot
+supply a token.
 
 Optional: C<region> and C<interface>, remembered so callers do not have to
 repeat them at every C<service> call; C<cache_dir>, and C<no_cache> to skip the
@@ -144,7 +163,7 @@ sub new {
     die "No application credential id provided in \"application_credential_id\"\n"
       unless defined $id && length $id;
     die "No application credential secret provided in \"application_credential_secret\"\n"
-      unless defined $secret && length $secret;
+      unless ref $secret eq 'CODE' || ( defined $secret && length $secret );
 
     my $self = bless {
         package_ua       => $args{package_ua} // 'Trog::OpenStack::UserAgent',
@@ -162,10 +181,24 @@ sub new {
 
     return $self if $self->_restore;
 
-    $self->_authenticate($secret);
+    $self->_authenticate( ref $secret eq 'CODE' ? $secret->() : $secret );
     $self->_store;
 
     return $self;
+}
+
+# A secret: reference, as something to call for the secret when there is no
+# cached token.  Parsed now, so that a malformed one is an error on every run
+# rather than only on the ones whose token has expired.
+sub _from_keepass {
+    my ($reference) = @_;
+
+    Trog::Secrets->parse($reference);
+
+    return sub {
+        my %found = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
+        return $found{secret};
+    };
 }
 
 # clouds.yaml files disagree about whether auth_url carries the identity
