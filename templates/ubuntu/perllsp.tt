@@ -5,10 +5,18 @@ npm install -g perlnavigator-server
 # vim 8+ loads packages from ~/.vim/pack/*/start/ automatically - no plugin manager needed.
 mkdir -p /home/[% admin_user %]/.vim/pack/lsp/start
 
-git clone --quiet --depth 1 "https://github.com/prabirshrestha/async.vim"            /home/[% admin_user %]/.vim/pack/lsp/start/async
-git clone --quiet --depth 1 "https://github.com/prabirshrestha/vim-lsp"              /home/[% admin_user %]/.vim/pack/lsp/start/vim-lsp
-git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete.vim"     /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete.vim
-git clone --quiet --depth 1 "https://github.com/prabirshrestha/asyncomplete-lsp.vim" /home/[% admin_user %]/.vim/pack/lsp/start/asyncomplete-lsp.vim
+[%# Each as the tarball of its pinned commit, through the fetch cache when there
+    is one, into a directory emptied first: a clone into one that already
+    existed failed every re-provision, and a tarball unpacked over an older one
+    would leave the files the newer commit deleted.  The ref is written beside
+    it so that the guest test can say which commit is there. -%]
+[% FOR plugin IN plugins -%]
+[% script_dir %]/fetch 'https://codeload.github.com/[% plugin.repo %]/tar.gz/[% plugin.ref %]' 'perllsp.[% plugin.dir %].tar.gz'
+rm -rf '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
+mkdir -p '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
+tar -xzf 'perllsp.[% plugin.dir %].tar.gz' --strip-components=1 -C '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]'
+echo '[% plugin.ref %]' > '/home/[% admin_user %]/.vim/pack/lsp/start/[% plugin.dir %]/.trog-ref'
+[% END -%]
 
 chown -R [% admin_user %]:[% admin_user %] /home/[% admin_user %]/.vim
 
