@@ -228,6 +228,14 @@ sub ssh {
             # Our commands are one-shot, and some of them are pipelines the
             # persistent Expect shell would rather we didn't send it.
             use_persistent_shell => 0,
+
+            # A connection of this machine's own.  Otherwise the library hands
+            # back whatever it cached for the same user, host and port, without
+            # asking whether that still reaches anything -- and a guest rebuilt
+            # in the same process at the same address was reached through the
+            # old guest's connection, whose first command died "Broken pipe".
+            # This object keeps its own for as long as it lives.
+            no_cache => 1,
         );
     } or die 'Could not ssh to ' . $self->describe . ": $@\n";
 

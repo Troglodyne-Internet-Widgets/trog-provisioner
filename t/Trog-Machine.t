@@ -63,6 +63,23 @@ subtest 'the ssh rsync is told to use' => sub {
     unlike( Trog::Machine->new( host => 'hv.test' )->_rsh, qr{-i}, 'no key, no -i naming a file that is not there' );
 };
 
+subtest 'every machine gets a connection of its own' => sub {
+
+    # Net::OpenSSH::More caches connections by user, host and port, and hands
+    # the cached one back without asking whether it still reaches anything.
+    # Rebuilding a guest ran a command on the old one during the salvage and
+    # then, in the same process, connected to the new one at the same address:
+    # it got the old guest's connection, and the first command through it died
+    # "Broken pipe".
+    my %asked;
+    my $mock = Test::MockModule->new('Net::OpenSSH::More');
+    $mock->redefine( new => sub { my ( $class, %opts ) = @_; %asked = %opts; return bless {}, $class } );
+
+    remote()->ssh;
+    is( $asked{no_cache}, 1,         'the library is told not to share one' );
+    is( $asked{host},     'hv.test', 'for the machine that was asked about' );
+};
+
 subtest 'the port the far side listens on' => sub {
     my $mock = Test::MockModule->new('Trog::Machine');
     my $asked;
