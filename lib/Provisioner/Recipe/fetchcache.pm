@@ -43,7 +43,7 @@ of CPAN as its mirror: the other half, configured separately.
 =head2 Pull-through, and stale rather than failing
 
 Nothing is fetched until a guest asks for it, and what has been fetched is kept
-for C<inactive> after it was last asked for.  When upstream fails -- an error, a
+until the store runs out of room -- see L</When it runs out of room>.  When upstream fails -- an error, a
 timeout, or a 403, 404, 429 or 5xx -- a copy the cache already has is served
 instead, however old.  That is the point of it: GitHub answering 503 for an hour
 is an hour of builds that did not notice.
@@ -76,6 +76,29 @@ hour.
 Only a C<200> is kept.  Upstream's own C<Cache-Control> is ignored, because
 GitHub marks every release asset C<private> and would otherwise never be cached
 at all.
+
+A copy that is no longer fresh is not thrown away: upstream is asked whether it
+has changed, with the copy's C<ETag> or C<Last-Modified>, and a C<304> keeps it.
+So a year's freshness for what never changes costs one small request a year,
+and an upstream that is down or has dropped the file gets the copy served
+instead.
+
+=head2 When it runs out of room
+
+Nothing is removed for its age: C<inactive> defaults to a hundred years, so a
+copy nobody has asked for in a long time is still there for the build that
+finally does.  Those are the ones that matter most -- a guest rebuilt a year on,
+pinned to a Sys::Virt or a garage upstream has since moved to BackPAN or
+deleted -- and nothing can fetch them back.
+
+What removes anything is room.  When the store passes C<max_size_gb>, or the
+disk it is on has less than C<min_free_gb> free, nginx's cache manager removes
+the least recently used copies until it is back under.  Least recently used
+rather than first in, first out: the oldest copy is often the old pinned
+version every build still asks for, and first-in-first-out would throw that
+away first.  C<max_size_gb> is enforced lazily and can be briefly exceeded,
+which is what C<min_free_gb> is there for: the store is on the guest's root
+disk.
 
 =head2 Redirects are followed here
 
@@ -127,8 +150,9 @@ upstream, as it always has.
 defaults are the ones recipes here download from, each on by default; naming
 another adds it, and naming one of the defaults false turns it off.
 
-=item * C<store>, C<max_size_gb>, C<inactive> -- where copies are kept, how much
-of the disk they may take, and how long one nobody asks for survives.
+=item * C<store>, C<max_size_gb>, C<min_free_gb>, C<inactive> -- where copies are
+kept, how much of the disk they may take, how much of it to leave free, and how
+long one nobody asks for survives.  See L</When it runs out of room>.
 
 =item * C<fresh_index>, C<fresh_immutable>, C<fresh_default> -- how long a copy
 of each kind is used before upstream is asked again.  In nginx's units:
@@ -178,11 +202,17 @@ sub args {
                 minimum     => 1,
                 description => 'How much of the disk copies may take, in GB.  nginx enforces it lazily, so the store can briefly exceed it.',
             },
+            min_free_gb => {
+                type        => 'integer',
+                default     => 5,
+                minimum     => 0,
+                description => 'Free space, in GB, to leave on the disk the store is on.  Below it the least recently used copies are removed, whatever max_size_gb says.  Zero turns it off.',
+            },
             inactive => {
                 type        => 'string',
-                default     => '365d',
+                default     => '100y',
                 pattern     => $duration,
-                description => 'How long a copy nobody asks for is kept, however fresh it is.',
+                description => 'How long a copy nobody asks for is kept.  A hundred years by default, so that only running out of room removes anything: the copy nobody has asked for in a year is the pinned version upstream may no longer have.',
             },
             fresh_index => {
                 type        => 'string',

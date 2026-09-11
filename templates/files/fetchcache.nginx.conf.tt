@@ -7,7 +7,7 @@
 
     No apostrophes in an Xslate comment: the lexer reads one as opening a
     string and swallows the template as far as the next quote. -%]
-proxy_cache_path [% store %] levels=1:2 keys_zone=fetchcache:64m max_size=[% max_size_gb %]g inactive=[% inactive %] use_temp_path=off;
+proxy_cache_path [% store %] levels=1:2 keys_zone=fetchcache:64m max_size=[% max_size_gb %]g[% IF min_free_gb %] min_free=[% min_free_gb %]g[% END %] inactive=[% inactive %] use_temp_path=off;
 
 log_format fetchcache '$remote_addr [$time_local] "$request" $status $body_bytes_sent $upstream_cache_status $request_time "$upstream_addr"';
 

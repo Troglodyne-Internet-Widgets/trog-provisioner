@@ -145,6 +145,21 @@ subtest 'upstream is trusted as little as possible' => sub {
     like( $vhost, qr/^\s+proxy_buffer_size 16k;$/m, 'with room for GitHub headers' );
 };
 
+subtest 'a copy is removed for want of room, never for its age' => sub {
+    my ($vhost) = generated();
+    my ($path)  = $vhost =~ m/^(proxy_cache_path [^;]*);$/m;
+    ok( defined $path, 'there is a store' ) or return;
+
+    # The copy nobody has asked for in a year is the pinned version upstream may
+    # no longer have, so age alone must not take it.
+    like( $path, qr/ inactive=100y\b/, 'kept however long since anybody asked for it' );
+    like( $path, qr/ max_size=20g\b/,  'until the store is full' );
+    like( $path, qr/ min_free=5g\b/,   'or the disk under it nearly is' );
+
+    my ($off) = generated( min_free_gb => 0 );
+    unlike( $off, qr/min_free=/, 'and min_free can be turned off' );
+};
+
 subtest 'the vhost answers for the address, not only the name' => sub {
     my ($vhost) = generated();
 
