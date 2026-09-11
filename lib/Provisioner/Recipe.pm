@@ -292,6 +292,38 @@ sub dep_conflicts {
     return ();
 }
 
+=head3 @hosts = $recipe->fetch_hosts()
+
+The hosts this recipe downloads from on the guest, by name: C<www.cpan.org>,
+C<codeload.github.com>.  Asked of the class rather than of a configured recipe,
+because the answer is also what the fetch cache fetches from by default -- see
+L<Provisioner::Recipe::fetchcache> -- which cannot depend on any one domain.
+
+Empty by default.  On a guest with a C<cache>, each host its recipes name is
+pointed at the cache while it provisions, so what is downloaded from one is
+served out of what the cache has kept, and out of what it kept last time when
+upstream is failing.  Name a host only for what can be fetched as anybody: what
+the cache keeps, it fetches without credentials.  A host whose downloads
+redirect to another names that one too, since the cache follows a redirect only
+to a host it fetches from -- C<github_release_hosts> is GitHub's.
+
+=cut
+
+sub fetch_hosts {
+    return ();
+}
+
+=head3 @hosts = $recipe->github_release_hosts()
+
+C<github.com>, and the hosts it redirects a release download to: what a recipe
+downloading a GitHub release names in C<fetch_hosts>.
+
+=cut
+
+sub github_release_hosts {
+    return qw{github.com objects.githubusercontent.com release-assets.githubusercontent.com};
+}
+
 =head3 %required = $recipe->required_recipes(%opts)
 
 If a recipe depends on another recipe being present, we need to build it as a synthetic recipe and append it to the list of things to provision.

@@ -105,6 +105,12 @@ sub describe {
     my $class = Provisioner::Cookbook->load($name);
     my %spec  = Provisioner::Cookbook->spec($name);
 
+    # The hosts it downloads from, which a guest points at the fetch cache
+    # while it provisions.  Under x-, which is how OpenAPI marks what is not
+    # schema.
+    my @hosts = $class->fetch_hosts;
+    $spec{'x-fetch-hosts'} = \@hosts if @hosts;
+
     return \%spec;
 }
 

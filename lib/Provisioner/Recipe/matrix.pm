@@ -262,4 +262,16 @@ sub tests {
     return qw{matrix.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the ketesa admin interface as a release: see
+C<github_release_hosts> in L<Provisioner::Recipe>.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+    return $class->github_release_hosts;
+}
+
 1;

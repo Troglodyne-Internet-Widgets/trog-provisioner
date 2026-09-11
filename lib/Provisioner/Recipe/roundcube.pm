@@ -123,4 +123,16 @@ sub tests {
     return qw{roundcube.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves roundcube's release tarballs: see C<github_release_hosts>
+in L<Provisioner::Recipe>.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+    return $class->github_release_hosts;
+}
+
 1;

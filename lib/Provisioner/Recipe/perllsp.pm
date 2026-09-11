@@ -138,4 +138,14 @@ sub tests {
     return qw{perllsp.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<codeload.github.com>, which serves the pinned tarballs of the vim plugins.
+
+=cut
+
+sub fetch_hosts {
+    return ('codeload.github.com');
+}
+
 1;

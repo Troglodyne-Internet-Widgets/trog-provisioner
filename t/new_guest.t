@@ -228,6 +228,18 @@ subtest 'bin/recipes NAME dumps the schema' => sub {
     is_deeply( [ sort @{ $spec->{required} } ], [qw{dumpfile root_pw version}], 'required and all' );
 };
 
+subtest 'bin/recipes NAME says what it downloads from' => sub {
+    my ( $out, $err, $rc ) = run_bin( 'recipes', 'perllsp' );
+    is( $rc, 0, 'exits clean' );
+
+    # The hosts a guest points at the fetch cache while it provisions.
+    my $spec = eval { Cpanel::JSON::XS->new->decode($out) };
+    is_deeply( $spec->{'x-fetch-hosts'}, ['codeload.github.com'], 'its fetch_hosts' ) or diag $@;
+
+    ( $out, $err, $rc ) = run_bin( 'recipes', 'mariadb' );
+    ok( !exists Cpanel::JSON::XS->new->decode($out)->{'x-fetch-hosts'}, 'and a recipe that downloads nothing says nothing' );
+};
+
 subtest 'bin/recipes on a name that is not one' => sub {
     my ( $out, $err, $rc ) = run_bin( 'recipes', 'nosuchrecipe' );
     isnt( $rc, 0, 'fails' );

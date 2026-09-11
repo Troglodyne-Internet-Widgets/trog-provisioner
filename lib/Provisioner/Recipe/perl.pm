@@ -177,4 +177,16 @@ sub tests {
     return qw{perl.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+CPAN: perlbrew fetches the source of the perl it builds from there, and cpanm
+what every recipe's C<cpan_deps> installs into it -- MetaCPAN saying which
+release a version pin names, and the mirrors serving it.
+
+=cut
+
+sub fetch_hosts {
+    return qw{www.cpan.org cpan.metacpan.org fastapi.metacpan.org};
+}
+
 1;

@@ -306,4 +306,16 @@ sub tests {
     return qw{garage.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<garagehq.deuxfleurs.fr>, which serves garage's binaries.  Not
+C<api.github.com>: the version is looked up by C<bin/new_config>, not by the
+guest.
+
+=cut
+
+sub fetch_hosts {
+    return ('garagehq.deuxfleurs.fr');
+}
+
 1;

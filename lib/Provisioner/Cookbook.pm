@@ -12,6 +12,7 @@ use Clone qw{clone};
 use Cwd();
 use File::Basename();
 use File::Find();
+use List::Util();
 use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
@@ -113,6 +114,23 @@ sub names {
     my %director = map { $_ => 1 } $class->directors();
     return grep { !$director{$_} }
       map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
+}
+
+=head2 fetch_hosts
+
+Every host any recipe names in C<fetch_hosts>, sorted and once each: what
+L<Provisioner::Recipe::fetchcache> fetches from unless it is told otherwise.
+
+Loads every recipe to ask it, which C<names> deliberately does not, and asks
+once a process: the answer is a fact about the code.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+
+    state @hosts = List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names );
+    return @hosts;
 }
 
 =head2 directors

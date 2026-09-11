@@ -481,4 +481,19 @@ subtest 'the defaults a schema declares, for the callers that fill fields in the
     ok( !exists $vm{image},      'nor a required field' );
 };
 
+subtest 'fetch_hosts: every host any recipe downloads from, once each' => sub {
+    my %declared;
+    foreach my $name ( Provisioner::Cookbook->names ) {
+        $declared{$_}++ for Provisioner::Cookbook->load($name)->fetch_hosts;
+    }
+
+    my @hosts = Provisioner::Cookbook->fetch_hosts;
+    is_deeply( \@hosts, [ sort keys %declared ], 'what each recipe names, sorted, and each once' );
+    ok( ( grep { $_ eq 'www.cpan.org' } @hosts ), 'CPAN among them, which the perl recipe names' );
+
+    # The cache writes each into a regex and a certificate.
+    my @bad = grep { !m/\A(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z\d](?:[a-z\d-]*[a-z\d])?\z/ } @hosts;
+    is_deeply( \@bad, [], 'every one of them a plain, lowercase host name' );
+};
+
 done_testing();

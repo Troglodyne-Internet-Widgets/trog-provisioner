@@ -50,4 +50,15 @@ sub tests {
     return qw{imagemagick.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<download.imagemagick.org>, where F<scripts/build_imagick.sh> fetches the
+source release.
+
+=cut
+
+sub fetch_hosts {
+    return ('download.imagemagick.org');
+}
+
 1;
