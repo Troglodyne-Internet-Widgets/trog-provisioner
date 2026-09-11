@@ -18,7 +18,12 @@ use Cpanel::JSON::XS();
 # Used when the tag list cannot be reached.  It has to be a version that is
 # actually published, because a version that is not is a 404 on the guest
 # halfway through the provision rather than an older garage.
-our $FALLBACK_VERSION = 'v1.0.1';
+our $FALLBACK_VERSION = 'v2.4.1';
+
+# What latest_version found, by the cache it asked; see its POD.
+our %LATEST;
+
+my $TAGS = 'https://api.github.com/repos/deuxfleurs-org/garage/tags';
 
 =head1 Provisioner::Recipe::garage
 
@@ -26,7 +31,7 @@ our $FALLBACK_VERSION = 'v1.0.1';
 
     somedomain:
         garage:
-            version: v1.0.1
+            version: latest
             data_dir: /var/lib/garage/data
             metadata_dir: /var/lib/garage/meta
             replication_factor: 1
@@ -46,8 +51,9 @@ our $FALLBACK_VERSION = 'v1.0.1';
 Installs and configures L<Garage|https://garagehq.deuxfleurs.fr/>, a lightweight
 S3-compatible distributed object-storage server.
 
-Downloads the statically-linked garage binary from GitHub releases, installs a
-systemd service, writes C</etc/garage.toml>, and runs C<garage_init.sh> to
+Downloads the statically-linked garage binary from garagehq.deuxfleurs.fr --
+through the fleet's fetch cache when there is one, see F<scripts/fetch> --
+installs a systemd service, writes C</etc/garage.toml>, and runs C<garage_init.sh> to
 apply a single-node layout and create any requested S3 buckets.
 
 =head3 Surviving a rebuild
@@ -74,7 +80,7 @@ affected; the fragment knows the configured paths and uses them.
 
 =head3 deps
 
-Requires C<curl> to download the Garage binary.
+Requires C<curl>, which F<scripts/fetch> downloads the Garage binary with.
 
 =head3 validate
 
@@ -93,7 +99,9 @@ never sits in the domain directory, which is what gets carried off to the
 hypervisor and into every backup.  See C<guest_secrets> in
 L<Provisioner::Recipe>.
 
-=item C<version> (optional, default: latest GitHub release)  Garage release tag to download.
+=item C<version> (optional, default C<latest>)  Garage release tag to download,
+or C<latest> for the newest stable one, which C<enrich> looks up -- see
+C<latest_version> below.
 
 =item C<data_dir> (optional, default C</var/lib/garage/data>)
 
@@ -123,27 +131,55 @@ L<Provisioner::Recipe>.
 
 =cut
 
-sub _latest_garage_version {
+=head2 $version = Provisioner::Recipe::garage->latest_version($cache_uri)
 
-    # Tags rather than releases: the GitHub repository is a mirror and has never
-    # cut a release, so /releases/latest answers 404 every time and this fell
-    # back to v1.0.1 on every run.
-    my $res = HTTP::Tiny->new( timeout => 10 )->get(
-        'https://api.github.com/repos/deuxfleurs-org/garage/tags',
-        { headers => { 'Accept' => 'application/vnd.github+json' } },
-    );
-    if ( $res->{success} ) {
-        my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
+The newest stable garage release, as its tag: C<v2.4.1>.
 
-        # Newest first, and only the stable ones: the tag list carries -rc,
-        # -beta and -internal tags we do not want to put on a guest.
-        foreach my $tag ( @{ $tags || [] } ) {
-            next unless ref $tag eq 'HASH' && defined $tag->{name};
-            return $tag->{name} if $tag->{name} =~ m{\Av[0-9]+[.][0-9]+[.][0-9]+\z};
+Read out of GitHub's tag list rather than its releases, because the GitHub
+repository is a mirror that has never cut one.  Asked of the fetch cache at
+C<$cache_uri> first when there is one, then of GitHub directly, and when neither
+answers it is C<$FALLBACK_VERSION> -- with a warning for each that failed, since
+a garage older than intended is otherwise silent.
+
+Memoized for the life of the process in C<%LATEST>, keyed on the cache asked:
+every guest one C<bin/new_config> run builds gets the same answer from one
+request.  Nothing clears it but the process ending.
+
+=cut
+
+sub latest_version {
+    my ( $class, $cache_uri ) = @_;
+    $cache_uri //= q{};
+
+    return $LATEST{$cache_uri} //= do {
+        my @from = ( ( length $cache_uri ? "$cache_uri/" . ( $TAGS =~ s{\Ahttps://}{}r ) : () ), $TAGS );
+        my $found;
+        foreach my $url (@from) {
+            $found = _newest_stable_tag($url) and last;
+            warn "garage: could not read the release tags from $url\n";
         }
+        $found // do {
+            warn "garage: falling back to $FALLBACK_VERSION\n";
+            $FALLBACK_VERSION;
+        };
+    };
+}
+
+# The first stable tag in a GitHub tag list, which is newest first, or undef if
+# there was no list to read.  Only the stable ones: the list carries -rc, -beta
+# and -internal tags we do not want to put on a guest.
+sub _newest_stable_tag {
+    my ($url) = @_;
+
+    my $res = HTTP::Tiny->new( timeout => 10 )->get( $url, { headers => { 'Accept' => 'application/vnd.github+json' } } );
+    return undef unless $res->{success};
+
+    my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
+    foreach my $tag ( @{ ref $tags eq 'ARRAY' ? $tags : [] } ) {
+        next unless ref $tag eq 'HASH' && defined $tag->{name};
+        return $tag->{name} if $tag->{name} =~ m{\Av[0-9]+[.][0-9]+[.][0-9]+\z};
     }
-    warn "garage: could not fetch latest release tag from GitHub, falling back to $FALLBACK_VERSION\n";
-    return $FALLBACK_VERSION;
+    return undef;
 }
 
 sub guest_secrets {
@@ -190,7 +226,7 @@ sub args {
     return (
         type       => 'object',
         properties => {
-            version            => { type => 'string',  default => _latest_garage_version(), },
+            version            => { type => 'string',  default => 'latest', pattern => '\A(?:latest|v[0-9]+[.][0-9]+[.][0-9]+)\z' },
             data_dir           => { type => 'string',  default => '/var/lib/garage/data' },
             metadata_dir       => { type => 'string',  default => '/var/lib/garage/meta' },
             replication_factor => { type => 'integer', default => 1 },
@@ -209,6 +245,22 @@ sub args {
             },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Turns a C<version> of C<latest> into the release it currently is, through
+C<cache_uri>.  Here rather than in C<args>, so that asking what this recipe
+takes -- C<bin/recipes>, C<bin/new_guest>, a test -- never asks the internet.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    $opts{version} = $self->latest_version( $opts{cache_uri} ) if $opts{version} eq 'latest';
+
+    return %opts;
 }
 
 sub template_files {

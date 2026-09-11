@@ -37,11 +37,10 @@ if [ -n "$$NEWEST" ] && [ ! -e '[% metadata_dir %]/db.lmdb' ]; then \
 fi
 chown -R garage:[% admin_user %] '[% data_dir %]' '[% metadata_dir %]'
 find '[% data_dir %]' '[% metadata_dir %]' -type d -exec chmod 2750 {} +
-# Download garage binary (idempotent - skipped if same version already installed)
+# Download garage binary (idempotent - skipped if same version already installed),
+# through the fetch cache when the fleet has one.
 if [ ! -x /usr/local/bin/garage ] || ! /usr/local/bin/garage --version 2>/dev/null | grep -qF '[% version %]'; then \
-    curl -fsSL \
-        -o /usr/local/bin/garage.tmp \
-        'https://garagehq.deuxfleurs.fr/_releases/[% version %]/x86_64-unknown-linux-musl/garage' && \
+    [% script_dir %]/fetch 'https://garagehq.deuxfleurs.fr/_releases/[% version %]/x86_64-unknown-linux-musl/garage' /usr/local/bin/garage.tmp && \
     chmod +x /usr/local/bin/garage.tmp && \
     mv /usr/local/bin/garage.tmp /usr/local/bin/garage; \
 fi

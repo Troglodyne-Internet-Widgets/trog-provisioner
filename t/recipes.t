@@ -28,8 +28,9 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Test::More;
 use Test::NoWarnings;
-use Test::Fatal qw{exception};
-use File::Temp  qw(tempdir);
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw(tempdir);
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
@@ -41,6 +42,12 @@ use File::Slurper::Temp();
 use Text::Xslate();
 
 my $template_dir = "$FindBin::Bin/../templates";
+
+# garage turns a version of latest into a release by asking for the tag list,
+# and every render here goes through its enrich.  Rendering is what is tested
+# here, not GitHub.
+my $garage = Test::MockModule->new('Provisioner::Recipe::garage');
+$garage->redefine( latest_version => sub { return 'v2.4.1' } );
 
 # The search path bin/new_config builds: a distribution's own directory first,
 # then the generic one.  Every fragment lives under ubuntu/ today, being written
