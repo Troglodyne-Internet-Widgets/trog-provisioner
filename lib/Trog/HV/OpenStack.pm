@@ -587,6 +587,25 @@ sub create_guest {
     );
 }
 
+=head2 prepare_host
+
+=head2 release_seed($domain)
+
+=head2 guest_volumes($domain)
+
+Nothing, each for its own reason.  There is no machine to prepare: Nova builds
+the guest, and its disk comes from Glance rather than from a pool.  There is no
+seed to release: C<user_data> is a field on the server, not a drive in it.  And
+there are no volumes left to delete once a guest is gone, because the ones this
+tool made went with the server -- see L</annihilate_domain($name)>, which is where the
+decision about which of them were ours is made.
+
+=cut
+
+sub prepare_host  { return 1 }
+sub release_seed  { return 1 }
+sub guest_volumes { return () }
+
 =head2 annihilate_domain($name)
 
 Take the guest away, and everything it was costing money for.

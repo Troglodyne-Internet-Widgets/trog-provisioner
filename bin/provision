@@ -430,29 +430,13 @@ sub main {
     );
     print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
-    # The storage pool is the hypervisor's, and it may not have one yet.
-    # Guarded because a backend whose guests get their disks from the service has
-    # no pool, and because such a hypervisor is is_local -- so unguarded this
-    # would make a directory on the machine running the provisioner.
-    if ( !$hv->builds_by_api ) {
-        $hv->mkpath( $hv->pool_path )
-          or die "Could not create storage pool dir " . $hv->pool_path . " on the hypervisor";
-    }
-
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
     close _must_read( $data, "No data to host for $domain" );
 
-    # Start off by fixing a sillyness in virtiofs.  This runs as part of the
-    # qemu process, so it has to land on the hypervisor, not on us.
-    # Same guard, and the same reason: virtiofs runs inside the qemu process, so a
-    # backend with no qemu has nowhere to put this -- and writing it would write
-    # into /usr/libexec on the machine running the provisioner.
-    if ( !$hv->builds_by_api && !$hv->file_exists('/usr/libexec/virtiofs-better') ) {
-        $hv->put_file( "$FindBin::Bin/../virtiofs-better", '/usr/libexec/virtiofs-better', sudo => 1 )
-          or die('Could not copy virtiofs-better to /usr/libexec/virtiofs-better, you may have to do this manually');
-        $hv->run_sudo(qw{chmod 0755 /usr/libexec/virtiofs-better});
-    }
+    # Its storage pool, and a fix for a sillyness in virtiofs -- or nothing, on a
+    # hypervisor that has neither.
+    $hv->prepare_host("$FindBin::Bin/../virtiofs-better");
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
@@ -472,7 +456,7 @@ sub main {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
             $guest->wait_for_ssh();
             $guest->wait_for_cloud_init($domain);
-            $hv->eject_cdrom($depends) unless $hv->builds_by_api;
+            $hv->release_seed($depends);
             $guest->wait_for_makefile($depends);
         }
 
@@ -503,9 +487,7 @@ sub main {
     # might want to read it, which is until it says it is finished; pulling it
     # out any earlier leaves the guest with no user, no keys and no netplan, and
     # the pulling-out is only to stop the guest booting off it next time.
-    # A guest with no cdrom took its cloud-init from the metadata service and has
-    # no drive to clear.
-    $hv->eject_cdrom($domain) unless $hv->builds_by_api;
+    $hv->release_seed($domain);
 
     $guest->wait_for_makefile($domain);
 

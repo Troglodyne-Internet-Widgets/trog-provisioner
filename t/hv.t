@@ -135,6 +135,35 @@ subtest 'pool and domain paths default the way they always did' => sub {
     is( $set->domain_dir, '/srv/domains', 'domain_dir override' );
 };
 
+subtest 'a backend that leaves something out is told what' => sub {
+    my @owed = qw{
+      build config_keys capacity
+      domain_exists domain_is_running annihilate_domain guest_names guest_ssh_ip
+      snapshot_names snapshot_current_name create_snapshot revert_snapshot
+      prepare_host release_seed guest_volumes
+    };
+
+    {
+
+        package Trog::HV::HalfDone;
+        use parent -norequire, 'Trog::HV';
+    }
+    my $half = bless {}, 'Trog::HV::HalfDone';
+
+    # In words, at the call, rather than "Can't locate object method" from
+    # somewhere up in bin/provision.
+    foreach my $method (@owed) {
+        ok( !eval { $half->$method('vm.test'); 1 }, "$method dies" );
+        like( $@, qr/\ATrog::HV::HalfDone does not implement \Q$method\E, which every backend has to$/, 'naming the backend and what it owes' );
+    }
+
+    # And the two there are owe nothing.
+    foreach my $backend ( Trog::HV->backends ) {
+        my @missing = grep { $backend->can($_) == Trog::HV->can($_) } @owed;
+        is_deeply( \@missing, [], "$backend implements every one of them" );
+    }
+};
+
 subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
 
     # Both default to what every hypervisor built by the old tool has, so a
