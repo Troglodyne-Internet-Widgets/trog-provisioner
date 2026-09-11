@@ -328,4 +328,57 @@ YAML
     is scalar @REQUESTS, 0, 'and did not try anyway';
 };
 
+subtest 'the secret can be kept in secrets.kdbx, and is only fetched when needed' => sub {
+    my $dir = fresh();
+
+    my $home = tempdir( CLEANUP => 1 );
+    local $ENV{HOME}     = $home;
+    local $ENV{OS_CLOUD} = undef;
+    delete local $ENV{OS_CLIENT_CONFIG_FILE};
+    delete local $ENV{OS_AUTH_URL};
+    delete local $ENV{OS_APPLICATION_CREDENTIAL_ID};
+    delete local $ENV{OS_APPLICATION_CREDENTIAL_SECRET};
+
+    my $clouds = sub {
+        my ($secret) = @_;
+        File::Slurper::Temp::write_binary( "$home/clouds.yaml", <<"YAML" );
+clouds:
+  openstack:
+    auth:
+      auth_url: https://keystone.example.net:5000/v3
+      application_credential_id: "from-file"
+      application_credential_secret: "$secret"
+    auth_type: "v3applicationcredential"
+YAML
+    };
+    $clouds->('secret:openstack/credential/password');
+
+    my @looked_up;
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine( read => sub { my ( $class, $file, $passphrase, %needed ) = @_; push @looked_up, [ $file, $passphrase, \%needed ]; return ( secret => 'secret-from-kdbx' ) } );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { 'the-passphrase' } );
+
+    @REQUESTS = ();
+    Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir );
+    is $REQUESTS[0]{body}{auth}{identity}{application_credential}{secret}, 'secret-from-kdbx', 'the secret out of the database is the one sent';
+    is_deeply $looked_up[0][2], { secret => 'secret:openstack/credential/password' }, 'looked up by the reference clouds.yaml gave';
+    is $looked_up[0][1], 'the-passphrase', 'with the passphrase';
+    like $looked_up[0][0], qr{/secrets\.kdbx\z}, 'in secrets.kdbx';
+
+    # The whole reason it is fetched lazily: a provision that finds a token
+    # cached should not stop to ask for a passphrase it does not need.
+    @looked_up = ();
+    @REQUESTS  = ();
+    Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir );
+    is scalar @REQUESTS,  0, 'a cached token is used';
+    is scalar @looked_up, 0, 'and needs no secret, so the database is not opened';
+
+    # But a reference that cannot name anything is wrong on every run, not just
+    # on the one whose token has expired.
+    $clouds->('secret:openstack/credential');
+    like exception { Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir ) }, qr/Malformed secret/,
+      'a malformed reference is an error even with a token cached';
+};
+
 done_testing();
