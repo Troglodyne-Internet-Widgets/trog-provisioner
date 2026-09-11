@@ -201,6 +201,35 @@ exactly as it always has, only slower, and `bin/preflight` says so rather than
 failing. `perldoc Provisioner::Recipe::aptmirror` has the sizes, which are the
 first thing to know before building one.
 
+`cache` names a fetch cache for guests to provision through: a domain here,
+resolved to its address, or an IPv4 address. While a guest provisions, each host
+its recipes download from -- what they name in `fetch_hosts`, which
+`perldoc Provisioner::Recipe` describes -- is pointed at the cache in the
+guest's `/etc/hosts`. So a template's `https://github.com/...`, cpanm and git
+are answered by the cache without knowing it is there, and every host goes back
+to upstream once the guest's deferred work is done.
+
+```yaml
+_base:
+    _global:
+        cache: fetchcache.example.com
+```
+
+To have one to name, give a domain the `fetchcache` recipe. It fetches from those
+hosts on a guest's behalf, keeps what it fetched, and hands out what it already
+has when upstream is failing, which is the point of it: GitHub answering 503 for
+an hour stops being an hour of failed builds. It answers under the hosts' own
+names, with a certificate signed by an authority `bin/new_config` makes in the
+configuration directory the first time one is needed, and a guest trusts that
+authority only while it provisions. `perldoc Provisioner::Recipe::fetchcache`
+has how long it keeps what, and how to add a host.
+
+A guest points a host at the cache only if the cache answers for it when the
+guest starts, so a cache that is down costs a build nothing. **Empty by
+default**, which is every download going straight upstream, as it always has.
+Nothing requires the recipe, and the cache itself fetches from upstream rather
+than from itself.
+
 `cpan_notest` skips the test suites of what is installed from CPAN, and is
 **on by default**: a guest has ninety minutes for its makefile and deferred work
 together, and the suites of everything a recipe like `trogrunner` installs under

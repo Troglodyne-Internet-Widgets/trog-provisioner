@@ -1,0 +1,46 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+my $store = '[% store %]';
+my @hosts = qw{[% allow.join(' ') %]};
+my $chain = '/etc/ssl/certs/fetchcache.pem';
+
+# Asked by name, as a guest asks once its /etc/hosts points the name here: it is
+# the only way to find out that nginx and the certificate answer to that name.
+sub ask {
+    my ( $host, $path, @curl ) = @_;
+    my $out = `curl -s -o /dev/null -D - --max-time 60 --resolve '$host:443:127.0.0.1' @curl 'https://$host$path' 2>/dev/null`;
+    my ($code)   = $out =~ m{\AHTTP/\S+ (\d+)};
+    my ($status) = $out =~ m{^X-Cache-Status: (\S+)}mi;
+    return ( $code // 'none', $status // 'none' );
+}
+
+chomp( my $nginx_active = `systemctl is-active nginx 2>/dev/null` );
+is( $nginx_active, 'active', 'nginx is running' );
+
+my $nginx_t = `nginx -t 2>&1`;
+like( $nginx_t, qr/test is successful/, 'and its configuration is valid' ) or diag $nginx_t;
+
+my @store = stat($store);
+ok( @store, "the store $store exists" );
+is( ( getpwuid( $store[4] // -1 ) )[0] // 'nobody', 'www-data', 'and nginx can write it' );
+
+foreach my $host (@hosts) {
+    is( ( ask( $host, '/fetchcache-status', '--cacert', $chain ) )[0], '200', "it answers to $host, with a certificate naming it" );
+}
+is( ( ask( 'not-an-upstream.test', '/anything', '-k' ) )[0], '421', 'and fetches nothing for a host it was not given' );
+
+# Through the cache for real, once: this is what proves the resolver, the
+# upstream TLS verification and the egress, none of which a configuration test
+# can.  A CPAN index, which every CPAN install through the cache asks for anyway.
+SKIP: {
+    skip 'www.cpan.org is not one of its upstreams', 2 unless grep { $_ eq 'www.cpan.org' } @hosts;
+
+    my ( $code, $status ) = ask( 'www.cpan.org', '/modules/02packages.details.txt.gz', '--cacert', $chain );
+    is( $code, '200', 'a CPAN index comes back through it' );
+    like( $status, qr/\A(?:MISS|HIT|EXPIRED|REVALIDATED|STALE|UPDATING)\z/, "and says what the cache did about it ($status)" );
+}
+
+done_testing();

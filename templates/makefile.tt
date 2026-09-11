@@ -22,7 +22,7 @@
 
     bin/new_config lifts ufw out of modules_ordered so this is the only place
     the position is decided, rather than the alphabet deciding it. -%]
-all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% FOR module IN modules_ordered %] [% module %][% END %][% IF ufw_fragment %] [% state_dir %]/ufw[% END %]
+all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% IF fetch_hosts %] [% state_dir %]/fetch_via_cache[% END %][% FOR module IN modules_ordered %] [% module %][% END %][% IF ufw_fragment %] [% state_dir %]/ufw[% END %]
 	[%# The tests run whether or not the deferred work succeeded, and the build
 	    still fails afterwards if it did not.  post_install failing used to stop
 	    make right there, so a guest with one broken postrun task produced no
@@ -30,6 +30,12 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	    want to read. -%]
 	rm -f /root/.postrun_failed
 	[% script_dir %]/post_install || touch /root/.postrun_failed
+[% IF fetch_hosts -%]
+[%# Every host given back to upstream once the deferred work is done, which is
+    the last of what downloads anything, and before the tests, which ask about
+    the guest as it will be left. -%]
+	[% script_dir %]/fetch_via_cache off
+[% END -%]
 	$(MAKE) --no-print-directory [% state_dir %]/test
 	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
@@ -59,6 +65,16 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% F
 	cpanm [% testdeps.join(' ') %]
 	[% END -%]
 
+[% IF fetch_hosts -%]
+[%# The hosts recipes download from, pointed at the fetch cache: after the
+    global targets, which download nothing and put this script where it is run
+    from, and ahead of every recipe.  Never touched, so a make run again asks
+    the cache again -- what it answered for last time says nothing about now.
+    scripts/fetch_via_cache has the rest. -%]
+[% state_dir %]/fetch_via_cache:
+	[% script_dir %]/fetch_via_cache on [% cache_ip %] fetchcache-ca.crt[% FOR host IN fetch_hosts %] [% host %][% END %]
+
+[% END -%]
 # Last, and after post_install rather than before it.  Most of what a recipe
 # does to a service it defers -- enable here, start there -- so testing ahead of
 # that asks whether the packaged config works, not whether ours does.

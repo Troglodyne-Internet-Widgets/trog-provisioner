@@ -111,11 +111,33 @@ subtest 'the four files a guest boots from are ordinary template_files' => sub {
 subtest 'global_defaults: what _global holds when nobody wrote it down' => sub {
     my %defaults = Provisioner::Cookbook->load('ubuntu')->global_defaults;
 
-    is_deeply( \%defaults, { mirror => q{} }, 'every setting the schema defaults, at its default' );
+    is_deeply( \%defaults, { mirror => q{}, cache => q{} }, 'every setting the schema defaults, at its default' );
 
     # Its absence is how enrich knows to follow the mirror, so a default laid
     # under _global would switch that off on every guest.
     ok( !exists $defaults{mirror_insecure}, 'and nothing for the setting that declares none' );
+};
+
+subtest 'cache_address: the fetch cache, as the address a guest points names at' => sub {
+    my $distro = Provisioner::Cookbook->load('ubuntu');
+    my %fleet  = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.168.1.9' } );
+
+    is( $distro->cache_address(%fleet), q{}, 'none configured is none' );
+    is( $distro->cache_address( %fleet, cache => 'cache.test.test' ), '192.168.1.9',  'a name in the pool is its address' );
+    is( $distro->cache_address( %fleet, cache => '192.168.1.77' ),    '192.168.1.77', 'and an address is itself' );
+
+    my $said = q{};
+    {
+        local *STDOUT;
+        open( STDOUT, '>', \$said ) or die $!;
+        is( $distro->cache_address( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' );
+    }
+    like( $said, qr/guest\.test\.test is the fetch cache/, 'and says so' );
+
+    # What a guest does with it is write it into /etc/hosts, so a URL, which
+    # would do for a mirror, is no use here.
+    like( exception { $distro->cache_address( %fleet, cache => 'nowhere.test.test' ) },       qr/No address for 'nowhere\.test\.test'/,          'a name nothing assigns an address to dies' );
+    like( exception { $distro->cache_address( %fleet, cache => 'http://cache.test.test/' ) }, qr/No address for 'http:\/\/cache\.test\.test\/'/, 'and so does a URL' );
 };
 
 Test::NoWarnings::had_no_warnings();
