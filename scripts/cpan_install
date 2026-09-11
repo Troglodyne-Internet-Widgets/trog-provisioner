@@ -5,21 +5,17 @@ package Trog::Script::CpanInstall;
 use strict;
 use warnings;
 
-use Cwd            ();
-use File::Basename ();
-use File::Temp     ();
-use Getopt::Long   ();
+use Cwd          ();
+use Getopt::Long ();
 
 =head1 cpan_install
 
 =head2 SYNOPSIS
 
-    cpan_install [--notest] [--link TOOL ...] install SPEC [SPEC ...]
-    cpan_install [--notest] [--link TOOL ...] installdeps DIR
-    cpan_install [--notest] [--link TOOL ...] dzil DIR
-    cpan_install [--notest] [--link TOOL ...] pin PKGCONFIG_PACKAGE MODULE
-    cpan_install [--notest] [--perl PERL] install SPEC [SPEC ...]
-    cpan_install --bootstrap PERL
+    cpan_install [--notest] install SPEC [SPEC ...]
+    cpan_install [--notest] installdeps DIR
+    cpan_install [--notest] dzil DIR
+    cpan_install [--notest] pin PKGCONFIG_PACKAGE MODULE
 
 =head2 DESCRIPTION
 
@@ -43,46 +39,35 @@ match the C<libvirt> it builds against.
 
 =back
 
-C<--link> links each tool out of that perl's bin into F</root/bin> once the
-step has succeeded, for a tool nothing else links.
-
 =head3 Which perl
 
-The one C</root/bin/cpanm> links into, found each time this runs rather than
+The newest under F</opt/perl5>, looked for each time this runs rather than
 written into the task, because that perl's path is its version and the version
-is whatever was current the day the guest was built.  C<--perl> names one
-instead, for a caller with no C</root/bin/cpanm> to go by yet.
-
-C<--bootstrap> gives a freshly built perl its cpanm: App::cpanminus, from its
-release tarball.  Not the system cpanm run under the new perl: Debian unpacks it
-into F</usr/share/perl5>, which the new perl does not look in.
+is whatever was current the day the guest was built.  Its cpanm, Module::Build
+and Dist::Zilla are there because F<build_latest_perl.sh> put them there before
+anything called this.
 
 Written for the system perl, which is what runs it.
 
 =cut
 
-our $CPANM_LINK = '/root/bin/cpanm';
-our $ROOT_BIN   = '/root/bin';
+# Where the perl recipe builds.  A variable so that t/cpan_install.t can point
+# this at a tree of its own.
+our $PERL_ROOT = '/opt/perl5';
 
-# The cpanminus a new perl is given.  A release rather than whatever is newest,
-# so that every guest gets the same one.
-our $CPANMINUS = 'https://www.cpan.org/authors/id/M/MI/MIYAGAWA/App-cpanminus-1.7049.tar.gz';
-
-my $USAGE = "usage: cpan_install [--notest] [--link TOOL] [--perl PERL] install|installdeps|dzil|pin ARGS, or --bootstrap PERL\n";
+my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin ARGS\n";
 
 sub main {
     my @args = @_;
 
-    my %opt = ( link => [] );
-    Getopt::Long::GetOptionsFromArray( \@args, \%opt, 'notest', 'link=s@', 'perl=s', 'bootstrap=s' )
+    my %opt;
+    Getopt::Long::GetOptionsFromArray( \@args, \%opt, 'notest' )
       or return usage();
-
-    return bootstrap( $opt{bootstrap} ) if defined $opt{bootstrap};
 
     my ( $verb, @rest ) = @args;
     return usage() unless defined $verb;
 
-    my $bin   = perl_bin( $opt{perl} );
+    my $bin   = perl_bin();
     my @cpanm = ( "$bin/cpanm", ( $opt{notest} ? '--notest' : () ) );
 
     my $rc;
@@ -111,10 +96,7 @@ sub main {
     else {
         return usage();
     }
-    return $rc if $rc;
-
-    link_tools( $bin, @{ $opt{link} } );
-    return 0;
+    return $rc;
 }
 
 sub usage {
@@ -122,45 +104,13 @@ sub usage {
     return 2;
 }
 
-# The bin directory of the perl to install into.
+# The bin directory of the perl to install into: the newest built under
+# PERL_ROOT, which is how every other consumer on a guest finds it too.
 sub perl_bin {
-    my ($perl) = @_;
-    return File::Basename::dirname($perl) if defined $perl;
-
-    my $cpanm = Cwd::abs_path($CPANM_LINK);
-    die "cpan_install: $CPANM_LINK leads to no cpanm.  The perl recipe builds a perl and links its cpanm there; is it on this guest?\n"
-      unless defined $cpanm && -x $cpanm;
-    return File::Basename::dirname($cpanm);
-}
-
-sub link_tools {
-    my ( $bin, @tools ) = @_;
-
-    foreach my $tool (@tools) {
-        die "cpan_install: there is no $tool in $bin to link\n" unless -e "$bin/$tool";
-        unlink("$ROOT_BIN/$tool") if -l "$ROOT_BIN/$tool";
-        symlink( "$bin/$tool", "$ROOT_BIN/$tool" ) or die "cpan_install: could not link $ROOT_BIN/$tool: $!\n";
-    }
-    return;
-}
-
-sub bootstrap {
-    my ($perl) = @_;
-
-    my $dir     = File::Temp::tempdir( CLEANUP => 1 );
-    my $tarball = "$dir/cpanminus.tar.gz";
-
-    foreach my $step (
-        [ undef, qw{curl -fsSL --retry 3 --retry-all-errors -o}, $tarball, $CPANMINUS ],
-        [ undef, 'tar', '-xzf', $tarball, '--strip-components=1', '-C', $dir ],
-        [ $dir,  $perl, 'Makefile.PL' ],
-        [ $dir,  'make' ],
-        [ $dir,  'make', 'install' ],
-    ) {
-        my $rc = run_in(@$step);
-        return $rc if $rc;
-    }
-    return 0;
+    my @built = sort glob("$PERL_ROOT/*/bin");
+    die "cpan_install: nothing is built under $PERL_ROOT, so there is no perl to install into.  The perl recipe builds one; is it on this guest?\n"
+      unless @built;
+    return $built[-1];
 }
 
 # The two ways this touches anything outside itself, so that a test can stand

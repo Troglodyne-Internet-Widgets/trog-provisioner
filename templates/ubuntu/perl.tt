@@ -7,9 +7,6 @@
 [% FOR step IN cpan_steps -%]
 [% script_dir %]/cpan_install[% IF cpan_notest %] --notest[% END %][% FOR word IN step %] '[% word | mark_raw %]'[% END %]
 [% END -%]
-[%# Last, so that every tool installed above is linked, rather than the ones
-    that happened to be there before: see scripts/link_perl_tools. -%]
-[% script_dir %]/link_perl_tools '[% user %]'
 # Critic config for AIs outside of normally configured paths
 install -m 0755 perl.tidy.rc   /etc/perltidyrc
 install -m 0755 perl.critic.rc /etc/perlcriticrc

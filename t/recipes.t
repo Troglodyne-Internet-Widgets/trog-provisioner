@@ -1710,9 +1710,8 @@ subtest 'no recipe takes a field bin/new_config writes over' => sub {
 
     # And what it builds from its own list, given the list new_config hands it.
     my $out = Provisioner::Cookbook->load( 'perl', distro => $DISTRO )->new(%PROV)->render( %G, modules => [qw{nginx ufw perl}] );
-    my ($baseline) = grep { index( $_, 'cpan_install' ) >= 0 } split( "\n", $out );
-    like( $baseline, qr/'Starman'/, 'perl installs its own baseline' );
-    unlike( $out, qr/'nginx'|'ufw'/, 'and not the recipes on the guest' );
+    unlike( $out, qr/'nginx'|'ufw'/, 'perl installs no recipe that is on the guest' );
+    unlike( $out, qr/cpan_install/,  'and nothing at all when nothing was handed to it' );
 };
 
 # The counterpart of the rule above, for CPAN.  A recipe hands what it installs

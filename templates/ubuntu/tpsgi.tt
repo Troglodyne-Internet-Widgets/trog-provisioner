@@ -9,9 +9,11 @@ chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/www'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/run'
 chmod -R 0755 '[% install_dir %]/[% domain %]'
 ln -s [% install_dir %]/[% domain %]/service/tpsgi.service /usr/lib/systemd/system/[% domain %].service
-# We can't guarantee that perl has installed yet.
-# the PATH shenanigans here ensure we get the *right* perl
-[% script_dir %]/queue_postrun_task "PATH=[% install_dir %]/[% domain %]/bin:$$PATH build_service [% domain %] [% extra_env %]"
+[%# The perl the perl recipe built, which is where starman is, and the checkout,
+    which is where build_service is.  Worked out when the task runs rather than
+    now: this fragment is rendered and queued before that perl exists.  The
+    backslash keeps the substitution out of the shell that queues the line. -%]
+[% script_dir %]/queue_postrun_task "PATH=\$$(ls -d /opt/perl5/*/bin 2>/dev/null | tail -n1):[% install_dir %]/[% domain %]/bin:$$PATH build_service [% domain %] [% extra_env %]"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable [% domain %]
 [% script_dir %]/queue_postrun_task systemctl start [% domain %]

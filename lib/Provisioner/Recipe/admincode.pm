@@ -69,14 +69,6 @@ sub args {
                 items => { type => "string" }
             },
 
-            # The installs the smoke run queues are into the perl recipe's perl,
-            # of repositories found only when it runs, so they cannot be handed
-            # to that recipe as its cpan_deps are.  They follow its setting.
-            cpan_notest => {
-                type        => 'boolean',
-                default     => 1,
-                description => 'Skip the test suites of what the smoke run installs, as the perl recipe cpan_notest does for everything else.  Set it in _global to set both.',
-            },
         },
     );
 }

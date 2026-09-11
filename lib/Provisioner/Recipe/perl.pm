@@ -21,28 +21,35 @@ use parent qw{Provisioner::Recipe};
 
 Downloads the latest perl, compiles it and slams it into /opt/perl5/$version
 
-Sets up a .bashrc in the install_dir which includes that perl's bindir in $PATH.
+Writes F</etc/profile.d/perl.sh>, so a person logging in gets that perl first.
+Nothing in a build reads shell init -- make runs its recipe lines under a
+non-interactive sh out of an atd job, and systemd and cron read none either --
+so everything that installs into this perl finds it under F</opt/perl5>
+instead.
 
-Its cpanm comes from the App::cpanminus tarball, and everything else it comes
-with is its C<cpan_deps>, installed through F<scripts/cpan_install>, which is
-the one thing on a guest that reaches CPAN.
+Three modules come with it whatever else is asked of this recipe, installed by
+F<scripts/build_latest_perl.sh> through the new perl's own C<cpan>: B<cpanm>,
+which everything below goes through, and B<Module::Build> and B<Dist::Zilla>,
+which a distribution needing either cannot install for itself.  Everything else
+is C<cpan_deps>, installed through F<scripts/cpan_install>, the one thing on a
+guest that reaches CPAN.
 
 TODO: allow specification of version.
 
 =head2 What other recipes install into it
 
-C<cpan_deps> is the whole of what goes into this perl: the fleet's own
-toolchain first -- C<@BASELINE>, unless C<baseline> is off -- and then what
-each recipe depending on this one hands over.  One list rather than two,
-because they are installed the same way and the order they are installed in is
-the only thing that tells them apart.
-
-A recipe that installs from CPAN depends on this one and hands its steps over.
-tpsgi's, which is what its checkout says it needs:
+A recipe that installs from CPAN depends on this one and hands its steps over as
+C<cpan_deps>.  tpsgi's, which is what its checkout says it needs, and the
+starman its service is started with:
 
     perl => sub {
         my (%opts) = @_;
-        return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify } ] );
+        return (
+            cpan_deps => [
+                { install     => ['Starman'] },
+                { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
+            ],
+        );
     },
 
 C<bin/new_config> merges what every dependant hands over, each list after the
@@ -59,21 +66,17 @@ C<install> takes anything cpanm does in place of a module name; C<installdeps>
 is what the distribution in that directory says it needs; C<dzil> is what
 C<dzil authordeps> and then C<dzil listdeps> say is missing there; C<pin>
 installs its module at the version pkg-config reports for that package, asked
-when the step runs.  Any step may add C<< link => [ 'dzil' ] >>, the tools to
-link into F</root/bin> once it has installed them.
+when the step runs.
 
-The schema holds a step to that: one verb, nothing but C<link> beside it, and
-no word with a quote, a dollar, a backtick, a backslash or a newline in it --
-any of which would stop it reaching cpan_install as one word through a makefile
-line and the shell that runs it.
+The schema holds a step to that: one verb, nothing beside it, and no word with a
+quote, a dollar, a backtick, a backslash or a newline in it -- any of which would
+stop it reaching cpan_install as one word through a makefile line and the shell
+that runs it.
 
 =head2 When they are installed, and why then
 
 In this recipe's own target, straight after the perl is built, in the order
-they were handed over: there and then, rather than deferred.  The tools are
-linked into the user's bin after all of them, by F<scripts/link_perl_tools>, so
-a dzil or a starman a dependant asked for is linked on the build that installs
-it rather than the next one.
+they were handed over: there and then, rather than deferred.
 
 That target runs after the fragment of every recipe that depends on this one,
 because C<bin/new_config> puts a required recipe after the last recipe that
@@ -86,14 +89,6 @@ service start included.
 A step that fails stops the makefile, as a perl that fails to build does.
 
 =cut
-
-# The toolchain every guest here expects of a perl, installed ahead of what
-# anything else hands over: starman has to be there before a service is started
-# with it, and dzil, perlcritic and perltidy before link_perl_tools links them.
-#
-# Module names, spelled as CPAN's index spells them: Starman, where MetaCPAN's
-# search forgave `starman`.
-our @BASELINE = ( { install => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}] } );
 
 # A word that reaches cpan_install whole, single-quoted in a makefile line: no
 # quote, dollar, backtick, backslash or newline.
@@ -112,7 +107,6 @@ my %STEP = (
             required             => [qw{module pkgconfig}],
             properties           => { module => {%WORD}, pkgconfig => {%WORD} },
         },
-        link => { type => 'array', items => {%WORD} },
     },
     oneOf => [ map { { required => [$_] } } qw{install installdeps dzil pin} ],
 );
@@ -127,27 +121,20 @@ sub args {
         properties => {
             user => { type => 'string' },
 
-            # A boolean rather than the list itself: a schema default is filled
-            # in only when the key is absent, and cpan_deps is present on any
-            # guest with a recipe that hands something over -- which is most of
-            # them.  Defaulted there, the fleet's own toolchain would vanish
-            # from exactly the guests that have the most in them.
-            baseline => {
-                type        => 'boolean',
-                default     => 1,
-                description => 'Install the toolchain every guest here expects -- Test2, Devel::NYTProf, Starman, Perl::Critic and Perl::Tidy -- ahead of everything else.  Off for a perl that is to have only what cpan_deps names.',
-            },
+            # No default: what goes in here is handed over by the recipes that
+            # depend on this one, and cpanm, Module::Build and Dist::Zilla are
+            # the build script's rather than a list anybody configures.
             cpan_deps => {
                 type        => 'array',
                 default     => [],
                 items       => \%STEP,
-                description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin, and may add link.  Installed in this target after the baseline, in the order handed over.',
+                description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin.  Installed in this target, in the order handed over.',
             },
             cpan_notest => {
                 type        => 'boolean',
                 default     => 1,
                 description =>
-                  'Skip the test suites of everything installed into this perl, the baseline and cpan_deps alike.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs do not fit.  Turn it off when what you are testing is what gets installed.  Set in _global to reach every guest, which is what the provisioning-recipes skill scratch_config --cpan-tests does.',
+                  'Skip the test suites of what cpan_deps installs into this perl.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs do not fit.  Turn it off when what you are testing is what gets installed.  Set in _global to reach every guest, which is what the provisioning-recipes skill scratch_config --cpan-tests does.',
             },
         },
     );
@@ -155,28 +142,26 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-C<cpan_deps>, behind C<@BASELINE> unless C<baseline> is off, as C<cpan_steps>:
-the words each step hands F<scripts/cpan_install> after C<--notest>.
+C<cpan_deps> as C<cpan_steps>: the words each step hands
+F<scripts/cpan_install> after C<--notest>.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my @steps = ( ( $opts{baseline} ? @BASELINE : () ), @{ $opts{cpan_deps} } );
-    $opts{cpan_steps} = [ map { [ _words($_) ] } @steps ];
+    $opts{cpan_steps} = [ map { [ _words($_) ] } @{ $opts{cpan_deps} } ];
     return %opts;
 }
 
 sub _words {
     my ($step) = @_;
 
-    my @link = map { ( '--link', $_ ) } @{ $step->{link} // [] };
-    return ( @link, 'install', @{ $step->{install} } )                   if $step->{install};
-    return ( @link, 'pin',     @{ $step->{pin} }{qw{pkgconfig module}} ) if $step->{pin};
+    return ( 'install', @{ $step->{install} } )                   if $step->{install};
+    return ( 'pin',     @{ $step->{pin} }{qw{pkgconfig module}} ) if $step->{pin};
 
     my ($verb) = grep { exists $step->{$_} } qw{installdeps dzil};
-    return ( @link, $verb, $step->{$verb} );
+    return ( $verb, $step->{$verb} );
 }
 
 sub template_files {

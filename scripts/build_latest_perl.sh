@@ -2,10 +2,10 @@
 
 # build_latest_perl.sh
 #
-# Build the latest perl into /opt/perl5, give it its cpanm, and link both where
-# scripts/cpan_install looks for them.  What goes into it is the perl recipe's
-# cpan_deps, installed by that recipe's target after this; the tools are linked
-# into an account's bin by scripts/link_perl_tools, after those.
+# Build the latest perl into /opt/perl5 and give it cpanm, Module::Build and
+# Dist::Zilla.  What else goes into it is the perl recipe's cpan_deps, installed
+# by that recipe's target after this; scripts/cpan_install finds this perl as
+# the newest under /opt/perl5, and a person finds it through profile.d.
 
 #XXX perlbrew = spooped when you run via clown-init
 export SHELL='/bin/bash';
@@ -35,18 +35,25 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     JOBS=$(nproc 2>/dev/null || echo 2)
     make -j"$JOBS"
     make -j"$JOBS" install
-
-    # Its cpanm, from the App::cpanminus release tarball.
-    "$WD/cpan_install" --bootstrap "/opt/perl5/$NICE_PERL_NAME/bin/perl" || exit 1
 fi
 
-# The links scripts/cpan_install finds this perl by, which everything installed
-# into it goes through.  The rest of them are scripts/link_perl_tools', run
-# after those installs rather than before: a link is only made for a tool that
-# is there.
-mkdir -p /root/bin
-for tool in perl cpanm; do
-    [ -e "/opt/perl5/$NICE_PERL_NAME/bin/$tool" ] || continue
-    [ -L "/root/bin/$tool" ] && continue
-    ln -s "/opt/perl5/$NICE_PERL_NAME/bin/$tool" "/root/bin/$tool"
-done
+# What this perl comes with whatever else is asked of it, from its own CPAN
+# client: cpanm, because everything installed into this perl afterwards goes
+# through it; Module::Build and Dist::Zilla, because a distribution needing
+# either cannot install it for itself.
+#
+# -T, so CPAN.pm installs without running each distribution's suite: Dist::Zilla
+# alone is most of a guest's wall clock with them on, and what the fleet wants
+# tested is its own code rather than the toolchain.  Every run rather than only
+# the first, so a module added to this line reaches a guest already built.
+yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus Module::Build Dist::Zilla || exit 1
+
+# Where a person finds this perl.  Not where the build finds it: make runs its
+# recipe lines under a non-interactive sh out of an atd job, and systemd and
+# cron read no shell init either, so everything that installs into this perl
+# names it by path -- see scripts/cpan_install.  Rewritten every run, so a perl
+# built since is the one on the PATH.
+cat > /etc/profile.d/perl.sh <<PROFILE
+PATH="/opt/perl5/$NICE_PERL_NAME/bin:\$PATH"
+PROFILE
+chmod 0644 /etc/profile.d/perl.sh

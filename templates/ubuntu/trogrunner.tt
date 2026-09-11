@@ -112,5 +112,5 @@ chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checko
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
 [%# What this installs from CPAN it hands the perl recipe, whose target installs
-    it once this fragment has made the checkout: Sys::Virt pinned, Dist::Zilla,
-    and what the checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]
+    it once this fragment has made the checkout: Sys::Virt pinned, and what the
+    checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]

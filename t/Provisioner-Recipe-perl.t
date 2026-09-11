@@ -68,48 +68,39 @@ subtest 'every step it is handed is installed in its own target, in order, after
             { installdeps => '/bogus/app' },
             { dzil        => '/bogus/checkout' },
             { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
-            { install     => ['Dist::Zilla'], link => ['dzil'] },
         ]
     );
 
-    my @got = installs($out);
-    is_deeply( shift @got, [qw{install Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}], 'the baseline first, whatever else was handed over' );
     is_deeply(
-        [@got],
+        [ installs($out) ],
         [
             [ qw{install Moo Sys::Virt@10.0.0}, 'Moo~>= 2.004' ],
             [ 'installdeps',                    '/bogus/app' ],
             [ 'dzil',                           '/bogus/checkout' ],
             [qw{pin libvirt Sys::Virt}],
-            [qw{--link dzil install Dist::Zilla}],
         ],
         'one cpan_install each, in the order handed over, every word quoted'
     );
     ok( index( $out, 'build_latest_perl.sh' ) < index( $out, 'cpan_install' ), 'after the perl they go into is built' );
-    ok( index( $out, 'cpan_install' ) < index( $out, 'link_perl_tools' ),      'and the tools are linked after all of them, rather than before' );
     unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependants queued' );
 
-    is_deeply( [ installs( rendered() ) ], [ [qw{install Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}] ], 'nothing handed over is the baseline alone' );
-
-    # A schema default is filled in only when the key is absent, and cpan_deps
-    # is present on any guest whose recipes hand something over -- which is most
-    # of them.  So the baseline is a boolean, not a defaulted list.
-    my @bare = installs( rendered( baseline => 0, cpan_deps => [ { install => ['Moo'] } ] ) );
-    is_deeply( \@bare, [ [qw{install Moo}] ], 'and baseline off is what was handed over alone' );
+    # cpanm, Module::Build and Dist::Zilla are build_latest_perl.sh's, so a perl
+    # nobody hands anything to installs nothing of its own.
+    is_deeply( [ installs( rendered() ) ], [], 'and nothing handed over is nothing installed here' );
 };
 
 subtest 'test suites are skipped unless cpan_notest is off' => sub {
     my @steps = ( { install => ['Moo'] } );
 
-    like( rendered( cpan_deps   => \@steps ),                   qr{^/root/bin/cpan_install --notest 'install' 'Moo'$}m, 'skipped when nothing says, which is the default' );
-    like( rendered( cpan_deps   => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m,          'run when it is off' );
-    like( rendered( cpan_notest => 0 ),                         qr{^\S+/cpan_install 'install' 'Test2'}m,               'for the baseline too' );
+    like( rendered( cpan_deps => \@steps ), qr{^/root/bin/cpan_install --notest 'install' 'Moo'$}m, 'skipped when nothing says, which is the default' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'run when it is off' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'whatever the step is' );
 };
 
 subtest 'a step that cannot be one is refused by the schema' => sub {
     foreach my $case (
         [ { install     => ['Moo'], dzil => '/bogus' }, qr/oneOf rules 0, 2 match/,           'two verbs' ],
-        [ { link        => ['dzil'] },                  qr/Missing property/,                 'none' ],
+        [ { notest      => 0 },                         qr/Missing property/,                 'none' ],
         [ { install     => ['Moo'], notest => 0 },      qr/Properties not allowed: notest/,   'a key no step has' ],
         [ { pin         => { module => 'Sys::Virt' } }, qr{/pin/pkgconfig: Missing property}, 'a pin without the package it pins to' ],
         [ { install     => [] },                        qr/Not enough items/,                 'an install of nothing' ],
@@ -137,9 +128,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
     chmod( 0755, "$bin/cpan_install" );
     ## use critic
 
-    # baseline off, so the line taken below is the one with the awkward words in
-    # it rather than the toolchain the recipe installs first.
-    my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, baseline => 0, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
+    my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
 
     # dash, which is what make runs a recipe line under.
     IPC::Run3::run3( [ '/bin/sh', '-c', $line ], \undef, \my $out, \my $err );
@@ -163,12 +152,11 @@ subtest 'what each recipe depending on it hands over, it takes, and the merge ke
         $merged = Hash::Merge::merge( $merged, \%handed );
     }
 
-    # baseline off: what is asserted here is what the dependants handed over,
-    # which the recipe installs after its own toolchain.
-    my @installs = installs( rendered( %$merged, baseline => 0 ) );
+    my @installs = installs( rendered(%$merged) );
     is_deeply( $installs[0], [ 'installdeps', "$INSTALL/$DOMAIN/tCMS" ], 'tcms: what its checkout needs, first, as it was merged first' );
     ok( ( grep { $_->[0] eq 'installdeps' && $_->[1] eq "$INSTALL/$DOMAIN" } @installs ), 'tpsgi: what the domain checkout needs' );
-    ok( ( grep { $_->[-1] eq 'Dist::Zilla' } @installs ),                                 'trogrunner: Dist::Zilla, among its own' );
+    ok( ( grep { $_->[-1] eq 'Starman' } @installs ),                                     'tpsgi: and the starman its service is started with' );
+    ok( ( grep { $_->[0] eq 'pin' && $_->[-1] eq 'Sys::Virt' } @installs ),               'trogrunner: Sys::Virt, pinned to what the guest has' );
     is( scalar @installs, 5, 'all of them, the merge dropping none' );
 };
 

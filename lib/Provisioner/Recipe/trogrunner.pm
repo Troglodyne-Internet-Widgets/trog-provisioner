@@ -11,6 +11,7 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use Path::Tiny();
+use Provisioner::Cookbook();
 
 use YAML::XS();
 use Text::Xslate();
@@ -175,16 +176,14 @@ C<libvirt_version> when one is named, and otherwise to what pkg-config says the
 guest's libvirt is when the step runs, which is right whenever the runner and
 the hypervisor are on the same distribution.
 
-=item * B<Dist::Zilla>, linked into F</root/bin>, because nothing else installs
-it and it is how this distribution says what it needs.
-
 =item * B<What the checkout needs>, and what each of C<deps_from> needs, by
-dzil.
+dzil.  Dist::Zilla itself comes with the perl, so nothing here asks for it.
 
 =back
 
-Worked out of this recipe's configuration validated, since the dependency is
-handed it raw and C<checkout_dir> has a default that only validation fills in.
+Worked out of what the dependency is handed, with this recipe's own schema
+defaults laid under it -- C<checkout_dir> has one, and the closure is handed the
+configuration raw.  The perl recipe validates what it is given.
 
 =cut
 
@@ -192,22 +191,21 @@ sub required_recipes {
     my ($self) = @_;
 
     # perl is the whole of what a runner was missing: it builds
-    # /opt/perl5/$version and puts perl, cpanm, prove and perlcritic in the
-    # user's bin.  Everything else here is CPAN or configuration.
+    # /opt/perl5/$version and gives it cpanm, Module::Build and Dist::Zilla.
+    # Everything else here is CPAN or configuration.
     return (
         perl => sub {
-            my %opts = $self->validate(@_);
+            my %opts = ( Provisioner::Cookbook->defaults('trogrunner'), @_ );
             my $sys_virt =
-              length $opts{libvirt_version}
+              length( $opts{libvirt_version} // q{} )
               ? { install => ["Sys::Virt\@$opts{libvirt_version}"] }
               : { pin     => { module => 'Sys::Virt', pkgconfig => 'libvirt' } };
 
             return (
                 cpan_deps => [
                     $sys_virt,
-                    { install => ['Dist::Zilla'], link => ['dzil'] },
                     ( $opts{checkout} ? { dzil => Path::Tiny::path( @opts{qw{install_dir domain checkout_dir}} )->stringify } : () ),
-                    ( map { { dzil => $_ } } @{ $opts{deps_from} } ),
+                    ( map { { dzil => $_ } } @{ $opts{deps_from} // [] } ),
                 ],
             );
         },

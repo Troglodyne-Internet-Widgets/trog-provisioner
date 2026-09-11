@@ -42,13 +42,19 @@ TODO: allow specification of specific SHA to check out.
 
 sub required_recipes {
     return (
-        # What the checkout says it needs, installed into the perl that recipe
-        # builds -- in its own target, which runs after this fragment has made
-        # the checkout and before the postrun starts the service: see
+        # Starman, which build_service starts the application with, and what
+        # the checkout says it needs -- both installed into the perl that
+        # recipe builds, in its own target, which runs after this fragment has
+        # made the checkout and before the postrun starts the service.  See
         # Provisioner::Recipe::perl on cpan_deps.
         perl => sub {
             my (%opts) = @_;
-            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify } ] );
+            return (
+                cpan_deps => [
+                    { install     => ['Starman'] },
+                    { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify },
+                ],
+            );
         },
         nginxproxy => sub {
             my (%opts) = @_;

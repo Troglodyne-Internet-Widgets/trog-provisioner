@@ -19,6 +19,7 @@ the perl the perl recipe built
 use Test::More;
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
+use File::Path       qw{make_path};
 
 use FindBin;
 use FindBin::libs;
@@ -26,9 +27,11 @@ use FindBin::libs;
 my $script = "$FindBin::Bin/../scripts/cpan_install";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
-# A perl to install into, which is only its bin directory and a cpanm in it.
-my $PERL = tempdir( CLEANUP => 1 );
-mkdir "$PERL/bin";
+# A perl to install into, found the way the script finds one: the newest under
+# the root the perl recipe builds into, which is only a bin and the tools in it.
+my $PERL_ROOT = tempdir( CLEANUP => 1 );
+my $PERL      = "$PERL_ROOT/perl5.44.0";
+make_path("$PERL/bin");
 for my $tool (qw{cpanm dzil}) {
     open( my $fh, '>', "$PERL/bin/$tool" ) or die $!;
     close $fh;
@@ -43,9 +46,7 @@ my $CPANM = "$PERL/bin/cpanm";
 sub install {
     my (%case) = @_;
 
-    my $root = tempdir( CLEANUP => 1 );
-    local $Trog::Script::CpanInstall::CPANM_LINK = $case{cpanm_link} // $CPANM;
-    local $Trog::Script::CpanInstall::ROOT_BIN   = $root;
+    local $Trog::Script::CpanInstall::PERL_ROOT = $case{perl_root} // $PERL_ROOT;
 
     my @ran;
 
@@ -64,10 +65,10 @@ sub install {
         $rc = eval { Trog::Script::CpanInstall::main( @{ $case{args} } ) };
         $err .= $@ if $@;
     }
-    return { rc => $rc, ran => \@ran, out => $out, err => $err, root => $root };
+    return { rc => $rc, ran => \@ran, out => $out, err => $err };
 }
 
-subtest 'install: into the perl /root/bin/cpanm leads to' => sub {
+subtest 'install: into the newest perl the recipe built' => sub {
     my $r = install( args => [ qw{--notest install Moo Sys::Virt@10.0.0}, 'Moo~>= 2.004' ] );
 
     is( $r->{rc}, 0, 'it succeeds' );
@@ -106,31 +107,26 @@ subtest 'pin: the version pkg-config reports, asked when it runs' => sub {
     like( $r->{err}, qr/pkg-config knows no libvirt/, 'saying so, rather than installing the newest' );
 };
 
-subtest 'a tool is linked once the step that installs it has worked' => sub {
-    my $r = install( args => [qw{--link dzil install Dist::Zilla}] );
-    is( readlink("$r->{root}/dzil"), "$PERL/bin/dzil", 'into /root/bin, pointing into the perl' );
-
-    $r = install( args => [qw{--link dzil install Dist::Zilla}], fails => qr/cpanm/ );
-    is( $r->{rc}, 1, 'a failed install is the exit code' );
-    ok( !-l "$r->{root}/dzil", 'and nothing is linked to what it did not install' );
+subtest 'a failed install is the exit code' => sub {
+    my $r = install( args => [qw{--notest install Dist::Zilla}], fails => qr/cpanm/ );
+    is( $r->{rc}, 1, 'what cpanm said' );
 };
 
-subtest 'a new perl is given its cpanm from the release tarball' => sub {
-    my $r = install( args => [qw{--bootstrap /bogus/perl/bin/perl}] );
+subtest 'the newest perl is the one installed into' => sub {
+    make_path("$PERL_ROOT/perl5.40.0/bin");
 
-    my @what = map {
-        join( ' ', grep { defined } @$_[ 1 .. 2 ] )
-    } @{ $r->{ran} };
-    is_deeply( \@what, [ 'curl -fsSL', 'tar -xzf', '/bogus/perl/bin/perl Makefile.PL', 'make', 'make install' ], 'fetched, and built by that perl' );
-    is( $r->{ran}[0][-1], $Trog::Script::CpanInstall::CPANMINUS, 'the pinned release' );
+    my $r = install( args => [qw{--notest install Moo}] );
+    is( $r->{ran}[0][1], $CPANM, 'not whichever was built first' );
+    rmdir "$PERL_ROOT/perl5.40.0/bin";
+    rmdir "$PERL_ROOT/perl5.40.0";
 };
 
 subtest 'it has to be told what to do, and have a perl to do it in' => sub {
     is( install( args => [] )->{rc},                 2, 'no verb is a usage error' );
     is( install( args => [qw{frobnicate x}] )->{rc}, 2, 'and so is one it does not know' );
 
-    my $r = install( args => [qw{install Moo}], cpanm_link => '/bogus/no/cpanm' );
-    like( $r->{err}, qr/leads to no cpanm/, 'and no built perl is said plainly' );
+    my $r = install( args => [qw{install Moo}], perl_root => tempdir( CLEANUP => 1 ) );
+    like( $r->{err}, qr/nothing is built under/, 'and no built perl is said plainly, naming where it looked' );
 };
 
 done_testing();

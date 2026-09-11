@@ -205,9 +205,7 @@ sub cpan_steps {
         distro        => 'ubuntu',
     );
 
-    # baseline off: what is asserted below is what trogrunner hands over, not
-    # the toolchain the perl recipe installs whatever else it is told.
-    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed, baseline => 0 ) );
+    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed ) );
     return map { [m/'([^']*)'/g] } @lines;
 }
 
@@ -237,13 +235,12 @@ subtest 'an unnamed libvirt version is asked of the guest rather than guessed' =
     is_deeply( [ @{ $steps[0] }[ -3 .. -1 ] ], [qw{pin libvirt Sys::Virt}], 'at whatever pkg-config says the guest libvirt is' );
 };
 
-subtest 'Dist::Zilla is installed, and linked where the next step finds it' => sub {
+subtest 'Dist::Zilla is not asked for: the perl comes with it' => sub {
     my ( undef, $recipe, $vars ) = built();
-    my ($dzil) = grep { $_->[-1] eq 'Dist::Zilla' } cpan_steps( $recipe, $vars );
 
-    ok( $dzil, 'nothing else installs it' ) or return;
-    my %words = map { $_ => 1 } @$dzil;
-    ok( $words{'--link'} && $words{dzil}, 'and it is linked into /root/bin once it is there' );
+    # build_latest_perl.sh installs it alongside cpanm, since a distribution
+    # that needs dzil to say what it needs cannot install dzil for itself.
+    is_deeply( [ grep { $_->[-1] eq 'Dist::Zilla' } cpan_steps( $recipe, $vars ) ], [], 'nothing here installs it' );
 };
 
 subtest 'nothing reaches CPAN from its own fragment' => sub {
