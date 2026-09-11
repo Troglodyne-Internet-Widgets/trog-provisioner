@@ -32,22 +32,29 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/scratch_config")
   or BAIL_OUT('the scratch_config script does not load');
 
-subtest 'a scratch build runs CPAN test suites, and keeps everything else _base said' => sub {
+sub scratch {
+    my (%opts) = @_;
     my $source = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$source/ipmap.cfg",    "[global]\nbasedir = /bogus\n" );
     File::Slurper::Temp::write_text( "$source/recipes.yaml", "_base:\n  _global:\n    distro: ubuntu\n    cpan_notest: 1\n  ntp: {}\nsome.test.test:\n  ntp: {}\n" );
 
     my $dir = tempdir( CLEANUP => 1 );
-    Trog::Skill::ScratchConfig::build( $source, $dir );
+    Trog::Skill::ScratchConfig::build( $source, $dir, %opts );
+    return YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
+}
 
-    my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
+subtest 'CPAN test suites are skipped, as on a real guest, unless asked for' => sub {
 
-    # Real guests skip them, for time; a failing suite is what a test build is
-    # for finding.  Written over whatever the real configuration said.
-    ok( exists $recipes->{_base}{_global}{cpan_notest} && !$recipes->{_base}{_global}{cpan_notest}, 'cpan_notest is off in _base _global' );
+    # Most scratch builds check that a recipe installs at all, and a suite
+    # failing in somebody else's distribution stops them before that part.
+    my $recipes = scratch();
+    is( $recipes->{_base}{_global}{cpan_notest}, 1, 'what the real configuration says is left alone' );
 
-    is( $recipes->{_base}{_global}{distro}, 'ubuntu', 'and the rest of _global is as it was' );
-    is_deeply( [ sort keys %$recipes ], [qw{_base some.test.test}], 'as is the rest of the file' );
+    # Asked for when what the build tests is what gets installed.
+    $recipes = scratch( cpan_tests => 1 );
+    ok( exists $recipes->{_base}{_global}{cpan_notest} && !$recipes->{_base}{_global}{cpan_notest}, 'and --cpan-tests turns the suites on' );
+    is( $recipes->{_base}{_global}{distro}, 'ubuntu', 'leaving the rest of _global as it was' );
+    is_deeply( [ sort keys %$recipes ], [qw{_base some.test.test}], 'and the rest of the file' );
 };
 
 done_testing();

@@ -227,9 +227,10 @@ the recipe, and the cache itself fetches from upstream rather than from itself.
 `cpan_notest` skips the test suites of what recipes install from CPAN, and is
 **on by default**: a guest has ninety minutes for its makefile and deferred work
 together, and the suites of everything a recipe like `trogrunner` installs under
-a freshly built perl do not fit. Turn it off to find out which suites fail -- the
-scratch configuration the provisioning-recipes skill builds does, since that is
-what a test build is for. What a recipe installs is its `cpan_deps`, which
+a freshly built perl do not fit. Turn it off when what you are testing is what
+gets installed -- a recipe's `cpan_deps`, or the perl recipe -- and a failing
+suite is the thing to find; the provisioning-recipes skill's
+`scratch_config --cpan-tests` does that for a scratch build. What a recipe installs is its `cpan_deps`, which
 `bin/recipes <recipe>` shows, and every install goes through `cache` when there
 is one.
 

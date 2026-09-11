@@ -95,6 +95,12 @@ Build it here rather than in a fresh temporary directory.
 
 Print the directory alone, no shell.
 
+=item B<--cpan-tests>
+
+Run the test suites of what the guest installs from CPAN, by writing
+C<cpan_notest: 0> into the scratch C<_base>'s C<_global>.  Off by default, as it
+is on a real guest; the skill says when a build wants it.
+
 =item B<--remove> DIR
 
 Delete a scratch directory.  Refuses anything that does not look like one, so a
@@ -109,13 +115,14 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $dir, $print_dir, $remove, $help );
+    my ( $dir, $print_dir, $remove, $cpan_tests, $help );
     GetOptionsFromArray(
         \@args,
-        'dir=s'     => \$dir,
-        'print-dir' => \$print_dir,
-        'remove=s'  => \$remove,
-        'help'      => \$help,
+        'dir=s'      => \$dir,
+        'cpan-tests' => \$cpan_tests,
+        'print-dir'  => \$print_dir,
+        'remove=s'   => \$remove,
+        'help'       => \$help,
     );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
@@ -124,7 +131,7 @@ sub main {
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
-    my ( $password, $has_fleet, @refs ) = build( $source, $dir );
+    my ( $password, $has_fleet, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests );
 
     if ($print_dir) {
         print "$dir\n";
@@ -136,7 +143,7 @@ sub main {
     print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
     print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
-    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n";
+    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n" if $cpan_tests;
     print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     print {*STDERR} "    $_\n" for @refs;
     print {*STDERR} "\n";
@@ -147,7 +154,7 @@ sub main {
 }
 
 sub build {
-    my ( $source, $dir ) = @_;
+    my ( $source, $dir, %opts ) = @_;
 
     make_path("$dir/recipes.d");
 
@@ -159,13 +166,14 @@ sub build {
           or die "Could not copy $source/$file into the scratch config: $!\n";
     }
 
-    # A scratch build runs the test suites of what it installs from CPAN, which
-    # a real guest skips for time: a suite that fails under the perl a guest
-    # builds is what a test build is for finding.  See the skill, and
+    # CPAN test suites, when what the build is testing is what gets installed.
+    # Otherwise skipped, as on a real guest: see the skill, and
     # Provisioner::DistroRecipe's cpan_notest.
-    my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
-    $recipes->{_base}{_global}{cpan_notest} = 0;
-    File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump($recipes) );
+    if ( $opts{cpan_tests} ) {
+        my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
+        $recipes->{_base}{_global}{cpan_notest} = 0;
+        File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump($recipes) );
+    }
 
     # The fleet, when there is one.  Its absence is a legitimate state -- it
     # means this machine is the hypervisor -- so this is not fatal, but getting
