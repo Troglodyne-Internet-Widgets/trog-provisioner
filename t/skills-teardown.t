@@ -213,6 +213,67 @@ subtest 'a sweep with nothing to do says so' => sub {
     is( $rc, 0, 'and is not a failure' );
 };
 
+subtest 'the sweep finds the data source where _global says it' => sub {
+
+    # Where a configuration says it now.  The sweep read only the data recipe's
+    # from, and on a configuration saying it here it swept nothing at all.
+    my $dir = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n    _global:\n        data_source: $data\nnamed.test:\n    ntp:\n" );
+    Provisioner::Cookbook->forget();
+    make_path("$data/$_") for qw{orphan.test named.test};
+
+    says( sub { Trog::Skill::Teardown::sweep_orphans( undef, undef, 0 ) } );
+    ok( !-e "$data/orphan.test", 'the orphan goes' );
+    ok( -d "$data/named.test",   'and the named one stays' );
+    File::Path::remove_tree("$data/named.test");
+};
+
+subtest 'with no data source, the domain directories are still swept' => sub {
+    my $dir     = $ENV{TROG_PROVISIONER_CONFIG};
+    my $domains = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n    ntp:\n" );
+    Provisioner::Cookbook->forget();
+    make_path("$domains/orphan.test");
+
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( domain_dir => sub { $domains } );
+    $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
+    local @Test::Libvirt::DOMAINS = ();
+
+    my ( $said, $rc ) = says( sub { Trog::Skill::Teardown::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    like( $said, qr/only the domain directories are swept/, 'saying there is no data source' );
+    ok( !-e "$domains/orphan.test", 'and sweeping where guests are built all the same' );
+    is( $rc, 0, 'which is not a failure' );
+
+    Trog::HV->forget();
+};
+
+subtest 'tearing one guest down keeps the configuration the others are built from' => sub {
+    my $scratch = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $scratch;
+    make_path("$scratch/recipes.d");
+    File::Slurper::Temp::write_text( "$scratch/recipes.d/$_.yaml", "$_:\n    ntp:\n" ) for qw{cache.test consumer.test};
+
+    # Not a scratch configuration: nothing in it is touched, whatever it holds.
+    my ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'cache.test', 0 ) } );
+    is( $rc, 1, 'refused without the marker' );
+    ok( -e "$scratch/recipes.d/cache.test.yaml", 'and nothing removed' );
+
+    scratch_marker(1);
+    ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'cache.test', 1 ) } );
+    like( $said, qr/Would remove .*cache\.test\.yaml.*consumer\.test/, 'a dry run says what it would keep, and for whom' );
+    ok( -e "$scratch/recipes.d/cache.test.yaml", 'and keeps it' );
+
+    ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'cache.test', 0 ) } );
+    ok( !-e "$scratch/recipes.d/cache.test.yaml",   'the domain torn down leaves the configuration' );
+    ok( -e "$scratch/recipes.d/consumer.test.yaml", 'the other stays in it' );
+    like( $said, qr/still configures consumer\.test/, 'and says why the rest is kept' );
+
+    ( $said, $rc ) = says( sub { Trog::Skill::Teardown::remove_config( 'consumer.test', 0 ) } );
+    is( $rc, 0, 'the last one out' );
+    ok( !-e $scratch, 'takes the configuration with it' );
+};
+
 subtest 'the POD documents the interface' => sub {
     my $text = File::Slurper::read_text("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/teardown");
 
