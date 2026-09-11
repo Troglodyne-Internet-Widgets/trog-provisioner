@@ -141,13 +141,13 @@ sub args {
                 type        => 'array',
                 default     => [],
                 items       => \%STEP,
-                description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin, and may add link.  Installed in this target after cpan_modules, in the order handed over.',
+                description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin, and may add link.  Installed in this target after the baseline, in the order handed over.',
             },
             cpan_notest => {
                 type        => 'boolean',
                 default     => 1,
                 description =>
-                  'Skip the test suites of what is installed into this perl, cpan_modules and cpan_deps alike.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs do not fit.  Turn it off when what you are testing is what gets installed.  Set in _global to reach every guest, which is what the provisioning-recipes skill scratch_config --cpan-tests does.',
+                  'Skip the test suites of everything installed into this perl, the baseline and cpan_deps alike.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs do not fit.  Turn it off when what you are testing is what gets installed.  Set in _global to reach every guest, which is what the provisioning-recipes skill scratch_config --cpan-tests does.',
             },
         },
     );
