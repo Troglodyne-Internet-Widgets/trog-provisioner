@@ -180,7 +180,7 @@ sub tests {
 =head2 @hosts = $recipe->fetch_hosts()
 
 CPAN: perlbrew fetches the source of the perl it builds from there, and cpanm
-what every recipe's C<cpan_deps> installs into it -- MetaCPAN saying which
+its C<cpan_modules> and C<cpan_deps> into it -- MetaCPAN saying which
 release a version pin names, and the mirrors serving it.
 
 =cut
