@@ -199,6 +199,46 @@ sub qualify_address {
     return "$value\@$domain";
 }
 
+=head3 ($kind, $value) = fleet_address($name, %opts)
+
+What a name for another machine in this installation -- a package mirror, a log
+destination, a fetch cache -- turns out to be, for the guest about to use it.
+C<%opts> takes C<domain>, the guest asking, and C<ipmap>, the ip pool's
+assignments.
+
+One of five answers:
+
+    none     the name is empty                          value ''
+    url      it has a scheme, and is used as written    value the name
+    self     it is the guest asking                     value ''
+    address  the pool assigns it an address             value the address
+    unknown  none of those                              value the name
+
+What C<unknown> means is the caller's to decide, and the callers differ for a
+reason.  Something cloud-init uses runs before the guest has DNS, so a name is no
+use to it and it has to die; something used from the makefile, by which time the
+guest has resolvers, can fall back to the name.
+
+=cut
+
+sub fleet_address {
+    my ( $name, %opts ) = @_;
+
+    return ( none => q{} ) unless defined $name && length $name;
+
+    # The scheme, rather than counting dots: aptmirror.example.com and
+    # mirror.example.net are both dotted, and only one of them says how to get
+    # there.
+    return ( url => $name ) if $name =~ m{\A[a-z][a-z\d+.-]*://}i;
+
+    return ( self => q{} ) if $name eq ( $opts{domain} // q{} );
+
+    my $address = ( $opts{ipmap} // {} )->{$name};
+    return ( address => $address ) if defined $address && length $address;
+
+    return ( unknown => $name );
+}
+
 =head3 write_ssh_keypair($path, $type, $bits, $comment)
 
 Make an ssh keypair and write both halves: the private key to C<$path> and the

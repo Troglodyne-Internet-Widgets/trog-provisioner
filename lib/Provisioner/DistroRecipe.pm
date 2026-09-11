@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Utils();
+
 use Scalar::Util();
 
 =head1 NAME
@@ -244,34 +246,27 @@ and on the build that makes it, there is nothing there to fetch from yet.
 sub mirror_uri {
     my ( $self, %opts ) = @_;
 
-    my $mirror = $opts{mirror} // q{};
-    return q{} unless length $mirror;
-
-    # The scheme, rather than counting dots: aptmirror.example.com and
-    # mirror.example.net are both dotted, and only one of them says how to get
-    # there.
-    return $mirror if $mirror =~ m{\A[a-z][a-z\d+.-]*://}i;
-
     my $domain = $opts{domain} // q{};
-    if ( $domain eq $mirror ) {
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $opts{mirror}, domain => $domain, ipmap => $opts{ipmap} );
+
+    return q{}                                  if $kind eq 'none';
+    return $value                               if $kind eq 'url';
+    return "http://$value" . $self->mirror_path if $kind eq 'address';
+
+    if ( $kind eq 'self' ) {
         print "$domain is the mirror, so it is built from the archive rather than from itself.\n";
         return q{};
     }
 
-    my $address = ( $opts{ipmap} // {} )->{$mirror};
-    if ( !defined $address || !length $address ) {
-        my $url = 'http://' . $mirror . $self->mirror_path;
-        die <<"NOPE";
-No address for '$mirror', which $domain is configured to use as its package mirror.
+    my $url = 'http://' . $value . $self->mirror_path;
+    die <<"NOPE";
+No address for '$value', which $domain is configured to use as its package mirror.
 A bare name is resolved out of the ip pool, because a guest runs cloud-init before
 it has DNS -- so it has to be a domain this installation assigns an address to.
 A mirror anywhere else is named as a URL instead:
 
     mirror: $url
 NOPE
-    }
-
-    return "http://$address" . $self->mirror_path;
 }
 
 =head2 %files = $distro->template_files()
