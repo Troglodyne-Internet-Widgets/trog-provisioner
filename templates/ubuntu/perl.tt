@@ -1,4 +1,4 @@
-[% script_dir %]/build_latest_perl.sh '[% user %]'[% IF cpan_notest %] --notest[% END %][% FOR module IN modules %] '[% module %]'[% END %]
+[% script_dir %]/build_latest_perl.sh '[% user %]'[% IF cpan_notest %] --notest[% END %][% FOR module IN cpan_modules %] '[% module %]'[% END %]
 # Critic config for AIs outside of normally configured paths
 install -m 0755 perl.tidy.rc   /etc/perltidyrc
 install -m 0755 perl.critic.rc /etc/perlcriticrc

@@ -1699,6 +1699,26 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
+# bin/new_config renders every recipe with its configuration and then with
+# modules, the recipes on the guest, so a field by that name is one no domain can
+# set and whose value is never what the recipe meant.  The perl recipe had one,
+# and on a guest cpanm was asked to install nginx and ufw.
+#
+# full_aliases is written over the same way, and is not checked: mail declares
+# it to describe what new_config hands it, which is the same thing.
+subtest 'no recipe takes a field bin/new_config writes over' => sub {
+    foreach my $recipe ( sort @available ) {
+        my %spec = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        ok( !exists $spec{properties}{modules}, "$recipe takes no field called modules" );
+    }
+
+    # And what it builds from its own list, given the list new_config hands it.
+    my $out = Provisioner::Cookbook->load( 'perl', distro => $DISTRO )->new(%PROV)->render( %G, modules => [qw{nginx ufw perl}] );
+    my ($build) = grep { index( $_, 'build_latest_perl.sh' ) >= 0 } split( "\n", $out );
+    like( $build, qr/'starman'/, 'perl installs its own module list' );
+    unlike( $build, qr/'nginx'|'ufw'/, 'and not the recipes on the guest' );
+};
+
 # The counterpart of the rule above, for CPAN.  A recipe says what it installs
 # in cpan_deps and scripts/cpan_install is the one thing that reaches CPAN, which
 # is what puts every install through the fetch cache and under cpan_notest.  A
