@@ -36,8 +36,9 @@ C<http://E<lt>cacheE<gt>/HOST/PATH>:
 
     curl http://fetchcache.example.com/www.cpan.org/modules/02packages.details.txt.gz
 
-What a guest does with that is L<Provisioner::DistroRecipe>'s C<cache> and
-F<scripts/fetch>, which is the other half and is configured separately.
+What a guest does with that is L<Provisioner::DistroRecipe>'s C<cache>,
+F<scripts/fetch>, and F<scripts/cpan_install>, which gives cpanm the cache's copy
+of CPAN as its mirror: the other half, configured separately.
 
 =head2 Pull-through, and stale rather than failing
 

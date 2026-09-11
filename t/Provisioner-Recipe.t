@@ -21,8 +21,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal qw{exception};
+use IPC::Run3();
 
 use_ok('Provisioner::Recipe');
+use Provisioner::Cookbook();
 
 subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $tdir = tempdir( CLEANUP => 1 );
@@ -203,6 +205,133 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $three = bless {}, 'Test::Recipe::Memo';
     my %other = $three->validated( domain => 'b.test', flavour => 'third' );
     is( $other{domain}, 'b.test', 'and so does one built for another domain' );
+};
+
+{
+    # A recipe that declares whatever @STEPS holds.  Named as a recipe, because
+    # new() works out the fragment from the name.
+    package Provisioner::Recipe::cpantest;
+    our @ISA   = ('Provisioner::Recipe');
+    our @STEPS = ();
+    sub cpan_deps { return @STEPS }
+}
+
+# With a fragment of its own that queues something, to see where the CPAN tasks
+# land relative to it.
+sub cpan_recipe {
+    my $tdir = tempdir( CLEANUP => 1 );
+    my $r    = Provisioner::Recipe::cpantest->new( template_dirs => [$tdir], output_dir => $tdir );
+    open( my $fh, '>', "$tdir/$r->{template}" ) or die $!;
+    print {$fh} "[% script_dir %]/queue_postrun_task own-task\n";
+    close $fh;
+    return $r;
+}
+
+subtest 'recipe_name is the last component, whichever distro specialised it' => sub {
+    is( Provisioner::Recipe::cpantest->recipe_name,                              'cpantest', 'of a class' );
+    is( cpan_recipe()->recipe_name,                                              'cpantest', 'of an object' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->recipe_name, 'nginx',    'and of a distribution version of a recipe, which shares the fragment' );
+    is( Provisioner::Recipe->recipe_name,                                        undef,      'and nothing for a class that is not one' );
+};
+
+subtest 'cpan_tasks: each step is one queued call to cpan_install' => sub {
+    local @Provisioner::Recipe::cpantest::STEPS = (
+        { install     => [ 'Moo', 'Sys::Virt@10.0.0', 'Moo~>= 2.004' ] },
+        { installdeps => '/bogus/app' },
+        { dzil        => '/bogus/checkout' },
+        { install     => 'Sys::Virt',     pin_to_pkgconfig => 'libvirt' },
+        { install     => ['Dist::Zilla'], link             => ['dzil'] },
+    );
+    my $q = q{/root/bin/queue_postrun_task "'/root/bin/cpan_install' '--notest'};
+
+    is_deeply(
+        [ Provisioner::Recipe::cpantest->cpan_tasks( script_dir => '/root/bin' ) ],
+        [
+            qq{$q 'install' 'Moo' 'Sys::Virt\@10.0.0' 'Moo~>= 2.004'"},
+            qq{$q 'installdeps' '/bogus/app'"},
+            qq{$q 'dzil' '/bogus/checkout'"},
+            qq{$q 'pin' 'libvirt' 'Sys::Virt'"},
+            qq{$q '--link' 'dzil' 'install' 'Dist::Zilla'"},
+        ],
+        'in the order declared, each word quoted'
+    );
+
+    my @tasks = Provisioner::Recipe::cpantest->cpan_tasks( script_dir => '/root/bin', cpan_notest => 0 );
+    ok( !( grep { index( $_, '--notest' ) >= 0 } @tasks ),                                                                 'the test suites run when cpan_notest is off' );
+    ok( ( grep { index( $_,  '--notest' ) >= 0 } Provisioner::Recipe::cpantest->cpan_tasks( script_dir => '/root/bin' ) ), 'and are skipped when nothing says, which is the default' );
+};
+
+subtest 'a queued task reaches cpan_install with its words intact' => sub {
+
+    # Through the three shells it really passes: dash runs the line out of the
+    # makefile, queue_postrun_task writes it into the queue, and post_install
+    # hands each line to bash.  Stand-ins for the two scripts write down what
+    # they were given.
+    my $bin = tempdir( CLEANUP => 1 );
+    my $out = "$bin/out";
+    open( my $q, '>', "$bin/queue_postrun_task" ) or die $!;
+    print {$q} qq{#!/bin/bash\necho "\$*" > $bin/queued\n};
+    close $q;
+    open( my $c, '>', "$bin/cpan_install" ) or die $!;
+    print {$c} qq{#!/bin/bash\nprintf '%s\\n' "\$\@" > $out\n};
+    close $c;
+    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    chmod( 0755, "$bin/queue_postrun_task", "$bin/cpan_install" );
+
+    local @Provisioner::Recipe::cpantest::STEPS = ( { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } );
+    my ($task) = Provisioner::Recipe::cpantest->cpan_tasks( script_dir => $bin );
+
+    IPC::Run3::run3( [ '/bin/sh', '-c', $task ], \undef, \my $dash_out, \my $dash_err );
+    is( $?, 0, 'dash runs the line out of the makefile' ) or diag $dash_err;
+    open( my $queued, '<', "$bin/queued" )                or die $!;
+    chomp( my $line = <$queued> );
+    IPC::Run3::run3( [ '/bin/bash', '-c', $line ], \undef, \my $bash_out, \my $bash_err );
+    is( $?, 0, 'and bash the line it queued' ) or diag $bash_err;
+
+    open( my $got, '<', $out ) or die $!;
+    chomp( my @args = <$got> );
+    is_deeply( \@args, [ '--notest', 'install', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ], 'one argument per word, the space and the > included' );
+};
+
+subtest 'a step that cannot be written as a task dies, naming the recipe' => sub {
+    foreach my $case (
+        [ ['Moo'],                                                    qr/every step is a hash/,           'a step that is not a hash' ],
+        [ { link => ['dzil'] },                                       qr/names none/,                     'one that names no verb' ],
+        [ { install => ['Moo'], dzil => '/bogus' },                   qr/names install dzil/,             'one that names two' ],
+        [ { install => ['Moo'], notest => 0 },                        qr/names what no step can: notest/, 'one that names a key no step has' ],
+        [ { install => [ 'A', 'B' ], pin_to_pkgconfig => 'libvirt' }, qr/pins one module/,                'a pin with two modules to pin' ],
+        [ { installdeps => '/bogus', pin_to_pkgconfig => 'libvirt' }, qr/goes with install/,              'a pin on something other than install' ],
+        [ { install => [] },                                          qr/installs nothing/,               'an install of nothing' ],
+        [ { install => ["O'Reilly"] },                                qr/cannot be written.*O'Reilly/,    'a quote' ],
+        [ { install => ['Moo$HOME'] },                                qr/cannot be written/,              'a dollar, which make would eat' ],
+        [ { install => ['Moo`id`'] },                                 qr/cannot be written/,              'a backtick' ],
+    ) {
+        my ( $step, $error, $what ) = @$case;
+        local @Provisioner::Recipe::cpantest::STEPS = ($step);
+        like( exception { Provisioner::Recipe::cpantest->cpan_tasks( script_dir => '/root/bin' ) }, qr/\Acpantest cpan_deps: .*$error/s, $what );
+    }
+};
+
+subtest 'render puts the CPAN tasks ahead of the fragment' => sub {
+    local @Provisioner::Recipe::cpantest::STEPS = ( { install => ['Moo'] } );
+    my $out = cpan_recipe()->render( script_dir => '/root/bin' );
+
+    my $mine = index( $out, 'own-task' );
+    my $cpan = index( $out, 'cpan_install' );
+    ok( $cpan >= 0 && $cpan < $mine, 'queued before anything the fragment queues, so a service started in the postrun has its modules' ) or diag $out;
+
+    local @Provisioner::Recipe::cpantest::STEPS = ();
+    is( cpan_recipe()->render( script_dir => '/root/bin' ), "/root/bin/queue_postrun_task own-task\n", 'and a recipe that declares none renders as it always has' );
+};
+
+subtest 'a recipe that installs from CPAN depends on perl' => sub {
+    local @Provisioner::Recipe::cpantest::STEPS = ( { install => ['Moo'] } );
+    my %required = Provisioner::Recipe::cpantest->required_recipes();
+    ok( exists $required{perl}, 'the perl those go into' );
+
+    local @Provisioner::Recipe::cpantest::STEPS = ();
+    %required = Provisioner::Recipe::cpantest->required_recipes();
+    ok( !exists $required{perl}, 'and one that installs nothing does not' );
 };
 
 subtest 'reconcile() hands disagreements to the recipe, and dies by default' => sub {

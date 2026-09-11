@@ -1699,6 +1699,27 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
+# The counterpart of the rule above, for CPAN.  A recipe says what it installs
+# in cpan_deps and scripts/cpan_install is the one thing that reaches CPAN, which
+# is what puts every install through the fetch cache and under cpan_notest.  A
+# fragment calling cpanm itself goes around both, and the build that finds out
+# is the one where CPAN is down.
+#
+# makefile.tt is not a recipe's: its testdeps target is a line nothing feeds.
+subtest 'no fragment calls cpanm itself' => sub {
+    my @fragments = grep { !m{/makefile[.]tt\z} } fragments();
+    ok( scalar @fragments, 'there are fragments to check' );
+
+    foreach my $tt (@fragments) {
+        my $body = File::Slurper::read_text($tt);
+        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/^\s*#.*$//gm;
+
+        my ($offender) = $body =~ m/^([^\n]*\bcpanm\b[^\n]*)$/m;
+        is( $offender, undef, ( File::Basename::basename($tt) ) . ' leaves CPAN to its cpan_deps' );
+    }
+};
+
 subtest 'the firewall reset is one that can actually run' => sub {
     my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-rules");
 

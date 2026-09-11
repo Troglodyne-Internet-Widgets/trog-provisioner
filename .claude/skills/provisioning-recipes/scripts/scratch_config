@@ -18,7 +18,7 @@ use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
-use Pod::Usage qw{pod2usage};
+use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
 use Trog::Config();
@@ -109,21 +109,22 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ($dir, $print_dir, $remove, $help);
-    GetOptionsFromArray(\@args,
+    my ( $dir, $print_dir, $remove, $help );
+    GetOptionsFromArray(
+        \@args,
         'dir=s'     => \$dir,
         'print-dir' => \$print_dir,
         'remove=s'  => \$remove,
         'help'      => \$help,
     );
-    pod2usage(-exitval => 0, -verbose => 2, -input => __FILE__) if $help;
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
     return remove($remove) if $remove;
 
     my $source = Trog::Config->dir;
-    $dir //= File::Temp::tempdir('trog-scratch-XXXXXXXX', TMPDIR => 1);
+    $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
-    my ($password, $has_fleet, @refs) = build($source, $dir);
+    my ( $password, $has_fleet, @refs ) = build( $source, $dir );
 
     if ($print_dir) {
         print "$dir\n";
@@ -131,13 +132,12 @@ sub main {
     }
 
     print {*STDERR} "Scratch configuration in $dir\n";
-    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml"
-      . ($has_fleet ? ", hypervisors.conf\n" : "\n");
+    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml" . ( $has_fleet ? ", hypervisors.conf\n" : "\n" );
     print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
     print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
-    print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value"
-      . (@refs == 1 ? '' : 's') . ":\n";
+    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n";
+    print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     print {*STDERR} "    $_\n" for @refs;
     print {*STDERR} "\n";
 
@@ -147,25 +147,33 @@ sub main {
 }
 
 sub build {
-    my ($source, $dir) = @_;
+    my ( $source, $dir ) = @_;
 
     make_path("$dir/recipes.d");
 
     # What says this is ours to delete later.
-    File::Slurper::Temp::write_text("$dir/$MARKER", "Built by scratch_config; safe to remove.\n");
+    File::Slurper::Temp::write_text( "$dir/$MARKER", "Built by scratch_config; safe to remove.\n" );
 
     foreach my $file (qw{ipmap.cfg recipes.yaml}) {
-        copy("$source/$file", "$dir/$file")
+        copy( "$source/$file", "$dir/$file" )
           or die "Could not copy $source/$file into the scratch config: $!\n";
     }
+
+    # A scratch build runs the test suites of what it installs from CPAN, which
+    # a real guest skips for time: a suite that fails under the perl a guest
+    # builds is what a test build is for finding.  See the skill, and
+    # Provisioner::DistroRecipe's cpan_notest.
+    my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
+    $recipes->{_base}{_global}{cpan_notest} = 0;
+    File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump($recipes) );
 
     # The fleet, when there is one.  Its absence is a legitimate state -- it
     # means this machine is the hypervisor -- so this is not fatal, but getting
     # it wrong silently sends the guest to the wrong libvirt.
-    my $fleet = 'hypervisors.conf';
-    my $has_fleet = copy("$source/$fleet", "$dir/$fleet") ? 1 : 0;
+    my $fleet     = 'hypervisors.conf';
+    my $has_fleet = copy( "$source/$fleet", "$dir/$fleet" ) ? 1 : 0;
 
-    my %needed = Trog::Secrets->needed(YAML::XS::Load(File::Slurper::read_binary("$dir/recipes.yaml")));
+    my %needed = Trog::Secrets->needed( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") ) );
     my @refs   = sort keys %{ { map { $_ => 1 } values %needed } };
 
     my $password = File::Temp::tempdir() =~ s{.*/}{}r;    # a throwaway name for a throwaway store
@@ -173,15 +181,14 @@ sub build {
     # Visibly fake, so that anything reaching a real service with one is refused
     # rather than quietly working.  What the values are is this harness's
     # business; making the database is Trog::Secrets'.
-    Trog::Secrets->write("$dir/secrets.kdbx", $password,
-        map { $_ => 'throwaway:' . substr($_, length 'secret:') } @refs);
+    Trog::Secrets->write(
+        "$dir/secrets.kdbx", $password,
+        map { $_ => 'throwaway:' . substr( $_, length 'secret:' ) } @refs
+    );
     chmod 0600, "$dir/secrets.kdbx";
 
-    return ($password, $has_fleet, @refs);
+    return ( $password, $has_fleet, @refs );
 }
-
-
-
 
 sub remove {
     my ($dir) = @_;

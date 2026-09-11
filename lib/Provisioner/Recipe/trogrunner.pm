@@ -167,6 +167,46 @@ sub required_recipes {
     return ( perl => sub { () } );
 }
 
+=head3 cpan_deps
+
+In this order, and the order is the point:
+
+=over 4
+
+=item * B<Sys::Virt, pinned>, before anything resolves dependencies.  Left to a
+dependency list, cpanm takes the newest, whose Makefile.PL wants a libvirt-dev
+far newer than this guest has -- and says so forty minutes into the queue, in a
+message about pkg-config rather than about ordering.  Pinned to
+C<libvirt_version> when one is named, and otherwise to what pkg-config says the
+guest's libvirt is when the task runs, which is right whenever the runner and
+the hypervisor are on the same distribution.
+
+=item * B<Dist::Zilla>, linked into F</root/bin>, because nothing else installs
+it and it is how this distribution says what it needs.
+
+=item * B<What the checkout needs>, and what each of C<deps_from> needs, by
+dzil.
+
+=item * C<extra_modules>.
+
+=back
+
+=cut
+
+sub cpan_deps {
+    my ( $self, %opts ) = @_;
+
+    my $libvirt = $opts{libvirt_version} // q{};
+    my @extra   = @{ $opts{extra_modules} // [] };
+    return (
+        ( length $libvirt ? { install => ["Sys::Virt\@$libvirt"] } : { install => ['Sys::Virt'], pin_to_pkgconfig => 'libvirt' } ),
+        { install => ['Dist::Zilla'], link => ['dzil'] },
+        ( ( $opts{checkout} // 1 ) ? { dzil => join( '/', map { $_ // q{} } @opts{qw{install_dir domain checkout_dir}} ) } : () ),
+        ( map { { dzil => $_ } } @{ $opts{deps_from} // [] } ),
+        ( @extra ? { install => \@extra } : () ),
+    );
+}
+
 sub args {
     return (
         type       => 'object',
@@ -198,7 +238,7 @@ sub args {
             # so anything written here would be a guess that goes stale.
             libvirt_version => { type => 'string', default => q{} },
 
-            # Absolute paths to run cpanm --installdeps against, for a checkout
+            # Absolute paths to install the dzil dependencies of, for a checkout
             # this recipe did not make.  Named by the operator rather than
             # worked out from another recipe: a runner that manages its own
             # repositories is the case this exists for, and only the person who

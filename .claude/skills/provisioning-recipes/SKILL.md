@@ -125,6 +125,42 @@ echo "$TROG_SCRATCH_PASS" | bin/provision "$DOMAIN"
 This takes minutes. It is finished when it says so or when it dies; if it dies,
 **go straight to collecting artifacts** — a failed run is when they matter most.
 
+## A scratch build runs CPAN test suites
+
+`scratch_config` sets `cpan_notest: 0` in `_base`'s `_global`, so every CPAN
+install on a scratch guest runs its distribution's test suite, where a real
+guest skips them. That is on purpose: a suite that fails under the perl a guest
+builds is what a test build is for finding, and this finds it on the first
+build rather than on somebody's production one.
+
+It costs time. A recipe that installs a lot from CPAN -- `trogrunner`, with
+Dist::Zilla and everything under it -- does not fit `bin/provision`'s default
+ninety minutes for the makefile and its deferred work, so give it more:
+
+    echo "$TROG_SCRATCH_PASS" | TROG_SETUP_TIMEOUT=3h bin/provision "$DOMAIN"
+
+A failing suite shows in `setup.log` as a `postrun FAILED:` naming a
+`cpan_install` task, with cpanm's build log path above it. Read which
+distribution failed and why before deciding anything. Setting `cpan_notest: 1`
+in the scratch `recipes.yaml` gets past it, and is for after you have reported
+it, not instead.
+
+### Through a fetch cache
+
+To watch a recipe's downloads go through one, build a `fetchcache` guest first
+and name it in the scratch `_base._global`:
+
+    cache: <the cache guest's domain>
+
+`scripts/fetch` and `scripts/cpan_install` then ask it first. It answers every
+request with `X-Cache-Status` -- `MISS` the first time, `HIT` after -- and logs
+the same in `/var/log/nginx/fetchcache.log`, so these two say what happened:
+
+    ask_guest "$CACHE" 'tail -n 50 /var/log/nginx/fetchcache.log'
+    ask_guest "$DOMAIN" 'curl -sI http://<cache>/www.cpan.org/modules/02packages.details.txt.gz | grep -i x-cache'
+
+Tear the cache guest down with the rest.
+
 ## Read what happened
 
 ```
@@ -480,10 +516,10 @@ instead.
 **Give the scratch guest a service user.** Every real domain sets one in its
 `_global`, and several recipes only line up when it exists: the `service_user`
 target gives that account the domain directory as its home, and
-`build_latest_perl.sh` symlinks `cpanm` into that home -- which is exactly where
-`tcms` and `tpsgi` look for it. Without one, the sweep falls back to the admin
-user, whose home is under `/home`, and those paths disagree for reasons that
-have nothing to do with the recipe.
+`build_latest_perl.sh` symlinks the perl's tools into that home -- which is the
+`bin` `tpsgi` puts on its service's `PATH`. Without one, the sweep falls back to
+the admin user, whose home is under `/home`, and those paths disagree for
+reasons that have nothing to do with the recipe.
 
 **A dummy value that is no longer needed is worse than none.** `perl.user` was
 pinned to `www-data` back when the field was required. It is filled in from the

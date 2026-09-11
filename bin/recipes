@@ -102,8 +102,15 @@ sub describe {
         };
     }
 
-    Provisioner::Cookbook->load($name);
-    my %spec = Provisioner::Cookbook->spec($name);
+    my $class = Provisioner::Cookbook->load($name);
+    my %spec  = Provisioner::Cookbook->spec($name);
+
+    # What it installs from CPAN, as the steps its defaults give, with the two
+    # things only a domain can say left as placeholders.  Under x-, which is
+    # how OpenAPI marks what is not schema.
+    my @cpan = $class->cpan_deps( Provisioner::Cookbook->defaults($name), domain => '<domain>', install_dir => '<install_dir>' );
+    $spec{'x-cpan-deps'} = \@cpan if @cpan;
+
     return \%spec;
 }
 

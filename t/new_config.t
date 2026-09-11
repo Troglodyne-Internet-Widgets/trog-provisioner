@@ -218,8 +218,9 @@ subtest 'fleet_settings: what every recipe is told about the rest of the fleet' 
     my %global = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.168.1.9' }, cache => 'cache.test.test' );
     Trog::Provisioner::Config::Generator::fleet_settings( 'Provisioner::Recipe::ubuntu', \%global, '192.168.1.254' );
 
-    is( $global{cache_uri}, 'http://192.168.1.9', 'the fetch cache, resolved once for all of them' );
-    is( $global{mirror},    q{},                  'a default nobody wrote down is there for every recipe to see' );
+    is( $global{cache_uri},   'http://192.168.1.9', 'the fetch cache, resolved once for all of them' );
+    is( $global{mirror},      q{},                  'a default nobody wrote down is there for every recipe to see' );
+    is( $global{cpan_notest}, 1,                    'including that CPAN test suites are skipped, which every recipe that declares cpan_deps reads' );
 
     # Config::Simple hands back a string for one value and a list for several.
     is_deeply( $global{resolvers}, ['192.168.1.254'], 'and the resolvers, as a list whichever it was' );

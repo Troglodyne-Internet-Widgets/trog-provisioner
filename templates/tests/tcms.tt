@@ -11,9 +11,10 @@ my $dir = '[% install_dir %]/[% domain %]/tCMS';
 ok(-d $dir, 'the tCMS checkout is there');
 ok(-d "$dir/.git", 'and is a git checkout');
 
-# What the queued postrun task runs to install the application's dependencies.
-# Missing, the task fails after the build has already said it succeeded.
-my $cpanm = '[% install_dir %]/[% domain %]/bin/cpanm';
+# What the queued cpan_install runs to install the application's dependencies:
+# it finds its perl through this link.  Missing, the task fails after the build
+# has already said it succeeded.
+my $cpanm = '/root/bin/cpanm';
 ok(-x $cpanm, 'the cpanm the postrun task uses is there');
 
 # And it runs.  Being there is not the same thing: nvm's node was installed and

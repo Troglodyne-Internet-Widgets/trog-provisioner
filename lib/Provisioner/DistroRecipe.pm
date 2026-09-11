@@ -171,6 +171,10 @@ distribution's own archive.  Empty by default, which is no mirror at all.
 way C<mirror> is.  Empty by default, which is every download going straight
 upstream.  See C<cache_uri> below, and L<Provisioner::Recipe::fetchcache>.
 
+=item * C<cpan_notest> -- skip the test suites of what recipes install from
+CPAN.  B<On by default>, for time: see C<cpan_deps> in L<Provisioner::Recipe>.  Off is
+for a test build, where a suite that fails is a thing to find out about.
+
 =item * C<mirror_insecure> -- whether to let apt install from a repository it
 cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
 C<enrich> turns it on when a mirror is configured and off when one is not, which
@@ -212,6 +216,11 @@ sub args {
                 default     => q{},
                 description =>
                   'A fetch cache for guests to download through: a guest built by the fetchcache recipe, or anything serving the same layout.  Empty, the default, means none, and every download goes straight upstream.  Named the way mirror is -- a URL as written, a bare domain resolved out of the ip pool -- and a guest falls back to upstream whenever the cache cannot answer, so one that is down costs seconds rather than a build.',
+            },
+            cpan_notest => {
+                type        => 'boolean',
+                default     => 1,
+                description => 'Skip the test suites of what recipes install from CPAN.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs under a source-built perl do not fit.  Turn it off to find out which of them fail, which is what a test build is for.',
             },
             mirror_insecure => {
                 type        => 'boolean',
