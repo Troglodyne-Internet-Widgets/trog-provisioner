@@ -11,6 +11,7 @@ Automatically build and host pretty much any website
 | `perldoc Trog::Credentials` | handing passwords to a run that has nobody to ask |
 | [docs/APPROACH.md](docs/APPROACH.md) | the choices a recipe is expected to make |
 | [docs/BACKUPS.md](docs/BACKUPS.md) | how state survives a guest being rebuilt |
+| [MAINTENANCE.md](MAINTENANCE.md) | what is pinned here, and how to tell when it has gone stale |
 | [EXAMPLE.md](EXAMPLE.md) | a worked deployment, end to end |
 | [STYLE.md](STYLE.md) and [docs/POD.md](docs/POD.md) | how we write the perl and document it |
 | [t/TESTING.md](t/TESTING.md) | how we test, here and on the guest |
