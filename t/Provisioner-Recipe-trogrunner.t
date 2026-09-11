@@ -204,7 +204,10 @@ sub cpan_steps {
         output_dir    => tempdir( CLEANUP => 1 ),
         distro        => 'ubuntu',
     );
-    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed ) );
+
+    # baseline off: what is asserted below is what trogrunner hands over, not
+    # the toolchain the perl recipe installs whatever else it is told.
+    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed, baseline => 0 ) );
     return map { [m/'([^']*)'/g] } @lines;
 }
 

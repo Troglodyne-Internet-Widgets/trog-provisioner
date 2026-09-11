@@ -1,13 +1,11 @@
 #!/bin/bash
 
-# build_latest_perl.sh USER [--notest] [MODULE ...]
-CLIENT=$1
-shift
-NOTEST=
-if [ "$1" = --notest ]; then
-    NOTEST=--notest
-    shift
-fi
+# build_latest_perl.sh
+#
+# Build the latest perl into /opt/perl5, give it its cpanm, and link both where
+# scripts/cpan_install looks for them.  What goes into it is the perl recipe's
+# cpan_deps, installed by that recipe's target after this; the tools are linked
+# into an account's bin by scripts/link_perl_tools, after those.
 
 #XXX perlbrew = spooped when you run via clown-init
 export SHELL='/bin/bash';
@@ -42,59 +40,13 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     "$WD/cpan_install" --bootstrap "/opt/perl5/$NICE_PERL_NAME/bin/perl" || exit 1
 fi
 
-# What the perl recipe says this perl comes with, installed every run rather
-# than only when it is built: cpanm skips what is already there, and a module
-# added to the list since reaches this guest now rather than never.  Before the
-# links below, which only link what is there.
-if [ $# -gt 0 ]; then
-    "$WD/cpan_install" $NOTEST --perl "/opt/perl5/$NICE_PERL_NAME/bin/perl" install "$@" || exit 1
-fi
-
-CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
-
-if [ -z "$CLIENT_HOMEDIR" ]; then
-	echo "build_latest_perl.sh: no such account '$CLIENT'" >&2
-	exit 255
-fi
-
-# Named, because "Can't get client's homedir!" says neither which account nor
-# which directory, and the answer is usually that the account is not the one the
-# domain meant: a service user has the domain directory as its home and that is
-# made by the service_user target, but an account like www-data has /var/www,
-# which only exists if something else created it.
-if [ ! -d "$CLIENT_HOMEDIR" ]; then
-	echo "build_latest_perl.sh: home directory '$CLIENT_HOMEDIR' for '$CLIENT' does not exist" >&2
-	exit 255
-fi
-
-# Symlinks to the perl, which is how everything else finds it --
-# scripts/cpan_install through /root/bin/cpanm, and people and services through
-# the user's bin.
-#
-# Guarded on the target existing, not just on the link being absent.  What is
-# installed above is cpanminus and the perl recipe's modules, and nothing else
-# -- so yath (Test2::Harness) and dzil
-# (Dist::Zilla) were being linked to files that have never been there, on every
-# guest that runs the perl recipe.  A link to nothing is worse than no link: it
-# satisfies -e, so anything checking for the tool finds it and then fails at the
-# point of use.  Whatever installs those later gets its link on the next run.
-mkdir -p $CLIENT_HOMEDIR/bin
+# The links scripts/cpan_install finds this perl by, which everything installed
+# into it goes through.  The rest of them are scripts/link_perl_tools', run
+# after those installs rather than before: a link is only made for a tool that
+# is there.
 mkdir -p /root/bin
-link_tool() {
-	[ -e "/opt/perl5/$NICE_PERL_NAME/bin/$1" ] || return 0
-	[ -L "$2/$1" ] && return 0
-	ln -s "/opt/perl5/$NICE_PERL_NAME/bin/$1" "$2/$1"
-}
-link_tool perl "$CLIENT_HOMEDIR/bin"
-link_tool prove "$CLIENT_HOMEDIR/bin"
-link_tool yath "$CLIENT_HOMEDIR/bin"
-link_tool dzil "$CLIENT_HOMEDIR/bin"
-link_tool cpanm "$CLIENT_HOMEDIR/bin"
-link_tool starman "$CLIENT_HOMEDIR/bin"
-link_tool perlcritic "$CLIENT_HOMEDIR/bin"
-link_tool perltidy "$CLIENT_HOMEDIR/bin"
-link_tool nytprofmerge "$CLIENT_HOMEDIR/bin"
-link_tool nytprofhtml "$CLIENT_HOMEDIR/bin"
-link_tool perl /root/bin
-link_tool cpanm /root/bin
-
+for tool in perl cpanm; do
+    [ -e "/opt/perl5/$NICE_PERL_NAME/bin/$tool" ] || continue
+    [ -L "/root/bin/$tool" ] && continue
+    ln -s "/opt/perl5/$NICE_PERL_NAME/bin/$tool" "/root/bin/$tool"
+done

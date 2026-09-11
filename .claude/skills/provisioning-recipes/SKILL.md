@@ -115,7 +115,7 @@ output — you need it for everything after.
 **Give it a service user: `--user`.** Most recipes are written to run as one,
 and every real domain names one in its `_global`. The `service_user` target
 makes that account with the domain directory as its home, and
-`build_latest_perl.sh` links the built perl's tools into `bin` there -- which is
+`link_perl_tools` links the built perl's tools into `bin` there -- which is
 where tcms, tpsgi and trogrunner find `cpanm`, and the `bin` tpsgi puts on its
 service's `PATH`. Leave it out and `user` falls back to the admin: the domain
 directory becomes a symlink to a home under `/home`, and a recipe can fail for
@@ -145,7 +145,7 @@ time, and the chance that a failure in somebody else's distribution stops the
 build before the part you were checking.
 
 Turn them on when what you changed is what gets installed: the `cpan_deps` a
-recipe hands the `perl` recipe, that recipe or its `cpan_modules`, or anything whose
+recipe hands the `perl` recipe, that recipe or its baseline, or anything whose
 correctness depends on a module actually working under the perl a guest builds.
 Then a failing suite is the finding.
 

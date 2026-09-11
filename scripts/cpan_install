@@ -51,8 +51,7 @@ step has succeeded, for a tool nothing else links.
 The one C</root/bin/cpanm> links into, found each time this runs rather than
 written into the task, because that perl's path is its version and the version
 is whatever was current the day the guest was built.  C<--perl> names one
-instead, for F<build_latest_perl.sh>, which installs before it has linked
-anything.
+instead, for a caller with no C</root/bin/cpanm> to go by yet.
 
 C<--bootstrap> gives a freshly built perl its cpanm: App::cpanminus, from its
 release tarball.  Not the system cpanm run under the new perl: Debian unpacks it

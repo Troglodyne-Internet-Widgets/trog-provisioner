@@ -83,11 +83,10 @@ tuned to -- see issue #123, which is about
 measuring it properly -- the answer is probably "more, and the build should be
 doing less".
 
-A runner builds perl from source, installs what F<scripts/build_latest_perl.sh>
-asks for on top of it -- through C<cpan>, which runs each distribution's own
-test suite, and that is where most of the wall clock goes -- and only then
-starts on C<Sys::Virt>, C<Dist::Zilla> and the forty-odd distributions this one
-declares.  On four vCPUs that does not fit the ninety minutes C<Trog::Guest>
+A runner builds perl from source, installs the toolchain the C<perl> recipe
+puts on top of it, and only then starts on C<Sys::Virt>, C<Dist::Zilla> and the
+forty-odd distributions this one hands that recipe.  Most of the wall clock is
+those distributions, and their own test suites when C<cpan_notest> is off.  On four vCPUs that does not fit the ninety minutes C<Trog::Guest>
 allows a makefile and its whole postrun queue.
 
 So build one with the budget raised:

@@ -23,16 +23,22 @@ Downloads the latest perl, compiles it and slams it into /opt/perl5/$version
 
 Sets up a .bashrc in the install_dir which includes that perl's bindir in $PATH.
 
-Its cpanm comes from the App::cpanminus tarball, and then C<cpan_modules> and
-C<cpan_deps> are installed into it, all through F<scripts/cpan_install>, which
-is the one thing on a guest that reaches CPAN.
+Its cpanm comes from the App::cpanminus tarball, and everything else it comes
+with is its C<cpan_deps>, installed through F<scripts/cpan_install>, which is
+the one thing on a guest that reaches CPAN.
 
 TODO: allow specification of version.
 
 =head2 What other recipes install into it
 
-A recipe that installs from CPAN depends on this one and hands it what to
-install, as C<cpan_deps>.  tpsgi's, which is what its checkout says it needs:
+C<cpan_deps> is the whole of what goes into this perl: the fleet's own
+toolchain first -- C<@BASELINE>, unless C<baseline> is off -- and then what
+each recipe depending on this one hands over.  One list rather than two,
+because they are installed the same way and the order they are installed in is
+the only thing that tells them apart.
+
+A recipe that installs from CPAN depends on this one and hands its steps over.
+tpsgi's, which is what its checkout says it needs:
 
     perl => sub {
         my (%opts) = @_;
@@ -63,8 +69,11 @@ line and the shell that runs it.
 
 =head2 When they are installed, and why then
 
-In this recipe's own target, straight after the perl and its C<cpan_modules>,
-in the order they were handed over: there and then, rather than deferred.
+In this recipe's own target, straight after the perl is built, in the order
+they were handed over: there and then, rather than deferred.  The tools are
+linked into the user's bin after all of them, by F<scripts/link_perl_tools>, so
+a dzil or a starman a dependant asked for is linked on the build that installs
+it rather than the next one.
 
 That target runs after the fragment of every recipe that depends on this one,
 because C<bin/new_config> puts a required recipe after the last recipe that
@@ -77,6 +86,14 @@ service start included.
 A step that fails stops the makefile, as a perl that fails to build does.
 
 =cut
+
+# The toolchain every guest here expects of a perl, installed ahead of what
+# anything else hands over: starman has to be there before a service is started
+# with it, and dzil, perlcritic and perltidy before link_perl_tools links them.
+#
+# Module names, spelled as CPAN's index spells them: Starman, where MetaCPAN's
+# search forgave `starman`.
+our @BASELINE = ( { install => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}] } );
 
 # A word that reaches cpan_install whole, single-quoted in a makefile line: no
 # quote, dollar, backtick, backslash or newline.
@@ -110,19 +127,15 @@ sub args {
         properties => {
             user => { type => 'string' },
 
-            # Installed while the perl is built: build_latest_perl.sh links these
-            # tools into the user's bin once they are there.
-            #
-            # Module names, spelled as CPAN's index spells them: Starman, where
-            # MetaCPAN's search forgave `starman`.
-            #
-            # Not `modules`: bin/new_config hands every render a `modules` of its
-            # own, the recipes on the guest, after the recipe's configuration.
-            cpan_modules => {
-                type        => 'array',
-                items       => { type => 'string', pattern => '\A[\w:]+\z' },
-                default     => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}],
-                description => 'Modules installed into the new perl as it is built.  Every run, not only the first, so one added here reaches a guest whose perl is already built.',
+            # A boolean rather than the list itself: a schema default is filled
+            # in only when the key is absent, and cpan_deps is present on any
+            # guest with a recipe that hands something over -- which is most of
+            # them.  Defaulted there, the fleet's own toolchain would vanish
+            # from exactly the guests that have the most in them.
+            baseline => {
+                type        => 'boolean',
+                default     => 1,
+                description => 'Install the toolchain every guest here expects -- Test2, Devel::NYTProf, Starman, Perl::Critic and Perl::Tidy -- ahead of everything else.  Off for a perl that is to have only what cpan_deps names.',
             },
             cpan_deps => {
                 type        => 'array',
@@ -142,15 +155,16 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-C<cpan_deps> as C<cpan_steps>, the words each step hands F<scripts/cpan_install>
-after C<--notest>.
+C<cpan_deps>, behind C<@BASELINE> unless C<baseline> is off, as C<cpan_steps>:
+the words each step hands F<scripts/cpan_install> after C<--notest>.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    $opts{cpan_steps} = [ map { [ _words($_) ] } @{ $opts{cpan_deps} } ];
+    my @steps = ( ( $opts{baseline} ? @BASELINE : () ), @{ $opts{cpan_deps} } );
+    $opts{cpan_steps} = [ map { [ _words($_) ] } @steps ];
     return %opts;
 }
 
