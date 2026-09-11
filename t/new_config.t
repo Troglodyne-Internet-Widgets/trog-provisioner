@@ -212,6 +212,24 @@ subtest 'a recipe that names rate limits depends on ufw for them' => sub {
     ok( $preq{ufw},         'and gains the one its limits imply' );
 };
 
+subtest 'fleet_settings: what every recipe is told about the rest of the fleet' => sub {
+    require Provisioner::Recipe::ubuntu;
+
+    my %global = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.168.1.9' }, cache => 'cache.test.test' );
+    Trog::Provisioner::Config::Generator::fleet_settings( 'Provisioner::Recipe::ubuntu', \%global, '192.168.1.254' );
+
+    is( $global{cache_uri}, 'http://192.168.1.9', 'the fetch cache, resolved once for all of them' );
+    is( $global{mirror},    q{},                  'a default nobody wrote down is there for every recipe to see' );
+
+    # Config::Simple hands back a string for one value and a list for several.
+    is_deeply( $global{resolvers}, ['192.168.1.254'], 'and the resolvers, as a list whichever it was' );
+
+    my %said = ( domain => 'guest.test.test', mirror => 'http://m.test.test/ubuntu' );
+    Trog::Provisioner::Config::Generator::fleet_settings( 'Provisioner::Recipe::ubuntu', \%said, [ '192.168.1.254', '1.1.1.1' ] );
+    is( $said{mirror},    'http://m.test.test/ubuntu', 'what _global said wins over the default' );
+    is( $said{cache_uri}, q{},                         'and no cache configured is none' );
+};
+
 # A stand-in for the sftp session, which is the only part of the salvage check
 # that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
 # what the guest said when asked whether the path still holds anything.

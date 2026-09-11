@@ -464,6 +464,17 @@ subtest 'a mirror whose indices are signed can be verified' => sub {
     unlike( loaded( $dir, 'user-data' )->{apt}{conf}, qr/AllowInsecureRepositories/, 'so the allowance can be turned off' );
 };
 
+subtest 'a fetch cache is named to the guest in a file' => sub {
+
+    # With no cache there is no file, which the documents a guest with no
+    # mirror is built from already pin: they list write_files exactly.
+    my ( $dir, undef ) = generated( cache_uri => 'http://192.168.1.9' );
+    my ($file) = grep { $_->{path} eq '/etc/provisioner/cache_uri' } @{ loaded( $dir, 'user-data' )->{write_files} };
+    ok( $file, 'written when there is one' ) or return;
+
+    is( $file->{content}, "http://192.168.1.9\n", 'holding the URL and nothing else, which is what scripts/fetch reads' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

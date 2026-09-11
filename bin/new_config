@@ -299,6 +299,24 @@ sub main {
     return 0;
 }
 
+# What every recipe is told about the rest of the fleet, laid into _global.
+#
+# The distribution's defaults go underneath what _global said, because _global
+# reaches every other recipe unvalidated -- see
+# Provisioner::DistroRecipe/global_defaults.  The fetch cache is resolved once,
+# here, rather than by each recipe that downloads something.  And resolvers,
+# which were the distro recipe's alone, because a recipe running a resolver of
+# its own -- nginx, in the fetch cache -- needs to know where to send it.
+sub fleet_settings {
+    my ( $distro, $global_config, $resolvers ) = @_;
+
+    %$global_config             = ( $distro->global_defaults, %$global_config );
+    $global_config->{cache_uri} = $distro->cache_uri(%$global_config);
+    $global_config->{resolvers} = Provisioner::Utils::coerce_arrayref($resolvers);
+
+    return $global_config;
+}
+
 # Settings that describe how the hypervisor should build the guest rather than
 # what goes on it, and so belong in provision.conf rather than in a template.
 #
@@ -632,6 +650,8 @@ sub handle_domain {
     $global_config->{transfer_user} = $transfer_user;
     $global_config->{transfer_port} = $transfer_port;
 
+    fleet_settings( $distro, $global_config, $resolvers );
+
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up
     # with rather than out of what it started with.
@@ -964,7 +984,6 @@ sub handle_domain {
         packages      => \@pkgs,
         ips           => [$static_ip],
         gateway       => $gateway,
-        resolvers     => $resolvers,
         contact_email => $admin_email,
         payload_dir   => $basedir,
         dryrun        => $dryrun,

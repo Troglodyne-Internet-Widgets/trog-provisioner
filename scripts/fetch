@@ -1,0 +1,55 @@
+#!/bin/bash
+# fetch URL DEST -- download URL to DEST, through the fleet's fetch cache when
+# there is one, and from upstream when the cache cannot answer.
+#
+# The cache serves an upstream URL under its own address with the scheme taken
+# off: https://github.com/o/r/x.tgz is $CACHE/github.com/o/r/x.tgz.  It keeps
+# what it has served and hands it out again when upstream is failing, so asking
+# it first is what keeps a build going through an upstream outage.  Falling back
+# is what keeps it going through a cache outage: a cache that is down costs the
+# connect timeout, not the build.  Provisioner::Recipe::fetchcache has the rest.
+#
+# curl rather than perl: this runs before any perl the recipes build exists,
+# and the one the image ships cannot speak https.
+#
+# The cache is /etc/provisioner/cache_uri, which Provisioner::DistroRecipe
+# writes when one is configured.  TROG_CACHE overrides it, and set but empty
+# means go straight upstream.  TROG_CACHE_FILE is only ever set under test.
+set -u
+
+if [ $# -ne 2 ]; then
+    echo "usage: fetch URL DEST" >&2
+    exit 2
+fi
+url=$1
+dest=$2
+
+if [ -n "${TROG_CACHE+set}" ]; then
+    cache=$TROG_CACHE
+else
+    cache_file=${TROG_CACHE_FILE:-/etc/provisioner/cache_uri}
+    cache=$(cat "$cache_file" 2>/dev/null)
+fi
+
+# Written beside the destination and moved into place, so a download that dies
+# half way leaves nothing a later step could mistake for the file.
+part="$dest.part"
+trap 'rm -f "$part"' EXIT
+
+if [ -n "$cache" ]; then
+    if curl -fsSL --connect-timeout 3 -o "$part" "$cache/${url#*://}"; then
+        mv "$part" "$dest"
+        echo "fetch: $url, from $cache"
+        exit 0
+    fi
+    echo "fetch: $cache could not supply $url; trying upstream" >&2
+fi
+
+if curl -fsSL --connect-timeout 10 --retry 3 --retry-all-errors -o "$part" "$url"; then
+    mv "$part" "$dest"
+    echo "fetch: $url, from upstream"
+    exit 0
+fi
+
+echo "fetch: could not download $url" >&2
+exit 1

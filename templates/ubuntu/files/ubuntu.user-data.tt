@@ -91,6 +91,17 @@ write_files:
       http://archive.ubuntu.com/ubuntu	priority:2
       http://security.ubuntu.com/ubuntu	priority:3
 [% END -%]
+[% IF cache_uri -%]
+[%# Where scripts/fetch looks for the fetch cache.  A file rather than something
+    rendered into each recipe, so that moving the cache is one line on the
+    guest; see Provisioner::DistroRecipe cache_uri. -%]
+  - path: /etc/provisioner/cache_uri
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [% cache_uri | mark_raw %]
+[% END -%]
 
 [%# Last, and in this order: root mail has to go somewhere before anything the
     setup script runs can fail and try to report it. -%]

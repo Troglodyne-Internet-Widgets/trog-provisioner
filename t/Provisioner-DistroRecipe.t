@@ -108,6 +108,39 @@ subtest 'the four files a guest boots from are ordinary template_files' => sub {
     ok( ( grep { m/\Aubuntu[.]/ } keys %files ) == scalar keys %files, 'out of that distribution own directory' );
 };
 
+subtest 'global_defaults: what _global holds when nobody wrote it down' => sub {
+    my %defaults = Provisioner::Cookbook->load('ubuntu')->global_defaults;
+
+    is_deeply( \%defaults, { mirror => q{}, cache => q{} }, 'every setting the schema defaults, at its default' );
+
+    # Its absence is how enrich knows to follow the mirror, so a default laid
+    # under _global would switch that off on every guest.
+    ok( !exists $defaults{mirror_insecure}, 'and nothing for the setting that declares none' );
+};
+
+subtest 'cache_uri: the fetch cache, as a URL a guest can append a path to' => sub {
+    my $distro = Provisioner::Cookbook->load('ubuntu');
+    my %fleet  = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.168.1.9' } );
+
+    is( $distro->cache_uri(%fleet), q{}, 'none configured is none' );
+    is( $distro->cache_uri( %fleet, cache => 'http://cache.test.test:8080/' ), 'http://cache.test.test:8080', 'a URL as written, less the slash every path is appended after' );
+    is( $distro->cache_uri( %fleet, cache => 'cache.test.test' ),              'http://192.168.1.9',          'a name in the pool is its address' );
+
+    my $said = q{};
+    {
+        local *STDOUT;
+        open( STDOUT, '>', \$said ) or die $!;
+        is( $distro->cache_uri( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' );
+    }
+    like( $said, qr/guest\.test\.test is the fetch cache/, 'and says so' );
+
+    like(
+        exception { $distro->cache_uri( %fleet, cache => 'nowhere.test.test' ) },
+        qr/No address for 'nowhere\.test\.test'.*cache: http:\/\/nowhere\.test\.test/s,
+        'a name nothing assigns an address to dies, saying how to name it as a URL'
+    );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

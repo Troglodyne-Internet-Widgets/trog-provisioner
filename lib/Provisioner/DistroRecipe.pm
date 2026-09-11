@@ -167,6 +167,10 @@ What a distribution takes.
 =item * C<mirror> -- a package mirror for guests to prefer over the
 distribution's own archive.  Empty by default, which is no mirror at all.
 
+=item * C<cache> -- a fetch cache for guests to download through, named the
+way C<mirror> is.  Empty by default, which is every download going straight
+upstream.  See C<cache_uri> below, and L<Provisioner::Recipe::fetchcache>.
+
 =item * C<mirror_insecure> -- whether to let apt install from a repository it
 cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
 C<enrich> turns it on when a mirror is configured and off when one is not, which
@@ -203,12 +207,41 @@ sub args {
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
             },
+            cache => {
+                type        => 'string',
+                default     => q{},
+                description =>
+                  'A fetch cache for guests to download through: a guest built by the fetchcache recipe, or anything serving the same layout.  Empty, the default, means none, and every download goes straight upstream.  Named the way mirror is -- a URL as written, a bare domain resolved out of the ip pool -- and a guest falls back to upstream whenever the cache cannot answer, so one that is down costs seconds rather than a build.',
+            },
             mirror_insecure => {
                 type        => 'boolean',
                 description => 'Let apt install from a repository it cannot verify.  Defaults to on when a mirror is configured and off when one is not, which is what every guest has had.  Turn it off against a mirror that carries the archive own signed indices -- one built by the aptmirror recipe does, being a verbatim copy.',
             },
         },
     );
+}
+
+=head2 %defaults = $distro->global_defaults()
+
+Every default C<args> declares, as a hash.
+
+These settings are read out of C<_global>, and C<_global> is handed to every
+recipe as it stands -- so a setting nobody wrote down would reach every recipe
+but this one as absent, the schema defaults being applied only when this recipe
+is validated.  C<bin/new_config> lays these under C<_global> instead, so the
+default is the one in the schema and there is no second copy of it to drift.
+
+A setting declaring no default, like C<mirror_insecure>, is left out: its absence
+is the answer.
+
+=cut
+
+sub global_defaults {
+    my ($class) = @_;
+
+    my %args       = $class->args();
+    my $properties = $args{properties} // {};
+    return map { $_ => $properties->{$_}{default} } grep { exists $properties->{$_}{default} } sort keys %$properties;
 }
 
 =head2 $path = $distro->mirror_path()
@@ -266,6 +299,48 @@ it has DNS -- so it has to be a domain this installation assigns an address to.
 A mirror anywhere else is named as a URL instead:
 
     mirror: $url
+NOPE
+}
+
+=head2 $uri = $distro->cache_uri(%opts)
+
+The fetch cache this guest downloads through, as a URL with no trailing slash,
+or empty for none.  Read out of C<cache>, and resolved the way C<mirror_uri>
+resolves a mirror: a URL as written, a name in the ip pool as C<http://> and its
+address, and a name that is not in it dies.  A cache outside this installation
+is named as a URL.
+
+Empty for the guest that is the cache, which fetches from upstream -- it is
+filling itself, and on the build that makes it there is nothing there yet.
+
+Worked out once, by C<bin/new_config>, and handed to every recipe as
+C<cache_uri>.  It reaches the guest as F</etc/provisioner/cache_uri>, which is
+where F<scripts/fetch> looks for it.
+
+=cut
+
+sub cache_uri {
+    my ( $self, %opts ) = @_;
+
+    my $domain = $opts{domain} // q{};
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $opts{cache}, domain => $domain, ipmap => $opts{ipmap} );
+
+    return q{}                  if $kind eq 'none';
+    return $value =~ s{/+\z}{}r if $kind eq 'url';
+    return "http://$value"      if $kind eq 'address';
+
+    if ( $kind eq 'self' ) {
+        print "$domain is the fetch cache, so it fetches from upstream rather than from itself.\n";
+        return q{};
+    }
+
+    die <<"NOPE";
+No address for '$value', which $domain is configured to use as its fetch cache.
+A bare name is resolved out of the ip pool, so it has to be a domain this
+installation assigns an address to.  A cache anywhere else is named as a URL
+instead:
+
+    cache: http://$value
 NOPE
 }
 
