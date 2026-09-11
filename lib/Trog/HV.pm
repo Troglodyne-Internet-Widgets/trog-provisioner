@@ -449,6 +449,10 @@ itself, which is a substring match and can be fooled: a guest named
 C<vm.example.com> matches a lease belonging to C<sub.vm.example.com>.  Prefer
 the MAC; C<guest_mac> exists so there always is one.
 
+Where several leases match, the one that expires last, which is the one granted
+or renewed most recently.  A MAC can hold two: a guest rebuilt under the same
+name gets a new address while its old lease stays on file until it runs out.
+
 =cut
 
 sub lease_ip {
@@ -462,7 +466,12 @@ sub lease_ip {
     my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
     return undef unless @leases;
 
-    foreach my $lease (@leases) {
+    # The newest first.  One MAC can hold two leases: a rebuilt guest has the
+    # same MAC but a new machine-id, dnsmasq tells clients apart by the client
+    # id that comes from it, and so the new guest gets a new address while the
+    # old one stays in the table until it expires.  The newest lease is the one
+    # granted or renewed last, and the one the guest now has.
+    foreach my $lease ( sort { ( $b->{expirytime} // 0 ) <=> ( $a->{expirytime} // 0 ) } @leases ) {
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
         next
           if defined $opts{hostname}

@@ -946,14 +946,41 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 
     package FakeNet;
 
+    # What dnsmasq has on file, in the order it lists them, when a test says;
+    # one lease otherwise.  The default is in the sub rather than on the
+    # variable, because this block runs after the subtests above it do.
+    our @LEASES;
+
     sub new { my ( $class, $asked ) = @_; return bless { asked => $asked }, $class }
 
     sub get_dhcp_leases {
         my ( $self, $mac ) = @_;
         push @{ $self->{asked} }, $mac;
+        return @LEASES if @LEASES;
         return ( { ipaddr => '192.168.122.50', mac => '52:54:00:aa:bb:cc', hostname => 'vm.example.com' } );
     }
 }
+
+subtest 'a rebuilt guest can hold two leases, and the newest is the address it has' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV');
+    $mock->redefine( vmm => sub { FakeLeaseVMM->new( [] ) } );
+
+    # Measured on hydra: a guest rebuilt under the same name kept its MAC, got
+    # 192.168.122.97, and dnsmasq kept its old 192.168.122.96 on file too --
+    # which is what collect_artifacts and ask_guest then connected to, and hung
+    # on, for as long as ssh would wait for an address nobody was at.
+    my $mac   = '52:54:00:9c:8b:34';
+    my @stale = ( { ipaddr => '192.168.122.96', mac => $mac, expirytime => 1_788_997_000 } );
+    my @now   = ( { ipaddr => '192.168.122.97', mac => $mac, expirytime => 1_789_000_600 } );
+
+    local @FakeNet::LEASES = ( @stale, @now );
+    is( $hv->lease_ip( 'default', mac => $mac ), '192.168.122.97', 'the newer of the two' );
+
+    local @FakeNet::LEASES = ( @now, @stale );
+    is( $hv->lease_ip( 'default', mac => $mac ), '192.168.122.97', 'in whichever order dnsmasq lists them' );
+};
 
 subtest 'a command that names its own timeout is not called hung before it' => sub {
 
