@@ -11,6 +11,7 @@ use re '/aa';
 use parent 'Trog::HV';
 
 use List::Util qw{first};
+use MIME::Base64();
 use OpenStack::MetaAPI();
 
 use Trog::OpenStack::Auth();
@@ -90,6 +91,14 @@ our $MANAGED_BY = 'trog-provisioner';
 
 # How long to wait for a deleted server to actually go.
 our $DELETE_TIMEOUT = 300;
+
+# How long to wait for a rebuilt one to come back.
+our $REBUILD_TIMEOUT = 600;
+
+# The first compute microversion whose rebuild takes user_data.  Below it the
+# request cannot carry one, and a rebuild without one keeps the payload the
+# server was created with.
+our $REBUILD_MICROVERSION = '2.57';
 
 =head2 config_keys
 
@@ -585,6 +594,97 @@ sub create_guest {
         metadata       => { %{ $spec{metadata} // {} }, managed_by => $MANAGED_BY, domain => $name },
         @optional,
     );
+}
+
+=head2 rebuild_guest($name, user_data => $seed)
+
+Put a fresh root disk from the image under a guest that already exists, with a
+new cloud-init payload, and wait for Nova to call it C<ACTIVE> again.
+
+A rebuild keeps the server, and so its ports, its floating IP and any volume
+attached to it.  What it replaces is the root disk, which is also what
+rebuilding a libvirt guest replaces: its overlay is made again from the base
+image.  C<image> defaults to what F<hypervisors.conf> said, like
+L</create_guest(%spec)>.
+
+The payload is the point.  It holds the key F<bin/provision> just let in, and a
+rebuild that kept the old one would bring the guest up locked against us -- so
+this asks Nova for the microversion that takes it, and a cloud too old to give
+that refuses the request rather than quietly rebuilding from the stale one.
+
+Returns the server, in full.
+
+=cut
+
+sub rebuild_guest {
+    my ( $self, $name, %spec ) = @_;
+
+    my $server = $self->server($name)
+      or die "There is no guest called '$name' to rebuild\n";
+
+    my $image = $spec{image} // $self->image;
+    die "Rebuilding '$name' on " . $self->describe . " needs 'image'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
+      unless defined $image && length $image;
+
+    my %rebuild = ( imageRef => $self->_image_id($image) );
+    $rebuild{user_data} = MIME::Base64::encode_base64( $spec{user_data}, '' )
+      if defined $spec{user_data} && length $spec{user_data};
+
+    $self->_nova( POST => "/servers/$server->{id}/action", { rebuild => \%rebuild }, $REBUILD_MICROVERSION );
+
+    return $self->_wait_for_active( $server->{id}, $name );
+}
+
+# Nova's rebuild wants an image id, and hypervisors.conf may well name one.
+sub _image_id {
+    my ( $self, $image ) = @_;
+
+    return $image if $image =~ m/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i;
+
+    my $found = $self->api->image_from_name($image);
+    $found = $found->[0] if ref $found eq 'ARRAY';
+
+    die "There is no image called '$image' on " . $self->describe . "\n"
+      unless ref $found eq 'HASH' && $found->{id};
+
+    return $found->{id};
+}
+
+# Nova, at a microversion.  MetaAPI's own post sends no version header, so Nova
+# answers it as 2.1 -- whose rebuild has no user_data to send.
+sub _nova {
+    my ( $self, $method, $path, $body, $microversion ) = @_;
+
+    my $compute = $self->api->route->service('compute');
+    my %headers = defined $microversion ? ( 'OpenStack-API-Version' => "compute $microversion" ) : ();
+
+    return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
+}
+
+# Poll until Nova has finished with the server.  ACTIVE with a task still
+# running is a rebuild that has not started yet rather than one that has
+# finished, and ERROR will not change on its own, so it is said at once along
+# with whatever Nova said caused it.
+sub _wait_for_active {
+    my ( $self, $uid, $name, $timeout ) = @_;
+
+    $timeout //= $REBUILD_TIMEOUT;
+    my $deadline = time + $timeout;
+
+    while (1) {
+        my $detail = $self->api->server_from_uid($uid) // {};
+        my $status = uc( $detail->{status} // '' );
+
+        return $detail if $status eq 'ACTIVE' && !$detail->{'OS-EXT-STS:task_state'};
+
+        die "Rebuilding '$name' left it in ERROR: " . ( $detail->{fault}{message} // 'Nova did not say why' ) . "\n"
+          if $status eq 'ERROR';
+
+        last if time >= $deadline;
+        sleep 2;
+    }
+
+    die "The guest '$name' was not ACTIVE ${timeout}s after being rebuilt.\n" . "Check its status, and its console log for what it is doing.\n";
 }
 
 =head2 prepare_host
