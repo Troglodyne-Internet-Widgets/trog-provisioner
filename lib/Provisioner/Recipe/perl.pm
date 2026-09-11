@@ -47,12 +47,16 @@ sub args {
             # the user's bin once they are there, and starman has to be there
             # before anything deferred starts a service with it.
             #
+            # Module names, spelled as CPAN's index spells them: through the
+            # fetch cache cpanm reads that index and matches exactly, where
+            # MetaCPAN's search forgave `starman`.
+            #
             # Not `modules`: bin/new_config hands every render a `modules` of its
             # own, the recipes on the guest, after the recipe's configuration.
             cpan_modules => {
                 type        => 'array',
                 items       => { type => 'string', pattern => '\A[\w:]+\z' },
-                default     => [qw{Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy}],
+                default     => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}],
                 description => 'Modules installed into the new perl as it is built, through the fetch cache when there is one.  Every run, not only the first, so one added here reaches a guest whose perl is already built.',
             },
         },
