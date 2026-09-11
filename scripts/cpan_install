@@ -23,9 +23,9 @@ use Getopt::Long   ();
 
 =head2 DESCRIPTION
 
-How a recipe's C<cpan_deps> are installed on a guest, into the perl the C<perl>
-recipe built.  L<Provisioner::Recipe>'s C<cpan_tasks> queues one call to this
-for each step a recipe declares, and the verbs are the steps':
+How what recipes install from CPAN reaches the perl the C<perl> recipe built:
+that recipe's target calls this once for each step of its C<cpan_deps>, and the
+verbs are the steps' -- see L<Provisioner::Recipe::perl>:
 
 =over 4
 

@@ -111,7 +111,7 @@ subtest 'the four files a guest boots from are ordinary template_files' => sub {
 subtest 'global_defaults: what _global holds when nobody wrote it down' => sub {
     my %defaults = Provisioner::Cookbook->load('ubuntu')->global_defaults;
 
-    is_deeply( \%defaults, { mirror => q{}, cpan_notest => 1 }, 'every setting the schema defaults, at its default' );
+    is_deeply( \%defaults, { mirror => q{} }, 'every setting the schema defaults, at its default' );
 
     # Its absence is how enrich knows to follow the mirror, so a default laid
     # under _global would switch that off on every guest.

@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Path::Tiny();
+
 =head1 Provisioner::Recipe::tcms
 
 =head2 SYNOPSIS
@@ -40,13 +42,6 @@ TODO: allow specification of specific SHA to check out.
 
 =cut
 
-# What the checkout says it needs, queued ahead of this fragment: see
-# Provisioner::Recipe cpan_deps.
-sub cpan_deps {
-    my ( $self, %opts ) = @_;
-    return ( { installdeps => join( '/', map { $_ // q{} } @opts{qw{install_dir domain}} ) . '/tCMS' } );
-}
-
 sub required_recipes {
     my ( $self, %opts ) = @_;
     return (
@@ -66,6 +61,13 @@ sub required_recipes {
                     },
                 },
             );
+        },
+
+        # What the checkout says it needs, installed into the perl that recipe
+        # builds: see Provisioner::Recipe::perl on cpan_deps.
+        perl => sub {
+            my (%opts) = @_;
+            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}}, 'tCMS' )->stringify } ] );
         },
         tpsgi => sub {
 

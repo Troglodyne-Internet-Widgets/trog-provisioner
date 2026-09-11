@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Path::Tiny();
+
 =head1 Provisioner::Recipe::tpsgi
 
 =head2 SYNOPSIS
@@ -38,16 +40,16 @@ TODO: allow specification of specific SHA to check out.
 
 =cut
 
-# What the application says it needs, queued ahead of this fragment -- and so
-# ahead of build_service, which starts it.  See Provisioner::Recipe cpan_deps.
-sub cpan_deps {
-    my ( $self, %opts ) = @_;
-    return ( { installdeps => join( '/', map { $_ // q{} } @opts{qw{install_dir domain}} ) } );
-}
-
 sub required_recipes {
     return (
-        perl       => sub { () },
+        # What the checkout says it needs, installed into the perl that recipe
+        # builds -- in its own target, which runs after this fragment has made
+        # the checkout and before the postrun starts the service: see
+        # Provisioner::Recipe::perl on cpan_deps.
+        perl => sub {
+            my (%opts) = @_;
+            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify } ] );
+        },
         nginxproxy => sub {
             my (%opts) = @_;
             return (

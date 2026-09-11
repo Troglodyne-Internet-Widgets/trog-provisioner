@@ -1715,9 +1715,9 @@ subtest 'no recipe takes a field bin/new_config writes over' => sub {
     unlike( $build, qr/'nginx'|'ufw'/, 'and not the recipes on the guest' );
 };
 
-# The counterpart of the rule above, for CPAN.  A recipe says what it installs
-# in cpan_deps and scripts/cpan_install is the one thing that reaches CPAN, which
-# is what puts every install under cpan_notest.  A
+# The counterpart of the rule above, for CPAN.  A recipe hands what it installs
+# to the perl recipe, whose target reaches CPAN through scripts/cpan_install and
+# nothing else, which is what puts every install under cpan_notest.  A
 # fragment calling cpanm itself goes around both, and the build that finds out
 # is the one where CPAN is down.
 #
@@ -1732,7 +1732,7 @@ subtest 'no fragment calls cpanm itself' => sub {
         $body =~ s/^\s*#.*$//gm;
 
         my ($offender) = $body =~ m/^([^\n]*\bcpanm\b[^\n]*)$/m;
-        is( $offender, undef, ( File::Basename::basename($tt) ) . ' leaves CPAN to its cpan_deps' );
+        is( $offender, undef, ( File::Basename::basename($tt) ) . ' leaves CPAN to the perl recipe' );
     }
 };
 

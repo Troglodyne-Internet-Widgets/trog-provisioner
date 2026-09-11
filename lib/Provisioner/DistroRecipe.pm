@@ -167,11 +167,6 @@ What a distribution takes.
 =item * C<mirror> -- a package mirror for guests to prefer over the
 distribution's own archive.  Empty by default, which is no mirror at all.
 
-=item * C<cpan_notest> -- skip the test suites of what recipes install from
-CPAN.  B<On by default>, for time: see C<cpan_deps> in L<Provisioner::Recipe>.  Off is
-for a build testing what gets installed, where a suite that fails is the thing
-to find.
-
 =item * C<mirror_insecure> -- whether to let apt install from a repository it
 cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
 C<enrich> turns it on when a mirror is configured and off when one is not, which
@@ -207,11 +202,6 @@ sub args {
                 default     => q{},
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
-            },
-            cpan_notest => {
-                type        => 'boolean',
-                default     => 1,
-                description => 'Skip the test suites of what recipes install from CPAN.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs under a source-built perl do not fit.  Turn it off when what you are testing is what gets installed, and a suite that fails is the thing to find.',
             },
             mirror_insecure => {
                 type        => 'boolean',

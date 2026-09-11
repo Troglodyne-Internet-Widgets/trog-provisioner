@@ -1,6 +1,6 @@
 package Provisioner::Recipe::perl;
 
-#ABSTRACT: Build and install the latest perl into /opt/perl5.
+#ABSTRACT: Build and install the latest perl into /opt/perl5, with what other recipes install into it from CPAN.
 
 use 5.041;
 
@@ -23,13 +23,82 @@ Downloads the latest perl, compiles it and slams it into /opt/perl5/$version
 
 Sets up a .bashrc in the install_dir which includes that perl's bindir in $PATH.
 
-Its cpanm comes from the App::cpanminus tarball, and C<cpan_modules> are installed
-into it straight after, both through F<scripts/cpan_install>.  What other recipes install into it is
-their C<cpan_deps>.
+Its cpanm comes from the App::cpanminus tarball, and then C<cpan_modules> and
+C<cpan_deps> are installed into it, all through F<scripts/cpan_install>, which
+is the one thing on a guest that reaches CPAN.
 
 TODO: allow specification of version.
 
+=head2 What other recipes install into it
+
+A recipe that installs from CPAN depends on this one and hands it what to
+install, as C<cpan_deps>.  tpsgi's, which is what its checkout says it needs:
+
+    perl => sub {
+        my (%opts) = @_;
+        return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}} )->stringify } ] );
+    },
+
+C<bin/new_config> merges what every dependant hands over, each list after the
+one before, so this recipe is configured once with all of them; anything
+written under C<perl> for the domain itself comes after those.  Each step is a
+hash naming one of four verbs, which are F<scripts/cpan_install>'s:
+
+    { install     => [ 'Dist::Zilla', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] }
+    { installdeps => '/opt/domains/example.test/tCMS' }
+    { dzil        => '/opt/domains/example.test/checkout' }
+    { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } }
+
+C<install> takes anything cpanm does in place of a module name; C<installdeps>
+is what the distribution in that directory says it needs; C<dzil> is what
+C<dzil authordeps> and then C<dzil listdeps> say is missing there; C<pin>
+installs its module at the version pkg-config reports for that package, asked
+when the step runs.  Any step may add C<< link => [ 'dzil' ] >>, the tools to
+link into F</root/bin> once it has installed them.
+
+The schema holds a step to that: one verb, nothing but C<link> beside it, and
+no word with a quote, a dollar, a backtick, a backslash or a newline in it --
+any of which would stop it reaching cpan_install as one word through a makefile
+line and the shell that runs it.
+
+=head2 When they are installed, and why then
+
+In this recipe's own target, straight after the perl and its C<cpan_modules>,
+in the order they were handed over: there and then, rather than deferred.
+
+That target runs after the fragment of every recipe that depends on this one,
+because C<bin/new_config> puts a required recipe after the last recipe that
+required it.  So a checkout a dependant's fragment makes is there to install
+from.  And it is finished before the deferred work starts, so a service a
+dependant starts in the postrun has its modules by then.  Deferred instead, they
+would be queued behind whatever those dependants had already queued, the
+service start included.
+
+A step that fails stops the makefile, as a perl that fails to build does.
+
 =cut
+
+# A word that reaches cpan_install whole, single-quoted in a makefile line: no
+# quote, dollar, backtick, backslash or newline.
+my %WORD = ( type => 'string', pattern => q{\A[^'"$`\\\\\n]+\z} );
+
+my %STEP = (
+    type                 => 'object',
+    additionalProperties => 0,
+    properties           => {
+        install     => { type => 'array', minItems => 1, items => {%WORD} },
+        installdeps => {%WORD},
+        dzil        => {%WORD},
+        pin         => {
+            type                 => 'object',
+            additionalProperties => 0,
+            required             => [qw{module pkgconfig}],
+            properties           => { module => {%WORD}, pkgconfig => {%WORD} },
+        },
+        link => { type => 'array', items => {%WORD} },
+    },
+    oneOf => [ map { { required => [$_] } } qw{install installdeps dzil pin} ],
+);
 
 sub args {
     return (
@@ -41,10 +110,8 @@ sub args {
         properties => {
             user => { type => 'string' },
 
-            # Installed while the perl is built rather than queued like a
-            # recipe's cpan_deps: build_latest_perl.sh links these tools into
-            # the user's bin once they are there, and starman has to be there
-            # before anything deferred starts a service with it.
+            # Installed while the perl is built: build_latest_perl.sh links these
+            # tools into the user's bin once they are there.
             #
             # Module names, spelled as CPAN's index spells them: Starman, where
             # MetaCPAN's search forgave `starman`.
@@ -57,8 +124,45 @@ sub args {
                 default     => [qw{Test2 Devel::NYTProf Starman Perl::Critic Perl::Tidy}],
                 description => 'Modules installed into the new perl as it is built.  Every run, not only the first, so one added here reaches a guest whose perl is already built.',
             },
+            cpan_deps => {
+                type        => 'array',
+                default     => [],
+                items       => \%STEP,
+                description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin, and may add link.  Installed in this target after cpan_modules, in the order handed over.',
+            },
+            cpan_notest => {
+                type        => 'boolean',
+                default     => 1,
+                description =>
+                  'Skip the test suites of what is installed into this perl, cpan_modules and cpan_deps alike.  On by default: a guest has ninety minutes for its makefile and deferred work together, and the suites of everything a recipe like trogrunner installs do not fit.  Turn it off when what you are testing is what gets installed.  Set in _global to reach every guest, which is what the provisioning-recipes skill scratch_config --cpan-tests does.',
+            },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+C<cpan_deps> as C<cpan_steps>, the words each step hands F<scripts/cpan_install>
+after C<--notest>.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    $opts{cpan_steps} = [ map { [ _words($_) ] } @{ $opts{cpan_deps} } ];
+    return %opts;
+}
+
+sub _words {
+    my ($step) = @_;
+
+    my @link = map { ( '--link', $_ ) } @{ $step->{link} // [] };
+    return ( @link, 'install', @{ $step->{install} } )                   if $step->{install};
+    return ( @link, 'pin',     @{ $step->{pin} }{qw{pkgconfig module}} ) if $step->{pin};
+
+    my ($verb) = grep { exists $step->{$_} } qw{installdeps dzil};
+    return ( @link, $verb, $step->{$verb} );
 }
 
 sub template_files {

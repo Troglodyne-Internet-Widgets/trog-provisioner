@@ -192,12 +192,20 @@ subtest 'no fleet is a legitimate answer' => sub {
     unlike( $recipe->render(%$vars), qr/hypervisors\.conf/, 'and nothing installs it' );
 };
 
-# The queued CPAN tasks, in the order they will run, each as the words
-# cpan_install will be handed.
+# What it hands the perl recipe, as that recipe's target will install it: each
+# cpan_install, as the words it is handed.
 sub cpan_steps {
     my ( $recipe, $vars ) = @_;
-    my @queued = grep { index( $_, '/cpan_install' ) >= 0 } split( "\n", $recipe->render(%$vars) );
-    return map { [m/'([^']*)'/g] } @queued;
+
+    my %required = $recipe->required_recipes(%$vars);
+    my %handed   = $required{perl}->(%$vars);
+    my $perl     = Provisioner::Cookbook->load( 'perl', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed ) );
+    return map { [m/'([^']*)'/g] } @lines;
 }
 
 subtest 'Sys::Virt is pinned, and pinned before anything resolves dependencies' => sub {
@@ -222,7 +230,7 @@ subtest 'an unnamed libvirt version is asked of the guest rather than guessed' =
 
     # A recipe cannot load Trog::HV to ask a hypervisor, so a written-down
     # default would be a guess that goes stale.  The guest answers for itself,
-    # when the task runs.
+    # when the step runs.
     is_deeply( [ @{ $steps[0] }[ -3 .. -1 ] ], [qw{pin libvirt Sys::Virt}], 'at whatever pkg-config says the guest libvirt is' );
 };
 
@@ -235,12 +243,12 @@ subtest 'Dist::Zilla is installed, and linked where the next step finds it' => s
     ok( $words{'--link'} && $words{dzil}, 'and it is linked into /root/bin once it is there' );
 };
 
-subtest 'nothing reaches CPAN except through cpan_install' => sub {
+subtest 'nothing reaches CPAN from its own fragment' => sub {
     my ( undef, $recipe, $vars ) = built();
-    my @queued = grep { index( $_, 'queue_postrun_task' ) >= 0 } split( "\n", $recipe->render(%$vars) );
 
-    ok( scalar @queued, 'something is queued' );
-    is_deeply( [ grep { index( $_, 'cpanm' ) >= 0 } @queued ], [], 'and none of it runs cpanm itself: all of it goes through cpan_install' );
+    # All of it is the perl recipe's to install, in that recipe's target, which
+    # runs after this fragment has made the checkout.
+    unlike( $recipe->render(%$vars), qr/cpanm|cpan_install/, 'the fragment installs nothing from CPAN itself' );
 };
 
 subtest 'the checkout is optional, which is the case koan needs' => sub {

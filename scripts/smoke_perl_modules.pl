@@ -6,8 +6,8 @@ use warnings;
 use File::Basename qw{basename};
 
 # The command that installs a distribution's dependencies, with the directory
-# to be appended: cpan_install's installdeps, as admincode queues it, the way every
-# recipe's cpan_deps are installed.
+# to be appended: cpan_install's installdeps, as admincode queues it, the way the
+# perl recipe installs every step it is handed.
 my ( $REPO_BASEDIR, @INSTALLDEPS ) = @ARGV;
 
 die "Must pass repo basedir as first arg"                                     unless $REPO_BASEDIR;

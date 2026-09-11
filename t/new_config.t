@@ -217,13 +217,11 @@ subtest 'apply_global_defaults: every recipe sees the distribution defaults' => 
 
     my %global = ( domain => 'guest.test.test' );
     Trog::Provisioner::Config::Generator::apply_global_defaults( 'Provisioner::Recipe::ubuntu', \%global );
-    is( $global{mirror},      q{}, 'a default nobody wrote down is there for every recipe to see' );
-    is( $global{cpan_notest}, 1,   'including that CPAN test suites are skipped, which every recipe that declares cpan_deps reads' );
+    is( $global{mirror}, q{}, 'a default nobody wrote down is there for every recipe to see' );
 
-    my %said = ( domain => 'guest.test.test', mirror => 'http://m.test.test/ubuntu', cpan_notest => 0 );
+    my %said = ( domain => 'guest.test.test', mirror => 'http://m.test.test/ubuntu' );
     Trog::Provisioner::Config::Generator::apply_global_defaults( 'Provisioner::Recipe::ubuntu', \%said );
-    is( $said{mirror},      'http://m.test.test/ubuntu', 'what _global said wins over the default' );
-    is( $said{cpan_notest}, 0,                           'the knob included' );
+    is( $said{mirror}, 'http://m.test.test/ubuntu', 'what _global said wins over the default' );
 };
 
 # A stand-in for the sftp session, which is the only part of the salvage check

@@ -111,6 +111,6 @@ h="$$(getent passwd '[% user %]' | cut -d: -f6)"; runuser -u '[% user %]' -- ssh
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
-[%# What this installs from CPAN is its cpan_deps, which Provisioner::Recipe
-    queues ahead of this fragment: Sys::Virt pinned, Dist::Zilla, and what the
-    checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]
+[%# What this installs from CPAN it hands the perl recipe, whose target installs
+    it once this fragment has made the checkout: Sys::Virt pinned, Dist::Zilla,
+    and what the checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]

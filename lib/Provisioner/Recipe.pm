@@ -13,7 +13,6 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
-use Provisioner::Utils();
 use File::Copy();
 use File::Slurper::Temp();
 
@@ -293,103 +292,6 @@ sub dep_conflicts {
     return ();
 }
 
-=head3 @steps = $recipe->cpan_deps(%opts)
-
-What this recipe installs from CPAN, into the perl the C<perl> recipe builds, as
-a list of steps taken in order.  Each is a hash with one verb:
-
-    { install     => [ 'Dist::Zilla', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] }
-    { installdeps => '/opt/domains/example.test/tCMS' }
-    { dzil        => '/opt/domains/example.test/checkout' }
-    { install     => ['Sys::Virt'], pin_to_pkgconfig => 'libvirt' }
-
-C<install> takes anything cpanm does in place of a module name.  C<installdeps>
-is what the distribution in that directory says it needs; C<dzil> is what
-C<dzil authordeps> and then C<dzil listdeps> say is missing there.
-C<pin_to_pkgconfig> installs its one module at the version pkg-config reports
-for that package, asked when the step runs.  Any step may add
-C<< link => [ 'dzil' ] >>, the tools to link into F</root/bin> once it has
-installed them.
-
-Empty by default.  A recipe that declares any depends on C<perl>, and each step
-becomes one deferred task, queued ahead of this recipe's own fragment -- see
-C<cpan_tasks>.  How a task reaches CPAN is
-F<scripts/cpan_install>'s business, which is the reason a recipe declares these
-rather than writing C<cpanm> into its fragment: there is one place that
-decides, and C<t/recipes.t> refuses a fragment that calls cpanm itself.
-
-B<Asked before validation as well as after.>  C<required_recipes> asks whether
-there are any, with whatever the domain wrote, so building the list must not die
-on an option that has no value yet.
-
-=cut
-
-sub cpan_deps {
-    return ();
-}
-
-=head3 @lines = $recipe->cpan_tasks(%opts)
-
-C<cpan_deps> as the lines of a fragment: one C<queue_postrun_task> per step,
-calling F<scripts/cpan_install> with the step's verb, and with C<--notest>
-unless C<cpan_notest> is off.  C<render> puts them ahead of the fragment.
-
-Every word goes into the queue single-quoted inside one double-quoted argument,
-so a requirement like C<< Moo~>= 2.004 >> arrives as the one word it is.  A word
-holding a quote, a dollar, a backtick, a backslash or a newline dies here,
-naming the recipe, rather than this working out a quoting that survives make,
-dash and the bash that runs the queue: no module name needs one, and a step
-that would is the recipe's mistake to hear about now rather than the guest's to
-find later.  So does a step that is not a hash, names no verb or two, or names
-a key it does not know.
-
-=cut
-
-sub cpan_tasks {
-    my ( $self, %opts ) = @_;
-
-    my $recipe = $self->recipe_name;
-    my $bin    = $opts{script_dir} // '/root/bin';
-
-    my @tasks;
-    foreach my $step ( $self->cpan_deps(%opts) ) {
-        die "$recipe cpan_deps: every step is a hash, and this one is not\n" unless ref $step eq 'HASH';
-
-        my @unknown = grep { !m/\A(?:install|installdeps|dzil|pin_to_pkgconfig|link)\z/ } sort keys %$step;
-        die "$recipe cpan_deps: a step names what no step can: @unknown\n" if @unknown;
-
-        my @verbs = grep { exists $step->{$_} } qw{install installdeps dzil};
-        die "$recipe cpan_deps: every step names one of install, installdeps or dzil, and this one names " . ( @verbs ? "@verbs" : 'none' ) . "\n"
-          unless @verbs == 1;
-        my ($verb) = @verbs;
-
-        my @words = ( "$bin/cpan_install", ( ( $opts{cpan_notest} // 1 ) ? '--notest' : () ), map { ( '--link', $_ ) } @{ Provisioner::Utils::coerce_arrayref( $step->{link} ) } );
-
-        if ( $verb eq 'install' ) {
-            my @modules = @{ Provisioner::Utils::coerce_arrayref( $step->{install} ) };
-            die "$recipe cpan_deps: an install step installs nothing\n" unless @modules;
-
-            if ( defined $step->{pin_to_pkgconfig} ) {
-                die "$recipe cpan_deps: pin_to_pkgconfig pins one module, and this step names " . scalar(@modules) . "\n" unless @modules == 1;
-                push( @words, 'pin', $step->{pin_to_pkgconfig}, @modules );
-            }
-            else {
-                push( @words, 'install', @modules );
-            }
-        }
-        else {
-            die "$recipe cpan_deps: pin_to_pkgconfig goes with install, not $verb\n" if defined $step->{pin_to_pkgconfig};
-            push( @words, $verb, $step->{$verb} );
-        }
-
-        my @unsafe = grep { !defined || !length || m/['"\$`\\\n]/ } @words;
-        die "$recipe cpan_deps: these cannot be written into a queued task safely: " . join( ', ', map { defined ? "'$_'" : 'undef' } @unsafe ) . "\n" if @unsafe;
-
-        push( @tasks, qq{$bin/queue_postrun_task "} . join( ' ', map { "'$_'" } @words ) . q{"} );
-    }
-    return @tasks;
-}
-
 =head3 %required = $recipe->required_recipes(%opts)
 
 If a recipe depends on another recipe being present, we need to build it as a synthetic recipe and append it to the list of things to provision.
@@ -431,9 +333,6 @@ sub required_recipes {
     # for itself.
     my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
-
-    # And a recipe that installs from CPAN installs into the perl that one builds.
-    push( @required, perl => sub { return () } ) if $self->cpan_deps(%opts);
 
     return @required;
 }
@@ -943,23 +842,13 @@ sub testdeps {
 
 =head3 $output = $recipe->render(%template_vars)
 
-Render recipe's makefile template, with C<cpan_tasks> ahead of it.
-
-Ahead, so that what a recipe installs from CPAN is queued before anything its
-own fragment queues -- a service started in the postrun has its modules by
-then.  They are still deferred work, so they run after every target in the
-makefile, the checkout they install for included.
+Render recipe's makefile template.
 
 =cut
 
 sub render {
     my ($self) = shift;
-
-    my @tasks    = $self->cpan_tasks( $self->validated( $self->vars(), @_ ) );
-    my $fragment = $self->render_file( $self->{template}, @_ );
-    return $fragment unless @tasks;
-
-    return join( '', '# What ' . $self->recipe_name . " installs from CPAN: its cpan_deps.\n", map { "$_\n" } @tasks ) . $fragment;
+    return $self->render_file( $self->{template}, @_ );
 }
 
 =head3 $bool = $recipe->has_global_template()

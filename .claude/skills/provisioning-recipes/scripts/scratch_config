@@ -168,7 +168,7 @@ sub build {
 
     # CPAN test suites, when what the build is testing is what gets installed.
     # Otherwise skipped, as on a real guest: see the skill, and
-    # Provisioner::DistroRecipe's cpan_notest.
+    # Provisioner::Recipe::perl's cpan_notest, which _global reaches.
     if ( $opts{cpan_tests} ) {
         my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
         $recipes->{_base}{_global}{cpan_notest} = 0;

@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Path::Tiny();
+
 use YAML::XS();
 use Text::Xslate();
 use File::Slurper();
@@ -159,26 +161,19 @@ my $ED25519_BITS = 256;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
-sub required_recipes {
+=head3 required_recipes
 
-    # perl only, and it is the whole of what a runner was missing: it builds
-    # /opt/perl5/$version and puts perl, cpanm, prove and perlcritic in the
-    # user's bin.  Everything else here is CPAN or configuration.
-    return ( perl => sub { () } );
-}
-
-=head3 cpan_deps
-
-In this order, and the order is the point:
+perl, and what goes into it from CPAN, handed over as its C<cpan_deps>.  In this
+order, and the order is the point:
 
 =over 4
 
 =item * B<Sys::Virt, pinned>, before anything resolves dependencies.  Left to a
 dependency list, cpanm takes the newest, whose Makefile.PL wants a libvirt-dev
-far newer than this guest has -- and says so forty minutes into the queue, in a
+far newer than this guest has -- and says so forty minutes into the build, in a
 message about pkg-config rather than about ordering.  Pinned to
 C<libvirt_version> when one is named, and otherwise to what pkg-config says the
-guest's libvirt is when the task runs, which is right whenever the runner and
+guest's libvirt is when the step runs, which is right whenever the runner and
 the hypervisor are on the same distribution.
 
 =item * B<Dist::Zilla>, linked into F</root/bin>, because nothing else installs
@@ -187,23 +182,36 @@ it and it is how this distribution says what it needs.
 =item * B<What the checkout needs>, and what each of C<deps_from> needs, by
 dzil.
 
-=item * C<extra_modules>.
-
 =back
+
+Worked out of this recipe's configuration validated, since the dependency is
+handed it raw and C<checkout_dir> has a default that only validation fills in.
 
 =cut
 
-sub cpan_deps {
-    my ( $self, %opts ) = @_;
+sub required_recipes {
+    my ($self) = @_;
 
-    my $libvirt = $opts{libvirt_version} // q{};
-    my @extra   = @{ $opts{extra_modules} // [] };
+    # perl is the whole of what a runner was missing: it builds
+    # /opt/perl5/$version and puts perl, cpanm, prove and perlcritic in the
+    # user's bin.  Everything else here is CPAN or configuration.
     return (
-        ( length $libvirt ? { install => ["Sys::Virt\@$libvirt"] } : { install => ['Sys::Virt'], pin_to_pkgconfig => 'libvirt' } ),
-        { install => ['Dist::Zilla'], link => ['dzil'] },
-        ( ( $opts{checkout} // 1 ) ? { dzil => join( '/', map { $_ // q{} } @opts{qw{install_dir domain checkout_dir}} ) } : () ),
-        ( map { { dzil => $_ } } @{ $opts{deps_from} // [] } ),
-        ( @extra ? { install => \@extra } : () ),
+        perl => sub {
+            my %opts = $self->validate(@_);
+            my $sys_virt =
+              length $opts{libvirt_version}
+              ? { install => ["Sys::Virt\@$opts{libvirt_version}"] }
+              : { pin     => { module => 'Sys::Virt', pkgconfig => 'libvirt' } };
+
+            return (
+                cpan_deps => [
+                    $sys_virt,
+                    { install => ['Dist::Zilla'], link => ['dzil'] },
+                    ( $opts{checkout} ? { dzil => Path::Tiny::path( @opts{qw{install_dir domain checkout_dir}} )->stringify } : () ),
+                    ( map { { dzil => $_ } } @{ $opts{deps_from} } ),
+                ],
+            );
+        },
     );
 }
 
@@ -243,8 +251,7 @@ sub args {
             # worked out from another recipe: a runner that manages its own
             # repositories is the case this exists for, and only the person who
             # configured that knows where they land.
-            deps_from     => { type => 'array', items => { type => 'string' }, default => [] },
-            extra_modules => { type => 'array', items => { type => 'string' }, default => [] },
+            deps_from => { type => 'array', items => { type => 'string' }, default => [] },
 
             # The runner's ipmap.cfg.  Defaults sit on the members rather than
             # on config itself, or a domain that sets one member would lose the
