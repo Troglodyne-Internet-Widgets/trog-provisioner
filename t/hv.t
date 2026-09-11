@@ -310,7 +310,7 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 subtest 'a guest gets a TPM only where one means something' => sub {
     my ( $asked, $answer );
     my $mock = Test::MockModule->new('Trog::HV');
-    $mock->redefine( capture => sub { $asked = $_[1]; return $answer } );
+    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return $answer } );
 
     # Both halves: hardware here, and swtpm to emulate one there.  The command
     # says yes or says nothing, so anything that is not yes is no.
@@ -430,7 +430,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
     $mock->redefine( sftp => sub { die "nothing should be reaching sftp any more\n" } );
 
     # The connection is built from the URI, and only once.
-    is( $hv->capture('id -un'), 'output of id -un', 'capture returns stdout' );
+    is( $hv->capture_cmd('id -un'), 'output of id -un', 'capture returns stdout' );
     my %opts = @connected;
     is( $opts{host}, 'fakehv', 'host from the URI' );
     is( $opts{user}, 'root',   'user from the URI' );
@@ -440,7 +440,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
 
     # Arguments go over as a list; Net::OpenSSH does the escaping we used to.
     my $nasty = "a b\tc 'quoted' \$HOME * ; rm -rf /";
-    is( $hv->run( 'touch', $nasty ), 0, 'run returns the exit code' );
+    is( $hv->run_cmd( 'touch', $nasty ), 0, 'run returns the exit code' );
     is_deeply( $commands[-1]{cmd}, [ 'touch', $nasty ], 'unmangled, not pre-quoted' );
 
     # Content is poured down a command's stdin rather than put over sftp.
@@ -693,7 +693,7 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
 
     my @ran;
     my $mock = Test::MockModule->new('Trog::HV');
-    $mock->redefine( run => sub { my ( $self, @argv ) = @_; push @ran, \@argv; return 0 } );
+    $mock->redefine( run_cmd => sub { my ( $self, @argv ) = @_; push @ran, \@argv; return 0 } );
 
     ok( $hv->pool_takes_direct_io, 'a pool whose filesystem takes the write says so' );
 
@@ -707,10 +707,10 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
     # O_DIRECT write on a current kernel and ZFS has since 2.3, so a list of
     # names that supposedly cannot would today be wrong about both of them.
     $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
-    $mock->redefine( run => sub { return 1 } );
+    $mock->redefine( run_cmd => sub { return 1 } );
     ok( !$hv->pool_takes_direct_io, 'and one that refuses it says that instead' );
 
-    $mock->redefine( run => sub { die "asked twice\n" } );
+    $mock->redefine( run_cmd => sub { die "asked twice\n" } );
     ok( !$hv->pool_takes_direct_io, 'the answer is kept, a build asking once per disk' );
 };
 
@@ -784,7 +784,7 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     $mock->redefine( write_text   => sub { $written{ $_[1] } = $_[2]; return 1 } );
     $mock->redefine( refresh_pool => sub { 1 } );
     $mock->redefine( iso_maker    => sub { 'xorriso' } );
-    $mock->redefine( run          => sub { my ( $s, @c ) = @_; push @ran, [@c]; return 0 } );
+    $mock->redefine( run_cmd      => sub { my ( $s, @c ) = @_; push @ran, [@c]; return 0 } );
 
     my $path = quietly(
         sub {
@@ -815,7 +815,7 @@ subtest 'the base image is fetched once' => sub {
     my $mock = Test::MockModule->new('Trog::HV');
     $mock->redefine( volume_path  => sub { undef } );
     $mock->redefine( refresh_pool => sub { 1 } );
-    $mock->redefine( run          => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
+    $mock->redefine( run_cmd      => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
 
     quietly( sub { $hv->base_image('https://example.test/noble.img') } );
 

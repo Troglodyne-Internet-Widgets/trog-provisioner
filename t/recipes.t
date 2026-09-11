@@ -18,6 +18,7 @@ t/recipes.t - every recipe renders, and refuses what it should
 
 use FindBin;
 use FindBin::libs;
+use Provisioner::Utils();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
@@ -212,7 +213,7 @@ sub rejects_missing {
 my $tmp  = tempdir( CLEANUP => 1 );
 my $ddir = "$tmp/test.test.test";
 mkdir $ddir;
-IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$ddir/key.rsa", qw{-N}, '', qw{-q} ], \undef, \undef, undef );
+Provisioner::Utils::write_ssh_keypair( "$ddir/key.rsa", RSA => 2048, 'recipes.t' );
 
 # Build list of known modules with required input data
 my %required_config = (

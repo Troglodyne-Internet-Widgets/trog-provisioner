@@ -68,7 +68,7 @@ subtest 'the port the far side listens on' => sub {
     my $asked;
 
     $mock->redefine(
-        capture => sub {
+        capture_cmd => sub {
             $asked = $_[1];
             return "2222\n";
         }
@@ -80,7 +80,7 @@ subtest 'the port the far side listens on' => sub {
     # says 22.  Test::NoWarnings at the end of this file is the assertion that
     # nothing was said about it -- this used to warn, and now runs against
     # ourselves on every provision.
-    $mock->redefine( capture => sub { return "\n" } );
+    $mock->redefine( capture_cmd => sub { return "\n" } );
     is( remote()->sshd_port, 22, 'and 22 when it says nothing' );
 };
 

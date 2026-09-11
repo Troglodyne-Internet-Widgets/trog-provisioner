@@ -17,16 +17,16 @@ t/recipes-remotetests.t - the recipes, against a real guest (AUTHOR_TESTING only
 
 use FindBin;
 use FindBin::libs;
+use Provisioner::Utils();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+use Provisioner::Cookbook();
 use YAML::XS();
-use File::Find;
 use File::Temp qw{tempdir tempfile};
-use IPC::Run3();
 use File::Touch;
 use File::Copy;
 
@@ -50,29 +50,33 @@ my $hv_mock = Test::MockModule->new('Trog::HV');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
 
-# test everything available.
-my @available;
-File::Find::find(
-    {
-        wanted => sub {
-            my $object = $_;
-            return unless ( -f $object && $object =~ m/\.pm$/ );
-            my ($name) = $object =~ m/(.+)\.pm$/;
-            push( @available, $name );
-        },
-    },
-    "$FindBin::Bin/../lib/Provisioner/Recipe/"
-);
+# garage, matrix and trogrunner each keep a file for the guest in the secret
+# store, so new_config opens the store to put it there.  That needs a store to
+# open, and its password handed in up front -- the way Trog::Credentials
+# documents for a run with nobody at a keyboard, since the answer to a prompt
+# here is undef and the run dies.  Both are throwaways in this test's own
+# configuration directory, built the way t/new_config-secrets.t builds one.
+require Trog::Config;
+require Trog::Credentials;
+require Trog::Secrets;
+Trog::Secrets->write( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
+Trog::Credentials->remember( keepass => 'throwaway' );
 
-# Treat 'data' as special
-@available = grep { $_ ne 'data' } @available;
-
-#XXX hardcoded
-my $test_ip = '192.168.1.40';
+# Every recipe there is, by the name the configuration uses.  The Cookbook's
+# answer rather than a walk of the directory, which also found each distro
+# subclass under Ubuntu/ and so tested most recipes twice.  data is tested
+# first, on its own, below.
+my @available = grep { $_ ne 'data' } Provisioner::Cookbook->names();
 
 my $tld     = 'test.test';
 my $aliases = join( ".$tld=data.$tld\n", @available ) . ".$tld=data.$tld";
-my $ips     = join( ".$tld=$test_ip\n",  @available ) . ".$tld=$test_ip";
+
+# One address per recipe, each its own domain, out of the pool -- which is where
+# addresses have come from since ips.db.  The [ips] section this used to write,
+# handing every recipe the same address, is not read by anything any more.  A
+# hundred is more than there are recipes, and none is the gateway or the .50
+# this ipmap says is us.
+my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
 
 # Populate stuff needed by recipes
 my $tmpdir = tempdir( CLEANUP => 1 );
@@ -83,7 +87,7 @@ mkdir "$tmpdir/data/data.test.test";
 mkdir "$tmpdir/domains";
 mkdir "$tmpdir/data/backup.test.test";
 mkdir "$tmpdir/data/backupdestination.test.test";
-IPC::Run3::run3( [ qw{ssh-keygen -t rsa -b 2048 -f}, "$tmpdir/data/backup.test.test/backup.rsa", qw{-N}, '', qw{-q} ], \undef, \undef, undef );
+Provisioner::Utils::write_ssh_keypair( "$tmpdir/data/backup.test.test/backup.rsa", RSA => 2048, 'recipes-remotetests.t' );
 die "Could not create backup.rsa: $@ $?" unless -f "$tmpdir/data/backup.test.test/backup.rsa";
 File::Copy::copy( "$tmpdir/data/backup.test.test/backup.rsa", "$tmpdir/data/backupdestination.test.test/backup.rsa" );
 File::Touch::touch("$tmpdir/dotfiles/test");
@@ -102,11 +106,8 @@ resolvers=127.0.0.1, 192.168.1.254, 8.8.8.8, 1.1.1.1
 bridge_devname=ens4
 dhcp_devname=ens3
 [ip_pool]
-addresses=
-cidr=
-[ips]
-data.$tld=$test_ip
-$ips
+addresses=$pool
+
 [aliases]
 $aliases
 [nameservers]
@@ -115,6 +116,12 @@ ns2=ns2.test.test";
 
 #XXX hate having to hardcode this, should really make this a toplevel thing in recipes
 my %recipes_raw = (
+
+    # Required, and neither has a default that could mean anything: a mirror of
+    # no release, and a shipper with nowhere to ship.  The same minimum
+    # t/recipes.t gives them.
+    aptmirror  => { releases => ['noble'] },
+    logshipper => { host     => 'logs.test.test' },
 
     # Both of these are full releases on purpose.  The archives they come from
     # publish one artifact per release, so a series like 7.1.0 or 10.11 is a
@@ -256,7 +263,13 @@ done_testing();
 
 sub test_recipe {
     my $recipe = shift;
-    require_ok("$FindBin::Bin/../lib/Provisioner/Recipe/$recipe.pm") unless Provisioner::Utils::already_required("Provisioner/Recipe/$recipe.pm");
+
+    # By module name, never by path.  A file required once by path and once by
+    # name is compiled twice -- and data.pm is reached by name as soon as
+    # new_config loads Provisioner::Recipe::Ubuntu::data, whose use parent
+    # names it -- so its second compile redefined every sub in it, which FATAL
+    # warnings make a death.
+    require_ok("Provisioner::Recipe::$recipe");
 
     my %opt = (
 

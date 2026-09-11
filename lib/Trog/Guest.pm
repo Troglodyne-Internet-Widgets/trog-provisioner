@@ -139,12 +139,12 @@ sub wait_for_cloud_init {
     $domain //= $self->name;
 
     print "Waiting up to $timeout for Cloud-init to finish...\n";
-    my $rc = $self->run(qq{sudo timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
+    my $rc = $self->run_cmd(qq{sudo timeout $timeout bash -c 'until grep "Boot configuration complete." /var/log/cloud-init-output.log; do sleep 1; done;'});
     print "Done!\n";
     die 'Cloud init reported failure on ' . $self->describe . ", investigate the machine\n" if $rc;
 
     # See if we got a lying exit code above.
-    my $raw    = $self->capture('sudo cloud-init analyze dump');
+    my $raw    = $self->capture_cmd('sudo cloud-init analyze dump');
     my $parsed = eval { JSON::MaybeXS->new( utf8 => 1 )->decode($raw) };
     die "cloud-init analyze dump on " . $self->describe . " did not return a JSON array\n"
       unless ref $parsed eq 'ARRAY';
@@ -157,7 +157,7 @@ sub wait_for_cloud_init {
 
         print "$target failed during $stage, re-running...\n";
         $self->run_sudo( qw{rm}, "/var/lib/cloud/instances/$domain/sem/$stage\_$target" );
-        print $self->capture("sudo cloud-init single --name $target") . "\n\n";
+        print $self->capture_cmd("sudo cloud-init single --name $target") . "\n\n";
     }
     return 1;
 }
@@ -182,18 +182,18 @@ sub wait_for_makefile {
     my $atq = qq{sudo timeout $timeout bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     print "Waiting up to $timeout for ATD queue to flush...\n";
-    $self->run($atq);
+    $self->run_cmd($atq);
 
     print "Waiting up to $timeout for Makefile payload to start...\n";
-    $self->run(qq{sudo timeout $timeout bash -c 'until [ -f $log ]; do sleep 1; done;'});
+    $self->run_cmd(qq{sudo timeout $timeout bash -c 'until [ -f $log ]; do sleep 1; done;'});
 
     print "Waiting up to $timeout for Makefile payload to finish...\n";
-    $self->run(qq{sudo timeout $timeout bash -c 'while lsof | grep $log; do sleep 1; done;'});
+    $self->run_cmd(qq{sudo timeout $timeout bash -c 'while lsof | grep $log; do sleep 1; done;'});
 
     print "Waiting up to $timeout for any makefile queued ATD jobs to flush...\n";
-    $self->run($atq);
+    $self->run_cmd($atq);
 
-    print "Last log:\n" . ( $self->capture("sudo tail $log") // '' ) . "\n";
+    print "Last log:\n" . ( $self->capture_cmd("sudo tail $log") // '' ) . "\n";
     print "\nDone!\n";
     return 1;
 }

@@ -170,7 +170,7 @@ sub transfer_user {
     return scalar getpwuid($<) if $self->is_local;
     return $self->ssh_user     if defined $self->ssh_user;
 
-    my $who = $self->capture('id -un');
+    my $who = $self->capture_cmd('id -un');
     chomp $who if defined $who;
     return $who;
 }
@@ -179,7 +179,7 @@ sub authorized_keys {
     my ($self) = @_;
     return "$ENV{HOME}/.ssh/authorized_keys" if $self->is_local;
 
-    my $home = $self->capture('echo $HOME');
+    my $home = $self->capture_cmd('echo $HOME');
     chomp $home if defined $home;
     die 'Could not determine the home directory of the transfer user on ' . $self->describe . "\n"
       unless defined $home && length $home;
@@ -195,7 +195,7 @@ sub sshd_port {
     # is what sshd actually uses -- reading only sshd_config finds the shipped
     # default and misses the answer.  Last match wins for the same reason: the
     # Include comes first, and sshd takes the first value it is given.
-    my $port = $self->capture(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
+    my $port = $self->capture_cmd(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
     chomp $port if defined $port;
 
     # No Port line at all means 22.  That is sshd's own default rather than a
@@ -236,19 +236,24 @@ sub ssh {
 
 =head1 RUNNING THINGS
 
-=head2 capture($shell_command)
+=head2 capture_cmd($shell_command)
 
 Takes a shell string -- pipelines and all -- and returns its standard output.
 
-=head2 run(@argv)
+=head2 run_cmd(@argv)
 
 Takes an argv list and returns the exit code.  The arguments are escaped for
 you, so they may contain anything.  A single argument is handed to the far
 side's shell instead, which is how you write a pipeline.
 
+Named for what they do rather than C<run> and C<capture>: those are the names
+Perl::Critic::Policy::PreferredBinaries reads as a local runner, and these run
+their command on whatever machine this is -- usually another one, where advice
+to use a perl module instead makes no sense.
+
 =cut
 
-sub capture {
+sub capture_cmd {
     my ( $self, $cmd ) = @_;
     if ( $self->is_local ) {
 
@@ -263,7 +268,7 @@ sub capture {
     return $self->_unhang( $cmd, sub { ( $self->ssh->cmd($cmd) )[0] } );
 }
 
-sub run {
+sub run_cmd {
     my ( $self, @argv ) = @_;
     return system(@argv) >> 8 if $self->is_local;
 
@@ -375,7 +380,7 @@ sub run_sudo {
     my ( $self, @argv ) = @_;
 
     # A local sudo has our own terminal to ask at, so let it.
-    return $self->run( 'sudo', @argv ) if $self->is_local;
+    return $self->run_cmd( 'sudo', @argv ) if $self->is_local;
     return $self->_run_sudo_attempt( 0, @argv );
 }
 
@@ -491,7 +496,7 @@ sub file_exists {
         close $fh;
         return 1;
     }
-    return $self->run( qw{test -f}, $path ) == 0 ? 1 : 0;
+    return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
 }
 
 sub mkpath {
@@ -502,11 +507,11 @@ sub mkpath {
     }
 
     foreach my $path (@paths) {
-        next if $self->run( qw{mkdir -p}, $path ) == 0;
+        next if $self->run_cmd( qw{mkdir -p}, $path ) == 0;
 
         # Somewhere above it belongs to root.  Make it anyway, then hand it to
         # the login user, who is the one that will be writing into it.
-        my $user = $self->ssh_user // $self->capture('id -un');
+        my $user = $self->ssh_user // $self->capture_cmd('id -un');
         chomp $user if defined $user;
         return 0    if $self->run_sudo( qw{mkdir -p}, $path );
         $self->run_sudo( 'chown', "$user:", $path );
@@ -520,7 +525,7 @@ sub remove {
         unlink @paths;
         return 1;
     }
-    return $self->run( qw{rm -f}, @paths ) == 0;
+    return $self->run_cmd( qw{rm -f}, @paths ) == 0;
 }
 
 sub remove_tree {
@@ -529,7 +534,7 @@ sub remove_tree {
         File::Path::remove_tree(@paths);
         return 1;
     }
-    return $self->run( qw{rm -rf}, @paths ) == 0;
+    return $self->run_cmd( qw{rm -rf}, @paths ) == 0;
 }
 
 sub list_dir {
@@ -538,7 +543,7 @@ sub list_dir {
 
     # ls rather than a listing over the connection: sftp is not used here at
     # all, and for the same reason -- see above.
-    my $listing = $self->capture("ls -1 $path 2>/dev/null") // '';
+    my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
     return grep { length } split( "\n", $listing );
 }
 
@@ -630,7 +635,7 @@ sub append_line {
 
     # grep decides whether it is already there, on the far side, so the file
     # never has to make the trip.
-    return 1 if $self->run( qw{grep -qxF --}, $line, $path ) == 0;
+    return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
 
     return $self->_pour( { stdin_data => "$line\n" }, $path, append => 1 );
 }
@@ -691,7 +696,7 @@ sub _shq {
 sub _staging_path {
     my ($self) = @_;
 
-    my $path = $self->capture('mktemp');
+    my $path = $self->capture_cmd('mktemp');
     chomp $path  if defined $path;
     return $path if defined $path && length $path && $path =~ m{\A/};
 

@@ -146,7 +146,7 @@ sub check_reachable {
 
     return report( 1, 'The hypervisor is this machine', q{} ) if $hv->is_local;
 
-    my $whoami = eval { $hv->capture('whoami') };
+    my $whoami = eval { $hv->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
 
     return report( 1, "Reached " . $hv->ssh_target . " as $whoami", q{} )
@@ -169,8 +169,8 @@ my $LEASE_HELPER = '/usr/lib/libvirt/libvirt_leaseshelper';
 sub check_passwordless_sudo {
     my ($hv) = @_;
 
-    if ( $hv->run(qw{sudo -n true}) == 0 ) {
-        my $allowed = eval { $hv->capture('sudo -n -l 2>/dev/null') } // q{};
+    if ( $hv->run_cmd(qw{sudo -n true}) == 0 ) {
+        my $allowed = eval { $hv->capture_cmd('sudo -n -l 2>/dev/null') } // q{};
         my $whole   = $allowed =~ m/NOPASSWD:\s*ALL/;
 
         return report( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
@@ -184,7 +184,7 @@ sub check_passwordless_sudo {
 bin/nuke_pool will not work for this account, which is deliberate at this
 level.  Widen the grant if you need it.
 FIX
-      if $hv->run( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
+      if $hv->run_cmd( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
 
     my $user   = $hv->ssh_user // 'you';
     my $target = $hv->is_local ? 'this machine' : $hv->ssh_host;
@@ -246,7 +246,7 @@ sub check_rsync {
 
     my @missing;
     push( @missing, 'this machine' ) unless File::Which::which('rsync');
-    push( @missing, $hv->describe ) if !$hv->is_local && $hv->run( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
+    push( @missing, $hv->describe ) if !$hv->is_local && $hv->run_cmd( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
 
     return report( 1, 'rsync on both ends', q{} ) unless @missing;
 
@@ -439,7 +439,7 @@ sub note_pool_quota {
     # -B1 without -P, which df refuses alongside --output; the last line is the
     # mount, and its second field is the size in bytes.
     my $path    = $hv->pool_path;
-    my $said    = eval { $hv->capture("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
+    my $said    = eval { $hv->capture_cmd("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
     my ($bytes) = $said =~ m/\A\S+\s+(\d+)\s/;
 
     # Within a gigabyte of the filesystem it sits on means it is not a limit,
@@ -655,7 +655,7 @@ FIX
 sub note_libguestfs {
     my ($hv) = @_;
 
-    my ($found) = grep { $hv->run( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
+    my ($found) = grep { $hv->run_cmd( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
 
     return { ok => 1 } if $found;
 
@@ -678,8 +678,8 @@ FIX
 sub note_swtpm {
     my ($hv) = @_;
 
-    return { ok => 1 } unless $hv->run( 'sh', '-c', 'test -c /dev/tpmrm0' ) == 0;
-    return { ok => 1 } if $hv->run( 'sh', '-c', 'command -v swtpm >/dev/null 2>&1' ) == 0;
+    return { ok => 1 } unless $hv->run_cmd( 'sh', '-c', 'test -c /dev/tpmrm0' ) == 0;
+    return { ok => 1 } if $hv->run_cmd( 'sh', '-c', 'command -v swtpm >/dev/null 2>&1' ) == 0;
 
     return { ok => 0, what => 'This machine has a TPM, and no swtpm to share it out', fix => <<'FIX' };
 Guests built here get an emulated TPM when swtpm is installed, which is what lets

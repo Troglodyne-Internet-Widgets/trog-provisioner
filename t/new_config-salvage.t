@@ -38,7 +38,7 @@ sub guest_that {
     $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
     $mock->redefine( run_sudo => sub { $behaviour{exit} } );
     $mock->redefine(
-        capture => sub {
+        capture_cmd => sub {
             my $now = shift @probes // $probes[-1];
             return join q{}, map { "$_\t$now->{$_}\n" } sort keys %$now;
         }
@@ -123,7 +123,7 @@ subtest 'each command is judged against what the one before it left' => sub {
     $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
     $mock->redefine( run_sudo => sub { shift @exits } );
     $mock->redefine(
-        capture => sub {
+        capture_cmd => sub {
             my $now = shift @probes;
             return join q{}, map { "$_\t$now->{$_}\n" } sort keys %$now;
         }
@@ -139,9 +139,9 @@ subtest 'each command is judged against what the one before it left' => sub {
 subtest 'a recipe that watches nothing is not probed at all' => sub {
     my $asked = 0;
     my $mock  = Test::MockModule->new('Trog::Guest');
-    $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
-    $mock->redefine( run_sudo => sub { 0 } );
-    $mock->redefine( capture  => sub { $asked++; return q{} } );
+    $mock->redefine( new         => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
+    $mock->redefine( run_sudo    => sub { 0 } );
+    $mock->redefine( capture_cmd => sub { $asked++; return q{} } );
 
     is( refresh( ['dump-it'], [] ), 1, 'it still runs the command' );
     is( $asked,                     0, 'and asks the guest for no mtimes' );

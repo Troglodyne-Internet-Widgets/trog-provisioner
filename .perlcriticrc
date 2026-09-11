@@ -45,6 +45,8 @@ info_level = 30
 [Variables::ProhibitUselessInitialization]
 [PreferredModules]
 config = .preferred_modules.ini
+[PreferredBinaries]
+config = .preferred_binaries.ini
 [logicLAB::RequireSheBang]
 formats = #!/usr/bin/env perl
 # Performance
