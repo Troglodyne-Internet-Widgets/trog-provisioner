@@ -774,21 +774,26 @@ sub provision_cloud_guest {
 
     my $existing = $hv->domain_exists($domain);
 
-    # Refused rather than rebuilt.  The libvirt path undefines the domain and
-    # defines it again, which is cheap because the disk is a file it keeps; the
-    # equivalent here deletes the server, and its disk goes with it.
-    die "$domain already exists on " . $hv->describe . ".\n" . "Pass --existing to provision onto it, or bin/destroy it first.\n"
-      if $existing && !$reuse;
-
     my $user = $config->param('admin_user') // 'root';
 
     if ($dryrun) {
-        print 'Would ' . ( $existing ? 'reprovision' : 'build' ) . " $domain on " . $hv->describe . "\n";
+        my $doing = !$existing ? 'build' : $reuse ? 'reprovision' : 'rebuild';
+        print "Would $doing $domain on " . $hv->describe . "\n";
         return ( $user, $existing ? $hv->guest_ssh_ip( $config, $domain ) : '(not built)' );
     }
 
-    if ($existing) {
+    if ( $existing && $reuse ) {
         print "$domain is already on " . $hv->describe . "; provisioning onto it\n";
+    }
+    elsif ($existing) {
+
+        # Rebuilt in place rather than deleted and made again, which is what the
+        # libvirt path amounts to: a fresh root disk from the image, and the same
+        # seed.  Nova keeps the server, so its ports, its floating IP and any
+        # volume attached to it survive -- and nothing has to be scheduled,
+        # allocated or waited on but the disk.
+        print 'Asking ' . $hv->describe . " to rebuild $domain...\n";
+        $hv->rebuild_guest( $domain, user_data => $seed->{'user-data'} );
     }
     else {
         print 'Asking ' . $hv->describe . " for $domain...\n";

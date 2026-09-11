@@ -17,6 +17,7 @@ use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp();
+use MIME::Base64();
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
@@ -444,6 +445,42 @@ subtest 'volumes and the console' => sub {
 
     is $hv->console_log('vm.example.com'), "it booted\n",
       'and the console is readable, which is all there is when a guest never comes up';
+};
+
+subtest 'a guest that is there already is rebuilt, not replaced' => sub {
+    my @asked;
+    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return {} } );
+
+    my $hv = cloud( image => 'noble' );
+    $FAKE = Test::FakeCloud->new(
+        servers => [ { id => 's1',    name => 'vm.example.com', status => 'ACTIVE' } ],
+        images  => [ { id => 'img-1', name => 'noble' } ],
+    );
+
+    my $server = $hv->rebuild_guest( 'vm.example.com', user_data => "#cloud-config\n" );
+
+    is_deeply $asked[0],
+      [ POST => '/servers/s1/action', { rebuild => { imageRef => 'img-1', user_data => MIME::Base64::encode_base64( "#cloud-config\n", '' ) } }, '2.57' ],
+      'a rebuild onto the image, with the new payload, at the microversion that takes it';
+    is $server->{id},                           's1', 'the same server comes back';
+    is scalar $FAKE->calls_to('delete_server'), 0,    'and nothing was deleted to get there';
+
+    @asked = ();
+    $hv->rebuild_guest( 'vm.example.com', image => '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b' );
+    is $asked[0][2]{rebuild}{imageRef}, '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', 'an image named by id is used as it is';
+
+    like exception { $hv->rebuild_guest( 'vm.example.com', image => 'nosuch' ) }, qr/no image called 'nosuch'/,
+      'an image that is not there is said, not sent';
+    like exception { $hv->rebuild_guest('gone.example.com') }, qr/no guest called 'gone.example.com'/,
+      'and so is a guest that is not';
+
+    # ERROR does not change on its own, so it is not something to wait out.
+    $FAKE->{servers}[0]{status} = 'ERROR';
+    $FAKE->{servers}[0]{fault}  = { message => 'No valid host was found' };
+    like exception { $hv->rebuild_guest('vm.example.com') }, qr/left it in ERROR: No valid host was found/,
+      'a rebuild that failed says so at once, with what Nova said';
+
+    $mock->unmock('_nova');
 };
 
 subtest 'nothing to prepare, release or clear up after' => sub {
