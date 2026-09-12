@@ -87,7 +87,17 @@ mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf
 mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
 chown -R pdns:pdns /var/spool/powerdns/run
 mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
-[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[%# Here rather than queued.  post_install runs its queue one task at a time,
+    and letsencrypt queues its certificate fetcher before this recipe queues
+    anything -- so a fetcher needing the API socket and the zone was waiting on
+    a restart sitting behind it in the very queue it was blocking, and could
+    only ever time out.  Measured on a guest: the socket appeared at 02:57:25,
+    which is when the restart finally ran, long after the fetcher had failed.
+
+    configure_pdns has just rewritten the unit, so the reload belongs with it
+    rather than three targets later.  rsyslog is left queued: it is a drop-in
+    that nothing in the build reads back. -%]
+systemctl daemon-reload
+systemctl enable pdns
+systemctl enable pdns-recursor
 [% script_dir %]/queue_postrun_task systemctl restart rsyslog
-[% script_dir %]/queue_postrun_task systemctl enable pdns
-[% script_dir %]/queue_postrun_task systemctl enable pdns-recursor

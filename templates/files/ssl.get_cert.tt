@@ -3,12 +3,13 @@
 [% IF prefer_local_dns -%]
 # Wait for the server that answers the challenge before asking for one.
 #
-# The postrun queue is in fragment order, and this recipe's fragment runs before
-# pdns's -- so the restarts that put the API socket and the zone in place are
-# queued after this task.  Measured on a guest: lexicon found no socket, so the
-# af-unix patch left the endpoint unmangled and requests refused it outright,
-# and --resolve-zone-name resolved to nothing, so the zone came out empty and
-# pdns answered 404 for zones/.
+# A backstop, not the fix: pdns starts in its own target now, so this should
+# fall through on the first pass.  It used to be neither -- the restarts were
+# queued in the postrun behind this task, and post_install runs its queue one
+# task at a time, so waiting here could only ever time out.  What that cost:
+# lexicon found no socket, so the af-unix patch left the endpoint unmangled and
+# requests refused it, and --resolve-zone-name resolved to nothing, so pdns was
+# asked for zones/ and answered 404.
 for _ in $(seq 1 60); do
     [ -S /var/spool/powerdns/api.sock ] && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . && break
     sleep 2
