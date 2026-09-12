@@ -166,8 +166,10 @@ subtest 'the guest has what this recipe installs into the perl needs to build' =
     # A recipe with no subclass for the distribution in hand inherits an empty
     # deps() and installs nothing at all.  Measured on a guest with this recipe
     # and nothing else: Dist::Zilla reaches Net::SSLeay through CPAN::Uploader,
-    # and its configure stops with "COULD NOT FIND LIBSSL HEADERS".
+    # which will not configure without the one and will not link without the
+    # other.
     ok( $deps{'libssl-dev'}, 'libssl-dev, without which Net::SSLeay does not configure' );
+    ok( $deps{'zlib1g-dev'}, 'zlib1g-dev, without which it configures and then cannot link -lz' );
     ok( $deps{perlbrew},     'and perlbrew, which builds the perl and brings a compiler with it' );
 };
 
