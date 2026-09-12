@@ -364,4 +364,59 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     like( $note->{fix}, qr/\Q{old.troglodyne.net,web.troglodyne.net}\E/, 'the removal command is one that would actually run' );
 };
 
+subtest 'a secret written into the configuration in the clear is worth saying' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    my $secret = 'hunter2-in-the-clear';
+    File::Slurper::Temp::write_text(
+        "$dir/recipes.yaml",
+        "---\nweb.test.test:\n" . "    mail:\n        names:\n            andy:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:troglodyne/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n"
+    );
+
+    my $note = Trog::Bin::Preflight::note_plaintext_secrets();
+    ok( !$note->{ok}, 'a literal password is reported' );
+    like( $note->{at} // $note->{fix}, qr/mail\.names\.andy\.password/, 'naming the field' );
+
+    # Never the value.  A note that printed a password to say a password was
+    # printed would be its own answer.
+    unlike( $note->{fix},  qr/\Q$secret\E/, 'and never the secret itself' );
+    unlike( $note->{what}, qr/\Q$secret\E/, 'in either half of it' );
+
+    # Already a reference: the store holds it, which is the whole point.
+    unlike( $note->{fix}, qr/api_key/, 'a secret: reference is not complained about' );
+
+    # key_file holds a filename.  Telling somebody to put "backup.rsa" in the
+    # store would be advice about nothing.
+    unlike( $note->{fix}, qr/key_file/, 'and neither is a field naming a file' );
+};
+
+subtest 'a pasted private key is found wherever it was written' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    # Not under a field named for a secret, so the name rule does not see it.
+    # This is how a key pasted into the wrong field gets found at all.
+    File::Slurper::Temp::write_text(
+        "$dir/recipes.d/bot.test.test.yaml",
+        "---\nbot.test.test:\n    koan:\n        deploy_material: |\n" . "            -----BEGIN OPENSSH PRIVATE KEY-----\n            b3BlbnNzaC1rZXktdjEA\n            -----END OPENSSH PRIVATE KEY-----\n"
+    );
+
+    my $note = Trog::Bin::Preflight::note_plaintext_secrets();
+    ok( !$note->{ok}, 'the key is reported' );
+    like( $note->{fix}, qr/deploy_material/, 'by where it was written' );
+    unlike( $note->{fix}, qr/BEGIN OPENSSH/, 'and without reproducing it' );
+};
+
+subtest 'a configuration that keeps its secrets in the store says nothing' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.test.test:\n    pdns:\n        api_key: secret:t/pdns/password\n" );
+    is_deeply( Trog::Bin::Preflight::note_plaintext_secrets(), { ok => 1 }, 'nothing to say' );
+};
+
 done_testing();
