@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Register with the CA this domain is configured for, if this guest has not
+# already.  The global fragment registers as well, but it runs before any
+# recipe's target -- so on a guest whose CA is one of its own recipes, that
+# happened while there was nothing listening yet.  dehydrated will not run
+# --cron for an account it never made, and registering twice is a no-op.
+dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --register --accept-terms; /bin/true
+
 #XXX it is VERY VERY BAD that the DOMAINS_D field does NOTHING WHATSOEVER!
 dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --cron
 fetched=$?
