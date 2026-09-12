@@ -3,7 +3,11 @@ mkdir -p /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/[% basedir %]
 [% IF admin_user != user %]
-sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
+[%# One admin home, and it holds one directory of that name -- so where a
+    machine hosts several domains the first one built keeps the link and the
+    rest must not die on it.  ln alone exits non-zero on a name already there,
+    which takes this target and everything after it down with it. -%]
+test -e /home/[% admin_user %]/[% basedir %] || sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
 [% END %]
 cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [% FOR repo in repos_from %]
