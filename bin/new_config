@@ -260,6 +260,13 @@ C<_salvage_gap>.
 
 our %SALVAGE_GAPS;
 
+# What each domain ended up running, keyed by domain, so that a domain being
+# layered onto another can be held against what that one already has.  A guest
+# hosting several domains has one of each service between them, and
+# expand_dependent_domains puts the host ahead of anything layered onto it, so
+# by the time a tenant is generated its host is in here.
+our %MACHINE_MODULES;
+
 sub salvage_gaps { return %SALVAGE_GAPS }
 
 sub main {
@@ -811,6 +818,23 @@ sub handle_domain {
     # recipe with no fragment anyway: `modules` is handed to every template and
     # every recipe as the list of what is on this guest, and neither of these is.
     @modules = grep { $builders{$_}->is_module } @modules;
+
+    # One guest, one of each service.  A recipe that cannot be told about a
+    # second domain would not add this one, it would replace the first -- so say
+    # so here, where an operator is reading, rather than on the guest an hour
+    # later when the first domain has quietly stopped working.
+    #
+    # Against the host alone: expand_dependent_domains puts a host and one of the
+    # domains layered onto it in the same run, never two of those together, so
+    # two tenants that clash with each other are not caught here.
+    $MACHINE_MODULES{$domain} = [@modules];
+    if ($depends_on) {
+        my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
+        my @cannot  = grep { $on_host{$_} && !$builders{$_}->shares_a_machine } @modules;
+
+        die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
+          if @cannot;
+    }
 
     my %guest_secrets;
 

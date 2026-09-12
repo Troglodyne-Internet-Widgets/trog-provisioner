@@ -239,6 +239,30 @@ to print a schema.
 
 sub is_module { return 1 }
 
+=head3 $bool = $recipe->shares_a_machine()
+
+Whether two domains provisioned onto one guest can both be configured with this
+recipe.
+
+True for nearly everything.  A recipe that writes per-domain files, or whose
+service reads a C<conf.d>, does not care how many domains are on the guest, and
+L<Provisioner::Recipe::configd> is what makes that true of the services which
+keep their configuration in one file and have none of their own.
+
+False for a service that can only ever belong to one domain -- one synapse has
+one C<server_name> -- where a second domain does not add itself so much as
+replace the first, and does it quietly.  C<bin/new_config> refuses to generate
+such a recipe for a domain being layered onto another rather than letting
+whichever was provisioned last win.
+
+This is not the same question as what belongs in the global half.  That is work
+done once for the machine, and a recipe can have a great deal of it and still be
+perfectly shareable; this says whether the domains can coexist at all.
+
+=cut
+
+sub shares_a_machine { return 1 }
+
 =head3 %args = $recipe->args()
 
 Define the args of a recipe in a hash suitable toe be fed into L<JSON::Validator>'s schema() method.
