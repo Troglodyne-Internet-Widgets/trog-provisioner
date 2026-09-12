@@ -1780,6 +1780,23 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     like( $fragment, qr/setup-ufw-ratelimits.*EXEMPT/, 'only to the one that does' );
 };
 
+subtest 'the service user is made once per machine, not once per domain' => sub {
+
+    # A shared host runs this target for each domain it holds, and the account
+    # is the machine's.  useradd on one that is already there exits non-zero and
+    # takes the target with it -- measured on a guest, where the second domain
+    # stopped on "useradd: user 'scratch' already exists" and never got the
+    # directory the two lines below it make.
+    my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
+
+    my ($target) = $mf =~ m/^\Q[% state_dir %]\E\/service_user:\n((?:\t.*\n)+)/m;
+    ok( $target, 'there is a service_user target' ) or return;
+
+    like( $target, qr/^\tgetent passwd \Q[% user %]\E.*\|\|.*useradd/m, 'the account is only added when it is not already there' );
+    like( $target, qr{^\tmkdir -p \Q[% install_dir %]/[% domain %]\E}m, 'and this domain still gets its own directory' );
+    like( $target, qr/^\tchown \Q[% user %]:[% admin_user %]\E/m,       'owned by the account it shares' );
+};
+
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {
 
     # setup-ufw-rules allows whatever `ufw app list` reports and opens with a
