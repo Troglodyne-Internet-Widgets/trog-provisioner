@@ -6,4 +6,4 @@ export LEXICON_POWERDNS_SERVER="/var/spool/powerdns/api.sock"
 COMMAND=$1;
 shift;
 
-lexicon --delegated [% domain %] powerdns $COMMAND [% domain %] $@
+lexicon --resolve-zone-name powerdns $COMMAND [% domain %] $@

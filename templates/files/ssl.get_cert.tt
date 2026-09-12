@@ -1,5 +1,27 @@
 #!/bin/bash
 
+[% IF prefer_local_dns -%]
+# Wait for the server that answers the challenge before asking for one.
+#
+# A backstop, not the fix: pdns starts in its own target now, so this should
+# fall through on the first pass.  It used to be neither -- the restarts were
+# queued in the postrun behind this task, and post_install runs its queue one
+# task at a time, so waiting here could only ever time out.  What that cost:
+# lexicon found no socket, so the af-unix patch left the endpoint unmangled and
+# requests refused it, and --resolve-zone-name resolved to nothing, so pdns was
+# asked for zones/ and answered 404.
+for _ in $(seq 1 60); do
+    [ -S /var/spool/powerdns/api.sock ] && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . && break
+    sleep 2
+done
+[% END -%]
+# Register with the CA this domain is configured for, if this guest has not
+# already.  The global fragment registers as well, but it runs before any
+# recipe's target -- so on a guest whose CA is one of its own recipes, that
+# happened while there was nothing listening yet.  dehydrated will not run
+# --cron for an account it never made, and registering twice is a no-op.
+dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --register --accept-terms; /bin/true
+
 #XXX it is VERY VERY BAD that the DOMAINS_D field does NOTHING WHATSOEVER!
 dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --cron
 fetched=$?

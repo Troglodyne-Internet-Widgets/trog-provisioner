@@ -13,6 +13,7 @@ use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
 use Data::Validate::Email();
+use URI();
 
 # Named as strings in the dispatch table below, never as code, so nothing static
 # can see that loading them is the whole point.
@@ -221,6 +222,35 @@ guest has resolvers, can fall back to the name.
 
 =cut
 
+=head3 host_of($url)
+
+The host a URL names, or nothing if it names none.  An scp-style git address --
+C<git@github.com:o/r.git> -- counts as one, since that is the form gogs hands
+out for a repository.
+
+Recipes whose upstream is configured ask this of a C<repo_url> or an C<api_url>
+to say which host they will actually reach, so it can be declared in
+C<fetch_hosts> and pointed at the fetch cache.
+
+=cut
+
+sub host_of {
+    my ($url) = @_;
+
+    return unless defined $url && length $url;
+
+    # Matched here rather than handed to URI, because prepending a scheme does
+    # not turn an scp address into a URL: a colon after the host opens a port in
+    # a URL and separates the path in scp syntax.  So ssh://git@github.com:o/r.git
+    # parses to the host "github.com:o", and ssh://git@github.com:22/r.git reads
+    # 22 as the port and drops it from the path.  Handed the address as written,
+    # URI returns a URI::_generic, which has no host method at all.
+    return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
+
+    my $host = eval { URI->new($url)->host };
+    return $host ? lc $host : ();
+}
+
 sub fleet_address {
     my ( $name, %opts ) = @_;
 
@@ -237,6 +267,26 @@ sub fleet_address {
     return ( address => $address ) if defined $address && length $address;
 
     return ( unknown => $name );
+}
+
+=head3 write_pem($path, $pem, $mode)
+
+Write a PEM -- a certificate, a key, or several of them concatenated -- to
+C<$path> and set its mode, dying if the mode cannot be set.
+
+Through L<File::Slurper::Temp>, so nothing ever reads a half-written key: what
+is incomplete is a temporary file, and the rename that puts it in place is
+atomic.  The mode is applied to the file after that rename, so C<$path> holds
+whatever mode the temporary was made with until the C<chmod> lands.
+
+=cut
+
+sub write_pem {
+    my ( $path, $pem, $mode ) = @_;
+
+    File::Slurper::Temp::write_binary( $path, $pem );
+    chmod( $mode, $path ) or die "Could not set the mode of $path: $!\n";
+    return;
 }
 
 =head3 write_ssh_keypair($path, $type, $bits, $comment)

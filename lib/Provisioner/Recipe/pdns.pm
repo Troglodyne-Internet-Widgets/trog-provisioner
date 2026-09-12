@@ -103,6 +103,7 @@ sub template_files {
         'pdns.domain.tt'                               => 'pdns-domain.conf',
         'pdns.global.tt'                               => 'pdns-global.conf',
         'pdns.recursor.tt'                             => 'pdns-recursor-domain.conf',
+        'pdns.recursor.lua.tt'                         => 'pdns-recursor-domain.lua',
         'pdns.rsyslog.tt'                              => '10-powerdns.conf',
         'pdns.api.tt'                                  => 'pdns-api.conf',
         'pdns.synczones.tt'                            => 'synczones.conf',

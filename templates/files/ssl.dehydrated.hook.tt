@@ -32,7 +32,7 @@ function deploy_challenge {
 
         echo "deploy_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon $PROVIDER create ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
+        lexicon [% lexicon_opts %] $PROVIDER create ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
         --content="${TOKEN_VALUE}"
     done
 
@@ -68,7 +68,7 @@ function clean_challenge {
 
         echo "clean_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon $PROVIDER delete ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
+        lexicon [% lexicon_opts %] $PROVIDER delete ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
         --content="${TOKEN_VALUE}"
     done
 

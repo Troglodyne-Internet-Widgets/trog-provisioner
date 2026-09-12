@@ -1,0 +1,49 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+my $steppath = '[% steppath %]';
+my $port     = '[% port %]';
+
+# The binary, and that it runs -- a download that half-worked leaves a file
+# there.
+my $said = `/usr/local/bin/step-ca version 2>&1`;
+ok($? == 0 && length $said, 'step-ca runs') or diag $said;
+like($said, qr/\Q[% version %]\E/, 'and it is the pinned version') or diag $said;
+
+is(system('systemctl is-active --quiet acmeca'), 0, 'the acmeca service is active');
+
+# Listening where ca.json says, and only there: this CA answers the guest's own
+# dehydrated and nothing off the machine.
+my $listening = `ss -lnt 2>/dev/null`;
+like($listening, qr/127\.0\.0\.1:$port\b/, "step-ca is listening on 127.0.0.1:$port")
+    or diag $listening;
+unlike($listening, qr/(?<!127\.)0\.0\.0\.0:$port\b/, 'and not on every address');
+
+# The ACME directory, fetched with no -k and no --cacert: this passes only if
+# the authority is in the system trust store, which is the thing that has to
+# still be true after fetch_via_cache has taken its own copy back out.
+my $directory = `curl -fsS --max-time 10 https://localhost:$port/acme/trog/directory 2>&1`;
+is($?, 0, 'the ACME directory answers, trusted by the system store') or diag $directory;
+like($directory, qr/newAccount/, 'and it looks like an ACME directory') or diag $directory;
+
+ok(-f '/usr/local/share/ca-certificates/trog-acmeca.crt', 'the authority is installed as an anchor');
+
+# What keeps this from being a key that can forge anything on the internet.
+# The authority it chains to has no name constraints of its own and is trusted
+# by every guest that provisions through the fetch cache, so the constraint on
+# the intermediate is the only thing narrowing what this guest can issue.
+my $constraints = `openssl x509 -noout -text -in $steppath/certs/intermediate_ca.crt 2>&1`;
+like($constraints, qr/X509v3 Name Constraints/, 'the intermediate carries name constraints')
+    or diag $constraints;
+like($constraints, qr/DNS:\.\Q[% constrain_to %]\E/, "and permits only .[% constrain_to %]")
+    or diag $constraints;
+like($constraints, qr/CA:TRUE/, 'and is a CA, so step-ca can issue from it');
+
+# The private key is the guest's alone.
+my @stat = stat("$steppath/secrets/intermediate_ca_key");
+ok(@stat, 'the intermediate key is there') or BAIL_OUT('no intermediate key');
+is(sprintf('%04o', $stat[2] & 07777), '0600', 'and it is not readable by anybody else');
+
+done_testing();

@@ -10,16 +10,26 @@ Ordered by how quietly it fails.
 ## It fails silently
 
 **The lexicon patches.**  `templates/ubuntu/pdns.global.tt` applies two patches
-to Ubuntu's `lexicon` package with `git apply ... ; /bin/true`, because a second
-provision would otherwise fail on an already-applied patch.  That `/bin/true`
-also swallows *"this no longer applies"*.  The patches are
-`templates/files/patches/lexicon-pdns-af-unix.patch` and
-`lexicon-arbitrary-record-types.patch`, both taken against the package as it was
-in October 2025.
+to Ubuntu's `lexicon` package: `templates/files/patches/lexicon-pdns-af-unix.patch`
+and `lexicon-arbitrary-record-types.patch`, both taken against the package as it
+was in October 2025.
 
-*Stale when:* Ubuntu updates `lexicon`.  The symptom is DNS-01 challenges
-failing against a unix-socket pdns, long after the build said it succeeded.
-*Check:* apply them by hand on a guest and look at what `git apply` says.
+They no longer fail silently, and the way they used to is worth keeping in mind
+for anything else written like it.  The line said `git apply ... ; /bin/true`,
+so a second provision would not fail on an already-applied patch -- and the same
+`/bin/true` swallowed *"there is no such file"*.  The path was wrong for the
+whole life of the line (`/tmp` for a payload that untars into `/var/tmp`), so
+the patches never applied on any guest, and `prefer_local_dns` could not have
+issued a certificate.  Nothing said so until somebody read a dehydrated hook's
+traceback.  It now skips only when `git apply --reverse --check` says the patch
+is already in, and says so on stderr when a patch will neither apply nor
+reverse.
+
+*Stale when:* Ubuntu updates `lexicon`.  One of these went upstream, so the
+af-unix one being *already applied* is the expected end state rather than a
+fault, and the day it is, the patch can go.  *Check:* the build prints
+`already applied` or `WOULD NOT APPLY` for each; and the pdns guest test asks
+lexicon whether it can reach the socket, which is the thing actually needed.
 
 **The matrix admin interface.**  `scripts/matrix.download-admin.sh` fetches
 `releases/latest` from `etkecc/ketesa`.  That project has already been renamed
@@ -61,6 +71,7 @@ default branch; a force-push or rename shows up as a 404 at build time.
 | imagemagick | `lib/Provisioner/Recipe/imagemagick.pm` | required, with the patch number; the archive prunes old releases |
 | gogs | `lib/Provisioner/Recipe/gogs.pm` | required; the asset spelling changed at 0.14.2, which is why the template tries two names |
 | roundcube | `lib/Provisioner/Recipe/roundcube.pm` | required; this one gets security releases worth following |
+| step-ca | `lib/Provisioner/Recipe/acmeca.pm`, `$STEP_CA_VERSION` | required; the release tarball is fetched from GitHub by version, so one that was never published is a 404 partway through a provision.  The recipe finds the binary inside the tarball rather than naming its directory, so a layout change upstream does not need a bump |
 | perl | `scripts/build_latest_perl.sh` | `perlbrew download stable`, so whatever is stable on the day.  Its three modules -- cpanm, Module::Build, Dist::Zilla -- are unversioned for the same reason |
 
 *Check:* each project's release page.  For garage, `bin/recipes garage` shows

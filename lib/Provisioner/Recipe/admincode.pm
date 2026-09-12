@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Utils();
+
 =head1 Provisioner::Recipe::admincode
 
 =head2 SYNOPSIS
@@ -118,7 +120,7 @@ caveat in the DESCRIPTION about the SSH fallback.
 sub fetch_hosts {
     my ( $self, %opts ) = @_;
 
-    return grep { $_ } map { $self->host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] };
+    return grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] };
 }
 
 1;

@@ -158,4 +158,20 @@ foreach my $fragment (qw{00-global.conf sqlite.conf api.conf}) {
 my $ports = `ss -lnup 2>/dev/null`;
 like($ports, qr/127\.0\.0\.1:2500/, 'pdns is on the port the recipe puts it on') or diag $ports;
 
+# The recursor forwards this zone to the authoritative half, and it validates
+# DNSSEC by default -- so without a negative trust anchor it answers SERVFAIL
+# for the one zone this guest exists to serve, while resolving everything else.
+# Nothing noticed until an ACME challenge could not be seen.
+my $status = `dig \@127.0.0.1 -p 53 '[% domain %]' SOA 2>&1`;
+like($status, qr/status: NOERROR/, 'the recursor answers for our own zone, rather than failing to validate it')
+    or diag $status;
+
+# Per zone, not by turning validation off: something bogus must still be bogus.
+my $bogus = `dig \@127.0.0.1 -p 53 dnssec-failed.org A 2>&1`;
+SKIP: {
+    skip 'no route to the public internet', 1 unless $bogus =~ m/status:/;
+    like($bogus, qr/status: SERVFAIL/, 'and still refuses a zone that genuinely fails validation')
+        or diag $bogus;
+}
+
 done_testing();

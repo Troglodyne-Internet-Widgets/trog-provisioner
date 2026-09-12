@@ -84,10 +84,19 @@ sub datadirs {
     return ('.letsencrypt');
 }
 
+# dehydrated's own preset for the public Let's Encrypt directory, and what a
+# domain gets when it asks for no particular CA.
+our $DEFAULT_CA = 'letsencrypt';
+
 sub args {
     return (
         type       => 'object',
         properties => {
+            ca => {
+                type        => 'string',
+                default     => $DEFAULT_CA,
+                description => "Which ACME server issues this domain's certificate: a dehydrated preset name, or the URL of a directory.  Anything but the default is taken to be one of this fleet's own, and pulls in the acmeca recipe that serves it -- which is how a guest under a reserved TLD gets a certificate at all.",
+            },
             registrar => {
                 type       => 'object',
                 properties => {
@@ -108,6 +117,20 @@ sub args {
 sub enrich {
     my ( $self, %params ) = @_;
 
+    # --resolve-zone-name rather than DELEGATED, and only for the local server.
+    #
+    # lexicon reduces a domain to its registrable name with tldextract before it
+    # asks for a zone.  A reserved TLD is not a public suffix, so <guest>.test
+    # collapsed to the zone "test", and DELEGATED was then composed back on top
+    # of that -- asking pdns for zones/<guest>.test.test, which is a 404, on
+    # every challenge.  Measured on a guest: with this flag lexicon finds the
+    # real zone, writes the record, and the authoritative server serves it back.
+    #
+    # Not for a registrar, where the domain is the zone and tldextract is right
+    # about it: the flag costs live DNS queries to work out something already
+    # known.
+    $params{lexicon_opts} = $params{prefer_local_dns} ? '--resolve-zone-name' : q{};
+
     # If the user instructs that we ought to use the local DNS server
     # instead of the global registrar info, let's do that.
     # Also make sure that we have the "right stuff" setup otherwise.
@@ -123,10 +146,7 @@ sub enrich {
         };
 
         #XXX pretty dopey that the var is POWERDNS_PDNS_SERVER, but load bearing at this point
-        $params{extra_lexicon_vars} = [
-            { key => 'PDNS_SERVER', value => "/var/spool/powerdns/api.sock" },
-            { key => 'DELEGATED',   value => $params{domain}, global => 1 },
-        ];
+        $params{extra_lexicon_vars} = [ { key => 'PDNS_SERVER', value => '/var/spool/powerdns/api.sock' } ];
     }
     else {
         die "Must set registrar info in _global section of config" unless exists $params{registrar} && ( ref( $params{registrar} ) eq 'HASH' );
@@ -156,6 +176,29 @@ sub remote_files {
         '/var/lib/dehydrated/certs/' => '.letsencrypt/var-certs',
         '/etc/dehydrated/accounts/'  => '.letsencrypt/accounts',
     );
+}
+
+=head2 %required = $recipe->required_recipes(%opts)
+
+The CA, when this domain names one of the fleet's own rather than a public
+preset.  Nothing is handed to it: what a CA is configured with is its own
+business, and the edge exists for the ordering rather than for the options.
+
+That ordering is the whole point.  bin/new_config puts a required recipe after
+the last recipe that required it and before the postrun, and the fetcher this
+recipe queues asks the CA for a certificate during the postrun -- so declaring
+the dependency is what makes the CA answering by then a property of the build
+rather than a coincidence of where two recipes happen to sit in a list.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+
+    # Before validation, so read ca the way the schema would have defaulted it.
+    my @required = ( $opts{ca} // $DEFAULT_CA ) eq $DEFAULT_CA ? () : ( acmeca => sub { return () } );
+
+    return ( @required, $self->SUPER::required_recipes(%opts) );
 }
 
 sub tests {

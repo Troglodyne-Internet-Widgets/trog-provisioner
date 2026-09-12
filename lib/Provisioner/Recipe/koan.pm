@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Utils();
+
 # One copy, shared by args and fetch_hosts: two would drift.
 our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
 
@@ -424,7 +426,7 @@ declared here and goes straight upstream.
 
 sub fetch_hosts {
     my ( $self, %opts ) = @_;
-    return $self->host_of( $opts{repo_url} // $DEFAULT_REPO ) || ();
+    return Provisioner::Utils::host_of( $opts{repo_url} // $DEFAULT_REPO ) || ();
 }
 
 1;

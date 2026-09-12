@@ -1,0 +1,24 @@
+{
+    "root": "[% steppath %]/certs/root_ca.crt",
+    "crt": "[% steppath %]/certs/intermediate_ca.crt",
+    "key": "[% steppath %]/secrets/intermediate_ca_key",
+    "address": "127.0.0.1:[% port %]",
+    "dnsNames": ["localhost", "[% domain %]"],
+    "db": {
+        "type": "badgerv2",
+        "dataSource": "[% steppath %]/db"
+    },
+    "authority": {
+        "provisioners": [
+            {
+                "type": "ACME",
+                "name": "trog",
+                "challenges": ["dns-01"],
+                "claims": {
+                    "defaultTLSCertDuration": "[% default_duration %]",
+                    "maxTLSCertDuration": "[% max_duration %]"
+                }
+            }
+        ]
+    }
+}

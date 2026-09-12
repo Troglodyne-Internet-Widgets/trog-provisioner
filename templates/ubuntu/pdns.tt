@@ -10,6 +10,9 @@
 # Point the recursor at our domain, via the forward zones file
 grep -qxF '[% domain %]=127.0.0.1:2500' /etc/powerdns/forward-zones 2>/dev/null     || cat pdns-recursor-domain.conf >> /etc/powerdns/forward-zones
 rm -f pdns-recursor-domain.conf
+[%# And the negative trust anchor for it: see the global fragment. -%]
+grep -qF 'addNTA("[% domain %]"' /etc/powerdns/recursor.lua 2>/dev/null || cat pdns-recursor-domain.lua >> /etc/powerdns/recursor.lua
+rm -f pdns-recursor-domain.lua
 # Build the zone database
 mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
 # TODO do this via lexicon instead
@@ -33,8 +36,13 @@ chmod -R 0775 /var/spool/powerdns
     pdns keeps them through the group. -%]
 chown root:pdns /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
 chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
-[% script_dir %]/queue_postrun_task systemctl restart pdns
-[% script_dir %]/queue_postrun_task systemctl restart pdns-recursor
+[%# Started here rather than queued, for the reason the global fragment gives:
+    the postrun queue is sequential, and the fetcher that needs this server to
+    be answering is queued ahead of anything this recipe could add to it.  This
+    also means a pdns that will not start fails its own target, which is where
+    it should be noticed. -%]
+systemctl restart pdns
+systemctl restart pdns-recursor
 # Setup lexicon shortcuts
 mkdir -p /opt/lexicon/[% domain %]; /bin/true
 mv lexicon-pdns.sh /opt/lexicon/[% domain %]/pdns
