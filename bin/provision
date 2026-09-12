@@ -632,7 +632,12 @@ sub provision_domain {
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This
     # says what happens, in order, and asks the backend to do each part.
-    return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $hv->would_provision( $config, reuse => $reuse ) ) )
+    # would_provision says what it would do and hands back where the guest is, or
+    # would be.  Not passed through guest_ssh_ip: main() throws this address away
+    # on a dry run, and asking a backend how to reach a guest that does not exist
+    # yet is a question with no answer -- a cloud looks it up by name and dies,
+    # where libvirt happens to hand the placeholder straight back.
+    return ( $config->param('admin_user'), $hv->would_provision( $config, reuse => $reuse ) )
       if $dryrun;
 
     $hv->clear_guest($domain);
