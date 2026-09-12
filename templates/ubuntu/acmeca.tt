@@ -1,0 +1,42 @@
+[%# The account step-ca runs as.  It owns the intermediate key and the database
+    and nothing else; the certificates stay root-owned and world readable. -%]
+id -u step-ca >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d [% steppath %] step-ca
+install -d -o root    -g root    -m 0755 [% steppath %] [% steppath %]/certs [% steppath %]/config
+install -d -o step-ca -g step-ca -m 0700 [% steppath %]/secrets
+install -d -o step-ca -g step-ca -m 0750 [% steppath %]/db
+[%# The fleet authority the provisioner holds the key to, and the intermediate
+    it signed for this guest.  step-ca is handed the root only to chain to: the
+    root key never leaves the provisioner, which is what lets this be the same
+    authority the fetch cache uses. -%]
+install -o root    -g root    -m 0644 acmeca-root.crt         [% steppath %]/certs/root_ca.crt
+install -o root    -g root    -m 0644 acmeca-intermediate.crt [% steppath %]/certs/intermediate_ca.crt
+install -o step-ca -g step-ca -m 0600 acmeca-intermediate.key [% steppath %]/secrets/intermediate_ca_key
+install -o root    -g root    -m 0644 acmeca.ca.json          [% steppath %]/config/ca.json
+[%# Permanently, unlike the copy the fetch cache installs of this same
+    certificate:
+    scripts/fetch_via_cache installs that one for the length of the build and
+    takes it out again before the guest tests run, so a certificate issued here
+    would stop verifying exactly when something came to check it. -%]
+install -o root -g root -m 0644 acmeca-root.crt /usr/local/share/ca-certificates/trog-acmeca.crt
+update-ca-certificates >/dev/null
+[%# The binary.  Found rather than named: the directory inside the release
+    tarball carries the version, and a layout that changes upstream would
+    otherwise install nothing and fail later at ExecStart. -%]
+INSTALLED=$$(/usr/local/bin/step-ca version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
+if [ "$$INSTALLED" != "[% version %]" ]; then \
+	ARCH=$$(dpkg --print-architecture); \
+	rm -rf /tmp/step-ca-unpack /tmp/step-ca.tar.gz; \
+	curl -fsSL "https://github.com/smallstep/certificates/releases/download/v[% version %]/step-ca_linux_[% version %]_$${ARCH}.tar.gz" -o /tmp/step-ca.tar.gz || exit 1; \
+	mkdir -p /tmp/step-ca-unpack; \
+	tar -xzf /tmp/step-ca.tar.gz -C /tmp/step-ca-unpack || exit 1; \
+	BIN=$$(find /tmp/step-ca-unpack -type f -name step-ca | head -1); \
+	test -n "$$BIN" || exit 1; \
+	install -o root -g root -m 0755 "$$BIN" /usr/local/bin/step-ca || exit 1; \
+	rm -rf /tmp/step-ca-unpack /tmp/step-ca.tar.gz; \
+fi
+install -o root -g root -m 0644 acmeca.service /etc/systemd/system/acmeca.service
+systemctl daemon-reload
+[%# Started here rather than queued: the fetcher letsencrypt queues asks this
+    for a certificate during the postrun, so it has to be answering by then. -%]
+systemctl enable --now acmeca
+echo 'acmeca: issuing from the fleet authority at https://127.0.0.1:[% port %]/acme/trog/directory'

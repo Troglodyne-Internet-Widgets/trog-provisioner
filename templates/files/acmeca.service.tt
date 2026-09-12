@@ -1,0 +1,20 @@
+[Unit]
+Description=Internal ACME certificate authority for [% domain %]
+After=network-online.target pdns-recursor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=step-ca
+Group=step-ca
+Environment=STEPPATH=[% steppath %]
+[%# No --password-file: the intermediate key is written as a plain PEM, the way
+    the key of the fetch cache authority is.  Both are made by the provisioner and both
+    are secrets the guest already holds; a passphrase beside the key it unlocks
+    protects nothing. -%]
+ExecStart=/usr/local/bin/step-ca [% steppath %]/config/ca.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

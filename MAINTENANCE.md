@@ -61,6 +61,7 @@ default branch; a force-push or rename shows up as a 404 at build time.
 | imagemagick | `lib/Provisioner/Recipe/imagemagick.pm` | required, with the patch number; the archive prunes old releases |
 | gogs | `lib/Provisioner/Recipe/gogs.pm` | required; the asset spelling changed at 0.14.2, which is why the template tries two names |
 | roundcube | `lib/Provisioner/Recipe/roundcube.pm` | required; this one gets security releases worth following |
+| step-ca | `lib/Provisioner/Recipe/acmeca.pm`, `$STEP_CA_VERSION` | required; the release tarball is fetched from GitHub by version, so one that was never published is a 404 partway through a provision.  The recipe finds the binary inside the tarball rather than naming its directory, so a layout change upstream does not need a bump |
 | perl | `scripts/build_latest_perl.sh` | `perlbrew download stable`, so whatever is stable on the day.  Its three modules -- cpanm, Module::Build, Dist::Zilla -- are unversioned for the same reason |
 
 *Check:* each project's release page.  For garage, `bin/recipes garage` shows
