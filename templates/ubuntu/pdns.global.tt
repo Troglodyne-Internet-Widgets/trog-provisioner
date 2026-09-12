@@ -7,9 +7,21 @@ retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.
 apt-add-repository http://repo.powerdns.com/ubuntu -p [% repo_branch %]
 apt-get update
 apt-get install -y pdns-server
-# Patch lexicon to work with unix sockets XXX it may have already been applied.
-cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-pdns-af-unix.patch; /bin/true
-cd / && git apply /tmp/domainsetup_[% domain %]/lexicon-arbitrary-record-types.patch; /bin/true
+[%# /var/tmp, which is where ubuntu.setup.sh untars the payload.  These two
+    said /tmp and so found nothing, every run, on every guest -- and the
+    "; /bin/true" after them meant the error was printed and then discarded, so
+    lexicon went unpatched and only failed later, deep in a dehydrated hook,
+    with a MissingSchema on the socket path it cannot use unpatched.
+
+    Applied only when it is not already in: one of these went upstream, so a
+    lexicon that already has it is the expected case rather than a fault, and
+    "git apply" of an applied patch fails.  A patch that neither applies nor
+    reverses is a real problem and says so, but does not stop the build: the
+    guest test asks lexicon whether it can reach the socket, which is the thing
+    actually needed, and it will fail there if this went wrong. -%]
+[% FOR patch IN ['lexicon-pdns-af-unix', 'lexicon-arbitrary-record-types'] -%]
+cd / && { git apply --reverse --check /var/tmp/domainsetup_[% domain %]/[% patch %].patch >/dev/null 2>&1 && echo "[% patch %]: already applied"; } || git apply /var/tmp/domainsetup_[% domain %]/[% patch %].patch || echo "[% patch %]: WOULD NOT APPLY -- lexicon may be missing it; see templates/files/patches" >&2
+[% END -%]
 # Run on port 2500 so the recursor can run
 mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
 [%# forward-zones-file, which is how the recursor takes a list of zones that
