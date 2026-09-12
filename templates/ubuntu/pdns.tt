@@ -10,6 +10,9 @@
 # Point the recursor at our domain, via the forward zones file
 grep -qxF '[% domain %]=127.0.0.1:2500' /etc/powerdns/forward-zones 2>/dev/null     || cat pdns-recursor-domain.conf >> /etc/powerdns/forward-zones
 rm -f pdns-recursor-domain.conf
+[%# And the negative trust anchor for it: see the global fragment. -%]
+grep -qF 'addNTA("[% domain %]"' /etc/powerdns/recursor.lua 2>/dev/null || cat pdns-recursor-domain.lua >> /etc/powerdns/recursor.lua
+rm -f pdns-recursor-domain.lua
 # Build the zone database
 mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
 # TODO do this via lexicon instead

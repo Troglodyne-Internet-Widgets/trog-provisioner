@@ -35,6 +35,22 @@ grep -q '^forward-zones-file=' /etc/powerdns/recursor.conf || echo 'forward-zone
 [% FOR zone IN forward_zones.keys().sort() %]
 grep -qxF '[% zone %]=[% forward_zones.$zone %]' /etc/powerdns/forward-zones || echo '[% zone %]=[% forward_zones.$zone %]' >> /etc/powerdns/forward-zones
 [% END -%]
+[%# The recursor validates DNSSEC, and an internal zone under a reserved TLD has
+    no chain to validate against -- so it answered SERVFAIL for the very zone it
+    was forwarding, while resolving the public internet perfectly well.  Nothing
+    said so: the failure surfaced as an ACME challenge that could not be seen.
+
+    A negative trust anchor turns validation off for that zone and nothing else.
+    Measured on a guest: the zone answers NOERROR afterwards and
+    dnssec-failed.org still SERVFAILs, which is the point of doing it per zone
+    rather than with dnssec=process-no-validate. -%]
+touch /etc/powerdns/recursor.lua
+chown root:pdns /etc/powerdns/recursor.lua; /bin/true
+chmod 0644 /etc/powerdns/recursor.lua
+grep -q '^lua-config-file=' /etc/powerdns/recursor.conf || echo 'lua-config-file=/etc/powerdns/recursor.lua' >> /etc/powerdns/recursor.conf
+[% FOR zone IN forward_zones.keys().sort() %]
+grep -qF 'addNTA("[% zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% zone %]", "forwarded to [% forward_zones.$zone %]")' >> /etc/powerdns/recursor.lua
+[% END -%]
 # Configure the zone to be loaded into pdns
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
 # Set up the API so we can use lexicon

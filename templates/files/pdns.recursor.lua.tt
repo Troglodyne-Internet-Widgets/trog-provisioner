@@ -1,0 +1,1 @@
+addNTA("[% domain %]", "unsigned internal zone, served by the authoritative half on 127.0.0.1:2500")
