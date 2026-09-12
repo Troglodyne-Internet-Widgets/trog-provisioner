@@ -39,4 +39,4 @@ systemctl daemon-reload
 [%# Started here rather than queued: the fetcher letsencrypt queues asks this
     for a certificate during the postrun, so it has to be answering by then. -%]
 systemctl enable --now acmeca
-echo 'acmeca: issuing from the fleet authority at https://127.0.0.1:[% port %]/acme/trog/directory'
+echo 'acmeca: issuing from the fleet authority at https://localhost:[% port %]/acme/trog/directory'

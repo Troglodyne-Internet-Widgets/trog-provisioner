@@ -22,7 +22,7 @@ use Provisioner::Cookbook();
     somedomain:
         acmeca:
         letsencrypt:
-            ca: https://127.0.0.1:9000/acme/trog/directory
+            ca: https://localhost:9000/acme/trog/directory
             prefer_local_dns: 1
         pdns:
             api_key: secret:group/entry/field
@@ -79,6 +79,15 @@ C<constrain_to>, and a guest that tried to issue for anything else would be
 refused by the client checking the chain rather than trusted.  The constraint is
 inherited by anything the intermediate goes on to sign, which is what makes it
 sufficient on its own.
+
+C<localhost> is permitted alongside it, and that is not a loophole being left
+open.  step-ca issues its own listener certificate from this intermediate when
+it starts, for the names in C<ca.json>, and refuses to start at all if the
+constraint forbids one of them -- measured on a guest, where it crash-looped on
+C<DNS name "localhost" is not permitted by any constraint>.  The name the CA
+answers to therefore has to be inside the constraint.  What that grants is a
+certificate for C<localhost> signed by the fleet authority, which is worth
+exactly as much as the loopback interface it names.
 
 =cut
 
@@ -246,7 +255,7 @@ sub intermediate {
         issuer    => [ $ca_cert, $ca_key ],
         not_after => time + $INTERMEDIATE_DAYS * $DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
-        ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld" } ],
+        ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld,permitted;DNS:localhost" } ],
     );
 
     ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal

@@ -24,7 +24,7 @@ unlike($listening, qr/(?<!127\.)0\.0\.0\.0:$port\b/, 'and not on every address')
 # The ACME directory, fetched with no -k and no --cacert: this passes only if
 # the authority is in the system trust store, which is the thing that has to
 # still be true after fetch_via_cache has taken its own copy back out.
-my $directory = `curl -fsS --max-time 10 https://127.0.0.1:$port/acme/trog/directory 2>&1`;
+my $directory = `curl -fsS --max-time 10 https://localhost:$port/acme/trog/directory 2>&1`;
 is($?, 0, 'the ACME directory answers, trusted by the system store') or diag $directory;
 like($directory, qr/newAccount/, 'and it looks like an ACME directory') or diag $directory;
 

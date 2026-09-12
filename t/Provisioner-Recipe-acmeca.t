@@ -159,6 +159,29 @@ subtest 'the pinned version is the one the guest is told to fetch' => sub {
     like( $fragment, qr/v9[.]9[.]9/, 'and a version an operator chose instead' );
 };
 
+subtest 'the CA can name itself under its own constraint' => sub {
+
+    # step-ca issues its own listener certificate from this intermediate when it
+    # starts, for the names in ca.json, and refuses to start at all when the
+    # constraint forbids one of them.  Measured on a guest, where it crash-looped
+    # on: DNS name "localhost" is not permitted by any constraint.  Nothing in
+    # the recipe couples those two lists, so this is what keeps them agreeing.
+    my ( undef, $dir ) = generated();
+
+    my ($listed) = File::Slurper::read_text("$dir/acmeca.ca.json") =~ m/"dnsNames":\s*\[([^\]]*)\]/;
+    my @names = $listed =~ m/"([^"]+)"/g;
+    ok( @names, 'ca.json says what the CA answers to' ) or return;
+
+    my @permitted = extension( IO::Socket::SSL::Utils::PEM_file2cert("$dir/acmeca-intermediate.crt"), 'nameConstraints' ) =~ m/DNS:(\S+)/g;
+    foreach my $name (@names) {
+
+        # A permitted entry starting with a dot is a suffix; anything else is
+        # the whole name.
+        my $allowed = grep { m/\A[.]/ ? ".$name" =~ m/\Q$_\E\z/ : $_ eq $name } @permitted;
+        ok( $allowed, "the CA may issue itself $name, which it needs to start" ) or diag "permitted: @permitted";
+    }
+};
+
 subtest 'it depends on the recipe that answers its challenges' => sub {
     my ($recipe) = generated();
     my %required = $recipe->required_recipes( domain => $DOMAIN );
