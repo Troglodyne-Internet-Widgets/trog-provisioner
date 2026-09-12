@@ -107,6 +107,17 @@ then only as narrow as the firewall.
 
 =cut
 
+=head2 $bool = $recipe->shares_a_machine()
+
+False.  One listener on the machine: one port, one ruleset, one
+F</etc/rsyslog.d/09-logcollector.conf>.  A second domain would not add a
+collector beside the first, it would rewrite the one the fleet is already
+shipping to.
+
+=cut
+
+sub shares_a_machine { return 0 }
+
 sub args {
     ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (
