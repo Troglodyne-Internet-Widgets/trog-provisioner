@@ -191,4 +191,20 @@ sub fetch_hosts {
     return qw{www.cpan.org cpan.metacpan.org fastapi.metacpan.org};
 }
 
+=head2 @classes = $recipe->cache_classes()
+
+CPAN: the index and MetaCPAN's API say which release is current, and a
+distribution under F<authors/id> is named by version and never changes.
+CHECKSUMS is excluded -- it is rewritten whenever anything beside it is.
+
+=cut
+
+sub cache_classes {
+    return (
+        { class => 'index',     pattern => 'fastapi\.metacpan\.org/' },
+        { class => 'index',     pattern => '[^/]+/modules/' },
+        { class => 'immutable', pattern => '[^/]+/authors/id/(?!.*/CHECKSUMS$)' },
+    );
+}
+
 1;

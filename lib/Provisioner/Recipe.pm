@@ -324,6 +324,47 @@ sub github_release_hosts {
     return qw{github.com objects.githubusercontent.com release-assets.githubusercontent.com};
 }
 
+=head3 @classes = $recipe->cache_classes()
+
+How long L<Provisioner::Recipe::fetchcache> may keep what this recipe
+downloads, as a list of C<{ class =E<gt> ..., pattern =E<gt> ... }>.  C<class>
+is C<index> for a URL saying which version is current, and C<immutable> for one
+a version or a commit names; anything a recipe does not describe gets the
+cache's C<default>.  C<pattern> is a regex matched against C<HOST/PATH>.
+
+Empty by default, which means the default freshness.
+
+This is beside C<fetch_hosts> for the same reason: which URLs under a host never
+change is a fact about that upstream, and the recipe that downloads from it is
+what knows.  A cache that held the list itself would have to be edited every
+time a recipe gained an upstream, which is the coupling this avoids.
+
+=cut
+
+sub cache_classes {
+    return ();
+}
+
+=head3 @classes = $recipe->github_release_classes()
+
+The C<cache_classes> entries for a recipe that downloads a GitHub release: the
+release asset and a source archive named by tag or commit never change, and
+C<releases/latest> is the link that says which release is current.
+
+Here rather than in each recipe for the reason C<github_release_hosts> is: it is
+one upstream's layout, and gogs, roundcube and matrix would otherwise carry
+three copies of it that drift apart when GitHub changes it.
+
+=cut
+
+sub github_release_classes {
+    return (
+        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },
+    );
+}
+
 =head3 %required = $recipe->required_recipes(%opts)
 
 If a recipe depends on another recipe being present, we need to build it as a synthetic recipe and append it to the list of things to provision.

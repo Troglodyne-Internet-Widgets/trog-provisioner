@@ -318,4 +318,18 @@ sub fetch_hosts {
     return ('garagehq.deuxfleurs.fr');
 }
 
+=head2 @classes = $recipe->cache_classes()
+
+A published release is that release for good.  The tag list is not: it is what
+says which release is current, and C<latest_version> reads it every build.
+
+=cut
+
+sub cache_classes {
+    return (
+        { class => 'immutable', pattern => 'garagehq\\.deuxfleurs\\.fr/_releases/' },
+        { class => 'index',     pattern => 'api\\.github\\.com/' },
+    );
+}
+
 1;

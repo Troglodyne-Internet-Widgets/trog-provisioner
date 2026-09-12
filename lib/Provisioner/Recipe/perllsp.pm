@@ -148,4 +148,14 @@ sub fetch_hosts {
     return ('codeload.github.com');
 }
 
+=head2 @classes = $recipe->cache_classes()
+
+A tarball codeload serves for a full commit SHA is that commit, for good.
+
+=cut
+
+sub cache_classes {
+    return ( { class => 'immutable', pattern => 'codeload\.github\.com/[^/]+/[^/]+/[^/]+/[0-9a-f]{40}$' } );
+}
+
 1;

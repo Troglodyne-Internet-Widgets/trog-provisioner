@@ -133,6 +133,23 @@ sub fetch_hosts {
     return @hosts;
 }
 
+=head2 cache_classes
+
+Every cache class any recipe declares, as C<{ class =E<gt> ..., pattern =E<gt>
+... }>: what L<Provisioner::Recipe::fetchcache> keeps for how long.  Asked of
+every recipe rather than of the ones a domain uses, for the reason
+C<fetch_hosts> is -- the cache serves a fleet and cannot depend on any one
+domain.
+
+=cut
+
+sub cache_classes {
+    my ($class) = @_;
+
+    state @classes = map { $class->load($_)->cache_classes } $class->names;
+    return @classes;
+}
+
 =head2 directors
 
 The recipes that direct a build instead of running in one: C<vm>, and the

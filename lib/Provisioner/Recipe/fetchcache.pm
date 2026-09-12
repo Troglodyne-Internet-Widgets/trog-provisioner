@@ -11,6 +11,7 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use Data::Validate::Domain();
+use List::Util();
 use File::Slurper();
 use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
@@ -72,7 +73,7 @@ it was pinned to.  The cache keeps every version it has ever handed out.
 =head2 Three kinds of URL, and one it does not keep
 
 How long a copy is used before upstream is asked again depends on what the URL
-is, which the recipe knows from the host and the path -- see C<@CLASSES>:
+is, which the recipe knows from the host and the path -- see C<classes>:
 
 =over 4
 
@@ -286,51 +287,49 @@ sub args {
     );
 }
 
-=head2 @CLASSES
+=head2 @classes = $recipe->classes()
 
-The three kinds of URL, most specific first, as C<name>, the C<args> key saying
-how fresh a copy stays, and C<pattern> -- a regex matched against C<HOST/PATH>,
-the host a request was for and the path it asked for, query included.
-C<default> has no pattern and takes whatever the other two did not.
+The kinds of URL, most specific first: C<index> for one saying which version is
+current, C<immutable> for one a version or a commit names, and C<default> for
+whatever the other two did not take.  Each is a C<name>, the C<args> key saying
+how fresh a copy of that kind stays, and a C<pattern> matched against
+C<HOST/PATH>.
 
-These are facts about how the upstreams lay out their URLs rather than
-configuration, which is why they are here and not in C<args>.
-
-=head2 $PASSTHROUGH
-
-The pattern of what is never kept, matched the same way and ahead of the classes:
-git's smart-HTTP ref advertisement.
+The patterns are not held here.  Each recipe declares its own in
+C<cache_classes> -- see L<Provisioner::Recipe> -- and this is the union of them,
+so a recipe gaining an upstream is not a reason to edit the cache.  What stays
+here is C<default>, which belongs to no recipe, and C<$PASSTHROUGH>.
 
 =cut
 
-our @CLASSES = (
-    {
-        name    => 'index',
-        fresh   => 'fresh_index',
-        pattern => join(
-            '|', qw{
-              (?:api\.github\.com|fastapi\.metacpan\.org)/
-              [^/]+/modules/
-              [^/]+/[^/]+/[^/]+/releases/latest(?:/|$)
-            }
-        ),
-    },
-    {
-        name    => 'immutable',
-        fresh   => 'fresh_immutable',
-        pattern => join(
-            '|', qw{
-              [^/]+/authors/id/(?!.*/CHECKSUMS$)
-              [^/]+/[^/]+/[^/]+/releases/download/
-              [^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)
-              codeload\.github\.com/[^/]+/[^/]+/[^/]+/[0-9a-f]{40}$
-              garagehq\.deuxfleurs\.fr/_releases/
-              download\.imagemagick\.org/archive/releases/
-            }
-        ),
-    },
-    { name => 'default', fresh => 'fresh_default' },
+our @CLASS_ORDER = (
+    { name => 'index',     fresh => 'fresh_index' },
+    { name => 'immutable', fresh => 'fresh_immutable' },
 );
+
+sub classes {
+    my ($self) = @_;
+
+    my %pattern;
+    push( @{ $pattern{ $_->{class} } }, $_->{pattern} ) for Provisioner::Cookbook->cache_classes;
+
+    # Sorted and once each: two recipes downloading from one upstream describe it
+    # the same way, and the vhost this renders into should not change because the
+    # recipes were loaded in a different order.
+    my @classes = map {
+        my @patterns = List::Util::uniq( sort @{ $pattern{ $_->{name} } // [] } );
+        @patterns ? { %$_, pattern => join( '|', @patterns ) } : ();
+    } @CLASS_ORDER;
+
+    return ( @classes, { name => 'default', fresh => 'fresh_default' } );
+}
+
+=head2 $PASSTHROUGH
+
+The pattern of what is never kept, matched the same way and ahead of the
+classes: git's smart-HTTP ref advertisement.
+
+=cut
 
 our $PASSTHROUGH = '[^/]+/.+/info/refs\?service=git-';
 
@@ -377,7 +376,7 @@ sub tests { return ('fetchcache.tt') }
 =head2 %opts = $recipe->enrich(%opts)
 
 Turns C<upstreams> into C<allow>, the hosts that are on, and C<allow_re>, the
-same as a regex alternation; C<@CLASSES> into C<classes>, each with the
+same as a regex alternation; the URL classes into C<classes>, each with the
 freshness configured for it; and hands the template C<$PASSTHROUGH>.
 
 Dies on a host that is not a plain DNS name, because it is written into the
@@ -414,7 +413,7 @@ sub enrich {
     $opts{classes}     = [
         map {
             { %$_, fresh => $opts{ $_->{fresh} } }
-        } @CLASSES
+        } $self->classes
     ];
 
     my @given = @{ Provisioner::Utils::coerce_arrayref( $opts{resolvers} ) };

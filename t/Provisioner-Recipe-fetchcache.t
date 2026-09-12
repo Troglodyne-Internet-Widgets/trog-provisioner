@@ -295,7 +295,7 @@ subtest 'the authority is made once, kept in the configuration directory, and it
 # The patterns are PCRE nginx evaluates; these ones read the same in perl, so what
 # each URL is taken for can be asked here rather than on a guest.
 subtest 'which kind each URL recipes fetch is taken for' => sub {
-    my @CLASSES = @Provisioner::Recipe::fetchcache::CLASSES;
+    my @CLASSES = $FETCHCACHE->classes();
     my $kind    = sub {
         my ($url) = @_;
         return 'pass' if $url =~ m{^(?:$Provisioner::Recipe::fetchcache::PASSTHROUGH)};
@@ -333,6 +333,39 @@ subtest 'which kind each URL recipes fetch is taken for' => sub {
         my ( $url, $want ) = @$case;
         is( $kind->($url), $want, "$url is $want" );
     }
+};
+
+subtest 'the classes are the union of what the recipes declare' => sub {
+
+    # Most specific first, and index before immutable: nginx takes the first
+    # map entry that matches, so a release tarball under a releases/latest URL
+    # has to meet the index pattern before the immutable one sees it.
+    is_deeply(
+        [ map { $_->{name} } @Provisioner::Recipe::fetchcache::CLASS_ORDER ],
+        [qw{index immutable}],
+        'the classes are tried most specific first'
+    );
+
+    # The patterns used to live here, which meant a recipe gaining an upstream
+    # was a reason to edit the cache.  They belong to the recipes now, so what
+    # has to be asserted is that they still reach the vhost: a recipe declaring
+    # one that never arrives would silently get the default freshness.
+    my %pattern = map { $_->{name} => $_->{pattern} // q{} } $FETCHCACHE->classes();
+
+    foreach my $name ( Provisioner::Cookbook->names ) {
+        foreach my $declared ( Provisioner::Cookbook->load($name)->cache_classes ) {
+            ok(
+                index( $pattern{ $declared->{class} } // q{}, $declared->{pattern} ) >= 0,
+                "$name's $declared->{class} pattern reaches the cache"
+            );
+        }
+    }
+
+    my ($vhost) = generated();
+    like( $vhost, qr{\Qauthors/id/\E}, 'and the union is what the vhost is written from' );
+
+    # default is the cache's own, and takes whatever the others did not.
+    is( $pattern{default}, q{}, 'default matches on nothing, being the fallback' );
 };
 
 subtest 'nothing depends on it, and it salvages nothing' => sub {
