@@ -1,5 +1,5 @@
 [Unit]
-Description=Internal ACME certificate authority for [% domain %]
+Description=Internal ACME certificate authority for this guest
 After=network-online.target pdns-recursor.service
 Wants=network-online.target
 

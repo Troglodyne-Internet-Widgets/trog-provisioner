@@ -59,6 +59,33 @@ its own host's resolver, and nothing outside this guest can answer for its zone.
 It listens on loopback alone.  The only client is this guest's own dehydrated,
 so there is no port to open and no rate limit to set.
 
+=head2 One CA for the guest, not one for each domain
+
+step-ca is a single service with one database, one listener and one
+intermediate, so this recipe is the guest's rather than the domain's and its
+fragment is the global half: installed, configured and started once however many
+domains the guest ends up holding.
+
+It was the per-domain half once, and the cost of that is worth writing down.
+Every domain mints an intermediate of its own at C<generate_files> time, so the
+second domain provisioned onto a guest overwrote the key the running CA was
+issuing from -- and C<systemctl enable --now> does not restart a unit that is
+already up, so nothing looked wrong until the next restart, when the authority
+quietly became a different one.
+
+Nothing addresses this CA by the name of a domain.  dehydrated is pointed at
+C<https://localhost:port/acme/trog/directory> and the listener is bound to
+loopback, so C<ca.json> names C<localhost> and nothing else -- which also
+retires a way for it to refuse to start, since a name outside the constraint
+below crash-loops step-ca and a second domain's name is exactly that whenever
+the two are under different top-level domains.
+
+What does still follow the first domain built is C<constrain_to>, and therefore
+what this CA may issue for at all.  A guest whose domains share a top-level
+domain -- which is the ordinary case, and every case under a reserved one --
+wants nothing done about that.  A guest mixing them has to say C<constrain_to>
+for itself; the constraint is a list, and one intermediate can carry several.
+
 =head2 The intermediate, and what stops it signing the internet
 
 The authority's private key stays on the provisioner, as it does for the fetch
