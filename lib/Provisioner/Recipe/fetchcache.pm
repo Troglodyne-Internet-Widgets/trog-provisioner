@@ -13,7 +13,6 @@ use parent qw{Provisioner::Recipe};
 use Data::Validate::Domain();
 use List::Util();
 use File::Slurper();
-use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
 
 use Provisioner::Cookbook();
@@ -471,8 +470,8 @@ sub authority {
 
     # The key first: the pair is only taken as made once both are there.
     ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
-    _write_pem( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
-    _write_pem( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
+    $class->write_pem( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
+    $class->write_pem( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
     ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($cert);
@@ -507,22 +506,14 @@ sub certify {
     );
 
     ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
-    _write_pem( "$output_dir/fetchcache.key", IO::Socket::SSL::Utils::PEM_key2string($key),                                                    0600 );
-    _write_pem( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), 0644 );
+    $self->write_pem( "$output_dir/fetchcache.key", IO::Socket::SSL::Utils::PEM_key2string($key),                                                    0600 );
+    $self->write_pem( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), 0644 );
     ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
     IO::Socket::SSL::Utils::KEY_free($_)  for $key,  $ca_key;
 
     return qw{fetchcache.crt fetchcache.key};
-}
-
-sub _write_pem {
-    my ( $path, $pem, $mode ) = @_;
-
-    File::Slurper::Temp::write_binary( $path, $pem );
-    chmod( $mode, $path ) or die "Could not set the mode of $path: $!\n";
-    return;
 }
 
 1;
