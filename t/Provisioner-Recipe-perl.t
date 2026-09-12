@@ -160,6 +160,17 @@ subtest 'what each recipe depending on it hands over, it takes, and the merge ke
     is( scalar @installs, 5, 'all of them, the merge dropping none' );
 };
 
+subtest 'the guest has what this recipe installs into the perl needs to build' => sub {
+    my %deps = map { $_ => 1 } recipe('perl')->deps();
+
+    # A recipe with no subclass for the distribution in hand inherits an empty
+    # deps() and installs nothing at all.  Measured on a guest with this recipe
+    # and nothing else: Dist::Zilla reaches Net::SSLeay through CPAN::Uploader,
+    # and its configure stops with "COULD NOT FIND LIBSSL HEADERS".
+    ok( $deps{'libssl-dev'}, 'libssl-dev, without which Net::SSLeay does not configure' );
+    ok( $deps{perlbrew},     'and perlbrew, which builds the perl and brings a compiler with it' );
+};
+
 subtest 'a dependant told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
     like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined, positive-length/, 'tcms' );
