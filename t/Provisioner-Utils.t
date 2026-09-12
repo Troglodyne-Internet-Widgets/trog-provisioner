@@ -42,6 +42,20 @@ subtest 'fleet_address: what a name for another machine turns out to be' => sub 
     is_deeply( [ Provisioner::Utils::fleet_address( 'guest.test.test', %own ) ], [ self => q{} ], 'even when the pool knows its address' );
 };
 
+subtest 'tld_of is the last label, and nothing when there is none' => sub {
+    is( Provisioner::Utils::tld_of('guest.test.test'),     'test',    'a name under a reserved TLD' );
+    is( Provisioner::Utils::tld_of('host.troglodyne.net'), 'net',     'and under a public one' );
+    is( Provisioner::Utils::tld_of('a.b.c.d.example'),     'example', 'however many labels precede it' );
+
+    # The boundaries: letsencrypt decides from this whether a public CA could
+    # ever issue for the name, and acmeca constrains a signing key to it, so an
+    # answer where there is none is worse than no answer.
+    is( Provisioner::Utils::tld_of('localhost'), undef, 'a single label names no TLD' );
+    is( Provisioner::Utils::tld_of('trailing.'), undef, 'nor does a trailing dot' );
+    is( Provisioner::Utils::tld_of(q{}),         undef, 'nor an empty string' );
+    is( Provisioner::Utils::tld_of(undef),       undef, 'and undef is not a warning' );
+};
+
 subtest 'host_of reads the host out of the forms a repo_url takes' => sub {
     is( Provisioner::Utils::host_of('https://github.com/o/r.git'),      'github.com', 'an https clone URL' );
     is( Provisioner::Utils::host_of('https://gitea.test:3000/api/v1/'), 'gitea.test', 'a port is not part of the host' );

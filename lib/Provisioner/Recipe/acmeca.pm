@@ -136,8 +136,7 @@ sub args {
             constrain_to => {
                 type        => 'string',
                 pattern     => q{\A[a-z\d]([a-z\d-]*[a-z\d])?\z},
-                default     => 'test',
-                description => 'The one top-level domain this CA is allowed to issue for, written into the intermediate as a name constraint.  It is what stops a key shipped to a throwaway guest from being trusted for anybody else: see perldoc Provisioner::Recipe::acmeca.',
+                description => "The one top-level domain this CA is allowed to issue for, written into the intermediate as a name constraint.  It is what stops a key shipped to a throwaway guest from being trusted for anybody else: see perldoc Provisioner::Recipe::acmeca.  Defaults to the top-level domain of the guest this CA is built for, which is the only name it has any business issuing.",
             },
             default_duration => {
                 type        => 'string',
@@ -153,6 +152,30 @@ sub args {
             },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+C<constrain_to> comes from the guest this CA is built for.  A CA on a guest
+exists to issue that guest its certificate, and the guest's own top-level domain
+is therefore the only one it has any business vouching for -- so the constraint
+follows the domain rather than a fixed default that is right for C<.test> and
+wrong for every other reserved TLD.
+
+Derived here rather than declared in the schema because a schema default cannot
+depend on another field.  A domain naming C<constrain_to> explicitly keeps what
+it named.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    $opts{constrain_to} //= Provisioner::Utils::tld_of( $opts{domain} );
+    die "acmeca could not tell what top-level domain to constrain itself to from '" . ( $opts{domain} // q{} ) . "'; set constrain_to for this domain\n"
+      unless defined $opts{constrain_to} && length $opts{constrain_to};
+
+    return %opts;
 }
 
 =head2 %required = $recipe->required_recipes(%opts)

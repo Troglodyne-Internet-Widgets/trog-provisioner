@@ -107,6 +107,16 @@ subtest 'the intermediate may not vouch for anything outside the TLD it was made
     my $intermediate = IO::Socket::SSL::Utils::PEM_file2cert("$dir/acmeca-intermediate.crt");
     like( extension( $intermediate, 'nameConstraints' ), qr/DNS:[.]test/, 'by default it is constrained to .test' );
 
+    # Derived from the guest rather than defaulted to .test, which the assertion
+    # above cannot tell apart: this fixture is itself a .test domain, so it
+    # passed just as well when the default was the literal string.  A CA on a
+    # guest has no business vouching for a TLD that guest is not under.
+    ( undef, $dir ) = generated( domain => 'acmeca.test.example' );
+    $intermediate = IO::Socket::SSL::Utils::PEM_file2cert("$dir/acmeca-intermediate.crt");
+    my $derived = extension( $intermediate, 'nameConstraints' );
+    like( $derived, qr/DNS:[.]example/, 'the constraint follows the domain it was built for' );
+    unlike( $derived, qr/DNS:[.]test\b/, 'rather than the TLD the schema used to name' );
+
     ( undef, $dir ) = generated( constrain_to => 'internal' );
     $intermediate = IO::Socket::SSL::Utils::PEM_file2cert("$dir/acmeca-intermediate.crt");
     my $constraints = extension( $intermediate, 'nameConstraints' );

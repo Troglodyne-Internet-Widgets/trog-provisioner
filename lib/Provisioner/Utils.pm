@@ -269,6 +269,27 @@ sub fleet_address {
     return ( unknown => $name );
 }
 
+=head3 tld_of($domain)
+
+The last label of C<$domain>, or nothing if it has none.
+
+Lives here rather than in either recipe that wants it: L<Provisioner::Recipe::letsencrypt>
+decides from it whether a name is one a public CA could ever issue for, and
+L<Provisioner::Recipe::acmeca> constrains its intermediate to it.  Those two must
+not work the answer out differently, and neither has any business loading the
+other to agree.
+
+=cut
+
+sub tld_of {
+    my ($domain) = @_;
+
+    return unless defined $domain && length $domain;
+    my ($tld) = $domain =~ m/[.]([^.]+)\z/;
+
+    return $tld;
+}
+
 =head3 write_pem($path, $pem, $mode)
 
 Write a PEM -- a certificate, a key, or several of them concatenated -- to
