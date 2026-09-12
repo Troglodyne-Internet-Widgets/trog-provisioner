@@ -3,23 +3,28 @@ use strict;
 use warnings;
 use Test::More;
 
-my $status = `systemctl is-active openvpn-client\@client 2>/dev/null`;
+# Named for the domain, both of them: a guest can hold two of these, and the
+# unit, the configuration and the certificates each have to say which.
+my $status = `systemctl is-active openvpn-client\@[% domain %] 2>/dev/null`;
 chomp $status;
-is($status, 'active', 'openvpn client is running');
-ok(-f '/etc/openvpn/client/client.conf', 'openvpn client config exists');
+is($status, 'active', 'the tunnel for this domain is running');
 
-# The tunnel interface the recipe waits for.  That wait was passing the
-# interface name as a word after `bash -c`, which makes it the inner shell's $0
-# rather than a variable -- so it tested "" against "" and returned success in a
-# hundredth of a second for any interface, including ones that cannot exist.
-# Nothing had ever waited for this.
-my $link = `ip link show tun0 2>&1`;
-like($link, qr/tun0/, 'the tunnel interface exists') or diag $link;
+ok(-f '/etc/openvpn/client/[% domain %].conf', 'its configuration is where openvpn-client@ looks for it');
+ok(-d '/etc/openvpn/client/[% domain %]', 'and its certificates are in a directory of its own');
+foreach my $file (qw{ca.crt client.crt client.key ta.key}) {
+    ok(-s "/etc/openvpn/client/[% domain %]/$file", "which has $file in it");
+}
+is((stat('/etc/openvpn/client/[% domain %]/client.key'))[2] & 07777, 0600, 'and the key is readable by nobody else');
 
-# Nothing is salvaged off this guest, so there is nothing here about a staged
-# copy of the certificates.  ced2763 took the round trip out -- cert_dir on the
-# hypervisor is rsynced over them every run, so salvaging them put a client
-# private key in the datadir to no purpose -- and what outlived it here were
-# assertions about a directory nothing had made since.
+# The interface the recipe waits for.  That wait was passing the name as a word
+# after `bash -c`, which makes it the inner shell's $0 rather than a variable --
+# so it tested "" against "" and returned success in a hundredth of a second for
+# any interface, including ones that cannot exist.
+my $link = `ip link show [% device %] 2>&1`;
+like($link, qr/\Q[% device %]\E/, 'the tunnel interface is up under the name this domain was given') or diag $link;
+
+# Nothing is salvaged off this guest: cert_dir on the hypervisor is rsynced over
+# these every run, so a copy taken off the guest would put a client private key
+# in the datadir to no purpose.
 
 done_testing();
