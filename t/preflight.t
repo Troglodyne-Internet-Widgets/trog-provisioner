@@ -27,6 +27,11 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
+
 my $script = "$FindBin::Bin/../bin/preflight";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
@@ -50,6 +55,95 @@ sub quietly {
     return wantarray ? ( $result[0], File::Slurper::read_text("$tmp") ) : $result[0];
 }
 
+# Stands in for the api a cloud hypervisor talks through.
+{
+
+    package Test::PreflightCloud;
+
+    sub new      { my ( $c, %a ) = @_; return bless {%a}, $c }
+    sub auth     { return $_[0] }
+    sub services { return @{ $_[0]->{services} } }
+
+    sub look_by_id_or_name {
+        my ( $self, $kind, $name ) = @_;
+        die "Cannot find '$kind' for id/name '$name'\n" unless grep { $_ eq $name } @{ $self->{$kind} // [] };
+        return { name => $name };
+    }
+
+    sub image_from_name {
+        my ( $self, $name ) = @_;
+        return unless grep { $_ eq $name } @{ $self->{images} // [] };
+        return { name => $name };
+    }
+}
+
+sub cloud_hv {
+    my (%opts) = @_;
+
+    my $api = Test::PreflightCloud->new(
+        services => [qw{compute image network volumev3}],
+        flavors  => ['m1.medium'],
+        networks => ['internal'],
+        images   => ['ubuntu-24.04'],
+        %{ $opts{api} // {} },
+    );
+
+    Trog::HV->forget();
+    my $hv = Trog::HV->new( cloud => 'testcloud', flavor => 'm1.medium', image => 'ubuntu-24.04', network => 'internal', %{ $opts{hv} // {} } );
+
+    my $mock = Test::MockModule->new('Trog::HV::OpenStack');
+    $mock->redefine( api => sub { $api } );
+
+    return ( $hv, $mock );
+}
+
+subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
+    my ( $hv, $mock ) = cloud_hv();
+
+    my ($ok) = quietly( sub { Trog::Bin::Preflight::check_cloud_reachable($hv) } );
+    ok $ok->{ok}, 'a credential that authenticates and a catalogue with the three services';
+
+    ($ok) = quietly( sub { Trog::Bin::Preflight::check_cloud_resources($hv) } );
+    ok $ok->{ok}, 'a flavor, image and network the cloud has';
+
+    # Getting one of these wrong otherwise fails a provision minutes in, with an
+    # error from the API rather than from us.
+    my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope', image => 'not-an-image' } );
+    my ($failed) = quietly( sub { Trog::Bin::Preflight::check_cloud_resources($bad) } );
+    ok !$failed->{ok}, 'and it notices when they are not';
+    like $failed->{what}, qr/flavor 'm1\.nope'/,    'naming the flavor';
+    like $failed->{what}, qr/image 'not-an-image'/, 'and the image';
+
+    my ( $thin, $thin_mock ) = cloud_hv( api => { services => [qw{compute volumev3}] } );
+    ($failed) = quietly( sub { Trog::Bin::Preflight::check_cloud_reachable($thin) } );
+    ok !$failed->{ok}, 'a catalogue without Glance or Neutron cannot build a guest';
+    like $failed->{what}, qr/image, network/, 'and it says which are missing';
+};
+
+subtest 'a cloud runs out of quota, not of hardware' => sub {
+    my ( $hv, $mock ) = cloud_hv();
+
+    my $capacity = { guests => 4, memory_free => 8192, memory_mb => 51200, memory_committed => 32768, cpus => 40, cpus_committed => 20, cpus_free => 19, disk_free => 1024 };
+    $mock->redefine( capacity   => sub { return $capacity } );
+    $mock->redefine( max_guests => sub { 10 } );
+
+    my ($ok) = quietly( sub { Trog::Bin::Preflight::check_cloud_quota($hv) } );
+    ok $ok->{ok}, 'room for one more';
+    like $ok->{what}, qr{4/10 instances}, 'and it says how much room';
+
+    $mock->redefine( capacity => sub { return { %$capacity, memory_free => 0, cpus_free => 0 } } );
+    my ($failed) = quietly( sub { Trog::Bin::Preflight::check_cloud_quota($hv) } );
+    ok !$failed->{ok}, 'and none is a failure';
+    like $failed->{what}, qr/memory/, 'naming what ran out';
+
+    $mock->redefine( capacity => sub { return { %$capacity, guests => 10 } } );
+    ($failed) = quietly( sub { Trog::Bin::Preflight::check_cloud_quota($hv) } );
+    ok !$failed->{ok}, 'so is being at the instance cap';
+    like $failed->{what}, qr/instances/, 'which is said as such';
+
+    Trog::HV->forget();
+};
+
 subtest 'libvirt packs its version into one integer' => sub {
     is( Trog::Bin::Preflight::libvirt_version(10000000), '10.0.0', 'major only' );
     is( Trog::Bin::Preflight::libvirt_version(9004000),  '9.4.0',  'and minor' );
@@ -60,7 +154,7 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
 
     # Sys::Virt binds the API of the libvirt release it was built against, so a
     # mismatch shows up as a missing constant rather than as a version error.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     my $sv = Test::MockModule->new('Sys::Virt');
 
     $hv->redefine( vmm                 => sub { bless {}, 'Sys::Virt' } );
@@ -87,7 +181,7 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
 };
 
 subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( vmm => sub { die "no route to host\n" } );
 
     my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_libvirt( Trog::HV->new() ) } );
@@ -99,7 +193,7 @@ subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
 };
 
 subtest 'passwordless sudo is the one that would hang the run' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
 
     $hv->redefine( run_cmd => sub { 0 } );
     my ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
@@ -114,7 +208,7 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
 };
 
 subtest 'rsync is the one thing both ends have to have' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $which = Test::MockModule->new('File::Which');
 
     $hv->redefine( is_local => sub { 0 } );
@@ -150,7 +244,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
 };
 
 subtest 'a guest has to have an address of ours to fetch from' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $local = Test::MockModule->new('Trog::Local');
 
     $hv->redefine( virbr_ip => sub { '192.168.122.1' } );
@@ -181,7 +275,7 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
 # domain.
 subtest 'a directory a recipe fetches has to be on this machine' => sub {
     my $dir = tempdir( CLEANUP => 1 );
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( ssh_host => sub { 'hv.test' } );
 
     my $present = "$dir/dotfiles";
@@ -235,7 +329,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
 
     # Being told about the sudo, and then a fix later about the missing
     # xorriso, is two round trips where one would do.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( is_local  => sub { 1 } );
     $hv->redefine( run_cmd   => sub { 1 } );              # no passwordless sudo
     $hv->redefine( iso_maker => sub { die "none\n" } );
@@ -308,7 +402,7 @@ subtest 'a fleet with nothing keeping its logs is told so, once there is a sink'
 
     # No leftovers on the hypervisor for most of this: the upgrade case has its
     # own subtest below, and it short-circuits everything else when it fires.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( list_dir => sub { return () } );
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
@@ -342,7 +436,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.troglodyne.net:\n    nginx:\nold.troglodyne.net:\n    nginx:\n" );
     Provisioner::Cookbook->forget();
 
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
     # Only the per-domain ones this tool wrote.  20-ufw.conf and 50-default.conf

@@ -33,6 +33,10 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # Every subtest wants a hypervisor of its own, and new() hands back the last one
 # it built unless you ask for something different.
 sub fresh {
@@ -131,6 +135,35 @@ subtest 'pool and domain paths default the way they always did' => sub {
     is( $set->domain_dir, '/srv/domains', 'domain_dir override' );
 };
 
+subtest 'a backend that leaves something out is told what' => sub {
+    my @owed = qw{
+      build config_keys capacity
+      domain_exists domain_is_running annihilate_domain guest_names guest_ssh_ip
+      snapshot_names snapshot_current_name create_snapshot revert_snapshot
+      prepare_host release_seed guest_volumes
+    };
+
+    {
+
+        package Trog::HV::HalfDone;
+        use parent -norequire, 'Trog::HV';
+    }
+    my $half = bless {}, 'Trog::HV::HalfDone';
+
+    # In words, at the call, rather than "Can't locate object method" from
+    # somewhere up in bin/provision.
+    foreach my $method (@owed) {
+        ok( !eval { $half->$method('vm.test'); 1 }, "$method dies" );
+        like( $@, qr/\ATrog::HV::HalfDone does not implement \Q$method\E, which every backend has to$/, 'naming the backend and what it owes' );
+    }
+
+    # And the two there are owe nothing.
+    foreach my $backend ( Trog::HV->backends ) {
+        my @missing = grep { $backend->can($_) == Trog::HV->can($_) } @owed;
+        is_deeply( \@missing, [], "$backend implements every one of them" );
+    }
+};
+
 subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
 
     # Both default to what every hypervisor built by the old tool has, so a
@@ -155,7 +188,7 @@ subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
 };
 
 subtest 'an existing pool says where it is, and is believed' => sub {
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { FakePoolVMM->new('/var/lib/libvirt/images') } );
 
     is(
@@ -309,7 +342,7 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
 # --- has_tpm ------------------------------------------------------------------
 subtest 'a guest gets a TPM only where one means something' => sub {
     my ( $asked, $answer );
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( capture_cmd => sub { $asked = $_[1]; return $answer } );
 
     # Both halves: hardware here, and swtpm to emulate one there.  The command
@@ -618,7 +651,7 @@ subtest 'a disk is an overlay on the base image' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my @created;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path => sub { undef } );
     $mock->redefine( pool        => sub { FakeBuildPool->new( \@created ) } );
 
@@ -653,7 +686,7 @@ subtest 'a disk is an overlay on the base image' => sub {
 subtest 'a feature needs its libvirt, its qemu, and sometimes its qemu-img' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( libvirt_version  => sub { 10_000_000 } );                                 # 10.0.0
     $mock->redefine( qemu_version     => sub { 8_002_000 } );                                  # 8.2.0, which noble ships
     $mock->redefine( qemu_img_options => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
@@ -680,7 +713,7 @@ subtest 'a feature needs its libvirt, its qemu, and sometimes its qemu-img' => s
 subtest 'an unanswerable hypervisor is assumed to support nothing' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { die "no libvirt here\n" } );
 
     is( $hv->libvirt_version, 0, 'a connection that will not answer is a zero' );
@@ -692,7 +725,7 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my @ran;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( run_cmd => sub { my ( $self, @argv ) = @_; push @ran, \@argv; return 0 } );
 
     ok( $hv->pool_takes_direct_io, 'a pool whose filesystem takes the write says so' );
@@ -715,7 +748,7 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
 };
 
 subtest 'how big a qcow2 has to be before its layout changes' => sub {
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( libvirt_version  => sub { 10_000_000 } );
     $mock->redefine( qemu_version     => sub { 9_000_000 } );
     $mock->redefine( qemu_img_options => sub { +{ cluster_size => 1, extended_l2 => 1 } } );
@@ -755,7 +788,7 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my @created;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path  => sub { undef } );
     $mock->redefine( pool         => sub { FakeBuildPool->new( \@created ) } );
     $mock->redefine( qcow2_tuning => sub { ( extended_l2 => 1, cluster_size => 1048576 ) } );
@@ -779,7 +812,7 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my ( @ran, %written );
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( mkpath       => sub { 1 } );
     $mock->redefine( write_text   => sub { $written{ $_[1] } = $_[2]; return 1 } );
     $mock->redefine( refresh_pool => sub { 1 } );
@@ -812,7 +845,7 @@ subtest 'the base image is fetched once' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
     my @ran;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path  => sub { undef } );
     $mock->redefine( refresh_pool => sub { 1 } );
     $mock->redefine( run_cmd      => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c ); return 0 } );
@@ -907,7 +940,7 @@ subtest 'what a guest will call its interfaces is the hypervisor to say' => sub 
     {
 
         package Trog::HV::Weird;
-        use parent -norequire, 'Trog::HV';
+        use parent -norequire, 'Trog::HV::Libvirt';
         sub nic_prefix { return 'enp0s' }
     }
 
@@ -922,7 +955,7 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
 
     my @asked;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { FakeLeaseVMM->new( \@asked ) } );
 
     is( $hv->lease_ip( 'default', mac => '52:54:00:aa:bb:cc' ), '192.168.122.50',    'found' );
@@ -964,7 +997,7 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 subtest 'a rebuilt guest can hold two leases, and the newest is the address it has' => sub {
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { FakeLeaseVMM->new( [] ) } );
 
     # Measured on hydra: a guest rebuilt under the same name kept its MAC, got

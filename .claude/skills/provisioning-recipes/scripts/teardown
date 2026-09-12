@@ -249,14 +249,16 @@ sub sweep_orphans {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
 
-    # Everything libvirt has, anywhere in the fleet.  A hypervisor that cannot
-    # be asked stops the sweep rather than being skipped: the guests it holds
-    # are exactly the ones that would then look like orphans.
+    # Every guest anywhere in the fleet.  A hypervisor that cannot be asked stops
+    # the sweep rather than being skipped: the guests it holds are exactly the
+    # ones that would then look like orphans.
+    #
+    # Asked of the hypervisor rather than of libvirt, because not every
+    # hypervisor has one -- a cloud answers this out of Nova, and asking it for a
+    # domain list stopped the sweep for the whole fleet.
     my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
     foreach my $hv (@hvs) {
-        my @names = eval {
-            map { $_->get_name } $hv->vmm->list_all_domains();
-        };
+        my @names = eval { $hv->guest_names };
         if ($@) {
             print {*STDERR} 'Could not ask ' . $hv->describe . " what guests it has, so nothing is swept:\n$@";
             return 1;

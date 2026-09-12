@@ -13,11 +13,13 @@ t/hypervisors.t - Trog::Hypervisors: reading the fleet, and placing a guest in i
 =cut
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
 
+use FindBin;
 use FindBin::libs;
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
@@ -26,6 +28,11 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 use Trog::HV();
+
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Trog::Hypervisors();
 
 my $GB = 1024 * 1024 * 1024;
@@ -50,6 +57,15 @@ CONF
     return "$dir/hypervisors.conf";
 }
 
+# A hypervisors.conf with whatever blocks the caller wants, for the tests about
+# what makes a block one kind of hypervisor rather than the other.
+sub fleet_of {
+    my ($body) = @_;
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/hypervisors.conf", $body );
+    return "$dir/hypervisors.conf";
+}
+
 sub guest_conf {
     my (%params) = @_;
     my $dir = tempdir( CLEANUP => 1 );
@@ -60,7 +76,7 @@ sub guest_conf {
 # Capacity comes from libvirt, so hand Trog::HV a made-up one.
 sub with_capacity {
     my (%by_name) = @_;
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine(
         capacity => sub {
             my ($self) = @_;
@@ -142,7 +158,7 @@ subtest 'a file with no blocks is an error' => sub {
 subtest 'hosting asks each hypervisor' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
     my $found = $fleet->hosting('vm.example.test');
@@ -155,7 +171,7 @@ subtest 'hosting asks each hypervisor' => sub {
 subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine(
         domain_exists => sub {
             die "connection refused\n" if $_[0]->name eq 'hv1';
@@ -226,7 +242,7 @@ subtest 'an unreachable hypervisor is reported as such, not skipped silently' =>
 subtest 'a guest that already exists stays where it is' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv1' ? 1 : 0 } );
     $mock->redefine( capacity      => sub { die "placement should not have been asked\n" } );
 
@@ -238,7 +254,7 @@ subtest 'a guest that already exists stays where it is' => sub {
 subtest 'provision.conf can pin a guest to a hypervisor' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { 0 } );
     $mock->redefine( capacity      => sub { capacity() } );
 
@@ -250,7 +266,7 @@ subtest 'provision.conf can pin a guest to a hypervisor' => sub {
 subtest 'a pin to a hypervisor that cannot take it is an error' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { 0 } );
     $mock->redefine( capacity      => sub { capacity( memory_free => 128 ) } );
 
@@ -278,7 +294,7 @@ subtest 'find' => sub {
     );
     ok( $no_fleet->is_local, 'with no fleet we are back to the local hypervisor' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
     Trog::HV->forget();
@@ -297,7 +313,7 @@ subtest 'capacity counts what is committed, not what is used' => sub {
     Trog::HV->forget();
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1', reserve_memory => 2048, reserve_cpus => 2 );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm       => sub { FakeVMM->new() } );
     $mock->redefine( pool_free => sub { 200 * $GB } );
 
@@ -318,7 +334,7 @@ subtest 'shortfalls and headroom' => sub {
     Trog::HV->forget();
     my $hv = Trog::HV->candidate( uri => 'qemu+ssh://hv/system', name => 'hv1' );
 
-    my $mock = Test::MockModule->new('Trog::HV');
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( capacity => sub { capacity( memory_free => 8192, cpus_free => 4, disk_free => 100 * $GB ) } );
 
     is_deeply(
@@ -365,5 +381,97 @@ subtest 'shortfalls and headroom' => sub {
     sub get_info  { my ($s) = @_; return { maxMem => $s->{maxMem}, nrVirtCpu => $s->{nrVirtCpu} } }
     sub is_active { return $_[0]->{active} }
 }
+
+subtest 'file order is the file\'s order, not the alphabet\'s' => sub {
+
+    # Named so that alphabetical and file order disagree.  With hv1/hv2/hv3 the
+    # two are the same, which is how sorting the keys passed for file order.
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[zulu]
+libvirt_uri=qemu+ssh://root@zulu.example.net/system
+
+[alpha]
+libvirt_uri=qemu+ssh://root@alpha.example.net/system
+
+[mike]
+libvirt_uri=qemu+ssh://root@mike.example.net/system
+CONF
+
+    is_deeply [ $fleet->names ], [qw{zulu alpha mike}],
+      'the order the file lists them in, which is what the documentation promises';
+};
+
+subtest 'a block naming a cloud is an OpenStack hypervisor' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[cloud1]
+cloud=openstack
+flavor=m1.medium
+image=ubuntu-24.04
+network=internal
+floating_network=public
+reserve_memory=8192
+CONF
+
+    is_deeply [ $fleet->names ], [qw{hv1 cloud1}], 'both kinds live in one file';
+
+    is ref $fleet->hypervisor('hv1'), 'Trog::HV::Libvirt', 'the one with a URI is libvirt';
+
+    my $os = $fleet->hypervisor('cloud1');
+    is ref $os,               'Trog::HV::OpenStack', 'and the one with a cloud is not';
+    is $os->name,             'cloud1',              'named as the file names it';
+    is $os->cloud,            'openstack',           'pointed at the clouds.yaml entry';
+    is $os->flavor,           'm1.medium',           'with the flavor';
+    is $os->image,            'ubuntu-24.04',        'the image';
+    is $os->network,          'internal',            'the network';
+    is $os->floating_network, 'public',              'and where floating IPs come from';
+
+    is $os->reserve_memory, 8192,
+      'the limits are read the same way for either kind, because placement is shared';
+};
+
+subtest 'the documented example is a file that loads' => sub {
+
+    # The shipped example, not a copy of it.  A configuration file people are
+    # told to copy and edit is documentation that can go stale silently, and the
+    # only thing that stops it is reading the real one.
+    my $example = "$FindBin::Bin/../hypervisors.conf.example";
+
+    my $fleet = Trog::Hypervisors->load($example);
+    ok $fleet->configured, 'the example describes a fleet';
+
+    my %backend = map { $_ => ref $fleet->hypervisor($_) } $fleet->names;
+
+    is $backend{hv1},    'Trog::HV::Libvirt',   'its machine blocks build machines';
+    is $backend{cloud1}, 'Trog::HV::OpenStack', 'and its cloud block builds a cloud';
+};
+
+subtest 'a block has to say which kind of hypervisor it is' => sub {
+    my $both = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[confused]
+libvirt_uri=qemu:///system
+cloud=openstack
+CONF
+
+    my $err = exception { $both->hypervisor('confused') };
+    like $err, qr/\[confused\]/,               'the error names the block';
+    like $err, qr/both libvirt_uri and cloud/, 'and what is wrong with it';
+
+    my $neither = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[vague]
+reserve_memory=4096
+CONF
+
+    $err = exception { $neither->hypervisor('vague') };
+    like $err, qr/\[vague\]/,                     'likewise by name';
+    like $err, qr/neither libvirt_uri nor cloud/, 'and why';
+
+    # The one that matters: without this check a block naming nothing falls
+    # through to libvirt's default connection, which is this machine -- the one
+    # placement nobody writing a fleet file intended.
+    unlike $err, qr/qemu/, 'rather than quietly placing the guest here';
+};
 
 done_testing;
