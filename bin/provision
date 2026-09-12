@@ -660,11 +660,6 @@ sub reprovision_guest {
     my $key = "$domain_dir/$domain/key.rsa";
     $key = "$domain_dir/$depends/key.rsa" if $depends;
 
-    # Make sure any existing VMs don't have this domain.  Which is only sensible
-    # with --depends, where $domain is a different name from the guest being
-    # connected to below; without one this clears the guest it is about to use.
-    $hv->clear_guest($domain);
-
     print "Attempting to access Machine\n";
     my $guest = Trog::Guest->new( name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key );
 

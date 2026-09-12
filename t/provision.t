@@ -444,6 +444,47 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     like( $@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
 };
 
+# Reusing a guest means provisioning onto the one that is already up.  This used
+# to clear it first -- annihilate the domain, delete both volumes -- and then
+# open an ssh connection to it, which only reads as sensible if $domain names
+# something other than the guest being connected to.  It never does: the host
+# comes from guest_mac($domain, 0), and --depends switches only the key.
+subtest 'reusing a guest leaves alone the guest it is about to use' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my @applied;
+
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
+    my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my $guest = Test::MockModule->new('Trog::Guest');
+
+    $hv->redefine( domain_dir   => sub { $dir } );
+    $hv->redefine( guest_mac    => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip     => sub { '192.168.122.50' } );
+    $hv->redefine( guest_ssh_ip => sub { '192.168.122.50' } );
+    $hv->redefine( clear_guest  => sub { push( @applied, 'clear_guest' ); 1 } );
+
+    $guest->redefine( new         => sub { return bless {}, 'Trog::Guest' } );
+    $guest->redefine( put_file    => sub { push( @applied, 'put_file' ); 1 } );
+    $guest->redefine( capture_cmd => sub { q{} } );
+
+    # The guest-side work has its own subtests; what this one is about is
+    # whether the hypervisor is asked to destroy anything on the way past.
+    $bin->redefine( read_seed             => sub { () } );
+    $bin->redefine( authorize_guest_key   => sub { 1 } );
+    $bin->redefine( refresh_cloud_init    => sub { 1 } );
+    $bin->redefine( merge_guest_addresses => sub { 1 } );
+    $bin->redefine( place_guest_secrets   => sub { push( @applied, 'place_guest_secrets' ); 1 } );
+
+    my $config = Config::Simple->new( _conf( domain => 'vm.test', admin_user => 'doge' ) );
+
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test', '192.168.122.50', 'doge' ) } );
+
+    ok( !( grep { $_ eq 'clear_guest' } @applied ), 'nothing is annihilated on the way to a guest we mean to keep' )
+      or diag "applied: @applied";
+    ok( ( grep { $_ eq 'place_guest_secrets' } @applied ), 'and the reprovision still runs to the end' );
+    is( $ip, '192.168.122.50', 'handing back where the guest already is' );
+};
+
 sub _conf {
     my (%params) = @_;
     my $dir = tempdir( CLEANUP => 1 );
