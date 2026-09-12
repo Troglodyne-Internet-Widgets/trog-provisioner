@@ -120,16 +120,16 @@ subtest 'what the vhost will not accept' => sub {
 };
 
 subtest 'each kind of URL gets its own freshness, and its own redirect handling' => sub {
-    my ($vhost) = generated( fresh_index => '5m', fresh_immutable => '30d', fresh_default => '2h' );
+    my ($vhost) = generated( fresh_apt_index => '3m', fresh_index => '5m', fresh_immutable => '30d', fresh_default => '2h' );
 
-    foreach my $class ( [ index => '5m' ], [ immutable => '30d' ], [ default => '2h' ] ) {
+    foreach my $class ( [ aptindex => '3m' ], [ index => '5m' ], [ immutable => '30d' ], [ default => '2h' ] ) {
         my ( $name, $fresh ) = @$class;
 
         # The location for the kind, then its @follow, each keeping only a 200
         # for as long as that kind is fresh.
         like(
             $vhost,
-            qr{location = /\.fetchcache/$name \{\n\s+internal;\n\s+proxy_cache_valid 200 \Q$fresh\E;\n\s+error_page 301 302 303 307 308 = \@follow_$name;\n\s+proxy_pass https://\$host\$request_uri;},
+            qr{location = /\.fetchcache/$name \{\n\s+internal;\n\s+proxy_cache_valid 200 \Q$fresh\E;\n(?:\s+proxy_cache_use_stale off;\n)?\s+error_page 301 302 303 307 308 = \@follow_$name;\n\s+proxy_pass https://\$host\$request_uri;},
             "$name: fresh for $fresh, fetched as the guest asked for it, redirects followed"
         );
         like( $vhost, qr/location \@follow_$name \{.*?proxy_cache_valid 200 \Q$fresh\E;.*?proxy_pass \$fetchcache_location;/s, "$name: and a followed redirect is kept as long" );
@@ -138,8 +138,19 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
     # nginx takes the first regex in a map that matches.
     my ($map) = $vhost =~ m/^map "\$host\$request_uri" \$fetchcache_class \{\n(.*?)^\}/ms;
     my @order = ( $map // q{} ) =~ m/^\s+"~[^\n]*" (\w+);$/mg;
-    is_deeply( \@order, [qw{pass index immutable}], 'what is never kept first, then the most specific first' );
-    like( $map // q{}, qr/^\s+default default;$/m, 'and anything else is the default kind' );
+    is_deeply( \@order, [qw{pass aptindex index immutable}], 'what is never kept first, then the most specific first' );
+
+    # An apt index is the one kind that must not be served stale: InRelease
+    # names the hashes of the Packages beside it, and half of that pair from a
+    # different moment stops apt outright rather than being an old download.
+    # Nothing else wants this -- the cache exists to serve stale.
+    foreach my $name (qw{aptindex index immutable default}) {
+        my ($block) = $vhost =~ m/location = \/\.fetchcache\/$name \{(.*?)\n    \}/s;
+        my $off = index( $block // q{}, 'proxy_cache_use_stale off;' ) >= 0 ? 1 : 0;
+        is( $off, ( $name eq 'aptindex' ? 1 : 0 ), "$name: stale is " . ( $name eq 'aptindex' ? 'refused' : 'allowed' ) );
+    }
+    like( $vhost,      qr/^\s+proxy_cache_use_stale error timeout/m, 'and the server still serves stale for everything else' );
+    like( $map // q{}, qr/^\s+default default;$/m,                   'and anything else is the default kind' );
 
     like( $vhost, qr{location / \{.*?rewrite \^ /\.fetchcache/\$fetchcache_class last;}s, 'every request goes out through the location for its kind' );
 };
@@ -346,7 +357,7 @@ subtest 'the classes are the union of what the recipes declare' => sub {
     # has to meet the index pattern before the immutable one sees it.
     is_deeply(
         [ map { $_->{name} } @Provisioner::Recipe::fetchcache::CLASS_ORDER ],
-        [qw{index immutable}],
+        [qw{aptindex index immutable}],
         'the classes are tried most specific first'
     );
 

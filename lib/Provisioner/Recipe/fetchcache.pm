@@ -260,6 +260,12 @@ sub args {
                 pattern     => $duration,
                 description => 'How long a copy nobody asks for is kept.  A hundred years by default, so that only running out of room removes anything: the copy nobody has asked for in a year is the pinned version upstream may no longer have.',
             },
+            fresh_apt_index => {
+                type        => 'string',
+                default     => '5m',
+                pattern     => $duration,
+                description => 'How long an apt index is used before the repository is asked again.  Short, and never served stale: InRelease names the hashes of the Packages beside it, and a mismatched pair stops apt outright.',
+            },
             fresh_index => {
                 type        => 'string',
                 default     => '10m',
@@ -303,6 +309,11 @@ here is C<default>, which belongs to no recipe, and C<$PASSTHROUGH>.
 =cut
 
 our @CLASS_ORDER = (
+
+    # First, and the only one that refuses to be served stale: an apt index is
+    # half of a pair, and half of a pair from a different moment is a hash-sum
+    # mismatch rather than an old download.
+    { name => 'aptindex',  fresh => 'fresh_apt_index', no_stale => 1 },
     { name => 'index',     fresh => 'fresh_index' },
     { name => 'immutable', fresh => 'fresh_immutable' },
 );

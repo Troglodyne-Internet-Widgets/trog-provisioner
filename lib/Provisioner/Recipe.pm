@@ -312,11 +312,11 @@ downloads from C<nodejs.org> without any template naming it.  So the test
 catches an omission that is written down, and the recipe still has to think
 about the ones that are not.
 
-Two things deliberately stay out.  B<Apt repositories>, because a guest reaches
-the archive through L<Provisioner::Recipe::aptmirror>'s mirrorlist and the
-cache's freshness classes do not map onto C<InRelease> and C<Packages>, where a
-mismatched pair is a hard failure.  And B<a host that only a configuration
-names>: this is asked of the class, with no configuration in hand, so a
+The B<Ubuntu archive> stays out: a guest reaches it through
+L<Provisioner::Recipe::aptmirror>'s mirrorlist, which is a mirror rather than a
+cache.  A B<third-party apt repository> does not -- nothing else fetches those,
+and C<apt_repo_classes> is how a recipe adds one.  What also stays out is B<a
+host that only a configuration names>: this is asked of the class, with no configuration in hand, so a
 C<repo_url> or an C<api_url> pointed somewhere unusual is not declared and goes
 straight upstream.
 
@@ -400,6 +400,32 @@ one upstream's layout, and gogs, roundcube and matrix would otherwise carry
 three copies of it that drift apart when GitHub changes it.
 
 =cut
+
+=head3 @classes = $recipe->apt_repo_classes($host)
+
+The C<cache_classes> entries for a third-party apt repository on C<$host>: the
+indexes under F<dists/>, and the packages under F<pool/> which a version names
+and which therefore never change.
+
+Here rather than in each recipe because four of them add an apt source and the
+layout is apt's, not theirs.  Indexes go in their own class because they are the
+one thing the cache must not serve stale: C<InRelease> lists the hashes of the
+C<Packages> beside it, and a stale one of the pair against a fresh other is a
+hash-sum mismatch.  None of the repositories this fleet uses publishes
+C<Acquire-By-Hash>, which would have made the indexes content-addressed and the
+question moot, so C<aptindex> turns C<proxy_cache_use_stale> off.
+
+=cut
+
+sub apt_repo_classes {
+    my ( $self, $host ) = @_;
+
+    my $h = quotemeta $host;
+    return (
+        { class => 'aptindex',  pattern => "$h/(?:[^/]+/)*dists/(?!.*/by-hash/)" },
+        { class => 'immutable', pattern => "$h/(?:[^/]+/)*(?:pool|by-hash)/" },
+    );
+}
 
 sub github_release_classes {
     return (

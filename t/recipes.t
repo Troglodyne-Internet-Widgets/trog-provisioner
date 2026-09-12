@@ -2023,9 +2023,11 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
     # guest reaches the archive through aptmirror's mirrorlist, and the cache's
     # freshness classes do not map onto InRelease and Packages, where a
     # mismatched pair is a hard apt failure rather than a stale download.
+    # The Ubuntu archive only: a guest reaches that through aptmirror's
+    # mirrorlist, which is a mirror rather than a cache.  The third-party
+    # repositories that used to be here are cached now -- see apt_repo_classes.
     my %elsewhere = map { $_ => 1 } qw{
-      archive.mariadb.org archive.ubuntu.com keyserver.ubuntu.com localhost
-      packages.matrix.org repo.plex.tv repo.powerdns.com security.ubuntu.com
+      archive.ubuntu.com keyserver.ubuntu.com localhost security.ubuntu.com
     };
 
     my @sources;

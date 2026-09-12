@@ -188,7 +188,19 @@ be the thing answering.
 =cut
 
 sub fetch_hosts {
-    return qw{mariadb.org};
+    return qw{mariadb.org archive.mariadb.org};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+archive.mariadb.org is the apt repository the packages come from; mariadb.org
+serves only the signing key, which the default freshness suits.
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+    return $self->apt_repo_classes('archive.mariadb.org');
 }
 
 1;

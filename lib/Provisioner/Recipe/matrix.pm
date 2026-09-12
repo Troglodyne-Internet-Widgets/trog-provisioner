@@ -271,7 +271,7 @@ C<github_release_hosts> in L<Provisioner::Recipe>.
 
 sub fetch_hosts {
     my ($class) = @_;
-    return $class->github_release_hosts;
+    return ( 'packages.matrix.org', $class->github_release_hosts );
 }
 
 =head2 @classes = $recipe->cache_classes()
@@ -283,7 +283,7 @@ downloading a release do not each carry a copy.
 
 sub cache_classes {
     my ($class) = @_;
-    return $class->github_release_classes;
+    return ( $class->apt_repo_classes('packages.matrix.org'), $class->github_release_classes );
 }
 
 1;

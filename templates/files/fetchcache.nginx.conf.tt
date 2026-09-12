@@ -133,6 +133,11 @@ server {
     location = /.fetchcache/[% class.name %] {
         internal;
         proxy_cache_valid 200 [% class.fresh %];
+[% IF class.no_stale -%]
+[%# Half of a pair from a different moment is a hash-sum mismatch, not an old
+    download, so this kind is refused rather than served when upstream is down. -%]
+        proxy_cache_use_stale off;
+[% END -%]
         error_page 301 302 303 307 308 = @follow_[% class.name %];
         proxy_pass https://$host$request_uri;
     }
@@ -144,6 +149,9 @@ server {
     it, which HTTP allows.  Read before the proxy_pass that replaces the
     upstream it came from; recursive_error_pages lets a second hop through. -%]
     location @follow_[% class.name %] {
+[% IF class.no_stale -%]
+        proxy_cache_use_stale off;
+[% END -%]
         set $fetchcache_location $upstream_http_location;
         if ($fetchcache_location ~ "^http://(.*)$") {
             set $fetchcache_location "https://$1";

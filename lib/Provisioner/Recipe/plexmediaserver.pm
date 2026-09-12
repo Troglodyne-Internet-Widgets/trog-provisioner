@@ -124,7 +124,19 @@ the cache.
 =cut
 
 sub fetch_hosts {
-    return qw{downloads.plex.tv};
+    return qw{downloads.plex.tv repo.plex.tv};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+The apt repository as well as the key: repo.plex.tv is where the package comes
+from.
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+    return $self->apt_repo_classes('repo.plex.tv');
 }
 
 1;
