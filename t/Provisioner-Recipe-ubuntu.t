@@ -92,14 +92,18 @@ sub settings {
 sub generated {
     my (%extra) = @_;
 
-    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv->redefine( new      => sub { return bless {}, 'Trog::HV::Libvirt' } );
-    $hv->redefine( virbr_ip => sub { return '192.168.122.1' } );
+    # virbr_ip is the only thing here that would talk to libvirt.  The object
+    # itself is handed over rather than intercepted: redefining new() worked
+    # only while the recipe constructed its own.
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( virbr_ip => sub { return '192.168.122.1' } );
+    my $hv = bless {}, 'Trog::HV::Libvirt';
 
     my $dir    = tempdir( CLEANUP => 1 );
     my $recipe = Provisioner::Cookbook->load('ubuntu')->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => $dir,
+        hv            => $hv,
     );
 
     my @written = $recipe->generate_files( $dir, settings(%extra) );
@@ -349,9 +353,13 @@ subtest 'a guest with addresses and no gateway is refused' => sub {
 };
 
 subtest 'the key is rotated on a real run and kept on a dry one' => sub {
-    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
-    $hv->redefine( new      => sub { return bless {}, 'Trog::HV::Libvirt' } );
-    $hv->redefine( virbr_ip => sub { return '192.168.122.1' } );
+
+    # virbr_ip is the only thing here that would talk to libvirt.  The object
+    # itself is handed over rather than intercepted: redefining new() worked
+    # only while the recipe constructed its own.
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( virbr_ip => sub { return '192.168.122.1' } );
+    my $hv = bless {}, 'Trog::HV::Libvirt';
 
     my $dir   = tempdir( CLEANUP => 1 );
     my $build = sub {
@@ -359,6 +367,7 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
         Provisioner::Cookbook->load('ubuntu')->new(
             template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
             output_dir    => $dir,
+            hv            => $hv,
         )->generate_files( $dir, settings(%extra) );
         return File::Slurper::read_text("$dir/key.rsa");
     };

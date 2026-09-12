@@ -626,6 +626,12 @@ sub handle_domain {
         script_loc      => $root_scripts,
         output_dir      => $cfg_dir,
         template_dirs   => \@paths,
+
+        # The one chosen above, handed to every builder rather than reached for.
+        # vm and the distro recipe both ask a hypervisor what it will accept, and
+        # a recipe calling Trog::HV->new() for itself would be asking a question
+        # placement has already answered.
+        hv => $hv,
     );
 
     # Every web host wants its own www and mail CNAMEs.  This used to have two

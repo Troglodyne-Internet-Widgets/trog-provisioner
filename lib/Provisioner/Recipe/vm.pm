@@ -11,7 +11,6 @@ use re '/aa';
 use parent qw{Provisioner::Recipe};
 
 use File::Slurper();
-use Trog::HV();
 
 =head1 NAME
 
@@ -236,16 +235,25 @@ sub create_storage {
 
 =head2 $hv = $recipe->hv()
 
-The hypervisor this guest is being built for, out of the singleton the run
-already established -- unless one was handed to the constructor, which is what a
-test does.
+The hypervisor this guest is being built for, as handed to the constructor.
 
-Reached here rather than from L<Provisioner::Recipe>, so that loading an
-ordinary recipe does not load L<Sys::Virt> along with it.
+Passed in rather than reached for.  A recipe that calls C<Trog::HV-E<gt>new()>
+itself puts the recipe layer in front of the machine layer in the loading order,
+which is backwards -- and it meant an ordinary recipe pulled in L<Sys::Virt>.
+Nothing here loads L<Trog::HV> now; it only speaks its interface.
+
+C<bin/new_config> hands one to every builder it makes, and C<bin/provision> to
+the one it builds directly.  Dies rather than defaulting, because a hypervisor
+chosen here would be a second answer to a question placement has already
+settled.
 
 =cut
 
-sub hv { my ($self) = @_; return $self->{hv} //= Trog::HV->new() }
+sub hv {
+    my ($self) = @_;
+
+    return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
+}
 
 =head2 %opts = $recipe->enrich(%opts)
 
