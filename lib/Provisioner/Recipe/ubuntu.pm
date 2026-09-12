@@ -17,7 +17,6 @@ use File::Slurper();
 use HTTP::Tiny();
 use List::Util qw{any uniq};
 use Provisioner::Utils();
-use Trog::HV();
 use Text::Xslate();
 use YAML::XS();
 
@@ -211,16 +210,25 @@ sub _indent {
 
 =head2 $hv = $recipe->hv()
 
-The hypervisor this guest is being built for, out of the singleton the run
-already established -- unless one was handed to the constructor, which is what a
-test does.
+The hypervisor this guest is being built for, as handed to the constructor.
 
-Reached here rather than from L<Provisioner::Recipe>, so that loading an
-ordinary recipe does not load L<Sys::Virt> along with it.
+Passed in rather than reached for.  A recipe that calls C<Trog::HV-E<gt>new()>
+itself puts the recipe layer in front of the machine layer in the loading order,
+which is backwards -- and it meant an ordinary recipe pulled in L<Sys::Virt>.
+Nothing here loads L<Trog::HV> now; it only speaks its interface.
+
+C<bin/new_config> hands one to every builder it makes, and C<bin/provision> to
+the one it builds directly.  Dies rather than defaulting, because a hypervisor
+chosen here would be a second answer to a question placement has already
+settled.
 
 =cut
 
-sub hv { my ($self) = @_; return $self->{hv} //= Trog::HV->new() }
+sub hv {
+    my ($self) = @_;
+
+    return $self->{hv} // die ref($self) . " was built without a hypervisor: whoever builds it has to hand one over\n";
+}
 
 =head2 %opts = $recipe->enrich(%opts)
 
@@ -248,11 +256,20 @@ sub enrich {
     # renames the interface to the name below -- so a guest whose kernel names
     # things some other way still gets the right configuration on the right
     # card.  dhcp_devname and bridge_devname override what it ends up called.
-    my ( $nat_name, $bridge_name ) = $hv->nic_names;
-    $opts{dhcp_devname}   //= $nat_name;
-    $opts{bridge_devname} //= $bridge_name;
-    $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
-    $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+    #
+    # All four of those are things we know because we defined the machine.  A
+    # guest a service created is not one we defined: it assigns the MAC and the
+    # image decides the interface name, and neither is knowable before the guest
+    # exists.  So they are left unset, and the network-config says to leave the
+    # network alone -- which is what a cloud image expects, its addressing
+    # coming from the platform rather than from a seed.
+    unless ( $hv->builds_by_api ) {
+        my ( $nat_name, $bridge_name ) = $hv->nic_names;
+        $opts{dhcp_devname}   //= $nat_name;
+        $opts{bridge_devname} //= $bridge_name;
+        $opts{nat_mac}        //= $hv->guest_mac( $opts{domain}, 0 );
+        $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
+    }
 
     # Which mirror, and whether apt is allowed to install from it unverified.
     # The second follows from the first and so cannot be a schema default; see

@@ -31,6 +31,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Provisioner::Cookbook();
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # Enough of Sys::Virt to answer the one question the sweep asks of it.
 {
 
@@ -172,7 +176,7 @@ subtest 'the sweep covers the domain directory as well as the data source' => su
     # A hypervisor to have a domain directory and a list of guests.  Both of the
     # sweep's exclusions come from somewhere real: the configuration above, and
     # this.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( domain_dir => sub { $domains } );
     $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
     local @Test::Libvirt::DOMAINS = ('live.test');
@@ -197,7 +201,7 @@ subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
     write_config();
     make_path("$data/orphan.test");
 
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
     $hv->redefine( vmm        => sub { die "connection refused\n" } );
 
@@ -242,7 +246,7 @@ subtest 'with no data source, the domain directories are still swept' => sub {
     Provisioner::Cookbook->forget();
     make_path("$domains/orphan.test");
 
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( domain_dir => sub { $domains } );
     $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
     local @Test::Libvirt::DOMAINS = ();

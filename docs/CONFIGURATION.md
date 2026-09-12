@@ -11,7 +11,7 @@ points somewhere else; every command also takes `--ipmap`, `--recipes` and
 | `ipmap.cfg` | addresses, nameservers, the address pool, and who administers it all |
 | `recipes.yaml` | the base recipe every guest gets |
 | `recipes.d/` | one file per guest, named for it |
-| `secrets.kdbx` | the passwords the recipes reach for |
+| `secrets.kdbx` | the passwords the recipes reach for, and a cloud's credential secret when `clouds.yaml` refers to it |
 
 Domains are always written in full. There is no `tld` to append to a short name
 and no separate path for anything under a different parent: `[ips]`, `[aliases]`

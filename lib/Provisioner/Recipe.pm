@@ -229,10 +229,11 @@ and can be depended upon, and then leaves them out of the module list.  Which
 matters for more than the makefile: C<modules> is handed to every template and
 every recipe as the list of what is on this guest, and neither of these is.
 
-They are also the only two that talk to a L<Trog::HV>, and each reaches it
-itself rather than through an accessor here.  That is deliberate: loading
-L<Trog::HV> loads L<Sys::Virt>, and C<bin/recipes> would then need libvirt
-installed to print a schema.
+They are also the only two that talk to a L<Trog::HV>, and each is handed one
+rather than reaching for it -- see L<Provisioner::Recipe::vm/hv>.  Neither loads
+L<Trog::HV>, and no accessor for it lives here, which is what keeps L<Sys::Virt>
+out of an ordinary recipe: C<bin/recipes> would otherwise need libvirt installed
+to print a schema.
 
 =cut
 

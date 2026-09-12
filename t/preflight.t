@@ -27,6 +27,11 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Trog::HV();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
+
 my $script = "$FindBin::Bin/../bin/preflight";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
@@ -50,31 +55,120 @@ sub quietly {
     return wantarray ? ( $result[0], File::Slurper::read_text("$tmp") ) : $result[0];
 }
 
+# Stands in for the api a cloud hypervisor talks through.
+{
+
+    package Test::PreflightCloud;
+
+    sub new      { my ( $c, %a ) = @_; return bless {%a}, $c }
+    sub auth     { return $_[0] }
+    sub services { return @{ $_[0]->{services} } }
+
+    sub look_by_id_or_name {
+        my ( $self, $kind, $name ) = @_;
+        die "Cannot find '$kind' for id/name '$name'\n" unless grep { $_ eq $name } @{ $self->{$kind} // [] };
+        return { name => $name };
+    }
+
+    sub image_from_name {
+        my ( $self, $name ) = @_;
+        return unless grep { $_ eq $name } @{ $self->{images} // [] };
+        return { name => $name };
+    }
+}
+
+sub cloud_hv {
+    my (%opts) = @_;
+
+    my $api = Test::PreflightCloud->new(
+        services => [qw{compute image network volumev3}],
+        flavors  => ['m1.medium'],
+        networks => ['internal'],
+        images   => ['ubuntu-24.04'],
+        %{ $opts{api} // {} },
+    );
+
+    Trog::HV->forget();
+    my $hv = Trog::HV->new( cloud => 'testcloud', flavor => 'm1.medium', image => 'ubuntu-24.04', network => 'internal', %{ $opts{hv} // {} } );
+
+    my $mock = Test::MockModule->new('Trog::HV::OpenStack');
+    $mock->redefine( api => sub { $api } );
+
+    return ( $hv, $mock );
+}
+
+subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
+    my ( $hv, $mock ) = cloud_hv();
+
+    my ($ok) = quietly( sub { $hv->check_reachable } );
+    ok $ok->{ok}, 'a credential that authenticates and a catalogue with the three services';
+
+    ($ok) = quietly( sub { $hv->check_cloud_resources } );
+    ok $ok->{ok}, 'a flavor, image and network the cloud has';
+
+    # Getting one of these wrong otherwise fails a provision minutes in, with an
+    # error from the API rather than from us.
+    my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope', image => 'not-an-image' } );
+    my ($failed) = quietly( sub { $bad->check_cloud_resources } );
+    ok !$failed->{ok}, 'and it notices when they are not';
+    like $failed->{what}, qr/flavor 'm1\.nope'/,    'naming the flavor';
+    like $failed->{what}, qr/image 'not-an-image'/, 'and the image';
+
+    my ( $thin, $thin_mock ) = cloud_hv( api => { services => [qw{compute volumev3}] } );
+    ($failed) = quietly( sub { $thin->check_reachable } );
+    ok !$failed->{ok}, 'a catalogue without Glance or Neutron cannot build a guest';
+    like $failed->{what}, qr/image, network/, 'and it says which are missing';
+};
+
+subtest 'a cloud runs out of quota, not of hardware' => sub {
+    my ( $hv, $mock ) = cloud_hv();
+
+    my $capacity = { guests => 4, memory_free => 8192, memory_mb => 51200, memory_committed => 32768, cpus => 40, cpus_committed => 20, cpus_free => 19, disk_free => 1024 };
+    $mock->redefine( capacity   => sub { return $capacity } );
+    $mock->redefine( max_guests => sub { 10 } );
+
+    my ($ok) = quietly( sub { $hv->check_cloud_quota } );
+    ok $ok->{ok}, 'room for one more';
+    like $ok->{what}, qr{4/10 instances}, 'and it says how much room';
+
+    $mock->redefine( capacity => sub { return { %$capacity, memory_free => 0, cpus_free => 0 } } );
+    my ($failed) = quietly( sub { $hv->check_cloud_quota } );
+    ok !$failed->{ok}, 'and none is a failure';
+    like $failed->{what}, qr/memory/, 'naming what ran out';
+
+    $mock->redefine( capacity => sub { return { %$capacity, guests => 10 } } );
+    ($failed) = quietly( sub { $hv->check_cloud_quota } );
+    ok !$failed->{ok}, 'so is being at the instance cap';
+    like $failed->{what}, qr/instances/, 'which is said as such';
+
+    Trog::HV->forget();
+};
+
 subtest 'libvirt packs its version into one integer' => sub {
-    is( Trog::Bin::Preflight::libvirt_version(10000000), '10.0.0', 'major only' );
-    is( Trog::Bin::Preflight::libvirt_version(9004000),  '9.4.0',  'and minor' );
-    is( Trog::Bin::Preflight::libvirt_version(8000012),  '8.0.12', 'and release' );
+    is( Trog::HV::Libvirt::_version_string(10000000), '10.0.0', 'major only' );
+    is( Trog::HV::Libvirt::_version_string(9004000),  '9.4.0',  'and minor' );
+    is( Trog::HV::Libvirt::_version_string(8000012),  '8.0.12', 'and release' );
 };
 
 subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
 
     # Sys::Virt binds the API of the libvirt release it was built against, so a
     # mismatch shows up as a missing constant rather than as a version error.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     my $sv = Test::MockModule->new('Sys::Virt');
 
     $hv->redefine( vmm                 => sub { bless {}, 'Sys::Virt' } );
     $sv->redefine( get_library_version => sub { 10000000 } );
 
     $sv->redefine( VERSION => sub { '10.0.0' } );
-    my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_sys_virt_in_step( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
     ok( $result->{ok}, 'the same release passes' );
-    like( $out, qr/Sys::Virt 10\.0\.0 matches libvirt 10\.0\.0/, 'saying both versions' );
+    like( $result->{what}, qr/Sys::Virt 10\.0\.0 matches libvirt 10\.0\.0/, 'saying both versions' );
 
     # A release apart in either direction is out of step.
     foreach my $version (qw{9.4.0 11.0.0}) {
         $sv->redefine( VERSION => sub { $version } );
-        ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_sys_virt_in_step( Trog::HV->new() ) } );
+        ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
         ok( !$result->{ok}, "$version against 10.0.0 fails" );
         like( $result->{fix}, qr/bring this machine to 10\.0\.0/, 'and says which way to move' );
     }
@@ -82,31 +176,31 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
     # A patch release apart is not: lockstep is on major.minor.
     $sv->redefine( get_library_version => sub { 10000004 } );
     $sv->redefine( VERSION             => sub { '10.0.0' } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_sys_virt_in_step( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
     ok( $result->{ok}, '10.0.0 against 10.0.4 is in step' );
 };
 
 subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( vmm => sub { die "no route to host\n" } );
 
-    my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_libvirt( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_libvirt } );
     ok( !$result->{ok}, 'libvirt check fails' );
 
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_sys_virt_in_step( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
     ok( !$result->{ok}, 'and so does the version check, rather than dying on the way' );
     like( $result->{fix}, qr/Fix that first/, 'pointing at the one above it' );
 };
 
 subtest 'passwordless sudo is the one that would hang the run' => sub {
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
 
     $hv->redefine( run_cmd => sub { 0 } );
-    my ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_passwordless_sudo } );
     ok( $result->{ok}, 'sudo -n succeeding passes' );
 
     $hv->redefine( run_cmd => sub { 1 } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_passwordless_sudo( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_passwordless_sudo } );
     ok( !$result->{ok}, 'and failing does not' );
     like( $result->{fix}, qr/NOPASSWD/,                  'the guidance is the sudoers line' );
     like( $result->{fix}, qr/hangs rather than failing/, 'and says why it matters more than it looks' );
@@ -114,7 +208,7 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
 };
 
 subtest 'rsync is the one thing both ends have to have' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $which = Test::MockModule->new('File::Which');
 
     $hv->redefine( is_local => sub { 0 } );
@@ -123,12 +217,12 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     # Both there.
     $hv->redefine( run_cmd => sub { 0 } );
     $which->redefine( which => sub { '/usr/bin/rsync' } );
-    my ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( $result->{ok}, 'rsync at both ends passes' );
 
     # Missing on the hypervisor.
     $hv->redefine( run_cmd => sub { 1 } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( !$result->{ok}, 'missing on the hypervisor fails' );
     like( $result->{what}, qr/doge\@hv[.]test/,   'naming the end that has not got it' );
     like( $result->{fix},  qr/apt install rsync/, 'and how to fix it' );
@@ -137,7 +231,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     # the machine that runs the rsync, not the one it talks to.
     $hv->redefine( run_cmd => sub { 0 } );
     $which->redefine( which => sub { undef } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( !$result->{ok}, 'missing here fails too' );
     like( $result->{what}, qr/this machine/, 'naming this end' );
 
@@ -145,25 +239,25 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     $hv->redefine( is_local => sub { 1 } );
     $hv->redefine( run_cmd  => sub { die 'a local hypervisor should not be asked over ssh' } );
     $which->redefine( which => sub { '/usr/bin/rsync' } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_rsync( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
 };
 
 subtest 'a guest has to have an address of ours to fetch from' => sub {
-    my $hv    = Test::MockModule->new('Trog::HV');
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $local = Test::MockModule->new('Trog::Local');
 
     $hv->redefine( virbr_ip => sub { '192.168.122.1' } );
 
     $local->redefine( transfer_ip => sub { '192.168.122.251' } );
-    my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_transfer_ip } );
     ok( $result->{ok}, 'an address a guest can route to passes' );
-    like( $out, qr/192[.]168[.]122[.]251/, 'and says which one, since nothing else prints it' );
+    like( $result->{what}, qr/192[.]168[.]122[.]251/, 'and says which one, since nothing else names it' );
 
     # A workstation on none of the hypervisor's networks. The guest's very first
     # target fetches from here, so this is the whole run failing later.
     $local->redefine( transfer_ip => sub { undef } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_transfer_ip } );
     ok( !$result->{ok}, 'no route to the guest network fails' );
     like( $result->{fix}, qr/transfer_ip/, 'and points at the setting that overrides it' );
     like( $result->{fix}, qr/\[global\]/,  'in the section it goes in' );
@@ -171,7 +265,7 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
     # Reported, not thrown: a hypervisor that will not answer about its bridge
     # is one more line in the list rather than the end of the run.
     $hv->redefine( virbr_ip => sub { die "no brctl\n" } );
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_transfer_ip( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_transfer_ip } );
     ok( !$result->{ok}, 'a hypervisor that cannot say where its guests live fails' );
 };
 
@@ -181,7 +275,7 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
 # domain.
 subtest 'a directory a recipe fetches has to be on this machine' => sub {
     my $dir = tempdir( CLEANUP => 1 );
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( ssh_host => sub { 'hv.test' } );
 
     my $present = "$dir/dotfiles";
@@ -197,11 +291,11 @@ subtest 'a directory a recipe fetches has to be on this machine' => sub {
 
     # skel is said once in _base for the whole fleet, so this is the usual shape.
     $write->("---\n_base:\n    adminconfig:\n        skel: \"$present\"\none.test:\n    adminconfig:\n");
-    my ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_fetch_sources } );
     ok( $result->{ok}, 'a directory that is there passes' );
 
     $write->("---\n_base:\n    adminconfig:\n        skel: \"$dir/gone\"\none.test:\n    adminconfig:\ntwo.test:\n    openvpnclient:\n        cert_dir: $dir/alsogone\n");
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_fetch_sources } );
     ok( !$result->{ok}, 'one that is not fails' );
     like( $result->{what}, qr/\b2 fetched directories/,         'counting the paths rather than the domains that wanted them' );
     like( $result->{fix},  qr{\Q$dir/gone\E \Q(adminconfig)\E}, 'naming the path and the recipe that asked' );
@@ -211,7 +305,7 @@ subtest 'a directory a recipe fetches has to be on this machine' => sub {
     # Nothing to check is not a failure: a fleet may run no recipe that fetches
     # a directory of the operator's at all.
     $write->("---\none.test:\n    ntp:\n");
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_fetch_sources( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_fetch_sources } );
     ok( $result->{ok}, 'and a configuration that fetches nothing passes' );
 };
 
@@ -219,15 +313,15 @@ subtest 'the configuration it copies from has to be there' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 
-    my ( $result, $out ) = quietly( sub { Trog::Bin::Preflight::check_config( Trog::HV->new() ) } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( !$result->{ok}, 'an empty directory fails' );
-    like( $out, qr/ipmap\.cfg, recipes\.yaml/, 'naming what is missing' );
+    like( $result->{what}, qr/ipmap\.cfg, recipes\.yaml/, 'naming what is missing' );
 
     foreach my $file (qw{ipmap.cfg recipes.yaml}) {
         open( my $fh, '>', "$dir/$file" ) or die $!;
         close $fh;
     }
-    ($result) = quietly( sub { Trog::Bin::Preflight::check_config( Trog::HV->new() ) } );
+    ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( $result->{ok}, 'and passes once they are there' );
 };
 
@@ -235,7 +329,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
 
     # Being told about the sudo, and then a fix later about the missing
     # xorriso, is two round trips where one would do.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( is_local  => sub { 1 } );
     $hv->redefine( run_cmd   => sub { 1 } );              # no passwordless sudo
     $hv->redefine( iso_maker => sub { die "none\n" } );
@@ -259,11 +353,11 @@ subtest 'a distro pinned to an image that has moved on is worth saying so about'
 
     # Current, so there is nothing to report.
     $ubuntu->redefine( current_release => sub { return 'noble' } );
-    is_deeply( Trog::Bin::Preflight::note_stale_image(), { ok => 1 }, 'a pin that is current says nothing' );
+    is_deeply( Trog::HV->new()->note_stale_image, { ok => 1 }, 'a pin that is current says nothing' );
 
     # A release behind.
     $ubuntu->redefine( current_release => sub { return 'plucky' } );
-    my $note = Trog::Bin::Preflight::note_stale_image();
+    my $note = Trog::HV->new()->note_stale_image;
     ok( !$note->{ok}, 'a pin that has fallen behind is reported' );
     like( $note->{fix}, qr/noble/,  'naming what it builds on' );
     like( $note->{fix}, qr/plucky/, 'and what it would build on now' );
@@ -271,7 +365,7 @@ subtest 'a distro pinned to an image that has moved on is worth saying so about'
     # A mirror that will not answer is not a reason to hold up a provision, so
     # a distribution with no answer gets no note rather than a wrong one.
     $ubuntu->redefine( current_release => sub { return undef } );
-    is_deeply( Trog::Bin::Preflight::note_stale_image(), { ok => 1 }, 'and a distribution that could not be asked says nothing either' );
+    is_deeply( Trog::HV->new()->note_stale_image, { ok => 1 }, 'and a distribution that could not be asked says nothing either' );
 };
 
 subtest 'a fleet with no package mirror is told what that costs' => sub {
@@ -280,7 +374,7 @@ subtest 'a fleet with no package mirror is told what that costs' => sub {
     my $write = sub {
         File::Slurper::Temp::write_text( "$dir/recipes.yaml", $_[0] );
         Provisioner::Cookbook->forget();
-        return Trog::Bin::Preflight::note_apt_mirror();
+        return Trog::HV->new()->note_apt_mirror;
     };
 
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
@@ -308,14 +402,14 @@ subtest 'a fleet with nothing keeping its logs is told so, once there is a sink'
 
     # No leftovers on the hypervisor for most of this: the upgrade case has its
     # own subtest below, and it short-circuits everything else when it fires.
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( list_dir => sub { return () } );
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
     my $write = sub {
         File::Slurper::Temp::write_text( "$dir/recipes.yaml", $_[0] );
         Provisioner::Cookbook->forget();
-        return Trog::Bin::Preflight::note_log_destination( Trog::HV->new() );
+        return Trog::HV->new()->note_log_destination;
     };
 
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
@@ -342,7 +436,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.troglodyne.net:\n    nginx:\nold.troglodyne.net:\n    nginx:\n" );
     Provisioner::Cookbook->forget();
 
-    my $hv = Test::MockModule->new('Trog::HV');
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( describe => sub { return 'the hypervisor' } );
 
     # Only the per-domain ones this tool wrote.  20-ufw.conf and 50-default.conf
@@ -354,7 +448,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
         }
     );
 
-    my $note = Trog::Bin::Preflight::note_log_destination( Trog::HV->new() );
+    my $note = Trog::HV->new()->note_log_destination;
     ok( !$note->{ok}, 'leftovers are worth a note' );
     like( $note->{what}, qr/\A2 rsyslog drop-ins/, 'counting only the ones written for a domain we know about' );
     unlike( $note->{fix}, qr/notours|20-ufw|50-default/, 'and leaving everything else on that machine alone' );

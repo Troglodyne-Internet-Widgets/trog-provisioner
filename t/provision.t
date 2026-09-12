@@ -33,6 +33,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use Trog::HV();
 use Provisioner::Cookbook();
 
+# Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
+# backend lazily, and it is named only as a string below.
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+
 # No skip_all if the prereqs are missing: a suite that passes because it never
 # ran is worse than one that fails.  bin/provision uses XML::Twig,
 # Net::OpenSSH::More and Net::EmptyPort itself, so this explodes and tells you
@@ -83,7 +87,7 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     # The config generator runs first now; this test is about what happens
     # after it, so there is nothing for it to generate from.
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( mkpath      => sub { 1 } );
     $hv_mock->redefine( file_exists => sub { 1 } );
 
@@ -121,8 +125,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 # --- The config generator runs first -----------------------------------------
 # The warning the generator prints is the most it can do: it writes
 # configuration and destroys nothing, and it runs from cron to take backups.
-# This program is the one that calls clean_domain_resources, so refusing is its
-# job.
+# This program is the one that asks a hypervisor to clear_guest, so refusing is
+# its job.
 subtest 'a salvage that came away empty stops the run before anything is destroyed' => sub {
 
     # The real generator, so this is pinned to the interface it actually
@@ -159,9 +163,10 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
     like( join( q{}, @said ), qr{redis read nothing out of /var/lib/redis}, 'still saying what is being lost' );
 };
 
-# It used to stop after clean_domain_resources and after mongle_domain_xml, so a
-# dry run annihilated the domain, deleted both its volumes, made a fresh disk and
-# a seed, and then reported that it had applied nothing.
+# It used to stop after clearing the guest and after rendering the XML -- what
+# clear_guest and provision_guest do now -- so a dry run annihilated the domain,
+# deleted both its volumes, made a fresh disk and a seed, and then reported that
+# it had applied nothing.
 subtest 'a dry run applies nothing' => sub {
 
     # The SUT is a modulino required at runtime, so its `our` is not in scope
@@ -171,7 +176,7 @@ subtest 'a dry run applies nothing' => sub {
     use warnings 'once';
 
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     my $loc = Test::MockModule->new('Trog::Local');
 
@@ -234,7 +239,7 @@ subtest 'a dry run applies nothing' => sub {
 # beside the domain is what ends up in the seed.
 subtest 'a real provision reaches the vm recipe with what new_config wrote' => sub {
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc = Test::MockModule->new('Trog::Local');
 
     my %seeded;
@@ -318,7 +323,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
 
 subtest 'a rebuild releases the leases the guests before it held' => sub {
     my @applied;
-    my $hv  = Test::MockModule->new('Trog::HV');
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc = Test::MockModule->new('Trog::Local');
 
     # A guest already there, and two leases on file for its MAC: the one it has,
@@ -439,6 +444,82 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     like( $@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
 };
 
+# Reusing a guest means provisioning onto one that is already up, which is how a
+# shared host gets built: bar.test is layered onto the guest depends_on named
+# rather than being given one of its own.  So $domain is not always the machine,
+# and the two things that follow from that are what these check -- which address
+# is connected to, and whether clearing $domain takes the target away with it.
+
+subtest 'a domain layered onto the guest built for another' => sub {
+    my %seen = _layered( domain => 'bar.test', reuse => '192.168.122.50', depends => 'foo.test' );
+
+    # foo.test's guest is the machine; bar.test has none, which is the whole
+    # point of depending on one.  Deriving the address from bar.test's own MAC
+    # asked for a lease that cannot exist -- and on OpenStack, for a server of
+    # that name, which does not either.
+    is( $seen{host}, '192.168.122.50', 'is reached where provisioning that one left it' );
+    like( $seen{key}, qr{/foo[.]test/key[.]rsa\z}, "and opened with that guest's own key" );
+
+    is_deeply( $seen{cleared}, ['bar.test'], "any VM still standing under this domain's own name is taken away" );
+    ok( $seen{finished}, 'and the reprovision runs to the end' );
+    is( $seen{returned}, '192.168.122.50', 'handing back where the guest is' );
+};
+
+subtest 'a domain reprovisioned onto a guest of its own' => sub {
+    my %seen = _layered( domain => 'vm.test', reuse => '192.168.122.50' );
+
+    is( $seen{host}, '192.168.122.50', 'is reached at the address --existing named' );
+    is_deeply( $seen{cleared}, [], 'and nothing is annihilated, that name being the machine itself' );
+    ok( $seen{finished}, 'while the reprovision still runs to the end' );
+};
+
+# What a reprovision did, without doing any of it: which machine it connected
+# to, with whose key, and what it asked the hypervisor to destroy on the way.
+sub _layered {
+    my (%params) = @_;
+    my ( $domain, $reuse, $depends ) = @params{qw{domain reuse depends}};
+
+    my $dir  = tempdir( CLEANUP => 1 );
+    my %seen = ( cleared => [] );
+
+    my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
+    my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my $guest = Test::MockModule->new('Trog::Guest');
+
+    $hv->redefine( domain_dir  => sub { $dir } );
+    $hv->redefine( guest_mac   => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( clear_guest => sub { push( @{ $seen{cleared} }, $_[1] ); 1 } );
+
+    # Left fatal rather than mocked to an answer.  A domain being layered onto
+    # another's guest has no lease and no server of its own, so either question
+    # is one with no answer, and the address is already in hand.
+    $hv->redefine( lease_ip     => sub { die "went looking for a lease\n" } );
+    $hv->redefine( guest_ssh_ip => sub { die "asked the hypervisor where to connect\n" } );
+
+    $guest->redefine(
+        new => sub {
+            my ( $class, %params ) = @_;
+            @seen{qw{host key}} = @params{qw{host key_path}};
+            return bless {}, $class;
+        }
+    );
+    $guest->redefine( put_file    => sub { 1 } );
+    $guest->redefine( capture_cmd => sub { q{} } );
+
+    # The guest-side work has subtests of its own; this is about which machine
+    # that work is aimed at.
+    $bin->redefine( read_seed             => sub { () } );
+    $bin->redefine( authorize_guest_key   => sub { 1 } );
+    $bin->redefine( refresh_cloud_init    => sub { 1 } );
+    $bin->redefine( merge_guest_addresses => sub { 1 } );
+    $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
+
+    my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'doge' ) );
+    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, $domain, $reuse, 'doge', $depends ) } );
+
+    return %seen;
+}
+
 sub _conf {
     my (%params) = @_;
     my $dir = tempdir( CLEANUP => 1 );
@@ -485,7 +566,7 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
 
     my @order;
 
-    my $hv_mock = Test::MockModule->new('Trog::HV');
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( mkpath      => sub { 1 } );
     $hv_mock->redefine( file_exists => sub { 1 } );
     $hv_mock->redefine( domain_dir  => sub { $dir } );

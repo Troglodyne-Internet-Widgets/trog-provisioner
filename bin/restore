@@ -13,6 +13,7 @@ use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 use Trog::Guest();
+use Trog::HV();
 use Trog::Hypervisors();
 
 =head1 NAME
@@ -97,7 +98,7 @@ sub main {
     # With a fleet configured that is whichever one has the guest; without one
     # it is whatever provision.conf says, so peek at that now.  The file being
     # mandatory is enforced further down, where it always was.
-    $domain_dir //= '/opt/domains';
+    $domain_dir //= Trog::HV->default_domain_dir;
     my $cfile = "$domain_dir/$domain/provision.conf";
     my $hv    = Trog::Hypervisors->find(
         $domain,

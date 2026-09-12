@@ -7,6 +7,7 @@ use warnings FATAL => 'all';
 
 use re '/aa';
 use Config::Simple();
+use File::Slurper();
 use Trog::Config();
 use Trog::HV();
 
@@ -98,11 +99,19 @@ sub load {
     my $config = eval { Config::Simple->new($path) } or return $self;
 
     # Config::Simple gives us "block.key" pairs and no way to ask for the block
-    # names, so recover them in the order the file lists them.
+    # names, and %vars is a hash, so the order has to come from the file itself.
+    # Sorting those keys was alphabetical, which looked like file order for
+    # exactly as long as every fleet was called hv1, hv2, hv3.
     my %vars = $config->vars();
-    my %seen;
-    foreach my $key ( sort keys %vars ) {
+    my %in_file;
+    foreach my $key ( keys %vars ) {
         my ($block) = $key =~ m/\A([^.]+)\./ or next;
+        $in_file{$block} = 1;
+    }
+
+    my %seen;
+    foreach my $block ( _block_order($path), sort keys %in_file ) {
+        next unless $in_file{$block};
         next if $seen{$block}++;
         push @{ $self->{order} }, $block;
         $self->{blocks}{$block} = $config->get_block($block);
@@ -115,6 +124,25 @@ sub load {
       if !@{ $self->{order} } || ( @{ $self->{order} } == 1 && $self->{order}[0] eq 'default' );
 
     return $self;
+}
+
+# The [block] headers, in the order they appear.
+#
+# Anything Config::Simple filed outside a header lands under 'default' and has
+# no header line to find, so load() falls back to the remaining names for those.
+sub _block_order {
+    my ($path) = @_;
+
+    my $text = eval { File::Slurper::read_text($path) };
+    return () unless defined $text;
+
+    my @order;
+    foreach my $line ( split "\n", $text ) {
+        my ($block) = $line =~ m/\A\s*\[([^\]]+)\]/ or next;
+        push @order, $block;
+    }
+
+    return @order;
 }
 
 =head2 default_path
@@ -189,13 +217,20 @@ sub hypervisor {
     my $block = $self->{blocks}{$name}
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
+    # Say which block is wrong, by name.  A block that names neither would
+    # otherwise fall through to libvirt's default connection -- that is, to this
+    # machine -- which is the one placement nobody writing a fleet file meant.
+    my $has_uri   = defined $block->{libvirt_uri} && length $block->{libvirt_uri};
+    my $has_cloud = defined $block->{cloud}       && length $block->{cloud};
+
+    die "[$name] in " . $self->{path} . " has both libvirt_uri and cloud; it can only be one hypervisor.\n"
+      if $has_uri && $has_cloud;
+    die "[$name] in " . $self->{path} . " has neither libvirt_uri nor cloud, so there is nothing to build on.\n"
+      unless $has_uri || $has_cloud;
+
     return $self->{built}{$name} //= Trog::HV->candidate(
         name => $name,
-        uri  => $block->{libvirt_uri},
-        map { $_ => $block->{$_} }
-          grep { defined $block->{$_} }
-          qw{pool_path pool_name domain_dir bridge_device virbr_device partition
-          reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit},
+        Trog::HV->options_from_block($block),
     );
 }
 

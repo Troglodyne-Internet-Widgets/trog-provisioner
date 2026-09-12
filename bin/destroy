@@ -177,11 +177,7 @@ sub destroy_disks {
     my ( $domain, $dryrun ) = @_;
     my $hv = Trog::HV->new();
 
-    # The guest's own overlay and its cloud-init seed.  The base image is
-    # shared by every guest on the hypervisor and is emphatically not ours to
-    # remove; nor is the pool.
-    foreach my $volume ( "$domain-qcow2", "$domain-cloudinit.iso" ) {
-        next unless $hv->volume($volume);
+    foreach my $volume ( $hv->guest_volumes($domain) ) {
         print "Removing volume $volume\n";
         $hv->delete_volume($volume) unless $dryrun;
     }
