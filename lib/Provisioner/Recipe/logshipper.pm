@@ -20,11 +20,11 @@ Provisioner::Recipe::logshipper - send this guest's logs to a named destination.
 
     _base:
         logshipper:
-            host: logs.example.com
+            host: logs.example.test
 
 or, for one guest that differs:
 
-    dmz.example.com:
+    dmz.example.test:
         logshipper:
             host: syslog.vendor.example
             selector: '*.warn;auth,authpriv.*'

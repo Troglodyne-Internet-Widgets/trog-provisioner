@@ -50,4 +50,26 @@ sub tests {
     return qw{imagemagick.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<download.imagemagick.org>, where F<scripts/build_imagick.sh> fetches the
+source release.
+
+=cut
+
+sub fetch_hosts {
+    return ('download.imagemagick.org');
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+A release tarball named by version, which the archive keeps until it prunes it
+-- and once pruned, what the cache kept is the only copy left.
+
+=cut
+
+sub cache_classes {
+    return ( { class => 'immutable', pattern => 'download\\.imagemagick\\.org/archive/releases/' } );
+}
+
 1;

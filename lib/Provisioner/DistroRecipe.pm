@@ -167,6 +167,11 @@ What a distribution takes.
 =item * C<mirror> -- a package mirror for guests to prefer over the
 distribution's own archive.  Empty by default, which is no mirror at all.
 
+=item * C<cache> -- a fetch cache for guests to provision through, named by its
+domain or its address.  Empty by default, which is every download going
+straight upstream.  See C<cache_address> below, and
+L<Provisioner::Recipe::fetchcache>.
+
 =item * C<mirror_insecure> -- whether to let apt install from a repository it
 cannot verify.  B<Declares no default>, because the answer depends on C<mirror>:
 C<enrich> turns it on when a mirror is configured and off when one is not, which
@@ -179,7 +184,7 @@ Set them in a domain's C<_global>, which every recipe is handed:
 
     _base:
         _global:
-            mirror: aptmirror.example.com
+            mirror: aptmirror.example.test
 
 C<_global> rather than a C<_base> block for the distro recipe itself, because a
 mirror is a fact about the guest that several recipes are handed rather than
@@ -202,6 +207,12 @@ sub args {
                 default     => q{},
                 description =>
                   'A package mirror for guests to prefer over the distribution archive.  Empty, the default, means no mirror: a guest uses whatever the image ships with.  A URL is used as written.  A bare domain name is resolved to that domain static IP out of the ip pool, with this distribution mirror_path appended, because a guest runs cloud-init before it has DNS.  The archive stays behind whichever you give, so a mirror that is behind, incomplete or down costs a fallback rather than a build.',
+            },
+            cache => {
+                type        => 'string',
+                default     => q{},
+                description =>
+                  'A fetch cache for guests to provision through: a guest built by the fetchcache recipe, named by its domain -- resolved out of the ip pool -- or by its IPv4 address.  Empty, the default, means none, and every download goes straight upstream.  For the length of a build, each host its recipes name in fetch_hosts is pointed at the cache, and only if the cache answers for that host when the build starts, so a cache that is down costs a build nothing.',
             },
             mirror_insecure => {
                 type        => 'boolean',
@@ -237,7 +248,7 @@ sub global_defaults {
 =head2 $path = $distro->mirror_path()
 
 What this distribution appends to a mirror named as a bare domain, so that
-C<aptmirror.example.com> becomes a URL a guest can fetch from.
+C<aptmirror.example.test> becomes a URL a guest can fetch from.
 
 Empty here.  A distribution that serves its archive under a path -- Ubuntu's
 C</ubuntu> -- says so.
@@ -289,6 +300,42 @@ it has DNS -- so it has to be a domain this installation assigns an address to.
 A mirror anywhere else is named as a URL instead:
 
     mirror: $url
+NOPE
+}
+
+=head2 $address = $distro->cache_address(%opts)
+
+The address of the fetch cache this guest provisions through, or empty for none.
+Read out of C<cache>: a domain in the ip pool is its address, and an IPv4
+address is itself.  Anything else dies, a URL included: what a guest does with
+this is write it into F</etc/hosts> against the names of the hosts it downloads
+from, so it has to be an address.
+
+Empty for the guest that is the cache, which fetches from upstream: it is
+filling itself, and on the build that makes it there is nothing there yet.
+
+=cut
+
+sub cache_address {
+    my ( $self, %opts ) = @_;
+
+    my $domain = $opts{domain} // q{};
+    my $cache  = $opts{cache}  // q{};
+    return $cache if $cache =~ m/\A(?:\d{1,3}\.){3}\d{1,3}\z/;
+
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $cache, domain => $domain, ipmap => $opts{ipmap} );
+    return q{}    if $kind eq 'none';
+    return $value if $kind eq 'address';
+
+    if ( $kind eq 'self' ) {
+        print "$domain is the fetch cache, so it fetches from upstream rather than from itself.\n";
+        return q{};
+    }
+
+    die <<"NOPE";
+No address for '$cache', which $domain is configured to use as its fetch cache.
+A guest points the hosts it downloads from at the cache by address, so name it
+by a domain this installation assigns an address to, or by its IPv4 address.
 NOPE
 }
 

@@ -646,6 +646,13 @@ sub handle_domain {
 
     apply_global_defaults( $distro, $global_config );
 
+    # Worked out once, here, rather than by each recipe -- see
+    # Provisioner::DistroRecipe/cache_address.  And resolvers, which were the
+    # distro recipe's alone, for every recipe: one running a resolver of its
+    # own -- nginx, in the fetch cache -- needs to know where to send it.
+    $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
+    $global_config->{resolvers} = Provisioner::Utils::coerce_arrayref($resolvers);
+
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up
     # with rather than out of what it started with.
@@ -925,6 +932,30 @@ sub handle_domain {
     my $ufw_fragment = delete $fragments{ufw};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
 
+    # The hosts this guest's recipes download from, pointed at the fetch cache
+    # while it provisions, and the authority the cache's certificate is signed
+    # by, for the guest to trust meanwhile: see Provisioner::Recipe/fetch_hosts
+    # and scripts/fetch_via_cache.  Only the certificate travels; its key stays
+    # on this machine.
+    # Asked with the module's own configuration, so a recipe whose upstream is
+    # configured -- a repo_url or an api_url pointed somewhere other than the
+    # default -- names the host it will actually reach.  Cookbook::fetch_hosts,
+    # which the cache builds its certificate from, is asked of the class and
+    # cannot see any of this: a cache serving a configured upstream needs that
+    # host in its own upstreams.
+    my @fetch_hosts =
+      $global_config->{cache_ip}
+      ? uniq( sort map { $builders{$_}->fetch_hosts( %$global_config, %{ $rconf->{$domain}{$_} // {} } ) } @modules )
+      : ();
+    if (@fetch_hosts) {
+        copy( Provisioner::Cookbook->load('fetchcache')->authority()->{cert}, "$cfg_dir/fetchcache-ca.crt" )
+          or die "Could not give $fqdn the fetch cache's authority: $!\n";
+
+        # Into the tarball with what the recipes generated; nothing else in
+        # $cfg_dir reaches the guest.
+        push( @generated, 'fetchcache-ca.crt' );
+    }
+
     my $makefile = $tt->render(
         'makefile.tt',
         {
@@ -942,6 +973,7 @@ sub handle_domain {
             state_dir        => "/etc/provisioner/state/$fqdn",
             global_state_dir => "/etc/provisioner/state",
             testdeps         => \@testdeps,
+            fetch_hosts      => @fetch_hosts ? \@fetch_hosts : undef,
         }
     );
 
@@ -987,7 +1019,6 @@ sub handle_domain {
         packages      => \@pkgs,
         ips           => [$static_ip],
         gateway       => $gateway,
-        resolvers     => $resolvers,
         contact_email => $admin_email,
         payload_dir   => $basedir,
         dryrun        => $dryrun,

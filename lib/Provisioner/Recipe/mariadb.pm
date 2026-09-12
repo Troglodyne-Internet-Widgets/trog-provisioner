@@ -175,4 +175,32 @@ sub tests {
     return qw{mariadb.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+The release signing key, which is a plain file fetch.
+
+Not C<archive.mariadb.org>: that is the apt repository, and apt reaches the
+network through the mirrorlist rather than the cache -- see
+L<Provisioner::Recipe::aptmirror>.  F<scripts/install_mariadb.sh> checks that
+what came back is really a PGP key, which is worth keeping now that a cache can
+be the thing answering.
+
+=cut
+
+sub fetch_hosts {
+    return qw{mariadb.org archive.mariadb.org};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+archive.mariadb.org is the apt repository the packages come from; mariadb.org
+serves only the signing key, which the default freshness suits.
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+    return $self->apt_repo_classes('archive.mariadb.org');
+}
+
 1;

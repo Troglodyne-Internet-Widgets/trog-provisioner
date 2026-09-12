@@ -61,7 +61,7 @@ Both are addresses by the time cron reads them, but a bare local part is the
 natural way to write one in a recipe -- C<from: cron> -- so anything that is not
 already an address gets this domain appended.  Anything that is one is left
 exactly as it stands, because appending to it would produce
-C<somebody@example.com@this.domain>.
+C<somebody@example.test@this.domain>.
 
 A script that says C<mailto: none> does not want its output, which cron spells
 as an empty MAILTO.  A script that says nothing at all has not been thought

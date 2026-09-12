@@ -19,10 +19,10 @@ Trog::Hypervisors - the fleet, and which of them a guest belongs on
     use Trog::Hypervisors();
 
     my $fleet  = Trog::Hypervisors->load(Trog::Config->path('hypervisors.conf'));
-    my $config = Config::Simple->new('/opt/domains/vm.example.com/provision.conf');
+    my $config = Config::Simple->new('/opt/domains/vm.example.test/provision.conf');
 
     # Where does this guest already live, or where should it go?
-    my $hv = $fleet->select_for('vm.example.com', $config);
+    my $hv = $fleet->select_for('vm.example.test', $config);
 
 =head1 DESCRIPTION
 
@@ -35,7 +35,7 @@ So the fleet lives in its own file.  F<hypervisors.conf>, in F</etc/trog-provisi
 per hypervisor, named however you like:
 
     [hv1]
-    libvirt_uri    = qemu+ssh://root@hv1.example.net/system
+    libvirt_uri    = qemu+ssh://root@hv1.example.test/system
     bridge_device  = br0
     virbr_device   = virbr0
     pool_path      = /opt/terraform/disks
@@ -47,7 +47,7 @@ per hypervisor, named however you like:
     max_guests     = 20
 
     [hv2]
-    libvirt_uri    = qemu+ssh://root@hv2.example.net/system
+    libvirt_uri    = qemu+ssh://root@hv2.example.test/system
 
 Every key but C<libvirt_uri> is optional; see L<Trog::HV> for what they mean and
 what they default to.  Two of them are worth knowing about before they are

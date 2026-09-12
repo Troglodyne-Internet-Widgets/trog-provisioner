@@ -1,0 +1,69 @@
+#!/bin/bash
+# Point the hosts this guest downloads from at the fleet's fetch cache while it
+# provisions, and give them back afterwards.  The guest's half of
+# Provisioner::Recipe::fetchcache, whose perldoc has the account.
+#
+#   fetch_via_cache on ADDRESS AUTHORITY HOST...
+#   fetch_via_cache off
+#
+# on trusts AUTHORITY -- what the cache's certificate is signed by -- and then
+# asks the cache for each HOST by name, over TLS.  Only the hosts it answers for
+# go into /etc/hosts, so a cache that is down, or one that does not fetch from
+# some host, leaves that host going upstream.  off takes both back out.
+#
+# Exits zero whatever the cache does: a cache saves a build time and outages,
+# and is never a reason for one to fail.
+
+HOSTS_FILE=${FETCH_VIA_CACHE_HOSTS:-/etc/hosts}
+ANCHOR=${FETCH_VIA_CACHE_ANCHOR:-/usr/local/share/ca-certificates/trog-fetchcache.crt}
+FIRST='# BEGIN trog fetchcache'
+LAST='# END trog fetchcache'
+
+forget() {
+    sed -i "/^$FIRST\$/,/^$LAST\$/d" "$HOSTS_FILE"
+}
+
+usage() {
+    echo "usage: fetch_via_cache on ADDRESS AUTHORITY HOST... | off" >&2
+    exit 2
+}
+
+case "$1" in
+on)
+    address=$2
+    authority=$3
+    [ -n "$address" ] && [ -f "$authority" ] || usage
+    shift 3
+
+    install -m 0644 "$authority" "$ANCHOR" && update-ca-certificates >/dev/null
+
+    # Replaced rather than added to, so a make run again does not stack them.
+    forget
+    answered=()
+    for host in "$@"; do
+        if curl -fsS -o /dev/null --max-time 5 --resolve "$host:443:$address" --cacert "$authority" "https://$host/fetchcache-status"; then
+            answered+=("$host")
+        else
+            echo "fetch_via_cache: $address does not answer for $host, so it comes from upstream" >&2
+        fi
+    done
+
+    if [ ${#answered[@]} -gt 0 ]; then
+        {
+            echo "$FIRST"
+            for host in "${answered[@]}"; do printf '%s\t%s\n' "$address" "$host"; done
+            echo "$LAST"
+        } >>"$HOSTS_FILE"
+    fi
+    echo "fetch_via_cache: through the cache at $address: ${answered[*]:-nothing}"
+    ;;
+off)
+    forget
+    rm -f "$ANCHOR" && update-ca-certificates >/dev/null
+    echo "fetch_via_cache: every host goes upstream again"
+    ;;
+*)
+    usage
+    ;;
+esac
+exit 0

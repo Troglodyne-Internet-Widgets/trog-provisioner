@@ -12,6 +12,7 @@ use Clone qw{clone};
 use Cwd();
 use File::Basename();
 use File::Find();
+use List::Util();
 use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
@@ -113,6 +114,83 @@ sub names {
     my %director = map { $_ => 1 } $class->directors();
     return grep { !$director{$_} }
       map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
+}
+
+=head2 fetch_hosts
+
+Every host any recipe names in C<fetch_hosts>, sorted and once each: what
+L<Provisioner::Recipe::fetchcache> fetches from unless it is told otherwise.
+
+Loads every recipe to ask it, which C<names> deliberately does not, and asks
+once a process: the answer is a fact about the code.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+
+    state @hosts = List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names );
+    return @hosts;
+}
+
+=head2 configured_fetch_hosts
+
+Every host the domains this installation is configured with will actually
+download from: each domain's recipes asked C<fetch_hosts> with that domain's own
+configuration, rather than asked of the class with none.
+
+C<fetch_hosts> above cannot answer this.  It is asked of the class, so a recipe
+whose upstream is configured -- koan's and trogrunner's C<repo_url>, admincode's
+C<api_url> -- can only name the host its default points at.  A guest gets the
+configured one, because C<bin/new_config> asks with the configuration in hand;
+what needed this is the cache, which builds its certificate and its
+C<server_name> from a list that had no configuration behind it and so did not
+answer for a host only somebody's F<recipes.d> entry names.
+
+Not memoized here on purpose: C<configuration> already remembers each file it
+read, keyed by path, and a second cache with a different lifetime is how the
+first one goes stale under a test that points C<TROG_PROVISIONER_CONFIG>
+somewhere else.
+
+=cut
+
+sub configured_fetch_hosts {
+    my ($class) = @_;
+
+    my $conf = $class->configuration();
+    my @hosts;
+
+    # _base is what every domain gets rather than a guest of its own.
+    foreach my $domain ( grep { $_ ne '_base' } sort keys %$conf ) {
+        my $config = $class->domain_config( $domain, $conf );
+
+        foreach my $recipe ( sort keys %$config ) {
+
+            # A configuration naming a recipe this installation does not have is
+            # somebody else's error to report, not a reason to fetch nothing.
+            next unless $class->has($recipe);
+            push( @hosts, eval { $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) } );
+        }
+    }
+
+    return List::Util::uniq( sort grep { defined && length } @hosts );
+}
+
+=head2 cache_classes
+
+Every cache class any recipe declares, as C<{ class =E<gt> ..., pattern =E<gt>
+... }>: what L<Provisioner::Recipe::fetchcache> keeps for how long.  Asked of
+every recipe rather than of the ones a domain uses, for the reason
+C<fetch_hosts> is -- the cache serves a fleet and cannot depend on any one
+domain.
+
+=cut
+
+sub cache_classes {
+    my ($class) = @_;
+
+    state @classes = map { $class->load($_)->cache_classes } $class->names;
+    return @classes;
 }
 
 =head2 directors

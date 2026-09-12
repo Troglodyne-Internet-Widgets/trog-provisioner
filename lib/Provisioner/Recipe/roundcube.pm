@@ -123,4 +123,28 @@ sub tests {
     return qw{roundcube.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves roundcube's release tarballs: see C<github_release_hosts>
+in L<Provisioner::Recipe>.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+    return $class->github_release_hosts;
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+GitHub's, which C<Provisioner::Recipe> holds so that the three recipes
+downloading a release do not each carry a copy.
+
+=cut
+
+sub cache_classes {
+    my ($class) = @_;
+    return $class->github_release_classes;
+}
+
 1;

@@ -140,7 +140,14 @@ subtest 'purge_data_dir removes the directory, and dryrun does not' => sub {
 
 subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
     write_config( 'named.test' => 1 );
-    make_path("$data/$_") for qw{orphan.test named.test real.example.com};
+
+    # real.example is not .test on purpose, and must not be "corrected" to it:
+    # it stands for a domain somebody actually runs, and the assertion at the
+    # end of this subtest is that the sweep never looks at one.  Under .test it
+    # would be an orphan by definition and the sweep would be right to take it.
+    # (.example is reserved by RFC 2606 just as .test is, so it resolves
+    # nowhere either.)
+    make_path("$data/$_") for qw{orphan.test named.test real.example};
 
     my ($said) = says( sub { Trog::Skill::Teardown::sweep_orphans( undef, undef, 1 ) } );
     like( $said, qr/orphan\.test/, 'the dry run names the orphan' );
@@ -153,7 +160,7 @@ subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
 
     # Every real domain's data lives in the same directory, and the whole reason
     # this is safe to run is that it is only ever looking at .test.
-    ok( -d "$data/real.example.com", 'and does not so much as consider a real domain' );
+    ok( -d "$data/real.example", 'and does not so much as consider a real domain' );
 };
 
 subtest 'the sweep covers the domain directory as well as the data source' => sub {

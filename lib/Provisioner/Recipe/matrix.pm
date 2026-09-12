@@ -21,11 +21,11 @@ use MIME::Base64();
         matrix:
             admin_user: admin
             admin_password: somepassword
-            smtp_host: smtp.example.com
+            smtp_host: smtp.example.test
             smtp_port: 465
-            smtp_user: notifications@example.com
+            smtp_user: notifications@example.test
             smtp_pass: smtp_password
-            smtp_domain: example.com
+            smtp_domain: example.test
 
 =head2 DESCRIPTION
 
@@ -260,6 +260,30 @@ sub remote_files {
 
 sub tests {
     return qw{matrix.tt};
+}
+
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the ketesa admin interface as a release: see
+C<github_release_hosts> in L<Provisioner::Recipe>.
+
+=cut
+
+sub fetch_hosts {
+    my ($class) = @_;
+    return ( 'packages.matrix.org', $class->github_release_hosts );
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+GitHub's, which C<Provisioner::Recipe> holds so that the three recipes
+downloading a release do not each carry a copy.
+
+=cut
+
+sub cache_classes {
+    my ($class) = @_;
+    return ( $class->apt_repo_classes('packages.matrix.org'), $class->github_release_classes );
 }
 
 1;

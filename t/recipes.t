@@ -31,6 +31,7 @@ use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
+use File::Find();
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
@@ -145,7 +146,10 @@ my %G = (
     packager_remove_invocation => 'apt-get remove -y',
     local_dns_access_token     => '',
 
-    users => [
+    # Every recipe is handed these, not only the distro recipe: the fetch cache
+    # runs a resolver of its own and refuses to render without them.
+    resolvers => [ '192.168.1.253', '8.8.8.8' ],
+    users     => [
         { name => 'admin', gecos => 'Admin User',  shell => '/bin/bash' },
         { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
     ],
@@ -388,8 +392,8 @@ rejects_missing(
 );
 
 rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
-rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },          'ldap_uri', 'sssd rejects missing ldap_uri' );
-rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn',  'sssd rejects missing base_dn' );
+rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },           'ldap_uri', 'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',  'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints
@@ -556,11 +560,11 @@ subtest 'cron addresses: a local part gets the domain, an address does not' => s
         qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended'
     );
 
-    # Appending to an address gives somebody@example.com@this.domain, which is
+    # Appending to an address gives somebody@example.test@this.domain, which is
     # what the old template did to every value the old schema would accept.
     like(
-        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.com' ),
-        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands'
+        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.test' ),
+        qr/^MAILFROM="someone\@example\.test"$/m, 'an address is left exactly as it stands'
     );
 };
 
@@ -573,7 +577,7 @@ subtest 'cron MAILTO per script' => sub {
             'files/cron.root.domain.tt', %G,
             root_scripts => [
                 { interval => '0 0 * * *',   cmd => '/silent.pl' },
-                { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
+                { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.test' },
                 { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
                 { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
             ]
@@ -596,8 +600,8 @@ subtest 'cron MAILTO per script' => sub {
         $to{'/none.pl'}, '',
         q{and one that says 'none' does not want it, which cron spells as an empty MAILTO}
     );
-    is( $to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone' );
-    is( $to{'/local.pl'},     "ops\@$d",             'a local part gets the domain' );
+    is( $to{'/addressed.pl'}, 'someone@example.test', 'an address is left alone' );
+    is( $to{'/local.pl'},     "ops\@$d",              'a local part gets the domain' );
 };
 
 #
@@ -1307,7 +1311,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     )->render(
         "files/$DISTRO.setup.sh.tt",
         {
-            domain        => 'vm.example.com',
+            domain        => 'vm.example.test',
             transfer_ip   => '192.168.122.251',
             transfer_port => 22,
             transfer_user => 'transfer',
@@ -2004,6 +2008,84 @@ subtest 'the two halves of the log path agree about the port' => sub {
 
     is( $ship{port},     $collect{port},     'logshipper sends where logcollector listens' );
     is( $ship{protocol}, $collect{protocol}, 'over the transport it is accepting' );
+};
+
+subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
+
+    # The heuristic that found nine undeclared hosts: a URL on the same line as
+    # something that fetches it.  What it cannot see is a host a program reaches
+    # on its own -- nvm downloads node from nodejs.org and no template writes
+    # that down -- so this catches an omission that is written, and a recipe
+    # still has to think about the rest.
+    my %declared = map { $_ => 1 } Provisioner::Cookbook->fetch_hosts;
+
+    # Deliberately elsewhere.  Apt repositories do not go through the cache: a
+    # guest reaches the archive through aptmirror's mirrorlist, and the cache's
+    # freshness classes do not map onto InRelease and Packages, where a
+    # mismatched pair is a hard apt failure rather than a stale download.
+    # The Ubuntu archive only: a guest reaches that through aptmirror's
+    # mirrorlist, which is a mirror rather than a cache.  The third-party
+    # repositories that used to be here are cached now -- see apt_repo_classes.
+    my %elsewhere = map { $_ => 1 } qw{
+      archive.ubuntu.com keyserver.ubuntu.com localhost security.ubuntu.com
+    };
+
+    my @sources;
+    File::Find::find(
+        sub { push( @sources, $File::Find::name ) if -f $_ },
+        "$FindBin::Bin/../templates", "$FindBin::Bin/../scripts",
+    );
+
+    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;
+    my %seen;
+    foreach my $file ( sort @sources ) {
+        my $text = eval { File::Slurper::read_text($file) };
+        next unless defined $text;
+
+        foreach my $line ( split( "\n", $text ) ) {
+            next unless $line =~ m/$fetches/;
+            while ( $line =~ m{https?://([a-z\d][a-z\d.-]*)}gi ) {
+                my $host = lc $1;
+
+                # An address is the guest talking to itself, and a template
+                # variable is not a host until it is rendered.
+                next if $host =~ m/\A[\d.]+\z/;
+                $seen{$host} //= $file =~ s{.*/}{}r;
+            }
+        }
+    }
+
+    ok( scalar keys %seen, 'the sweep found hosts that something fetches' ) or return;
+
+    foreach my $host ( sort keys %seen ) {
+        next if $elsewhere{$host};
+        ok( $declared{$host}, "$host, fetched in $seen{$host}, is declared in a fetch_hosts" );
+    }
+};
+
+subtest 'a recipe whose upstream is configured names the host it will reach' => sub {
+
+    # fetch_hosts is handed the module's own configuration by bin/new_config, so
+    # a repo_url pointed somewhere other than the default is declared -- and the
+    # guest points that host at the cache rather than the default it ignores.
+    foreach my $case ( [ koan => 'koan' ], [ trogrunner => 'trogrunner' ] ) {
+        my ( $name, $label ) = @$case;
+        my $recipe = Provisioner::Cookbook->load($name);
+
+        is( ( $recipe->fetch_hosts() )[0], 'github.com', "$label: the default's host when nothing is configured" );
+        is(
+            ( $recipe->fetch_hosts( repo_url => 'https://gitea.test/o/r.git' ) )[0],
+            'gitea.test', "$label: and the configured one when there is"
+        );
+    }
+
+    # admincode asks each api_url it is given; the hosts it then clones from come
+    # back from that API, so nothing can declare them in advance.
+    my @asked = Provisioner::Cookbook->load('admincode')->fetch_hosts(
+        repos_from => [ { api_url => 'https://gitea.test/api/v1/' }, { api_url => 'https://git.test/api/v1/' } ],
+    );
+    is_deeply( [ sort @asked ],                                             [qw{git.test gitea.test}], 'admincode: every api_url it was configured with' );
+    is_deeply( [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ], [],                        'and nothing when it is configured with none' );
 };
 
 Test::NoWarnings::had_no_warnings();

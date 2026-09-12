@@ -38,7 +38,7 @@ Postfix, opendkim, opendmarc and redis each keep their configuration in one
 file with no C<conf.d> to add to, so two domains provisioned onto one guest
 cannot both configure them: the second run replaces what the first wrote.
 Postfix is the one that bites, because it is quiet -- C<postconf -e
-mydestination=second.example.com> does not add the second domain, it forgets
+mydestination=second.example.test> does not add the second domain, it forgets
 the first, and mail for it simply stops being delivered locally.
 
 C<configd adopt> gives such a file a fragment directory beside it --

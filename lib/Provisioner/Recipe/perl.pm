@@ -177,4 +177,34 @@ sub tests {
     return qw{perl.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+CPAN, which this recipe reaches three ways: perlbrew fetches the source of the
+perl it builds, that perl's own C<cpan> fetches the cpanm, Module::Build and
+Dist::Zilla it comes with, and cpanm fetches every C<cpan_deps> step after
+that -- MetaCPAN saying which release a version pin names, and the mirrors
+serving it.
+
+=cut
+
+sub fetch_hosts {
+    return qw{www.cpan.org cpan.metacpan.org fastapi.metacpan.org};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+CPAN: the index and MetaCPAN's API say which release is current, and a
+distribution under F<authors/id> is named by version and never changes.
+CHECKSUMS is excluded -- it is rewritten whenever anything beside it is.
+
+=cut
+
+sub cache_classes {
+    return (
+        { class => 'index',     pattern => 'fastapi\.metacpan\.org/' },
+        { class => 'index',     pattern => '[^/]+/modules/' },
+        { class => 'immutable', pattern => '[^/]+/authors/id/(?!.*/CHECKSUMS$)' },
+    );
+}
+
 1;

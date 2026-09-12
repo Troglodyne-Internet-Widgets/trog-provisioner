@@ -89,7 +89,7 @@ sub quietly {
 subtest 'the seed is built from all three NoCloud files' => sub {
     my $config = Config::Simple->new(
         _conf(
-            domain => 'vm.example.com', memory => 2048,
+            domain => 'vm.example.test', memory => 2048,
             cpus   => 2, size => 42949672960, image => 'https://example.test/img'
         )
     );
@@ -100,7 +100,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     $hv_mock->redefine( has_tpm       => sub { 0 } );
     $hv_mock->redefine( pool          => sub { 1 } );
     $hv_mock->redefine( base_image    => sub { '/pool/baseimage-qcow2' } );
-    $hv_mock->redefine( create_disk   => sub { '/pool/vm.example.com-qcow2' } );
+    $hv_mock->redefine( create_disk   => sub { '/pool/vm.example.test-qcow2' } );
     $hv_mock->redefine( domain_dir    => sub { $_[0]->{domain_dir} } );
 
     # An unanswerable hypervisor is the untuned case: every disk knob is gated
@@ -120,20 +120,20 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     );
 
     my $dir = tempdir( CLEANUP => 1 );
-    mkdir "$dir/vm.example.com";
+    mkdir "$dir/vm.example.test";
     Trog::HV->forget();
     Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
 
     my %seed = (
         'user-data'      => "#cloud-config\n",
-        'meta-data'      => "instance-id: vm.example.com\n",
+        'meta-data'      => "instance-id: vm.example.test\n",
         'network-config' => "version: 1\n",
     );
     my $xml = quietly( sub { domain_xml( $config, \%seed ) } );
 
     is_deeply( \%got, \%seed, 'all three reach the seed, as a hash' );
     like( $xml, qr{<source file='/pool/seed\.iso'/>}, 'and the ISO is attached to the domain' );
-    like( $xml, qr{<name>vm\.example\.com</name>},    'which is named after the guest' );
+    like( $xml, qr{<name>vm\.example\.test</name>},   'which is named after the guest' );
     like( $xml, qr{<source bridge='br0'/>},           'on the outbound bridge' );
     unlike( $xml, qr/\[%/,  'with nothing of the template left in it' );
     unlike( $xml, qr/<tpm/, 'and no TPM, the hypervisor having none to make one mean anything' );
@@ -168,13 +168,13 @@ sub _tuned_xml {
     my (%opts) = @_;
 
     my $dir = tempdir( CLEANUP => 1 );
-    mkdir "$dir/vm.example.com";
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/mounts.txt", "raw=/dev/sdb\n" )
+    mkdir "$dir/vm.example.test";
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/mounts.txt", "raw=/dev/sdb\n" )
       if $opts{extra_disk};
 
     my $config = Config::Simple->new(
         _conf(
-            domain => 'vm.example.com',           memory => 2048, cpus => 4,
+            domain => 'vm.example.test',          memory => 2048, cpus => 4,
             size   => $opts{size} // 42949672960, image  => 'https://example.test/img',
             %{ $opts{config} // {} },
         )
@@ -185,7 +185,7 @@ sub _tuned_xml {
     $hv_mock->redefine( has_tpm              => sub { 0 } );
     $hv_mock->redefine( pool                 => sub { 1 } );
     $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
-    $hv_mock->redefine( create_disk          => sub { '/pool/vm.example.com-qcow2' } );
+    $hv_mock->redefine( create_disk          => sub { '/pool/vm.example.test-qcow2' } );
     $hv_mock->redefine( cloudinit_iso        => sub { '/pool/seed.iso' } );
     $hv_mock->redefine( domain_dir           => sub { $dir } );
     $hv_mock->redefine( libvirt_version      => sub { $opts{libvirt} } );

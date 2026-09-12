@@ -10,6 +10,9 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+# One copy, shared by args and fetch_hosts: two would drift.
+our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
+
 use Crypt::PRNG();
 
 =head1 Provisioner::Recipe::koan
@@ -88,11 +91,11 @@ use Crypt::PRNG();
             interval_seconds: 60
 
             # Optional SMTP for session-digest emails
-            # smtp_host:     "smtp.example.com"
+            # smtp_host:     "smtp.example.test"
             # smtp_port:     587
-            # smtp_user:     "koan@example.com"
+            # smtp_user:     "koan@example.test"
             # smtp_password: "..."
-            # email_to:      "you@example.com"
+            # email_to:      "you@example.test"
 
             # Projects the bot collaborates on.  Each entry needs an
             # absolute `path` on the guest.  Optional `github_url`
@@ -236,7 +239,7 @@ sub args {
             # Generally set in _base._global
             user       => { type => 'string' },
             koan_email => { type => 'email' },
-            repo_url   => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
+            repo_url   => { type => 'string', default => $DEFAULT_REPO },
 
             # Default to the troglodyne fork  it carries the Megolm/Olm E2EE
             # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
@@ -409,6 +412,19 @@ sub remote_files {
 
 sub tests {
     return qw{koan.tt};
+}
+
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the koan checkout this recipe clones.  The host of the default only: C<fetch_hosts> is asked of the class,
+without a configuration, so a C<repo_url> pointed somewhere else is not
+declared here and goes straight upstream.
+
+=cut
+
+sub fetch_hosts {
+    my ( $self, %opts ) = @_;
+    return $self->host_of( $opts{repo_url} // $DEFAULT_REPO ) || ();
 }
 
 1;

@@ -306,4 +306,30 @@ sub tests {
     return qw{garage.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+C<garagehq.deuxfleurs.fr>, which serves garage's binaries.  Not
+C<api.github.com>: the version is looked up by C<bin/new_config>, not by the
+guest.
+
+=cut
+
+sub fetch_hosts {
+    return ('garagehq.deuxfleurs.fr');
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+A published release is that release for good.  The tag list is not: it is what
+says which release is current, and C<latest_version> reads it every build.
+
+=cut
+
+sub cache_classes {
+    return (
+        { class => 'immutable', pattern => 'garagehq\\.deuxfleurs\\.fr/_releases/' },
+        { class => 'index',     pattern => 'api\\.github\\.com/' },
+    );
+}
+
 1;

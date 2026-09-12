@@ -71,7 +71,7 @@ subtest 'a destination the pool knows is pinned to its address' => sub {
 
     # The collector files a message under the name the sender put in it, and
     # rsyslog sends its short hostname unless told otherwise -- so a fleet with
-    # staging.example.com and staging.example.net would file both into
+    # staging.example.test and staging.example.test would file both into
     # staging.log and have neither whole.  Measured on a guest: off gives
     # "logs", on gives "logs.test.test".
     like( conf($dir), qr/\Qglobal(preserveFQDN="on")\E/, 'and sending its full name, so two guests with one short name do not collide' );

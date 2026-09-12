@@ -57,4 +57,15 @@ subtest 'CPAN test suites are skipped, as on a real guest, unless asked for' => 
     is_deeply( [ sort keys %$recipes ], [qw{_base some.test.test}], 'and the rest of the file' );
 };
 
+subtest 'a fetch cache to provision through, when asked for one' => sub {
+    my $recipes = scratch();
+    ok( !exists $recipes->{_base}{_global}{cache}, 'none unless asked for, as on a real guest' );
+
+    $recipes = scratch( cache => 'fetchcache.test' );
+    is( $recipes->{_base}{_global}{cache}, 'fetchcache.test', 'and --cache names it in _base, for every guest' );
+
+    $recipes = scratch( cache => 'fetchcache.test', cpan_tests => 1 );
+    ok( exists $recipes->{_base}{_global}{cpan_notest} && !$recipes->{_base}{_global}{cpan_notest}, 'with CPAN suites on as well, when asked for both' );
+};
+
 done_testing();

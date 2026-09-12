@@ -101,6 +101,12 @@ Run the test suites of what the guest installs from CPAN, by writing
 C<cpan_notest: 0> into the scratch C<_base>'s C<_global>.  Off by default, as it
 is on a real guest; the skill says when a build wants it.
 
+=item B<--cache> NAME
+
+Provision through the fetch cache NAME, by writing C<cache: NAME> into the
+scratch C<_base>'s C<_global>.  NAME is a cache built from this same scratch
+configuration, which has an authority of its own; the skill says how.
+
 =item B<--remove> DIR
 
 Delete a scratch directory.  Refuses anything that does not look like one, so a
@@ -115,11 +121,12 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $dir, $print_dir, $remove, $cpan_tests, $help );
+    my ( $dir, $print_dir, $remove, $cpan_tests, $cache, $help );
     GetOptionsFromArray(
         \@args,
         'dir=s'      => \$dir,
         'cpan-tests' => \$cpan_tests,
+        'cache=s'    => \$cache,
         'print-dir'  => \$print_dir,
         'remove=s'   => \$remove,
         'help'       => \$help,
@@ -131,7 +138,7 @@ sub main {
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
-    my ( $password, $has_fleet, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests );
+    my ( $password, $has_fleet, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests, cache => $cache );
 
     if ($print_dir) {
         print "$dir\n";
@@ -143,7 +150,8 @@ sub main {
     print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
     print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
-    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n" if $cpan_tests;
+    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
+    print {*STDERR} "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
     print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
     print {*STDERR} "    $_\n" for @refs;
     print {*STDERR} "\n";
@@ -169,9 +177,13 @@ sub build {
     # CPAN test suites, when what the build is testing is what gets installed.
     # Otherwise skipped, as on a real guest: see the skill, and
     # Provisioner::Recipe::perl's cpan_notest, which _global reaches.
-    if ( $opts{cpan_tests} ) {
+    #
+    # And a fetch cache, when the build is to go through one: see
+    # Provisioner::Recipe::fetchcache.
+    if ( $opts{cpan_tests} || $opts{cache} ) {
         my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
-        $recipes->{_base}{_global}{cpan_notest} = 0;
+        $recipes->{_base}{_global}{cpan_notest} = 0            if $opts{cpan_tests};
+        $recipes->{_base}{_global}{cache}       = $opts{cache} if $opts{cache};
         File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump($recipes) );
     }
 

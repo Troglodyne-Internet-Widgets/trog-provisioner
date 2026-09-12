@@ -169,4 +169,23 @@ sub tests {
     return qw{pdns.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+The PowerDNS apt repository, which this recipe adds and installs from.
+
+=cut
+
+sub fetch_hosts {
+    return qw{repo.powerdns.com};
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+    return $self->apt_repo_classes('repo.powerdns.com');
+}
+
 1;

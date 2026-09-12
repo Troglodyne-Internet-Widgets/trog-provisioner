@@ -83,4 +83,18 @@ sub tests {
     return qw{nvm.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+The installer, and where nvm then gets node from.
+
+nodejs.org is named here and nowhere else: C<nvm install node> fetches it
+itself, so nothing in this recipe writes that URL down and nothing reading the
+templates would find it.
+
+=cut
+
+sub fetch_hosts {
+    return qw{raw.githubusercontent.com nodejs.org};
+}
+
 1;

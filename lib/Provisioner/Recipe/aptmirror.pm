@@ -17,7 +17,7 @@ every other guest stops fetching the same packages over the internet.
 
 =head1 SYNOPSIS
 
-    aptmirror.example.com:
+    aptmirror.example.test:
         _global:
             size: 161061273600
         aptmirror:
@@ -28,7 +28,7 @@ and then, once it has synced, point the fleet at it:
 
     _base:
         _global:
-            mirror: aptmirror.example.com
+            mirror: aptmirror.example.test
 
 =head1 DESCRIPTION
 

@@ -105,6 +105,18 @@ sub describe {
     my $class = Provisioner::Cookbook->load($name);
     my %spec  = Provisioner::Cookbook->spec($name);
 
+    # The hosts it downloads from, which a guest points at the fetch cache
+    # while it provisions.  Under x-, which is how OpenAPI marks what is not
+    # schema.
+    #
+    # A guest is pointed at the cache through its /etc/hosts rather than
+    # through a recipe that manages that file, because the pointing lasts one
+    # build: scripts/fetch_via_cache puts the entries in before the makefile
+    # and takes them out after it, so nothing outlives the provision and there
+    # is no state for a recipe to own.
+    my @hosts = $class->fetch_hosts;
+    $spec{'x-fetch-hosts'} = \@hosts if @hosts;
+
     return \%spec;
 }
 

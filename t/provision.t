@@ -66,13 +66,13 @@ subtest 'no domain exits with the usage' => sub {
 # see what it decided without letting it near a real libvirt or a real ssh.
 subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $dir = tempdir( CLEANUP => 1 );
-    mkdir "$dir/vm.example.com";
+    mkdir "$dir/vm.example.test";
     File::Slurper::Temp::write_text(
-        "$dir/vm.example.com/provision.conf",
+        "$dir/vm.example.test/provision.conf",
         "libvirt_uri=qemu+ssh://root\@confhv/system\nips=203.0.113.10\n"
     );
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/users.yaml",  "users: []\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/data.tar.gz", "not really a tarball\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/users.yaml",  "users: []\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/data.tar.gz", "not really a tarball\n" );
 
     my $fakebin = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$fakebin/terraform", "#!/bin/sh\nexit 0\n" );
@@ -102,7 +102,7 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
         return Trog::HV->new();
     };
 
-    my $hv = $run->( '--domaindir', $dir, 'vm.example.com' );
+    my $hv = $run->( '--domaindir', $dir, 'vm.example.test' );
     is(
         $hv->uri, 'qemu+ssh://root@confhv/system',
         'libvirt_uri from provision.conf reaches the hypervisor object'
@@ -111,7 +111,7 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 
     $hv = $run->(
         '--domaindir', $dir,
-        qw{--connect qemu+ssh://root@clihv/system vm.example.com}
+        qw{--connect qemu+ssh://root@clihv/system vm.example.test}
     );
     is( $hv->uri, 'qemu+ssh://root@clihv/system', '--connect wins over the config' );
 };
@@ -379,13 +379,13 @@ subtest 'a domain directory with no recipes is built as it stands' => sub {
 
     my $out = quietly(
         sub {
-            Trog::Bin::Provisioner::generate_config( 'vm.example.com', { domain_dir => $dir } );
+            Trog::Bin::Provisioner::generate_config( 'vm.example.test', { domain_dir => $dir } );
         }
     );
     is( $out, 0, 'nothing to generate from, so nothing was generated' );
 };
 subtest 'the outbound adapter is found by MAC, not by name' => sub {
-    my $config = Config::Simple->new( _conf( domain => 'vm.example.com' ) );
+    my $config = Config::Simple->new( _conf( domain => 'vm.example.test' ) );
     my $mac    = '52:54:00:AA:BB:CC';
 
     # cloud-init writes the MAC it matched on, so the entry identifies itself
@@ -423,7 +423,7 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     );
 
     # And an explicit override still wins that fallback.
-    my $named = Config::Simple->new( _conf( domain => 'vm.example.com', bridge_devname => 'ens3' ) );
+    my $named = Config::Simple->new( _conf( domain => 'vm.example.test', bridge_devname => 'ens3' ) );
     is(
         Trog::Bin::Provisioner::primary_adapter( $old, $named, $mac ), 'ens3',
         'bridge_devname is still honoured'
@@ -478,10 +478,10 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     # user, no keys and no netplan.  Order is the whole fix, so it is what this
     # asserts.
     my $dir = tempdir( CLEANUP => 1 );
-    mkdir "$dir/vm.example.com";
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/provision.conf", "admin_user=ubuntu\nips=203.0.113.10\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/users.yaml",     "users: []\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.example.com/data.tar.gz",    "not really a tarball\n" );
+    mkdir "$dir/vm.example.test";
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/provision.conf", "admin_user=ubuntu\nips=203.0.113.10\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/users.yaml",     "users: []\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.example.test/data.tar.gz",    "not really a tarball\n" );
 
     my @order;
 
@@ -505,7 +505,7 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     my $rc       = eval {
         Trog::Bin::Provisioner::main(
             '--no-config', '--hvconf', $no_fleet,
-            '--domaindir', $dir,       'vm.example.com'
+            '--domaindir', $dir,       'vm.example.test'
         );
     };
     is( $@,  '', 'main() runs to the end' ) or diag $@;

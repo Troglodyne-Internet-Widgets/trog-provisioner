@@ -162,6 +162,27 @@ A failing suite stops the makefile in the `perl` recipe's target, and shows in
 above it. Read which
 distribution failed and why before deciding anything, and report it.
 
+## Through a fetch cache
+
+A scratch guest can provision through a fetch cache as a real one does, which
+is how to check the `fetchcache` recipe, or a recipe's `fetch_hosts`. Build the
+cache from the same scratch configuration, first, and name it there:
+
+    eval "$(.claude/skills/provisioning-recipes/scripts/scratch_config --cache fetchcache.test)"
+    bin/new_guest --hostname fetchcache.test --user scratch fetchcache
+    echo "$TROG_SCRATCH_PASS" | bin/provision fetchcache.test
+
+and then build the guest under test as usual. The same configuration because a
+scratch configuration has an authority of its own, made the first time the
+cache is configured, and a guest trusts only the one its configuration has --
+it will point nothing at a cache another one signed, the fleet's included.
+
+What happened is in two places. The guest's `setup.log` says which hosts went
+through the cache on its `fetch_via_cache:` line, and names each it left going
+upstream because the cache did not answer for it. The cache's
+`/var/log/nginx/fetchcache.log` has every request, the host it was for, and what
+the cache did about it: `MISS`, `HIT`, `STALE`. Tear both guests down at the end.
+
 ## Read what happened
 
 ```

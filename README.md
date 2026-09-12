@@ -77,12 +77,12 @@ Describe the machines once, in `/etc/trog-provisioner/hypervisors.conf`.  See `h
 
 ```
 [hv1]
-libvirt_uri    = qemu+ssh://root@hv1.example.net/system
+libvirt_uri    = qemu+ssh://root@hv1.example.test/system
 reserve_memory = 4096
 max_guests     = 20
 
 [hv2]
-libvirt_uri    = qemu+ssh://root@hv2.example.net/system
+libvirt_uri    = qemu+ssh://root@hv2.example.test/system
 ```
 
 From then on every tool works out which machine it wants on its own, and you go on running them exactly as you did:
@@ -122,10 +122,10 @@ It still has to fit; a pin to a machine with no room is an error rather than a q
 Skip all of the above and say where to build:
 
 ```
-bin/provision --connect qemu+ssh://root@hv1.example.net/system mysite.test
-bin/destroy   --connect qemu+ssh://root@hv1.example.net/system mysite.test
-bin/snapshot  --connect qemu+ssh://root@hv1.example.net/system mysite.test
-bin/restore   --connect qemu+ssh://root@hv1.example.net/system --latest mysite.test
+bin/provision --connect qemu+ssh://root@hv1.example.test/system mysite.test
+bin/destroy   --connect qemu+ssh://root@hv1.example.test/system mysite.test
+bin/snapshot  --connect qemu+ssh://root@hv1.example.test/system mysite.test
+bin/restore   --connect qemu+ssh://root@hv1.example.test/system --latest mysite.test
 ```
 
 `--connect` bypasses `hypervisors.conf` entirely: no search, no capacity check, build it there.
@@ -156,7 +156,7 @@ That means:
 
 5. **The HV still has to be set up as a hypervisor**: the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 
-    It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+    It no longer has to run an apt mirror, or collect anybody's logs.  Both used to be assumed of every hypervisor and compiled into every guest.  A mirror is a guest now, built with the `aptmirror` recipe and named in `_global`'s `mirror`; so is a cache for what recipes download, built with `fetchcache` and named in `_global`'s `cache`; a log collector is a guest built with `logcollector`, and `logshipper` is what points a guest at one.  See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
     It does not have to be the machine you run this from either.  The machine that *runs* the provisioner is itself a guest, built with the `trogrunner` recipe: perl, the CPAN dependencies, `/etc/trog-provisioner`, and a key a hypervisor will trust.  `perldoc Provisioner::Recipe::trogrunner`.
 
@@ -278,10 +278,10 @@ them run even after the first failure, and each one that fails says what to do:
 
 ```
 $ bin/preflight
-Hypervisor: qemu+ssh://doge@hv1.example.net/system
+Hypervisor: qemu+ssh://doge@hv1.example.test/system
 
-  ok   Reached doge@hv1.example.net as doge
-FAILED No passwordless sudo for doge on hv1.example.net
+  ok   Reached doge@hv1.example.test as doge
+FAILED No passwordless sudo for doge on hv1.example.test
   ok   Cloud-init seed builder: xorriso
   ok   libvirt answers, running 10.0.0
   ok   Sys::Virt 10.0.0 matches libvirt 10.0.0 on the hypervisor
@@ -317,7 +317,7 @@ hypervisor, restarts it, and hands back every line the kernel and systemd
 printed — as text, from the first line of firmware:
 
 ```
-bin/debug_boot --console vm.example.com
+bin/debug_boot --console vm.example.test
 ```
 
 A hang is the last line before the silence.  `--fetch` re-reads that capture
@@ -326,9 +326,9 @@ without another restart, and `--shot` grabs the screen as it is now.
 With libguestfs on the hypervisor, you can go further without booting anything:
 
 ```
-bin/debug_boot --cat vm.example.com /var/log/cloud-init.log
-bin/debug_boot --ls  vm.example.com /etc/netplan
-bin/debug_boot --single vm.example.com     # then --vnc for the tunnel
+bin/debug_boot --cat vm.example.test /var/log/cloud-init.log
+bin/debug_boot --ls  vm.example.test /etc/netplan
+bin/debug_boot --single vm.example.test     # then --vnc for the tunnel
 ```
 
 `--single` writes `single` onto the kernel command line in the guest's own
@@ -347,7 +347,7 @@ A storage pool can get into a state nothing else will get it out of.  `bin/nuke_
 
 ```
 bin/nuke_pool
-bin/nuke_pool --connect qemu+ssh://root@hv1.example.net/system
+bin/nuke_pool --connect qemu+ssh://root@hv1.example.test/system
 ```
 
 ## RUNNING THIS WITHOUT A TERMINAL
@@ -362,7 +362,7 @@ prompt nobody will ever see.
 So hand them in first, on standard input, with `--credentials`:
 
     printf 'keepass: %s\nsudo: %s\n\n' "$PASSPHRASE" "$SUDO" \
-      | bin/provision --credentials vm.example.com
+      | bin/provision --credentials vm.example.test
 
 One `name: value` per line, read until a blank line.  The flag is not optional
 sugar: nothing reads standard input unless you ask it to, because a caller that

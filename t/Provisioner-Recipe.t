@@ -98,8 +98,8 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $global_out = $widget->()->render_global( global_flag => 'yes' );
     like( $global_out, qr/global_setup=yes/, 'render_global renders global template' );
 
-    my $domain_out = $widget->()->render( domain => 'example.com' );
-    like( $domain_out, qr/domain=example\.com/, 'render still renders per-domain template' );
+    my $domain_out = $widget->()->render( domain => 'example.test' );
+    like( $domain_out, qr/domain=example\.test/, 'render still renders per-domain template' );
 };
 
 subtest 'schema defaults are filled in' => sub {
@@ -355,11 +355,28 @@ subtest 'generate_files writes what template_files names' => sub {
         }
     }
 
-    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.com' );
+    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.test' );
 
     is_deeply( [ sort @written ], [qw{rendered.conf verbatim.conf}], 'and says what it wrote, relative to where' );
-    is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.com', 'a .tt is rendered' );
-    is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',   'and anything else is copied' );
+    is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.test', 'a .tt is rendered' );
+    is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',    'and anything else is copied' );
+};
+
+subtest 'host_of reads the host out of the forms a repo_url takes' => sub {
+    my $recipe = 'Provisioner::Recipe';
+
+    is( $recipe->host_of('https://github.com/o/r.git'),      'github.com', 'an https clone URL' );
+    is( $recipe->host_of('https://gitea.test:3000/api/v1/'), 'gitea.test', 'a port is not part of the host' );
+    is( $recipe->host_of('HTTPS://GitHub.COM/o/r'),          'github.com', 'and the case it was written in is not either' );
+
+    # URI reads no host out of an scp-style address, and somebody will certainly
+    # configure one: it is what gogs hands out.
+    is( $recipe->host_of('git@github.com:o/r.git'),       'github.com', 'an scp-style git address, which is not a URL' );
+    is( $recipe->host_of('ssh://git@gitea.test/o/r.git'), 'gitea.test', 'and an ssh one, which is' );
+
+    is( $recipe->host_of('not a url'), undef, 'something that names no host' );
+    is( $recipe->host_of(q{}),         undef, 'and nothing at all' );
+    is( $recipe->host_of(undef),       undef, 'without warning about it' );
 };
 
 done_testing();

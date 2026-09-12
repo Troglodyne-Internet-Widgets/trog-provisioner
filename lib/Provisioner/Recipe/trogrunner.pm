@@ -92,7 +92,7 @@ allows a makefile and its whole postrun queue.
 
 So build one with the budget raised:
 
-    TROG_SETUP_TIMEOUT=3h bin/provision runner.example.com
+    TROG_SETUP_TIMEOUT=3h bin/provision runner.example.test
 
 Nothing breaks if you forget.  C<bin/provision> stops waiting and says so; the
 queue carries on regardless, because F<scripts/post_install> is run by C<atd>
@@ -596,6 +596,19 @@ sub remote_skip {
 
 sub tests {
     return qw{trogrunner.tt};
+}
+
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the checkout this recipe clones.  The host of the default only: C<fetch_hosts> is asked of the class,
+without a configuration, so a C<repo_url> pointed somewhere else is not
+declared here and goes straight upstream.
+
+=cut
+
+sub fetch_hosts {
+    my ( $self, %opts ) = @_;
+    return $self->host_of( $opts{repo_url} // $REPO ) || ();
 }
 
 1;

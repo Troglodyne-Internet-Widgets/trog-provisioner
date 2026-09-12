@@ -12,6 +12,7 @@ use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
+use URI();
 use Scalar::Util();
 use File::Copy();
 use File::Slurper::Temp();
@@ -290,6 +291,148 @@ All packages returned hereby will be removed from the dep list.
 
 sub dep_conflicts {
     return ();
+}
+
+=head3 @hosts = $recipe->fetch_hosts()
+
+The hosts this recipe downloads from on the guest, by name: C<www.cpan.org>,
+C<codeload.github.com>.  Asked of the class rather than of a configured recipe,
+because the answer is also what the fetch cache fetches from by default -- see
+L<Provisioner::Recipe::fetchcache> -- which cannot depend on any one domain.
+
+B<Every recipe that downloads anything declares this.>  A recipe that fetches a
+tarball, clones a checkout, or pulls a key and says nothing here is a recipe
+whose downloads never reach the cache -- so it is slower than its neighbours,
+and it is the one that fails when upstream does.  Nothing enforced that for a
+long time and nine hosts went undeclared; C<t/recipes.t> now checks what it can
+see.
+
+What it cannot see is a host a program reaches on its own: C<nvm install node>
+downloads from C<nodejs.org> without any template naming it.  So the test
+catches an omission that is written down, and the recipe still has to think
+about the ones that are not.
+
+The B<Ubuntu archive> stays out: a guest reaches it through
+L<Provisioner::Recipe::aptmirror>'s mirrorlist, which is a mirror rather than a
+cache.  A B<third-party apt repository> does not -- nothing else fetches those,
+and C<apt_repo_classes> is how a recipe adds one.  What also stays out is B<a
+host that only a configuration names>: this is asked of the class, with no configuration in hand, so a
+C<repo_url> or an C<api_url> pointed somewhere unusual is not declared and goes
+straight upstream.
+
+Empty by default.  On a guest with a C<cache>, each host its recipes name is
+pointed at the cache while it provisions, so what is downloaded from one is
+served out of what the cache has kept, and out of what it kept last time when
+upstream is failing.  Name a host only for what can be fetched as anybody: what
+the cache keeps, it fetches without credentials.  A host whose downloads
+redirect to another names that one too, since the cache follows a redirect only
+to a host it fetches from -- C<github_release_hosts> is GitHub's.
+
+=cut
+
+sub fetch_hosts {
+    return ();
+}
+
+=head3 $host = $recipe->host_of($url)
+
+The host a URL names, or nothing if it names none.
+
+Here because C<fetch_hosts> is handed a configuration and several recipes have
+to answer the same question of it: which host is this C<repo_url> or C<api_url>
+actually going to reach.  An scp-style git address -- C<git@github.com:o/r.git>
+-- is not a URL and L<URI> reads no host out of it, so it is matched separately
+rather than silently returning nothing for a form somebody will certainly use:
+it is what gogs hands out.
+
+=cut
+
+sub host_of {
+    my ( $self, $url ) = @_;
+
+    return unless defined $url && length $url;
+    return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
+
+    my $host = eval { URI->new($url)->host };
+    return $host ? lc $host : ();
+}
+
+=head3 @hosts = $recipe->github_release_hosts()
+
+C<github.com>, and the hosts it redirects a release download to: what a recipe
+downloading a GitHub release names in C<fetch_hosts>.
+
+=cut
+
+sub github_release_hosts {
+    return qw{github.com objects.githubusercontent.com release-assets.githubusercontent.com};
+}
+
+=head3 @classes = $recipe->cache_classes()
+
+How long L<Provisioner::Recipe::fetchcache> may keep what this recipe
+downloads, as a list of C<{ class =E<gt> ..., pattern =E<gt> ... }>.  C<class>
+is C<index> for a URL saying which version is current, and C<immutable> for one
+a version or a commit names; anything a recipe does not describe gets the
+cache's C<default>.  C<pattern> is a regex matched against C<HOST/PATH>.
+
+Empty by default, which means the default freshness.
+
+This is beside C<fetch_hosts> for the same reason: which URLs under a host never
+change is a fact about that upstream, and the recipe that downloads from it is
+what knows.  A cache that held the list itself would have to be edited every
+time a recipe gained an upstream, which is the coupling this avoids.
+
+=cut
+
+sub cache_classes {
+    return ();
+}
+
+=head3 @classes = $recipe->github_release_classes()
+
+The C<cache_classes> entries for a recipe that downloads a GitHub release: the
+release asset and a source archive named by tag or commit never change, and
+C<releases/latest> is the link that says which release is current.
+
+Here rather than in each recipe for the reason C<github_release_hosts> is: it is
+one upstream's layout, and gogs, roundcube and matrix would otherwise carry
+three copies of it that drift apart when GitHub changes it.
+
+=cut
+
+=head3 @classes = $recipe->apt_repo_classes($host)
+
+The C<cache_classes> entries for a third-party apt repository on C<$host>: the
+indexes under F<dists/>, and the packages under F<pool/> which a version names
+and which therefore never change.
+
+Here rather than in each recipe because four of them add an apt source and the
+layout is apt's, not theirs.  Indexes go in their own class because they are the
+one thing the cache must not serve stale: C<InRelease> lists the hashes of the
+C<Packages> beside it, and a stale one of the pair against a fresh other is a
+hash-sum mismatch.  None of the repositories this fleet uses publishes
+C<Acquire-By-Hash>, which would have made the indexes content-addressed and the
+question moot, so C<aptindex> turns C<proxy_cache_use_stale> off.
+
+=cut
+
+sub apt_repo_classes {
+    my ( $self, $host ) = @_;
+
+    my $h = quotemeta $host;
+    return (
+        { class => 'aptindex',  pattern => "$h/(?:[^/]+/)*dists/(?!.*/by-hash/)" },
+        { class => 'immutable', pattern => "$h/(?:[^/]+/)*(?:pool|by-hash)/" },
+    );
+}
+
+sub github_release_classes {
+    return (
+        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },
+    );
 }
 
 =head3 %required = $recipe->required_recipes(%opts)
