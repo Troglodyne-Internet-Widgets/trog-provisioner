@@ -13,6 +13,7 @@ use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
 use Data::Validate::Email();
+use URI();
 
 # Named as strings in the dispatch table below, never as code, so nothing static
 # can see that loading them is the whole point.
@@ -220,6 +221,29 @@ use to it and it has to die; something used from the makefile, by which time the
 guest has resolvers, can fall back to the name.
 
 =cut
+
+=head2 host_of($url)
+
+The host a URL names, or nothing if it names none.
+
+Recipes whose upstream is configured ask this of a C<repo_url> or an C<api_url>
+to say which host they will actually reach, so it can be declared in
+C<fetch_hosts> and pointed at the fetch cache.  An scp-style git address --
+C<git@github.com:o/r.git> -- is not a URL and L<URI> reads no host out of it, so
+it is matched separately rather than silently answering nothing for a form
+somebody will certainly configure: it is what gogs hands out.
+
+=cut
+
+sub host_of {
+    my ($url) = @_;
+
+    return unless defined $url && length $url;
+    return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
+
+    my $host = eval { URI->new($url)->host };
+    return $host ? lc $host : ();
+}
 
 sub fleet_address {
     my ( $name, %opts ) = @_;
