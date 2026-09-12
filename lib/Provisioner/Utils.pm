@@ -263,6 +263,26 @@ sub fleet_address {
     return ( unknown => $name );
 }
 
+=head3 write_pem($path, $pem, $mode)
+
+Write a PEM -- a certificate, a key, or several of them concatenated -- to
+C<$path> and set its mode, dying if the mode cannot be set.
+
+Through L<File::Slurper::Temp>, so nothing ever reads a half-written key: what
+is incomplete is a temporary file, and the rename that puts it in place is
+atomic.  The mode is applied to the file after that rename, so C<$path> holds
+whatever mode the temporary was made with until the C<chmod> lands.
+
+=cut
+
+sub write_pem {
+    my ( $path, $pem, $mode ) = @_;
+
+    File::Slurper::Temp::write_binary( $path, $pem );
+    chmod( $mode, $path ) or die "Could not set the mode of $path: $!\n";
+    return;
+}
+
 =head3 write_ssh_keypair($path, $type, $bits, $comment)
 
 Make an ssh keypair and write both halves: the private key to C<$path> and the
