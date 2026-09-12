@@ -217,6 +217,41 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
 };
 
+subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
+    my %common = ( install_dir => '/opt/domains', admin_user => 'doge', modules => [qw{pdns letsencrypt}] );
+
+    # One pdns serves the whole guest, and its global target is made once -- so a
+    # domain layered onto another never rewrites api.conf and the key in it stays
+    # the first domain's.  A token of its own is one the server does not know:
+    # measured on a shared host, where every challenge came back 401.
+    my %host   = _fresh()->validate( %common, domain => 'first.test' );
+    my %tenant = _fresh()->validate( %common, domain => 'second.test', dns_host_domain => 'first.test' );
+    my %alone  = _fresh()->validate( %common, domain => 'second.test' );
+
+    ok( length $host{local_dns_access_token}, 'the machine has a token' );
+    is( $tenant{local_dns_access_token}, $host{local_dns_access_token}, 'a domain on it presents that one' );
+    isnt( $alone{local_dns_access_token}, $host{local_dns_access_token}, 'while a domain with a machine of its own gets its own' );
+
+    # The hook is only half of it.  required_recipes hands pdns its api_key on a
+    # separate path, and fixing the hook alone left the server configured with
+    # one key and told to expect another.
+    my %host_req    = _fresh()->required_recipes( %common, domain => 'first.test' );
+    my %tenant_req  = _fresh()->required_recipes( %common, domain => 'second.test', dns_host_domain => 'first.test' );
+    my %host_pdns   = $host_req{pdns}   ? $host_req{pdns}->()   : ();
+    my %tenant_pdns = $tenant_req{pdns} ? $tenant_req{pdns}->() : ();
+
+    ok( length( $host_pdns{api_key} // q{} ), 'pdns is handed a key for the machine' );
+    is( $tenant_pdns{api_key}, $host_pdns{api_key}, 'and a domain on it hands pdns that same key' );
+};
+
+sub _fresh {
+    return Provisioner::Cookbook->load( 'letsencrypt', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+}
+
 subtest 'prefer_local_dns without a DNS server is refused' => sub {
     my $recipe = Provisioner::Cookbook->load( 'letsencrypt', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),

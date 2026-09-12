@@ -688,7 +688,16 @@ sub handle_domain {
 
     # If we use a local dns provider, we might be doing NS delegation to this box.
     # As such we have to teach anything relying on DNS changes to use it.
-    $global_config->{local_dns_access_token} = get_dns_provider_token( $rconf->{$domain} );
+    #
+    # The machine's, not this domain's, when this domain is being layered onto
+    # another: one pdns serves the whole guest and its global_pdns target is made
+    # once, so the second domain never rewrites api.conf and the key in it stays
+    # the first domain's.  A token of its own is one the server will not know --
+    # measured on a shared host, where every challenge came back 401 and the
+    # fetcher failed.
+    my $dns_domain = $depends_on // $domain;
+    $global_config->{dns_host_domain}        = $dns_domain;
+    $global_config->{local_dns_access_token} = get_dns_provider_token( $rconf->{$dns_domain} );
 
     my ( @pkgs, @generated );
 
