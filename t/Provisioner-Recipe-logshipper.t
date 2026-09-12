@@ -106,7 +106,7 @@ subtest 'the firewall is opened outwards, which is the half a sender needs' => s
     like( $profile, qr/^\[logshipper\]$/m, 'a profile, not named syslog, which ufw would skip' );
     like( $profile, qr{^ports=5514/tcp$}m, 'naming the port it sends to' );
 
-    like( $recipe->render(%$vars), qr{/etc/ufw/applications\.d/logshipper}, 'and the fragment installs it' );
+    like( $recipe->render_global(%$vars), qr{/etc/ufw/applications\.d/logshipper}, 'and the fragment installs it' );
 };
 
 subtest 'a guest that would ship to itself ships nowhere' => sub {
@@ -118,7 +118,7 @@ subtest 'a guest that would ship to itself ships nowhere' => sub {
 
     is( conf($dir), q{}, 'nothing is configured' );
 
-    my $fragment = $recipe->render(%$vars);
+    my $fragment = $recipe->render_global(%$vars);
     unlike( $fragment, qr{/etc/rsyslog[.]d}, 'and the fragment installs nothing' );
     like( $fragment, qr/keeps its logs/, 'saying why rather than silently doing nothing' );
 };

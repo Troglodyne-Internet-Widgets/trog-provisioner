@@ -129,7 +129,7 @@ subtest 'the firewall hole is asked for on the port it actually listens on' => s
 
 subtest 'the directory is writable by the user rsyslog becomes' => sub {
     my ( undef, $recipe, $vars ) = generated();
-    my $fragment = $recipe->render(%$vars);
+    my $fragment = $recipe->render_global(%$vars);
 
     # Ubuntu ships PrivDropToUser syslog, so rsyslog is not root by the time it
     # opens anything.  A root-owned directory here means it cannot create a
