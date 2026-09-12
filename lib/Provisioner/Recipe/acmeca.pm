@@ -14,6 +14,7 @@ use File::Copy();
 use IO::Socket::SSL::Utils();
 
 use Provisioner::Cookbook();
+use Trog::Utils();
 
 =head1 Provisioner::Recipe::acmeca
 
@@ -245,8 +246,8 @@ sub intermediate {
     );
 
     ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
-    $self->write_pem( "$output_dir/acmeca-intermediate.key", IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
-    $self->write_pem( "$output_dir/acmeca-intermediate.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
+    Trog::Utils::write_pem( "$output_dir/acmeca-intermediate.key", IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
+    Trog::Utils::write_pem( "$output_dir/acmeca-intermediate.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
     ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
