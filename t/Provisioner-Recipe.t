@@ -21,7 +21,6 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal qw{exception};
-use IPC::Run3();
 
 use_ok('Provisioner::Recipe');
 use Provisioner::Cookbook();
