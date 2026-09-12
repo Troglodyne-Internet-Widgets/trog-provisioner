@@ -1,4 +1,8 @@
 [Resolve]
-DNS=8.8.8.8
-FallbackDNS=8.8.4.4
+[%# The resolvers this installation is configured with, rather than a pair of
+    addresses written here.  This file used to name 8.8.8.8 whatever ipmap.cfg
+    said, so a guest told to resolve internally resolved at Google instead --
+    and a guest serving its own zone could not read back a record it had just
+    written.  See Provisioner::Recipe::nostubresolver. -%]
+DNS=[% resolvers.join(' ') %]
 DNSStubListener=no
