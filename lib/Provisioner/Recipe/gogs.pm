@@ -128,6 +128,17 @@ sub required_recipes {
     );
 }
 
+=head2 $bool = $recipe->shares_a_machine()
+
+False.  One gogs is one site: C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
+and the repositories, the database and the sessions all live under that domain's
+directory.  A second domain provisioned onto the guest would rewrite all of them
+to point at itself.
+
+=cut
+
+sub shares_a_machine { return 0 }
+
 sub args {
     return (
         required   => [qw{version admin_password}],

@@ -76,6 +76,20 @@ hour.
 
 =cut
 
+=head2 $bool = $recipe->shares_a_machine()
+
+False.  One slapd, and its suffix, its organisation and its TLS certificate are
+all named for the domain it was configured with.
+
+This recipe is the machine's half already, which makes the second domain's case
+quieter rather than better: its target never runs, so it does not overwrite what
+the first domain configured -- it simply has no directory of its own while
+looking as though it does.
+
+=cut
+
+sub shares_a_machine { return 0 }
+
 sub args {
     return (
         type       => 'object',

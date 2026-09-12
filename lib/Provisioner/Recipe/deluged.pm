@@ -83,6 +83,17 @@ sub required_recipes {
     );
 }
 
+=head2 $bool = $recipe->shares_a_machine()
+
+False.  One deluged, one F</var/lib/deluged/config/core.conf>, and the download
+location in it is this domain's directory.  A second domain would point the
+daemon at its own and leave the first with a client writing somewhere it does
+not look.
+
+=cut
+
+sub shares_a_machine { return 0 }
+
 sub args {
     return (
         type       => 'object',

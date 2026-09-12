@@ -1797,6 +1797,43 @@ subtest 'the service user is made once per machine, not once per domain' => sub 
     like( $target, qr/^\tchown \Q[% user %]:[% admin_user %]\E/m,       'owned by the account it shares' );
 };
 
+subtest 'the services that cannot be told about a second domain are named here' => sub {
+
+    # Naming the whole set makes marking one a decision rather than something
+    # that drifted in, and iterating every recipe catches it in both directions
+    # -- a service that quietly stopped being shareable as much as one that was
+    # marked without cause.  bin/new_config refuses these for a domain being
+    # layered onto another; everything else writes per domain, or goes through
+    # configd, and does not care how many domains the guest holds.
+    my %cannot = map { $_ => 1 } qw{deluged garage gogs koan ldap matrix trogrunner};
+
+    foreach my $name ( sort Provisioner::Cookbook->names() ) {
+        my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
+        is(
+            !!$recipe->shares_a_machine, !$cannot{$name},
+            $cannot{$name} ? "$name cannot share a machine" : "$name can"
+        );
+    }
+};
+
+subtest 'the acme CA belongs to the guest rather than to each domain' => sub {
+
+    # One service, one database, one intermediate.  Installed from a per-domain
+    # target, the second domain to be built overwrote the key the running CA was
+    # issuing from with a freshly minted one -- and enable --now does not restart
+    # what is already up, so it stayed hidden until the next restart.
+    my $global = fragment_file('ubuntu/acmeca.global.tt');
+    ok( $global, 'the fragment is the machine one' );
+
+    my $per_domain = eval { fragment_file('ubuntu/acmeca.tt') };
+    is( $per_domain, undef, 'and there is no per-domain half to run again for the next domain' );
+
+    # dehydrated asks localhost and the listener is on loopback, so a domain name
+    # here buys nothing -- and a name outside the constraint crash-loops step-ca.
+    my $ca_json = File::Slurper::read_text( fragment_file('files/acmeca.ca.json.tt') );
+    unlike( $ca_json, qr/\Q[% domain %]\E/, 'and the CA names no domain' );
+};
+
 subtest 'the admin checkout symlink survives a second domain on the machine' => sub {
 
     # The source is this domain's, the destination is the admin's home, which is
