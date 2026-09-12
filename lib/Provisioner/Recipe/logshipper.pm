@@ -10,6 +10,8 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Provisioner::Utils();
+
 =head1 NAME
 
 Provisioner::Recipe::logshipper - send this guest's logs to a named destination.
@@ -206,11 +208,10 @@ to itself.
 sub target {
     my ( $self, %opts ) = @_;
 
-    my $host = $opts{host} // q{};
-    return q{} unless length $host;
-
     my $domain = $opts{domain} // q{};
-    if ( $domain eq $host ) {
+    my ( $kind, $value ) = Provisioner::Utils::fleet_address( $opts{host}, domain => $domain, ipmap => $opts{ipmap} );
+
+    if ( $kind eq 'self' ) {
         print "$domain is the log destination, so it keeps its logs rather than forwarding them to itself.\n";
         return q{};
     }
@@ -218,10 +219,7 @@ sub target {
     # A name this installation assigns an address to is pinned to that address,
     # so the logs that would tell you DNS is broken do not need DNS to arrive.
     # Anything else is a destination we do not run, and is named as written.
-    my $address = ( $opts{ipmap} // {} )->{$host};
-    return $address if defined $address && length $address;
-
-    return $host;
+    return $value;
 }
 
 1;

@@ -31,13 +31,31 @@ SKIP: {
         or diag "built: $version  system: $system";
 }
 
-# The symlinks the build makes, which is how everything else finds it -- the
-# postrun tasks in tcms and tpsgi call $home/bin/cpanm by name.
-foreach my $tool (qw{perl cpanm prove}) {
-    ok(-e "$home/bin/$tool", "$home/bin/$tool is there for other recipes to use");
+# What this perl comes with whatever else was asked of the recipe, and what
+# scripts/cpan_install goes through for every step it is handed.  Running, not
+# merely present: a build that half-worked leaves the file there.
+SKIP: {
+    skip 'nothing built under /opt/perl5', 3 unless $built && -x $built;
+
+    my $bin = $built =~ s{/perl\z}{}r;
+    foreach my $tool (qw{cpanm dzil}) {
+        my $said = `$bin/$tool --version 2>&1`;
+        ok($? == 0 && length $said, "$bin/$tool runs, as the perl recipe installs it")
+            or diag "$tool said: $said";
+    }
+
+    # Module::Build has no command of its own, so it is asked for by name.
+    my $mb = `$built -MModule::Build -e 'print Module::Build->VERSION' 2>&1`;
+    like($mb, qr/^\d/, 'and Module::Build is installed in it') or diag $mb;
 }
 
-my $works = `$home/bin/perl -e 'print 1' 2>/dev/null`;
-is($works, '1', 'and the perl that link points at runs');
+# Where a person finds it.  Nothing in the build reads shell init -- make runs
+# under a non-interactive sh out of atd -- so this is for whoever logs in.
+ok(-f '/etc/profile.d/perl.sh', '/etc/profile.d/perl.sh is there');
+chomp( my $on_path = `bash -lc 'command -v perl' 2>/dev/null` );
+like($on_path, qr{^/opt/perl5/}, "a login shell gets the built perl first ($on_path)");
+
+# And nothing links tools into an account bin any more.
+ok(!-e "$home/bin/starman", "$home/bin holds no symlink farm");
 
 done_testing();

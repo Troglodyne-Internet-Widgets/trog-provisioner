@@ -299,6 +299,18 @@ sub main {
     return 0;
 }
 
+# The distribution's defaults, laid underneath what _global said.  _global
+# reaches every recipe unvalidated, so a default applied only when the distro
+# recipe is validated would reach no other recipe at all -- see
+# Provisioner::DistroRecipe/global_defaults.
+sub apply_global_defaults {
+    my ( $distro, $global_config ) = @_;
+
+    %$global_config = ( $distro->global_defaults, %$global_config );
+
+    return $global_config;
+}
+
 # Settings that describe how the hypervisor should build the guest rather than
 # what goes on it, and so belong in provision.conf rather than in a template.
 #
@@ -632,6 +644,8 @@ sub handle_domain {
     $global_config->{transfer_user} = $transfer_user;
     $global_config->{transfer_port} = $transfer_port;
 
+    apply_global_defaults( $distro, $global_config );
+
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up
     # with rather than out of what it started with.
@@ -682,6 +696,14 @@ sub handle_domain {
     #Memoize
     my %builders;
 
+    # Each recipe's configuration as the domain wrote it, taken on its first
+    # visit.  A recipe other recipes depend on is visited once for each of
+    # them, and what they handed it has to be merged into what the domain
+    # wrote each time -- merged into the last visit's result instead, a list
+    # they handed it came out once per visit.  perl's cpan_deps did, three
+    # times over, on a guest with tcms, tpsgi and trogrunner.
+    my %as_written;
+
     # First, run thru the modules and depsolve.
     for ( my $i = 0; $i < scalar(@modules); $i++ ) {
         my $module  = $modules[$i];
@@ -719,12 +741,13 @@ sub handle_domain {
         }
 
         # Merge the configuration provided by all things depending on this.
+        $as_written{$module} //= clone($pconf);
         if ( $depmod_conf->{$module} ) {
-            $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $pconf );
+            $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $as_written{$module} );
 
             # Same on this side of it: what an operator wrote for this recipe is
             # held against what the recipes depending on it asked for.
-            $builder->reconcile( $rconf->{$domain}{$module}, $_ ) for ( $depmod_conf->{$module}, $pconf );
+            $builder->reconcile( $rconf->{$domain}{$module}, $_ ) for ( $depmod_conf->{$module}, $as_written{$module} );
         }
     }
 

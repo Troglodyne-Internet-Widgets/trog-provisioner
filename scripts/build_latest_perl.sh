@@ -1,6 +1,11 @@
 #!/bin/bash
 
-CLIENT=$1
+# build_latest_perl.sh
+#
+# Build the latest perl into /opt/perl5 and give it cpanm, Module::Build and
+# Dist::Zilla.  What else goes into it is the perl recipe's cpan_deps, installed
+# by that recipe's target after this; scripts/cpan_install finds this perl as
+# the newest under /opt/perl5, and a person finds it through profile.d.
 
 #XXX perlbrew = spooped when you run via clown-init
 export SHELL='/bin/bash';
@@ -30,53 +35,29 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     JOBS=$(nproc 2>/dev/null || echo 2)
     make -j"$JOBS"
     make -j"$JOBS" install
-    yes | /opt/perl5/$NICE_PERL_NAME/bin/cpan App::cpanminus Test2 Devel::NYTProf starman Perl::Critic Perl::Tidy
 fi
 
-CLIENT_HOMEDIR=$(getent passwd $CLIENT | cut -d: -f6);
-
-if [ -z "$CLIENT_HOMEDIR" ]; then
-	echo "build_latest_perl.sh: no such account '$CLIENT'" >&2
-	exit 255
-fi
-
-# Named, because "Can't get client's homedir!" says neither which account nor
-# which directory, and the answer is usually that the account is not the one the
-# domain meant: a service user has the domain directory as its home and that is
-# made by the service_user target, but an account like www-data has /var/www,
-# which only exists if something else created it.
-if [ ! -d "$CLIENT_HOMEDIR" ]; then
-	echo "build_latest_perl.sh: home directory '$CLIENT_HOMEDIR' for '$CLIENT' does not exist" >&2
-	exit 255
-fi
-
-# Symlinks to the perl, which is how every other recipe finds it -- the postrun
-# tasks in tcms, tpsgi and trogrunner call $CLIENT_HOMEDIR/bin/cpanm by name.
+# Its cpanm, from the new perl's own CPAN client, since nothing else can install
+# one yet: -T so CPAN.pm skips the suite, and yes to answer its first-run
+# configuration.
 #
-# Guarded on the target existing, not just on the link being absent.  The cpan
-# line above installs cpanminus, Test2, NYTProf, starman, Perl::Critic and
-# Perl::Tidy, and nothing else -- so yath (Test2::Harness) and dzil
-# (Dist::Zilla) were being linked to files that have never been there, on every
-# guest that runs the perl recipe.  A link to nothing is worse than no link: it
-# satisfies -e, so anything checking for the tool finds it and then fails at the
-# point of use.  Whatever installs those later gets its link on the next run.
-mkdir -p $CLIENT_HOMEDIR/bin
-mkdir -p /root/bin
-link_tool() {
-	[ -e "/opt/perl5/$NICE_PERL_NAME/bin/$1" ] || return 0
-	[ -L "$2/$1" ] && return 0
-	ln -s "/opt/perl5/$NICE_PERL_NAME/bin/$1" "$2/$1"
-}
-link_tool perl "$CLIENT_HOMEDIR/bin"
-link_tool prove "$CLIENT_HOMEDIR/bin"
-link_tool yath "$CLIENT_HOMEDIR/bin"
-link_tool dzil "$CLIENT_HOMEDIR/bin"
-link_tool cpanm "$CLIENT_HOMEDIR/bin"
-link_tool starman "$CLIENT_HOMEDIR/bin"
-link_tool perlcritic "$CLIENT_HOMEDIR/bin"
-link_tool perltidy "$CLIENT_HOMEDIR/bin"
-link_tool nytprofmerge "$CLIENT_HOMEDIR/bin"
-link_tool nytprofhtml "$CLIENT_HOMEDIR/bin"
-link_tool perl /root/bin
-link_tool cpanm /root/bin
+# cpanm and nothing else.  Measured on a guest: CPAN.pm two hundred
+# distributions into Dist::Zilla's tree lost a single fetch to "SSL connection
+# failed for cpan.org: SSL wants a read first", gave up, and took the build with
+# it.  cpanm is what every other install on a guest goes through, and it retries.
+yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus || exit 1
 
+# What a distribution needing either cannot install for itself, through the one
+# thing on a guest that reaches CPAN.  Every run rather than only the first, so a
+# module added here reaches a guest whose perl is already built.
+"$WD/cpan_install" --notest install Module::Build Dist::Zilla || exit 1
+
+# Where a person finds this perl.  Not where the build finds it: make runs its
+# recipe lines under a non-interactive sh out of an atd job, and systemd and
+# cron read no shell init either, so everything that installs into this perl
+# names it by path -- see scripts/cpan_install.  Rewritten every run, so a perl
+# built since is the one on the PATH.
+cat > /etc/profile.d/perl.sh <<PROFILE
+PATH="/opt/perl5/$NICE_PERL_NAME/bin:\$PATH"
+PROFILE
+chmod 0644 /etc/profile.d/perl.sh

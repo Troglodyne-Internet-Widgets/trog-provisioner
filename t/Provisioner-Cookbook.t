@@ -360,13 +360,6 @@ subtest 'placeholders_in walks the whole structure' => sub {
 
 subtest 'every real recipe can be loaded and scaffolded' => sub {
 
-    # A recipe may compute a default by asking the internet -- garage asks
-    # GitHub for the current release.  Scaffolding has to work without a
-    # network, and a test suite has no business making the call, so there is
-    # not one to make.
-    my $http = Test::MockModule->new('HTTP::Tiny');
-    $http->redefine( get => sub { { success => 0, status => 599, content => '' } } );
-
     my @broken;
     foreach my $name ( Provisioner::Cookbook->names() ) {
         eval {
@@ -383,9 +376,6 @@ subtest 'no recipe declares its fields somewhere the validator will not look' =>
     # An object schema spells its fields "properties".  Spell it "parameters"
     # and OpenAPIv3 skips the lot: the recipe looks validated, accepts anything,
     # and says nothing.  Seven did.  This is why they do not any more.
-    my $http = Test::MockModule->new('HTTP::Tiny');
-    $http->redefine( get => sub { { success => 0, status => 599, content => '' } } );
-
     my @wrong;
     foreach my $name ( Provisioner::Cookbook->names() ) {
         my %spec = Provisioner::Cookbook->spec($name);

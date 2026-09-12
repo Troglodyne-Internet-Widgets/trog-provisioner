@@ -11,10 +11,11 @@ my $dir = '[% install_dir %]/[% domain %]/tCMS';
 ok(-d $dir, 'the tCMS checkout is there');
 ok(-d "$dir/.git", 'and is a git checkout');
 
-# What the queued postrun task runs to install the application's dependencies.
-# Missing, the task fails after the build has already said it succeeded.
-my $cpanm = '[% install_dir %]/[% domain %]/bin/cpanm';
-ok(-x $cpanm, 'the cpanm the postrun task uses is there');
+# What cpan_install runs to install the application's dependencies: it finds its
+# perl as the newest under /opt/perl5, which is where the perl recipe built one.
+# Missing, the build fails in the perl recipe's target.
+my ($cpanm) = reverse sort glob('/opt/perl5/*/bin/cpanm');
+ok($cpanm && -x $cpanm, 'the cpanm the perl recipe installed is there');
 
 # And it runs.  Being there is not the same thing: nvm's node was installed and
 # could not start for want of a shared library, and every check that asked where

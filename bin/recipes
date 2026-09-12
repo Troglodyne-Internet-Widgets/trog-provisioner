@@ -102,8 +102,9 @@ sub describe {
         };
     }
 
-    Provisioner::Cookbook->load($name);
-    my %spec = Provisioner::Cookbook->spec($name);
+    my $class = Provisioner::Cookbook->load($name);
+    my %spec  = Provisioner::Cookbook->spec($name);
+
     return \%spec;
 }
 

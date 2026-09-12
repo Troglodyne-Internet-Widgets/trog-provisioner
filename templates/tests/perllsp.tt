@@ -12,6 +12,16 @@ like($nav, qr/perlnavigator-server/, 'perlnavigator-server installed globally vi
 ok(-d "$home/.vim/pack/lsp/start", 'vim-lsp pack directory exists');
 ok(-f "$home/.vim/perllsp.vim", 'perllsp.vim vimrc snippet installed');
 
+# Each plugin unpacked, and at the commit it was pinned to.
+[% FOR plugin IN plugins -%]
+{
+    my $dir = "$home/.vim/pack/lsp/start/[% plugin.dir %]";
+    ok( -d "$dir/autoload" || -d "$dir/plugin", '[% plugin.dir %] is unpacked, with vim files in it' );
+    my $ref = do { local $/; my $fh; open( $fh, '<', "$dir/.trog-ref" ) ? <$fh> : '' };
+    like( $ref, qr/\A[% plugin.ref %]\s*\z/, '[% plugin.dir %] is at [% plugin.ref %]' );
+}
+[% END -%]
+
 my $vimrc = "$home/.vimrc";
 if (-f $vimrc) {
     my $content = do { open my $fh, '<', $vimrc or die; local $/; <$fh> };

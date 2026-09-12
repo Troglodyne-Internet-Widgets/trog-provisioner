@@ -17,12 +17,11 @@ my $confdir = "$dir/etc/trog-provisioner";
 # here that does not depend on the domain naming a service user.  The home
 # directory of an admin user is /home/<them> and not the domain directory, and
 # assuming otherwise is what perl.tt already had to be fixed for.
-# \$( escaped twice over: unescaped it is perl's real-GID variable, which
-# interpolates into the backticks as a list of numbers and leaves the shell a
-# command substitution that never opened.
-chomp( my $bin = `dirname \$(readlink -f /root/bin/cpanm) 2>/dev/null` );
-ok( $bin && $bin ne '.' && -d $bin, 'the perl recipe built a perl, and /root/bin/cpanm points into it' )
-    or BAIL_OUT( 'no perl was built, or cpanm does not point at one: ' . ( $bin // 'nothing' ) );
+# The newest perl under /opt/perl5, which is how scripts/cpan_install finds the
+# one it installs into, and how everything else on a guest reaches it.
+my ($bin) = reverse sort glob('/opt/perl5/*/bin');
+ok( $bin && -d $bin, 'the perl recipe built a perl under /opt/perl5' )
+    or BAIL_OUT( 'no perl was built: nothing under /opt/perl5' );
 diag "the built perl is in $bin" if $bin;
 
 # The version, as a number, because that is the thing that was wrong: every
@@ -43,9 +42,9 @@ foreach my $tool (qw{cpanm perlcritic dzil prove}) {
         or diag "$tool said: $said";
 }
 
-# And the link the fragment makes once dzil exists, since /root/bin is where
-# anything else deferred on this guest will look for it.
-ok( -x '/root/bin/dzil', '/root/bin/dzil is there for anything queued after it' );
+# dzil comes with the perl rather than being asked for, since a distribution
+# that needs it cannot install it for itself.
+ok( -x "$bin/dzil", "$bin/dzil is there for the checkout dependencies" );
 
 # Sys::Virt binds the API of the libvirt it was built against and does not say
 # so when it is wrong -- it shows up later as a missing constant, blamed on

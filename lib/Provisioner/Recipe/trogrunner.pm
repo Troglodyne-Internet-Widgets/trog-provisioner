@@ -10,6 +10,9 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Path::Tiny();
+use Provisioner::Cookbook();
+
 use YAML::XS();
 use Text::Xslate();
 use File::Slurper();
@@ -81,11 +84,10 @@ tuned to -- see issue #123, which is about
 measuring it properly -- the answer is probably "more, and the build should be
 doing less".
 
-A runner builds perl from source, installs what F<scripts/build_latest_perl.sh>
-asks for on top of it -- through C<cpan>, which runs each distribution's own
-test suite, and that is where most of the wall clock goes -- and only then
-starts on C<Sys::Virt>, C<Dist::Zilla> and the forty-odd distributions this one
-declares.  On four vCPUs that does not fit the ninety minutes C<Trog::Guest>
+A runner builds perl from source, installs the toolchain the C<perl> recipe
+puts on top of it, and only then starts on C<Sys::Virt>, C<Dist::Zilla> and the
+forty-odd distributions this one hands that recipe.  Most of the wall clock is
+those distributions, and their own test suites when C<cpan_notest> is off.  On four vCPUs that does not fit the ninety minutes C<Trog::Guest>
 allows a makefile and its whole postrun queue.
 
 So build one with the budget raised:
@@ -159,12 +161,55 @@ my $ED25519_BITS = 256;
 
 my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git';
 
-sub required_recipes {
+=head3 required_recipes
 
-    # perl only, and it is the whole of what a runner was missing: it builds
-    # /opt/perl5/$version and puts perl, cpanm, prove and perlcritic in the
-    # user's bin.  Everything else here is CPAN or configuration.
-    return ( perl => sub { () } );
+perl, and what goes into it from CPAN, handed over as its C<cpan_deps>.  In this
+order, and the order is the point:
+
+=over 4
+
+=item * B<Sys::Virt, pinned>, before anything resolves dependencies.  Left to a
+dependency list, cpanm takes the newest, whose Makefile.PL wants a libvirt-dev
+far newer than this guest has -- and says so forty minutes into the build, in a
+message about pkg-config rather than about ordering.  Pinned to
+C<libvirt_version> when one is named, and otherwise to what pkg-config says the
+guest's libvirt is when the step runs, which is right whenever the runner and
+the hypervisor are on the same distribution.
+
+=item * B<What the checkout needs>, and what each of C<deps_from> needs, by
+dzil.  Dist::Zilla itself comes with the perl, so nothing here asks for it.
+
+=back
+
+Worked out of what the dependency is handed, with this recipe's own schema
+defaults laid under it -- C<checkout_dir> has one, and the closure is handed the
+configuration raw.  The perl recipe validates what it is given.
+
+=cut
+
+sub required_recipes {
+    my ($self) = @_;
+
+    # perl is the whole of what a runner was missing: it builds
+    # /opt/perl5/$version and gives it cpanm, Module::Build and Dist::Zilla.
+    # Everything else here is CPAN or configuration.
+    return (
+        perl => sub {
+            my %opts = ( Provisioner::Cookbook->defaults('trogrunner'), @_ );
+            my $sys_virt =
+              length( $opts{libvirt_version} // q{} )
+              ? { install => ["Sys::Virt\@$opts{libvirt_version}"] }
+              : { pin     => { module => 'Sys::Virt', pkgconfig => 'libvirt' } };
+
+            return (
+                cpan_deps => [
+                    $sys_virt,
+                    ( $opts{checkout} ? { dzil => Path::Tiny::path( @opts{qw{install_dir domain checkout_dir}} )->stringify } : () ),
+                    ( map { { dzil => $_ } } @{ $opts{deps_from} // [] } ),
+                ],
+            );
+        },
+    );
 }
 
 sub args {
@@ -198,13 +243,12 @@ sub args {
             # so anything written here would be a guess that goes stale.
             libvirt_version => { type => 'string', default => q{} },
 
-            # Absolute paths to run cpanm --installdeps against, for a checkout
+            # Absolute paths to install the dzil dependencies of, for a checkout
             # this recipe did not make.  Named by the operator rather than
             # worked out from another recipe: a runner that manages its own
             # repositories is the case this exists for, and only the person who
             # configured that knows where they land.
-            deps_from     => { type => 'array', items => { type => 'string' }, default => [] },
-            extra_modules => { type => 'array', items => { type => 'string' }, default => [] },
+            deps_from => { type => 'array', items => { type => 'string' }, default => [] },
 
             # The runner's ipmap.cfg.  Defaults sit on the members rather than
             # on config itself, or a domain that sets one member would lose the

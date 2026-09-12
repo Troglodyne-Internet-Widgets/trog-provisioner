@@ -21,8 +21,10 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal qw{exception};
+use IPC::Run3();
 
 use_ok('Provisioner::Recipe');
+use Provisioner::Cookbook();
 
 subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $tdir = tempdir( CLEANUP => 1 );
@@ -203,6 +205,21 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $three = bless {}, 'Test::Recipe::Memo';
     my %other = $three->validated( domain => 'b.test', flavour => 'third' );
     is( $other{domain}, 'b.test', 'and so does one built for another domain' );
+};
+
+{
+    # A recipe of no distribution, named as a recipe because new() works out
+    # the fragment from the name.
+    package Provisioner::Recipe::nametest;
+    our @ISA = ('Provisioner::Recipe');
+}
+
+subtest 'recipe_name is the last component, whichever distro specialised it' => sub {
+    my $tdir = tempdir( CLEANUP => 1 );
+    is( Provisioner::Recipe::nametest->recipe_name,                                                       'nametest', 'of a class' );
+    is( Provisioner::Recipe::nametest->new( template_dirs => [$tdir], output_dir => $tdir )->recipe_name, 'nametest', 'of an object' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->recipe_name,                          'nginx',    'and of a distribution version of a recipe, which shares the fragment' );
+    is( Provisioner::Recipe->recipe_name,                                                                 undef,      'and nothing for a class that is not one' );
 };
 
 subtest 'reconcile() hands disagreements to the recipe, and dies by default' => sub {

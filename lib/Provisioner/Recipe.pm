@@ -168,6 +168,24 @@ other.  See C<bin/new_config> for the search path.
 
 =head2 STATIC METHODS
 
+=head3 $name = $recipe->recipe_name()
+
+The name this recipe answers to, of a class or an object: the last component of
+the class, so that a distro's specialisation of a recipe --
+C<Provisioner::Recipe::Ubuntu::pdns> -- answers to the same name and looks for
+the same fragment as the recipe it specialises.  Sharing the fragment is the
+point: what a distro changes is the package list, not the makefile.
+
+Undef for a class not named as a recipe.
+
+=cut
+
+sub recipe_name {
+    my ($self) = @_;
+    my ($name) = ( Scalar::Util::blessed($self) // $self ) =~ m/\AProvisioner::Recipe::(?:\w+::)?(\w+)\z/;
+    return $name;
+}
+
 =head3 $class->new(%opts)
 
 Create new recipe instance.
@@ -177,11 +195,7 @@ Create new recipe instance.
 sub new {
     my ( $class, %opts ) = @_;
 
-    # The last component, so that a distro's specialisation of a recipe --
-    # Provisioner::Recipe::Ubuntu::pdns -- answers to the same name and looks
-    # for the same fragment as the recipe it specialises.  Sharing the fragment
-    # is the point: what a distro changes is the package list, not the makefile.
-    my ($tname) = $class =~ m/\AProvisioner::Recipe::(?:\w+::)?(\w+)\z/;
+    my $tname = $class->recipe_name;
     die "Could not extract recipe name.  Recipes must be of form Provisioner::Recipe::* or Provisioner::Recipe::<Distro>::*" unless $tname;
 
     $opts{template}        = "$tname.tt";

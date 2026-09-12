@@ -111,65 +111,6 @@ h="$$(getent passwd '[% user %]' | cut -d: -f6)"; runuser -u '[% user %]' -- ssh
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
-# Everything below installs from CPAN, through the perl the perl recipe builds
-# rather than the system one, and all of it is queued rather than run here --
-# that perl does not exist yet.  The makefile target above this one is what
-# compiles it.
-#
-# Which is also why the bin directory is resolved inside each task rather than
-# written into it.  build_latest_perl.sh installs to /opt/perl5/$version, the
-# version being whatever was current the day the guest was built, and it links
-# cpanm into /root/bin unconditionally -- that link is the only path here that
-# is true before the build has happened.  Resolving it at makefile time gave
-# `dirname` an empty string and put ./cpanm in the queue.
-#
-# /root/bin rather than the user home: build_latest_perl.sh links into the home
-# of whoever the perl is for, and that is the domain directory only when the
-# domain names a service user.  This recipe does not require one.
-#
-# \$$ so that make hands the shell a literal $ and the expansion happens when
-# the task runs.
-#
-# Sys::Virt first, and pinned, before anything that resolves dependencies.
-# Left to the dependency list, cpanm takes the newest, whose Makefile.PL wants
-# a libvirt-dev far newer than this guest has -- and says so forty minutes into
-# the queue, in a message about pkg-config rather than about ordering.  Pinning
-# it to what the guest actually has is what bin/preflight tells an operator to
-# do by hand.
-[% IF libvirt_version %]
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest 'Sys::Virt@[% libvirt_version %]'"
-[% ELSE %]
-# No version was named, so the guest is asked.  Right whenever the runner and
-# the hypervisor are on the same distribution, which is the usual case and the
-# only one this can answer -- a recipe cannot ask a hypervisor anything.
-#
-# Resolved here rather than in the task, because libvirt-dev is installed by
-# the time this makefile runs and post_install.sh is more use naming a version
-# than naming a command.
-v="$$(pkg-config --modversion libvirt 2>/dev/null)"; if [ -z "$$v" ]; then echo 'trogrunner: pkg-config knows no libvirt, so there is no Sys::Virt version to pin' >&2; exit 1; fi; [% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest 'Sys::Virt@$$v'"
-[% END %]
-# Dist::Zilla, because nothing else installs it and it is how this distribution
-# declares what it needs -- and the link in the same task, because
-# build_latest_perl.sh links only what is already there and until this has run
-# there is no dzil for it to have found.
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest Dist::Zilla && ln -sfn \$$p/dzil /root/bin/dzil"
-[% IF checkout %]
-# authordeps before listdeps: dist.ini names plugins, and dzil cannot read its
-# own configuration to answer listdeps until the plugins it names are there.
-#
-# --notest throughout.  Forty distributions worth of test suites under a
-# source-built perl does not fit the ninety minutes a guest gets for its
-# makefile and postrun queue together, and the guest test is the check that
-# matters here.
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% install_dir %]/[% domain %]/[% checkout_dir %]' && \$$p/dzil authordeps --missing | \$$p/cpanm --notest"
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% install_dir %]/[% domain %]/[% checkout_dir %]' && \$$p/dzil listdeps --missing | \$$p/cpanm --notest"
-[% END %]
-[% FOR path IN deps_from %]
-# A checkout this recipe did not make -- the runner manages its own, and the
-# operator says where it lands.
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% path %]' && \$$p/dzil authordeps --missing | \$$p/cpanm --notest"
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); cd '[% path %]' && \$$p/dzil listdeps --missing | \$$p/cpanm --notest"
-[% END %]
-[% FOR module IN extra_modules %]
-[% script_dir %]/queue_postrun_task "p=\$$(dirname \$$(readlink -f /root/bin/cpanm)); \$$p/cpanm --notest '[% module %]'"
-[% END %]
+[%# What this installs from CPAN it hands the perl recipe, whose target installs
+    it once this fragment has made the checkout: Sys::Virt pinned, and what the
+    checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]
