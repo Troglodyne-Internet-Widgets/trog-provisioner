@@ -627,7 +627,7 @@ sub provision_domain {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
-    return reprovision_guest( $hv, $config, $domain, $reuser, $depends ) if $reuse;
+    return reprovision_guest( $hv, $config, $domain, $reuse, $reuser, $depends ) if $reuse;
 
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This
@@ -642,29 +642,37 @@ sub provision_domain {
     return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $address ) );
 }
 
-# Provisioning onto a guest that is already up, rather than building one.
+# Layering a domain onto a guest that is already up, rather than building one.
 #
-# None of this is the hypervisor's: it is ssh to a guest, cloud-init, netplan and
-# at(1).  The three things only a hypervisor can answer -- where to reach it,
-# what MAC its second interface has, and clearing anything left under this name
-# -- are asked of it, and the rest is done here.
+# The machine is $reuse: where --existing pointed, or where provisioning the
+# dependency ended up.  That is what makes a shared host -- bar.test is added to
+# the guest built for foo.test rather than getting one of its own.  Only two
+# things here are the hypervisor's: what MAC the guest's second interface has,
+# and clearing anything left standing under this domain's own name.
 sub reprovision_guest {
-    my ( $hv, $config, $domain, $reuser, $depends ) = @_;
+    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @_;
 
+    return ( $reuser, $reuse ) if $dryrun;
+
+    # Whose machine this is.  With --depends it is the domain that was built, and
+    # that domain's key is the one which opens it; otherwise this domain is the
+    # guest.  Failing the key there is the agent, and $reuser is root when nobody
+    # named an admin user -- which will not do if the box has been locked down.
+    my $built_for  = $depends // $domain;
     my $domain_dir = $hv->domain_dir;
-    my $old_ssh_ip = $hv->guest_ssh_ip( $config, $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) ) );
-    return ( $reuser, $old_ssh_ip ) if $dryrun;
+    my $key        = "$domain_dir/$built_for/key.rsa";
 
-    # Try the root key if no admin user is passed -- this may not work if you
-    # locked the box down -- and otherwise the agent.
-    my $key = "$domain_dir/$domain/key.rsa";
-    $key = "$domain_dir/$depends/key.rsa" if $depends;
+    # Any VM still standing under this domain's own name, which is the guest it
+    # had to itself before being moved onto this one.  Only with --depends: there
+    # the two are different machines, and without one that name *is* the machine
+    # being connected to below.
+    $hv->clear_guest($domain) if $depends;
 
     print "Attempting to access Machine\n";
-    my $guest = Trog::Guest->new( name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key );
+    my $guest = Trog::Guest->new( name => $domain, host => $reuse, user => $reuser, key_path => $key );
 
     refresh_cloud_init( $guest, $domain_dir, $domain );
-    merge_guest_addresses( $guest, $hv, $config, $domain_dir, $domain );
+    merge_guest_addresses( $guest, $hv, $config, $domain_dir, $domain, $built_for );
 
     print "Syncing setup script\n";
     $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
@@ -676,7 +684,7 @@ sub reprovision_guest {
     print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
     print "Done.\n";
 
-    return ( $reuser, $old_ssh_ip );
+    return ( $reuser, $reuse );
 }
 
 # cloud-init runs once and remembers that it did.  Removing the semaphore for the
@@ -701,14 +709,17 @@ sub refresh_cloud_init {
 # The addresses provision.conf names, added to whatever the guest already has.
 # Only written back when that changes something: netplan apply on an unchanged
 # file is a needless bounce of the guest's network.
+#
+# The interface belongs to $built_for, the domain the machine was built for,
+# while the addresses belong to $domain -- two different names on a shared host.
 sub merge_guest_addresses {
-    my ( $guest, $hv, $config, $domain_dir, $domain ) = @_;
+    my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @_;
 
     my $ips         = _coerce_array( $config->param('ips') );
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
     my $parsed      = YAML::XS::Load($existing_nc);
 
-    my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $domain, 1 ) );
+    my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $built_for, 1 ) );
     my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
 
     my $num_ips = scalar @$addresses;

@@ -444,46 +444,81 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
     like( $@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
 };
 
-# Reusing a guest means provisioning onto the one that is already up.  This used
-# to clear it first -- annihilate the domain, delete both volumes -- and then
-# open an ssh connection to it, which only reads as sensible if $domain names
-# something other than the guest being connected to.  It never does: the host
-# comes from guest_mac($domain, 0), and --depends switches only the key.
-subtest 'reusing a guest leaves alone the guest it is about to use' => sub {
-    my $dir = tempdir( CLEANUP => 1 );
-    my @applied;
+# Reusing a guest means provisioning onto one that is already up, which is how a
+# shared host gets built: bar.test is layered onto the guest depends_on named
+# rather than being given one of its own.  So $domain is not always the machine,
+# and the two things that follow from that are what these check -- which address
+# is connected to, and whether clearing $domain takes the target away with it.
+
+subtest 'a domain layered onto the guest built for another' => sub {
+    my %seen = _layered( domain => 'bar.test', reuse => '192.168.122.50', depends => 'foo.test' );
+
+    # foo.test's guest is the machine; bar.test has none, which is the whole
+    # point of depending on one.  Deriving the address from bar.test's own MAC
+    # asked for a lease that cannot exist -- and on OpenStack, for a server of
+    # that name, which does not either.
+    is( $seen{host}, '192.168.122.50', 'is reached where provisioning that one left it' );
+    like( $seen{key}, qr{/foo[.]test/key[.]rsa\z}, "and opened with that guest's own key" );
+
+    is_deeply( $seen{cleared}, ['bar.test'], "any VM still standing under this domain's own name is taken away" );
+    ok( $seen{finished}, 'and the reprovision runs to the end' );
+    is( $seen{returned}, '192.168.122.50', 'handing back where the guest is' );
+};
+
+subtest 'a domain reprovisioned onto a guest of its own' => sub {
+    my %seen = _layered( domain => 'vm.test', reuse => '192.168.122.50' );
+
+    is( $seen{host}, '192.168.122.50', 'is reached at the address --existing named' );
+    is_deeply( $seen{cleared}, [], 'and nothing is annihilated, that name being the machine itself' );
+    ok( $seen{finished}, 'while the reprovision still runs to the end' );
+};
+
+# What a reprovision did, without doing any of it: which machine it connected
+# to, with whose key, and what it asked the hypervisor to destroy on the way.
+sub _layered {
+    my (%params) = @_;
+    my ( $domain, $reuse, $depends ) = @params{qw{domain reuse depends}};
+
+    my $dir  = tempdir( CLEANUP => 1 );
+    my %seen = ( cleared => [] );
 
     my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     my $guest = Test::MockModule->new('Trog::Guest');
 
-    $hv->redefine( domain_dir   => sub { $dir } );
-    $hv->redefine( guest_mac    => sub { '52:54:00:aa:bb:cc' } );
-    $hv->redefine( lease_ip     => sub { '192.168.122.50' } );
-    $hv->redefine( guest_ssh_ip => sub { '192.168.122.50' } );
-    $hv->redefine( clear_guest  => sub { push( @applied, 'clear_guest' ); 1 } );
+    $hv->redefine( domain_dir  => sub { $dir } );
+    $hv->redefine( guest_mac   => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( clear_guest => sub { push( @{ $seen{cleared} }, $_[1] ); 1 } );
 
-    $guest->redefine( new         => sub { return bless {}, 'Trog::Guest' } );
-    $guest->redefine( put_file    => sub { push( @applied, 'put_file' ); 1 } );
+    # Left fatal rather than mocked to an answer.  A domain being layered onto
+    # another's guest has no lease and no server of its own, so either question
+    # is one with no answer, and the address is already in hand.
+    $hv->redefine( lease_ip     => sub { die "went looking for a lease\n" } );
+    $hv->redefine( guest_ssh_ip => sub { die "asked the hypervisor where to connect\n" } );
+
+    $guest->redefine(
+        new => sub {
+            my ( $class, %params ) = @_;
+            @seen{qw{host key}} = @params{qw{host key_path}};
+            return bless {}, $class;
+        }
+    );
+    $guest->redefine( put_file    => sub { 1 } );
     $guest->redefine( capture_cmd => sub { q{} } );
 
-    # The guest-side work has its own subtests; what this one is about is
-    # whether the hypervisor is asked to destroy anything on the way past.
+    # The guest-side work has subtests of its own; this is about which machine
+    # that work is aimed at.
     $bin->redefine( read_seed             => sub { () } );
     $bin->redefine( authorize_guest_key   => sub { 1 } );
     $bin->redefine( refresh_cloud_init    => sub { 1 } );
     $bin->redefine( merge_guest_addresses => sub { 1 } );
-    $bin->redefine( place_guest_secrets   => sub { push( @applied, 'place_guest_secrets' ); 1 } );
+    $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
 
-    my $config = Config::Simple->new( _conf( domain => 'vm.test', admin_user => 'doge' ) );
+    my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'doge' ) );
+    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, $domain, $reuse, 'doge', $depends ) } );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test', '192.168.122.50', 'doge' ) } );
-
-    ok( !( grep { $_ eq 'clear_guest' } @applied ), 'nothing is annihilated on the way to a guest we mean to keep' )
-      or diag "applied: @applied";
-    ok( ( grep { $_ eq 'place_guest_secrets' } @applied ), 'and the reprovision still runs to the end' );
-    is( $ip, '192.168.122.50', 'handing back where the guest already is' );
-};
+    return %seen;
+}
 
 sub _conf {
     my (%params) = @_;
