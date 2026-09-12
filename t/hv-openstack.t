@@ -17,6 +17,7 @@ use Test::More;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp();
+use Config::Simple();
 use MIME::Base64();
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
@@ -116,6 +117,17 @@ use Trog::HV::OpenStack();
 my $FAKE;
 my $mock = Test::MockModule->new('Trog::HV::OpenStack');
 $mock->redefine( api => sub { return $FAKE } );
+
+# guest_ssh_ip takes the guest from the configuration now, the way bin/provision
+# hands it over -- its second argument is libvirt's lease and means nothing here.
+sub conf_for {
+    my ($name) = @_;
+
+    my $conf = Config::Simple->new( syntax => 'simple' );
+    $conf->param( 'domain', $name );
+
+    return $conf;
+}
 
 sub cloud {
     my (%opts) = @_;
@@ -288,21 +300,21 @@ subtest 'the address we can actually reach' => sub {
         ]
     );
 
-    is $hv->guest_ssh_ip( undef, 'vm.example.com' ), '203.0.113.10',
+    is $hv->guest_ssh_ip( conf_for('vm.example.com') ), '203.0.113.10',
       'the floating IP, not the fixed one -- a tenant address only routes inside the tenant';
 
     # The arrangement the cloud this was written against actually uses: no
     # tenant network at all, so the only address is on the external network and
     # Nova calls it 'fixed'.  Rejecting that rejects a guest that answers fine.
-    is $hv->guest_ssh_ip( undef, 'direct.example.com' ), '10.2.65.133',
+    is $hv->guest_ssh_ip( conf_for('direct.example.com') ), '10.2.65.133',
       'a fixed address on an external network is reachable, and is used';
 
-    my $err = exception { $hv->guest_ssh_ip( undef, 'nofloat.example.com' ) };
+    my $err = exception { $hv->guest_ssh_ip( conf_for('nofloat.example.com') ) };
     like $err, qr/no address we can reach/,  'a guest with only a tenant address is an error';
     like $err, qr/internal \(10\.0\.0\.6\)/, 'and it says what the guest is on';
     like $err, qr/floating_network/,         'and what to configure';
 
-    like exception { $hv->guest_ssh_ip( undef, 'gone.example.com' ) }, qr/no guest called/,
+    like exception { $hv->guest_ssh_ip( conf_for('gone.example.com') ) }, qr/no guest called/,
       'as is one that is not there';
 };
 

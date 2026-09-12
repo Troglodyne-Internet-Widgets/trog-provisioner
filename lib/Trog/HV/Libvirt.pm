@@ -16,6 +16,7 @@ use URI();
 use URI::Split();
 
 use Trog::Local();
+use File::Slurper();
 use Provisioner::Cookbook();
 
 =head1 NAME
@@ -1764,6 +1765,114 @@ FIX
 sub _version_string {
     my ($packed) = @_;
     return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
+}
+
+=head2 clear_guest($domain)
+
+Whatever is already answering to this name, gone: the domain, both of its
+volumes, and the addresses its MAC still holds.
+
+A domain about to be defined cannot share a name with one that exists, and its
+disk is a fresh overlay on the base image -- keeping the old one would hand the
+new guest the old one's filesystem.
+
+The leases matter for a subtler reason.  A rebuilt guest keeps its MAC, which is
+derived from its name, but it is a new DHCP client, so dnsmasq gives it a new
+address and keeps the old lease on file until it expires.  Left there, every
+rebuild holds one more address out of the NAT range, and the wait in
+C<provision_guest> finds the old lease already in the table and stops before the
+new guest has asked for anything.
+
+=cut
+
+sub clear_guest {
+    my ( $self, $domain ) = @_;
+
+    if ( $self->domain_exists($domain) ) {
+        print "Terminating the existing VM $domain\n";
+        $self->annihilate_domain($domain);
+    }
+
+    $self->delete_volume("$domain-qcow2");
+    $self->delete_volume("$domain-cloudinit.iso");
+
+    $self->release_dhcp_lease($_) for $self->lease_ips( 'default', mac => $self->guest_mac( $domain, 0 ) );
+
+    return 1;
+}
+
+=head2 $address = $hv->provision_guest($config, $seed, %opts)
+
+The guest itself: its disks and cloud-init seed, the XML that names them, and
+the domain defined and started from it.  Hands back the address it asked for.
+
+C<settings> is the domain's configuration as a plain hash -- C<bin/provision>
+reads that out of F<provision.conf>, so nothing here has to know what
+L<Config::Simple> is.  L<Provisioner::Recipe::vm> takes one for the same reason:
+its other caller, C<bin/new_config>, has a domain's recipe configuration and no
+such object.
+
+=cut
+
+sub provision_guest {
+    my ( $self, $config, $seed, %opts ) = @_;
+
+    my $domain   = $config->param('domain');
+    my %settings = %{ $opts{settings} // {} };
+    my $dir      = $self->domain_dir . "/$domain";
+
+    my $vm = Provisioner::Cookbook->load('vm')->new(
+        template_dirs => Provisioner::Cookbook->template_dirs( $config->param('distro') ),
+        output_dir    => $dir,
+        hv            => $self,
+    );
+
+    # The disks, the base image and the seed ISO, before the XML that names them
+    # by path: there is no rendering it without making them first.
+    my %storage = $vm->create_storage( %settings, domain => $domain, seed => $seed );
+    $vm->generate_files( $dir, %settings, %storage, domain => $domain );
+
+    my $file = "$dir/domain.xml";
+    print "Wrote $file\n";
+
+    print "Defining and starting $domain...\n";
+    $self->define_domain( File::Slurper::read_text($file) );
+
+    # clear_guest released the leases this MAC held, so the one that appears is
+    # this guest asking for it.  Unless the release could not be done -- no lease
+    # helper on the hypervisor says so as it happens -- in which case this can
+    # find the old one; either way it finds an address and does not establish
+    # that anything is running at it.  wait_for_ssh does that.
+    print "Looking up the address for $domain...";
+    my $nat_mac = $self->guest_mac( $domain, 0 );
+    my $address = q{};
+    for ( 1 .. 30 ) {
+        $address = $self->lease_ip( 'default', mac => $nat_mac );
+        last if $address;
+        print q{.};
+        sleep 1;
+    }
+    die "\n$domain never asked for a lease!\n" unless $address;
+
+    print "\nDefined and started; $domain should come up at $address\n";
+
+    return $address;
+}
+
+=head2 $hv->would_provision($config, %opts)
+
+What the two above would do, said rather than done.
+
+=cut
+
+sub would_provision {
+    my ( $self, $config, %opts ) = @_;
+
+    my $domain = $config->param('domain');
+    print "Would terminate the existing $domain and delete its volumes\n" if $self->domain_exists($domain);
+    print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $self->describe . ", then define and start $domain\n";
+
+    return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) ) // 'bogus';
 }
 
 1;

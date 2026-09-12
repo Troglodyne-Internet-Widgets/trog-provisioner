@@ -384,9 +384,10 @@ sub domain_is_running {
     return ( $server->{status} // '' ) eq 'ACTIVE' ? 1 : 0;
 }
 
-=head2 guest_ssh_ip($config)
+=head2 guest_ssh_ip($config, $lease)
 
-The address to reach a guest at: its floating IP.
+The address to reach a guest at: its floating IP.  C<$lease> is libvirt's and is
+ignored.
 
 A fixed address on a tenant network only routes from inside that network, so
 unlike libvirt's NAT lease -- which at least works from the hypervisor -- it is
@@ -396,9 +397,12 @@ the alternative is handing back an address that will silently never connect.
 =cut
 
 sub guest_ssh_ip {
-    my ( $self, $config, $name ) = @_;
+    my ( $self, $config, $_lease ) = @_;
 
-    $name //= ref $config ? $config->param('domain') : $config;
+    # The second argument is libvirt's NAT lease, which means nothing here: a
+    # cloud allocates the address itself and the guest is found by name.  Taken
+    # and ignored so bin/provision can ask either backend the same way.
+    my $name = ref $config ? $config->param('domain') : $config;
 
     my $server = $self->server_detail($name)
       or die "There is no guest called '$name' on " . $self->describe . "\n";
@@ -1031,6 +1035,74 @@ FIX
         ),
         q{}
     );
+}
+
+=head2 clear_guest($domain)
+
+Nothing, and that is the point.
+
+The libvirt path deletes the domain and its disks before making them again,
+because that is what "rebuild" amounts to there.  Nova rebuilds the server it
+already has -- a fresh root disk from the image, with its ports, its floating IP
+and any attached volume surviving -- so clearing anything first would throw away
+the very things worth keeping, and make the scheduler find room for a server we
+already own.
+
+=cut
+
+sub clear_guest { return 1 }
+
+=head2 $address = $hv->provision_guest($config, $seed, %opts)
+
+Ask the cloud for the guest and hand back the address it turned up at.
+
+C<user_data> is the seed C<bin/provision> has already written; there is no XML
+to render and no lease to wait for, because Nova takes the seed directly and the
+address comes back with the server.  C<reuse> says to provision onto the guest
+that is already there rather than rebuilding it.
+
+=cut
+
+sub provision_guest {
+    my ( $self, $config, $seed, %opts ) = @_;
+
+    my $domain   = $config->param('domain');
+    my $existing = $self->domain_exists($domain);
+
+    if ( $existing && $opts{reuse} ) {
+        print "$domain is already on " . $self->describe . "; provisioning onto it\n";
+    }
+    elsif ($existing) {
+        print 'Asking ' . $self->describe . " to rebuild $domain...\n";
+        $self->rebuild_guest( $domain, user_data => $seed->{'user-data'} );
+    }
+    else {
+        print 'Asking ' . $self->describe . " for $domain...\n";
+        $self->create_guest( name => $domain, user_data => $seed->{'user-data'} );
+    }
+
+    my $ip = $self->guest_ssh_ip($config);
+    print "$domain is at $ip\n";
+
+    return $ip;
+}
+
+=head2 $hv->would_provision($config, %opts)
+
+What the above would do, said rather than done.
+
+=cut
+
+sub would_provision {
+    my ( $self, $config, %opts ) = @_;
+
+    my $domain   = $config->param('domain');
+    my $existing = $self->domain_exists($domain);
+    my $doing    = !$existing ? 'build' : $opts{reuse} ? 'reprovision' : 'rebuild';
+
+    print "Would $doing $domain on " . $self->describe . "\n";
+
+    return $existing ? $self->guest_ssh_ip($config) : '(not built)';
 }
 
 1;

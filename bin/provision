@@ -374,12 +374,15 @@ sub main {
       unless $domain;
 
     # Everything the hypervisor knows about itself comes off provision.conf, so
-    # we have to find that the hard way first.
+    # we have to find that the hard way first -- and asking Trog::HV for one here
+    # would pin the singleton before generate_config has chosen it.  The class
+    # answers without being built, so the default is spelled in one place.
+    #
     # Kept, because the default below makes "given" and "defaulted"
     # indistinguishable afterwards, and only one of them should beat what the
     # hypervisor says.
     my $domain_dir_from_cli = $domain_dir;
-    $domain_dir //= '/opt/domains';
+    $domain_dir //= Trog::HV->default_domain_dir;
     $domain =~ s/\///g;
 
     # Build the domain's configuration first.  It is what writes provision.conf
@@ -549,8 +552,8 @@ guest still has.
 The generator says so and carries on, which is right for what it is -- it
 writes configuration, and it runs from cron to take backups where quitting over
 one unreadable directory would abandon every domain after it.  This program is
-the one that calls clean_domain_resources, so this is where the warning has to
-turn into a refusal.
+the one that asks a hypervisor to C<clear_guest>, so this is where the warning
+has to turn into a refusal.
 
 Only the gaps where the guest still holds files that did not come off it.  A
 path with nothing under it has nothing to salvage, which is what every first
@@ -612,8 +615,7 @@ sub choose_hypervisor {
 sub provision_domain {
     my ( $config, $domain, $reuse, $reuser, $depends ) = @_;
 
-    my $hv         = Trog::HV->new();
-    my $domain_dir = $hv->domain_dir;
+    my $hv = Trog::HV->new();
 
     # Set this to simplify calling conventions
     $config->param( 'domain', $domain );
@@ -625,185 +627,113 @@ sub provision_domain {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
-    # Everything below this is libvirt: a MAC derived from the domain name, a DHCP
-    # lease to look up, and a domain to define from XML.  A cloud has none of
-    # them, and creates the guest from the seed we have just written.
-    return provision_cloud_guest( $config, $domain, \%seed, $reuse ) if $hv->builds_by_api;
+    return reprovision_guest( $hv, $config, $domain, $reuser, $depends ) if $reuse;
 
-    # If the domain is already up, let's find the IP.
-    # We can't guarantee we have a static IP, so use the internal.
-    my $qdn = $domain;
-    $qdn = $depends if $depends;
-    $qdn =~ s/\.\S+$//;
+    # Which of these a hypervisor does is its own business: libvirt annihilates a
+    # domain and its disks, a cloud rebuilds the server it already has.  This
+    # says what happens, in order, and asks the backend to do each part.
+    return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $hv->would_provision( $config, reuse => $reuse ) ) )
+      if $dryrun;
 
-    # By MAC, which is exact: the hostname match this used to do could be
-    # fooled by a guest that is a subdomain of another.
-    my $nat_mac = $hv->guest_mac( $domain, 0 );
-    my $old_ip  = $hv->lease_ip( 'default', mac => $nat_mac ) // 'bogus';
+    $hv->clear_guest($domain);
 
-    if ($reuse) {
-        my $old_ssh_ip = $hv->guest_ssh_ip( $config, $old_ip );
-        return ( $reuser, $old_ssh_ip ) if $dryrun;
+    my $address = $hv->provision_guest( $config, \%seed, settings => { _settings($config) }, reuse => $reuse );
 
-        # Re-Use the existing VM, and just ship over what we got and run the makefile again.
-        # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
-        # Otherwise we'll use the agent.
-        my $key = "$domain_dir/$domain/key.rsa";
-        $key = "$domain_dir/$depends/key.rsa" if $depends;
-
-        # Make sure any existing VMs don't have this domain
-        clean_domain_resources($domain);
-
-        print "Attempting to access Machine\n";
-        my $guest = Trog::Guest->new( name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key );
-
-        my $output = '';
-        print "Installing Updated cloud-init and forcing re-run...\n";
-        my $init   = "$domain_dir/$domain/user-data";
-        my $ci_dir = "/var/lib/cloud/instances/$domain";
-        $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
-
-        # Remove the semaphore that says this was run, then run the needed targets
-        $guest->run_sudo( qw{rm}, "$ci_dir/sem/cc_package_update_upgrade_install" );
-        print $guest->capture_cmd('sudo cloud-init single --name cc_package_update_upgrade_install -f cloud-config.txt') . "\n";
-        $guest->run_sudo( qw{rm}, "$ci_dir/sem/cc_users_groups" );
-        print $guest->capture_cmd('sudo cloud-init single --name cc_users_groups -f cloud-config.txt') . "\n";
-
-        my $ips         = _coerce_array( $config->param('ips') );
-        my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
-        my $parsed      = YAML::XS::Load($existing_nc);
-
-        my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $domain, 1 ) );
-        my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
-
-        my $num_ips = scalar @$addresses;
-        @$addresses = uniq( @$addresses, map { "$_/24" } @$ips );
-        if ( $num_ips != scalar @$addresses ) {
-            my $encoded    = YAML::XS::Dump($parsed);
-            my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
-            File::Slurper::Temp::write_text( $new_config, $encoded );
-            print "Setting up IP for $domain...\n";
-
-            # Straight to where it belongs, as root, rather than landing in the
-            # home directory and being moved and chmodded afterwards.
-            $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
-              or die "Could not install the netplan config on $domain";
-            $output = $guest->capture_cmd('sudo netplan apply');
-            chomp $output;
-            print "$output\n" if $output;
-        }
-
-        print "Syncing setup script\n";
-        $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
-          or die "Could not ship the setup script to $domain";
-        place_guest_secrets( $guest, $domain );
-        print "Scheduling job to run setup script\n";
-        print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
-        print "Done.\n";
-        return ( $reuser, $old_ssh_ip );
-    }
-
-    # A dry run stops here, which is further up than it used to.  It stopped
-    # after clean_domain_resources and after mongle_domain_xml, so it annihilated
-    # the domain, deleted both its volumes, made a fresh disk and a seed ISO, and
-    # then reported that it had applied nothing.
-    #
-    # Nothing below this line only writes into the domain directory.
-    # mongle_domain_xml makes the storage pool, the base image, this guest's disk
-    # and its cloud-init seed on the hypervisor -- the XML it returns is built out
-    # of the paths to those, so there is no rendering it without making them --
-    # and everything after that defines and starts the domain.
-    if ($dryrun) {
-        print "Would terminate the existing $domain and delete its volumes\n" if $hv->domain_exists($domain);
-        print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $hv->describe . ", then define and start $domain\n";
-        return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $old_ip ) );
-    }
-
-    # Anything already answering to this name has to go before we define one.
-    clean_domain_resources($domain);
-
-    # And the addresses it held.  A rebuilt guest keeps its MAC, which is
-    # derived from its name, but it is a new DHCP client, so dnsmasq gives it a
-    # new address and keeps the old lease on file until that expires.  Left
-    # there, every rebuild holds one more address out of the NAT range, and the
-    # wait below finds the old lease already in the table and stops waiting for
-    # this guest to ask.
-    $hv->release_dhcp_lease($_) for $hv->lease_ips( 'default', mac => $nat_mac );
-
-    my $file = build_domain( $config, \%seed );
-    print "Wrote $file\n";
-
-    print "Defining and starting $domain...\n";
-    $hv->define_domain( File::Slurper::read_text($file) );
-
-    # The leases this MAC held were released above, so the one that appears is
-    # this guest asking for it.  Unless the release could not be done -- no
-    # lease helper on the hypervisor says so as it happens -- in which case this
-    # can find the old one; either way it finds an address and does not
-    # establish that anything is running at it.  wait_for_ssh does that.
-    print "Looking up the address for $domain...";
-    my $new_ip = '';
-    for ( 1 .. 30 ) {
-        $new_ip = $hv->lease_ip( 'default', mac => $nat_mac );
-        last if $new_ip;
-        print ".";
-        sleep 1;
-    }
-    die "\n$domain never asked for a lease!\n" unless $new_ip;
-
-    print "\nDefined and started; $domain should come up at $new_ip\n";
-
-    return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $new_ip ) );
+    return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $address ) );
 }
 
-=head2 provision_cloud_guest($config, $domain, $seed, $reuse)
+# Provisioning onto a guest that is already up, rather than building one.
+#
+# None of this is the hypervisor's: it is ssh to a guest, cloud-init, netplan and
+# at(1).  The three things only a hypervisor can answer -- where to reach it,
+# what MAC its second interface has, and clearing anything left under this name
+# -- are asked of it, and the rest is done here.
+sub reprovision_guest {
+    my ( $hv, $config, $domain, $reuser, $depends ) = @_;
 
-Ask a cloud for the guest, and hand back where it turned up.
+    my $domain_dir = $hv->domain_dir;
+    my $old_ssh_ip = $hv->guest_ssh_ip( $config, $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) ) );
+    return ( $reuser, $old_ssh_ip ) if $dryrun;
 
-There is no XML to render and no lease to wait for: the seed goes to the service
-as C<user_data>, and the address comes back with the server.  Everything after
-this -- waiting for ssh, the secrets, the makefile -- is C<main>'s, and is the
-same for either kind of guest.
+    # Try the root key if no admin user is passed -- this may not work if you
+    # locked the box down -- and otherwise the agent.
+    my $key = "$domain_dir/$domain/key.rsa";
+    $key = "$domain_dir/$depends/key.rsa" if $depends;
 
-=cut
+    # Make sure any existing VMs don't have this domain.  Which is only sensible
+    # with --depends, where $domain is a different name from the guest being
+    # connected to below; without one this clears the guest it is about to use.
+    $hv->clear_guest($domain);
 
-sub provision_cloud_guest {
-    my ( $config, $domain, $seed, $reuse ) = @_;
+    print "Attempting to access Machine\n";
+    my $guest = Trog::Guest->new( name => $domain, host => $old_ssh_ip, user => $reuser, key_path => $key );
 
-    my $hv = Trog::HV->new();
+    refresh_cloud_init( $guest, $domain_dir, $domain );
+    merge_guest_addresses( $guest, $hv, $config, $domain_dir, $domain );
 
-    my $existing = $hv->domain_exists($domain);
+    print "Syncing setup script\n";
+    $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
+      or die "Could not ship the setup script to $domain";
 
-    my $user = $config->param('admin_user') // 'root';
+    place_guest_secrets( $guest, $domain );
 
-    if ($dryrun) {
-        my $doing = !$existing ? 'build' : $reuse ? 'reprovision' : 'rebuild';
-        print "Would $doing $domain on " . $hv->describe . "\n";
-        return ( $user, $existing ? $hv->guest_ssh_ip( $config, $domain ) : '(not built)' );
+    print "Scheduling job to run setup script\n";
+    print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
+    print "Done.\n";
+
+    return ( $reuser, $old_ssh_ip );
+}
+
+# cloud-init runs once and remembers that it did.  Removing the semaphore for the
+# two modules whose output changes between provisions is what makes it run them
+# again against the config we have just shipped.
+sub refresh_cloud_init {
+    my ( $guest, $domain_dir, $domain ) = @_;
+
+    print "Installing Updated cloud-init and forcing re-run...\n";
+    my $init   = "$domain_dir/$domain/user-data";
+    my $ci_dir = "/var/lib/cloud/instances/$domain";
+    $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
+
+    foreach my $module (qw{cc_package_update_upgrade_install cc_users_groups}) {
+        $guest->run_sudo( qw{rm}, "$ci_dir/sem/$module" );
+        print $guest->capture_cmd("sudo cloud-init single --name $module -f cloud-config.txt") . "\n";
     }
 
-    if ( $existing && $reuse ) {
-        print "$domain is already on " . $hv->describe . "; provisioning onto it\n";
-    }
-    elsif ($existing) {
+    return 1;
+}
 
-        # Rebuilt in place rather than deleted and made again, which is what the
-        # libvirt path amounts to: a fresh root disk from the image, and the same
-        # seed.  Nova keeps the server, so its ports, its floating IP and any
-        # volume attached to it survive -- and nothing has to be scheduled,
-        # allocated or waited on but the disk.
-        print 'Asking ' . $hv->describe . " to rebuild $domain...\n";
-        $hv->rebuild_guest( $domain, user_data => $seed->{'user-data'} );
-    }
-    else {
-        print 'Asking ' . $hv->describe . " for $domain...\n";
-        $hv->create_guest( name => $domain, user_data => $seed->{'user-data'} );
-    }
+# The addresses provision.conf names, added to whatever the guest already has.
+# Only written back when that changes something: netplan apply on an unchanged
+# file is a needless bounce of the guest's network.
+sub merge_guest_addresses {
+    my ( $guest, $hv, $config, $domain_dir, $domain ) = @_;
 
-    my $ip = $hv->guest_ssh_ip( $config, $domain );
-    print "$domain is at $ip\n";
+    my $ips         = _coerce_array( $config->param('ips') );
+    my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
+    my $parsed      = YAML::XS::Load($existing_nc);
 
-    return ( $user, $ip );
+    my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $domain, 1 ) );
+    my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
+
+    my $num_ips = scalar @$addresses;
+    @$addresses = uniq( @$addresses, map { "$_/24" } @$ips );
+    return 1 if $num_ips == scalar @$addresses;
+
+    my $new_config = "$domain_dir/$domain/network-config-merged.yaml";
+    File::Slurper::Temp::write_text( $new_config, YAML::XS::Dump($parsed) );
+    print "Setting up IP for $domain...\n";
+
+    # Straight to where it belongs, as root, rather than landing in the home
+    # directory and being moved and chmodded afterwards.
+    $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
+      or die "Could not install the netplan config on $domain";
+
+    my $output = $guest->capture_cmd('sudo netplan apply');
+    chomp $output;
+    print "$output\n" if $output;
+
+    return 1;
 }
 
 # Which entry in the guest's netplan is the outbound interface?
@@ -830,26 +760,6 @@ sub primary_adapter {
     return $named if ref $ethernets->{$named} eq 'HASH';
 
     die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is no $named either.  It has: " . join( ', ', sort keys %$ethernets ) . "\n";
-}
-
-# Whatever is already answering to this name, gone.
-#
-# A domain we are about to define cannot share a name with one that already
-# exists, and its disk is a fresh overlay on the base image -- keeping the old
-# one would hand the new guest the old one's filesystem.  This used to have to
-# fight terraform for the privilege; now it asks libvirt.
-sub clean_domain_resources {
-    my ($domain) = @_;
-    my $hv = Trog::HV->new();
-
-    if ( $hv->domain_exists($domain) ) {
-        print "Terminating the existing VM $domain\n";
-        $hv->annihilate_domain($domain);
-    }
-
-    $hv->delete_volume("$domain-qcow2");
-    $hv->delete_volume("$domain-cloudinit.iso");
-    return 1;
 }
 
 =head2 %seed = read_seed($config)
@@ -946,43 +856,6 @@ sub authorize_guest_key {
     $this_machine->append_line( $this_machine->authorized_keys, $pubkey )
       or die "Could not authorize the key for $domain on " . $this_machine->describe . "\n";
     return 1;
-}
-
-=head2 build_domain($config, $seed)
-
-Make the guest's storage and write the libvirt XML that points at it, handing
-back the path.
-
-Both halves belong to L<Provisioner::Recipe::vm>: the XML is one of its
-C<template_files>, rendered the way every recipe's generated files are.  What is
-here is only the part that cannot move -- reading F<provision.conf> and handing
-it over as a flat hash.
-
-Which is why the recipe takes one rather than a C<Config::Simple>: the other
-caller, C<bin/new_config>, has a domain's recipe configuration and no such
-object.
-
-=cut
-
-sub build_domain {
-    my ( $config, $seed ) = @_;
-
-    my $hv     = Trog::HV->new();
-    my $domain = $config->param('domain');
-    my $dir    = $hv->domain_dir . "/$domain";
-
-    my $vm = Provisioner::Cookbook->load('vm')->new(
-        template_dirs => Provisioner::Cookbook->template_dirs( $config->param('distro') ),
-        output_dir    => $dir,
-        hv            => $hv,
-    );
-
-    # The disks, the base image and the seed ISO, before the XML that names
-    # them by path.
-    my %storage = $vm->create_storage( _settings($config), domain => $domain, seed => $seed );
-
-    $vm->generate_files( $dir, _settings($config), %storage, domain => $domain );
-    return "$dir/domain.xml";
 }
 
 exit main(@ARGV) unless caller;

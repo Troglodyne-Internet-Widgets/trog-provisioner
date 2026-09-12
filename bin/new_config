@@ -380,14 +380,13 @@ sub handle_domain {
     die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
       unless exists $rconf->{$domain};
 
-    # Only now, with the domain known to be one we have a recipe for, do the
-    # things that cannot be taken back: an address out of the pool, and a prompt
-    # for the password to the secret store.
+    # Only now, with the domain known to be one we have a recipe for, is the
+    # password to the secret store asked for: a prompt is not something to put in
+    # front of somebody on behalf of a domain that has no recipe.  The address
+    # out of the pool is the other thing that cannot be taken back, and it waits
+    # further down still -- it needs the hypervisor, which decides whether there
+    # is an address of ours to hand out at all.
     #
-    # Seeded here for the same reason -- the first call builds the database out
-    # of what every hypervisor is running, which is not work to do on behalf of
-    # a domain that has no recipe.
-
     # A recipe carries a note saying where a password is, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;

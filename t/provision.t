@@ -125,8 +125,8 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
 # --- The config generator runs first -----------------------------------------
 # The warning the generator prints is the most it can do: it writes
 # configuration and destroys nothing, and it runs from cron to take backups.
-# This program is the one that calls clean_domain_resources, so refusing is its
-# job.
+# This program is the one that asks a hypervisor to clear_guest, so refusing is
+# its job.
 subtest 'a salvage that came away empty stops the run before anything is destroyed' => sub {
 
     # The real generator, so this is pinned to the interface it actually
@@ -163,9 +163,10 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
     like( join( q{}, @said ), qr{redis read nothing out of /var/lib/redis}, 'still saying what is being lost' );
 };
 
-# It used to stop after clean_domain_resources and after mongle_domain_xml, so a
-# dry run annihilated the domain, deleted both its volumes, made a fresh disk and
-# a seed, and then reported that it had applied nothing.
+# It used to stop after clearing the guest and after rendering the XML -- what
+# clear_guest and provision_guest do now -- so a dry run annihilated the domain,
+# deleted both its volumes, made a fresh disk and a seed, and then reported that
+# it had applied nothing.
 subtest 'a dry run applies nothing' => sub {
 
     # The SUT is a modulino required at runtime, so its `our` is not in scope

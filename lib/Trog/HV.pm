@@ -78,6 +78,16 @@ that a directory belongs to something still running.
 
 =item * C<guest_ssh_ip>, the address a built guest is reached at.
 
+=item * C<clear_guest>, whatever has to go before a guest of that name can be
+made.  For libvirt that is the domain, its disks and the addresses it held; a
+cloud rebuilds the server it already has, so there is nothing to clear.
+
+=item * C<provision_guest>, the guest itself, from the seed C<bin/provision>
+has written.  Returns the address it came up at, which C<guest_ssh_ip> is then
+asked how to reach.
+
+=item * C<would_provision>, what the two above would do, for a dry run.
+
 =item * C<prepare_host>, C<release_seed> and C<guest_volumes>: what has to be
 done to a hypervisor before it can build, to a guest once cloud-init has read
 its seed, and to a guest's disks once it is gone.  A backend with nothing to do
@@ -329,7 +339,20 @@ guest, and it means the same thing however that guest gets built.
 
 =cut
 
-sub domain_dir { return $_[0]->{domain_dir} // '/opt/domains' }
+sub domain_dir { return $_[0]->{domain_dir} // $_[0]->default_domain_dir }
+
+=head2 default_domain_dir
+
+Where a domain's directory goes when nothing says otherwise.
+
+A class method, so C<bin/provision> can ask before it has a hypervisor to ask --
+it needs the path to find F<provision.conf>, and F<provision.conf> is where the
+hypervisor comes from.  Spelling the default there as well is how the two came
+to be able to disagree.
+
+=cut
+
+sub default_domain_dir { return '/opt/domains' }
 
 =head1 WHICH WAY A GUEST GETS BUILT
 
@@ -404,6 +427,9 @@ sub revert_snapshot       { return $_[0]->_abstract('revert_snapshot') }
 sub prepare_host          { return $_[0]->_abstract('prepare_host') }
 sub release_seed          { return $_[0]->_abstract('release_seed') }
 sub guest_volumes         { return $_[0]->_abstract('guest_volumes') }
+sub clear_guest           { return $_[0]->_abstract('clear_guest') }
+sub provision_guest       { return $_[0]->_abstract('provision_guest') }
+sub would_provision       { return $_[0]->_abstract('would_provision') }
 
 =head1 PLACEMENT
 
