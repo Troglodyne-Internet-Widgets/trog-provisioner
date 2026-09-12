@@ -20,7 +20,6 @@ use File::Slurper();
 use FindBin::libs;
 
 use Provisioner::Cookbook();
-use Provisioner::Recipe::openvpnclient();
 
 my %BASE = (
     server        => 'vpn.test.test',
