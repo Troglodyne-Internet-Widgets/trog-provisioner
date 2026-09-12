@@ -96,11 +96,6 @@ exactly as much as the loopback interface it names.
 # provision rather than an older step-ca.
 our $STEP_CA_VERSION = '0.30.2';
 
-# Where step-ca keeps everything, and what the templates interpolate.  Fixed
-# rather than configurable: it is the service's own directory, nothing else
-# writes there, and a second guest would put it in the same place anyway.
-our $STEPPATH = '/etc/step-ca';
-
 our $DEFAULT_PORT = 9000;
 
 ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
@@ -118,6 +113,12 @@ sub args {
     return (
         type       => 'object',
         properties => {
+            steppath => {
+                type        => 'string',
+                pattern     => q{\A/[^\0]*[^/\0]\z},
+                default     => '/etc/step-ca',
+                description => "Where step-ca keeps its certificates, its key and its database.  The fragment, the unit and ca.json are all written from this one value, so they cannot disagree about where the CA lives.",
+            },
             port => {
                 type        => 'integer',
                 minimum     => 1024,
@@ -151,21 +152,6 @@ sub args {
             },
         },
     );
-}
-
-=head2 %opts = $recipe->enrich(%opts)
-
-C<steppath>, which the templates lay the certificates out under.  Derived rather
-than configured, so the fragment, the unit and C<ca.json> cannot disagree about
-where the CA lives.
-
-=cut
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    $opts{steppath} = $STEPPATH;
-    return %opts;
 }
 
 =head2 %required = $recipe->required_recipes(%opts)
