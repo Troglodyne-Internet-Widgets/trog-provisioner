@@ -15,6 +15,9 @@ use Digest::SHA();
 use URI();
 use URI::Split();
 
+use Trog::Local();
+use Provisioner::Cookbook();
+
 =head1 NAME
 
 Trog::HV::Libvirt - the libvirt backend: domains, storage pools and the facts of
@@ -1403,5 +1406,364 @@ sub guest_ssh_ip {
 L<Sys::Virt>
 
 =cut
+
+=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+
+What C<bin/preflight> asks of this backend, in order.
+
+=cut
+
+sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_fetch_sources check_libvirt check_sys_virt_in_step check_config} }
+sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota} }
+
+sub check_reachable {
+    my ($self) = @_;
+
+    return $self->_verdict( 1, 'The hypervisor is this machine', q{} ) if $self->is_local;
+
+    my $whoami = eval { $self->capture_cmd('whoami') };
+    chomp $whoami if defined $whoami;
+
+    return $self->_verdict( 1, "Reached " . $self->ssh_target . " as $whoami", q{} )
+      if defined $whoami && length $whoami;
+
+    return $self->_verdict( 0, 'Cannot reach ' . $self->describe, <<"FIX" );
+ssh -v @{[ $self->ssh_target ]} and see what it says.  This wants an agent or a
+key already trusted there; nothing here can answer a password prompt.
+FIX
+}
+
+# A guest fetches its payload from this machine, over ssh, so it has to have an
+# address of ours to fetch from.  Which of ours depends on how this machine is
+# attached to the hypervisor's networks, and on a workstation that is not on any
+# of them there is no answer -- which is the whole run failing at the guest's
+# first target rather than here, so it is worth a question up front.
+#
+# This asks the routing table, which cannot see a firewall in between or a route
+# that only works one way.  It says there is an address to try, not that the
+# guest will get through on it.
+sub check_transfer_ip {
+    my ($self) = @_;
+
+    my $virbr = eval { $self->virbr_ip };
+    return $self->_verdict( 0, 'Could not ask the hypervisor for its NAT bridge', <<"FIX" ) unless $virbr;
+$@
+Guests are built on that network and fetch their payload across it, so this has
+to answer before anything can be worked out about reaching them.
+FIX
+
+    my $ours = eval { Trog::Local->new()->transfer_ip($virbr) };
+    return $self->_verdict( 1, "Guests fetch their payload from $ours", q{} ) if $ours;
+
+    return $self->_verdict( 0, "No address of ours is reachable from a guest on $virbr", <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  Nothing routes to the
+hypervisor's guest network from here.
+
+Put this machine on that network, or name the address yourself in the [global]
+section of ipmap.cfg:
+
+    transfer_ip = 192.0.2.10
+FIX
+}
+
+# The lease helper is the whole of what a provision still needs root on a
+# hypervisor for, bar a one-off install of virtiofs-better and bin/nuke_pool.
+# So "no sudo" and "exactly enough sudo" are different answers, and `sudo -n
+# true` cannot tell them apart -- it fails for the second as loudly as for the
+# first, and the fix it then prints is a standing grant of root that was not
+# needed.
+my $LEASE_HELPER = '/usr/lib/libvirt/libvirt_leaseshelper';
+
+sub check_passwordless_sudo {
+    my ($self) = @_;
+
+    if ( $self->run_cmd(qw{sudo -n true}) == 0 ) {
+        my $allowed = eval { $self->capture_cmd('sudo -n -l 2>/dev/null') } // q{};
+        my $whole   = $allowed =~ m/NOPASSWD:\s*ALL/;
+
+        return $self->_verdict( 1, 'Passwordless sudo, for everything', q{} ) if $whole;
+        return $self->_verdict( 1, 'Passwordless sudo',                 q{} );
+    }
+
+    # Narrowed rather than absent: enough for a provision, not enough for
+    # bin/nuke_pool, which is the correct shape for a grant handed to something
+    # that builds guests unattended.
+    return $self->_verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
+bin/nuke_pool will not work for this account, which is deliberate at this
+level.  Widen the grant if you need it.
+FIX
+      if $self->run_cmd( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
+
+    my $user   = $self->ssh_user // 'you';
+    my $target = $self->is_local ? 'this machine' : $self->ssh_host;
+
+    return $self->_verdict( 0, "No passwordless sudo for $user on $target", <<"FIX" );
+Provisioning writes to the storage pool and defines domains, all through
+sudo.  A password prompt in the middle of that has nowhere to be answered
+from, and the run hangs rather than failing.
+
+On $target:
+
+    echo '$user ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-$user
+    sudo chmod 0440 /etc/sudoers.d/90-$user
+
+Then check it took:
+
+    ssh @{[ $self->ssh_target // $user ]} sudo -n true
+
+This is a real grant of root on a hypervisor.  If that is not something you
+want standing, make it, use it, and take it away again afterwards.
+
+There is a narrower one that is enough to build guests with.  Everything else
+a provision does is the libvirt API -- which wants group membership, not root
+-- or a write into the storage pool:
+
+    echo '$user ALL=(root) NOPASSWD: $LEASE_HELPER' | sudo tee /etc/sudoers.d/90-$user
+    sudo usermod -aG libvirt $user
+
+That leaves bin/nuke_pool needing root it does not have, and needs
+/usr/libexec/virtiofs-better already in place -- bin/provision installs it on
+first use, which is the one step that wants the wider grant.
+FIX
+}
+
+sub check_iso_builder {
+    my ($self) = @_;
+
+    my $maker = eval { $self->iso_maker };
+    return $self->_verdict( 1, "Cloud-init seed builder: $maker", q{} ) if $maker;
+
+    return $self->_verdict( 0, 'No ISO builder on the hypervisor', <<'FIX' );
+cloud-init reads its configuration off a small ISO, and something has to make
+it:
+
+    sudo apt install xorriso
+FIX
+}
+
+sub check_libvirt {
+    my ($self) = @_;
+
+    my $version = eval { $self->vmm->get_library_version() };
+    return $self->_verdict( 1, 'libvirt answers, running ' . _version_string($version), q{} ) if $version;
+
+    return $self->_verdict( 0, 'libvirt did not answer', <<"FIX" );
+$@
+The URI is @{[ $self->uri ]}.  Check libvirtd is running there and that the user
+is in the libvirt group.
+FIX
+}
+
+# Sys::Virt is released in lockstep with libvirt and binds the API of the
+# release it was built against.  Talk to a daemon from a different one and the
+# failures are not "version mismatch": they are a constant that is not exported,
+# or a call the far side does not implement, surfacing as an error about
+# whatever was being attempted at the time.
+sub check_sys_virt_in_step {
+    my ($self) = @_;
+
+    my $remote = eval { $self->vmm->get_library_version() };
+    return $self->_verdict( 0, 'Could not ask the hypervisor its libvirt version', <<'FIX' ) unless $remote;
+libvirt did not answer, so this could not be checked.  Fix that first; the
+answer is above.
+FIX
+
+    my $there = _version_string($remote);
+    my $here  = Sys::Virt->VERSION;
+
+    my ($here_mm)  = $here  =~ m/\A(\d+\.\d+)/;
+    my ($there_mm) = $there =~ m/\A(\d+\.\d+)/;
+
+    return $self->_verdict( 1, "Sys::Virt $here matches libvirt $there on the hypervisor", q{} )
+      if defined $here_mm && defined $there_mm && $here_mm eq $there_mm;
+
+    return $self->_verdict( 0, "Sys::Virt $here here, libvirt $there on the hypervisor", <<"FIX" );
+These want to be the same release.  Sys::Virt is versioned to track libvirt and
+binds the API of the one it was built against, so a mismatch does not announce
+itself -- it shows up as a missing constant or an unimplemented call, blamed on
+whatever was being done at the time.
+
+Either bring this machine to $there:
+
+    apt-cache policy libvirt-dev    # what is available here
+    cpanm Sys::Virt\@$there         # once libvirt-dev matches
+
+or provision from a machine whose libvirt already does.  Installing a Sys::Virt
+that does not match the local libvirt-dev will not build.
+
+FIX
+}
+
+sub note_libguestfs {
+    my ($self) = @_;
+
+    my ($found) = grep { $self->run_cmd( 'sh', '-c', "command -v $_ >/dev/null 2>&1" ) == 0 } qw{virt-cat virt-ls virt-edit};
+
+    return { ok => 1 } if $found;
+
+    return { ok => 0, what => 'No libguestfs on the hypervisor', fix => <<'FIX' };
+Without it, a guest that will not boot can only be looked at through its
+console.  With it, its disk can be read while it is off -- the cloud-init log
+of a guest that never came up, the netplan it was actually given -- and its
+kernel command line can be edited to boot single-user, rather than driving
+GRUB with timed keystrokes.
+
+    sudo apt install libguestfs-tools
+FIX
+}
+
+# A hypervisor with a TPM of its own can give its guests emulated ones worth
+# having, and swtpm is what emulates them.  Only worth saying where there is
+# hardware to make it mean something: on a machine with no TPM, installing swtpm
+# would buy a guest a TPM sealed to a file next to its disk image, which is why
+# bin/provision does not give it one.  Nothing to fix there, so nothing said.
+sub note_swtpm {
+    my ($self) = @_;
+
+    return { ok => 1 } unless $self->run_cmd( 'sh', '-c', 'test -c /dev/tpmrm0' ) == 0;
+    return { ok => 1 } if $self->run_cmd( 'sh', '-c', 'command -v swtpm >/dev/null 2>&1' ) == 0;
+
+    return { ok => 0, what => 'This machine has a TPM, and no swtpm to share it out', fix => <<'FIX' };
+Guests built here get an emulated TPM when swtpm is installed, which is what lets
+anything on them seal a secret to the machine -- systemd-creds, LUKS, tPSGI's
+vault key.  Without it they are built without one and do without.
+
+    sudo apt install swtpm swtpm-tools
+FIX
+}
+
+# What the guests built here can actually be held to, which is a question worth
+# asking before handing an unattended runner a key.
+#
+# Nothing in libvirt counts what anybody has allocated, and on the system URI
+# every guest runs as libvirt-qemu whoever defined it, so there is no UID for a
+# disk quota to attach to.  The pool being on a filesystem with a limit is the
+# only thing that makes one real -- and a pool whose capacity is the whole
+# filesystem is a pool that can fill the hypervisor root.
+#
+# A note rather than a check: this is what every hypervisor looks like today,
+# and refusing to build anything over it would be wrong.
+sub note_pool_quota {
+    my ($self) = @_;
+
+    # Asked of libvirt directly rather than through Trog::HV::pool, which
+    # defines and starts a pool it cannot find.  A check that builds something
+    # is not a check.
+    my $name = $self->pool_name;
+    my $info = eval { $self->vmm->get_storage_pool_by_name($name)->get_info() } or return { ok => 1 };
+
+    # -B1 without -P, which df refuses alongside --output; the last line is the
+    # mount, and its second field is the size in bytes.
+    my $path    = $self->pool_path;
+    my $said    = eval { $self->capture_cmd("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
+    my ($bytes) = $said =~ m/\A\S+\s+(\d+)\s/;
+
+    # Within a gigabyte of the filesystem it sits on means it is not a limit,
+    # it is the filesystem -- the pool is a directory, and libvirt reports what
+    # statvfs says about whatever it is mounted on.
+    return { ok => 1 }
+      unless defined $bytes && abs( $bytes - ( $info->{capacity} // 0 ) ) < 1_073_741_824;
+
+    return {
+        ok   => 0,
+        what => sprintf( 'The %s pool has no quota: its %.1fGB is all of %s', $name, ( $info->{capacity} // 0 ) / 1_073_741_824, $path ),
+        fix  => <<"FIX" };
+Guests built here are limited by nothing but the filesystem, and by
+reserve_disk in hypervisors.conf -- which is this tool asking itself for
+permission, and says nothing to anybody driving virsh directly.
+
+To make it real, give the pool a filesystem of its own with a limit on it:
+
+    zfs create -o quota=500G tank/vm-disks/$name
+
+then name both halves in hypervisors.conf, because libvirt looks a pool up by
+name and a pool_path beside an existing pool's name is silently ignored:
+
+    pool_path = /tank/vm-disks/$name
+    pool_name = $name
+
+This matters most for a hypervisor an unattended runner can build on.  See
+QUOTAS in Provisioner::Recipe::trogrunner.
+FIX
+}
+
+# Is anything keeping the logs the fleet produces?
+#
+# Two things worth saying.  A collector built and nothing shipping to it is the
+# more annoying: the sink exists and every guest is still talking to itself.
+# Leftover drop-ins on the hypervisor are the upgrade case -- provisioning used
+# to write one per guest there, for a listener that on most installations was
+# never opened.
+#
+# Reads the configuration, and asks the hypervisor only what it already has a
+# connection for.  It does not ask the ip pool anything: that would have a
+# read-only command create ips.db.
+sub note_log_destination {
+    my ($self) = @_;
+
+    my $conf    = eval { Provisioner::Cookbook->configuration() } // {};
+    my @domains = grep { !m/\A_/ } sort keys %$conf;
+
+    my ( $shipping, %collectors );
+    foreach my $domain (@domains) {
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+        $shipping            = 1 if exists $recipes->{logshipper};
+        $collectors{$domain} = 1 if exists $recipes->{logcollector};
+    }
+
+    # What provisioning used to write, for a listener it never opened.  Only the
+    # per-domain ones this tool made: everything else in there is the
+    # distribution's or another recipe's.
+    my %known = map       { $_ => 1 } @domains;
+    my @stale = sort grep { $known{$_} }
+      map { m/\A10-(.+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
+
+    if (@stale) {
+
+        # Comma-joined with no spaces on purpose: that is a brace expansion the
+        # operator can paste, and one with spaces in it is not.
+        my $braces = join( ',',  @stale );
+        my $listed = join( "\n", map { "    $_" } @stale );
+        my $where  = $self->describe;
+        return { ok => 0, what => scalar(@stale) . " rsyslog drop-ins on the hypervisor are left over from before logging was a recipe", fix => <<"FIX" };
+$where still carries a per-domain collector configuration for:
+
+$listed
+
+Provisioning wrote those, and no longer does -- where a guest sends its logs is
+Provisioner::Recipe::logshipper now, and the listener at the other end is
+Provisioner::Recipe::logcollector.  They route nothing unless something on that
+machine is listening for syslog, which this tool no longer arranges.  Remove
+them once you are satisfied nothing else put them to use:
+
+    sudo rm /etc/rsyslog.d/10-{$braces}.conf
+    sudo systemctl restart rsyslog
+FIX
+    }
+
+    return { ok => 1 } unless %collectors;
+    return { ok => 1 } if $shipping;
+
+    my $built = join( ', ', sort keys %collectors );
+    return { ok => 0, what => "$built collects logs, and nothing ships to it", fix => <<"FIX" };
+Every guest is keeping its logs to itself, on its own disk, where they go when
+the guest does.  Point the fleet at the collector:
+
+    _base:
+        logshipper:
+            host: $built
+
+Nothing depends on that recipe, and a guest that does not run it ships nowhere.
+FIX
+}
+
+# libvirt packs its version into one integer: major * 1000000 + minor * 1000 +
+# release.  Named apart from libvirt_version above, which asks the connection
+# what it is running rather than spelling out an answer already in hand.
+sub _version_string {
+    my ($packed) = @_;
+    return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
+}
 
 1;

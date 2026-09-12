@@ -17,6 +17,9 @@ use OpenStack::MetaAPI();
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
 
+use Config::Simple();
+use Trog::Config();
+
 =head1 NAME
 
 Trog::HV::OpenStack - the OpenStack backend: Nova servers, Neutron addresses and
@@ -885,5 +888,149 @@ L<Trog::OpenStack::Auth>, which authenticates it.
 L<Trog::HV::Libvirt>, the other one.
 
 =cut
+
+=head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
+
+What C<bin/preflight> asks of this backend, in order.
+
+=cut
+
+sub preflight_checks { return qw{check_reachable check_cloud_resources check_cloud_quota check_rsync check_transfer_ip check_fetch_sources check_config} }
+sub preflight_notes  { return qw{note_stale_image note_apt_mirror} }
+
+# The cloud equivalent of "can we reach the hypervisor": whether the credential
+# in clouds.yaml gets us a token, and whether the catalogue that comes back has
+# the three services a guest needs.  Everything below needs this to have worked.
+sub check_reachable {
+    my ($self) = @_;
+
+    my @services = eval { $self->api->auth->services };
+    return $self->_verdict( 0, 'Could not authenticate to ' . $self->describe, <<"FIX" ) unless @services;
+$@
+The cloud is named '@{[ $self->cloud ]}', so this is the entry of that name in
+clouds.yaml.  Check the application credential has not been revoked or expired:
+
+    openstack --os-cloud @{[ $self->cloud ]} token issue
+FIX
+
+    my %offered = map  { $_ => 1 } @services;
+    my @missing = grep { !$offered{$_} } qw{compute image network};
+
+    return $self->_verdict( 0, 'The catalogue is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
+A guest needs Nova to run on, Glance to boot from and Neutron to be addressed
+on.  A credential scoped to a project without all three cannot build one.
+FIX
+
+    return $self->_verdict( 1, 'Authenticated; the catalogue offers ' . scalar(@services) . ' services', q{} );
+}
+
+# The same question check_transfer_ip asks, which a cloud cannot answer the same
+# way.  There, the guest's network is the hypervisor's NAT bridge and is known
+# before any guest exists; here the cloud allocates the address when it creates
+# the server, so there is nothing to ask the routing table about until there is
+# a guest -- and by then the seed naming the address has already been written.
+#
+# So it has to be given, and this is where being told that is cheap.
+sub check_transfer_ip {
+    my ($self) = @_;
+
+    my $ipmap  = Trog::Config->path('ipmap.cfg');
+    my $config = eval { Config::Simple->new($ipmap) };
+    my $named  = $config ? $config->param('global.transfer_ip') : undef;
+    $named = $named->[0] if ref $named eq 'ARRAY';
+
+    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if defined $named && length $named;
+
+    return $self->_verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  On a hypervisor that address is
+worked out by asking the routing table about the guest's network -- but
+@{[ $self->describe ]} allocates a guest's address when it creates it, so there is
+nothing to ask about until the guest exists, and the seed naming the address is
+written before that.
+
+Name it in the [global] section of $ipmap:
+
+    transfer_ip = 192.0.2.10
+
+It has to be an address of this machine that a guest on the cloud can reach.
+FIX
+}
+
+# Whether the flavor, image and network hypervisors.conf names are things this
+# cloud has.  Each is a name it has to recognise, and one wrong fails a provision
+# minutes in, with an error from the API rather than from us.
+sub check_cloud_resources {
+    my ($self) = @_;
+
+    my %wanted = (
+        flavor  => $self->flavor,
+        image   => $self->image,
+        network => $self->network,
+    );
+    $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
+
+    my @unset = grep { !defined $wanted{$_} || !length $wanted{$_} } sort keys %wanted;
+    return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
+The cloud's block in hypervisors.conf has to say what to build guests as.  What
+exists is the cloud's to say, so ask it rather than guessing:
+
+    openstack flavor list
+    openstack image list
+    openstack network list
+FIX
+
+    my %found;
+    $found{flavor}           = eval { scalar $self->api->look_by_id_or_name( flavors  => $wanted{flavor} ) };
+    $found{network}          = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{network} ) };
+    $found{image}            = eval { $self->api->image_from_name( $wanted{image} ) };
+    $found{floating_network} = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{floating_network} ) }
+      if exists $wanted{floating_network};
+
+    my @absent = grep { !$found{$_} } sort keys %found;
+    return $self->_verdict( 0, 'The cloud has no ' . join( ', ', map { "$_ '$wanted{$_}'" } @absent ), <<'FIX' ) if @absent;
+Ask the cloud what it has:
+
+    openstack flavor list
+    openstack image list
+    openstack network list
+FIX
+
+    return $self->_verdict( 1, "Builds as $wanted{flavor} from $wanted{image} on $wanted{network}", q{} );
+}
+
+# Whether there is room for one more guest.  A quota is what a cloud has instead
+# of hardware, and running out of it is what will stop a provision.
+sub check_cloud_quota {
+    my ($self) = @_;
+
+    my $have = eval { $self->capacity };
+    return $self->_verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
+
+    my @full;
+    push @full, 'instances' if $self->max_guests && $have->{guests} >= $self->max_guests;
+    push @full, 'memory'    if $have->{memory_free} <= 0;
+    push @full, 'cpus'      if $have->{cpus_free} <= 0;
+    push @full, 'disk'      if $have->{disk_free} <= 0;
+
+    return $self->_verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
+The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests ]} instances,
+@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} ]}MB of memory and
+@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} ]} cores.
+
+Destroy a guest you have finished with, or ask for more quota.  Note that the
+reserves in hypervisors.conf are held back out of the quota, so a project that
+looks like it has room may not once they are counted.
+FIX
+
+    return $self->_verdict(
+        1,
+        sprintf(
+            'Quota: %d/%d instances used, %dMB memory and %d cores free',
+            $have->{guests}, $self->max_guests, $have->{memory_free}, $have->{cpus_free}
+        ),
+        q{}
+    );
+}
 
 1;

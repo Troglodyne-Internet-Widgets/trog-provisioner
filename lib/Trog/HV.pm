@@ -10,6 +10,11 @@ use warnings FATAL => 'all';
 use re '/aa';
 use parent 'Trog::Machine';
 
+use Trog::Config();
+use Provisioner::Cookbook();
+
+use File::Which();
+
 =head1 NAME
 
 Trog::HV - the hypervisor we are provisioning against, whichever kind it is
@@ -498,6 +503,275 @@ sub _fraction {
     return 0 if !$total;
     my $fraction = $left / $total;
     return $fraction < 0 ? 0 : $fraction;
+}
+
+=head1 PREFLIGHT
+
+What a hypervisor can be asked about itself, before a guest is built on it.
+
+C<bin/preflight> prints these; it does not know them.  Which questions are worth
+asking depends entirely on the backend -- passwordless sudo means nothing to a
+cloud, and a Keystone catalogue means nothing to libvirt -- so each one says
+which it answers and in what order, and the script walks that list.  It used to
+branch on C<builds_by_api> in two places to decide, which is a decision only the
+backend can make correctly.
+
+Every check and note returns C<{ ok =E<gt> 1 }>, or C<{ ok =E<gt> 0, what
+=E<gt> ..., fix =E<gt> ... }> saying what is wrong and what to do about it.
+
+=head2 @names = $hv->preflight_checks()
+
+The checks this backend answers, in the order they should be asked.  Each names
+a method on it.  A failure here means a guest cannot be built.
+
+=head2 @names = $hv->preflight_notes()
+
+The same, for things worth having rather than things required.
+
+=cut
+
+sub preflight_checks { return $_[0]->_abstract('preflight_checks') }
+sub preflight_notes  { return $_[0]->_abstract('preflight_notes') }
+
+=head2 $result = $hv->_verdict($ok, $what, $fix)
+
+One check's answer, in the shape C<bin/preflight> prints.
+
+=cut
+
+sub _verdict {
+    my ( $self, $ok, $what, $fix ) = @_;
+    return { ok => $ok, what => $what, fix => $fix };
+}
+
+=head2 $hv->check_reachable(), $hv->check_transfer_ip()
+
+Declared here and answered by the backend, because both questions are real for
+either kind and neither has a shared answer.  Reaching a machine is an ssh
+login; reaching a cloud is a credential that authenticates and a catalogue with
+compute, image and network in it.  Finding the address a guest fetches from
+means asking the routing table about a NAT bridge, or reading it out of
+F<ipmap.cfg> because a cloud has nothing to ask until the guest exists.
+
+=cut
+
+sub check_reachable   { return $_[0]->_abstract('check_reachable') }
+sub check_transfer_ip { return $_[0]->_abstract('check_transfer_ip') }
+
+# Both ends, because both ends run one.  A domain's data directory goes up to the
+# hypervisor over rsync and comes off the guest being replaced over rsync, and
+# rsync is the only thing in this toolkit that has to exist on the machine
+# driving a run as well as on the machine being driven.
+#
+# Guests are not asked and do not need to be: every one this tool builds installs
+# rsync among its base packages, and one that has not been built yet has nothing
+# to salvage.
+sub check_rsync {
+    my ($self) = @_;
+
+    my @missing;
+    push( @missing, 'this machine' ) unless File::Which::which('rsync');
+    push( @missing, $self->describe ) if !$self->is_local && $self->run_cmd( 'sh', '-c', 'command -v rsync >/dev/null 2>&1' ) != 0;
+
+    return $self->_verdict( 1, 'rsync on both ends', q{} ) unless @missing;
+
+    my $where = join( ' and ', @missing );
+    return $self->_verdict( 0, "No rsync on $where", <<"FIX" );
+A domain's data directory is shipped to the hypervisor and salvaged off the old
+guest with it, and both of those compare before they transfer -- which is what
+keeps a re-provision from moving twenty gigabytes of video it already has.
+
+    sudo apt install rsync
+
+on $where.
+FIX
+}
+
+# A recipe that ships an operator's own files names a directory nothing here
+# creates: adminconfig's skel, openvpnclient's cert_dir.  The guest rsyncs those
+# out of this machine, so an absent one fails that recipe's target part way
+# through a build -- and rsync's error for it names neither the recipe that
+# asked nor the domain it was for.
+#
+# Asked of every domain rather than of one, because preflight is about the
+# machine and because skel is usually said once in _base for the whole fleet.
+# Read raw, without validating or enriching: a configuration with a CHANGEME
+# still in it is one somebody is in the middle of writing, and refusing to look
+# at it would withhold exactly the answer they need next.
+sub check_fetch_sources {
+    my ($self) = @_;
+
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+    my %wanted;
+
+    foreach my $domain ( grep { !m/\A_/ } sort keys %$conf ) {
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+
+        foreach my $name ( sort keys %$recipes ) {
+            my $class = eval { Provisioner::Cookbook->load($name) } or next;
+            next unless $class->can('fetch_sources');
+
+            my $opts = $recipes->{$name} // {};
+            next unless ref $opts eq 'HASH';
+
+            foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
+                next unless defined $path && length $path;
+                $wanted{$path}{$name} = 1;
+            }
+        }
+    }
+
+    return $self->_verdict( 1, 'No recipe fetches a directory of yours', q{} ) unless %wanted;
+
+    my @missing = grep { !-d } sort keys %wanted;
+    return $self->_verdict( 1, scalar( keys %wanted ) . ' fetched ' . ( keys %wanted == 1 ? 'directory is' : 'directories are' ) . ' here', q{} ) unless @missing;
+
+    my $detail = join( q{}, map { "    $_ (" . join( ', ', sort keys %{ $wanted{$_} } ) . ")\n" } @missing );
+    return $self->_verdict( 0, scalar(@missing) . ' fetched ' . ( @missing == 1 ? 'directory is' : 'directories are' ) . ' not on this machine', <<"FIX" );
+A guest rsyncs these out of this machine, and the recipe that wants one fails
+when it is not there:
+
+$detail
+They used to be read off the hypervisor, so on an installation that predates
+that change they are still over there.  Bring them here:
+
+    rsync -a @{[ $self->ssh_host // 'the-hypervisor' ]}:<path>/ <path>/
+FIX
+}
+
+sub check_config {
+    my ($self) = @_;
+
+    my $dir = Trog::Config->dir;
+
+    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml};
+    return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) unless @missing;
+
+    return $self->_verdict( 0, "Missing from $dir: " . join( ', ', @missing ), <<"FIX" );
+These are where an installation says which machines exist and what every guest
+gets.  See Trog::Config for where this directory is and how to point it
+somewhere else.
+FIX
+}
+
+# Not a requirement: nothing here needs it to provision anything, and failing a
+# run over its absence would refuse runs that would have worked.  It is the
+# difference between guessing at why a guest will not boot and reading its disk,
+# so it is worth saying it is missing.
+# Is the image guests are built on still the one the distribution would put them
+# on?  A note rather than a check: a pin one release behind is a decision
+# somebody may well have made on purpose, and a mirror that will not answer is
+# no reason to refuse to build anything.
+sub note_stale_image {
+    my @stale;
+
+    foreach my $name ( Provisioner::Cookbook->distros() ) {
+        my $distro = Provisioner::Cookbook->load($name);
+
+        # Undef means the distribution has no way of being asked, or was asked
+        # and did not answer.  Either way there is nothing to report.
+        my $current = $distro->current_image or next;
+        next if $current eq $distro->base_image;
+
+        push( @stale, { name => $name, have => $distro->base_image, want => $current } );
+    }
+
+    return { ok => 1 } unless @stale;
+
+    my $fix = join(
+        q{},
+        map {
+            "$_->{name} builds on
+  $_->{have}
+and the current release is
+  $_->{want}
+"
+        } @stale
+    );
+
+    return {
+        ok   => 0,
+        what => 'A distro recipe is pinned to an image that is no longer current',
+        fix  => $fix . <<'FIX' };
+Guests already built are unaffected; this is about the next one.  Change the
+release in the distro recipe when you want to move, and rebuild -- see
+perldoc Provisioner::DistroRecipe.
+FIX
+}
+
+# Is anything telling guests where to get their packages?
+#
+# Two things worth saying and they are not the same.  Having built a mirror and
+# pointed nothing at it is the more annoying of the two, because the work is
+# already done and the fleet is still paying for it every build.
+#
+# Reads the configuration and nothing else.  In particular it does not ask the
+# ip pool whether a named mirror has an address -- that would have a read-only
+# command create ips.db, and it is bin/new_config's question to answer anyway.
+sub note_apt_mirror {
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+
+    my @domains = grep { !m/\A_/ } sort keys %$conf;
+    return { ok => 1 } unless @domains;
+
+    my %distro = map { $_ => 1 } Provisioner::Cookbook->distros();
+    my ( $pointed, @mirrors );
+
+    foreach my $domain ( @domains, undef ) {
+        my $global  = eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {};
+        my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
+
+        $pointed = 1 if length( $global->{mirror} // q{} );
+
+        foreach my $name ( sort keys %$recipes ) {
+            my $opts = $recipes->{$name};
+            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && length( $opts->{mirror} // q{} );
+            push( @mirrors, $domain ) if $name eq 'aptmirror' && defined $domain;
+        }
+    }
+
+    return { ok => 1 } if $pointed;
+
+    if (@mirrors) {
+        my $built = join( ', ', sort keys %{ { map { $_ => 1 } @mirrors } } );
+        return { ok => 0, what => "$built mirrors the archive, and nothing points at it", fix => <<"FIX" };
+Every guest still fetches every package over the internet on every build, this
+one included.  Name it in the _global that the fleet shares:
+
+    _base:
+        _global:
+            mirror: $built
+
+A bare name is resolved out of the ip pool, because a guest runs cloud-init
+before it has DNS.  A mirror somewhere else is named as a URL instead.
+FIX
+    }
+
+    my ($parent) = map { m/\A[^.]+[.](.+)\z/ ? $1 : () } @domains;
+    my $suggested = 'aptmirror.' . ( $parent // 'example.com' );
+
+    return { ok => 0, what => 'No package mirror is configured', fix => <<"FIX" };
+Every guest downloads its packages over the internet on every provision, and
+again on every autoupdate.  Across a fleet that is the same few hundred
+megabytes per guest per build.
+
+A mirror is a guest like any other:
+
+    bin/new_guest --hostname $suggested aptmirror
+
+and then, once it has synced, point the fleet at it with `mirror:` in _base's
+_global.  Nothing depends on that recipe, and a fleet without one builds exactly
+as it does now -- only slower.
+FIX
+}
+
+# Whether a path can be opened for reading, which is all 'is the configuration
+# there' amounts to.
+sub readable {
+    my ($path) = @_;
+    open( my $fh, '<', $path ) or return 0;
+    close $fh;
+    return 1;
 }
 
 =head1 SEE ALSO
