@@ -97,8 +97,14 @@ sub main {
     # and above all the address, which stays reserved against a domain nobody
     # has if this stops here.
     my $hosted = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir ) };
+    my $err    = $@;
     my $hv     = $hosted;
     unless ($hv) {
+
+        # Why, and not just that: this is the whole of what an operator running
+        # this by hand is told, and "nothing has it" reads the same for a shared
+        # guest as for a domain whose name they typed wrong.
+        print $err if $err;
         print "Nothing in the fleet has $domain, so only what is on this side goes.\n";
         $hv = Trog::HV->from_config( undef, ( defined $domain_dir ? ( domain_dir => $domain_dir ) : () ) )->activate();
     }
