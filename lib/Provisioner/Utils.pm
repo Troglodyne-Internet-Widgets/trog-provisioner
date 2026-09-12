@@ -222,16 +222,15 @@ guest has resolvers, can fall back to the name.
 
 =cut
 
-=head2 host_of($url)
+=head3 host_of($url)
 
-The host a URL names, or nothing if it names none.
+The host a URL names, or nothing if it names none.  An scp-style git address --
+C<git@github.com:o/r.git> -- counts as one, since that is the form gogs hands
+out for a repository.
 
 Recipes whose upstream is configured ask this of a C<repo_url> or an C<api_url>
 to say which host they will actually reach, so it can be declared in
-C<fetch_hosts> and pointed at the fetch cache.  An scp-style git address --
-C<git@github.com:o/r.git> -- is not a URL and L<URI> reads no host out of it, so
-it is matched separately rather than silently answering nothing for a form
-somebody will certainly configure: it is what gogs hands out.
+C<fetch_hosts> and pointed at the fetch cache.
 
 =cut
 
@@ -239,6 +238,13 @@ sub host_of {
     my ($url) = @_;
 
     return unless defined $url && length $url;
+
+    # Matched here rather than handed to URI, because prepending a scheme does
+    # not turn an scp address into a URL: a colon after the host opens a port in
+    # a URL and separates the path in scp syntax.  So ssh://git@github.com:o/r.git
+    # parses to the host "github.com:o", and ssh://git@github.com:22/r.git reads
+    # 22 as the port and drops it from the path.  Handed the address as written,
+    # URI returns a URI::_generic, which has no host method at all.
     return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
 
     my $host = eval { URI->new($url)->host };
