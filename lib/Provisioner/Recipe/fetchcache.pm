@@ -231,9 +231,14 @@ sub args {
             # On the members rather than on the map, so that an operator adding
             # one host keeps all of these.
             upstreams => {
-                type                 => 'object',
-                default              => {},
-                properties           => { map { $_ => { type => 'boolean', default => 1 } } Provisioner::Cookbook->fetch_hosts },
+                type    => 'object',
+                default => {},
+
+                # What every recipe names by default, and what the domains this
+                # installation actually configures will reach: a koan pointed at
+                # a gitea of its own is a host this cache has to answer for, and
+                # asking the class alone never saw it.
+                properties           => { map { $_ => { type => 'boolean', default => 1 } } List::Util::uniq( sort Provisioner::Cookbook->fetch_hosts, Provisioner::Cookbook->configured_fetch_hosts ) },
                 additionalProperties => { type => 'boolean' },
                 description          => 'Hosts the cache will fetch from, each true or false.  The defaults are every host a recipe names in fetch_hosts; naming another adds it, and naming a default false removes it.',
             },

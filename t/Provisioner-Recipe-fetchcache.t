@@ -18,6 +18,7 @@ use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
 use Net::SSLeay();
 
@@ -104,6 +105,30 @@ subtest 'the upstreams: every host a recipe downloads from, and whatever an oper
     my ($guard) = $defaults =~ m/^map \$host \$fetchcache_allowed \{\n\s+"~\^\(\?:(.*?)\)\$" 1;$/m;
     is_deeply( alternatives($guard), \@declared, 'a request for any other host is told apart' );
     like( $defaults, qr/if \(\$fetchcache_allowed = 0\) \{\n\s+return 421;/, 'and refused' );
+};
+
+subtest 'a host only a domain configuration names is one the cache answers for' => sub {
+
+    # The gap this closes: bin/new_config asks each recipe with the domain's
+    # configuration, so a guest points its configured upstream at the cache --
+    # but the cache built its server_name and its certificate from the class
+    # list, which has never seen a repo_url.  The probe then failed and the host
+    # quietly went upstream, uncached, with nothing said.
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n  _global:\n    distro: ubuntu\n" );
+    File::Slurper::Temp::write_text(
+        "$dir/recipes.d/elsewhere.test.yaml",
+        "elsewhere.test:\n  trogrunner:\n    repo_url: \"https://git.elsewhere.test/o/r.git\"\n"
+    );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    my ( $vhost, undef, $out ) = generated();
+
+    ok( ( grep { $_ eq 'git.elsewhere.test' } @{ allowed($vhost) } ), 'it is in the server_name' );
+
+    my $leaf = IO::Socket::SSL::Utils::PEM_file2cert("$out/fetchcache.crt");
+    like( extension( $leaf, 'subjectAltName' ), qr/DNS:git[.]elsewhere[.]test/, 'and in the certificate it answers with' );
 };
 
 subtest 'what the vhost will not accept' => sub {

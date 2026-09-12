@@ -496,4 +496,40 @@ subtest 'fetch_hosts: every host any recipe downloads from, once each' => sub {
     is_deeply( \@bad, [], 'every one of them a plain, lowercase host name' );
 };
 
+subtest 'configured_fetch_hosts: what the domains this installation has will actually reach' => sub {
+
+    # A configuration of its own, on a path nothing has read yet: configuration()
+    # remembers each file by path, so a test that wrote into one already read
+    # would be asserting against the answer from before it wrote.
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n  _global:\n    distro: ubuntu\n" );
+    File::Slurper::Temp::write_text(
+        "$dir/recipes.d/somewhere.test.yaml",
+        "somewhere.test:\n  koan:\n    repo_url: \"https://gitea.internal/o/koan.git\"\n  tcms: ~\n"
+    );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    my @configured = Provisioner::Cookbook->configured_fetch_hosts;
+
+    ok( ( grep { $_ eq 'gitea.internal' } @configured ), 'a host only a repo_url names' );
+    ok( ( grep { $_ eq 'github.com' } @configured ),     'and the default host of a recipe that configures nothing' );
+
+    # The point of the method: the class-level list cannot see the first of
+    # those, because it is asked with no configuration at all.
+    my %class = map { $_ => 1 } Provisioner::Cookbook->fetch_hosts;
+    ok( !$class{'gitea.internal'}, 'which fetch_hosts, asked of the class, does not' );
+
+    is_deeply( [@configured], [ sort @configured ], 'sorted' );
+    is( scalar( grep { $_ eq 'github.com' } @configured ), 1, 'and once each, however many domains name it' );
+};
+
+subtest 'configured_fetch_hosts copes with a configuration that is not there' => sub {
+
+    # fetchcache asks this while building its schema, which the unit tests do
+    # against a scratch directory with nothing in it.
+    local $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );
+    is_deeply( [ Provisioner::Cookbook->configured_fetch_hosts ], [], 'no configuration, no hosts, no exception' );
+};
+
 done_testing();
