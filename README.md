@@ -150,9 +150,9 @@ That means:
 3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
 
-4. **The whole domain directory is copied to the HV** at the same path, since the guest fetches its payload from there over the NAT network.  It's the whole directory and not just `data.tar.gz` because what else lives in there is decided by whatever provisions your domains, not by this repository -- we're in no position to guess which parts the guest will reach for.  Note that this puts the guest's private key on the hypervisor as well; that's the cost of the hypervisor being the machine the guest fetches from.
+4. **The domain directory is not copied to the HV at all.**  It used to be, the whole of it, because the guest fetched its payload from the hypervisor -- which meant the guest's private key was on the hypervisor too.  The guest fetches from *this* machine now, so neither is true; the key does not leave here, and since it is kept in the secret store rather than in the domain directory it is not at rest here either.  See `perldoc Trog::GuestKey`.
 
-    Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is not synced and never was.  Those are yours to provision.
+    Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is yours to provision, and always was.
 
 5. **The HV still has to be set up as a hypervisor**: the bridge devices, the qemu/kvm group membership.  See UBUNTU DEPS above.  `--connect` points at a hypervisor; it doesn't build one.
 

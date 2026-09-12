@@ -15,6 +15,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
 use Trog::Guest();
+use Trog::GuestKey();
 use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
@@ -437,7 +438,7 @@ sub main {
 
     # Now, let's figure out if this has a VM which needs to be built first.
     # In the event reuse is passed, we are just layering configs really.
-    my $skey    = "$domain_dir/$domain/key.rsa";
+    my $skey;
     my $depends = $config->param('depends_on');
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
@@ -447,8 +448,11 @@ sub main {
 
         #XXX should probably die here if the admin_users differ!
 
-        $skey = "$domain_dir/$depends/key.rsa";
         ( $reuser, $reuse ) = provision_domain( $dconfig, $depends, $reuse, $reuser );
+
+        # After, not before: provision_domain is what mints this key and puts it
+        # in the store, so asking any earlier is asking about the guest that was.
+        $skey = Trog::GuestKey->path( $depends, "$domain_dir/$depends/key.rsa" );
         if ( !$dryrun ) {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
             $guest->wait_for_ssh();
@@ -463,7 +467,13 @@ sub main {
     my ( $user, $ip ) = provision_domain( $config, $domain, $reuse, $reuser, $depends );
     return 0 if $dryrun;
 
-    print "ssh -i $skey $user\@$ip\n";
+    # Same reason as above: the key this needs is the one provision_domain just
+    # made.  A domain with a dependency uses that one, which is already in hand.
+    $skey //= Trog::GuestKey->path( $domain, "$domain_dir/$domain/key.rsa" );
+
+    # bin/guest_key rather than the path: the key is in the store, and what
+    # $skey holds is a temporary file that goes when this process does.
+    print "ssh -i \$(bin/guest_key $domain) $user\@$ip\n";
     my $guest = Trog::Guest->new( name => $domain, host => $ip, user => $user, key_path => $skey );
     $guest->wait_for_ssh();
 
@@ -640,8 +650,8 @@ sub provision_domain {
         # Re-Use the existing VM, and just ship over what we got and run the makefile again.
         # Try to use the root key if no admin user is passed (this may not work if you locked down the box!)
         # Otherwise we'll use the agent.
-        my $key = "$domain_dir/$domain/key.rsa";
-        $key = "$domain_dir/$depends/key.rsa" if $depends;
+        my $for = $depends // $domain;
+        my $key = Trog::GuestKey->path( $for, "$domain_dir/$for/key.rsa" );
 
         # Make sure any existing VMs don't have this domain
         clean_domain_resources($domain);
