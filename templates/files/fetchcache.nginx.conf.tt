@@ -27,8 +27,8 @@ map $host $fetchcache_allowed {
 map "$host$request_uri" $fetchcache_class {
     "~^(?:[% passthrough %])" pass;
 [% FOR class IN classes -%]
-[% IF class.shape -%]
-    "~^(?:[% class.shape %])" [% class.name %];
+[% IF class.pattern -%]
+    "~^(?:[% class.pattern %])" [% class.name %];
 [% END -%]
 [% END -%]
     default default;

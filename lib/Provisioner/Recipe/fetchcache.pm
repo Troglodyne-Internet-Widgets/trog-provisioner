@@ -1,6 +1,6 @@
 package Provisioner::Recipe::fetchcache;
 
-#ABSTRACT: Keep what the fleet downloads, and hand it out again when upstream will not.
+#ABSTRACT: Keep what the fleet downloads, so a provision does not wait on upstream, or stop when it fails.
 
 use 5.041;
 
@@ -10,6 +10,7 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use Data::Validate::Domain();
 use File::Slurper();
 use File::Slurper::Temp();
 use IO::Socket::SSL::Utils();
@@ -25,14 +26,14 @@ while they provision, so an upstream outage stops being a failed build.
 
 =head1 SYNOPSIS
 
-    fetchcache.example.com:
+    fetchcache.test:
         fetchcache: {}
 
 and then point the fleet at it:
 
     _base:
         _global:
-            cache: fetchcache.example.com
+            cache: fetchcache.test
 
 =head1 DESCRIPTION
 
@@ -154,30 +155,34 @@ the system's certificate authorities, and never forwards a guest's
 C<Authorization> or C<Cookie> with anything it keeps -- so nothing it keeps was
 fetched as anybody in particular.
 
-=head2 Sharing a guest with a package mirror
+=head2 Sharing a port with a package mirror
 
 It listens on 443 and on 80 -- a guest pointed at it by name asks on whatever
 port it likes, and cpanm asks CPAN over plain http -- and answers only to the
-names of the hosts it fetches from.  So it shares a guest with an
-L<Provisioner::Recipe::aptmirror>, which answers on 80 to the guest's own name
-and address, without either being told about the other: nginx routes a port
-between servers by name, and fetchcache leaves 80's C<backlog>, which nginx
-takes once a port, to the mirror.  Upstream is fetched over https whichever
+names of the hosts it fetches from.  Upstream is fetched over https whichever
 port the guest asked on.
+
+That it answers by name and not by address is what lets it B<coexist> with an
+L<Provisioner::Recipe::aptmirror> on one guest, neither being told about the
+other: nginx routes a port between servers by name, and fetchcache leaves 80's
+C<backlog>, which nginx takes once a port, to the mirror.  Worth knowing about,
+rather than recommended.  A mirror is there to be a mirror, and a cache is all
+that a provision needs to be quick and to survive a bad day upstream, so most
+installations should keep them apart.
 
 Nothing else is answered.  A guest reaching one of those hosts on another port
 while it provisions -- git over ssh to C<github.com> -- reaches the cache
 instead, and fails.
 
-    mirrors.example.com:
+    mirrors.test:
         aptmirror:
             releases: [noble]
         fetchcache: {}
 
     _base:
         _global:
-            mirror: mirrors.example.com
-            cache:  mirrors.example.com
+            mirror: mirrors.test
+            cache:  mirrors.test
 
 =head2 Seeing what it did
 
@@ -190,13 +195,6 @@ something from anywhere, name the host and give its address:
         https://www.cpan.org/modules/02packages.details.txt.gz
 
 (C<-k>, because only a guest that is provisioning trusts the authority.)
-
-=head2 What is deliberately not here
-
-B<No C<remote_files>, no C<restores>, no C<datadirs>>, and the store is outside
-C<install_dir>, for the reason L<Provisioner::Recipe::aptmirror> gives: it is
-re-fetchable by definition, and the C<data> target walks C<install_dir>
-recursively on every provision.
 
 Nothing requires it.  A fleet with no cache configured downloads straight from
 upstream, as it always has.
@@ -224,7 +222,6 @@ C<10m>, C<1h>, C<365d>.
 =cut
 
 sub args {
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     my $duration = '\A\d+(?:ms|[smhdwMy])?\z';
     return (
         type       => 'object',
@@ -292,25 +289,25 @@ sub args {
 =head2 @CLASSES
 
 The three kinds of URL, most specific first, as C<name>, the C<args> key saying
-how fresh a copy stays, and C<shape> -- a regex matched against C<HOST/PATH>,
+how fresh a copy stays, and C<pattern> -- a regex matched against C<HOST/PATH>,
 the host a request was for and the path it asked for, query included.
-C<default> has no shape and takes whatever the other two did not.
+C<default> has no pattern and takes whatever the other two did not.
 
 These are facts about how the upstreams lay out their URLs rather than
 configuration, which is why they are here and not in C<args>.
 
 =head2 $PASSTHROUGH
 
-The shape of what is never kept, matched the same way and ahead of the classes:
+The pattern of what is never kept, matched the same way and ahead of the classes:
 git's smart-HTTP ref advertisement.
 
 =cut
 
 our @CLASSES = (
     {
-        name  => 'index',
-        fresh => 'fresh_index',
-        shape => join(
+        name    => 'index',
+        fresh   => 'fresh_index',
+        pattern => join(
             '|', qw{
               (?:api\.github\.com|fastapi\.metacpan\.org)/
               [^/]+/modules/
@@ -319,9 +316,9 @@ our @CLASSES = (
         ),
     },
     {
-        name  => 'immutable',
-        fresh => 'fresh_immutable',
-        shape => join(
+        name    => 'immutable',
+        fresh   => 'fresh_immutable',
+        pattern => join(
             '|', qw{
               [^/]+/authors/id/(?!.*/CHECKSUMS$)
               [^/]+/[^/]+/[^/]+/releases/download/
@@ -404,7 +401,11 @@ sub enrich {
     my @allow = sort grep { $opts{upstreams}{$_} } keys %{ $opts{upstreams} };
     die "fetchcache has no upstreams turned on, so it would fetch nothing.\n" unless @allow;
 
-    my @bad = grep { !m/\A(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z\d](?:[a-z\d-]*[a-z\d])?\z/i } @allow;
+    # is_domain rather than a regex of our own: it refuses a scheme, a path, a
+    # space and a leading or trailing dash, and it checks the top-level domain,
+    # which a hand-rolled pattern here did not.  Note that last part -- a host
+    # under a made-up TLD is refused now, where the pattern took it.
+    my @bad = grep { !Data::Validate::Domain::is_domain($_) } @allow;
     die "fetchcache upstreams must be plain host names; these are not: @bad\n" if @bad;
 
     $opts{allow}       = \@allow;
@@ -432,11 +433,11 @@ kept; see L</The certificate, and who signs it>.
 
 =cut
 
-## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
-our $AUTHORITY_DAYS   = 3650;
-our $CERTIFICATE_DAYS = 397;
-my $DAY = 86_400;
-## use critic
+use constant {
+    AUTHORITY_DAYS   => 3650,
+    CERTIFICATE_DAYS => 397,
+    DAY              => 86_400,
+};
 
 sub authority {
     my ($class) = @_;
@@ -449,7 +450,7 @@ sub authority {
     my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
         CA        => 1,
         subject   => { commonName => 'trog-provisioner fetch cache authority' },
-        not_after => time + $AUTHORITY_DAYS * $DAY,
+        not_after => time + AUTHORITY_DAYS * DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
     );
 
@@ -485,7 +486,7 @@ sub certify {
         subject   => { commonName => $hosts[0] },
         purpose   => 'server',
         issuer    => [ $ca_cert, $ca_key ],
-        not_after => time + $CERTIFICATE_DAYS * $DAY,
+        not_after => time + CERTIFICATE_DAYS * DAY,
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
         ext       => [ { sn => 'subjectAltName', data => join( ',', map { "DNS:$_" } @hosts ) } ],
     );

@@ -292,7 +292,7 @@ subtest 'the authority is made once, kept in the configuration directory, and it
     ## use critic
 };
 
-# The shapes are PCRE nginx evaluates; these ones read the same in perl, so what
+# The patterns are PCRE nginx evaluates; these ones read the same in perl, so what
 # each URL is taken for can be asked here rather than on a guest.
 subtest 'which kind each URL recipes fetch is taken for' => sub {
     my @CLASSES = @Provisioner::Recipe::fetchcache::CLASSES;
@@ -300,7 +300,7 @@ subtest 'which kind each URL recipes fetch is taken for' => sub {
         my ($url) = @_;
         return 'pass' if $url =~ m{^(?:$Provisioner::Recipe::fetchcache::PASSTHROUGH)};
         foreach my $class (@CLASSES) {
-            return $class->{name} if !defined $class->{shape} || $url =~ m{^(?:$class->{shape})};
+            return $class->{name} if !defined $class->{pattern} || $url =~ m{^(?:$class->{pattern})};
         }
         return 'none';
     };
