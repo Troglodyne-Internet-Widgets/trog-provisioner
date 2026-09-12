@@ -21,11 +21,11 @@ use MIME::Base64();
         matrix:
             admin_user: admin
             admin_password: somepassword
-            smtp_host: smtp.example.com
+            smtp_host: smtp.example.test
             smtp_port: 465
-            smtp_user: notifications@example.com
+            smtp_user: notifications@example.test
             smtp_pass: smtp_password
-            smtp_domain: example.com
+            smtp_domain: example.test
 
 =head2 DESCRIPTION
 

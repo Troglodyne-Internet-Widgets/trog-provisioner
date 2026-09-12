@@ -184,7 +184,7 @@ Set them in a domain's C<_global>, which every recipe is handed:
 
     _base:
         _global:
-            mirror: aptmirror.example.com
+            mirror: aptmirror.example.test
 
 C<_global> rather than a C<_base> block for the distro recipe itself, because a
 mirror is a fact about the guest that several recipes are handed rather than
@@ -248,7 +248,7 @@ sub global_defaults {
 =head2 $path = $distro->mirror_path()
 
 What this distribution appends to a mirror named as a bare domain, so that
-C<aptmirror.example.com> becomes a URL a guest can fetch from.
+C<aptmirror.example.test> becomes a URL a guest can fetch from.
 
 Empty here.  A distribution that serves its archive under a path -- Ubuntu's
 C</ubuntu> -- says so.

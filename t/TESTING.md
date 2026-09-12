@@ -115,7 +115,7 @@ See the `perl-slop:profiling-perl` skill for more details.
 
 # Nature of fake data
 
-When you need a domain name, use `test.test` or a subdomain thereof.  Never use `example.com`.
+When you need a domain name, use `test.test` or a subdomain thereof.  Never use `example.test`.
 
 Avoid any remotely plausible file path names where possible (example: /bogus).
 If a test results in unintended system modifications this helps make them obvious.

@@ -19,7 +19,7 @@ Trog::Guest - a VM we have just built, and are now waiting on
 
     use Trog::Guest();
 
-    my $domain = 'vm.example.com';
+    my $domain = 'vm.example.test';
 
     my $guest = Trog::Guest->new(
         name     => $domain,

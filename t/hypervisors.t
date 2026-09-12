@@ -37,14 +37,14 @@ sub fleet_file {
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/hypervisors.conf", <<"CONF" );
 [hv1]
-libvirt_uri=qemu+ssh://root\@hv1.example.net/system
+libvirt_uri=qemu+ssh://root\@hv1.example.test/system
 bridge_device=br0
 reserve_memory=4096
 max_guests=20
 $extra{hv1}
 
 [hv2]
-libvirt_uri=qemu+ssh://root\@hv2.example.net/system
+libvirt_uri=qemu+ssh://root\@hv2.example.test/system
 $extra{hv2}
 CONF
     return "$dir/hypervisors.conf";
@@ -112,11 +112,11 @@ subtest 'a fleet is read in file order' => sub {
     is_deeply( [ $fleet->names ], [qw{hv1 hv2}], 'both, in order' );
 
     my $hv1 = $fleet->hypervisor('hv1');
-    is( $hv1->name,           'hv1',                                    'name' );
-    is( $hv1->uri,            'qemu+ssh://root@hv1.example.net/system', 'uri' );
-    is( $hv1->bridge_device,  'br0',                                    'bridge_device, so no probing' );
-    is( $hv1->reserve_memory, 4096,                                     'reserve_memory' );
-    is( $hv1->max_guests,     20,                                       'max_guests' );
+    is( $hv1->name,           'hv1',                                     'name' );
+    is( $hv1->uri,            'qemu+ssh://root@hv1.example.test/system', 'uri' );
+    is( $hv1->bridge_device,  'br0',                                     'bridge_device, so no probing' );
+    is( $hv1->reserve_memory, 4096,                                      'reserve_memory' );
+    is( $hv1->max_guests,     20,                                        'max_guests' );
 
     is( $fleet->hypervisor('hv2')->reserve_memory, 2048, 'unset limits fall back to the defaults' );
     is( $fleet->hypervisor('hv2')->cpu_overcommit, 4,    'including the cpu overcommit ratio' );
@@ -145,11 +145,11 @@ subtest 'hosting asks each hypervisor' => sub {
     my $mock = Test::MockModule->new('Trog::HV');
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
-    my $found = $fleet->hosting('vm.example.com');
+    my $found = $fleet->hosting('vm.example.test');
     is( $found && $found->name, 'hv2', 'the one that has it' );
 
     $mock->redefine( domain_exists => sub { 0 } );
-    is( $fleet->hosting('vm.example.com'), undef, 'undef when nobody does' );
+    is( $fleet->hosting('vm.example.test'), undef, 'undef when nobody does' );
 };
 
 subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
@@ -166,7 +166,7 @@ subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     my @warnings;
     my $found = do {
         local $SIG{__WARN__} = sub { push @warnings, @_ };
-        $fleet->hosting('vm.example.com');
+        $fleet->hosting('vm.example.test');
     };
 
     is( $found && $found->name, 'hv2', 'the reachable one still answers' );
@@ -182,7 +182,7 @@ subtest 'place picks the roomiest that fits' => sub {
         hv2 => capacity( memory_free => 40000, disk_free => 900 * $GB ),
     );
 
-    my $chosen = quietly( sub { $fleet->place( 'vm.example.com', memory_mb => 4096, cpus => 2, disk_bytes => 40 * $GB ) } );
+    my $chosen = quietly( sub { $fleet->place( 'vm.example.test', memory_mb => 4096, cpus => 2, disk_bytes => 40 * $GB ) } );
     is( $chosen->name, 'hv2', 'the emptier one' );
 };
 
@@ -196,7 +196,7 @@ subtest 'placement is by the tightest resource, not the roomiest' => sub {
         hv2 => capacity( memory_free => 20000, memory_mb => 65536, disk_free => 4000 * $GB ),
     );
 
-    my $chosen = quietly( sub { $fleet->place( 'big.example.com', memory_mb => 4096, cpus => 2, disk_bytes => 50 * $GB ) } );
+    my $chosen = quietly( sub { $fleet->place( 'big.example.test', memory_mb => 4096, cpus => 2, disk_bytes => 50 * $GB ) } );
     is( $chosen->name, 'hv2', 'the one that will not be nearly full afterwards' );
 };
 
@@ -207,8 +207,8 @@ subtest 'nowhere to put it is an error that says why' => sub {
         hv2 => capacity( memory_free => 512, disk_free => 1 * $GB ),
     );
 
-    eval { $fleet->place( 'vm.example.com', memory_mb => 8192, cpus => 2, disk_bytes => 40 * $GB ) };
-    like( $@, qr/Nowhere to put vm\.example\.com/,         'refuses' );
+    eval { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 40 * $GB ) };
+    like( $@, qr/Nowhere to put vm\.example\.test/,        'refuses' );
     like( $@, qr/hv1: needs 8192MB of memory, 512MB free/, 'naming what hv1 was short of' );
     like( $@, qr/hv1: already has 20 guests/,              'and that it is full' );
     like( $@, qr/hv2: needs 40GB of disk/,                 'and what hv2 was short of' );
@@ -218,7 +218,7 @@ subtest 'an unreachable hypervisor is reported as such, not skipped silently' =>
     my $fleet = Trog::Hypervisors->load( fleet_file() );
     my $mock  = with_capacity( hv1 => 'libvirt says no', hv2 => capacity( memory_free => 512 ) );
 
-    eval { $fleet->place( 'vm.example.com', memory_mb => 8192, cpus => 2, disk_bytes => 1 * $GB ) };
+    eval { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 1 * $GB ) };
     like( $@, qr/hv1: unreachable -- libvirt says no/, 'named, with the reason' );
 };
 
@@ -230,7 +230,7 @@ subtest 'a guest that already exists stays where it is' => sub {
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv1' ? 1 : 0 } );
     $mock->redefine( capacity      => sub { die "placement should not have been asked\n" } );
 
-    my $hv = quietly( sub { $fleet->select_for( 'vm.example.com', guest_conf( memory => 4096, cpus => 2, size => 40 * $GB ) ) } );
+    my $hv = quietly( sub { $fleet->select_for( 'vm.example.test', guest_conf( memory => 4096, cpus => 2, size => 40 * $GB ) ) } );
     is( $hv->name,             'hv1', 'found rather than placed' );
     is( Trog::HV->new()->name, 'hv1', 'and it became the current hypervisor' );
 };
@@ -243,7 +243,7 @@ subtest 'provision.conf can pin a guest to a hypervisor' => sub {
     $mock->redefine( capacity      => sub { capacity() } );
 
     my $conf = guest_conf( memory => 4096, cpus => 2, size => 40 * $GB, hypervisor => 'hv2' );
-    my $hv   = $fleet->select_for( 'vm.example.com', $conf );
+    my $hv   = $fleet->select_for( 'vm.example.test', $conf );
     is( $hv->name, 'hv2', 'pinned where it was told' );
 };
 
@@ -255,7 +255,7 @@ subtest 'a pin to a hypervisor that cannot take it is an error' => sub {
     $mock->redefine( capacity      => sub { capacity( memory_free => 128 ) } );
 
     my $conf = guest_conf( memory => 4096, cpus => 2, size => 40 * $GB, hypervisor => 'hv2' );
-    eval { $fleet->select_for( 'vm.example.com', $conf ) };
+    eval { $fleet->select_for( 'vm.example.test', $conf ) };
     like( $@, qr/pinned to hv2, which cannot take it/, 'refuses rather than placing it elsewhere' );
     like( $@, qr/needs 4096MB of memory/,              'and says what it was short of' );
 };
@@ -266,14 +266,14 @@ subtest 'find' => sub {
 
     Trog::HV->forget();
     my $explicit = Trog::Hypervisors->find(
-        'vm.example.com',
+        'vm.example.test',
         uri => 'qemu+ssh://root@elsewhere/system', hvconf => $path
     );
     is( $explicit->uri, 'qemu+ssh://root@elsewhere/system', '--connect skips the fleet entirely' );
 
     Trog::HV->forget();
     my $no_fleet = Trog::Hypervisors->find(
-        'vm.example.com',
+        'vm.example.test',
         hvconf => '/tmp/nonexistent_xyz/hypervisors.conf', config => undef
     );
     ok( $no_fleet->is_local, 'with no fleet we are back to the local hypervisor' );
@@ -282,14 +282,14 @@ subtest 'find' => sub {
     $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
 
     Trog::HV->forget();
-    my $found = quietly( sub { Trog::Hypervisors->find( 'vm.example.com', hvconf => $path ) } );
+    my $found = quietly( sub { Trog::Hypervisors->find( 'vm.example.test', hvconf => $path ) } );
     is( $found->name, 'hv2', 'found on the one that has it' );
 
     $mock->redefine( domain_exists => sub { 0 } );
     Trog::HV->forget();
-    eval { Trog::Hypervisors->find( 'gone.example.com', hvconf => $path ) };
-    like( $@, qr/has a guest called gone\.example\.com/, 'a guest on none of them is an error' );
-    like( $@, qr/Looked on: hv1, hv2/,                   'saying where we looked' );
+    eval { Trog::Hypervisors->find( 'gone.example.test', hvconf => $path ) };
+    like( $@, qr/has a guest called gone\.example\.test/, 'a guest on none of them is an error' );
+    like( $@, qr/Looked on: hv1, hv2/,                    'saying where we looked' );
 };
 
 # --- Capacity arithmetic, against a stand-in libvirt --------------------------

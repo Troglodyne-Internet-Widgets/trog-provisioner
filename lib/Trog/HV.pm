@@ -21,8 +21,8 @@ Trog::HV - the hypervisor we are provisioning against
 
     use Trog::HV();
 
-    my $config = Config::Simple->new('/opt/domains/vm.example.com/provision.conf');
-    my $uri    = 'qemu+ssh://root@hv1.example.net/system';    # or undef, from --connect
+    my $config = Config::Simple->new('/opt/domains/vm.example.test/provision.conf');
+    my $uri    = 'qemu+ssh://root@hv1.example.test/system';    # or undef, from --connect
 
     # Once, wherever the config and command line are read:
     Trog::HV->from_config($config, uri => $uri);
@@ -30,7 +30,7 @@ Trog::HV - the hypervisor we are provisioning against
     # Everywhere else, in any package, without threading it through:
     my $hv = Trog::HV->new();
 
-    $hv->annihilate_domain('vm.example.com');
+    $hv->annihilate_domain('vm.example.test');
     $hv->write_text('/etc/libvirt/hooks/qemu', 'some hook', sudo => 1);
     print $hv->pool_path, "\n";
 
@@ -446,7 +446,7 @@ The address libvirt has leased on C<$network>, usually C<default>.
 Pass C<mac> and it asks dnsmasq for that interface's lease and nothing else,
 which is exact.  Pass C<hostname> and it matches on what the guest called
 itself, which is a substring match and can be fooled: a guest named
-C<vm.example.com> matches a lease belonging to C<sub.vm.example.com>.  Prefer
+C<vm.example.test> matches a lease belonging to C<sub.vm.example.test>.  Prefer
 the MAC; C<guest_mac> exists so there always is one.
 
 Where several leases match, the one that expires last, which is the one granted

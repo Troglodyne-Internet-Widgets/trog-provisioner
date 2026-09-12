@@ -160,8 +160,8 @@ archive. Two shapes:
 ```yaml
 _base:
     _global:
-        mirror: aptmirror.example.com          # a domain here, resolved to its address
-        # mirror: http://mirror.example.net/ubuntu   # or a URL, used as written
+        mirror: aptmirror.example.test          # a domain here, resolved to its address
+        # mirror: http://mirror.example.test/ubuntu   # or a URL, used as written
 ```
 
 To have one of your own to name, give a domain the `aptmirror` recipe and build
@@ -212,7 +212,7 @@ to upstream once the guest's deferred work is done.
 ```yaml
 _base:
     _global:
-        cache: fetchcache.example.com
+        cache: fetchcache.test
 ```
 
 To have one to name, give a domain the `fetchcache` recipe. It fetches from those
@@ -249,9 +249,9 @@ the guests that send; `logcollector` goes on the guest that keeps what arrives.
 ```yaml
 _base:
     logshipper:
-        host: logs.example.com        # every guest ships
+        host: logs.example.test        # every guest ships
 
-logs.example.com:
+logs.example.test:
     logcollector:
         retain: 52
 ```
@@ -297,7 +297,7 @@ it, the CPAN dependencies, an `/etc/trog-provisioner` of its own, and -- when
 asked for one -- a key a hypervisor will trust.
 
 ```yaml
-runner.example.com:
+runner.example.test:
     trogrunner:
         checkout: 0                   # this one manages its own repositories
         deps_from:
@@ -310,7 +310,7 @@ runner.example.com:
 
         hypervisors:
             hydra:
-                libvirt_uri: qemu+ssh://runner@hydra.example.com/system
+                libvirt_uri: qemu+ssh://runner@hydra.example.test/system
                 pool_path:   /pool/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner

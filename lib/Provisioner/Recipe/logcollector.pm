@@ -16,7 +16,7 @@ Provisioner::Recipe::logcollector - a guest that keeps everybody else's logs.
 
 =head1 SYNOPSIS
 
-    logs.example.com:
+    logs.example.test:
         logcollector:
             retain: 52
 
@@ -24,7 +24,7 @@ and then point the fleet at it:
 
     _base:
         logshipper:
-            host: logs.example.com
+            host: logs.example.test
 
 =head1 DESCRIPTION
 

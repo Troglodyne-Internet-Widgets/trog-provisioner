@@ -92,7 +92,7 @@ allows a makefile and its whole postrun queue.
 
 So build one with the budget raised:
 
-    TROG_SETUP_TIMEOUT=3h bin/provision runner.example.com
+    TROG_SETUP_TIMEOUT=3h bin/provision runner.example.test
 
 Nothing breaks if you forget.  C<bin/provision> stops waiting and says so; the
 queue carries on regardless, because F<scripts/post_install> is run by C<atd>

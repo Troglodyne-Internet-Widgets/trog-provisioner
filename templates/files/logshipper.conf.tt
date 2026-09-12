@@ -7,7 +7,7 @@
 [% IF target -%]
 [%# The collector files messages under the name the sender put in them, and
     rsyslog sends its short hostname unless told otherwise -- so without this a
-    fleet with staging.example.com and staging.example.net files both into
+    fleet with staging.example.test and staging.example.test files both into
     staging.log and neither is complete.  Measured on a guest: off gives "logs",
     on gives "logs.test.test". -%]
 global(preserveFQDN="on")

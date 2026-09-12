@@ -16,16 +16,16 @@ use parent qw{Provisioner::Recipe};
 
     somedomain:
         sssd:
-            ldap_uri: ldaps://ldap.example.com
-            base_dn: dc=example,dc=com
+            ldap_uri: ldaps://ldap.example.test
+            base_dn: dc=example,dc=test
 
 Or with a bind DN for authenticated searches:
 
     somedomain:
         sssd:
-            ldap_uri: ldaps://ldap.example.com
-            base_dn: dc=example,dc=com
-            bind_dn: cn=readonly,dc=example,dc=com
+            ldap_uri: ldaps://ldap.example.test
+            base_dn: dc=example,dc=test
+            bind_dn: cn=readonly,dc=example,dc=test
             bind_password: readonlypass
 
 =head2 DESCRIPTION

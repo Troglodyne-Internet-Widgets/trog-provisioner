@@ -19,7 +19,7 @@ In recipes.yaml:
     somedomain:
         openvpnclient:
             order: A
-            server: vpn.example.com
+            server: vpn.example.test
             cert_dir: /opt/vpn-certs/somedomain
             port: 1194
             proto: udp

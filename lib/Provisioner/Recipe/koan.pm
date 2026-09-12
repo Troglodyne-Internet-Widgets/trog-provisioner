@@ -88,11 +88,11 @@ use Crypt::PRNG();
             interval_seconds: 60
 
             # Optional SMTP for session-digest emails
-            # smtp_host:     "smtp.example.com"
+            # smtp_host:     "smtp.example.test"
             # smtp_port:     587
-            # smtp_user:     "koan@example.com"
+            # smtp_user:     "koan@example.test"
             # smtp_password: "..."
-            # email_to:      "you@example.com"
+            # email_to:      "you@example.test"
 
             # Projects the bot collaborates on.  Each entry needs an
             # absolute `path` on the guest.  Optional `github_url`

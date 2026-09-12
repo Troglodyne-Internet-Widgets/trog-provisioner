@@ -40,17 +40,17 @@ subtest 'a guest needs somewhere to connect to' => sub {
 
 subtest 'identity' => sub {
     my $guest = Trog::Guest->new(
-        name => 'vm.example.com', host     => '203.0.113.10',
-        user => 'ubuntu',         key_path => '/opt/domains/vm.example.com/key.rsa'
+        name => 'vm.example.test', host     => '203.0.113.10',
+        user => 'ubuntu',          key_path => '/opt/domains/vm.example.test/key.rsa'
     );
 
-    is( $guest->name,       'vm.example.com',      'name' );
+    is( $guest->name,       'vm.example.test',     'name' );
     is( $guest->ssh_host,   '203.0.113.10',        'host' );
     is( $guest->ssh_user,   'ubuntu',              'user' );
     is( $guest->ssh_port,   22,                    'the usual port' );
     is( $guest->ssh_target, 'ubuntu@203.0.113.10', 'ssh target' );
     ok( !$guest->is_local, 'a guest is never us' );
-    is( $guest->describe, 'vm.example.com (ubuntu@203.0.113.10)', 'says both in errors' );
+    is( $guest->describe, 'vm.example.test (ubuntu@203.0.113.10)', 'says both in errors' );
 
     is(
         Trog::Guest->new( host => '203.0.113.11' )->name, '203.0.113.11',
@@ -60,7 +60,7 @@ subtest 'identity' => sub {
 
 # --- Waiting ------------------------------------------------------------------
 subtest 'wait_for_ssh wants the port open and the connection made' => sub {
-    my $guest = Trog::Guest->new( name => 'vm.example.com', host => '203.0.113.10', user => 'ubuntu' );
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
 
     my $ports   = Test::MockModule->new('Net::EmptyPort');
     my $machine = Test::MockModule->new('Trog::Machine');
@@ -70,7 +70,7 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
         quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } );
     };
     like( $@, qr/never came up after 1s/, 'a port that never opens is an error' );
-    like( $@, qr/vm\.example\.com/,       'naming the guest' );
+    like( $@, qr/vm\.example\.test/,      'naming the guest' );
 
     # A port that opens but a connection that will not: checking only the first
     # is how you get a confusing failure three steps later.
@@ -86,7 +86,7 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
 };
 
 subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
-    my $guest = Trog::Guest->new( name => 'vm.example.com', host => '203.0.113.10', user => 'ubuntu' );
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
 
     my @ran;
     my $machine = Test::MockModule->new('Trog::Machine');
@@ -102,11 +102,11 @@ subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
         }
     );
 
-    ok( quietly( sub { $guest->wait_for_cloud_init('vm.example.com') } ), 'finishes' );
+    ok( quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } ), 'finishes' );
 
     ok( ( grep { index( $_, 'Boot configuration complete' ) >= 0 } @ran ), 'waited for the boot to report complete' );
     ok(
-        ( grep { index( $_, 'sudo rm /var/lib/cloud/instances/vm.example.com/sem/config_foo' ) >= 0 } @ran ),
+        ( grep { index( $_, 'sudo rm /var/lib/cloud/instances/vm.example.test/sem/config_foo' ) >= 0 } @ran ),
         'removed the semaphore of the module that failed'
     );
     ok( ( grep { index( $_,  'cloud-init single --name foo' ) >= 0 } @ran ), 'and re-ran it' );
@@ -122,7 +122,7 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
     $machine->redefine( capture_cmd => sub { '[]' } );
 
     eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.com') } );
+        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
     };
     like( $@, qr/Cloud init reported failure/, 'dies' );
 };
@@ -136,13 +136,13 @@ subtest 'cloud-init that does not return JSON is fatal' => sub {
     $machine->redefine( capture_cmd => sub { 'command not found' } );
 
     eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.com') } );
+        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
     };
     like( $@, qr/did not return a JSON array/, 'dies rather than carrying on blind' );
 };
 
 subtest 'wait_for_makefile waits for the queue twice' => sub {
-    my $guest = Trog::Guest->new( name => 'vm.example.com', host => '203.0.113.10', user => 'ubuntu' );
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
 
     my @ran;
     my $machine = Test::MockModule->new('Trog::Machine');
@@ -150,12 +150,12 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
     $machine->redefine( run_sudo    => sub { my ( $s, @c ) = @_; push @ran, 'sudo ' . join( ' ', @c ); return 0 } );
     $machine->redefine( capture_cmd => sub { 'the last few lines' } );
 
-    ok( quietly( sub { $guest->wait_for_makefile('vm.example.com') } ), 'finishes' );
+    ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'finishes' );
 
     my @queue = grep { index( $_, 'atq' ) >= 0 } @ran;
     is( scalar @queue, 2, 'twice, because the Makefile may queue work of its own' );
-    ok( ( grep { index( $_, 'until [ -f /var/log/vm.example.com.setup.log ]' ) >= 0 } @ran ),      'waited for the log to appear' );
-    ok( ( grep { index( $_, 'while lsof | grep /var/log/vm.example.com.setup.log' ) >= 0 } @ran ), 'and to stop being written' );
+    ok( ( grep { index( $_, 'until [ -f /var/log/vm.example.test.setup.log ]' ) >= 0 } @ran ),      'waited for the log to appear' );
+    ok( ( grep { index( $_, 'while lsof | grep /var/log/vm.example.test.setup.log' ) >= 0 } @ran ), 'and to stop being written' );
 };
 
 # These print their progress; the tests do not need to read it.

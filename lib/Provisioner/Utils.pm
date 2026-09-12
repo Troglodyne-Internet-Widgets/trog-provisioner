@@ -183,7 +183,7 @@ stands.
 
 Two recipes need this and it is easy to get wrong in the direction that only
 shows up in a mail log: appending the domain to something that is already an
-address gives C<somebody@example.com@this.domain>, which postfix and cron both
+address gives C<somebody@example.test@this.domain>, which postfix and cron both
 accept and neither delivers.
 
 Returns STRING, or C<$value> unchanged when there is nothing to qualify it with.
@@ -226,8 +226,8 @@ sub fleet_address {
 
     return ( none => q{} ) unless defined $name && length $name;
 
-    # The scheme, rather than counting dots: aptmirror.example.com and
-    # mirror.example.net are both dotted, and only one of them says how to get
+    # The scheme, rather than counting dots: aptmirror.example.test and
+    # mirror.example.test are both dotted, and only one of them says how to get
     # there.
     return ( url => $name ) if $name =~ m{\A[a-z][a-z\d+.-]*://}i;
 

@@ -23,7 +23,7 @@ Or with explicit base DN and LDAPS port:
     somedomain:
         ldap:
             admin_password: s3cr3t
-            base_dn: dc=example,dc=com
+            base_dn: dc=example,dc=test
             port: 636
 
 =head2 DESCRIPTION
@@ -105,7 +105,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Derive base_dn from domain: example.com -> dc=example,dc=com
+    # Derive base_dn from domain: example.test -> dc=example,dc=test
     #
     # split(/[.]/) and not split('.'): the first argument to split is a pattern,
     # and '.' as a pattern matches every character -- so this produced no parts

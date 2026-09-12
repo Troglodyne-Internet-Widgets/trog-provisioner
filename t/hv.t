@@ -51,17 +51,17 @@ subtest 'default connection is local' => sub {
 };
 
 subtest 'new() is a singleton' => sub {
-    my $configured = fresh( uri => 'qemu+ssh://root@hv1.example.net/system' );
+    my $configured = fresh( uri => 'qemu+ssh://root@hv1.example.test/system' );
     is(
-        Trog::HV->new()->uri, 'qemu+ssh://root@hv1.example.net/system',
+        Trog::HV->new()->uri, 'qemu+ssh://root@hv1.example.test/system',
         'a later new() with no arguments finds the hypervisor we configured'
     );
     is( Trog::HV->new(), $configured, 'and it is the very same object' );
 
-    my $other = Trog::HV->new( uri => 'qemu+ssh://root@hv2.example.net/system' );
+    my $other = Trog::HV->new( uri => 'qemu+ssh://root@hv2.example.test/system' );
     isnt( $other, $configured, 'asking for a different URI builds a different one' );
     is(
-        Trog::HV->new()->uri, 'qemu+ssh://root@hv2.example.net/system',
+        Trog::HV->new()->uri, 'qemu+ssh://root@hv2.example.test/system',
         'which becomes the one everything else sees'
     );
 };
@@ -74,11 +74,11 @@ subtest 'explicitly asking for the local URI is still explicit' => sub {
 
 # --- URI parsing --------------------------------------------------------------
 subtest 'qemu+ssh URI' => sub {
-    my $hv = fresh( uri => 'qemu+ssh://root@hv1.example.net/system' );
+    my $hv = fresh( uri => 'qemu+ssh://root@hv1.example.test/system' );
     ok( !$hv->is_local, 'remote' );
-    is( $hv->ssh_target, 'root@hv1.example.net', 'ssh target' );
-    is( $hv->ssh_user,   'root',                 'ssh user' );
-    is( $hv->ssh_port,   22,                     'port falls back to 22' );
+    is( $hv->ssh_target, 'root@hv1.example.test', 'ssh target' );
+    is( $hv->ssh_user,   'root',                  'ssh user' );
+    is( $hv->ssh_port,   22,                      'port falls back to 22' );
 };
 
 subtest 'qemu+ssh URI with a port' => sub {
@@ -102,7 +102,7 @@ subtest 'unparseable URI dies' => sub {
 # --- Transports that give us no shell ----------------------------------------
 subtest 'a remote transport with no shell is refused up front' => sub {
     Trog::HV->forget();
-    eval { Trog::HV->new( uri => 'qemu+tcp://hv2.example.net/system' ) };
+    eval { Trog::HV->new( uri => 'qemu+tcp://hv2.example.test/system' ) };
     like( $@, qr/gives us no shell/,  'tcp:// is rejected rather than half-working' );
     like( $@, qr/qemu\+ssh:\/\/root/, 'and names the transport to use instead' );
 };
@@ -111,8 +111,8 @@ subtest 'a remote transport with no shell is refused up front' => sub {
 subtest 'slug is filesystem safe and stable' => sub {
     is( fresh( uri => 'qemu:///system' )->slug, 'qemu_system', 'local' );
     is(
-        fresh( uri => 'qemu+ssh://root@hv1.example.net/system' )->slug,
-        'qemu_ssh_root_hv1_example_net_system', 'remote'
+        fresh( uri => 'qemu+ssh://root@hv1.example.test/system' )->slug,
+        'qemu_ssh_root_hv1_example_test_system', 'remote'
     );
     unlike(
         fresh( uri => 'qemu+ssh://root@hv1/system' )->slug, qr{[^A-Za-z0-9_]},
@@ -625,15 +625,15 @@ subtest 'a disk is an overlay on the base image' => sub {
     my $path = quietly(
         sub {
             $hv->create_disk(
-                'vm.example.com-qcow2',
+                'vm.example.test-qcow2',
                 backing => '/opt/terraform/disks/baseimage-qcow2', capacity => 42949672960
             );
         }
     );
 
-    is( $path, '/opt/terraform/disks/vm.example.com-qcow2', 'made, and its path came back' );
-    like( $created[0], qr{<name>vm\.example\.com-qcow2</name>}, 'named' );
-    like( $created[0], qr{<capacity unit='bytes'>42949672960<}, 'sized' );
+    is( $path, '/opt/terraform/disks/vm.example.test-qcow2', 'made, and its path came back' );
+    like( $created[0], qr{<name>vm\.example\.test-qcow2</name>}, 'named' );
+    like( $created[0], qr{<capacity unit='bytes'>42949672960<},  'sized' );
     like(
         $created[0], qr{<backingStore><path>/opt/terraform/disks/baseimage-qcow2</path>},
         'laid over the base image rather than copying it'
@@ -641,10 +641,10 @@ subtest 'a disk is an overlay on the base image' => sub {
     like( $created[0], qr{<format type='qcow2'/></backingStore>}, 'which is qcow2 too' );
 
     # One that is already there is left alone: it is a guest's filesystem.
-    $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.example.com-qcow2' } );
+    $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.example.test-qcow2' } );
     is(
-        $hv->create_disk( 'vm.example.com-qcow2', backing => '/base', capacity => 1 ),
-        '/opt/terraform/disks/vm.example.com-qcow2', 'an existing disk is returned, not remade'
+        $hv->create_disk( 'vm.example.test-qcow2', backing => '/base', capacity => 1 ),
+        '/opt/terraform/disks/vm.example.test-qcow2', 'an existing disk is returned, not remade'
     );
     is( scalar @created, 1, 'and nothing new was created' );
 };
@@ -789,7 +789,7 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     my $path = quietly(
         sub {
             $hv->cloudinit_iso(
-                'vm.example.com',
+                'vm.example.test',
                 'user-data'      => "#cloud-config\n",
                 'meta-data'      => "instance-id: vm\n",
                 'network-config' => "version: 1\n"
@@ -797,7 +797,7 @@ subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
         }
     );
 
-    is( $path, '/opt/terraform/disks/vm.example.com-cloudinit.iso', 'lands in the pool' );
+    is( $path, '/opt/terraform/disks/vm.example.test-cloudinit.iso', 'lands in the pool' );
 
     my ($iso) = grep { $_->[0] eq 'xorriso' } @ran;
     is_deeply( [ @{$iso}[ 0, 1, 2 ] ], [qw{xorriso -as mkisofs}], 'xorriso in mkisofs mode' );
@@ -874,21 +874,21 @@ sub quietly {
 subtest 'a guest MAC is derived from its name and does not move' => sub {
     my $hv = fresh();
 
-    my $nat    = $hv->guest_mac( 'vm.example.com', 0 );
-    my $bridge = $hv->guest_mac( 'vm.example.com', 1 );
+    my $nat    = $hv->guest_mac( 'vm.example.test', 0 );
+    my $bridge = $hv->guest_mac( 'vm.example.test', 1 );
 
     like( $nat, qr/\A52:54:00(:[0-9a-f]{2}){3}\z/, 'a QEMU-prefixed MAC' );
     isnt( $nat, $bridge, 'the two interfaces differ' );
 
     is(
-        $hv->guest_mac( 'vm.example.com', 0 ), $nat,
+        $hv->guest_mac( 'vm.example.test', 0 ), $nat,
         'the same guest gets the same MAC every time, so its lease survives a rebuild'
     );
-    isnt( $hv->guest_mac( 'other.example.com', 0 ), $nat, 'a different guest does not' );
+    isnt( $hv->guest_mac( 'other.example.test', 0 ), $nat, 'a different guest does not' );
 
     # Any hypervisor agrees, since it comes from the name and nothing else.
     is(
-        fresh( uri => 'qemu+ssh://hv2/system' )->guest_mac( 'vm.example.com', 0 ), $nat,
+        fresh( uri => 'qemu+ssh://hv2/system' )->guest_mac( 'vm.example.test', 0 ), $nat,
         'and so does another hypervisor'
     );
 
@@ -929,9 +929,9 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     is( $asked[0],                                              '52:54:00:aa:bb:cc', 'and dnsmasq was asked about that MAC, not sifted afterwards' );
 
     # The hostname match is still there, and is still a substring match: a guest
-    # called vm.example.com matches a lease for sub.vm.example.com.
-    is( $hv->lease_ip( 'default', hostname => 'vm.example.com' ), '192.168.122.50', 'hostname still works' );
-    is( $hv->lease_ip( 'default', hostname => 'nothing.here' ),   undef,            'and misses when it should' );
+    # called vm.example.test matches a lease for sub.vm.example.test.
+    is( $hv->lease_ip( 'default', hostname => 'vm.example.test' ), '192.168.122.50', 'hostname still works' );
+    is( $hv->lease_ip( 'default', hostname => 'nothing.here' ),    undef,            'and misses when it should' );
 };
 
 {
@@ -957,7 +957,7 @@ subtest 'leases are looked up by MAC, not by name' => sub {
         my ( $self, $mac ) = @_;
         push @{ $self->{asked} }, $mac;
         return @LEASES if @LEASES;
-        return ( { ipaddr => '192.168.122.50', mac => '52:54:00:aa:bb:cc', hostname => 'vm.example.com' } );
+        return ( { ipaddr => '192.168.122.50', mac => '52:54:00:aa:bb:cc', hostname => 'vm.example.test' } );
     }
 }
 

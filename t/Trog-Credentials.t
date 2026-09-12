@@ -120,13 +120,13 @@ subtest 'sudo on a machine nobody is watching' => sub {
     require Trog::HV;
 
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( describe       => sub { 'hv.example.com' } );
+    $machine->redefine( describe       => sub { 'hv.example.test' } );
     $machine->redefine( ssh_user       => sub { 'ubuntu' } );
-    $machine->redefine( ssh_target     => sub { 'ubuntu@hv.example.com' } );
+    $machine->redefine( ssh_target     => sub { 'ubuntu@hv.example.test' } );
     $machine->redefine( _have_terminal => sub { 0 } );
 
     Trog::HV->forget();
-    my $hv = Trog::HV->new( uri => 'qemu+ssh://ubuntu@hv.example.com/system' );
+    my $hv = Trog::HV->new( uri => 'qemu+ssh://ubuntu@hv.example.test/system' );
     Trog::Machine::forget_sudo_passwords();
 
     # This is the case the whole thing is for: a detached run, sudo on the far

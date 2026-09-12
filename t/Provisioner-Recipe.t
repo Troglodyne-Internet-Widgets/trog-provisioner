@@ -98,8 +98,8 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $global_out = $widget->()->render_global( global_flag => 'yes' );
     like( $global_out, qr/global_setup=yes/, 'render_global renders global template' );
 
-    my $domain_out = $widget->()->render( domain => 'example.com' );
-    like( $domain_out, qr/domain=example\.com/, 'render still renders per-domain template' );
+    my $domain_out = $widget->()->render( domain => 'example.test' );
+    like( $domain_out, qr/domain=example\.test/, 'render still renders per-domain template' );
 };
 
 subtest 'schema defaults are filled in' => sub {
@@ -355,11 +355,11 @@ subtest 'generate_files writes what template_files names' => sub {
         }
     }
 
-    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.com' );
+    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.test' );
 
     is_deeply( [ sort @written ], [qw{rendered.conf verbatim.conf}], 'and says what it wrote, relative to where' );
-    is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.com', 'a .tt is rendered' );
-    is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',   'and anything else is copied' );
+    is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.test', 'a .tt is rendered' );
+    is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',    'and anything else is copied' );
 };
 
 done_testing();

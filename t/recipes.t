@@ -391,8 +391,8 @@ rejects_missing(
 );
 
 rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
-rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },          'ldap_uri', 'sssd rejects missing ldap_uri' );
-rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.com' }, 'base_dn',  'sssd rejects missing base_dn' );
+rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },           'ldap_uri', 'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',  'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints
@@ -559,11 +559,11 @@ subtest 'cron addresses: a local part gets the domain, an address does not' => s
         qr/^MAILFROM="cron\@\Q$d\E"$/m, 'and gets the domain appended'
     );
 
-    # Appending to an address gives somebody@example.com@this.domain, which is
+    # Appending to an address gives somebody@example.test@this.domain, which is
     # what the old template did to every value the old schema would accept.
     like(
-        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.com' ),
-        qr/^MAILFROM="someone\@example\.com"$/m, 'an address is left exactly as it stands'
+        $cron->()->render_file( 'files/cron.root.tt', %G, from => 'someone@example.test' ),
+        qr/^MAILFROM="someone\@example\.test"$/m, 'an address is left exactly as it stands'
     );
 };
 
@@ -576,7 +576,7 @@ subtest 'cron MAILTO per script' => sub {
             'files/cron.root.domain.tt', %G,
             root_scripts => [
                 { interval => '0 0 * * *',   cmd => '/silent.pl' },
-                { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.com' },
+                { interval => '*/5 * * * *', cmd => '/addressed.pl', mailto => 'someone@example.test' },
                 { interval => '*/7 * * * *', cmd => '/local.pl',     mailto => 'ops' },
                 { interval => '*/9 * * * *', cmd => '/none.pl',      mailto => 'none' },
             ]
@@ -599,8 +599,8 @@ subtest 'cron MAILTO per script' => sub {
         $to{'/none.pl'}, '',
         q{and one that says 'none' does not want it, which cron spells as an empty MAILTO}
     );
-    is( $to{'/addressed.pl'}, 'someone@example.com', 'an address is left alone' );
-    is( $to{'/local.pl'},     "ops\@$d",             'a local part gets the domain' );
+    is( $to{'/addressed.pl'}, 'someone@example.test', 'an address is left alone' );
+    is( $to{'/local.pl'},     "ops\@$d",              'a local part gets the domain' );
 };
 
 #
@@ -1310,7 +1310,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     )->render(
         "files/$DISTRO.setup.sh.tt",
         {
-            domain        => 'vm.example.com',
+            domain        => 'vm.example.test',
             transfer_ip   => '192.168.122.251',
             transfer_port => 22,
             transfer_user => 'transfer',
