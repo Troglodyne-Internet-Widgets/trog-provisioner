@@ -607,7 +607,8 @@ declared here and goes straight upstream.
 =cut
 
 sub fetch_hosts {
-    return qw{github.com};
+    my ( $self, %opts ) = @_;
+    return $self->host_of( $opts{repo_url} // $REPO ) || ();
 }
 
 1;

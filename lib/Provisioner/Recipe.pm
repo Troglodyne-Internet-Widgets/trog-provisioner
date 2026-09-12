@@ -12,6 +12,7 @@ use List::Util qw{any};
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
+use URI();
 use Scalar::Util();
 use File::Copy();
 use File::Slurper::Temp();
@@ -331,6 +332,29 @@ to a host it fetches from -- C<github_release_hosts> is GitHub's.
 
 sub fetch_hosts {
     return ();
+}
+
+=head3 $host = $recipe->host_of($url)
+
+The host a URL names, or nothing if it names none.
+
+Here because C<fetch_hosts> is handed a configuration and several recipes have
+to answer the same question of it: which host is this C<repo_url> or C<api_url>
+actually going to reach.  An scp-style git address -- C<git@github.com:o/r.git>
+-- is not a URL and L<URI> reads no host out of it, so it is matched separately
+rather than silently returning nothing for a form somebody will certainly use:
+it is what gogs hands out.
+
+=cut
+
+sub host_of {
+    my ( $self, $url ) = @_;
+
+    return unless defined $url && length $url;
+    return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
+
+    my $host = eval { URI->new($url)->host };
+    return $host ? lc $host : ();
 }
 
 =head3 @hosts = $recipe->github_release_hosts()

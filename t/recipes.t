@@ -2061,6 +2061,31 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
     }
 };
 
+subtest 'a recipe whose upstream is configured names the host it will reach' => sub {
+
+    # fetch_hosts is handed the module's own configuration by bin/new_config, so
+    # a repo_url pointed somewhere other than the default is declared -- and the
+    # guest points that host at the cache rather than the default it ignores.
+    foreach my $case ( [ koan => 'koan' ], [ trogrunner => 'trogrunner' ] ) {
+        my ( $name, $label ) = @$case;
+        my $recipe = Provisioner::Cookbook->load($name);
+
+        is( ( $recipe->fetch_hosts() )[0], 'github.com', "$label: the default's host when nothing is configured" );
+        is(
+            ( $recipe->fetch_hosts( repo_url => 'https://gitea.test/o/r.git' ) )[0],
+            'gitea.test', "$label: and the configured one when there is"
+        );
+    }
+
+    # admincode asks each api_url it is given; the hosts it then clones from come
+    # back from that API, so nothing can declare them in advance.
+    my @asked = Provisioner::Cookbook->load('admincode')->fetch_hosts(
+        repos_from => [ { api_url => 'https://gitea.test/api/v1/' }, { api_url => 'https://git.test/api/v1/' } ],
+    );
+    is_deeply( [ sort @asked ],                                             [qw{git.test gitea.test}], 'admincode: every api_url it was configured with' );
+    is_deeply( [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ], [],                        'and nothing when it is configured with none' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing();

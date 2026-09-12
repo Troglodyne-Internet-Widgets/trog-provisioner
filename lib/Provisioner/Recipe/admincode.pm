@@ -26,6 +26,31 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
+Sets a domain's admin account up for working in: the packages a person needs at
+a shell, and a checkout of every repository the accounts in C<repos_from> can
+see, cloned into C<basedir> under the admin's home.
+
+=head2 Cloning while the fetch cache is in front of it
+
+C<repos_for> asks each C<api_url> what repositories an account has and clones
+each one, trying C<clone_url> first and falling back to C<ssh_url>.  Two things
+about that are worth knowing before it surprises somebody.
+
+It runs B<during> the provision, from this recipe's own target, which is inside
+the window where C<scripts/fetch_via_cache> has pointed every host in
+C<fetch_hosts> at the cache.  An https clone is served through the cache and
+works -- git's ref advertisement and its upload-pack POST both pass through
+uncached, which C<templates/tests/fetchcache.tt> checks.
+
+The ssh fallback cannot be.  F</etc/hosts> redirects every port for a host, and
+the cache listens on 80 and 443, so an C<ssh_url> for a host the cache answers
+for has nothing to connect to until the entries come back out at the end of the
+build.  In practice this is the fallback doing its job -- gogs hands out ssh
+addresses and nothing else, and a gogs host is not one any recipe names -- but
+an https clone that fails transiently against a cached host will not be rescued
+by the fallback the way it would be on a guest with no cache.
+
+
 Clones all the repos owned by the specified entities known to the git server.
 Also symlink to the admin user's $HOME as $basedir.
 
@@ -75,6 +100,25 @@ sub args {
 
 sub tests {
     return qw{admincode.tt};
+}
+
+=head2 @hosts = $recipe->fetch_hosts(%opts)
+
+Each C<api_url> this domain is configured to ask, since C<repos_from> is where
+the repositories come from.
+
+Not the hosts it then clones from: those come back from that API as
+C<clone_url>, so nothing here can know them before it has asked.  On a guest
+where they turn out to be a host the cache answers for, the clone is served
+through it, which is the arrangement working rather than a problem -- see the
+caveat in the DESCRIPTION about the SSH fallback.
+
+=cut
+
+sub fetch_hosts {
+    my ( $self, %opts ) = @_;
+
+    return grep { $_ } map { $self->host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] };
 }
 
 1;

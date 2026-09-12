@@ -10,6 +10,9 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+# One copy, shared by args and fetch_hosts: two would drift.
+our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
+
 use Crypt::PRNG();
 
 =head1 Provisioner::Recipe::koan
@@ -236,7 +239,7 @@ sub args {
             # Generally set in _base._global
             user       => { type => 'string' },
             koan_email => { type => 'email' },
-            repo_url   => { type => 'string', default => 'https://github.com/troglodyne/koan.git' },
+            repo_url   => { type => 'string', default => $DEFAULT_REPO },
 
             # Default to the troglodyne fork  it carries the Megolm/Olm E2EE
             # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
@@ -420,7 +423,8 @@ declared here and goes straight upstream.
 =cut
 
 sub fetch_hosts {
-    return qw{github.com};
+    my ( $self, %opts ) = @_;
+    return $self->host_of( $opts{repo_url} // $DEFAULT_REPO ) || ();
 }
 
 1;
