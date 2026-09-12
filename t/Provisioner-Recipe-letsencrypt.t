@@ -126,6 +126,22 @@ subtest 'the fetcher registers before it asks for anything' => sub {
       or diag "register on line $register, cron on line $cron";
 };
 
+subtest 'the fetcher waits for the server that answers its challenge' => sub {
+    my ( undef, undef, $slurp ) = generated(%LOCAL);
+    my $fetcher = $slurp->('get_cert');
+
+    # The postrun queue is in fragment order and this recipe's fragment runs
+    # before pdns's, so the restarts that put the API socket and the zone in
+    # place are queued behind the fetcher.  Measured on a guest: lexicon found
+    # no socket, so the af-unix patch left the endpoint unmangled and requests
+    # refused it, and --resolve-zone-name resolved to nothing.
+    ok( index( $fetcher, '/var/spool/powerdns/api.sock' ) >= 0, 'it waits for the socket lexicon talks to' );
+    ok( index( $fetcher, 'SOA' ) >= 0,                          'and for the zone to be answered' );
+
+    ( undef, undef, $slurp ) = generated();
+    ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
+};
+
 subtest 'prefer_local_dns without a DNS server is refused' => sub {
     my $recipe = Provisioner::Cookbook->load( 'letsencrypt', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),

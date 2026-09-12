@@ -1,5 +1,19 @@
 #!/bin/bash
 
+[% IF prefer_local_dns -%]
+# Wait for the server that answers the challenge before asking for one.
+#
+# The postrun queue is in fragment order, and this recipe's fragment runs before
+# pdns's -- so the restarts that put the API socket and the zone in place are
+# queued after this task.  Measured on a guest: lexicon found no socket, so the
+# af-unix patch left the endpoint unmangled and requests refused it outright,
+# and --resolve-zone-name resolved to nothing, so the zone came out empty and
+# pdns answered 404 for zones/.
+for _ in $(seq 1 60); do
+    [ -S /var/spool/powerdns/api.sock ] && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . && break
+    sleep 2
+done
+[% END -%]
 # Register with the CA this domain is configured for, if this guest has not
 # already.  The global fragment registers as well, but it runs before any
 # recipe's target -- so on a guest whose CA is one of its own recipes, that
