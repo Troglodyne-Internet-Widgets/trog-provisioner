@@ -156,6 +156,21 @@ cannot have 50 GB free.  A deliberately small mirror still passes.
 
 =cut
 
+=head2 $bool = $recipe->shares_a_machine()
+
+False.  One mirror on the machine: one F</etc/apt/mirror.list>, one unit and one
+cron entry, each installed to a fixed path, and the releases it carries are this
+domain's argument.  Two domains naming different ones would not both be served
+-- whichever was built first would decide, and the other would be pointed at a
+mirror of something it never asked for.
+
+The vhost is not the difficulty; that one is named for the domain already, so
+each gets its own.  What they would be sharing is the mirror behind it.
+
+=cut
+
+sub shares_a_machine { return 0 }
+
 sub args {
     ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (

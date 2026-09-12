@@ -1805,7 +1805,7 @@ subtest 'the services that cannot be told about a second domain are named here' 
     # marked without cause.  bin/new_config refuses these for a domain being
     # layered onto another; everything else writes per domain, or goes through
     # configd, and does not care how many domains the guest holds.
-    my %cannot = map { $_ => 1 } qw{deluged garage gogs koan ldap matrix trogrunner};
+    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs koan ldap matrix openvpn trogrunner};
 
     foreach my $name ( sort Provisioner::Cookbook->names() ) {
         my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
