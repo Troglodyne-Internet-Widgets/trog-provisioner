@@ -101,4 +101,14 @@ sub tests {
     return qw{tpsgi.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the tPSGI checkout this recipe clones.
+
+=cut
+
+sub fetch_hosts {
+    return qw{github.com};
+}
+
 1;

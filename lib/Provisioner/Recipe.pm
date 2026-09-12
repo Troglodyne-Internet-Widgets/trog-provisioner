@@ -299,6 +299,26 @@ C<codeload.github.com>.  Asked of the class rather than of a configured recipe,
 because the answer is also what the fetch cache fetches from by default -- see
 L<Provisioner::Recipe::fetchcache> -- which cannot depend on any one domain.
 
+B<Every recipe that downloads anything declares this.>  A recipe that fetches a
+tarball, clones a checkout, or pulls a key and says nothing here is a recipe
+whose downloads never reach the cache -- so it is slower than its neighbours,
+and it is the one that fails when upstream does.  Nothing enforced that for a
+long time and nine hosts went undeclared; C<t/recipes.t> now checks what it can
+see.
+
+What it cannot see is a host a program reaches on its own: C<nvm install node>
+downloads from C<nodejs.org> without any template naming it.  So the test
+catches an omission that is written down, and the recipe still has to think
+about the ones that are not.
+
+Two things deliberately stay out.  B<Apt repositories>, because a guest reaches
+the archive through L<Provisioner::Recipe::aptmirror>'s mirrorlist and the
+cache's freshness classes do not map onto C<InRelease> and C<Packages>, where a
+mismatched pair is a hard failure.  And B<a host that only a configuration
+names>: this is asked of the class, with no configuration in hand, so a
+C<repo_url> or an C<api_url> pointed somewhere unusual is not declared and goes
+straight upstream.
+
 Empty by default.  On a guest with a C<cache>, each host its recipes name is
 pointed at the cache while it provisions, so what is downloaded from one is
 served out of what the cache has kept, and out of what it kept last time when

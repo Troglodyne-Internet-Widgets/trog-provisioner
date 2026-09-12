@@ -598,4 +598,16 @@ sub tests {
     return qw{trogrunner.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the checkout this recipe clones.  The host of the default only: C<fetch_hosts> is asked of the class,
+without a configuration, so a C<repo_url> pointed somewhere else is not
+declared here and goes straight upstream.
+
+=cut
+
+sub fetch_hosts {
+    return qw{github.com};
+}
+
 1;

@@ -175,4 +175,20 @@ sub tests {
     return qw{mariadb.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+The release signing key, which is a plain file fetch.
+
+Not C<archive.mariadb.org>: that is the apt repository, and apt reaches the
+network through the mirrorlist rather than the cache -- see
+L<Provisioner::Recipe::aptmirror>.  F<scripts/install_mariadb.sh> checks that
+what came back is really a PGP key, which is worth keeping now that a cache can
+be the thing answering.
+
+=cut
+
+sub fetch_hosts {
+    return qw{mariadb.org};
+}
+
 1;

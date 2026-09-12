@@ -47,4 +47,21 @@ SKIP: {
     like( $status, qr/\A(?:MISS|HIT|EXPIRED|REVALIDATED|STALE|UPDATING)\z/, "and says what the cache did about it ($status)" );
 }
 
+# A clone is two requests and both must pass through uncached: the ref
+# advertisement, and then a POST of the wants.  Nothing exercised either, and
+# the recipes that clone are the ones that had no fetch_hosts -- so whether a
+# clone met the cache at all depended on which other recipe shared the guest.
+SKIP: {
+    skip 'github.com is not one of its upstreams', 3 unless grep { $_ eq 'github.com' } @hosts;
+
+    my $repo = '/Troglodyne-Internet-Widgets/trog-provisioner.git';
+    my ( $code, $status ) = ask( 'github.com', "$repo/info/refs?service=git-upload-pack", '--cacert', $chain );
+    is( $code, '200', 'the ref advertisement comes back through it' );
+    is( $status, 'none', 'and is not cached, so a clone gets what is there now' );
+
+    # The POST half, which takes the other branch of the request-method test.
+    my $post = `curl -s -o /dev/null -w '%{http_code}' --max-time 60 --resolve 'github.com:443:127.0.0.1' --cacert '$chain' -X POST -H 'Content-Type: application/x-git-upload-pack-request' --data-binary '' 'https://github.com$repo/git-upload-pack' 2>/dev/null`;
+    isnt( $post, '421', "a POST is passed upstream rather than refused ($post)" );
+}
+
 done_testing();

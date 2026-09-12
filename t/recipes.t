@@ -31,6 +31,7 @@ use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
+use File::Find();
 use Provisioner::Cookbook();
 use IPC::Run3();
 use File::Find();
@@ -2007,6 +2008,57 @@ subtest 'the two halves of the log path agree about the port' => sub {
 
     is( $ship{port},     $collect{port},     'logshipper sends where logcollector listens' );
     is( $ship{protocol}, $collect{protocol}, 'over the transport it is accepting' );
+};
+
+subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
+
+    # The heuristic that found nine undeclared hosts: a URL on the same line as
+    # something that fetches it.  What it cannot see is a host a program reaches
+    # on its own -- nvm downloads node from nodejs.org and no template writes
+    # that down -- so this catches an omission that is written, and a recipe
+    # still has to think about the rest.
+    my %declared = map { $_ => 1 } Provisioner::Cookbook->fetch_hosts;
+
+    # Deliberately elsewhere.  Apt repositories do not go through the cache: a
+    # guest reaches the archive through aptmirror's mirrorlist, and the cache's
+    # freshness classes do not map onto InRelease and Packages, where a
+    # mismatched pair is a hard apt failure rather than a stale download.
+    my %elsewhere = map { $_ => 1 } qw{
+      archive.mariadb.org archive.ubuntu.com keyserver.ubuntu.com localhost
+      packages.matrix.org repo.plex.tv repo.powerdns.com security.ubuntu.com
+    };
+
+    my @sources;
+    File::Find::find(
+        sub { push( @sources, $File::Find::name ) if -f $_ },
+        "$FindBin::Bin/../templates", "$FindBin::Bin/../scripts",
+    );
+
+    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;
+    my %seen;
+    foreach my $file ( sort @sources ) {
+        my $text = eval { File::Slurper::read_text($file) };
+        next unless defined $text;
+
+        foreach my $line ( split( "\n", $text ) ) {
+            next unless $line =~ m/$fetches/;
+            while ( $line =~ m{https?://([a-z\d][a-z\d.-]*)}gi ) {
+                my $host = lc $1;
+
+                # An address is the guest talking to itself, and a template
+                # variable is not a host until it is rendered.
+                next if $host =~ m/\A[\d.]+\z/;
+                $seen{$host} //= $file =~ s{.*/}{}r;
+            }
+        }
+    }
+
+    ok( scalar keys %seen, 'the sweep found hosts that something fetches' ) or return;
+
+    foreach my $host ( sort keys %seen ) {
+        next if $elsewhere{$host};
+        ok( $declared{$host}, "$host, fetched in $seen{$host}, is declared in a fetch_hosts" );
+    }
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -114,4 +114,17 @@ sub tests {
     return qw{plexmediaserver.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+The package signing key, which is a plain file fetch.
+
+Not C<repo.plex.tv>: that is the apt repository, and apt does not go through
+the cache.
+
+=cut
+
+sub fetch_hosts {
+    return qw{downloads.plex.tv};
+}
+
 1;

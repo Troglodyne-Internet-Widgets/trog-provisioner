@@ -193,7 +193,10 @@ L<Provisioner::Recipe>.
 
 sub fetch_hosts {
     my ($class) = @_;
-    return $class->github_release_hosts;
+
+    # api.github.com as well: gogs.mirror.sh asks it which repositories an
+    # account or an organisation has before cloning any of them.
+    return ( 'api.github.com', $class->github_release_hosts );
 }
 
 =head2 @classes = $recipe->cache_classes()

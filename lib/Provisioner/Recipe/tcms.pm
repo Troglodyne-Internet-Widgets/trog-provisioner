@@ -121,4 +121,14 @@ sub tests {
     return qw{tcms.tt};
 }
 
+=head2 @hosts = $recipe->fetch_hosts()
+
+GitHub, which serves the tCMS checkout this recipe clones.
+
+=cut
+
+sub fetch_hosts {
+    return qw{github.com};
+}
+
 1;

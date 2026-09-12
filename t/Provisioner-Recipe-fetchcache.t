@@ -89,8 +89,12 @@ subtest 'the upstreams: every host a recipe downloads from, and whatever an oper
 
     # The default is on each host rather than on the map, so an operator adding
     # one does not replace the lot -- the ufw rate_limits trap.
-    my ($added) = generated( upstreams => { 'nodejs.org' => 1 } );
-    is_deeply( allowed($added), [ sort( @declared, 'nodejs.org' ) ], 'naming another adds it to them' );
+    #
+    # A .test name for the one added: this was nodejs.org until nvm declared it,
+    # and the fixture then appeared twice in the expected list.  The stand-in has
+    # to be a host no recipe can ever name.
+    my ($added) = generated( upstreams => { 'upstream.test' => 1 } );
+    is_deeply( allowed($added), [ sort( @declared, 'upstream.test' ) ], 'naming another adds it to them' );
 
     my ($removed) = generated( upstreams => { 'github.com' => 0 } );
     is_deeply( allowed($removed), [ grep { $_ ne 'github.com' } @declared ], 'and naming one false takes it away' );
@@ -253,7 +257,7 @@ subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a
 };
 
 subtest 'the certificate names every host it answers to, and the authority signed it' => sub {
-    my ( $vhost, undef, $dir ) = generated( upstreams => { 'nodejs.org' => 1 } );
+    my ( $vhost, undef, $dir ) = generated( upstreams => { 'upstream.test' => 1 } );
     my $authority = $FETCHCACHE->authority();
 
     my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)/sg;
