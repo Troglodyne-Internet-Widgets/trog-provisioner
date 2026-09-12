@@ -117,6 +117,20 @@ sub args {
 sub enrich {
     my ( $self, %params ) = @_;
 
+    # --resolve-zone-name rather than DELEGATED, and only for the local server.
+    #
+    # lexicon reduces a domain to its registrable name with tldextract before it
+    # asks for a zone.  A reserved TLD is not a public suffix, so <guest>.test
+    # collapsed to the zone "test", and DELEGATED was then composed back on top
+    # of that -- asking pdns for zones/<guest>.test.test, which is a 404, on
+    # every challenge.  Measured on a guest: with this flag lexicon finds the
+    # real zone, writes the record, and the authoritative server serves it back.
+    #
+    # Not for a registrar, where the domain is the zone and tldextract is right
+    # about it: the flag costs live DNS queries to work out something already
+    # known.
+    $params{lexicon_opts} = $params{prefer_local_dns} ? '--resolve-zone-name' : q{};
+
     # If the user instructs that we ought to use the local DNS server
     # instead of the global registrar info, let's do that.
     # Also make sure that we have the "right stuff" setup otherwise.
@@ -132,10 +146,7 @@ sub enrich {
         };
 
         #XXX pretty dopey that the var is POWERDNS_PDNS_SERVER, but load bearing at this point
-        $params{extra_lexicon_vars} = [
-            { key => 'PDNS_SERVER', value => "/var/spool/powerdns/api.sock" },
-            { key => 'DELEGATED',   value => $params{domain}, global => 1 },
-        ];
+        $params{extra_lexicon_vars} = [ { key => 'PDNS_SERVER', value => '/var/spool/powerdns/api.sock' } ];
     }
     else {
         die "Must set registrar info in _global section of config" unless exists $params{registrar} && ( ref( $params{registrar} ) eq 'HASH' );
