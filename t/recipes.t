@@ -1294,6 +1294,25 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
 };
 
+subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
+
+    # lexicon builds an environment variable from provider plus option name --
+    # lexicon:powerdns:pdns_server becomes LEXICON_POWERDNS_PDNS_SERVER -- and
+    # its legacy fallback only strips _AUTH_, so a shorter spelling resolves to
+    # nothing and the client quietly asks its default endpoint instead.  The
+    # option is --pdns-server, which the af-unix patch here teaches to take a
+    # socket path.  The DCV hook had this right; the per-domain shortcut did
+    # not, and nothing on a guest runs the shortcut, so nothing caught it.
+    my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/pdns.lexicon.tt', %G, %{ $required_config{pdns} } );
+    like( $short, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
+    unlike( $short, qr/^export LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
+
+    # A fresh recipe per render: validated() memoises onto the object, so a
+    # second render through the same one answers with the first one's options.
+    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns', local_dns_access_token => 'a-token' );
+    like( $hook, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
+};
+
 subtest 'the resolver is live before anything reads a zone back through it' => sub {
     my $out = Provisioner::Cookbook->load( 'nostubresolver', distro => $DISTRO )->new(%PROV)->render_global(%G);
 

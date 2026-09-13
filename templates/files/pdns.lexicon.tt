@@ -1,7 +1,15 @@
 #!/bin/bash
 
 export LEXICON_POWERDNS_AUTH_TOKEN="[% api_key %]"
-export LEXICON_POWERDNS_SERVER="/var/spool/powerdns/api.sock"
+[%# LEXICON_POWERDNS_PDNS_SERVER, not _SERVER.  lexicon derives an
+    environment variable from provider plus option name --
+    lexicon:powerdns:pdns_server becomes LEXICON_POWERDNS_PDNS_SERVER --
+    and the option here is --pdns-server, which the af-unix patch in this
+    repository is what teaches to accept a socket path.  The legacy
+    fallback in lexicon only strips _AUTH_, so it never rescued the
+    shorter spelling: this shortcut asked the default endpoint instead of
+    the socket for as long as it has existed. -%]
+export LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api.sock"
 
 COMMAND=$1;
 shift;

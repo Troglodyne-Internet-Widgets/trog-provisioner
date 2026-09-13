@@ -354,7 +354,12 @@ sub enrich {
             key  => $params{local_dns_access_token},
         };
 
-        #XXX pretty dopey that the var is POWERDNS_PDNS_SERVER, but load bearing at this point
+        # PDNS_SERVER, which the hook prefixes with the provider to get
+        # LEXICON_POWERDNS_PDNS_SERVER.  Not a doubled word by accident:
+        # lexicon builds an environment variable out of provider plus option
+        # name, and the option is --pdns-server, so the provider appears once
+        # for each.  Its legacy fallback only strips _AUTH_, so the shorter
+        # spelling resolves to nothing at all.
         $params{extra_lexicon_vars} = [ { key => 'PDNS_SERVER', value => '/var/spool/powerdns/api.sock' } ];
     }
 
