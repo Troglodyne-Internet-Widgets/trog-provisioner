@@ -17,11 +17,6 @@ chmod 0700 /etc/dehydrated/hooks/[% domain %].sh
 # two domains has both in the salvage and each domain's fragment puts its own
 # back.  The account key is not restored here -- it goes back in the global
 # fragment, ahead of `dehydrated --register`.
-# Slap in a utility to do dns mongling for the domain
-mkdir -p /opt/lexicon/[% domain %]; /bin/true
-mv lexicon.sh /opt/lexicon/[% domain %]/[% registrar.type %]
-chmod -R 0700 /opt/lexicon/[% domain %]
-chown -R root:root /opt/lexicon/[% domain %]
 # Place a script to actually get the cert, and then queue it to go post-run
 mv get_cert /etc/letsencrypt/fetchers/[% domain %]
 chown root:root /etc/letsencrypt/fetchers/[% domain %]

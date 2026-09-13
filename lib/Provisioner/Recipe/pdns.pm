@@ -141,7 +141,7 @@ sub template_files {
         'pdns.rsyslog.tt'                              => '10-powerdns.conf',
         'pdns.api.tt'                                  => 'pdns-api.conf',
         'pdns.synczones.tt'                            => 'synczones.conf',
-        'pdns.lexicon.tt'                              => 'lexicon-pdns.sh',
+        'lexicon.shortcut.sh.tt'                       => 'lexicon-pdns.sh',
         'patches/lexicon-pdns-af-unix.patch'           => 'lexicon-pdns-af-unix.patch',
         'patches/lexicon-arbitrary-record-types.patch' => 'lexicon-arbitrary-record-types.patch'
     );

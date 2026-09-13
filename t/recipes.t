@@ -256,11 +256,10 @@ my %required_config = (
             },
         },
     },
-    letsencrypt => {
-        registrar => { type => 'route53', user => 'foo', key => 'bar' },
-    },
-    pdns   => { api_key => 'test-api-key' },
-    matrix => {
+    letsencrypt => {},
+    pdns        => { api_key => 'test-api-key' },
+    registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
+    matrix      => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
@@ -362,6 +361,7 @@ rejects_missing( 'mariadb', { root_pw  => 'x',     dumpfile => 'd.sql' }, 'versi
 rejects_missing( 'adminconfig', {}, 'skel' );
 rejects_missing( 'imagemagick', {}, 'version' );
 rejects_missing( 'pdns',        {}, 'api_key' );
+rejects_missing( 'registrar',   {}, 'type' );
 
 rejects_missing(
     'koan',
@@ -1303,7 +1303,7 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
     # option is --pdns-server, which the af-unix patch here teaches to take a
     # socket path.  The DCV hook had this right; the per-domain shortcut did
     # not, and nothing on a guest runs the shortcut, so nothing caught it.
-    my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/pdns.lexicon.tt', %G, %{ $required_config{pdns} } );
+    my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/lexicon.shortcut.sh.tt', %G, %{ $required_config{pdns} } );
     like( $short, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
     unlike( $short, qr/^export LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
 

@@ -51,11 +51,30 @@ sub generated {
         main_ip      => '192.168.1.9',
         full_aliases => ["www.$DOMAIN"],
         modules      => [qw{pdns letsencrypt}],
-        registrar    => { type => 'easydns', user => 'somebody', key => 'a-token' },
         %extra,
     );
 
     return ( $recipe, $dir, sub { File::Slurper::read_text("$dir/$_[0]") } );
+}
+
+# "This domain is served by a registrar", said the way the configuration says
+# it.  The credentials are the registrar recipe's own block now, so a test
+# configures that recipe rather than handing letsencrypt a hash -- which is also
+# what stops the recipe from having an argument and a recipe under one name.
+#
+# Returns the guard: Test::MockModule unmocks when it goes out of scope, so keep
+# it in a lexical for as long as the domain should look configured.
+sub with_registrar {
+    my (%extra) = @_;
+
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine(
+        domain_config => sub {
+            return { registrar => { type => 'easydns', user => 'somebody', key => 'a-token' }, letsencrypt => {}, %extra };
+        }
+    );
+
+    return $mock;
 }
 
 # What the local DNS path needs beside the domain.  Nothing names the provider:
@@ -64,6 +83,7 @@ sub generated {
 my %LOCAL = ( local_dns_access_token => 'an-api-key' );
 
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
+    my $registrar = with_registrar();
     my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
 
     # Read off the module: a literal here would pass while saying nothing about
@@ -155,6 +175,7 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
 };
 
 subtest 'a registrar is left alone' => sub {
+    my $registrar = with_registrar();
     my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
     my $hook = $slurp->('domain.hook');
 
@@ -232,8 +253,11 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     ok( ( scalar grep { index( $_, '@127.0.0.1' ) >= 0 } @soa ), 'one asks the server directly' );
     ok( ( scalar grep { index( $_, '@' ) < 0 } @soa ),           'and one asks whatever the guest resolves with' );
 
-    ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
-    ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
+    {
+        my $registrar = with_registrar();
+        ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
+        ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
+    }
 };
 
 subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
@@ -282,12 +306,8 @@ subtest 'a guest that answers its own challenge can resolve its own zone' => sub
     ok( exists $required{nostubresolver}, 'the local provider brings a resolver that can see it' );
 
     # Somebody else holds the zone, so the guest has no need to resolve it here.
-    my %elsewhere = _fresh()->required_recipes(
-        domain      => $PUBLIC,
-        install_dir => '/opt/domains',
-        admin_user  => 'doge',
-        registrar   => { type => 'easydns', user => 'somebody', key => 'a-token' },
-    );
+    my $registrar = with_registrar();
+    my %elsewhere = _fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge' );
     ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
 };
 
@@ -312,20 +332,21 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
 
     # No public registrar can hold a zone under a TLD reserved by RFC 2606, so
     # the credentials could never answer for the name however good they are.
-    like(
-        exception {
-            _fresh()->enrich(
-                domain         => $DOMAIN,
-                install_dir    => '/opt/domains',
-                admin_user     => 'doge',
-                registrar      => { type => 'easydns', user => 'somebody', key => 'a-token' },
-                dns_preference => 'registrar',
-            );
-        },
-        qr/reserve/,
-        'and so is naming a registrar for a name no registrar can hold'
-    );
+    # Configured rather than handed over, or the refusal under test would be the
+    # one about credentials in the wrong place instead.
+    {
+        my $registrar = with_registrar();
+        like(
+            exception {
+                _fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', dns_preference => 'registrar' );
+            },
+            qr/reserve/,
+            'and so is naming a registrar for a name no registrar can hold'
+        );
+    }
 
+    # Outside that block on purpose: this one is about a domain configured with
+    # neither, and a guard still in scope would have it answered by a registrar.
     like(
         exception { _fresh()->enrich( $public->() ) },
         qr/no DNS provider/,
@@ -334,18 +355,13 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
 };
 
 subtest 'a guest that could answer either way is asked which' => sub {
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( domain_config => sub { return { pdns => { api_key => 'a-key' }, letsencrypt => {} }; } );
 
-    # A public name whose zone this fleet also serves: the credentials inherited
-    # from _global and the server on the guest can each write the record, they
-    # write it in different places, and choosing for the operator is a guess.
-    my %both = (
-        domain      => $PUBLIC,
-        install_dir => '/opt/domains',
-        admin_user  => 'doge',
-        registrar   => { type => 'easydns', user => 'somebody', key => 'a-token' },
-    );
+    # A public name whose zone this fleet also serves: the registrar holding it
+    # and the server on the guest can each write the record, they write it in
+    # different places, and choosing for the operator is a guess.
+    my $registrar = with_registrar( pdns => { api_key => 'a-key' } );
+
+    my %both = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge' );
 
     like(
         exception { _fresh()->enrich(%both) },

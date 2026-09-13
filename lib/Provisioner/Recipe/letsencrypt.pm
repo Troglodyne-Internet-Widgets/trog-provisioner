@@ -144,7 +144,6 @@ sub template_files {
         'ssl.dehydrated.domain.tt'    => 'dehydrated.domain',
         'ssl.dehydrated.hook.tt'      => 'domain.hook',
         'ssl.domains.tt'              => 'domains.txt',
-        'ssl.lexicon.sh.tt'           => 'lexicon.sh',
         'ssl.dehydrated.logrotate.tt' => 'dehydrated.logrotate',
     );
 }
@@ -202,14 +201,60 @@ sub _our_ca {
 # pdns this recipe pulls in through acmeca, so a reserved TLD reads as having no
 # local DNS server before that happens and as having one afterwards.  Deriving
 # the provider from that list made the answer depend on when it was put.
+# The recipe implementing a provider, as a class.  Loaded rather than
+# instantiated: lexicon_credentials reads its arguments and nothing on the
+# object, and constructing one would want template_dirs that enrich has no
+# business knowing about.
+# Whether a domain is configured with a recipe, asked of the configuration
+# rather than of the module list -- which is not the same list before and after
+# the depsolver has run.  The machine's domain as well as this one's, because a
+# domain layered onto another is served by what that guest runs.
+sub _configures {
+    my ( $domain, $recipe, $host ) = @_;
+
+    foreach my $where ( grep { defined } ( $domain, $host ) ) {
+        my $conf = Provisioner::Cookbook->domain_config($where) // {};
+        return 1 if exists $conf->{$recipe};
+    }
+
+    return 0;
+}
+
+# What to ask an implementation its credentials with: the configuration of that
+# recipe for this domain, which is its own block and not this one's.  pdns is
+# handed the token as well, because this recipe is what mints one for a guest
+# whose operator configured no key of their own.
+sub _provider_config {
+    my ( $provider, %params ) = @_;
+
+    my $server = $params{dns_host_domain} // $params{domain};
+    my $conf = Provisioner::Cookbook->domain_config( $params{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
+
+    return ( %{$conf}, domain => $params{domain}, api_key => $conf->{api_key} // $params{local_dns_access_token} );
+}
+
+sub _implementation {
+    my ($provider) = @_;
+
+    my $class = eval { Provisioner::Cookbook->load($provider) };
+    die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n" unless $class;
+    die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n"                       unless $class->isa('Provisioner::DNSRecipe');
+
+    return $class;
+}
+
 sub _dns_provider {
     my (%opts) = @_;
 
     my $reserved   = _reserved_tld( $opts{domain} );
-    my $registrar  = ( ref $opts{registrar} eq 'HASH' && length( $opts{registrar}{type} // q{} ) ) ? 1 : 0;
     my $server     = $opts{dns_host_domain}                        // $opts{domain};
     my $configured = Provisioner::Cookbook->domain_config($server) // {};
     my $local      = ( $reserved || exists $configured->{pdns} ) ? 1 : 0;
+
+    # The registrar is a recipe now, so this asks the configuration for it
+    # rather than for a hash of credentials -- the same question, put to the
+    # same place, as the one about pdns above.
+    my $registrar = _configures( $opts{domain}, 'registrar', $server );
 
     my $stated = $opts{dns_preference};
     if ( defined $stated && length $stated ) {
@@ -297,15 +342,6 @@ sub args {
                 description =>
                   "Which ACME server issues this domain's certificate: a dehydrated preset name, or the URL of a directory.  Defaults to '$DEFAULT_CA', the public one -- except under a reserved TLD, where no public CA can issue at all and this becomes the fleet's own, pulling in the acmeca recipe that serves it.  Naming anything but the default preset also pulls that recipe in.  No default is declared here because the answer depends on the domain.",
             },
-            registrar => {
-                type        => 'object',
-                description => "The credentials lexicon presents to whoever holds this domain's public zone, so dehydrated can write its _acme-challenge record there.  Ordinarily set once in the _global section and inherited by every domain.  A domain served by the guest's own DNS server needs none, and one under a reserved TLD can never use them.",
-                properties  => {
-                    type => { type => 'string' },
-                    user => { type => 'string' },
-                    key  => { type => 'string' },
-                },
-            },
             dns_preference => {
                 type        => 'string',
                 enum        => [qw{pdns registrar}],
@@ -322,6 +358,13 @@ sub enrich {
 
     die "prefer_local_dns is now dns_preference, which names the recipe that answers this domain's challenge rather than asserting a boolean: 'pdns' for the server on the guest, 'registrar' for whoever holds the public zone.\n"
       if exists $params{prefer_local_dns};
+
+    # registrar is its own recipe now, so credentials in _global reach nothing.
+    # Refused rather than ignored: a domain whose zone a registrar holds would
+    # otherwise resolve to no provider at all, or to the guest, and say nothing
+    # about the credentials it had been given.
+    die "registrar credentials belong to the registrar recipe now, not to _global, so nothing reads the ones set for $params{domain}.  Move the registrar block out of _base._global and into _base, where it configures Provisioner::Recipe::registrar for every domain that inherits it.\n"
+      if ref $params{registrar} eq 'HASH' && !_configures( $params{domain}, 'registrar' );
 
     my $provider = _dns_provider(%params);
 
@@ -345,23 +388,17 @@ sub enrich {
         # (auth_token)" after the order had already been placed.
         $params{local_dns_access_token} = _dns_token( $params{dns_host_domain} // $params{domain} )
           unless length( $params{local_dns_access_token} // q{} );
-
-        # The local server presented to lexicon the way a registrar is, because
-        # to lexicon that is all it is: a provider, a token, and an endpoint.
-        $params{registrar} = {
-            type => 'powerdns',
-            user => '',
-            key  => $params{local_dns_access_token},
-        };
-
-        # PDNS_SERVER, which the hook prefixes with the provider to get
-        # LEXICON_POWERDNS_PDNS_SERVER.  Not a doubled word by accident:
-        # lexicon builds an environment variable out of provider plus option
-        # name, and the option is --pdns-server, so the provider appears once
-        # for each.  Its legacy fallback only strips _AUTH_, so the shorter
-        # spelling resolves to nothing at all.
-        $params{extra_lexicon_vars} = [ { key => 'PDNS_SERVER', value => '/var/spool/powerdns/api.sock' } ];
     }
+
+    # What lexicon needs to reach whoever holds this zone, asked of the recipe
+    # that holds it rather than assembled here.  This used to spell powerdns's
+    # provider name, its empty username and its socket out in this block, which
+    # is three facts about a server another recipe configures -- and the socket
+    # was written down in two places.  See Provisioner::DNSRecipe.
+    my %creds = _implementation($provider)->lexicon_credentials( _provider_config( $provider, %params ) );
+
+    $params{registrar}          = { type => $creds{type}, user => $creds{user}, key => $creds{key} };
+    $params{extra_lexicon_vars} = $creds{extra};
 
     # --resolve-zone-name rather than DELEGATED, and only for the local server.
     #
@@ -375,7 +412,7 @@ sub enrich {
     # Not for a registrar, where the domain is the zone and tldextract is right
     # about it: the flag costs live DNS queries to work out something already
     # known.
-    $params{lexicon_opts} = $provider eq 'pdns' ? '--resolve-zone-name' : q{};
+    $params{lexicon_opts} = $creds{opts};
 
     return %params;
 }

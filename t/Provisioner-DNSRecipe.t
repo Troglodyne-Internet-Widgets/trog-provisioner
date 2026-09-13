@@ -81,7 +81,7 @@ subtest 'what pdns tells lexicon' => sub {
 };
 
 subtest 'the shortcut is rendered from that, and names what lexicon reads' => sub {
-    my $out = fresh('pdns')->render_file( 'files/pdns.lexicon.tt', domain => $DOMAIN, api_key => 'an-api-key' );
+    my $out = fresh('pdns')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $DOMAIN, api_key => 'an-api-key' );
 
     # lexicon builds an environment variable from provider plus option, so
     # --pdns-server is LEXICON_POWERDNS_PDNS_SERVER.  Its legacy fallback only
