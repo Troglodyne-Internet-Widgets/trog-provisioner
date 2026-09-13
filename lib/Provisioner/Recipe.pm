@@ -458,6 +458,27 @@ This also enables automatic figuring of what to do with a dependent recipe in th
 In some cases this will allow you to omit configuring it entirely.
 This is configured by setting the sub value.
 
+=head3 Depending on a capability rather than on a recipe
+
+A key naming an interface rather than a recipe -- one with C<::> in it -- is
+resolved by C<bin/new_config> to whichever recipe implements it and serves this
+domain:
+
+    my %out = (
+        'Provisioner::DNSRecipe' => sub { return () },
+    );
+
+That is how L<Provisioner::Recipe::letsencrypt> asks for something that can
+answer a C<dns-01> challenge without naming C<pdns>, which is one of the two
+recipes that can.  Which one is the interface's to decide: it is asked, and it
+names the configuration key that settles a tie, so nothing in the depsolver has
+to know what the capability is about.  See
+L<Provisioner::DNSRecipe/implementation_for>.
+
+The answer has to be a recipe this installation has, and one that implements
+what was asked for; a configuration naming anything else is refused there rather
+than three targets later.
+
 =cut
 
 sub required_recipes {

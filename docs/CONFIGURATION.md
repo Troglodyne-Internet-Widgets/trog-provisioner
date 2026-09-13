@@ -453,6 +453,26 @@ adding to it. Dependencies of dependencies work, and several recipes can layer
 onto one shared dependency -- `tcms` builds on `tpsgi` and adds to the same
 vhost.
 
+A recipe can also depend on a **capability** rather than on a recipe by name:
+
+```yaml
+    letsencrypt:
+        dns_preference: pdns
+```
+
+`letsencrypt` needs something that can answer a dns-01 challenge, which is
+`Provisioner::DNSRecipe` -- implemented by `pdns`, which serves the zone from the
+guest, and by `registrar`, which is whoever holds it publicly. It asks for the
+interface, and the depsolver resolves that to whichever serves this domain and
+builds it.
+
+Which one is the interface's to decide, not the depsolver's: a name under a
+reserved TLD is always served locally, a domain configured with one of the two
+uses it, and a guest with both is a tie. `dns_preference` settles the tie, read
+out of the configuration of whichever recipe declared the dependency -- so it
+goes under `letsencrypt`, where you already write it. A guest with both and no
+preference is refused rather than guessed at.
+
 Where two of them ask for the same field and disagree, the recipe being depended
 on decides, and **dies** if it has no rule for that field: two applications both
 claiming a domain's 443 vhost is a misconfiguration rather than something to
@@ -462,13 +482,6 @@ listening on one port both get the higher of their rate limits. See
 
 ## Known gaps
 
-* `Provisioner::DNSRecipe` is resolved by the recipes that need it rather than
-  by the depsolver. `letsencrypt` and `acmeca` ask the interface which
-  implementation serves a domain and then require that recipe by the name it
-  gives back, so nothing names `pdns` literally -- but `required_recipes` still
-  names a *recipe*. It cannot yet name an interface and have the depsolver pick
-  any recipe that `isa` it. Adding a second local implementation would work;
-  depending on the capability generically would not.
 * `local_dns_access_token` and `dns_host_domain` still ride in `_global`, so
   they reach every recipe on a guest whether or not it has business with DNS.
   The registrar's credentials no longer do.
