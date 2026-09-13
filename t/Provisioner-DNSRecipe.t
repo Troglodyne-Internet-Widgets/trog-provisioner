@@ -16,7 +16,8 @@ to say for itself
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Test::MockModule();
+use File::Temp qw{tempdir};
 
 use FindBin::libs;
 
@@ -115,6 +116,37 @@ subtest 'the operator registrar is left alone, so synczones still has an upstrea
 
     my $alone = fresh('pdns')->render_file( 'files/pdns.synczones.tt', domain => $DOMAIN, api_key => 'an-api-key' );
     unlike( $alone, qr/^\[easydns\]$/m, 'while a guest with no registrar syncs nowhere' );
+};
+
+subtest 'the CA depends on the capability, not on a recipe name' => sub {
+    my %common = ( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge' );
+
+    my %required = fresh('acmeca')->required_recipes(%common);
+    my $local    = Provisioner::DNSRecipe->local_implementation;
+    ok( exists $required{$local}, "the CA requires whatever runs the DNS on the guest ($local)" );
+
+    my %handed = $required{$local} ? $required{$local}->() : ( sentinel => 1 );
+    is_deeply( \%handed, {}, 'and hands it nothing, since its key is the operator to supply' );
+
+    # Following the interface rather than a literal, which is the whole of #149.
+    # Asserting the key is 'pdns' would pass just as well against the hardcoded
+    # string it replaced, so this moves the answer and checks the CA moved with
+    # it.
+    my $iface = Test::MockModule->new('Provisioner::DNSRecipe');
+    $iface->redefine( local_implementation => sub { return 'registrar' } );
+
+    my %moved = fresh('acmeca')->required_recipes(%common);
+    ok( exists $moved{registrar}, 'so moving the answer moves what the CA asks for' );
+    ok( !exists $moved{pdns},     'and it stops asking for the one it used to name' );
+};
+
+subtest 'the two questions the interface answers are not the same question' => sub {
+
+    # They are one recipe today, and asking them apart is what stops a second
+    # local implementation from silently becoming everybody default -- or the
+    # default from being required where only a server on this guest will do.
+    is( Provisioner::DNSRecipe->local_implementation,   'pdns',                                       'the one that runs on the guest' );
+    is( Provisioner::DNSRecipe->default_implementation, Provisioner::DNSRecipe->local_implementation, 'is also what a tie falls back to, for now' );
 };
 
 Test::NoWarnings::had_no_warnings();

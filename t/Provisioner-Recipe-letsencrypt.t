@@ -345,13 +345,20 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
         );
     }
 
-    # Outside that block on purpose: this one is about a domain configured with
-    # neither, and a guard still in scope would have it answered by a registrar.
-    like(
-        exception { _fresh()->enrich( $public->() ) },
-        qr/no DNS provider/,
-        'a domain with neither is told so, rather than rendering a hook that cannot run'
-    );
+    # Configured with neither, said explicitly rather than by picking a domain
+    # the installation happens not to configure.  It did the latter until
+    # _base.registrar started being inherited by every domain on this fleet, at
+    # which point this case quietly stopped being the case it names.
+    {
+        my $nothing = Test::MockModule->new('Provisioner::Cookbook');
+        $nothing->redefine( domain_config => sub { return {} } );
+
+        like(
+            exception { _fresh()->enrich( $public->() ) },
+            qr/no DNS provider/,
+            'a domain with neither is told so, rather than rendering a hook that cannot run'
+        );
+    }
 };
 
 subtest 'a guest that could answer either way is asked which' => sub {

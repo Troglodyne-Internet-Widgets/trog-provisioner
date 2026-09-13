@@ -14,6 +14,7 @@ use File::Copy();
 use IO::Socket::SSL::Utils();
 
 use Provisioner::Cookbook();
+use Provisioner::DNSRecipe();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::acmeca
@@ -200,9 +201,15 @@ sub enrich {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-pdns, which is what answers the challenge this CA sets.  Nothing is handed to
-it: its API key is the operator's to supply, and a guest that names this recipe
-without configuring one should be told so rather than issued a key nobody chose.
+The DNS server on this guest, which is what answers the challenge this CA sets.
+Named through L<Provisioner::DNSRecipe/local_implementation> rather than
+literally: what serves a zone is the interface's business, and this recipe only
+needs to say that a registrar will not do -- step-ca validates through the
+host's own resolver, so the record has to be one the guest itself serves.
+
+Nothing is handed to it: its API key is the operator's to supply, and a guest
+that names this recipe without configuring one should be told so rather than
+issued a key nobody chose.
 
 letsencrypt is B<not> required here, and the edge points the other way: a domain
 can stand up a CA without asking anything of it, while a domain pointing
@@ -213,7 +220,7 @@ dehydrated at one needs it to exist first.
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    return ( pdns => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    return ( Provisioner::DNSRecipe->local_implementation() => sub { return () }, $self->SUPER::required_recipes(%opts) );
 }
 
 =head2 @hosts = $recipe->fetch_hosts()

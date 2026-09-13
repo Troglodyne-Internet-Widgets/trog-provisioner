@@ -15,6 +15,7 @@ use List::Util qw{any};
 use Crypt::PRNG();
 
 use Provisioner::Cookbook();
+use Provisioner::DNSRecipe();
 use Provisioner::Utils();
 
 =head1 Provisioner::Recipe::letsencrypt
@@ -326,7 +327,7 @@ sub _directory_url {
 sub _dns_token {
     my ($domain) = @_;
 
-    my $configured = Provisioner::Cookbook->domain_config($domain)->{pdns}{api_key};
+    my $configured = Provisioner::Cookbook->domain_config($domain)->{ Provisioner::DNSRecipe->local_implementation() }{api_key};
     return $configured if defined $configured && length $configured;
 
     state %made;
@@ -480,10 +481,11 @@ sub required_recipes {
         # that server is already running with.  See dns_host_domain, which
         # bin/new_config sets from depends_on.
         my $server     = $opts{dns_host_domain} // $opts{domain};
-        my $configured = Provisioner::Cookbook->domain_config($server)->{pdns}{api_key};
+        my $local      = Provisioner::DNSRecipe->local_implementation();
+        my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
         unless ( defined $configured && length $configured ) {
             my $token = _dns_token($server);
-            push( @required, pdns => sub { return ( api_key => $token ) } );
+            push( @required, $local => sub { return ( api_key => $token ) } );
         }
     }
 

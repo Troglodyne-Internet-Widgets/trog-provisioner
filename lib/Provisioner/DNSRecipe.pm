@@ -68,10 +68,14 @@ names which of the two holds the zone this name is served from.
 
 =cut
 
+# The implementation that runs on the guest itself.
+our $LOCAL_IMPLEMENTATION = 'pdns';
+
 # What a guest gets when nothing has said otherwise and more than one could
-# answer.  The local server: it is the one this fleet builds, and the one a
-# reserved TLD has no alternative to.
-our $DEFAULT_IMPLEMENTATION = 'pdns';
+# answer.  The local server, and written in terms of it rather than repeated:
+# it is the one this fleet builds, and the one a reserved TLD has no
+# alternative to.
+our $DEFAULT_IMPLEMENTATION = $LOCAL_IMPLEMENTATION;
 
 =head1 METHODS AN IMPLEMENTATION MUST ANSWER
 
@@ -116,6 +120,21 @@ has said which.  C<pdns>, the server this fleet runs itself.
 =cut
 
 sub default_implementation { return $DEFAULT_IMPLEMENTATION }
+
+=head2 $name = $recipe->local_implementation()
+
+Which implementation runs on the guest itself.
+
+The same recipe as C<default_implementation> today, and a different question:
+that one is what to pick when more than one could answer and nothing said which,
+this one is what to require when only a server on this guest will do.
+L<Provisioner::Recipe::acmeca> validates a C<dns-01> challenge through the
+host's own resolver, so a registrar could not serve it however the tiebreaker
+fell.
+
+=cut
+
+sub local_implementation { return $LOCAL_IMPLEMENTATION }
 
 sub _unanswered {
     my ( $self, $what ) = @_;

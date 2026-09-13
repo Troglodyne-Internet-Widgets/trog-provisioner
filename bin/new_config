@@ -80,11 +80,11 @@ L<Trog::Config>.
 In the main recipes.yaml, most of what you will want will be in the _base section:
 
     _base:
+        registrar:
+            type: "some_dns_provider_understood_by_dns-lexicon
+            user: "AzureDiamond"
+            key: "hunter2"
         _global:
-            registrar:
-                type: "some_dns_provider_understood_by_dns-lexicon
-                user: "AzureDiamond"
-                key: "hunter2"
             libdir:
                 - path/to/my/custom/libdir
         adminconfig:
@@ -186,11 +186,10 @@ You will be asked for the unlock password for the DB in the event you use this f
 Example usage in a recipe:
 
     _base:
-        _global:
-            registrar:
-                type: "some_dns_provider_understood_by_dns-lexicon
-                user: "AzureDiamond"
-                key: "secret:Hosting/DNS/password"
+        registrar:
+            type: "some_dns_provider_understood_by_dns-lexicon
+            user: "AzureDiamond"
+            key: "secret:Hosting/DNS/password"
 
 Where each path component past 'secret:' corresponds to group/key/parameter in a keepass KDBX.
 
