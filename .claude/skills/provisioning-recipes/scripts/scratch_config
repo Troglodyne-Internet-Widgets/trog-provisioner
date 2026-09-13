@@ -54,8 +54,21 @@ entry for a guest that will not exist by lunchtime.
 
 =item F<recipes.yaml>
 
-Copied, for the C<_base> block: what every guest gets, which is most of what a
-recipe under test will interact with.
+B<Not> copied.  Built here, holding a C<_base> and nothing else: a
+C<data_source> inside this directory, and the installation's C<mirror> when it
+has one.
+
+Copying it was the bug this replaced.  The installation's C<_base> names
+credentials out of a KeePass store this harness cannot open -- it builds a
+throwaway one precisely because it cannot -- so every scratch guest inherited a
+registrar whose credentials were made up, and inherited the whole fleet recipe
+set besides, which is how a guest asked for two recipes came to install a
+certificate authority and a DNS server it never named.
+
+A scratch guest now gets what C<new_guest> named and the C<data> recipe.  The
+mirror is the one thing carried over: it is infrastructure rather than something
+a recipe under test has an opinion about, and without it every build fetches its
+packages from the far side of the internet.
 
 =item F<hypervisors.conf>
 
@@ -68,13 +81,14 @@ all.
 
 B<Not> copied, deliberately.  new_config gathers secrets across every domain it
 can see, so copying these would mean needing every password in the real store
-in order to build one throwaway guest.  Empty, the only secrets wanted are
-C<_base>'s.
+in order to build one throwaway guest.  Empty, and with the C<_base> built rather
+than copied, there is normally no secret to want at all.
 
 =item F<secrets.kdbx>
 
 Not copied.  A new one is built holding a made-up value for every C<secret:>
-reference in the copied F<recipes.yaml>, under a password printed to stdout.
+reference in the scratch F<recipes.yaml> -- normally none, what is built there
+naming no credential -- under a password printed to stdout.
 
 =back
 
@@ -146,10 +160,11 @@ sub main {
     }
 
     print {*STDERR} "Scratch configuration in $dir\n";
-    print {*STDERR} "  copied from $source: ipmap.cfg, recipes.yaml" . ( $has_fleet ? ", hypervisors.conf\n" : "\n" );
+    print {*STDERR} "  copied from $source: ipmap.cfg" . ( $has_fleet ? ", hypervisors.conf\n" : "\n" );
+    print {*STDERR} "  recipes.yaml built here, so none of the installation's credentials are wanted\n";
     print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
-    print {*STDERR} "  recipes.d/ left empty, so only _base's secrets are wanted\n";
+    print {*STDERR} "  recipes.d/ left empty, so a guest gets what new_guest names and nothing else\n";
     print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
     print {*STDERR} "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
     print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
@@ -165,14 +180,23 @@ sub build {
     my ( $source, $dir, %opts ) = @_;
 
     make_path("$dir/recipes.d");
+    make_path("$dir/data");
 
     # What says this is ours to delete later.
     File::Slurper::Temp::write_text( "$dir/$MARKER", "Built by scratch_config; safe to remove.\n" );
 
-    foreach my $file (qw{ipmap.cfg recipes.yaml}) {
-        copy( "$source/$file", "$dir/$file" )
-          or die "Could not copy $source/$file into the scratch config: $!\n";
-    }
+    # The addresses.  Copied because a guest cannot be placed without them and
+    # nothing in there is a credential.
+    copy( "$source/ipmap.cfg", "$dir/ipmap.cfg" )
+      or die "Could not copy $source/ipmap.cfg into the scratch config: $!\n";
+
+    # And the _base, built rather than taken: see the POD above for what copying
+    # it cost.  Its data source is inside this directory, so a throwaway guest
+    # reads and writes nothing of the installation's.
+    my %global = ( data_source => "$dir/data" );
+
+    my $mirror = source_mirror($source);
+    $global{mirror} = $mirror if defined $mirror && length $mirror;
 
     # CPAN test suites, when what the build is testing is what gets installed.
     # Otherwise skipped, as on a real guest: see the skill, and
@@ -180,12 +204,10 @@ sub build {
     #
     # And a fetch cache, when the build is to go through one: see
     # Provisioner::Recipe::fetchcache.
-    if ( $opts{cpan_tests} || $opts{cache} ) {
-        my $recipes = YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") );
-        $recipes->{_base}{_global}{cpan_notest} = 0            if $opts{cpan_tests};
-        $recipes->{_base}{_global}{cache}       = $opts{cache} if $opts{cache};
-        File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump($recipes) );
-    }
+    $global{cpan_notest} = 0            if $opts{cpan_tests};
+    $global{cache}       = $opts{cache} if $opts{cache};
+
+    File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump( { _base => { _global => \%global } } ) );
 
     # The fleet, when there is one.  Its absence is a legitimate state -- it
     # means this machine is the hypervisor -- so this is not fatal, but getting
@@ -208,6 +230,22 @@ sub build {
     chmod 0600, "$dir/secrets.kdbx";
 
     return ( $password, $has_fleet, @refs );
+}
+
+# The mirror the installation provisions through, when it has one.  Read rather
+# than the file copied: everything else in its _base is either a credential this
+# harness cannot hold or a recipe the guest under test did not ask for.
+sub source_mirror {
+    my ($source) = @_;
+
+    my $file = "$source/recipes.yaml";
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    return undef unless -f $file;
+
+    my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($file) ) };
+    return undef unless ref $conf eq 'HASH';
+
+    return $conf->{_base}{_global}{mirror};
 }
 
 sub remove {
