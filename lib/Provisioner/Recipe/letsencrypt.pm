@@ -445,6 +445,22 @@ sub required_recipes {
         }
     }
 
+    # A guest that answers its own challenge has to be able to read back what it
+    # just wrote.  lexicon walks the zone for --resolve-zone-name through the
+    # system resolver, and step-ca validates dns-01 through it as well, so a
+    # guest left on systemd's stub resolves its own name nowhere.  Measured on a
+    # scratch guest: the walk fell all the way to the root, lexicon asked pdns
+    # for zones/. and got a 404, and every challenge failed while dig
+    # @127.0.0.1 answered for the zone perfectly well.  nostubresolver points
+    # the resolver at the server on the guest; it is invisible on a fleet whose
+    # _base gives every domain that recipe already.
+    #
+    # eval because this runs before validation: a domain configured with no
+    # provider at all is enrich's to reject, and reporting it here as well would
+    # race two messages for one fault.
+    my $provider = eval { _dns_provider(%opts) } // q{};
+    push( @required, nostubresolver => sub { return () } ) if $provider eq 'pdns';
+
     return ( @required, $self->SUPER::required_recipes(%opts) );
 }
 

@@ -261,6 +261,26 @@ sub _fresh {
     );
 }
 
+subtest 'a guest that answers its own challenge can resolve its own zone' => sub {
+    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge' );
+
+    # lexicon walks the zone through the system resolver for --resolve-zone-name,
+    # and step-ca validates dns-01 through it too.  Measured on a scratch guest
+    # with no nostubresolver: the walk fell to the root, lexicon asked pdns for
+    # zones/. and got a 404, and dig @127.0.0.1 answered for the zone the whole
+    # time.  A fleet whose _base carries the recipe never sees this.
+    ok( exists $required{nostubresolver}, 'the local provider brings a resolver that can see it' );
+
+    # Somebody else holds the zone, so the guest has no need to resolve it here.
+    my %elsewhere = _fresh()->required_recipes(
+        domain      => $PUBLIC,
+        install_dir => '/opt/domains',
+        admin_user  => 'doge',
+        registrar   => { type => 'easydns', user => 'somebody', key => 'a-token' },
+    );
+    ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
+};
+
 subtest 'a provider that could not answer the challenge is refused' => sub {
     my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge', @_ ); };
 
