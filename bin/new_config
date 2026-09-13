@@ -309,6 +309,56 @@ sub main {
 # reaches every recipe unvalidated, so a default applied only when the distro
 # recipe is validated would reach no other recipe at all -- see
 # Provisioner::DistroRecipe/global_defaults.
+
+=head2 resolve_interface($interface, $domain_conf, $host_conf, $requiring_conf, $domain)
+
+Which recipe satisfies a dependency named as an interface.
+
+The interface decides -- this asks it, rather than working it out again.  Two
+answers to one question is how the gates this replaced came to disagree, so the
+rules live in one place and both callers, here and the recipe rendering its own
+templates, put the same question to it.
+
+What this adds is the part the interface cannot know: that the answer has to be
+a recipe this installation actually has, and one that implements what was asked
+for.  A configuration naming something else is a typo, and saying so beats
+loading it and finding out three targets later.
+
+C<$domain_conf> and C<$host_conf> are what the domain and the machine it is
+layered onto are configured with -- the second undef for a guest of its own.
+C<$requiring_conf> is the configuration of the recipe that declared the
+dependency: the interface names the key holding a preference and reads it from
+there, so a domain settles a tie where it already writes it.
+
+=cut
+
+sub resolve_interface {
+    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain ) = @_;
+
+    # It arrives as text out of required_recipes, so nothing has loaded it and
+    # every method call below would be "perhaps you forgot to load".
+    my $path = $interface =~ s{::}{/}gr;
+    eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
+
+    my @known = Provisioner::Cookbook->implementations($interface);
+    die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
+
+    # The configuration this run was pointed at, not the installation's: they
+    # are the same thing for a fleet provision and different for every scratch
+    # one, and the resolver has no way to tell which it is being asked about.
+    my $chosen = $interface->implementation_for(
+        %{ $requiring_conf // {} },
+        domain          => $domain,
+        configured      => $domain_conf // {},
+        host_configured => $host_conf,
+    );
+
+    die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
+      unless any { $_ eq $chosen } @known;
+
+    return $chosen;
+}
+
 sub apply_global_defaults {
     my ( $distro, $global_config ) = @_;
 
@@ -776,6 +826,26 @@ sub handle_domain {
             $builder->required_recipes( %$global_config, %$pconf ),
         );
         foreach my $required ( keys(%dep_recipes) ) {
+
+            # A recipe may depend on an interface rather than on a recipe, and
+            # this is where that becomes one: Provisioner::Cookbook::has takes
+            # \w+ and nothing else, so the name has to be resolved before
+            # anything below tries to load it or put it in the module list.
+            #
+            # Which implementation is the interface's to say, not this loop's.
+            # It names the configuration key holding a preference, and that is
+            # read out of the configuration of whichever recipe asked -- so a
+            # domain saying `letsencrypt: dns_preference: pdns` settles it for
+            # the recipe that wanted a DNS provider, and nothing here has to
+            # know what DNS is.
+            if ( index( $required, '::' ) >= 0 ) {
+                my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
+                my $chosen    = resolve_interface( $required, $rconf->{$domain}, $host_conf, $pconf, $domain );
+                $dep_recipes{$chosen} //= $dep_recipes{$required};
+                delete $dep_recipes{$required};
+                $required = $chosen;
+            }
+
             my $manual_args = delete $pconf->{$required} // {};
 
             # See about autocomputing the options if possible.

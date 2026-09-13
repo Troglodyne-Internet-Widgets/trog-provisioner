@@ -155,11 +155,10 @@ my %recipes_raw = (
             }
         }
     },
-    letsencrypt => {
-        registrar => { type => 'route53', user => 'foo', key => 'bar' },
-    },
-    pdns   => { api_key => 'test-api-key' },
-    matrix => {
+    letsencrypt => {},
+    registrar   => { type    => 'route53', user => 'foo', key => 'bar' },
+    pdns        => { api_key => 'test-api-key' },
+    matrix      => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
@@ -236,13 +235,11 @@ foreach my $key ( 'data', @available ) {
     $recipes_raw{"$key.$tld"} = { $key => $data };
 }
 $recipes_raw{_base} = {
-    _global => {
-        user      => 'test',
-        registrar => {
-            type => "bogus",
-            user => "bogus",
-            key  => "bogus",
-        },
+    _global   => { user => 'test' },
+    registrar => {
+        type => "bogus",
+        user => "bogus",
+        key  => "bogus",
     },
     data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };

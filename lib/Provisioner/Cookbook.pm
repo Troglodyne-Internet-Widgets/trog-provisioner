@@ -193,6 +193,38 @@ sub cache_classes {
     return @classes;
 }
 
+=head2 implementations($interface)
+
+The recipes that implement an interface -- the ones whose class C<isa> it --
+sorted.  C<Provisioner::DNSRecipe> has two, C<pdns> and C<registrar>.
+
+Loads every recipe to ask, which C<names> deliberately does not, and asks once a
+process for each interface: which classes inherit from what is a fact about the
+code rather than about a configuration.
+
+This is what lets C<bin/new_config> resolve a dependency on an interface.  A
+recipe can say it needs something that can answer a dns-01 challenge without
+naming the one that happens to exist.
+
+=cut
+
+sub implementations {
+    my ( $class, $interface ) = @_;
+
+    # names() and directors() together: names deliberately leaves out the
+    # recipes that direct a build, and those implement interfaces too -- every
+    # Provisioner::DistroRecipe there is, is one.  Asked of names alone this
+    # answered "nothing implements that" for a real interface.
+    state %by_interface;
+    $by_interface{$interface} //= [
+        sort grep {
+            eval { $class->load($_)->isa($interface) }
+        } ( $class->names, $class->directors )
+    ];
+
+    return @{ $by_interface{$interface} };
+}
+
 =head2 directors
 
 The recipes that direct a build instead of running in one: C<vm>, and the

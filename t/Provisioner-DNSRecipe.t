@@ -149,6 +149,70 @@ subtest 'the two questions the interface answers are not the same question' => s
     is( Provisioner::DNSRecipe->default_implementation, Provisioner::DNSRecipe->local_implementation, 'is also what a tie falls back to, for now' );
 };
 
+subtest 'the interface says which implementation serves a domain' => sub {
+
+    # Handed the configuration rather than left to find it.  It used to ask
+    # Provisioner::Cookbook, which answers about the installation -- and the
+    # generator is routinely pointed at a different recipes file, so the
+    # resolver and the run could be looking at two different configurations.
+    # Passing it also means these cases are data rather than mocking.
+    my $nothing   = {};
+    my $registrar = { registrar => { type => 'easydns' } };
+    my $both      = { registrar => { type => 'easydns' }, pdns => { api_key => 'k' } };
+
+    # A reserved name is served by the guest, because no public registrar holds
+    # a zone under a TLD RFC 2606 reserves.
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $nothing ), 'pdns', 'a reserved name is served locally' );
+
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $nothing ) },
+        qr/no DNS provider/,
+        'and a public one with nothing configured is refused rather than guessed at'
+    );
+
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $registrar ), 'registrar', 'the one that is configured serves it' );
+
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $registrar, dns_preference => 'registrar' ) },
+        qr/reserve/,
+        'while naming a registrar for a reserved name is refused'
+    );
+
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $both ) },
+        qr/dns_preference/,
+        'a guest that could answer either way is asked which'
+    );
+
+    foreach my $named (qw{pdns registrar}) {
+        is( Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
+    }
+
+    # A domain layered onto another is served by what that guest runs, so the
+    # host's configuration counts as well as its own.
+    is(
+        Provisioner::DNSRecipe->implementation_for( domain => 'tenant.troglodyne.net', configured => $nothing, host_configured => $registrar ),
+        'registrar',
+        'and a tenant is served by what its host holds'
+    );
+
+    like(
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net' ) },
+        qr/was not told what/,
+        'asked without a configuration at all, it says so rather than resolving against something else'
+    );
+};
+
+subtest 'the interface names the key that settles a tie' => sub {
+
+    # bin/new_config reads this out of the configuration of whichever recipe
+    # declared the dependency, so it can resolve one without knowing what DNS is.
+    is( Provisioner::DNSRecipe->tiebreaker_key, 'dns_preference', 'which is where operators already write it' );
+
+    my %schema = Provisioner::Cookbook->load('letsencrypt')->args();
+    ok( exists $schema{properties}{ Provisioner::DNSRecipe->tiebreaker_key }, 'and the recipe that takes it declares it' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

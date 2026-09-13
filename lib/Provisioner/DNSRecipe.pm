@@ -10,7 +10,10 @@ use re '/aa';
 
 use parent qw{Provisioner::Recipe};
 
+use List::Util qw{any};
 use Scalar::Util();
+
+use Provisioner::Utils();
 
 =head1 NAME
 
@@ -70,6 +73,11 @@ names which of the two holds the zone this name is served from.
 
 # The implementation that runs on the guest itself.
 our $LOCAL_IMPLEMENTATION = 'pdns';
+
+# RFC 2606 and RFC 6761 keep these for documentation, testing and private use,
+# so no public registrar holds a zone under one and the guest serves it or
+# nothing does.
+our @RESERVED_TLDS = qw{test example invalid localhost};
 
 # What a guest gets when nothing has said otherwise and more than one could
 # answer.  The local server, and written in terms of it rather than repeated:
@@ -135,6 +143,119 @@ fell.
 =cut
 
 sub local_implementation { return $LOCAL_IMPLEMENTATION }
+
+=head2 $key = $recipe->tiebreaker_key()
+
+Which configuration key names the implementation a recipe prefers, where more
+than one could answer.  C<dns_preference>.
+
+Declared here so C<bin/new_config> can resolve a dependency on this interface
+without knowing anything about the recipes that declare one: it asks the
+interface which key to read, and reads it out of the configuration of whichever
+recipe asked.
+
+=cut
+
+sub tiebreaker_key { return 'dns_preference' }
+
+=head2 @tlds = $recipe->reserved_tlds()
+
+The top-level domains no public registrar holds a zone under, and so no public
+CA will issue for: they are not public suffixes, so nobody can demonstrate
+control of a name beneath one.
+
+Asked rather than reached for.  L<Provisioner::Recipe::letsencrypt> needs the
+same list to decide which CA issues, which is a different question from which
+provider serves the zone -- but it is one list, and a second copy of it is a
+second thing to keep right.
+
+=cut
+
+sub reserved_tlds { return @RESERVED_TLDS }
+
+=head2 $name = $recipe->implementation_for(%opts)
+
+Which implementation serves this domain's zone: C<pdns> where the guest holds
+it, C<registrar> where somebody else does.
+
+Dies rather than guessing, and there are three ways to be told so.  A registrar
+named for a name under a TLD RFC 2606 reserves could never answer for it.  The
+local server asked for where none is configured is not there.  And a guest
+configured with both, naming neither, is a tie nothing here can settle -- so
+C<tiebreaker_key> is what settles it.
+
+Asked of the domain's configuration rather than of the module list, because that
+list is not the same before and after the depsolver has run: the two callers
+here sit either side of it.  Both C<bin/new_config>, resolving a dependency on
+this interface, and L<Provisioner::Recipe::letsencrypt>, rendering the hook, ask
+this one question rather than each answering it -- which is how they came to
+disagree before.
+
+=cut
+
+sub implementation_for {
+    my ( $class, %opts ) = @_;
+
+    my $domain   = $opts{domain};
+    my $reserved = Provisioner::Utils::tld_of($domain);
+    $reserved = ( defined $reserved && any { $_ eq $reserved } @RESERVED_TLDS ) ? $reserved : undef;
+
+    die "implementation_for was not told what $domain is configured with; pass configured => the domain's recipes.\n"
+      unless ref $opts{configured} eq 'HASH';
+
+    my $server = $opts{dns_host_domain} // $domain;
+
+    # Both candidates asked the same way and of the same places: the domain's
+    # own configuration and the machine's, since a domain layered onto another
+    # is served by what that guest runs.
+    my @where     = ( $opts{configured}, $opts{host_configured} );
+    my $local     = ( $reserved || _configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
+    my $registrar = _configures( 'registrar', @where );
+
+    my $stated = $opts{ $class->tiebreaker_key };
+    if ( defined $stated && length $stated ) {
+        die "$domain is under .$reserved, which RFC 2606 and RFC 6761 reserve, so no public registrar can hold a zone for it -- dns_preference: registrar names a provider that could never answer its challenge.  The guest serves this name itself; drop the preference.\n"
+          if $stated eq 'registrar' && $reserved;
+
+        die "$domain asks for dns_preference: $LOCAL_IMPLEMENTATION, but $server is configured with no $LOCAL_IMPLEMENTATION recipe, so nothing on the guest could answer its dns-01 challenge.  Add $LOCAL_IMPLEMENTATION, or name the registrar that holds the zone.\n"
+          if $stated eq $LOCAL_IMPLEMENTATION && !$local;
+
+        return $stated;
+    }
+
+    # No tie to break under a reserved TLD, whatever credentials a domain
+    # inherited: a public registrar is not a provider that could serve one, so
+    # there is only ever the one candidate.
+    return $LOCAL_IMPLEMENTATION if $reserved;
+
+    return 'registrar'           if $registrar && !$local;
+    return $LOCAL_IMPLEMENTATION if $local     && !$registrar;
+
+    die "$domain is configured with both a DNS server of its own and registrar credentials, and either could answer its dns-01 challenge.  Set dns_preference to '$LOCAL_IMPLEMENTATION' or 'registrar' to say which one holds the zone this name is served from.\n"
+      if $local && $registrar;
+
+    die "$domain has no DNS provider that could answer a dns-01 challenge: set registrar credentials for its zone, or add the $LOCAL_IMPLEMENTATION recipe so the guest serves the zone itself.\n";
+}
+
+# Whether a recipe appears in any of the configurations handed over: the
+# domain's, and the machine's where it is layered onto another.
+#
+# Handed rather than fetched.  Asking Provisioner::Cookbook would answer about
+# the configuration the environment names, and a resolver that goes looking
+# cannot be told which one it is being asked about -- bin/new_config takes
+# --recipes, so the two can in principle be different files.  Every real
+# invocation points both at one directory, scratch guests included, so this is
+# not a fault anybody has hit; it is a question with no safe default, and the
+# caller is the only one that knows the answer.
+sub _configures {
+    my ( $recipe, @where ) = @_;
+
+    foreach my $conf ( grep { ref $_ eq 'HASH' } @where ) {
+        return 1 if exists $conf->{$recipe};
+    }
+
+    return 0;
+}
 
 sub _unanswered {
     my ( $self, $what ) = @_;
