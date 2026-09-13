@@ -703,6 +703,43 @@ sub domain_config {
     return _base_merger()->merge( $base, $own );
 }
 
+=head2 host_of($domain, $conf)
+
+The domain whose guest holds C<$domain>, where it is layered onto another, and
+nothing where it has a machine of its own.  That arrangement is C<_shared>: a
+host, and the domains built onto it.
+
+Asked rather than handed down from recipe to recipe.  A guest runs one of each
+service between all the domains on it, so a recipe reading what a sibling is
+configured with -- the credential the DNS server runs with, the zone it holds --
+has to ask about the machine rather than about the domain, and this is what
+names it.
+
+C<$conf> is a configuration to work from, defaulting to C<configuration()>; see
+C<domain_config> for when a caller passes one.
+
+Ask it in scalar context.  Where a domain has a machine of its own this returns
+nothing rather than undef, which in a list vanishes instead of becoming one --
+so C<< is( host_of($d), undef ) >> compares the wrong pair of arguments.
+
+=cut
+
+sub host_of {
+    my ( $class, $domain, $conf ) = @_;
+    return unless defined $domain;
+
+    $conf //= $class->configuration();
+    my $shared = $conf->{_shared};
+    return unless ref $shared eq 'HASH';
+
+    foreach my $host ( keys %{$shared} ) {
+        next unless ref $shared->{$host} eq 'ARRAY';
+        return $host if grep { $_ eq $domain } @{ $shared->{$host} };
+    }
+
+    return;
+}
+
 =head2 global_config($domain, $conf)
 
 The C<_global> block a domain is built with: what C<_base> says, with the

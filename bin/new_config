@@ -223,19 +223,17 @@ sub get_recipe_config {
 }
 
 sub expand_dependent_domains {
-    my $d      = shift;
-    my $c      = get_recipe_config();
-    my $shared = $c->{_shared};
-    return $d unless ref $shared eq 'HASH';
+    my $d = shift;
 
-    foreach my $host ( keys(%$shared) ) {
-        next unless ref $shared->{$host} eq 'ARRAY' && @{ $shared->{$host} };
-        next unless grep { $_ eq $d } @{ $shared->{$host} };
-        print "Expanding list of configs to generate to include $host\n";
-        return ( $host, $d );
-    }
+    # Provisioner::Cookbook's walk rather than one of our own.  The recipes ask
+    # it the same question whenever they need the machine rather than the domain
+    # -- which guest runs the DNS server a record goes into -- and two readings
+    # of _shared are two chances to disagree about what is layered onto what.
+    my $host = Provisioner::Cookbook->host_of( $d, get_recipe_config() );
+    return $d unless defined $host;
 
-    return $d;
+    print "Expanding list of configs to generate to include $host\n";
+    return ( $host, $d );
 }
 
 =head2 %gaps = salvage_gaps()
@@ -324,8 +322,11 @@ a recipe this installation actually has, and one that implements what was asked
 for.  A configuration naming something else is a typo, and saying so beats
 loading it and finding out three targets later.
 
-C<$domain_conf> and C<$host_conf> are what the domain and the machine it is
-layered onto are configured with -- the second undef for a guest of its own.
+C<$domain_conf> is what the domain itself is configured with.  C<$host_conf> is
+what the machine it is layered onto is, and C<$host> names that machine so a
+refusal can say which guest it looked at -- both of those undef for a domain
+with a guest of its own.
+
 C<$requiring_conf> is the configuration of the recipe that declared the
 dependency: the interface names the key holding a preference and reads it from
 there, so a domain settles a tie where it already writes it.
@@ -333,7 +334,7 @@ there, so a domain settles a tie where it already writes it.
 =cut
 
 sub resolve_interface {
-    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain ) = @_;
+    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @_;
 
     # It arrives as text out of required_recipes, so nothing has loaded it and
     # every method call below would be "perhaps you forgot to load".
@@ -350,6 +351,7 @@ sub resolve_interface {
         %{ $requiring_conf // {} },
         domain          => $domain,
         configured      => $domain_conf // {},
+        host            => $host,
         host_configured => $host_conf,
     );
 
@@ -749,18 +751,6 @@ sub handle_domain {
 
     $global_config->{script_dir} = $root_scripts;
 
-    # Which guest holds the DNS server this domain's records live on: its own,
-    # or the one it is layered onto.  One pdns serves the whole guest and its
-    # global_pdns target is made once, so a second domain never rewrites
-    # api.conf and the key in it stays the first domain's -- measured on a
-    # shared host, where a token of its own meant every challenge came back 401.
-    #
-    # The name only.  The credential belongs to the recipe that runs the API and
-    # is settled there, rather than copied into _global under a second name
-    # where it reached every recipe on the guest: see
-    # Provisioner::Recipe::pdns/api_key_for.
-    $global_config->{dns_host_domain} = $depends_on // $domain;
-
     my ( @pkgs, @generated );
 
     # Regrettably, we may be running this on an existing system so we gotta install pkgs anyways.
@@ -846,7 +836,7 @@ sub handle_domain {
             # know what DNS is.
             if ( index( $required, '::' ) >= 0 ) {
                 my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
-                my $chosen    = resolve_interface( $required, $rconf->{$domain}, $host_conf, $pconf, $domain );
+                my $chosen    = resolve_interface( $required, $rconf->{$domain}, $host_conf, $pconf, $domain, $depends_on );
                 $dep_recipes{$chosen} //= $dep_recipes{$required};
                 delete $dep_recipes{$required};
                 $required = $chosen;

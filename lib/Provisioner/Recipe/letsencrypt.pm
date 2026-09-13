@@ -238,26 +238,31 @@ sub _directory_url {
 sub _resolve_provider {
     my (%opts) = @_;
 
-    my $host = $opts{dns_host_domain};
+    my $host = Provisioner::Cookbook->host_of( $opts{domain} );
 
     return Provisioner::DNSRecipe->implementation_for(
         %opts,
         configured      => Provisioner::Cookbook->domain_config( $opts{domain} ) // {},
+        host            => $host,
         host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
     );
 }
 
 # What to ask an implementation its credentials with: the configuration of that
-# recipe for this domain, which is its own block and not this one's.  pdns is
-# handed the token as well, because this recipe is what mints one for a guest
-# whose operator configured no key of their own.
+# recipe for this domain, which is its own block and not this one's -- falling
+# back to the machine's, since a domain layered onto another is served by what
+# that guest runs.
+#
+# Whatever the operator wrote there, and nothing else.  A credential nobody
+# configured is the implementation's to settle rather than this recipe's: see
+# Provisioner::Recipe::pdns/api_key_for.
 sub _provider_config {
     my ( $provider, %params ) = @_;
 
-    my $server = $params{dns_host_domain} // $params{domain};
-    my $conf = Provisioner::Cookbook->domain_config( $params{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
+    my $server = Provisioner::Cookbook->host_of( $params{domain} ) // $params{domain};
+    my $conf   = Provisioner::Cookbook->domain_config( $params{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
 
-    return ( %{$conf}, domain => $params{domain}, dns_host_domain => $params{dns_host_domain} );
+    return ( %{$conf}, domain => $params{domain} );
 }
 
 # The recipe implementing a provider, as a class.  Loaded rather than
@@ -407,9 +412,9 @@ sub required_recipes {
 
         # The machine's domain rather than this one's: a single pdns serves the
         # whole guest, so a domain layered onto another has to hand it the key
-        # that server is already running with.  See dns_host_domain, which
-        # bin/new_config sets from depends_on.
-        my $server = $opts{dns_host_domain} // $opts{domain};
+        # that server is already running with.  Which machine that is is
+        # Provisioner::Cookbook/host_of, read out of _shared.
+        my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
         my $local  = Provisioner::DNSRecipe->local_implementation();
         my $class  = Provisioner::Cookbook->load($local);
 

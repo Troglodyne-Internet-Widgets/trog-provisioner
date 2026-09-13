@@ -196,6 +196,50 @@ subtest 'a list in _base is added to rather than replaced' => sub {
     );
 };
 
+subtest 'host_of names the guest a domain is layered onto' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", <<'YAML' );
+_shared:
+    host.test:
+        - tenant.test
+        - other.test
+host.test:
+    pdns:
+tenant.test:
+    letsencrypt:
+alone.test:
+    letsencrypt:
+YAML
+
+    Provisioner::Cookbook->forget();
+
+    is( scalar Provisioner::Cookbook->host_of('tenant.test'), 'host.test', 'a domain built onto another names that machine' );
+    is( scalar Provisioner::Cookbook->host_of('other.test'),  'host.test', 'and so does the second one on it' );
+
+    # The distinction every caller turns on.  A recipe asks this to decide
+    # whether to read a sibling's configuration rather than its own, so a domain
+    # with a machine of its own has to answer nothing rather than answer itself.
+    #
+    # scalar, because this returns nothing rather than undef -- in the list is()
+    # takes, nothing would vanish and shift the arguments along.
+    is( scalar Provisioner::Cookbook->host_of('alone.test'), undef, 'a domain with a machine of its own is layered onto nothing' );
+    is( scalar Provisioner::Cookbook->host_of('host.test'),  undef, 'and neither is the host itself' );
+    is( scalar Provisioner::Cookbook->host_of(undef),        undef, 'and asking about no domain at all is not fatal' );
+
+    # A configuration to work from rather than the one the environment names:
+    # bin/new_config resolved the secrets in its copy and passes that.
+    is(
+        scalar Provisioner::Cookbook->host_of( 'x.test', { _shared => { 'y.test' => ['x.test'] } } ),
+        'y.test',
+        'a caller can hand it the configuration it means'
+    );
+
+    is( scalar Provisioner::Cookbook->host_of( 'x.test', {} ), undef, 'and one with no _shared layers nothing onto anything' );
+
+    Provisioner::Cookbook->forget();
+};
+
 subtest 'the data source, and a domain inside it' => sub {
     my $conf = {
         _base       => { data => { from => '/opt/data', to => '/opt/domains' } },

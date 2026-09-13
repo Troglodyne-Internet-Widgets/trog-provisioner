@@ -184,6 +184,11 @@ local server asked for where none is configured is not there.  And a guest
 configured with both, naming neither, is a tie nothing here can settle -- so
 C<tiebreaker_key> is what settles it.
 
+C<configured> is what the domain is configured with and C<host_configured> what
+the guest holding it is, for a domain layered onto another; C<host> names that
+guest, and is used to say which one was looked at.  All three are passed in
+rather than fetched -- see C<_configures>.
+
 Asked of the domain's configuration rather than of the module list, because that
 list is not the same before and after the depsolver has run: the two callers
 here sit either side of it.  Both C<bin/new_config>, resolving a dependency on
@@ -203,7 +208,7 @@ sub implementation_for {
     die "implementation_for was not told what $domain is configured with; pass configured => the domain's recipes.\n"
       unless ref $opts{configured} eq 'HASH';
 
-    my $server = $opts{dns_host_domain} // $domain;
+    my $server = $opts{host} // $domain;
 
     # Both candidates asked the same way and of the same places: the domain's
     # own configuration and the machine's, since a domain layered onto another

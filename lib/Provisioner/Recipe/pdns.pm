@@ -114,7 +114,7 @@ sub lexicon_credentials {
     my $key =
       length( $opts{api_key} // q{} )
       ? $opts{api_key}
-      : $self->api_key_for( $opts{dns_host_domain} // $opts{domain} );
+      : $self->api_key_for( $opts{domain} );
 
     return (
         type  => 'powerdns',
@@ -133,18 +133,21 @@ An operator who set one owns it.  Otherwise it is made here -- once per server,
 because the API config, the dehydrated hook and the lexicon shortcut all have to
 present the same value, and a second one is a 401 rather than a warning.  The
 server belongs to a guest rather than to a domain, so a domain layered onto
-another asks with that machine's name: see C<dns_host_domain>.
+another is answered with the key that machine's server already runs with -- which
+this works out from L<Provisioner::Cookbook/host_of> rather than being told.
 
 =cut
 
 sub api_key_for {
     my ( $self, $domain ) = @_;
 
-    my $configured = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name }{api_key};
+    my $server = Provisioner::Cookbook->host_of($domain) // $domain;
+
+    my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
     return $configured if defined $configured && length $configured;
 
     state %made;
-    return $made{ $domain // q{} } //= Crypt::PRNG::random_bytes_hex(32);
+    return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
 }
 
 sub enrich {
@@ -154,7 +157,7 @@ sub enrich {
     # letsencrypt's, under a second name in _global, which meant the credential
     # for this API reached every recipe on the guest and was owned by none of
     # them.
-    $opts{api_key} = $self->api_key_for( $opts{dns_host_domain} // $opts{domain} )
+    $opts{api_key} = $self->api_key_for( $opts{domain} )
       unless length( $opts{api_key} // q{} );
 
     my $extras = $opts{extra_records} // '';

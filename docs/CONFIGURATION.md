@@ -408,6 +408,10 @@ my.client.on.shared.host:
 The shared host is built first, then each guest on it is built against the
 running machine.
 
+A recipe that needs the machine rather than the domain -- the DNS server's
+credential belongs to one guest however many domains it serves -- asks
+`Provisioner::Cookbook->host_of`, which is this list read back.
+
 ## Data directories
 
 The `data` recipe rsyncs `from/<domain>` on this machine to `to/<domain>` on the
@@ -482,12 +486,7 @@ listening on one port both get the higher of their rate limits. See
 
 ## Known gaps
 
-* `dns_host_domain` rides in `_global`, so every recipe on a guest is told which
-  guest holds its DNS server whether or not it has business with DNS. It is a
-  name rather than a credential -- the API key belongs to `pdns`, and the
-  registrar's to `registrar`.
-
-Two the old documentation carried, both still true:
+Two, both carried over from the old documentation and both still true:
 
 * `admin_key` is handed to cloud-init as an `ssh_import_id`, so it names an
   account to import from (`gh:someone`) rather than a key. A raw public key has

@@ -196,6 +196,21 @@ subtest 'the interface says which implementation serves a domain' => sub {
         'and a tenant is served by what its host holds'
     );
 
+    # The machine's name, so a refusal says which guest was looked at rather
+    # than naming the domain that was never going to have a server of its own.
+    like(
+        exception {
+            Provisioner::DNSRecipe->implementation_for(
+                domain         => 'tenant.troglodyne.net',
+                configured     => $nothing,
+                host           => 'host.troglodyne.net',
+                dns_preference => 'pdns',
+            );
+        },
+        qr/host\.troglodyne\.net is configured with no pdns/,
+        'and a refusal names the machine it asked about, not the domain on it'
+    );
+
     like(
         exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net' ) },
         qr/was not told what/,

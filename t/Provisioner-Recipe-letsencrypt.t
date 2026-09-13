@@ -19,8 +19,16 @@ use Test::Fatal qw{exception};
 use Test::MockModule();
 use File::Temp qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
 
 use FindBin::libs;
+
+# Never this machine's real configuration.  The recipe asks
+# Provisioner::Cookbook which guest holds a domain and what it is configured
+# with, so a fleet that happened to name one of the domains below would change
+# what this file asserts.
+## no critic (CompileTime) -- setting it at compile time is the point.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::letsencrypt();
@@ -262,13 +270,34 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
 subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
     my %common = ( install_dir => '/opt/domains', admin_user => 'doge', modules => [qw{pdns letsencrypt}] );
 
+    # The arrangement said the way an operator says it, in _shared, rather than
+    # handed to the recipe as an argument.  Which guest holds a domain is the
+    # configuration's to answer -- Provisioner::Cookbook/host_of -- and a test
+    # that passes the answer in cannot tell whether the recipe ever asked.
+    my $dir = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", <<'YAML' );
+_shared:
+    first.test:
+        - second.test
+first.test:
+    pdns:
+    letsencrypt:
+second.test:
+    letsencrypt:
+third.test:
+    pdns:
+    letsencrypt:
+YAML
+    Provisioner::Cookbook->forget();
+
     # One pdns serves the whole guest, and its global target is made once -- so a
     # domain layered onto another never rewrites api.conf and the key in it stays
     # the first domain's.  A token of its own is one the server does not know:
     # measured on a shared host, where every challenge came back 401.
     my %host   = _fresh()->validate( %common, domain => 'first.test' );
-    my %tenant = _fresh()->validate( %common, domain => 'second.test', dns_host_domain => 'first.test' );
-    my %alone  = _fresh()->validate( %common, domain => 'second.test' );
+    my %tenant = _fresh()->validate( %common, domain => 'second.test' );
+    my %alone  = _fresh()->validate( %common, domain => 'third.test' );
 
     # Length first, and not merely equality: two empty strings are equal, so an
     # absent credential would satisfy the comparison below while rendering a
@@ -281,12 +310,14 @@ subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
     # separate path, and fixing the hook alone left the server configured with
     # one key and told to expect another.
     my %host_req    = _fresh()->required_recipes( %common, domain => 'first.test' );
-    my %tenant_req  = _fresh()->required_recipes( %common, domain => 'second.test', dns_host_domain => 'first.test' );
+    my %tenant_req  = _fresh()->required_recipes( %common, domain => 'second.test' );
     my %host_pdns   = $host_req{pdns}   ? $host_req{pdns}->()   : ();
     my %tenant_pdns = $tenant_req{pdns} ? $tenant_req{pdns}->() : ();
 
     ok( length( $host_pdns{api_key} // q{} ), 'pdns is handed a key for the machine' );
     is( $tenant_pdns{api_key}, $host_pdns{api_key}, 'and a domain on it hands pdns that same key' );
+
+    Provisioner::Cookbook->forget();
 };
 
 sub _fresh {
