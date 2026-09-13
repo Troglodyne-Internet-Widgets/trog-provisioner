@@ -24,7 +24,7 @@ use Provisioner::Utils();
         acmeca:
         letsencrypt:
             ca: https://localhost:9000/acme/trog/directory
-            prefer_local_dns: 1
+            dns_preference: pdns
         pdns:
             api_key: secret:group/entry/field
 
@@ -49,9 +49,9 @@ What was untested is then tested, on the guest, with the real client.
 Because the guest is already authoritative for its own name.
 L<Provisioner::Recipe::pdns> runs an authoritative server on C<127.0.0.1:2500>
 and a recursor on C<:53> which forwards this domain to it, and letsencrypt's
-C<prefer_local_dns> points lexicon at that server's API socket.  So the record
-is written, served and read without a packet leaving the machine, and a CA in
-the same place needs no view of the fleet to validate anything.
+C<dns_preference> resolves to that server, pointing lexicon at its API socket.
+So the record is written, served and read without a packet leaving the machine,
+and a CA in the same place needs no view of the fleet to validate anything.
 
 A CA elsewhere would need one: step-ca resolves a C<dns-01> challenge through
 its own host's resolver, and nothing outside this guest can answer for its zone.

@@ -19,7 +19,7 @@ for anything else written like it.  The line said `git apply ... ; /bin/true`,
 so a second provision would not fail on an already-applied patch -- and the same
 `/bin/true` swallowed *"there is no such file"*.  The path was wrong for the
 whole life of the line (`/tmp` for a payload that untars into `/var/tmp`), so
-the patches never applied on any guest, and `prefer_local_dns` could not have
+the patches never applied on any guest, and the local DNS path could not have
 issued a certificate.  Nothing said so until somebody read a dehydrated hook's
 traceback.  It now skips only when `git apply --reverse --check` says the patch
 is already in, and says so on stderr when a patch will neither apply nor

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-[% IF prefer_local_dns -%]
+[% IF dns_preference == 'pdns' -%]
 # Wait for the server that answers the challenge before asking for one.
 #
 # A backstop, not the fix: pdns starts in its own target now, so this should

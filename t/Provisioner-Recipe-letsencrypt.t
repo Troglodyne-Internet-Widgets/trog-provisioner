@@ -16,7 +16,8 @@ challenge reaches the server that answers for it
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Test::MockModule();
+use File::Temp qw{tempdir};
 use File::Slurper();
 
 use FindBin::libs;
@@ -57,8 +58,10 @@ sub generated {
     return ( $recipe, $dir, sub { File::Slurper::read_text("$dir/$_[0]") } );
 }
 
-# What prefer_local_dns needs beside itself: the token, and a pdns to talk to.
-my %LOCAL = ( prefer_local_dns => 1, local_dns_access_token => 'an-api-key' );
+# What the local DNS path needs beside the domain.  Nothing names the provider:
+# a reserved TLD has only the one that could serve it, and the recipe resolves
+# that for itself.
+my %LOCAL = ( local_dns_access_token => 'an-api-key' );
 
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
     my ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
@@ -101,16 +104,22 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     like( $hook, qr/^export LEXICON_POWERDNS_AUTH_TOKEN="[0-9a-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
 };
 
-subtest 'a reserved TLD with no dns server of its own is left to the public CA' => sub {
+subtest 'a reserved TLD is served locally whatever reached the module list' => sub {
     my ( undef, undef, $slurp ) = generated( modules => ['letsencrypt'] );
 
-    # enrich turns on prefer_local_dns for the fleet CA, and the guard below it
-    # dies without a dns provider -- so routing every .test domain at our own CA
-    # made a bare render of this recipe fatal, which is t/recipes.t and
-    # bin/recipes both.  Nothing can issue for the name either way; this leaves
-    # the failure where it already was instead of making a new one here.
-    my $default = $Provisioner::Recipe::letsencrypt::DEFAULT_CA;
-    like( $slurp->('dehydrated.conf'), qr/^\QCA="$default"\E$/m, 'rather than dying on a mode it cannot complete' );
+    # The module list is not what decides this, and asking it is what made the
+    # two callers disagree: the depsolver adds the pdns this recipe pulls in
+    # through acmeca between required_recipes and enrich, so the same domain
+    # resolved as the registrar for the first and as the local server for the
+    # second.  A reserved TLD is served locally because this recipe requires
+    # what serves it, which is true before the depsolver has run.
+    like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the fleet CA, with pdns absent from the list' );
+
+    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', modules => ['letsencrypt'] );
+    ok( exists $required{pdns}, 'because the recipe is what puts that server there' );
+
+    my %opts = _fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', modules => ['letsencrypt'] );
+    is( $opts{dns_preference}, 'pdns', 'and both callers resolve the one provider' );
 };
 
 subtest 'a domain can name one of the fleet own instead' => sub {
@@ -252,18 +261,77 @@ sub _fresh {
     );
 }
 
-subtest 'prefer_local_dns without a DNS server is refused' => sub {
-    my $recipe = Provisioner::Cookbook->load( 'letsencrypt', distro => 'ubuntu' )->new(
-        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
-        output_dir    => tempdir( CLEANUP => 1 ),
-        distro        => 'ubuntu',
+subtest 'a provider that could not answer the challenge is refused' => sub {
+    my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge', @_ ); };
+
+    # The rename is not silent.  An unrecognised key is dropped by the schema
+    # rather than rejected, so a configuration left unmigrated would have
+    # resolved to the registrar without saying anything -- on the one domain
+    # whose zone this fleet is itself serving.
+    like(
+        exception { _fresh()->enrich( $public->( prefer_local_dns => 1 ) ) },
+        qr/dns_preference/,
+        'the flag this replaced names its replacement rather than being ignored'
     );
 
     like(
-        exception { $recipe->enrich( %LOCAL, domain => $DOMAIN, modules => ['letsencrypt'] ) },
-        qr/dns provider/i,
-        'rather than writing a challenge nothing can serve'
+        exception { _fresh()->enrich( $public->( dns_preference => 'pdns' ) ) },
+        qr/no pdns recipe/,
+        'asking for a local server where none is configured is refused'
     );
+
+    # No public registrar can hold a zone under a TLD reserved by RFC 2606, so
+    # the credentials could never answer for the name however good they are.
+    like(
+        exception {
+            _fresh()->enrich(
+                domain         => $DOMAIN,
+                install_dir    => '/opt/domains',
+                admin_user     => 'doge',
+                registrar      => { type => 'easydns', user => 'somebody', key => 'a-token' },
+                dns_preference => 'registrar',
+            );
+        },
+        qr/reserve/,
+        'and so is naming a registrar for a name no registrar can hold'
+    );
+
+    like(
+        exception { _fresh()->enrich( $public->() ) },
+        qr/no DNS provider/,
+        'a domain with neither is told so, rather than rendering a hook that cannot run'
+    );
+};
+
+subtest 'a guest that could answer either way is asked which' => sub {
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( domain_config => sub { return { pdns => { api_key => 'a-key' }, letsencrypt => {} }; } );
+
+    # A public name whose zone this fleet also serves: the credentials inherited
+    # from _global and the server on the guest can each write the record, they
+    # write it in different places, and choosing for the operator is a guess.
+    my %both = (
+        domain      => $PUBLIC,
+        install_dir => '/opt/domains',
+        admin_user  => 'doge',
+        registrar   => { type => 'easydns', user => 'somebody', key => 'a-token' },
+    );
+
+    like(
+        exception { _fresh()->enrich(%both) },
+        qr/dns_preference/,
+        'a tie with no tiebreaker is refused rather than resolved'
+    );
+
+    foreach my $named (qw{pdns registrar}) {
+        my %opts = _fresh()->enrich( %both, dns_preference => $named );
+        is( $opts{dns_preference}, $named, "naming $named settles it" );
+    }
+
+    # The tiebreaker decides the hook as well as the answer: the local server is
+    # reached over a unix socket lexicon has to be pointed at.
+    my %local = _fresh()->enrich( %both, dns_preference => 'pdns' );
+    is( $local{registrar}{type}, 'powerdns', 'and the local server is what lexicon is given' );
 };
 
 Test::NoWarnings::had_no_warnings();
