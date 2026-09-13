@@ -33,6 +33,8 @@ use File::Slurper::Temp();
 use YAML::XS();
 
 use Provisioner::Cookbook();
+use Trog::Credentials();
+use Trog::Secrets();
 
 require Trog::HV;
 require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
@@ -116,6 +118,79 @@ sub builds {
     # a loose match would answer yes for a recipe that is not built at all.
     return $makefile =~ m{^/etc/provisioner/state/(?:global_|[^/]+/)\Q$recipe\E:}m ? 1 : 0;
 }
+
+subtest 'a credential written as a secret reference reaches the hook resolved' => sub {
+    my $tmpdir = tempdir( CLEANUP => 1 );
+    mkdir "$tmpdir/domains";
+    mkdir "$tmpdir/data";
+    mkdir "$tmpdir/data/$REMOTE";
+
+    # A real store, not a stubbed read: what this is about is a password making
+    # it from the database into a rendered file, so faking the database out
+    # would skip the part that broke.
+    my $kdbx = "$tmpdir/secrets.kdbx";
+    Trog::Secrets->write( $kdbx, 'throwaway', 'secret:dns/registrar/password' => 'REAL-PASSWORD' );
+
+    # Seeded rather than mocked: prompt() hands back a credential this run has
+    # already been given, so the generator never reaches for a terminal.
+    Trog::Credentials->remember( 'keepass', 'throwaway' );
+
+    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my ( $ih, $ipmap_file ) = tempfile();
+    print {$ih} <<"IPMAP";
+[global]
+ip=192.168.1.50
+basedir=$tmpdir/domains
+transfer_user=doge
+admin_user=doge
+admin_key=gh:teodesian
+admin_email=bogus\@test.test
+admin_gecos=Test Test
+gateway=192.168.1.254
+resolvers=127.0.0.1, 192.168.1.254
+bridge_devname=ens4
+dhcp_devname=ens3
+[ip_pool]
+addresses=$pool
+[nameservers]
+ns1=ns1.test.test
+ns2=ns2.test.test
+IPMAP
+    close $ih;
+
+    my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
+    File::Slurper::Temp::write_binary(
+        $recipe_file,
+        YAML::XS::Dump(
+            {
+                _base => {
+                    _global   => { data_source => "$tmpdir/data" },
+                    registrar => { type        => 'easydns', user => 'somebody', key => 'secret:dns/registrar/password' },
+                },
+                $REMOTE => { letsencrypt => undef },
+            }
+        )
+    );
+
+    Provisioner::Cookbook->forget();
+
+    my $err = exception {
+        Trog::Provisioner::Config::Generator::main( '--ipmap', $ipmap_file, '--recipes', $recipe_file, '--secrets', $kdbx, '--skip_ssh', $REMOTE );
+    };
+    is( $err, undef, 'the generation runs to the end' ) or diag $err;
+
+    my $hook = "$tmpdir/domains/$REMOTE/domain.hook";
+    ok( -f $hook, 'a dehydrated hook was written' ) or return;
+
+    # bin/new_config resolves secret: references into a clone of the
+    # configuration, and a recipe reading a sibling's credential through
+    # Provisioner::Cookbook was answered from the copy that had not been
+    # resolved -- so the hook exported the reference and authenticated with
+    # nothing.
+    my $text = File::Slurper::read_text($hook);
+    like( $text, qr/^export LEXICON_EASYDNS_AUTH_TOKEN="REAL-PASSWORD"$/m, 'the hook carries the password the store holds' );
+    unlike( $text, qr/secret:/, 'and nowhere in it says where the password is instead of what it is' );
+};
 
 subtest 'a reserved name resolves the interface to the server on the guest' => sub {
     my ( $err, $makefile ) = generate( $LOCAL, letsencrypt => undef );

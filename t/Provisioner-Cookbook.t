@@ -90,6 +90,40 @@ subtest 'configuration() is read once and remembered' => sub {
     ok( exists Provisioner::Cookbook->configuration("$dir/recipes.yaml")->{'two.test'}, 'and forget() makes it read again' );
 };
 
+subtest 'remember() seats what a run resolved, so recipes read that' => sub {
+
+    # The installation's own directory, not a tempdir of its own: domain_config
+    # with no configuration reads Trog::Config's path, so seating anywhere else
+    # is seating under one key and reading from another.
+    my $dir = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "a.test:\n    pdns:\n        api_key: 'secret:g/e/password'\n" );
+
+    Provisioner::Cookbook->forget();
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'the file says where the password is' );
+
+    # bin/new_config resolves into a clone, so what it remembered stays the
+    # reference -- and a recipe reading a sibling through domain_config rendered
+    # that reference into the file meant to authenticate with it.
+    my $resolved = { 'a.test' => { pdns => { api_key => 'REAL' } } };
+    Provisioner::Cookbook->remember( "$dir/recipes.yaml", $resolved );
+
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'REAL', 'after seating, a recipe reads what the run resolved' );
+
+    # A copy, not the caller's structure.  bin/new_config seats what it resolved
+    # and then keeps editing it -- folding _base into the domain it is building,
+    # then deleting _base outright.  Holding the reference meant a later reader
+    # lost the inheritance, invisibly for the domain being built and not at all
+    # invisibly for a domain layered onto another, which asks about its host.
+    $resolved->{'a.test'}{pdns}{api_key} = 'CHANGED-AFTERWARDS';
+    delete $resolved->{'a.test'}{pdns}{soa};
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'REAL', 'and editing it afterwards does not reach what was seated' );
+
+    # And it is remembered the way anything else is: keyed by resolved path, and
+    # dropped by forget rather than outliving the command that seated it.
+    Provisioner::Cookbook->forget();
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'and forget() puts it back to what is on disk' );
+};
+
 subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
     my $conf = {
         _base => {

@@ -624,6 +624,42 @@ sub configuration {
     return $CONFIGURATION{$key} = $conf;
 }
 
+=head2 remember($path, $conf)
+
+Seat C<$conf> as the configuration for C<$path>, so everything that asks for it
+afterwards is answered with this one.
+
+There is exactly one caller and one reason.  C<bin/new_config> reads the
+configuration, clones it, and resolves every C<secret:> reference into the
+clone -- so the copy remembered here still says C<secret:group/entry/field>
+where the clone says the password.  A recipe reading a sibling's configuration
+through C<domain_config> got the reference, and rendered it into the file that
+was supposed to authenticate with it.  Measured: a domain whose registrar
+credentials are a secret reference exported
+C<LEXICON_EASYDNS_AUTH_TOKEN="secret:g/e/password"> into its dehydrated hook,
+while the same run configured the server with the real one.
+
+Keyed the way C<configuration> keys, so the two cannot disagree about which
+file they are talking about, and cleared by C<forget> like anything else it
+remembers.
+
+=cut
+
+sub remember {
+    my ( $class, $path, $conf ) = @_;
+
+    my $key = Cwd::abs_path( $path // Trog::Config->path('recipes.yaml') );
+
+    # A copy, because the caller goes on using theirs.  bin/new_config seats the
+    # configuration it resolved and then folds _base into the domain it is
+    # building and deletes _base outright -- and holding its reference meant
+    # every later reader lost the inheritance.  Not visibly for the domain being
+    # built, whose _base was folded in a line earlier, but for every other one:
+    # a domain layered onto another asks about its host, and got a host with
+    # nothing _base gave it.
+    return $CONFIGURATION{$key} = clone($conf);
+}
+
 =head2 domain_config($domain, $conf)
 
 Everything one domain is configured with: its own entry with the C<_base> entry

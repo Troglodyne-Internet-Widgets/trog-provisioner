@@ -77,10 +77,9 @@ sub with_registrar {
     return $mock;
 }
 
-# What the local DNS path needs beside the domain.  Nothing names the provider:
-# a reserved TLD has only the one that could serve it, and the recipe resolves
-# that for itself.
-my %LOCAL = ( local_dns_access_token => 'an-api-key' );
+# The local DNS path needs nothing named at all now: a reserved TLD has only the
+# one provider that could serve it, the recipe resolves that for itself, and the
+# credential belongs to pdns rather than being handed over.
 
 subtest 'the CA defaults to the public one where a public CA could issue' => sub {
     my $registrar = with_registrar();
@@ -114,7 +113,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     my %handed = $required{pdns}->();
     my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'doge' );
     ok( length $handed{api_key}, 'pdns is handed an api key' );
-    is( $handed{api_key}, $opts{local_dns_access_token}, 'and the hook is given the same one' );
+    is( $handed{api_key}, $opts{registrar}{key}, 'and the hook is given the same one' );
 
     # The token reaching the file dehydrated executes, which is the thing that
     # actually failed: every other consumer had it and agreed, while the hook
@@ -159,7 +158,7 @@ subtest 'a domain can name one of the fleet own instead' => sub {
 };
 
 subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
-    my ( undef, undef, $slurp ) = generated(%LOCAL);
+    my ( undef, undef, $slurp ) = generated();
     my $hook = $slurp->('domain.hook');
 
     # lexicon reduces a domain to its registrable name before asking for a zone,
@@ -232,7 +231,7 @@ subtest 'the fetcher registers before it asks for anything' => sub {
 };
 
 subtest 'the fetcher waits for the server that answers its challenge' => sub {
-    my ( undef, undef, $slurp ) = generated(%LOCAL);
+    my ( undef, undef, $slurp ) = generated();
     my $fetcher = $slurp->('get_cert');
 
     # The postrun queue is in fragment order and this recipe's fragment runs
@@ -271,9 +270,12 @@ subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
     my %tenant = _fresh()->validate( %common, domain => 'second.test', dns_host_domain => 'first.test' );
     my %alone  = _fresh()->validate( %common, domain => 'second.test' );
 
-    ok( length $host{local_dns_access_token}, 'the machine has a token' );
-    is( $tenant{local_dns_access_token}, $host{local_dns_access_token}, 'a domain on it presents that one' );
-    isnt( $alone{local_dns_access_token}, $host{local_dns_access_token}, 'while a domain with a machine of its own gets its own' );
+    # Length first, and not merely equality: two empty strings are equal, so an
+    # absent credential would satisfy the comparison below while rendering a
+    # hook that authenticates with nothing.
+    ok( length( $host{registrar}{key} // q{} ) >= 32, 'the machine has a token' );
+    is( $tenant{registrar}{key}, $host{registrar}{key}, 'a domain on it presents that one' );
+    isnt( $alone{registrar}{key}, $host{registrar}{key}, 'while a domain with a machine of its own gets its own' );
 
     # The hook is only half of it.  required_recipes hands pdns its api_key on a
     # separate path, and fixing the hook alone left the server configured with

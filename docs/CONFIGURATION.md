@@ -482,9 +482,10 @@ listening on one port both get the higher of their rate limits. See
 
 ## Known gaps
 
-* `local_dns_access_token` and `dns_host_domain` still ride in `_global`, so
-  they reach every recipe on a guest whether or not it has business with DNS.
-  The registrar's credentials no longer do.
+* `dns_host_domain` rides in `_global`, so every recipe on a guest is told which
+  guest holds its DNS server whether or not it has business with DNS. It is a
+  name rather than a credential -- the API key belongs to `pdns`, and the
+  registrar's to `registrar`.
 
 Two the old documentation carried, both still true:
 

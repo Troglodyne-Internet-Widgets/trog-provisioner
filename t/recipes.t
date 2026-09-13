@@ -144,7 +144,6 @@ my %G = (
     packager_invocation        => 'apt-get install -y',
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',
-    local_dns_access_token     => '',
 
     # Every recipe is handed these, not only the distro recipe: the fetch cache
     # runs a resolver of its own and refuses to render without them.
@@ -360,7 +359,6 @@ rejects_missing( 'mariadb', { root_pw  => 'x',     dumpfile => 'd.sql' }, 'versi
 
 rejects_missing( 'adminconfig', {}, 'skel' );
 rejects_missing( 'imagemagick', {}, 'version' );
-rejects_missing( 'pdns',        {}, 'api_key' );
 rejects_missing( 'registrar',   {}, 'type' );
 
 rejects_missing(
@@ -1294,6 +1292,16 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
 };
 
+subtest 'pdns makes the credential its own API is reached with' => sub {
+    my %bare = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test' );
+    ok( length( $bare{api_key} // q{} ) >= 32, 'a guest that configured no key gets one made for it' );
+
+    # An operator who set one owns it: this is a secret nobody chose, not a
+    # decision to take away from somebody who made it.
+    my %set = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test', api_key => 'chosen-by-hand' );
+    is( $set{api_key}, 'chosen-by-hand', 'and one that did keeps it' );
+};
+
 subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
 
     # lexicon builds an environment variable from provider plus option name --
@@ -1309,7 +1317,7 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
 
     # A fresh recipe per render: validated() memoises onto the object, so a
     # second render through the same one answers with the first one's options.
-    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns', local_dns_access_token => 'a-token' );
+    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns' );
     like( $hook, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
 };
 

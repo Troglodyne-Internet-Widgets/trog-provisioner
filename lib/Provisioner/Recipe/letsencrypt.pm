@@ -12,8 +12,6 @@ use parent qw{Provisioner::Recipe};
 
 use List::Util qw{any};
 
-use Crypt::PRNG();
-
 use Provisioner::Cookbook();
 use Provisioner::DNSRecipe();
 use Provisioner::Utils();
@@ -227,22 +225,6 @@ sub _directory_url {
     return "https://localhost:$port/acme/trog/directory";
 }
 
-# The token lexicon authenticates to the local pdns with, which is that server's
-# own api_key.  An operator who set one owns it; otherwise this is a secret
-# nobody chose, so it is made here -- once per server, because pdns and every
-# hook that talks to it have to be given the same one.  That is the domain the
-# server belongs to, which is not this domain when this one is sharing another's
-# machine: see dns_host_domain.
-sub _dns_token {
-    my ($domain) = @_;
-
-    my $configured = Provisioner::Cookbook->domain_config($domain)->{ Provisioner::DNSRecipe->local_implementation() }{api_key};
-    return $configured if defined $configured && length $configured;
-
-    state %made;
-    return $made{ $domain // q{} } //= Crypt::PRNG::random_bytes_hex(32);
-}
-
 # Which provider serves this domain, asked with what this run is configured
 # with.
 #
@@ -275,7 +257,7 @@ sub _provider_config {
     my $server = $params{dns_host_domain} // $params{domain};
     my $conf = Provisioner::Cookbook->domain_config( $params{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
 
-    return ( %{$conf}, domain => $params{domain}, api_key => $conf->{api_key} // $params{local_dns_access_token} );
+    return ( %{$conf}, domain => $params{domain}, dns_host_domain => $params{dns_host_domain} );
 }
 
 # The recipe implementing a provider, as a class.  Loaded rather than
@@ -310,7 +292,6 @@ sub args {
                 description =>
                   "Which DNS recipe answers this domain's dns-01 challenge where the guest has more than one that could: 'pdns' for the server this fleet runs on the guest, 'registrar' for whoever holds the public zone.  A tiebreaker and nothing more -- a name under a reserved TLD is always served locally, and a domain configured with only one of the two uses it -- so a guest with both and no preference is refused rather than guessed at.  Resolved by enrich to the provider actually used, which is what the hook and the fetcher are rendered from.",
             },
-            local_dns_access_token => { type => 'string' },
         },
     );
 }
@@ -338,19 +319,6 @@ sub enrich {
     # The provider the rest of the render is driven from, resolved rather than
     # declared: a domain that named no preference still has one.
     $params{dns_preference} = $provider;
-
-    if ( $provider eq Provisioner::DNSRecipe->local_implementation() ) {
-
-        # Tested for length rather than definedness: bin/new_config fills this
-        # in from the domain's configured pdns, and does it before the depsolver
-        # adds the one this recipe pulls in -- so on a guest that configured
-        # none it arrives as the empty string rather than absent.  With //= it
-        # stayed empty, the hook's [% IF registrar.key %] then rendered no
-        # export at all, and lexicon died on "PowerDNS API key not defined
-        # (auth_token)" after the order had already been placed.
-        $params{local_dns_access_token} = _dns_token( $params{dns_host_domain} // $params{domain} )
-          unless length( $params{local_dns_access_token} // q{} );
-    }
 
     # What lexicon needs to reach whoever holds this zone, asked of the recipe
     # that holds it rather than assembled here.  This used to spell powerdns's
@@ -441,11 +409,19 @@ sub required_recipes {
         # whole guest, so a domain layered onto another has to hand it the key
         # that server is already running with.  See dns_host_domain, which
         # bin/new_config sets from depends_on.
-        my $server     = $opts{dns_host_domain} // $opts{domain};
-        my $local      = Provisioner::DNSRecipe->local_implementation();
+        my $server = $opts{dns_host_domain} // $opts{domain};
+        my $local  = Provisioner::DNSRecipe->local_implementation();
+        my $class  = Provisioner::Cookbook->load($local);
+
         my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
         unless ( defined $configured && length $configured ) {
-            my $token = _dns_token($server);
+
+            # Asked of the recipe that owns it rather than minted here, and
+            # asked now rather than left to enrich: this runs before validation,
+            # so nothing has enriched anything yet.  Both askings land on the
+            # same per-server value, which is what stops the server being
+            # configured with one key and told to expect another.
+            my $token = $class->api_key_for($server);
             push( @required, $local => sub { return ( api_key => $token ) } );
         }
     }

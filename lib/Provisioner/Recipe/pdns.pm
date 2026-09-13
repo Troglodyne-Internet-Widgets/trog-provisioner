@@ -37,6 +37,9 @@ Sets up the recursor in the event you want to point your resolver at it for fast
 use Text::Xslate;
 use Net::IP;
 use File::Slurper;
+use Crypt::PRNG();
+
+use Provisioner::Cookbook();
 
 # Where pdns binds its API, inside the chroot.  Named here because this recipe
 # is what puts it there: the unit, the configuration and every client that talks
@@ -59,9 +62,12 @@ sub rate_limits {
 sub args {
     return (
         type       => 'object',
-        required   => [qw{api_key}],
         properties => {
-            api_key       => { type => 'string' },
+            api_key => {
+                type        => 'string',
+                description =>
+                  'The credential everything on this guest presents to talk to the API on its loopback socket -- lexicon writing an _acme-challenge record, synczones reading the zone back.  Made here when nobody sets one, because it is a secret nobody chose rather than a decision an operator has to make; a secret: reference is how you set one deliberately.  It belongs to the server, so a domain layered onto another guest presents that machine key rather than one of its own.',
+            },
             extra_records => { type => 'string' },
 
             # Which repo.powerdns.com train to install from.  This asked for
@@ -100,17 +106,56 @@ suffix -- so it asked for the zone "test" and got a 404.
 sub lexicon_credentials {
     my ( $self, %opts ) = @_;
 
+    # Settled here rather than taken on trust.  enrich has put the key in opts
+    # by the time this recipe renders its own templates, but letsencrypt asks
+    # this as a class method to render its hook -- nothing has enriched
+    # anything on that path, and taking $opts{api_key} on faith rendered an
+    # empty token into the file dehydrated executes.
+    my $key =
+      length( $opts{api_key} // q{} )
+      ? $opts{api_key}
+      : $self->api_key_for( $opts{dns_host_domain} // $opts{domain} );
+
     return (
         type  => 'powerdns',
         user  => q{},
-        key   => $opts{api_key},
+        key   => $key,
         opts  => '--resolve-zone-name',
         extra => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
     );
 }
 
+=head2 $key = $recipe->api_key_for($domain)
+
+The credential this server runs with, for the guest C<$domain> holds it on.
+
+An operator who set one owns it.  Otherwise it is made here -- once per server,
+because the API config, the dehydrated hook and the lexicon shortcut all have to
+present the same value, and a second one is a 401 rather than a warning.  The
+server belongs to a guest rather than to a domain, so a domain layered onto
+another asks with that machine's name: see C<dns_host_domain>.
+
+=cut
+
+sub api_key_for {
+    my ( $self, $domain ) = @_;
+
+    my $configured = Provisioner::Cookbook->domain_config($domain)->{ $self->recipe_name }{api_key};
+    return $configured if defined $configured && length $configured;
+
+    state %made;
+    return $made{ $domain // q{} } //= Crypt::PRNG::random_bytes_hex(32);
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
+
+    # Minted here rather than by whoever needed it first.  It used to be
+    # letsencrypt's, under a second name in _global, which meant the credential
+    # for this API reached every recipe on the guest and was owned by none of
+    # them.
+    $opts{api_key} = $self->api_key_for( $opts{dns_host_domain} // $opts{domain} )
+      unless length( $opts{api_key} // q{} );
 
     my $extras = $opts{extra_records} // '';
     if ($extras) {
