@@ -98,8 +98,9 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 	newaliases
 	touch $@
 
+[%# One machine can host several domains, and the account is the machine one while this target is per domain: the second domain to be built must not stop on a user the first one made. %]
 [% state_dir %]/service_user:
-	useradd -s /usr/sbin/nologin -d [% install_dir %]/[% domain %] [% user %]
+	getent passwd [% user %] > /dev/null || useradd -s /usr/sbin/nologin -d [% install_dir %]/[% domain %] [% user %]
 	mkdir -p [% install_dir %]/[% domain %]; /bin/true
 	chown [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 	touch $@

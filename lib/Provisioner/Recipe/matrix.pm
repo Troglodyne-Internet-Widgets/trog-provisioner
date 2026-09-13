@@ -133,6 +133,17 @@ sub required_recipes {
     );
 }
 
+=head2 $bool = $recipe->is_multi_tenant()
+
+False.  One synapse is one homeserver, and C<server_name> is the identity it
+federates under rather than a setting it can hold two of.  Everything else
+follows it -- the public base URL, the database, the media store -- so a second
+domain on the guest would not be added to this one, it would be this one.
+
+=cut
+
+sub is_multi_tenant { return 0 }
+
 sub args {
     my ($self) = @_;
     return (

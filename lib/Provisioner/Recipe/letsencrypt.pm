@@ -202,8 +202,10 @@ sub _directory_url {
 
 # The token lexicon authenticates to the local pdns with, which is that server's
 # own api_key.  An operator who set one owns it; otherwise this is a secret
-# nobody chose, so it is made here -- once per domain, because pdns and the hook
-# that talks to it have to be given the same one.
+# nobody chose, so it is made here -- once per server, because pdns and every
+# hook that talks to it have to be given the same one.  That is the domain the
+# server belongs to, which is not this domain when this one is sharing another's
+# machine: see dns_host_domain.
 sub _dns_token {
     my ($domain) = @_;
 
@@ -261,7 +263,7 @@ sub enrich {
         # stayed empty, the hook's [% IF registrar.key %] then rendered no
         # export at all, and lexicon died on "PowerDNS API key not defined
         # (auth_token)" after the order had already been placed.
-        $params{local_dns_access_token} = _dns_token( $params{domain} )
+        $params{local_dns_access_token} = _dns_token( $params{dns_host_domain} // $params{domain} )
           unless length( $params{local_dns_access_token} // q{} );
     }
     $params{ca} //= $DEFAULT_CA;
@@ -361,9 +363,15 @@ sub required_recipes {
     # set no key of their own: handing one they had also written is the conflict
     # resolve_conflict dies on.
     if ($auto) {
-        my $configured = Provisioner::Cookbook->domain_config( $opts{domain} )->{pdns}{api_key};
+
+        # The machine's domain rather than this one's: a single pdns serves the
+        # whole guest, so a domain layered onto another has to hand it the key
+        # that server is already running with.  See dns_host_domain, which
+        # bin/new_config sets from depends_on.
+        my $server     = $opts{dns_host_domain} // $opts{domain};
+        my $configured = Provisioner::Cookbook->domain_config($server)->{pdns}{api_key};
         unless ( defined $configured && length $configured ) {
-            my $token = _dns_token( $opts{domain} );
+            my $token = _dns_token($server);
             push( @required, pdns => sub { return ( api_key => $token ) } );
         }
     }

@@ -119,6 +119,21 @@ making a total failure invisible are at least visible.
 
 =cut
 
+=head2 $bool = $recipe->is_multi_tenant()
+
+False.  One rsyslog on the machine, and one F</etc/rsyslog.d/10-logshipper.conf>
+saying where it forwards.  Where it forwards, on what selector and over which
+port are this domain's arguments, so two domains wanting different collectors
+would not both be shipped: the first one built would decide where everything
+goes, this domain's logs included.
+
+That this recipe is the machine's half is what made the failure quiet rather
+than loud -- the second domain rendered a configuration nothing installed.
+
+=cut
+
+sub is_multi_tenant { return 0 }
+
 sub args {
     ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (

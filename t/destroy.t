@@ -57,6 +57,7 @@ sub make_domain_dir {
 }
 
 # --- destroy_disks ---
+
 subtest 'destroy_disks removes the guest disks and nothing shared' => sub {
     my $domain = 'test.example';
 
@@ -283,6 +284,47 @@ subtest 'the POD documents the interface' => sub {
     like( $text, qr/--dryrun/,  'POD documents --dryrun' );
     like( $text, qr/--connect/, 'POD documents --connect' );
     like( $text, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
+};
+
+subtest 'a domain no hypervisor holds still gives its address back' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    make_path("$dir/tenant.test");
+
+    # A guest sharing another domain's machine never had a VM of its own, so the
+    # fleet has nothing to find.  That used to stop the run before step five --
+    # measured on a shared host, where tearing the tenant down left its address
+    # reserved against a domain that no longer existed.
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { die "No hypervisor in the fleet has a guest called tenant.test.\n" } );
+
+    my @asked;
+    my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
+    $bin->redefine( $_ => sub { 1 } )                        for qw{remove_authorized_key remove_runner_key};
+    $bin->redefine( $_ => sub { push( @asked, $_[0] ); 1 } ) for qw{destroy_vm destroy_disks};
+
+    my $released;
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( held_by => sub { '203.0.113.9' } );
+    $pool->redefine( release => sub { $released = $_[0]; 1 } );
+
+    Trog::HV->forget();
+    open( my $capture, '>', \my $out ) or die $!;
+    my $rc = do { local *STDOUT = $capture; Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
+    close $capture;
+
+    is( $rc, 0, 'the run finishes rather than stopping on the lookup' );
+
+    # Nothing hosts it, so there is no VM and no disk to ask about -- and the
+    # machine this falls back to is not a hypervisor on a fleet that keeps them
+    # elsewhere, so asking dies on the libvirt socket before the address is back.
+    is_deeply( \@asked, [], 'no hypervisor is asked to destroy anything' );
+    is( $released, 'tenant.test', 'and the address goes back to the pool' );
+    like( $out, qr/only what is on this side goes/, 'saying it is cleaning up this side alone' );
+
+    # This replaces the class-wide hypervisor, which is why the subtest sits last
+    # in the file: the ones above it resolve their paths through Trog::HV->new()
+    # and do not survive having it swapped out from under them.
+    Trog::HV->forget();
 };
 
 done_testing;

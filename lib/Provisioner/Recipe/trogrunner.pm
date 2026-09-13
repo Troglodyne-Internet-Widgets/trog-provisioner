@@ -212,6 +212,16 @@ sub required_recipes {
     );
 }
 
+=head2 $bool = $recipe->is_multi_tenant()
+
+False.  A machine has one F</etc/trog-provisioner>, and here it is a symlink into
+this domain's directory -- so a second domain does not get a runner of its own,
+it repoints that link and takes the address pool in F<ips.db> with it.
+
+=cut
+
+sub is_multi_tenant { return 0 }
+
 sub args {
     return (
         type       => 'object',

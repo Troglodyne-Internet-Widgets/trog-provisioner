@@ -56,7 +56,7 @@ sub generated {
     );
 
     my @written = $recipe->generate_files( $dir, %vars );
-    return ( $recipe, $dir, \@written, $recipe->render(%vars) );
+    return ( $recipe, $dir, \@written, $recipe->render_global(%vars) );
 }
 
 # What one of a certificate's extensions says, as openssl prints it.

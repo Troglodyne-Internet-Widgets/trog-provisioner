@@ -91,10 +91,23 @@ sub main {
 
     $domain =~ s/\///g;
 
-    my $hv = Trog::Hypervisors->find(
-        $domain,
-        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir
-    );
+    # A domain no hypervisor holds is not always a mistake: a guest that shares
+    # another domain's machine never had one of its own.  What is on this side
+    # is still ours to take back -- the domain directory, the authorized key,
+    # and above all the address, which stays reserved against a domain nobody
+    # has if this stops here.
+    my $hosted = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir ) };
+    my $err    = $@;
+    my $hv     = $hosted;
+    unless ($hv) {
+
+        # Why, and not just that: this is the whole of what an operator running
+        # this by hand is told, and "nothing has it" reads the same for a shared
+        # guest as for a domain whose name they typed wrong.
+        print $err if $err;
+        print "Nothing in the fleet has $domain, so only what is on this side goes.\n";
+        $hv = Trog::HV->from_config( undef, ( defined $domain_dir ? ( domain_dir => $domain_dir ) : () ) )->activate();
+    }
     print "Destroying on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
     $domain_dir = $hv->domain_dir;
@@ -103,10 +116,17 @@ sub main {
     print "[DRY RUN] No changes will be made.\n" if $dryrun;
 
     # 1. Stop and undefine the VM
-    destroy_vm( $domain, $dryrun );
+    #
+    # Only where one is: a domain nothing hosts has no VM and no disks, and the
+    # fallback above is this machine, which is not a hypervisor at all on a fleet
+    # that keeps them elsewhere.  Asking it anyway fails on the libvirt socket and
+    # takes the run down before step five, which is what gives the address back.
+    if ($hosted) {
+        destroy_vm( $domain, $dryrun );
 
-    # 2. Remove the disks it was using
-    destroy_disks( $domain, $dryrun );
+        # 2. Remove the disks it was using
+        destroy_disks( $domain, $dryrun );
+    }
 
     # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
     remove_authorized_key( $domain, $dryrun );

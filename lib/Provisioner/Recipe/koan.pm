@@ -232,6 +232,18 @@ sub required_recipes {
     return ( claude => sub { () } );
 }
 
+=head2 $bool = $recipe->is_multi_tenant()
+
+False.  The two units this installs are the machine's -- one
+F</etc/systemd/system/koan.service> and one F<koan-awake.service> -- and both
+name this domain's checkout, its virtualenv and its F<.env> throughout.  A
+second domain does not get a koan of its own; it rewrites those units to point
+at itself.
+
+=cut
+
+sub is_multi_tenant { return 0 }
+
 sub args {
     return (
         type       => 'object',

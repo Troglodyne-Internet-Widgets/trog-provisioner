@@ -113,6 +113,19 @@ sub rate_limits {
     return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
+=head2 $bool = $recipe->is_multi_tenant()
+
+False.  One server on the machine -- one F</etc/openvpn/server>, one
+C<openvpn-server@server> -- over one easy-rsa PKI, whose authority is named for
+the domain that built it.  A second domain does not get a tunnel of its own: it
+would either issue from the first domain's authority or replace it, and
+replacing it is what stops every client already given a certificate from
+connecting.
+
+=cut
+
+sub is_multi_tenant { return 0 }
+
 sub args {
     return (
         properties => {

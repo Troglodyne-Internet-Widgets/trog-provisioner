@@ -1,5 +1,10 @@
 client
-dev tun
+[%# Named rather than left to openvpn, which hands out tun0, tun1 and so on in
+    start order -- with two tunnels on a guest, nothing afterwards could say
+    which was which, and the recipe waits on this one by name.  dev-type is
+    explicit because openvpn otherwise infers it from the prefix. -%]
+dev [% device %]
+dev-type tun
 proto [% proto %]
 
 remote [% server %] [% port %]
@@ -9,15 +14,15 @@ nobind
 persist-key
 persist-tun
 
-ca   /etc/openvpn/client/ca.crt
-cert /etc/openvpn/client/client.crt
-key  /etc/openvpn/client/client.key
+ca   /etc/openvpn/client/[% domain %]/ca.crt
+cert /etc/openvpn/client/[% domain %]/client.crt
+key  /etc/openvpn/client/[% domain %]/client.key
 
-tls-auth /etc/openvpn/client/ta.key 1
+tls-auth /etc/openvpn/client/[% domain %]/ta.key 1
 tls-version-min 1.2
 
 cipher [% cipher %]
 auth SHA256
 
 verb 3
-log-append /var/log/openvpn/openvpn-client.log
+log-append /var/log/openvpn/openvpn-client-[% domain %].log

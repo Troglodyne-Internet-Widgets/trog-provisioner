@@ -1780,6 +1780,72 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     like( $fragment, qr/setup-ufw-ratelimits.*EXEMPT/, 'only to the one that does' );
 };
 
+subtest 'the service user is made once per machine, not once per domain' => sub {
+
+    # A shared host runs this target for each domain it holds, and the account
+    # is the machine's.  useradd on one that is already there exits non-zero and
+    # takes the target with it -- measured on a guest, where the second domain
+    # stopped on "useradd: user 'scratch' already exists" and never got the
+    # directory the two lines below it make.
+    my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
+
+    my ($target) = $mf =~ m/^\Q[% state_dir %]\E\/service_user:\n((?:\t.*\n)+)/m;
+    ok( $target, 'there is a service_user target' ) or return;
+
+    like( $target, qr/^\tgetent passwd \Q[% user %]\E.*\|\|.*useradd/m, 'the account is only added when it is not already there' );
+    like( $target, qr{^\tmkdir -p \Q[% install_dir %]/[% domain %]\E}m, 'and this domain still gets its own directory' );
+    like( $target, qr/^\tchown \Q[% user %]:[% admin_user %]\E/m,       'owned by the account it shares' );
+};
+
+subtest 'the services that cannot be told about a second domain are named here' => sub {
+
+    # Naming the whole set makes marking one a decision rather than something
+    # that drifted in, and iterating every recipe catches it in both directions
+    # -- a service that quietly stopped being shareable as much as one that was
+    # marked without cause.  bin/new_config refuses these for a domain being
+    # layered onto another; everything else writes per domain, or goes through
+    # configd, and does not care how many domains the guest holds.
+    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs koan ldap logcollector logshipper matrix openvpn trogrunner};
+
+    foreach my $name ( sort Provisioner::Cookbook->names() ) {
+        my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
+        is(
+            !!$recipe->is_multi_tenant, !$cannot{$name},
+            $cannot{$name} ? "$name cannot share a machine" : "$name can"
+        );
+    }
+};
+
+subtest 'the acme CA belongs to the guest rather than to each domain' => sub {
+
+    # One service, one database, one intermediate.  Installed from a per-domain
+    # target, the second domain to be built overwrote the key the running CA was
+    # issuing from with a freshly minted one -- and enable --now does not restart
+    # what is already up, so it stayed hidden until the next restart.
+    my $global = fragment_file('ubuntu/acmeca.global.tt');
+    ok( $global, 'the fragment is the machine one' );
+
+    my $per_domain = eval { fragment_file('ubuntu/acmeca.tt') };
+    is( $per_domain, undef, 'and there is no per-domain half to run again for the next domain' );
+
+    # dehydrated asks localhost and the listener is on loopback, so a domain name
+    # here buys nothing -- and a name outside the constraint crash-loops step-ca.
+    my $ca_json = File::Slurper::read_text( fragment_file('files/acmeca.ca.json.tt') );
+    unlike( $ca_json, qr/\Q[% domain %]\E/, 'and the CA names no domain' );
+};
+
+subtest 'the admin checkout symlink survives a second domain on the machine' => sub {
+
+    # The source is this domain's, the destination is the admin's home, which is
+    # the machine's -- so two domains naming the same basedir aim at one name.
+    # Unguarded, the second exits non-zero on "File exists" and takes the target
+    # with it, the way useradd did in the service_user target.
+    my $fragment = File::Slurper::read_text( fragment_file("admincode.tt") );
+
+    like( $fragment, qr{^test -e /home/\Q[% admin_user %]/[% basedir %]\E \|\| }m, 'the link is only made when the name is free' );
+    like( $fragment, qr{ln -s \Q[% install_dir %]/[% domain %]/[% basedir %]\E}m,  'and still points at this domain own checkout' );
+};
+
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {
 
     # setup-ufw-rules allows whatever `ufw app list` reports and opens with a

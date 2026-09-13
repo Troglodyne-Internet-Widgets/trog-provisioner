@@ -448,7 +448,7 @@ sub main {
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        close _must_read( $cfile, "No provision.conf for $depends, which $domain depends on" );
+        close _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" );
         my $dconfig = Config::Simple->new($dcfile);
 
         #XXX should probably die here if the admin_users differ!
@@ -458,7 +458,7 @@ sub main {
         if ( !$dryrun ) {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
             $guest->wait_for_ssh();
-            $guest->wait_for_cloud_init($domain);
+            $guest->wait_for_cloud_init($depends);
             $hv->release_seed($depends);
             $guest->wait_for_makefile($depends);
         }
@@ -687,19 +687,17 @@ sub reprovision_guest {
     return ( $reuser, $reuse );
 }
 
-# cloud-init runs once and remembers that it did.  Removing the semaphore for the
-# two modules whose output changes between provisions is what makes it run them
-# again against the config we have just shipped.
+# cloud-init runs once and remembers that it did.  Asking for a module by name
+# runs it again regardless, which is what applies the config we have just
+# shipped to a guest that booted from an older one.
 sub refresh_cloud_init {
     my ( $guest, $domain_dir, $domain ) = @_;
 
     print "Installing Updated cloud-init and forcing re-run...\n";
-    my $init   = "$domain_dir/$domain/user-data";
-    my $ci_dir = "/var/lib/cloud/instances/$domain";
+    my $init = "$domain_dir/$domain/user-data";
     $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
 
     foreach my $module (qw{cc_package_update_upgrade_install cc_users_groups}) {
-        $guest->run_sudo( qw{rm}, "$ci_dir/sem/$module" );
         print $guest->capture_cmd("sudo cloud-init single --name $module -f cloud-config.txt") . "\n";
     }
 

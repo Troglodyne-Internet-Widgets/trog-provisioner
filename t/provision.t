@@ -473,6 +473,33 @@ subtest 'a domain reprovisioned onto a guest of its own' => sub {
     ok( $seen{finished}, 'while the reprovision still runs to the end' );
 };
 
+subtest 'a dependency with no configuration is named as the one that is missing' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/tenant.test";
+    File::Slurper::Temp::write_text( "$dir/tenant.test/provision.conf", "ips=203.0.113.11\ndepends_on=host.test\n" );
+    File::Slurper::Temp::write_text( "$dir/tenant.test/users.yaml",     "users: []\n" );
+    File::Slurper::Temp::write_text( "$dir/tenant.test/data.tar.gz",    "not really a tarball\n" );
+
+    my $no_fleet = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
+
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv_mock->redefine( mkpath       => sub { 1 } );
+    $hv_mock->redefine( file_exists  => sub { 1 } );
+    $hv_mock->redefine( prepare_host => sub { 1 } );
+
+    Trog::HV->forget();
+    my $err = exception {
+        quietly( sub { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, '--no-config', '--domaindir', $dir, 'tenant.test' ) } )
+    };
+
+    # The guard read the tenant's own provision.conf, which is right there, so a
+    # dependency that was never configured got past it and died in
+    # Config::Simple instead -- naming neither file.
+    like( $err, qr/No provision\.conf for host\.test/, 'the dependency is what it complains about' );
+    like( $err, qr{\Q$dir/host.test/provision.conf\E}, 'and it names the file that is actually absent' );
+    unlike( $err, qr{\Q$dir/tenant.test/provision.conf\E}, 'rather than the one that is present' );
+};
+
 # What a reprovision did, without doing any of it: which machine it connected
 # to, with whose key, and what it asked the hypervisor to destroy on the way.
 sub _layered {
