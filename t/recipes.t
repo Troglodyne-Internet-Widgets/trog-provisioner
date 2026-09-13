@@ -1294,6 +1294,19 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
 };
 
+subtest 'the resolver is live before anything reads a zone back through it' => sub {
+    my $out = Provisioner::Cookbook->load( 'nostubresolver', distro => $DISTRO )->new(%PROV)->render_global(%G);
+
+    # post_install runs its queue one task at a time and letsencrypt queues its
+    # fetcher first, so a restart deferred here happened after the thing that
+    # needed it.  Measured on a guest: the config was written during the
+    # makefile, the restart ran fourth in the postrun, the fetcher ran second
+    # through a stub that could not see the zone, and pdns was asked for
+    # zones/. and answered 404.
+    like( $out, qr{^systemctl restart systemd-resolved$}m, 'the resolver is restarted where it is configured' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl restart systemd-resolved}, 'rather than deferred behind its dependants' );
+};
+
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
 
     # The setup script unpacks the payload and runs make from inside it.  With

@@ -222,6 +222,16 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     ok( index( $fetcher, '/var/spool/powerdns/api.sock' ) >= 0, 'it waits for the socket lexicon talks to' );
     ok( index( $fetcher, 'SOA' ) >= 0,                          'and for the zone to be answered' );
 
+    # Two SOA lookups, and the difference between them is the whole finding.
+    # @127.0.0.1 asks the server; the bare one asks the resolver lexicon walks
+    # the zone with for --resolve-zone-name, and that step-ca validates through.
+    # On a guest the first passed while systemd's stub knew nothing of the zone,
+    # so the wait fell through and every challenge failed on zones/.
+    my @soa = grep { m/\bdig \+short\b/ } split( "\n", $fetcher );
+    is( scalar @soa, 2, 'it waits on the server and on the resolver separately' );
+    ok( ( scalar grep { index( $_, '@127.0.0.1' ) >= 0 } @soa ), 'one asks the server directly' );
+    ok( ( scalar grep { index( $_, '@' ) < 0 } @soa ),           'and one asks whatever the guest resolves with' );
+
     ( undef, undef, $slurp ) = generated( domain => $PUBLIC );
     ok( index( $slurp->('get_cert'), '/var/spool/powerdns/api.sock' ) < 0, 'and waits for nothing where the DNS is somebody else' );
 };
