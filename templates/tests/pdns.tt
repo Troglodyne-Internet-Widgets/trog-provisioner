@@ -78,6 +78,36 @@ SKIP: {
     ok(-S $onhost, "the API socket is at $onhost") or diag $api;
 }
 
+# One key, presented by everything that talks to this API.  The server is the
+# guest's rather than the domain's, so the credential is settled once per guest
+# and read back by whoever needs it -- see Provisioner::Recipe::pdns/api_key_for.
+# A second one is not a warning, it is a 401 on every challenge, and the only
+# place that shows is the fetcher failing long after this target went green.
+my ($api_key) = $api =~ m/^api-key=(\S+)/m;
+ok($api_key && length($api_key) >= 32, 'the API is configured with a credential')
+    or diag $api;
+
+SKIP: {
+    skip 'the API has no key to compare against', 1 unless $api_key;
+
+    my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]/pdns'; <> } // '';
+    my ($shortcut_key) = $shortcut =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
+    is($shortcut_key, $api_key, 'the lexicon shortcut presents the key the server runs with')
+        or diag "shortcut has " . ($shortcut_key // '(none)');
+}
+
+# dehydrated's hook, where the domain also runs letsencrypt.  A guest running
+# this server for something else has no hook and nothing to disagree with.
+my $hook_path = '/etc/dehydrated/hooks/[% domain %].sh';
+SKIP: {
+    skip 'this domain does not run dehydrated', 1 unless $api_key && -f $hook_path;
+
+    my $hook = do { local (@ARGV, $/) = $hook_path; <> } // '';
+    my ($hook_key) = $hook =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
+    is($hook_key, $api_key, 'and so does the hook dehydrated executes')
+        or diag "hook has " . ($hook_key // '(none)');
+}
+
 my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> } // '';
 my $zones_file    = '/etc/powerdns/forward-zones';
 my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
