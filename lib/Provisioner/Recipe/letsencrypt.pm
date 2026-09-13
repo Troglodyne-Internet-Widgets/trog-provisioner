@@ -247,14 +247,16 @@ sub _implementation {
 sub _dns_provider {
     my (%opts) = @_;
 
-    my $reserved   = _reserved_tld( $opts{domain} );
-    my $server     = $opts{dns_host_domain}                        // $opts{domain};
-    my $configured = Provisioner::Cookbook->domain_config($server) // {};
-    my $local      = ( $reserved || exists $configured->{pdns} ) ? 1 : 0;
+    my $reserved = _reserved_tld( $opts{domain} );
+    my $server   = $opts{dns_host_domain} // $opts{domain};
 
-    # The registrar is a recipe now, so this asks the configuration for it
-    # rather than for a hash of credentials -- the same question, put to the
-    # same place, as the one about pdns above.
+    # Both candidates asked the same way and of the same places: the domain's
+    # own configuration and the machine's, since a domain layered onto another
+    # is served by what that guest runs.  They were asked differently once --
+    # the local server of the machine alone, the registrar of both -- so a
+    # domain carrying its own DNS server on a host without one was local to half
+    # of this decision and not to the other.
+    my $local     = ( $reserved || _configures( $opts{domain}, Provisioner::DNSRecipe->local_implementation(), $server ) ) ? 1 : 0;
     my $registrar = _configures( $opts{domain}, 'registrar', $server );
 
     my $stated = $opts{dns_preference};
@@ -378,7 +380,7 @@ sub enrich {
     # declared: a domain that named no preference still has one.
     $params{dns_preference} = $provider;
 
-    if ( $provider eq 'pdns' ) {
+    if ( $provider eq Provisioner::DNSRecipe->local_implementation() ) {
 
         # Tested for length rather than definedness: bin/new_config fills this
         # in from the domain's configured pdns, and does it before the depsolver
@@ -503,7 +505,7 @@ sub required_recipes {
     # provider at all is enrich's to reject, and reporting it here as well would
     # race two messages for one fault.
     my $provider = eval { _dns_provider(%opts) } // q{};
-    push( @required, nostubresolver => sub { return () } ) if $provider eq 'pdns';
+    push( @required, nostubresolver => sub { return () } ) if $provider eq Provisioner::DNSRecipe->local_implementation();
 
     return ( @required, $self->SUPER::required_recipes(%opts) );
 }
