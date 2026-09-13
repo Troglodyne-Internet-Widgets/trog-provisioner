@@ -83,7 +83,7 @@ sub required_recipes {
     );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One deluged, one F</var/lib/deluged/config/core.conf>, and the download
 location in it is this domain's directory.  A second domain would point the
@@ -92,7 +92,7 @@ not look.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     return (

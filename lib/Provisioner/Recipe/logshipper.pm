@@ -119,7 +119,7 @@ making a total failure invisible are at least visible.
 
 =cut
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One rsyslog on the machine, and one F</etc/rsyslog.d/10-logshipper.conf>
 saying where it forwards.  Where it forwards, on what selector and over which
@@ -132,7 +132,7 @@ than loud -- the second domain rendered a configuration nothing installed.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)

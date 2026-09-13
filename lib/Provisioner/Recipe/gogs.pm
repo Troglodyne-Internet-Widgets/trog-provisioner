@@ -128,7 +128,7 @@ sub required_recipes {
     );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One gogs is one site: C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
 and the repositories, the database and the sessions all live under that domain's
@@ -137,7 +137,7 @@ to point at itself.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     return (

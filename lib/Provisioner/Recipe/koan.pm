@@ -232,7 +232,7 @@ sub required_recipes {
     return ( claude => sub { () } );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  The two units this installs are the machine's -- one
 F</etc/systemd/system/koan.service> and one F<koan-awake.service> -- and both
@@ -242,7 +242,7 @@ at itself.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     return (

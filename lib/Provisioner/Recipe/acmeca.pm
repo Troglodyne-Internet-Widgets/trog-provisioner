@@ -66,13 +66,6 @@ intermediate, so this recipe is the guest's rather than the domain's and its
 fragment is the global half: installed, configured and started once however many
 domains the guest ends up holding.
 
-It was the per-domain half once, and the cost of that is worth writing down.
-Every domain mints an intermediate of its own at C<generate_files> time, so the
-second domain provisioned onto a guest overwrote the key the running CA was
-issuing from -- and C<systemctl enable --now> does not restart a unit that is
-already up, so nothing looked wrong until the next restart, when the authority
-quietly became a different one.
-
 Nothing addresses this CA by the name of a domain.  dehydrated is pointed at
 C<https://localhost:port/acme/trog/directory> and the listener is bound to
 loopback, so C<ca.json> names C<localhost> and nothing else -- which also

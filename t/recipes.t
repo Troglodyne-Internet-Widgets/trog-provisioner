@@ -1810,7 +1810,7 @@ subtest 'the services that cannot be told about a second domain are named here' 
     foreach my $name ( sort Provisioner::Cookbook->names() ) {
         my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
         is(
-            !!$recipe->shares_a_machine, !$cannot{$name},
+            !!$recipe->is_multi_tenant, !$cannot{$name},
             $cannot{$name} ? "$name cannot share a machine" : "$name can"
         );
     }

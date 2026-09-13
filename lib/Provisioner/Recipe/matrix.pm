@@ -133,7 +133,7 @@ sub required_recipes {
     );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One synapse is one homeserver, and C<server_name> is the identity it
 federates under rather than a setting it can hold two of.  Everything else
@@ -142,7 +142,7 @@ domain on the guest would not be added to this one, it would be this one.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     my ($self) = @_;

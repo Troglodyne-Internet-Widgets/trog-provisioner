@@ -130,7 +130,7 @@ subtest 'a recipe that cannot be shared is refused rather than replacing the fir
     # second provision would not add itself, it would replace what the first
     # configured, and say nothing about it.
     my $nosnap = Test::MockModule->new('Provisioner::Recipe::nosnap');
-    $nosnap->redefine( shares_a_machine => sub { 0 } );
+    $nosnap->redefine( is_multi_tenant => sub { 0 } );
 
     my ( $err, $domains ) = generate();
 

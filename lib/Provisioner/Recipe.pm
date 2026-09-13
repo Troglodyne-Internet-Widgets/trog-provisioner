@@ -239,7 +239,7 @@ to print a schema.
 
 sub is_module { return 1 }
 
-=head3 $bool = $recipe->shares_a_machine()
+=head3 $bool = $recipe->is_multi_tenant()
 
 Whether two domains provisioned onto one guest can both be configured with this
 recipe.
@@ -256,12 +256,12 @@ such a recipe for a domain being layered onto another rather than letting
 whichever was provisioned last win.
 
 This is not the same question as what belongs in the global half.  That is work
-done once for the machine, and a recipe can have a great deal of it and still be
-perfectly shareable; this says whether the domains can coexist at all.
+done once for the machine, and a recipe can have a great deal of it and still
+serve several domains; this says whether the domains can coexist at all.
 
 =cut
 
-sub shares_a_machine { return 1 }
+sub is_multi_tenant { return 1 }
 
 =head3 %args = $recipe->args()
 

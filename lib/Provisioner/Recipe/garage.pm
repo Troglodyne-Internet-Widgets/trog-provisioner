@@ -209,7 +209,7 @@ sub rate_limits {
     return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  The endpoints this node answers on are one domain's: C<root_domain> is
 C<.s3.E<lt>domainE<gt>> and C<.web.E<lt>domainE<gt>> in the single
@@ -218,7 +218,7 @@ first, it would take its place.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     my $self = shift;

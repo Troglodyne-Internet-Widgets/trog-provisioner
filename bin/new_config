@@ -830,7 +830,7 @@ sub handle_domain {
     $MACHINE_MODULES{$domain} = [@modules];
     if ($depends_on) {
         my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
-        my @cannot  = grep { $on_host{$_} && !$builders{$_}->shares_a_machine } @modules;
+        my @cannot  = grep { $on_host{$_} && !$builders{$_}->is_multi_tenant } @modules;
 
         die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
           if @cannot;

@@ -113,7 +113,7 @@ sub rate_limits {
     return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One server on the machine -- one F</etc/openvpn/server>, one
 C<openvpn-server@server> -- over one easy-rsa PKI, whose authority is named for
@@ -124,7 +124,7 @@ connecting.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     return (

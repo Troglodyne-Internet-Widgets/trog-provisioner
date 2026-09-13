@@ -76,7 +76,7 @@ hour.
 
 =cut
 
-=head2 $bool = $recipe->shares_a_machine()
+=head2 $bool = $recipe->is_multi_tenant()
 
 False.  One slapd, and its suffix, its organisation and its TLS certificate are
 all named for the domain it was configured with.
@@ -88,7 +88,7 @@ looking as though it does.
 
 =cut
 
-sub shares_a_machine { return 0 }
+sub is_multi_tenant { return 0 }
 
 sub args {
     return (
