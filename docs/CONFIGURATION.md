@@ -74,10 +74,6 @@ What each guest is made of. `recipes.yaml` holds what every guest gets;
 tickle.test.test:
     _global:
         user: my_service_user
-        registrar:
-            type: "cloudflare"
-            user: "someGuy"
-            key:  "secret:troglodyne/cloudflare/password"
         size: disk_size_in_bytes
         memory: ram_size_in_mb
         cpus:  num_cpus
@@ -105,7 +101,23 @@ tickle.test.test:
         proxy_uri: http://localhost:5000
     pdns:
         soa: "ns1.test.test"
+    registrar:
+        type: "cloudflare"
+        user: "someGuy"
+        key:  "secret:troglodyne/cloudflare/password"
 ```
+
+`registrar` is a recipe rather than a `_global` setting, and usually lives in
+`_base` so every domain inherits one. It says who holds a domain's public zone
+so dehydrated can write an `_acme-challenge` record into it; `pdns` says the
+guest holds its own. Both implement `Provisioner::DNSRecipe`, and a guest with
+both is ambiguous -- `letsencrypt`'s `dns_preference` names which of the two
+serves this name, and a guest with both and no preference is refused rather
+than guessed at. A name under a TLD RFC 2606 reserves is always served locally,
+because no public registrar can hold a zone for one.
+
+Credentials written under `_global` are refused, naming the domain: they used to
+live there and nothing reads them now.
 
 See [EXAMPLE.md](../EXAMPLE.md) for a worked one, and each recipe's own POD
 (`perldoc Provisioner::Recipe::nginxproxy`) for what it takes.
@@ -449,6 +461,17 @@ listening on one port both get the higher of their rate limits. See
 `Provisioner::Recipe::resolve_conflict`.
 
 ## Known gaps
+
+* `Provisioner::DNSRecipe` is resolved by the recipes that need it rather than
+  by the depsolver. `letsencrypt` and `acmeca` ask the interface which
+  implementation serves a domain and then require that recipe by the name it
+  gives back, so nothing names `pdns` literally -- but `required_recipes` still
+  names a *recipe*. It cannot yet name an interface and have the depsolver pick
+  any recipe that `isa` it. Adding a second local implementation would work;
+  depending on the capability generically would not.
+* `local_dns_access_token` and `dns_host_domain` still ride in `_global`, so
+  they reach every recipe on a guest whether or not it has business with DNS.
+  The registrar's credentials no longer do.
 
 Two the old documentation carried, both still true:
 
