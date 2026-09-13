@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aa';
 
-use parent qw{Provisioner::Recipe};
+use parent qw{Provisioner::DNSRecipe};
 
 =head1 Provisioner::Recipe::pdns
 
@@ -37,6 +37,11 @@ Sets up the recursor in the event you want to point your resolver at it for fast
 use Text::Xslate;
 use Net::IP;
 use File::Slurper;
+
+# Where pdns binds its API, inside the chroot.  Named here because this recipe
+# is what puts it there: the unit, the configuration and every client that talks
+# to it read this one value.
+our $API_SOCKET = '/var/spool/powerdns/api.sock';
 
 sub rate_limits {
 
@@ -81,6 +86,29 @@ sub args {
     );
 }
 
+=head2 %credentials = $recipe->lexicon_credentials(%opts)
+
+The API on the loopback socket, which is how anything on this guest writes a
+record into the zone this server holds.  See L<Provisioner::DNSRecipe>.
+
+C<--resolve-zone-name> because lexicon reduces a name to its registrable form
+with tldextract before asking for a zone, and a reserved TLD is not a public
+suffix -- so it asked for the zone "test" and got a 404.
+
+=cut
+
+sub lexicon_credentials {
+    my ( $self, %opts ) = @_;
+
+    return (
+        type  => 'powerdns',
+        user  => q{},
+        key   => $opts{api_key},
+        opts  => '--resolve-zone-name',
+        extra => [ { key => 'PDNS_SERVER', value => $API_SOCKET } ],
+    );
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
@@ -92,6 +120,12 @@ sub enrich {
     }
 
     $opts{serial} = time;
+
+    # Under its own key rather than into registrar, which is the operator's and
+    # is what synczones writes its upstream section from.  Putting this there
+    # would have the guest describe itself as its own upstream.
+    $opts{lexicon} = { $self->lexicon_credentials(%opts) };
+
     return %opts;
 }
 

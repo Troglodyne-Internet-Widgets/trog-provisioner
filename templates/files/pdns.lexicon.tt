@@ -1,17 +1,22 @@
 #!/bin/bash
 
-export LEXICON_POWERDNS_AUTH_TOKEN="[% api_key %]"
-[%# LEXICON_POWERDNS_PDNS_SERVER, not _SERVER.  lexicon derives an
-    environment variable from provider plus option name --
-    lexicon:powerdns:pdns_server becomes LEXICON_POWERDNS_PDNS_SERVER --
-    and the option here is --pdns-server, which the af-unix patch in this
-    repository is what teaches to accept a socket path.  The legacy
-    fallback in lexicon only strips _AUTH_, so it never rescued the
-    shorter spelling: this shortcut asked the default endpoint instead of
-    the socket for as long as it has existed. -%]
-export LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api.sock"
+[%# Rendered from Provisioner::DNSRecipe/lexicon_credentials, so this shortcut,
+    the dehydrated hook and the synczones upstream section cannot come to
+    different answers about how lexicon reaches the server holding this zone.
+
+    lexicon derives an environment variable from the provider name plus the
+    option name, so --pdns-server is PDNS_SERVER here with the provider
+    prefixed around it.  The shorter spelling resolved to nothing, and this
+    shortcut had therefore never been pointed at the socket at all. -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
+[% IF lexicon.user -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"
+[% END -%]
+[% FOREACH lv IN lexicon.extra -%]
+export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
+[% END -%]
 
 COMMAND=$1;
 shift;
 
-lexicon --resolve-zone-name powerdns $COMMAND [% domain %] $@
+lexicon [% lexicon.opts %] [% lexicon.type %] $COMMAND [% domain %] $@
