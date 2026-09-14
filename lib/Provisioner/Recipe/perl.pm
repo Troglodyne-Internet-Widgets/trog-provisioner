@@ -34,7 +34,9 @@ B<Dist::Zilla> through cpanm, which a distribution needing either cannot install
 for itself.  Everything else is C<cpan_deps>.  Both go through
 F<scripts/cpan_install>, the one thing on a guest that reaches CPAN -- CPAN.pm
 is asked for nothing but the cpanm it bootstraps, having once given up on a
-fetch two hundred distributions into Dist::Zilla's tree.
+fetch two hundred distributions into Dist::Zilla's tree.  It installs the
+release the mirror's own index names, rather than asking cpanmetadb, except
+where a version pin needs an older one.
 
 TODO: allow specification of version.
 

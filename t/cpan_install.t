@@ -82,7 +82,7 @@ subtest 'the test suites run unless told not to' => sub {
 
 subtest 'installdeps and dzil' => sub {
     my $r = install( args => [qw{--notest installdeps /bogus/app}] );
-    is_deeply( $r->{ran}, [ [ undef, $CPANM, qw{--notest --installdeps /bogus/app} ] ], 'installdeps is what the distribution says it needs' );
+    is_deeply( $r->{ran}, [ [ undef, $CPANM, qw{--notest --mirror-only --installdeps /bogus/app} ] ], 'installdeps is what the distribution says it needs' );
 
     $r = install(
         args    => [qw{dzil /bogus/checkout}],
@@ -90,7 +90,7 @@ subtest 'installdeps and dzil' => sub {
     );
     is_deeply(
         $r->{ran},
-        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, $CPANM, 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, $CPANM, 'Moo' ], ],
+        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, $CPANM, '--mirror-only', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, $CPANM, '--mirror-only', 'Moo' ], ],
         'the plugins dist.ini names, then what they say the distribution needs, asked in the checkout'
     );
 
@@ -105,6 +105,25 @@ subtest 'pin: the version pkg-config reports, asked when it runs' => sub {
     $r = install( args => [qw{pin libvirt Sys::Virt}] );
     is( $r->{rc}, 1, 'pkg-config knowing nothing is a failure' );
     like( $r->{err}, qr/pkg-config knows no libvirt/, 'saying so, rather than installing the newest' );
+};
+
+subtest 'which release: the mirror index, unless only MetaCPAN can say' => sub {
+    my $mirror_only = sub {
+        my ($r) = @_;
+        return scalar grep { defined && $_ eq '--mirror-only' } @{ $r->{ran}[-1] };
+    };
+
+    my $r = install( args => [qw{install Moo}] );
+    is_deeply( $r->{ran}, [ [ undef, $CPANM, '--mirror-only', 'Moo' ] ], 'a module by name is whatever the mirror index names' );
+    ok( $mirror_only->( install( args => [ 'install', 'Moo~>= 2.004' ] ) ), 'and so is one the newest release satisfies' );
+
+    foreach my $spec ( 'Sys::Virt@10.0.0', 'Moo~== 2.004', 'Moo~!= 2.004', 'Moo~< 3', 'Moo~>= 2, <= 3' ) {
+        ok( !$mirror_only->( install( args => [ 'install', $spec ] ) ), "but $spec can want a release the index does not list" );
+    }
+    ok( !$mirror_only->( install( args => [ qw{install Moo}, 'Sys::Virt@10.0.0' ] ) ), 'which takes the whole command line with it' );
+
+    $r = install( args => [qw{pin libvirt Sys::Virt}], capture => { 'pkg-config --modversion' => ["10.0.0\n"] } );
+    ok( !$mirror_only->($r), 'as a pin always does' );
 };
 
 subtest 'a failed install is the exit code' => sub {
