@@ -31,7 +31,8 @@ verbs are the steps' -- see L<Provisioner::Recipe::perl>:
 
 =item * C<dzil> -- what C<dzil authordeps> and then C<dzil listdeps> say is
 missing in C<DIR>, in that order, because C<dist.ini> names plugins and dzil
-cannot read it to answer the second until the first are installed.
+cannot read it to answer the second until the first are installed.  A dzil that
+fails fails the step, rather than reading as nothing missing.
 
 =item * C<pin> -- C<MODULE> at the version pkg-config reports for
 C<PKGCONFIG_PACKAGE>, asked when this runs.  C<Sys::Virt> is why: it has to
@@ -64,6 +65,15 @@ is what C<pin> asks for, or a requirement with C<==>, C<!=> or C<< < >> in it --
 is resolved through MetaCPAN as before, and so is everything else on that cpanm
 command line.
 
+=head3 Whose checkout
+
+A C<dzil> directory is a checkout a recipe made and handed to its service user,
+and this runs as root, so the git that dzil's plugins run while answering
+C<listdeps> refuses it as a repository owned by somebody else.  That directory
+is trusted as a C<safe.directory> for the dzil commands asked of it and nothing
+else: as git's command-scope configuration, in C<GIT_CONFIG_COUNT> and its
+pairs, rather than written into anybody's F<.gitconfig>.
+
 =cut
 
 # Where the perl recipe builds.  A variable so that t/cpan_install.t can point
@@ -85,7 +95,7 @@ sub main {
     my $bin   = perl_bin();
     my @cpanm = ( "$bin/cpanm", ( $opt{notest} ? '--notest' : () ) );
 
-    my $rc;
+    my $rc = 0;
     if ( $verb eq 'install' && @rest ) {
         $rc = run_in( undef, @cpanm, mirror_only(@rest), @rest );
     }
@@ -93,16 +103,26 @@ sub main {
         $rc = run_in( undef, @cpanm, mirror_only(), '--installdeps', $rest[0] );
     }
     elsif ( $verb eq 'dzil' && @rest == 1 ) {
+        my ($dir) = @rest;
+
+        # See "Whose checkout" above.
+        local @ENV{qw{GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0}} = ( 1, 'safe.directory', $dir );
         foreach my $which (qw{authordeps listdeps}) {
-            my @missing = grep { length } map { s/\s+\z//r } capture_in( $rest[0], "$bin/dzil", $which, '--missing' );
+            my ( $failed, @said ) = capture_in( $dir, "$bin/dzil", $which, '--missing' );
+            if ($failed) {
+                print {*STDERR} "cpan_install: dzil $which --missing exited $failed in $dir, so what it needs is not known\n";
+                return $failed;
+            }
+            my @missing = grep { length } map { s/\s+\z//r } @said;
             next unless @missing;
             $rc = run_in( undef, @cpanm, mirror_only(@missing), @missing ) and last;
         }
     }
     elsif ( $verb eq 'pin' && @rest == 2 ) {
         my ( $package, $module ) = @rest;
-        my ($version) = map { s/\s+\z//r } capture_in( undef, 'pkg-config', '--modversion', $package );
-        unless ( defined $version && length $version ) {
+        my ( $failed,  @said )   = capture_in( undef, 'pkg-config', '--modversion', $package );
+        my ($version) = map { s/\s+\z//r } @said;
+        unless ( !$failed && defined $version && length $version ) {
             print {*STDERR} "cpan_install: pkg-config knows no $package, so there is no $module version to pin\n";
             return 1;
         }
@@ -137,7 +157,8 @@ sub perl_bin {
 }
 
 # The two ways this touches anything outside itself, so that a test can stand
-# in for both.  run_in answers with the exit code, capture_in with the lines.
+# in for both.  run_in answers with the exit code, capture_in with the exit code
+# and then the lines.
 sub run_in {
     my ( $dir, @cmd ) = @_;
 
@@ -145,7 +166,7 @@ sub run_in {
     chdir $dir or die "cpan_install: cannot enter $dir: $!\n" if defined $dir;
     print "cpan_install: @cmd\n";
     system(@cmd);
-    my $rc = $? == -1 ? 127 : $? >> 8;
+    my $rc = exit_code($?);
     chdir $was if defined $dir;
     return $rc;
 }
@@ -158,8 +179,20 @@ sub capture_in {
     open( my $fh, '-|', @cmd ) or die "cpan_install: cannot run $cmd[0]: $!\n";
     my @lines = <$fh>;
     close $fh;
+    my $rc = exit_code($?);
     chdir $was if defined $dir;
-    return @lines;
+    return ( $rc, @lines );
+}
+
+# A finished child's $? as an exit code, the way a shell reports one: 127 for a
+# command that never ran, and 128 plus the signal for one a signal killed --
+# which $? >> 8 alone reports as a success.
+sub exit_code {
+    my ($status) = @_;
+
+    return 127                     if $status == -1;
+    return 128 + ( $status & 127 ) if $status & 127;
+    return $status >> 8;
 }
 
 exit main(@ARGV) unless caller;
