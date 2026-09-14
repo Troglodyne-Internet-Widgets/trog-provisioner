@@ -320,6 +320,18 @@ already owns its one, where C<bin/recipes vm> prints it.  C<cpus> and C<memory>
 are excluded for the same reason, and C<distro>, C<mirror> and C<cache> because
 L<Provisioner::DistroRecipe/args> owns them.
 
+Two more travel in that same hash and are B<not> declared here, for a different
+reason.  C<subdomain> is set to the fully qualified domain and read by nothing.
+C<libdir> is the list of extra library directories an operator names in
+C<_global> so that recipes outside this checkout are found, and it is consumed
+before any recipe exists: C<bin/new_config> pushes it onto C<@INC> and hands it
+to L<Provisioner::Cookbook/template_dirs>.  Declaring either would advertise a
+setting no recipe acts on.
+
+Both nevertheless reach every recipe as an undeclared key, so both have to be
+declared or kept out of what a recipe is handed before C<additionalProperties>
+can be turned on.
+
 =cut
 
 sub global_args {
