@@ -62,7 +62,7 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 [% state_dir %]/testdeps:
 	/bin/true;
 	[% IF testdeps.size() %]
-	cpanm [% testdeps.join(' ') %]
+	cpanm[% FOR flag IN testdeps_flags %] [% flag %][% END %] [% testdeps.join(' ') %]
 	[% END -%]
 
 [% IF fetch_hosts -%]

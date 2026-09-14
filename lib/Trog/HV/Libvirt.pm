@@ -1402,12 +1402,6 @@ sub guest_ssh_ip {
     return $ip;
 }
 
-=head1 SEE ALSO
-
-L<Sys::Virt>
-
-=cut
-
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
 
 What C<bin/preflight> asks of this backend, in order.
@@ -1874,5 +1868,11 @@ sub would_provision {
 
     return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) ) // 'bogus';
 }
+
+=head1 SEE ALSO
+
+L<Sys::Virt>
+
+=cut
 
 1;
