@@ -1,17 +1,26 @@
 #!/bin/bash
 
-[% IF prefer_local_dns -%]
+[% IF dns_preference == 'pdns' -%]
 # Wait for the server that answers the challenge before asking for one.
 #
-# A backstop, not the fix: pdns starts in its own target now, so this should
-# fall through on the first pass.  It used to be neither -- the restarts were
-# queued in the postrun behind this task, and post_install runs its queue one
-# task at a time, so waiting here could only ever time out.  What that cost:
-# lexicon found no socket, so the af-unix patch left the endpoint unmangled and
-# requests refused it, and --resolve-zone-name resolved to nothing, so pdns was
-# asked for zones/ and answered 404.
+# A backstop, not the fix: pdns starts in its own target and nostubresolver
+# restarts the resolver in its own, so this should fall through on the first
+# pass.  It used to be neither -- the restarts were queued in the postrun behind
+# this task, and post_install runs its queue one task at a time, so waiting here
+# could only ever time out.
+#
+# Three checks, and the third is the one this used to be missing.  The socket
+# and the @127.0.0.1 SOA say the server is up and holds the zone.  The bare SOA
+# says the *system* resolver can see it -- which is the resolver lexicon walks
+# the zone with for --resolve-zone-name, and the one step-ca validates dns-01
+# through.  Measured on a guest: the first two passed while systemd's stub knew
+# nothing of a reserved TLD, so the walk fell all the way to the root, lexicon
+# asked pdns for zones/. and got a 404, and every challenge failed.
 for _ in $(seq 1 60); do
-    [ -S /var/spool/powerdns/api.sock ] && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . && break
+    [ -S /var/spool/powerdns/api.sock ] \
+      && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . \
+      && dig +short [% domain %] SOA 2>/dev/null | grep -q . \
+      && break
     sleep 2
 done
 [% END -%]

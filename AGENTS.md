@@ -135,6 +135,7 @@ trog-provisioner/
 │   └── Provisioner/
 │       ├── Recipe.pm       # Base class
 │       ├── DistroRecipe.pm # Base class for the recipe naming a distribution
+│       ├── DNSRecipe.pm    # Base class for the recipes that can answer a dns-01 challenge
 │       └── Recipe/         # Recipe implementations
 │           └── Ubuntu/     # ...and the package names Ubuntu gives them
 ├── scripts/          # Helper scripts deployed to VMs

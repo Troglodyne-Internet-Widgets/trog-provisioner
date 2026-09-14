@@ -1,0 +1,7 @@
+[%# The shortcut, and nothing else: the registrar is somewhere else, so there is
+    no package to install and no service to start.  pdns installs the same file
+    under its own name for the same reason, and the two are one template. -%]
+mkdir -p /opt/lexicon/[% domain %]; /bin/true
+mv lexicon.sh /opt/lexicon/[% domain %]/[% lexicon.type %]
+chmod -R 0700 /opt/lexicon/[% domain %]
+chown -R root:root /opt/lexicon/[% domain %]

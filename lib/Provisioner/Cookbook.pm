@@ -193,6 +193,38 @@ sub cache_classes {
     return @classes;
 }
 
+=head2 implementations($interface)
+
+The recipes that implement an interface -- the ones whose class C<isa> it --
+sorted.  C<Provisioner::DNSRecipe> has two, C<pdns> and C<registrar>.
+
+Loads every recipe to ask, which C<names> deliberately does not, and asks once a
+process for each interface: which classes inherit from what is a fact about the
+code rather than about a configuration.
+
+This is what lets C<bin/new_config> resolve a substitutable dependency.  A
+recipe can say it needs something that can answer a dns-01 challenge without
+naming the one that happens to exist.
+
+=cut
+
+sub implementations {
+    my ( $class, $interface ) = @_;
+
+    # names() and directors() together: names deliberately leaves out the
+    # recipes that direct a build, and those implement interfaces too -- every
+    # Provisioner::DistroRecipe there is, is one.  Asked of names alone this
+    # answered "nothing implements that" for a real interface.
+    state %by_interface;
+    $by_interface{$interface} //= [
+        sort grep {
+            eval { $class->load($_)->isa($interface) }
+        } ( $class->names, $class->directors )
+    ];
+
+    return @{ $by_interface{$interface} };
+}
+
 =head2 directors
 
 The recipes that direct a build instead of running in one: C<vm>, and the
@@ -592,6 +624,42 @@ sub configuration {
     return $CONFIGURATION{$key} = $conf;
 }
 
+=head2 remember($path, $conf)
+
+Seat C<$conf> as the configuration for C<$path>, so everything that asks for it
+afterwards is answered with this one.
+
+There is exactly one caller and one reason.  C<bin/new_config> reads the
+configuration, clones it, and resolves every C<secret:> reference into the
+clone -- so the copy remembered here still says C<secret:group/entry/field>
+where the clone says the password.  A recipe reading a sibling's configuration
+through C<domain_config> got the reference, and rendered it into the file that
+was supposed to authenticate with it.  Measured: a domain whose registrar
+credentials are a secret reference exported
+C<LEXICON_EASYDNS_AUTH_TOKEN="secret:g/e/password"> into its dehydrated hook,
+while the same run configured the server with the real one.
+
+Keyed the way C<configuration> keys, so the two cannot disagree about which
+file they are talking about, and cleared by C<forget> like anything else it
+remembers.
+
+=cut
+
+sub remember {
+    my ( $class, $path, $conf ) = @_;
+
+    my $key = Cwd::abs_path( $path // Trog::Config->path('recipes.yaml') );
+
+    # A copy, because the caller goes on using theirs.  bin/new_config seats the
+    # configuration it resolved and then folds _base into the domain it is
+    # building and deletes _base outright -- and holding its reference meant
+    # every later reader lost the inheritance.  Not visibly for the domain being
+    # built, whose _base was folded in a line earlier, but for every other one:
+    # a domain layered onto another asks about its host, and got a host with
+    # nothing _base gave it.
+    return $CONFIGURATION{$key} = clone($conf);
+}
+
 =head2 domain_config($domain, $conf)
 
 Everything one domain is configured with: its own entry with the C<_base> entry
@@ -633,6 +701,43 @@ sub domain_config {
     delete $own->{_global};
 
     return _base_merger()->merge( $base, $own );
+}
+
+=head2 host_of($domain, $conf)
+
+The domain whose guest holds C<$domain>, where it is layered onto another, and
+nothing where it has a machine of its own.  That arrangement is C<_shared>: a
+host, and the domains built onto it.
+
+Asked rather than handed down from recipe to recipe.  A guest runs one of each
+service between all the domains on it, so a recipe reading what a sibling is
+configured with -- the credential the DNS server runs with, the zone it holds --
+has to ask about the machine rather than about the domain, and this is what
+names it.
+
+C<$conf> is a configuration to work from, defaulting to C<configuration()>; see
+C<domain_config> for when a caller passes one.
+
+Ask it in scalar context.  Where a domain has a machine of its own this returns
+nothing rather than undef, which in a list vanishes instead of becoming one --
+so C<< is( host_of($d), undef ) >> compares the wrong pair of arguments.
+
+=cut
+
+sub host_of {
+    my ( $class, $domain, $conf ) = @_;
+    return unless defined $domain;
+
+    $conf //= $class->configuration();
+    my $shared = $conf->{_shared};
+    return unless ref $shared eq 'HASH';
+
+    foreach my $host ( keys %{$shared} ) {
+        next unless ref $shared->{$host} eq 'ARRAY';
+        return $host if grep { $_ eq $domain } @{ $shared->{$host} };
+    }
+
+    return;
 }
 
 =head2 global_config($domain, $conf)

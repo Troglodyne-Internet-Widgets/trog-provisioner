@@ -144,7 +144,6 @@ my %G = (
     packager_invocation        => 'apt-get install -y',
     packager_up_invocation     => 'apt-get upgrade -y',
     packager_remove_invocation => 'apt-get remove -y',
-    local_dns_access_token     => '',
 
     # Every recipe is handed these, not only the distro recipe: the fetch cache
     # runs a resolver of its own and refuses to render without them.
@@ -256,11 +255,10 @@ my %required_config = (
             },
         },
     },
-    letsencrypt => {
-        registrar => { type => 'route53', user => 'foo', key => 'bar' },
-    },
-    pdns   => { api_key => 'test-api-key' },
-    matrix => {
+    letsencrypt => {},
+    pdns        => { api_key => 'test-api-key' },
+    registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
+    matrix      => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
@@ -361,7 +359,7 @@ rejects_missing( 'mariadb', { root_pw  => 'x',     dumpfile => 'd.sql' }, 'versi
 
 rejects_missing( 'adminconfig', {}, 'skel' );
 rejects_missing( 'imagemagick', {}, 'version' );
-rejects_missing( 'pdns',        {}, 'api_key' );
+rejects_missing( 'registrar',   {}, 'type' );
 
 rejects_missing(
     'koan',
@@ -1292,6 +1290,48 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     # failure fails the build.
     like( $out, qr{systemctl enable --now tmp\.mount}, 'and is mounted, not merely enabled' );
     unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
+};
+
+subtest 'pdns makes the credential its own API is reached with' => sub {
+    my %bare = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test' );
+    ok( length( $bare{api_key} // q{} ) >= 32, 'a guest that configured no key gets one made for it' );
+
+    # An operator who set one owns it: this is a secret nobody chose, not a
+    # decision to take away from somebody who made it.
+    my %set = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->validate( %G, domain => 'mint.test', api_key => 'chosen-by-hand' );
+    is( $set{api_key}, 'chosen-by-hand', 'and one that did keeps it' );
+};
+
+subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
+
+    # lexicon builds an environment variable from provider plus option name --
+    # lexicon:powerdns:pdns_server becomes LEXICON_POWERDNS_PDNS_SERVER -- and
+    # its legacy fallback only strips _AUTH_, so a shorter spelling resolves to
+    # nothing and the client quietly asks its default endpoint instead.  The
+    # option is --pdns-server, which the af-unix patch here teaches to take a
+    # socket path.  The DCV hook had this right; the per-domain shortcut did
+    # not, and nothing on a guest runs the shortcut, so nothing caught it.
+    my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/lexicon.shortcut.sh.tt', %G, %{ $required_config{pdns} } );
+    like( $short, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
+    unlike( $short, qr/^export LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
+
+    # A fresh recipe per render: validated() memoises onto the object, so a
+    # second render through the same one answers with the first one's options.
+    my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns' );
+    like( $hook, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
+};
+
+subtest 'the resolver is live before anything reads a zone back through it' => sub {
+    my $out = Provisioner::Cookbook->load( 'nostubresolver', distro => $DISTRO )->new(%PROV)->render_global(%G);
+
+    # post_install runs its queue one task at a time and letsencrypt queues its
+    # fetcher first, so a restart deferred here happened after the thing that
+    # needed it.  Measured on a guest: the config was written during the
+    # makefile, the restart ran fourth in the postrun, the fetcher ran second
+    # through a stub that could not see the zone, and pdns was asked for
+    # zones/. and answered 404.
+    like( $out, qr{^systemctl restart systemd-resolved$}m, 'the resolver is restarted where it is configured' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl restart systemd-resolved}, 'rather than deferred behind its dependants' );
 };
 
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {

@@ -74,10 +74,6 @@ What each guest is made of. `recipes.yaml` holds what every guest gets;
 tickle.test.test:
     _global:
         user: my_service_user
-        registrar:
-            type: "cloudflare"
-            user: "someGuy"
-            key:  "secret:troglodyne/cloudflare/password"
         size: disk_size_in_bytes
         memory: ram_size_in_mb
         cpus:  num_cpus
@@ -105,7 +101,23 @@ tickle.test.test:
         proxy_uri: http://localhost:5000
     pdns:
         soa: "ns1.test.test"
+    registrar:
+        type: "cloudflare"
+        user: "someGuy"
+        key:  "secret:troglodyne/cloudflare/password"
 ```
+
+`registrar` is a recipe rather than a `_global` setting, and usually lives in
+`_base` so every domain inherits one. It says who holds a domain's public zone
+so dehydrated can write an `_acme-challenge` record into it; `pdns` says the
+guest holds its own. Both implement `Provisioner::DNSRecipe`, and a guest with
+both is ambiguous -- `letsencrypt`'s `dns_preference` names which of the two
+serves this name, and a guest with both and no preference is refused rather
+than guessed at. A name under a TLD RFC 2606 reserves is always served locally,
+because no public registrar can hold a zone for one.
+
+Credentials written under `_global` are refused, naming the domain: they used to
+live there and nothing reads them now.
 
 See [EXAMPLE.md](../EXAMPLE.md) for a worked one, and each recipe's own POD
 (`perldoc Provisioner::Recipe::nginxproxy`) for what it takes.
@@ -396,6 +408,10 @@ my.client.on.shared.host:
 The shared host is built first, then each guest on it is built against the
 running machine.
 
+A recipe that needs the machine rather than the domain -- the DNS server's
+credential belongs to one guest however many domains it serves -- asks
+`Provisioner::Cookbook->host_of`, which is this list read back.
+
 ## Data directories
 
 The `data` recipe rsyncs `from/<domain>` on this machine to `to/<domain>` on the
@@ -441,6 +457,27 @@ adding to it. Dependencies of dependencies work, and several recipes can layer
 onto one shared dependency -- `tcms` builds on `tpsgi` and adds to the same
 vhost.
 
+A recipe can also declare a **substitutable dependency** -- depending on a
+capability rather than on a recipe by name:
+
+```yaml
+    letsencrypt:
+        dns_preference: pdns
+```
+
+`letsencrypt` needs something that can answer a dns-01 challenge, which is
+`Provisioner::DNSRecipe` -- implemented by `pdns`, which serves the zone from the
+guest, and by `registrar`, which is whoever holds it publicly. It asks for the
+interface -- a substitutable dependency -- and the depsolver resolves that to
+whichever serves this domain and builds it.
+
+Which one is the interface's to decide, not the depsolver's: a name under a
+reserved TLD is always served locally, a domain configured with one of the two
+uses it, and a guest with both is a tie. `dns_preference` settles the tie, read
+out of the configuration of whichever recipe declared the dependency -- so it
+goes under `letsencrypt`, where you already write it. A guest with both and no
+preference is refused rather than guessed at.
+
 Where two of them ask for the same field and disagree, the recipe being depended
 on decides, and **dies** if it has no rule for that field: two applications both
 claiming a domain's 443 vhost is a misconfiguration rather than something to
@@ -450,7 +487,7 @@ listening on one port both get the higher of their rate limits. See
 
 ## Known gaps
 
-Two the old documentation carried, both still true:
+Two, both carried over from the old documentation and both still true:
 
 * `admin_key` is handed to cloud-init as an `ssh_import_id`, so it names an
   account to import from (`gh:someone`) rather than a key. A raw public key has

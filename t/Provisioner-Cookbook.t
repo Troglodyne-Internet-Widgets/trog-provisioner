@@ -90,6 +90,40 @@ subtest 'configuration() is read once and remembered' => sub {
     ok( exists Provisioner::Cookbook->configuration("$dir/recipes.yaml")->{'two.test'}, 'and forget() makes it read again' );
 };
 
+subtest 'remember() seats what a run resolved, so recipes read that' => sub {
+
+    # The installation's own directory, not a tempdir of its own: domain_config
+    # with no configuration reads Trog::Config's path, so seating anywhere else
+    # is seating under one key and reading from another.
+    my $dir = $ENV{TROG_PROVISIONER_CONFIG};
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "a.test:\n    pdns:\n        api_key: 'secret:g/e/password'\n" );
+
+    Provisioner::Cookbook->forget();
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'the file says where the password is' );
+
+    # bin/new_config resolves into a clone, so what it remembered stays the
+    # reference -- and a recipe reading a sibling through domain_config rendered
+    # that reference into the file meant to authenticate with it.
+    my $resolved = { 'a.test' => { pdns => { api_key => 'REAL' } } };
+    Provisioner::Cookbook->remember( "$dir/recipes.yaml", $resolved );
+
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'REAL', 'after seating, a recipe reads what the run resolved' );
+
+    # A copy, not the caller's structure.  bin/new_config seats what it resolved
+    # and then keeps editing it -- folding _base into the domain it is building,
+    # then deleting _base outright.  Holding the reference meant a later reader
+    # lost the inheritance, invisibly for the domain being built and not at all
+    # invisibly for a domain layered onto another, which asks about its host.
+    $resolved->{'a.test'}{pdns}{api_key} = 'CHANGED-AFTERWARDS';
+    delete $resolved->{'a.test'}{pdns}{soa};
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'REAL', 'and editing it afterwards does not reach what was seated' );
+
+    # And it is remembered the way anything else is: keyed by resolved path, and
+    # dropped by forget rather than outliving the command that seated it.
+    Provisioner::Cookbook->forget();
+    is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'and forget() puts it back to what is on disk' );
+};
+
 subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
     my $conf = {
         _base => {
@@ -162,6 +196,50 @@ subtest 'a list in _base is added to rather than replaced' => sub {
     );
 };
 
+subtest 'host_of names the guest a domain is layered onto' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", <<'YAML' );
+_shared:
+    host.test:
+        - tenant.test
+        - other.test
+host.test:
+    pdns:
+tenant.test:
+    letsencrypt:
+alone.test:
+    letsencrypt:
+YAML
+
+    Provisioner::Cookbook->forget();
+
+    is( scalar Provisioner::Cookbook->host_of('tenant.test'), 'host.test', 'a domain built onto another names that machine' );
+    is( scalar Provisioner::Cookbook->host_of('other.test'),  'host.test', 'and so does the second one on it' );
+
+    # The distinction every caller turns on.  A recipe asks this to decide
+    # whether to read a sibling's configuration rather than its own, so a domain
+    # with a machine of its own has to answer nothing rather than answer itself.
+    #
+    # scalar, because this returns nothing rather than undef -- in the list is()
+    # takes, nothing would vanish and shift the arguments along.
+    is( scalar Provisioner::Cookbook->host_of('alone.test'), undef, 'a domain with a machine of its own is layered onto nothing' );
+    is( scalar Provisioner::Cookbook->host_of('host.test'),  undef, 'and neither is the host itself' );
+    is( scalar Provisioner::Cookbook->host_of(undef),        undef, 'and asking about no domain at all is not fatal' );
+
+    # A configuration to work from rather than the one the environment names:
+    # bin/new_config resolved the secrets in its copy and passes that.
+    is(
+        scalar Provisioner::Cookbook->host_of( 'x.test', { _shared => { 'y.test' => ['x.test'] } } ),
+        'y.test',
+        'a caller can hand it the configuration it means'
+    );
+
+    is( scalar Provisioner::Cookbook->host_of( 'x.test', {} ), undef, 'and one with no _shared layers nothing onto anything' );
+
+    Provisioner::Cookbook->forget();
+};
+
 subtest 'the data source, and a domain inside it' => sub {
     my $conf = {
         _base       => { data => { from => '/opt/data', to => '/opt/domains' } },
@@ -197,6 +275,29 @@ subtest 'the shelf has the recipes on it' => sub {
     # It lives in lib/Provisioner/, not lib/Provisioner/Recipe/, because
     # everything in the latter is discovered and loaded as a recipe.
     ok( !( grep { $_ eq 'Cookbook' } @names ), 'and the cookbook is not a recipe' );
+};
+
+subtest 'implementations of an interface' => sub {
+
+    # What lets bin/new_config satisfy a substitutable dependency: a
+    # recipe can say it needs something that answers a dns-01 challenge without
+    # naming the one that happens to exist.
+    my @dns = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
+    is_deeply( [@dns], [qw{pdns registrar}], 'the DNS interface has its two, sorted' );
+
+    # names() prunes the recipes that direct a build, and those implement
+    # interfaces too -- every distro recipe is one.  Asked of names alone this
+    # answered that nothing implements DistroRecipe, which is a lie that would
+    # have read as "no such capability here".
+    my @distro = Provisioner::Cookbook->implementations('Provisioner::DistroRecipe');
+    ok( ( grep { $_ eq 'ubuntu' } @distro ), 'and a director counts as an implementation' );
+
+    is_deeply( [ Provisioner::Cookbook->implementations('No::Such::Interface') ], [], 'something nothing implements is empty rather than fatal' );
+
+    # Asked once a process: which classes inherit from what is a fact about the
+    # code, not about a configuration.
+    my @again = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
+    is_deeply( [@again], [@dns], 'and the answer is stable' );
 };
 
 subtest 'has() and load()' => sub {

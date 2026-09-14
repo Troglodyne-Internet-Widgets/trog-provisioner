@@ -1,0 +1,24 @@
+#!/bin/bash
+
+[%# One shortcut for whichever recipe holds this zone, rendered from
+    Provisioner::DNSRecipe/lexicon_credentials.  pdns and the registrar reach
+    lexicon the same way -- a provider, a credential, and sometimes an endpoint
+    -- so there is one template rather than one per implementation, which is
+    how the two of them came to disagree about the endpoint variable in the
+    first place.
+
+    lexicon derives an environment variable from the provider name plus the
+    option name, so --pdns-server is PDNS_SERVER here with the provider
+    prefixed around it. -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
+[% IF lexicon.user -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"
+[% END -%]
+[% FOREACH lv IN lexicon.extra -%]
+export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
+[% END -%]
+
+COMMAND=$1;
+shift;
+
+lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %][% lexicon.type %] $COMMAND [% domain %] $@

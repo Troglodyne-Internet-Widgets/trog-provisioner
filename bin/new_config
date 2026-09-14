@@ -80,11 +80,11 @@ L<Trog::Config>.
 In the main recipes.yaml, most of what you will want will be in the _base section:
 
     _base:
+        registrar:
+            type: "some_dns_provider_understood_by_dns-lexicon
+            user: "AzureDiamond"
+            key: "hunter2"
         _global:
-            registrar:
-                type: "some_dns_provider_understood_by_dns-lexicon
-                user: "AzureDiamond"
-                key: "hunter2"
             libdir:
                 - path/to/my/custom/libdir
         adminconfig:
@@ -186,11 +186,10 @@ You will be asked for the unlock password for the DB in the event you use this f
 Example usage in a recipe:
 
     _base:
-        _global:
-            registrar:
-                type: "some_dns_provider_understood_by_dns-lexicon
-                user: "AzureDiamond"
-                key: "secret:Hosting/DNS/password"
+        registrar:
+            type: "some_dns_provider_understood_by_dns-lexicon
+            user: "AzureDiamond"
+            key: "secret:Hosting/DNS/password"
 
 Where each path component past 'secret:' corresponds to group/key/parameter in a keepass KDBX.
 
@@ -224,19 +223,12 @@ sub get_recipe_config {
 }
 
 sub expand_dependent_domains {
-    my $d      = shift;
-    my $c      = get_recipe_config();
-    my $shared = $c->{_shared};
-    return $d unless ref $shared eq 'HASH';
+    my $d    = shift;
+    my $host = Provisioner::Cookbook->host_of( $d, get_recipe_config() );
+    return $d unless defined $host;
 
-    foreach my $host ( keys(%$shared) ) {
-        next unless ref $shared->{$host} eq 'ARRAY' && @{ $shared->{$host} };
-        next unless grep { $_ eq $d } @{ $shared->{$host} };
-        print "Expanding list of configs to generate to include $host\n";
-        return ( $host, $d );
-    }
-
-    return $d;
+    print "Expanding list of configs to generate to include $host\n";
+    return ( $host, $d );
 }
 
 =head2 %gaps = salvage_gaps()
@@ -310,6 +302,61 @@ sub main {
 # reaches every recipe unvalidated, so a default applied only when the distro
 # recipe is validated would reach no other recipe at all -- see
 # Provisioner::DistroRecipe/global_defaults.
+
+=head2 resolve_substitutable_dependency($interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host)
+
+Which recipe satisfies a substitutable dependency: one naming an interface that
+any of several recipes could answer for, rather than naming a recipe outright.
+
+The interface decides -- this asks it, rather than working it out again.  Two
+answers to one question is how the gates this replaced came to disagree, so the
+rules live in one place and both callers, here and the recipe rendering its own
+templates, put the same question to it.
+
+What this adds is the part the interface cannot know: that the answer has to be
+a recipe this installation actually has, and one that implements what was asked
+for.  A configuration naming something else is a typo, and saying so beats
+loading it and finding out three targets later.
+
+C<$domain_conf> is what the domain itself is configured with.  C<$host_conf> is
+what the machine it is layered onto is, and C<$host> names that machine so a
+refusal can say which guest it looked at -- both of those undef for a domain
+with a guest of its own.
+
+C<$requiring_conf> is the configuration of the recipe that declared the
+dependency: the interface names the key holding a preference and reads it from
+there, so a domain settles a tie where it already writes it.
+
+=cut
+
+sub resolve_substitutable_dependency {
+    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @_;
+
+    # It arrives as text out of required_recipes, so nothing has loaded it and
+    # every method call below would be "perhaps you forgot to load".
+    my $path = $interface =~ s{::}{/}gr;
+    eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
+
+    my @known = Provisioner::Cookbook->implementations($interface);
+    die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
+
+    # The configuration this run was pointed at, not the installation's: they
+    # are the same thing for a fleet provision and different for every scratch
+    # one, and the resolver has no way to tell which it is being asked about.
+    my $chosen = $interface->implementation_for(
+        %{ $requiring_conf // {} },
+        domain          => $domain,
+        configured      => $domain_conf // {},
+        host            => $host,
+        host_configured => $host_conf,
+    );
+
+    die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
+      unless any { $_ eq $chosen } @known;
+
+    return $chosen;
+}
+
 sub apply_global_defaults {
     my ( $distro, $global_config ) = @_;
 
@@ -402,6 +449,13 @@ sub handle_domain {
         my %secrets = Trog::Secrets->read( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
+
+        # What every recipe asking Provisioner::Cookbook about a sibling now
+        # sees.  The clone above is where the references became passwords, and
+        # the copy Cookbook remembered is not it -- so a recipe reading another
+        # recipe's credential got the reference and rendered it into the file
+        # meant to authenticate with it.
+        Provisioner::Cookbook->remember( $pfile, $rconf );
     }
 
     # Allow a base recipe set.  Read rather than removed: the merge below is
@@ -693,19 +747,6 @@ sub handle_domain {
 
     $global_config->{script_dir} = $root_scripts;
 
-    # If we use a local dns provider, we might be doing NS delegation to this box.
-    # As such we have to teach anything relying on DNS changes to use it.
-    #
-    # The machine's, not this domain's, when this domain is being layered onto
-    # another: one pdns serves the whole guest and its global_pdns target is made
-    # once, so the second domain never rewrites api.conf and the key in it stays
-    # the first domain's.  A token of its own is one the server will not know --
-    # measured on a shared host, where every challenge came back 401 and the
-    # fetcher failed.
-    my $dns_domain = $depends_on // $domain;
-    $global_config->{dns_host_domain}        = $dns_domain;
-    $global_config->{local_dns_access_token} = get_dns_provider_token( $rconf->{$dns_domain} );
-
     my ( @pkgs, @generated );
 
     # Regrettably, we may be running this on an existing system so we gotta install pkgs anyways.
@@ -777,6 +818,27 @@ sub handle_domain {
             $builder->required_recipes( %$global_config, %$pconf ),
         );
         foreach my $required ( keys(%dep_recipes) ) {
+
+            # A dependency may be substitutable -- naming an interface several
+            # recipes could answer for -- and this is where it becomes one of
+            # them: Provisioner::Cookbook::has takes \w+ and nothing else, so the
+            # name has to be resolved before anything below tries to load it or
+            # put it in the module list.
+            #
+            # Which implementation is the interface's to say, not this loop's.
+            # It names the configuration key holding a preference, and that is
+            # read out of the configuration of whichever recipe asked -- so a
+            # domain saying `letsencrypt: dns_preference: pdns` settles it for
+            # the recipe that wanted a DNS provider, and nothing here has to
+            # know what DNS is.
+            if ( index( $required, '::' ) >= 0 ) {
+                my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
+                my $chosen    = resolve_substitutable_dependency( $required, $rconf->{$domain}, $host_conf, $pconf, $domain, $depends_on );
+                $dep_recipes{$chosen} //= $dep_recipes{$required};
+                delete $dep_recipes{$required};
+                $required = $chosen;
+            }
+
             my $manual_args = delete $pconf->{$required} // {};
 
             # See about autocomputing the options if possible.
@@ -1545,15 +1607,6 @@ sub _get_sftp {
     );
     $ssh->error or $target_is_up = 1;
     return ( $ssh, $target_is_up );
-}
-
-sub get_dns_provider_token {
-    my ($rconf) = @_;
-    my @known_dns_providers = qw{pdns};
-    foreach my $provider (@known_dns_providers) {
-        return $rconf->{$provider}{api_key} if exists $rconf->{$provider} && ( ref( $rconf->{$provider} ) eq 'HASH' );
-    }
-    return '';
 }
 
 main(@ARGV) unless caller;
