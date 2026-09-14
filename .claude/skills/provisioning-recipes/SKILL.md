@@ -204,6 +204,30 @@ the answer is in there. "not there" means the file genuinely is not there: the
 collector proves the connection before it reads anything, and dies rather than
 reporting a guest it could not reach as a guest with no logs.
 
+**Then ask whether the build finished, before you read anything else into what
+the guest looks like.** Two lines in `setup.log` answer it: `prove -vm`, where
+the guest's own tests run, and `touch /root/install_complete`, the last thing a
+build that got all the way through does. Neither present means make stopped
+somewhere above, and every conclusion you draw from the guest's state is a
+conclusion about a half-built machine.
+
+That matters most for the work a recipe defers. `queue_postrun_task` puts a
+command in `/root/post_install.sh` to be run after the targets, so a build that
+failed runs **none** of it: services never restarted, units never enabled, rules
+never loaded. Absence there belongs to the failed build rather than to the
+recipe, and a report naming the recipe sends the next person after a bug that is
+not there.
+
+**A state stamp does not mean the recipe is done.** `/etc/provisioner/state/`
+gets a file per target, written by `touch $@` as the target's last line -- so a
+stamp says the fragment's commands all ran, not that what they set out to do has
+happened. `queue_postrun_task` succeeds the moment it appends to
+`post_install.sh`, which is why `auditd` stamps itself while `augenrules --load`
+has not run at all: on a build that died further down, the stamp is there, the
+rules are on disk, and nothing has loaded them. That pair reads exactly like a
+broken recipe and was reported here as one. Read the stamps for which targets
+ran, and `prove -vm` and the `postrun:` lines for what actually took effect.
+
 Read the whole `setup.log`, not just the tail. `make` keeps going through some
 failures, so the first error is often thousands of lines above the last one.
 
