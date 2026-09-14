@@ -116,6 +116,40 @@ subtest 'who actually asks' => sub {
     is( $asked,                                       2,                     'again' );
 };
 
+subtest 'asking at the terminal, for a caller whose standard input is spoken for' => sub {
+    Trog::Credentials->forget();
+
+    # A file standing in for /dev/tty, holding what would have been typed.
+    my $terminal = sub {
+        my ($typed) = @_;
+        my $fh = File::Temp->new();
+        print {$fh} $typed;
+        close $fh;
+        return $fh;
+    };
+
+    my $tty = $terminal->("typed there\n");
+    local $Trog::Credentials::TERMINAL = $tty->filename;
+    is( Trog::Credentials->prompt( 'passphrase:', 'keepass', terminal => 1 ), 'typed there', 'what was typed at the terminal is the answer' );
+    is( Trog::Credentials->get('keepass'),                                    'typed there', 'and it is kept for the rest of the run' );
+
+    $tty = $terminal->("\n");
+    local $Trog::Credentials::TERMINAL = $tty->filename;
+    is( Trog::Credentials->prompt( 'sudo:', undef, terminal => 1 ), q{}, 'an empty line is an empty password, not a missing one' );
+
+    # What bin/add_secret --stdin hit: the input was gone before anything was
+    # typed.  That is no answer, and saying so beats a warning about undef.
+    $tty = $terminal->(q{});
+    local $Trog::Credentials::TERMINAL = $tty->filename;
+    like( exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) }, qr/Nothing was typed for sudo: its input ended/, 'input that ends with no answer is refused' );
+    is( Trog::Credentials->have('sudo'), 0, 'and nothing is remembered for it' );
+
+    local $Trog::Credentials::TERMINAL = '/bogus/tty';
+    my $why = exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) };
+    like( $why, qr{Cannot ask for sudo at a terminal: /bogus/tty}, 'no terminal to open is refused' );
+    like( $why, qr/already spoken for/,                            'saying why it had to be the terminal' );
+};
+
 subtest 'sudo on a machine nobody is watching' => sub {
     require Trog::HV;
 
