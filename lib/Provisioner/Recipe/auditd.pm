@@ -34,20 +34,6 @@ TODO integrate this into some manner of IDS mechanism.
 
 =cut
 
-sub args {
-    return (
-        type       => 'object',
-        properties => {
-
-            # The account this domain's watch rule is keyed on.  The template
-            # has always used it and nothing declared it, so the key rendered
-            # as "-watch" -- a leading dash, which is not a key auditctl will
-            # take.
-            user => { type => 'string' },
-        },
-    );
-}
-
 sub template_files {
     my ($self) = @_;
 

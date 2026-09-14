@@ -65,18 +65,11 @@ Check L<https://github.com/nvm-sh/nvm/releases> for available versions.
 sub args {
     return (
         properties => {
-            user => { type => 'string' },
 
             # TODO fetch latest version automatically
             nvm_version => { type => 'string', default => 'v0.40.3' },
         },
     );
-}
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-    $opts{user} //= $opts{admin_user};
-    return %opts;
 }
 
 sub tests {

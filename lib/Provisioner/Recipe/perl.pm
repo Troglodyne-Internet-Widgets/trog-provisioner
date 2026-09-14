@@ -119,11 +119,7 @@ sub args {
     return (
         type => 'object',
 
-        # user is not required, because enrich fills it in from admin_user and
-        # enrich runs after validation -- a required field cannot be satisfied
-        # by one.  It is always set by the time a template sees it.
         properties => {
-            user => { type => 'string' },
 
             # No default: what goes in here is handed over by the recipes that
             # depend on this one, and cpanm, Module::Build and Dist::Zilla are

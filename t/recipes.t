@@ -1801,17 +1801,33 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
-# bin/new_config renders every recipe with its configuration and then with
-# modules, the recipes on the guest, so a field by that name is one no domain can
-# set and whose value is never what the recipe meant.  The perl recipe had one,
-# and on a guest cpanm was asked to install nginx and ufw.
+# Every recipe is handed the same settings, the ones
+# Provisioner::Recipe::global_args declares, and a recipe redeclaring one is a
+# second opinion about a field it does not own -- which is how the perl recipe
+# came to take `modules`, the recipes on the guest, and ask cpanm on a guest to
+# install nginx and ufw.
 #
-# full_aliases is written over the same way, and is not checked: mail declares
-# it to describe what new_config hands it, which is the same thing.
-subtest 'no recipe takes a field bin/new_config writes over' => sub {
+# The exemptions are the four recipes that mean something else by the name, or
+# that describe what bin/new_config hands them.  Each says so where it declares
+# the field.
+my %MEANS_SOMETHING_ELSE_BY_IT = (
+    registrar => { user         => 1 },
+    matrix    => { admin_user   => 1 },
+    ldap      => { users        => 1 },
+    mail      => { full_aliases => 1 },
+);
+
+subtest 'no recipe redeclares a setting every recipe is handed' => sub {
+    my %global  = Provisioner::Recipe->global_args();
+    my @globals = sort keys %{ $global{properties} };
+    ok( scalar @globals, 'there are settings to check against' );
+
     foreach my $recipe ( sort @available ) {
-        my %spec = eval { Provisioner::Cookbook->spec($recipe) } or next;
-        ok( !exists $spec{properties}{modules}, "$recipe takes no field called modules" );
+        my %spec       = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        my $deliberate = $MEANS_SOMETHING_ELSE_BY_IT{$recipe} // {};
+
+        my @offenders = grep { exists $spec{properties}{$_} && !$deliberate->{$_} } @globals;
+        is( "@offenders", q{}, "$recipe redeclares none of the settings it is handed" );
     }
 
     # And what it builds from its own list, given the list new_config hands it.

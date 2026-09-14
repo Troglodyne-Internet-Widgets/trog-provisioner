@@ -251,9 +251,6 @@ sub args {
         type       => 'object',
         required   => [qw{user koan_email github_user github_token}],
         properties => {
-
-            # Generally set in _base._global
-            user       => { type => 'string' },
             koan_email => { type => 'email' },
             repo_url   => { type => 'string', default => $DEFAULT_REPO },
 
