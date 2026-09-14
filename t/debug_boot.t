@@ -12,6 +12,7 @@ t/debug_boot.t - bin/debug_boot: the XML it rewrites, and the grub line it edits
 =cut
 
 use Test::More;
+use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 
 use File::Temp();
@@ -230,9 +231,7 @@ sub with_vmm {
 subtest 'the vnc port comes out of the live definition' => sub {
     my $mock = with_vmm( dom => FakeDom->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) );
 
-    open( my $capture, '>', \my $out ) or die $!;
-    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
-    close $capture;
+    my ($out) = capture_stdout { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
 
     is( $out, "5910\n", 'the port libvirt allocated, as libvirt reports it' );
 };
@@ -255,9 +254,7 @@ subtest 'a screenshot is streamed straight here, and named for what it is' => su
     my $stream = FakeStream->new( "\x89PNG", 'rest-of-it' );
     my $mock   = with_vmm( dom => FakeDom->new( mime => 'image/png' ), stream => $stream );
 
-    open( my $capture, '>', \my $out ) or die $!;
-    do { local *STDOUT = $capture; Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { into => "$dir/screen" } ) };
-    close $capture;
+    my ($out) = capture_stdout { Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { into => "$dir/screen" } ) };
 
     is( $out,                                      "$dir/screen\n",     'the path printed is the one written' );
     is( File::Slurper::read_binary("$dir/screen"), "\x89PNGrest-of-it", 'every piece of the stream, in order' );

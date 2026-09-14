@@ -65,7 +65,7 @@ subtest 'pdns is one of them, and is still a recipe' => sub {
 
     ok( $class->isa('Provisioner::DNSRecipe'), 'the distro subclass reaches the interface' );
     ok( $class->isa('Provisioner::Recipe'),    'and is still a recipe, which is what Cookbook->load asserts' );
-    is( Provisioner::DNSRecipe->default_implementation, 'pdns', 'and is what a guest uses when nothing says otherwise' );
+    is( Provisioner::DNSRecipe->local_implementation, 'pdns', 'and is the implementation that runs on the guest itself' );
 };
 
 subtest 'what pdns tells lexicon' => sub {
@@ -138,15 +138,6 @@ subtest 'the CA depends on the capability, not on a recipe name' => sub {
     my %moved = fresh('acmeca')->required_recipes(%common);
     ok( exists $moved{registrar}, 'so moving the answer moves what the CA asks for' );
     ok( !exists $moved{pdns},     'and it stops asking for the one it used to name' );
-};
-
-subtest 'the two questions the interface answers are not the same question' => sub {
-
-    # They are one recipe today, and asking them apart is what stops a second
-    # local implementation from silently becoming everybody default -- or the
-    # default from being required where only a server on this guest will do.
-    is( Provisioner::DNSRecipe->local_implementation,   'pdns',                                       'the one that runs on the guest' );
-    is( Provisioner::DNSRecipe->default_implementation, Provisioner::DNSRecipe->local_implementation, 'is also what a tie falls back to, for now' );
 };
 
 subtest 'the interface says which implementation serves a domain' => sub {

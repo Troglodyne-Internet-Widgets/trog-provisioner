@@ -13,6 +13,7 @@ t/Provisioner-DistroRecipe.t - what a distribution has to answer for
 =cut
 
 use Test::More;
+use Capture::Tiny qw{capture_stdout};
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
@@ -126,12 +127,7 @@ subtest 'cache_address: the fetch cache, as the address a guest points names at'
     is( $distro->cache_address( %fleet, cache => 'cache.test.test' ), '192.168.1.9',  'a name in the pool is its address' );
     is( $distro->cache_address( %fleet, cache => '192.168.1.77' ),    '192.168.1.77', 'and an address is itself' );
 
-    my $said = q{};
-    {
-        local *STDOUT;
-        open( STDOUT, '>', \$said ) or die $!;
-        is( $distro->cache_address( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' );
-    }
+    my ($said) = capture_stdout { is( $distro->cache_address( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' ) };
     like( $said, qr/guest\.test\.test is the fetch cache/, 'and says so' );
 
     # What a guest does with it is write it into /etc/hosts, so a URL, which

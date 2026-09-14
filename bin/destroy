@@ -11,12 +11,15 @@ use re '/aa';
 use FindBin::libs;
 use Provisioner::IPPool();
 use Provisioner::Cookbook();
+use Trog::Config();
 use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
+use File::Basename();
 use File::Path();
 use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
+use List::Util   qw{uniq};
 use Pod::Usage   qw{pod2usage};
 
 =head1 NAME
@@ -26,9 +29,11 @@ destroy - tear a provisioned VM back down
 =head1 SYNOPSIS
 
     destroy [OPTIONS] DOMAIN
+    destroy --orphans [--dryrun]
 
     destroy vm.example.com
     destroy --purge --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    destroy --purge --purge-data vm.test
 
 =head1 OPTIONS
 
@@ -55,6 +60,34 @@ Where the per-domain directories live.  Defaults to F</opt/domains>.
 
 Also delete the domain directory, on both this machine and the hypervisor.
 
+=item B<--purge-data>
+
+Also delete the domain's directory under the data source, on this machine and on
+the hypervisor that held the guest.  C<bin/new_config> makes it for the datadirs
+the recipes ask for, writes into it whatever was salvaged off the last guest,
+and ships a copy to the hypervisor for the guest to pull its payload out of.
+
+Never implied by C<--purge>, and not to be used on a domain anything will be
+restored onto: a real domain's data directory is where its backups come back
+from.  It is for throwaway guests, which is what the provisioning-recipes
+skill's teardown passes it for.
+
+=item B<--orphans>
+
+Sweep rather than destroy one domain: every C<.test> directory, in the data
+source and in the domain directory of each hypervisor in the fleet, that no
+hypervisor has a guest for and no recipe configuration names -- here and on each
+of them.  Takes no domain.  Pair it with C<--dryrun> first; it says what it
+found and where each copy is.
+
+Only C<.test>, which RFC 2606 reserves: nothing real is named under it, and
+every real domain's data sits in the same directory.  The two exclusions are
+the rest of the safety of it, so neither is inferred and neither may be
+unavailable: a name a hypervisor still has is a live guest however old its
+directory looks, a name the configuration carries is one somebody means to build
+again, and a hypervisor that will not say what it has stops the sweep rather than
+being counted as holding nothing.
+
 =item B<--dryrun>
 
 Say what would be removed without removing any of it.
@@ -75,21 +108,28 @@ sub main {
     ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
-    my ( $purge, $dryrun, $uri, $domain_dir, $hvconf );
+    my ( $purge, $purge_data, $orphans, $dryrun, $uri, $domain_dir, $hvconf );
     GetOptionsFromArray(
         \@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
+        'purge-data'  => \$purge_data,
+        'orphans'     => \$orphans,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'hvconf=s'    => \$hvconf,
     );
 
+    return sweep_orphans( $uri, $hvconf, $dryrun ) if $orphans;
+
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
+    # The domain arrives on the command line and ends up in an rm.
     $domain =~ s/\///g;
+    pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'That is not a domain' )
+      if $domain =~ m/\A[.]*\z/;
 
     # A domain no hypervisor holds is not always a mistake: a guest that shares
     # another domain's machine never had one of its own.  What is on this side
@@ -132,13 +172,14 @@ sub main {
     remove_authorized_key( $domain, $dryrun );
     remove_runner_key( $domain, $dryrun );
 
-    # 4. Optionally purge the domain directory
+    # 4. Optionally purge the domain directory, and the data directory
     if ($purge) {
         purge_domain_dir( $domain, $dryrun );
     }
     else {
         print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
     }
+    purge_data_dir( $domain, $hosted, $dryrun ) if $purge_data;
 
     # 5. Give the address back to the pool
     release_ip( $domain, $dryrun );
@@ -329,6 +370,153 @@ sub purge_domain_dir {
     print "Purging domain directory $dir\n";
     File::Path::remove_tree($dir) unless $dryrun;
     return;
+}
+
+=head2 purge_data_dir($domain, $hv, $dryrun)
+
+Remove the domain's directory under the data source, here and on C<$hv> -- the
+hypervisor that held the guest, worked out before it went, since the fleet can
+only say which one did for as long as it does.  Undef for C<$hv> is this machine
+alone.
+
+Says so, rather than failing, when nothing says where the data source is, and
+when the directory is not there: a provision that died early made none.
+
+=cut
+
+sub purge_data_dir {
+    my ( $domain, $hv, $dryrun ) = @_;
+
+    my $dir = Provisioner::Cookbook->data_dir($domain);
+    unless ($dir) {
+        print 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so there is no data directory to remove.\n";
+        return;
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] Would purge the data directory $dir, here and on the hypervisor\n";
+        return;
+    }
+
+    print "Purging data directory $dir\n";
+    File::Path::remove_tree($dir) if -d $dir;
+    $hv->remove_tree($dir)        if $hv && !$hv->is_local;
+
+    return;
+}
+
+=head2 sweep_orphans($uri, $hvconf, $dryrun)
+
+What C<--orphans> does: every C<.test> directory under C<sweep_roots> that no
+hypervisor in the fleet has a guest for and no recipe configuration names, here
+and on each of them.  Non-zero when a hypervisor could not be asked, or there was
+nowhere to look.
+
+=cut
+
+sub sweep_orphans {
+    my ( $uri, $hvconf, $dryrun ) = @_;
+
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
+
+    # Every guest anywhere in the fleet.  A hypervisor that cannot be asked stops
+    # the sweep rather than being skipped: the guests it holds are exactly the
+    # ones that would then look like orphans.
+    #
+    # Asked of the hypervisor rather than of libvirt, because not every
+    # hypervisor has one -- a cloud answers this out of Nova, and asking it for a
+    # domain list stopped the sweep for the whole fleet.
+    my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
+    foreach my $hv (@hvs) {
+        my @names = eval { $hv->guest_names };
+        if ($@) {
+            warn 'Could not ask ' . $hv->describe . " what guests it has, so nothing is swept:\n$@";
+            return 1;
+        }
+        $spoken_for{$_} = 1 for @names;
+    }
+
+    my @roots = sweep_roots(@hvs) or return 1;
+
+    # This machine, as something with the same file operations on it as a
+    # hypervisor has, so the copy here and the copy there are taken away the
+    # same way.
+    my $here = Trog::HV->candidate();
+
+    # name => the copies of it there are, as [ machine, path ] pairs.
+    my %found;
+    foreach my $root (@roots) {
+        ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
+        push @{ $found{ File::Basename::basename($_) } }, [ $here, $_ ] for grep { -d $_ } glob "$root/*.test";
+
+        foreach my $hv (@hvs) {
+            next if $hv->is_local;
+            push @{ $found{$_} }, [ $hv, "$root/$_" ] for grep { substr( $_, -length '.test' ) eq '.test' } $hv->list_dir($root);
+        }
+    }
+
+    my @orphans = sort grep { !$spoken_for{$_} } keys %found;
+    unless (@orphans) {
+        print 'Nothing under ' . join( ' or ', @roots ) . " belongs to a guest that is gone.\n";
+        return 0;
+    }
+
+    print scalar(@orphans) . ' of ' . scalar( keys %found ) . ' .test directories under ' . join( ' and ', @roots ) . " belong to no guest:\n";
+    foreach my $name (@orphans) {
+        print "  $name (" . join( ', ', where_they_are( $found{$name} ) ) . ")\n";
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] None of it removed.\n";
+        return 0;
+    }
+
+    foreach my $name (@orphans) {
+        $_->[0]->remove_tree( $_->[1] ) for @{ $found{$name} };
+    }
+
+    print 'Removed ' . scalar(@orphans) . " directories.\n";
+    return 0;
+}
+
+=head2 sweep_roots(@hvs)
+
+The directories a run leaves things in: the data source, and the domain
+directory of each hypervisor.  Empty, having said why, only when there is
+neither.
+
+The data source is C<Provisioner::Cookbook>'s answer, which is C<_base>'s
+C<_global: data_source> or the C<data> recipe's C<from> before it.  Without one
+the domain directories are still swept: they come out of the fleet, because that
+is where C<purge_domain_dir> gets the one it purges, and a configuration that says
+nothing about data still builds guests into them.
+
+=cut
+
+sub sweep_roots {
+    my (@hvs) = @_;
+
+    my $data = Provisioner::Cookbook->data_source();
+    warn 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so only the domain directories are swept.\n"
+      unless $data;
+
+    my @roots = uniq( grep { defined && length } $data, map { $_->domain_dir } @hvs );
+    warn "And there is no fleet to ask for a domain directory either, so there is nothing to sweep.\n" unless @roots;
+
+    return @roots;
+}
+
+=head2 where_they_are($copies)
+
+The machines a name was found on, for saying so: C<here> for this one and the
+hypervisor's name for the others, each mentioned once however many directories
+it turned up in.
+
+=cut
+
+sub where_they_are {
+    my ($copies) = @_;
+    return uniq( map { $_->[0]->is_local ? 'here' : ( $_->[0]->name // $_->[0]->describe ) } @$copies );
 }
 
 exit main(@ARGV) unless caller;

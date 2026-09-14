@@ -14,6 +14,7 @@ t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
 =cut
 
 use Test::More;
+use Capture::Tiny qw{capture capture_stdout};
 use IPC::Run3();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -30,6 +31,7 @@ use FindBin::libs;
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+use Provisioner::Cookbook();
 use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
@@ -280,10 +282,230 @@ subtest 'the POD documents the interface' => sub {
     );
     close $fh;
 
-    like( $text, qr/--purge/,   'POD documents --purge' );
-    like( $text, qr/--dryrun/,  'POD documents --dryrun' );
-    like( $text, qr/--connect/, 'POD documents --connect' );
-    like( $text, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
+    like( $text, qr/--purge/,      'POD documents --purge' );
+    like( $text, qr/--dryrun/,     'POD documents --dryrun' );
+    like( $text, qr/--connect/,    'POD documents --connect' );
+    like( $text, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
+    like( $text, qr/--purge-data/, 'POD documents --purge-data' );
+    like( $text, qr/--orphans/,    'POD documents --orphans' );
+};
+
+# --- the data directory, and the sweep for what runs left behind ---
+
+# Enough of Sys::Virt to answer the one question the sweep asks of it.
+{
+
+    package Test::Libvirt;
+    our @DOMAINS;
+
+    sub list_all_domains {
+        return map { bless { name => $_ }, 'Test::Libvirt::Domain' } @DOMAINS;
+    }
+
+    package Test::Libvirt::Domain;
+    sub get_name { return $_[0]->{name} }
+}
+
+# The data source these act on.  No hypervisors.conf is written into the
+# configuration directory, so the fleet is empty unless a subtest names one.
+my $data = tempdir( CLEANUP => 1 );
+
+sub write_config {
+    my (%domains) = @_;
+
+    my $yaml = "_base:\n    data:\n        from: $data\n        to: /opt/domains\n";
+    $yaml .= "$_:\n    ntp:\n" for sort keys %domains;
+
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", $yaml );
+    Provisioner::Cookbook->forget();
+    return;
+}
+
+# Both streams, because half of what the sweep has to say about refusing to do
+# something is said on stderr.
+sub says {
+    my ($code) = @_;
+    my ( $out, $err, @returned ) = capture { $code->() };
+    return ( "$out$err", @returned );
+}
+
+subtest 'purge_data_dir takes the domain data directory, and dryrun does not' => sub {
+    write_config( map { $_ => 1 } qw{gone.test kept.test never-was.test} );
+    make_path("$data/$_") for qw{gone.test kept.test};
+
+    says( sub { Trog::Bin::Destroy::purge_data_dir( 'kept.test', undef, 1 ) } );
+    ok( -d "$data/kept.test", 'a dry run leaves it where it is' );
+
+    says( sub { Trog::Bin::Destroy::purge_data_dir( 'gone.test', undef, 0 ) } );
+    ok( !-e "$data/gone.test", 'and a real one takes it' );
+
+    # Asked of a domain whose provision died before it made one.
+    my ($said) = says( sub { Trog::Bin::Destroy::purge_data_dir( 'never-was.test', undef, 0 ) } );
+    like( $said, qr/never-was\.test/, 'a directory that was never there is not an error' );
+
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    ntp:\n" );
+    Provisioner::Cookbook->forget();
+    ($said) = says( sub { Trog::Bin::Destroy::purge_data_dir( 'kept.test', undef, 0 ) } );
+    like( $said, qr/says where the data source is/, 'with no data source it says there is nothing to remove' );
+    ok( -d "$data/kept.test", 'rather than guessing where one is' );
+    File::Path::remove_tree("$data/kept.test");
+};
+
+subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
+    write_config( 'named.test' => 1 );
+
+    # real.example is not .test on purpose, and must not be "corrected" to it:
+    # it stands for a domain somebody actually runs, and the assertion at the
+    # end of this subtest is that the sweep never looks at one.  Under .test it
+    # would be an orphan by definition and the sweep would be right to take it.
+    # (.example is reserved by RFC 2606 just as .test is, so it resolves
+    # nowhere either.)
+    make_path("$data/$_") for qw{orphan.test named.test real.example};
+
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 1 ) } );
+    like( $said, qr/orphan\.test/, 'the dry run names the orphan' );
+    unlike( $said, qr/named\.test/, 'and not the one the configuration carries' );
+    ok( -d "$data/orphan.test", 'and removes nothing' );
+
+    says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
+    ok( !-e "$data/orphan.test", 'the sweep takes the orphan' );
+    ok( -d "$data/named.test",   'leaves the one a recipe configuration names' );
+
+    # Every real domain's data lives in the same directory, and the whole reason
+    # this is safe to run is that it is only ever looking at .test.
+    ok( -d "$data/real.example", 'and does not so much as consider a real domain' );
+    File::Path::remove_tree("$data/$_") for qw{named.test real.example};
+};
+
+subtest 'the sweep covers the domain directory as well as the data source' => sub {
+    my $domains = tempdir( CLEANUP => 1 );
+    write_config( 'named.test' => 1 );
+    make_path("$data/$_")    for qw{orphan.test live.test};
+    make_path("$domains/$_") for qw{orphan.test live.test named.test};
+
+    # A hypervisor to have a domain directory and a list of guests.  Both of the
+    # sweep's exclusions come from somewhere real: the configuration above, and
+    # this.
+    Trog::HV->forget();
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( domain_dir => sub { $domains } );
+    $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
+    local @Test::Libvirt::DOMAINS = ('live.test');
+
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    like( $said, qr/\Q$domains\E/, 'the domain directory is one of the places it looks' );
+
+    ok( !-e "$data/orphan.test",    'the orphan goes from the data source' );
+    ok( !-e "$domains/orphan.test", 'and from the domain directory' );
+
+    ok( -d "$data/live.test",     'a guest the hypervisor still has is not an orphan' );
+    ok( -d "$domains/live.test",  'in either place' );
+    ok( -d "$domains/named.test", 'and neither is one the configuration names' );
+
+    Trog::HV->forget();
+
+    # It is only live while this subtest says it is.
+    File::Path::remove_tree("$data/live.test");
+};
+
+subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
+    write_config();
+    make_path("$data/orphan.test");
+
+    Trog::HV->forget();
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
+    $hv->redefine( vmm        => sub { die "connection refused\n" } );
+
+    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    is( $rc, 1, 'the sweep fails rather than carrying on' );
+    like( $said, qr/nothing is swept/, 'and says so' );
+
+    # The guests it holds are exactly the ones that would look like orphans.
+    ok( -d "$data/orphan.test", 'nothing was removed on the strength of a list it could not get' );
+
+    Trog::HV->forget();
+    rmdir "$data/orphan.test";
+};
+
+subtest 'a sweep with nothing to do says so' => sub {
+    write_config( 'named.test' => 1 );
+
+    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
+    like( $said, qr/belongs to a guest that is gone/, 'says there is nothing' );
+    is( $rc, 0, 'and is not a failure' );
+};
+
+subtest 'the sweep finds the data source where _global says it' => sub {
+
+    # Where a configuration says it now.  The sweep read only the data recipe's
+    # from, and on a configuration saying it here it swept nothing at all.
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    _global:\n        data_source: $data\nnamed.test:\n    ntp:\n" );
+    Provisioner::Cookbook->forget();
+    make_path("$data/$_") for qw{orphan.test named.test};
+
+    says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
+    ok( !-e "$data/orphan.test", 'the orphan goes' );
+    ok( -d "$data/named.test",   'and the named one stays' );
+    File::Path::remove_tree("$data/named.test");
+};
+
+subtest 'with no data source, the domain directories are still swept' => sub {
+    my $domains = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    ntp:\n" );
+    Provisioner::Cookbook->forget();
+    make_path("$domains/orphan.test");
+
+    Trog::HV->forget();
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( domain_dir => sub { $domains } );
+    $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
+    local @Test::Libvirt::DOMAINS = ();
+
+    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    like( $said, qr/only the domain directories are swept/, 'saying there is no data source' );
+    ok( !-e "$domains/orphan.test", 'and sweeping where guests are built all the same' );
+    is( $rc, 0, 'which is not a failure' );
+
+    Trog::HV->forget();
+};
+
+# pod2usage exits, so these have to be real runs.
+subtest '--orphans takes no domain, and a name of only dots is not one' => sub {
+    write_config();
+
+    my $out = q{};
+    IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", qw{--orphans --dryrun} ], \undef, \$out, \$out );
+    is( $?, 0, '--orphans runs without one' );
+    unlike( $out, qr/No domain passed/, 'rather than asking for a domain' );
+
+    IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", qw{--dryrun --purge-data ..} ], \undef, \$out, \$out );
+    isnt( $?, 0, 'a domain that is only dots is refused' );
+    like( $out, qr/not a domain/, 'saying so, before it names anything to remove' );
+};
+
+subtest '--purge-data is asked for, and never implied by --purge' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    make_path("$dir/tenant.test");
+
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { die "No hypervisor in the fleet has a guest called tenant.test.\n" } );
+
+    my @purged;
+    my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
+    $bin->redefine( $_             => sub { 1 } ) for qw{remove_authorized_key remove_runner_key purge_domain_dir release_ip};
+    $bin->redefine( purge_data_dir => sub { push @purged, [@_]; 1 } );
+
+    Trog::HV->forget();
+    says( sub { Trog::Bin::Destroy::main( '--domaindir', $dir, '--purge', 'tenant.test' ) } );
+    is_deeply( \@purged, [], '--purge alone leaves the data directory' );
+
+    says( sub { Trog::Bin::Destroy::main( '--domaindir', $dir, '--purge-data', 'tenant.test' ) } );
+    is( scalar @purged, 1,             '--purge-data takes it' );
+    is( $purged[0][0],  'tenant.test', 'for that domain' );
+    is( $purged[0][1],  undef,         'on this side alone, when no hypervisor held the guest' );
+
+    Trog::HV->forget();
 };
 
 subtest 'a domain no hypervisor holds still gives its address back' => sub {
@@ -308,9 +530,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     $pool->redefine( release => sub { $released = $_[0]; 1 } );
 
     Trog::HV->forget();
-    open( my $capture, '>', \my $out ) or die $!;
-    my $rc = do { local *STDOUT = $capture; Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
-    close $capture;
+    my ( $out, $rc ) = capture_stdout { Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
 
     is( $rc, 0, 'the run finishes rather than stopping on the lookup' );
 

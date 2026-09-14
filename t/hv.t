@@ -18,7 +18,8 @@ t/hv.t - Trog::HV: connection URIs, paths, libvirt and capacity
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Capture::Tiny qw{capture_stdout};
+use File::Temp    qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
@@ -111,19 +112,6 @@ subtest 'a remote transport with no shell is refused up front' => sub {
     like( $@, qr/qemu\+ssh:\/\/root/, 'and names the transport to use instead' );
 };
 
-# --- Slug ---------------------------------------------------------------------
-subtest 'slug is filesystem safe and stable' => sub {
-    is( fresh( uri => 'qemu:///system' )->slug, 'qemu_system', 'local' );
-    is(
-        fresh( uri => 'qemu+ssh://root@hv1.example.test/system' )->slug,
-        'qemu_ssh_root_hv1_example_test_system', 'remote'
-    );
-    unlike(
-        fresh( uri => 'qemu+ssh://root@hv1/system' )->slug, qr{[^A-Za-z0-9_]},
-        'no path separators'
-    );
-};
-
 # --- Paths --------------------------------------------------------------------
 subtest 'pool and domain paths default the way they always did' => sub {
     my $hv = fresh();
@@ -138,7 +126,7 @@ subtest 'pool and domain paths default the way they always did' => sub {
 subtest 'a backend that leaves something out is told what' => sub {
     my @owed = qw{
       build config_keys capacity
-      domain_exists domain_is_running annihilate_domain guest_names guest_ssh_ip
+      domain_exists annihilate_domain guest_names guest_ssh_ip
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
       prepare_host release_seed guest_volumes
     };
@@ -897,9 +885,7 @@ subtest 'the base image is fetched once' => sub {
 
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 

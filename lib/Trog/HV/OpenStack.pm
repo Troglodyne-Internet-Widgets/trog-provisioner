@@ -352,11 +352,7 @@ sub server_detail {
 
 =head2 domain_exists($name)
 
-=head2 domain_is_running($name)
-
-Whether there is such a guest, and whether it is up.  C<ACTIVE> is the only
-status that counts as running: a server that is C<BUILD>, C<ERROR> or
-C<SHUTOFF> exists without being usable.
+Whether there is such a guest, in whatever state Nova has it.
 
 =cut
 
@@ -375,14 +371,6 @@ sub guest_names {
 }
 
 sub domain_exists { return defined $_[0]->server( $_[1] ) ? 1 : 0 }
-
-sub domain_is_running {
-    my ( $self, $name ) = @_;
-
-    my $server = $self->server_detail($name);
-    return 0 unless $server;
-    return ( $server->{status} // '' ) eq 'ACTIVE' ? 1 : 0;
-}
 
 =head2 guest_ssh_ip($config, $lease)
 
@@ -776,10 +764,6 @@ sub _wait_for_gone {
 
 A Cinder volume for a guest, named so that teardown can recognise it.
 
-=head2 attach_volume($domain, $volume_id)
-
-Attach one to the guest.  Attaching is Nova's end of the job, not Cinder's.
-
 =cut
 
 sub create_volume {
@@ -796,38 +780,11 @@ sub create_volume {
     );
 }
 
-sub attach_volume {
-    my ( $self, $domain, $volume_id ) = @_;
-
-    my $server = $self->server($domain)
-      or die "There is no guest called '$domain' to attach a volume to\n";
-
-    return $self->api->attach_volume( $server->{id}, $volume_id );
-}
-
 # Cinder's list, flattened -- the route hands back a single hash when there is
 # one volume and a list when there are more.
 sub _volumes {
     my ($self) = @_;
     return grep { ref $_ } $self->api->volumes();
-}
-
-=head2 console_log($domain, $length)
-
-What the guest wrote to its serial console.
-
-When a guest never comes up there is nothing to ssh into and ask, so this is
-usually the only thing that will say why.
-
-=cut
-
-sub console_log {
-    my ( $self, $domain, $length ) = @_;
-
-    my $server = $self->server($domain)
-      or die "There is no guest called '$domain' to read a console log from\n";
-
-    return $self->api->console_output( $server->{id}, $length );
 }
 
 =head1 WHAT THIS CANNOT DO

@@ -20,6 +20,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Test::More;
+use Capture::Tiny qw{capture_stdout};
 use File::Temp();
 use File::Slurper::Temp();
 
@@ -71,14 +72,7 @@ subtest 'the report says which way each address went' => sub {
     my %before = ( '10.0.0.1' => 'gone.test', '10.0.0.2' => 'same.test',  '10.0.0.3' => 'insitu:aa' );
     my %after  = ( '10.0.0.2' => 'same.test', '10.0.0.3' => 'moved.test', '10.0.0.4' => 'new.test' );
 
-    my $said = q{};
-    {
-        ## no critic (InputOutput::ProhibitOneArgSelect, Variables::RequireInitializationForLocalVars)
-        open( my $fh, '>', \$said ) or die $!;
-        local *STDOUT = $fh;
-        Provisioner::Bin::reseed_ips::report( \%before, \%after, 0 );
-        close $fh;
-    }
+    my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( \%before, \%after, 0 ) };
 
     like( $said, qr/10[.]0[.]0[.]4\s+recorded as new[.]test/,          'an address that arrived' );
     like( $said, qr/10[.]0[.]0[.]1\s+freed \(was gone[.]test\)/,       'one that went' );
@@ -88,14 +82,7 @@ subtest 'the report says which way each address went' => sub {
 };
 
 subtest 'a dry run says would, and a real one does not' => sub {
-    my $said = q{};
-    {
-        ## no critic (InputOutput::ProhibitOneArgSelect, Variables::RequireInitializationForLocalVars)
-        open( my $fh, '>', \$said ) or die $!;
-        local *STDOUT = $fh;
-        Provisioner::Bin::reseed_ips::report( { '10.0.0.1' => 'a.test' }, {}, 1 );
-        close $fh;
-    }
+    my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( { '10.0.0.1' => 'a.test' }, {}, 1 ) };
 
     like( $said, qr/would be freed/,  'said in the conditional' );
     like( $said, qr/Nothing written/, 'and says so plainly' );

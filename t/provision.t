@@ -13,7 +13,8 @@ t/provision.t - bin/provision: the order it does things in, and the XML it write
 =cut
 
 use Test::More;
-use Test::Fatal qw{exception};
+use Capture::Tiny qw{capture_stdout};
+use Test::Fatal   qw{exception};
 use IPC::Run3();
 use File::Temp qw{tempdir};
 use File::Slurper();
@@ -608,9 +609,7 @@ sub _conf {
 
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 
@@ -781,9 +780,7 @@ sub _throwaway_key {
 
 sub _quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 

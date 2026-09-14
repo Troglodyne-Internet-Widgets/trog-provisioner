@@ -13,8 +13,9 @@ t/hypervisors.t - Trog::Hypervisors: reading the fleet, and placing a guest in i
 =cut
 
 use Test::More;
-use Test::Fatal qw{exception};
-use File::Temp  qw{tempdir};
+use Capture::Tiny qw{capture_stdout};
+use Test::Fatal   qw{exception};
+use File::Temp    qw{tempdir};
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
@@ -92,9 +93,7 @@ sub with_capacity {
 # place() reports what it chose; tests don't need to see it.
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 
