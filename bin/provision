@@ -141,6 +141,12 @@ sub _coerce_array {
     return \@_;
 }
 
+# Which of these are lists.  Config::Simple hands back a bare string for a file
+# that names one of them and an arrayref for one that names two, and what every
+# recipe validates against says array -- so a guest with a single resolver would
+# be refused for saying what provision.conf has always meant by it.
+my %LIST_SETTING = map { $_ => 1 } qw{resolvers ips packages transfer_ips};
+
 # Everything provision.conf says, as a plain hash, for handing to a recipe.
 #
 # Config::Simple prefixes every key with the block it came from, and
@@ -150,12 +156,6 @@ sub _coerce_array {
 # Stripped rather than asked for by block: param(-block => 'default') is refused
 # outright unless Config::Simple decided the file was ini syntax, which it
 # decides by looking for a [header] this file does not have.
-# Which of these are lists.  Config::Simple hands back a bare string for a file
-# that names one of them and an arrayref for one that names two, and what every
-# recipe validates against says array -- so a guest with a single resolver would
-# be refused for saying what provision.conf has always meant by it.
-my %LIST_SETTING = map { $_ => 1 } qw{resolvers ips packages transfer_ips};
-
 sub _settings {
     my ($config) = @_;
 
