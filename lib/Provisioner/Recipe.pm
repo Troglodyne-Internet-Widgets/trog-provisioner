@@ -779,8 +779,6 @@ sub validate {
 
     forget_undefs( \%opts, \%args );
 
-    my $classname = Scalar::Util::blessed($self);
-
     # OpenAPIv3 coerces booleans, numbers and strings but not defaults, so
     # nothing was filling them in and every default in every args() documented
     # an intention that never happened.
@@ -793,7 +791,12 @@ sub validate {
     my $validator = JSON::Validator::Schema::Troglodyne->new;
     $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
     my @errors = $validator->validate( \%opts, \%args );
-    die "Had errors validating your recipe:\n" . join( "\n", map { "$classname$_" } @errors ) if @errors;
+    if (@errors) {
+        my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
+        my $where = ( defined $opts{domain} && length $opts{domain} ) ? " for $opts{domain}" : q{};
+
+        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
+    }
 
     $opts{user} //= $opts{admin_user};
 

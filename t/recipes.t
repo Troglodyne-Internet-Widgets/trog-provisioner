@@ -242,6 +242,14 @@ sub rejects_missing {
         my $r = "Provisioner::Recipe::$name"->new(%PROV);
         eval { $r->render( %G, %$extra, $field => undef ) };
         ok( $@, "render() dies without $field" );
+
+        # An operator reads this refusal and has to know what to go and edit.
+        # It used to glue the class to the error -- giving
+        # `Provisioner::Recipe::Ubuntu::koan/user: Missing property.`, a
+        # namespace nobody can edit and no domain at all.
+        like( $@, qr/\bThe \Q$name\E recipe\b/, "and says it is $name refusing" );
+        like( $@, qr{\Q/$field\E:},             "and names $field" );
+        like( $@, qr/\Q$G{domain}\E/,           "and names the domain" );
     };
 }
 
