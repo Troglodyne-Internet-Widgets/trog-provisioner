@@ -1433,6 +1433,19 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'unpacked there' );
     like( $setup, qr{^cd /var/tmp/domainsetup_}m,          'and make runs from there' );
 
+    # `make | tee` exits with tee's status, which is always 0, so the guest
+    # records make's own and bin/provision reads that rather than guessing.
+    like( $setup, qr{^rm -f /var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
+    my $records = '{ make 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
+    like( $setup, qr/\Q$records\E/, "and make's own exit code is what gets recorded" );
+
+    # at(1) runs this script, and at(1) runs jobs under /bin/sh -- dash on
+    # Ubuntu, where the shebang is a comment.  Written with PIPESTATUS it died
+    # there as a bad substitution: the log was written, the status never was,
+    # and bin/provision then waited for a file that was never coming.
+    ( my $commands = $setup ) =~ s/^\s*#.*$//gm;
+    unlike( $commands, qr/PIPESTATUS|\[\[/, 'and nothing in it needs bash to run' );
+
     # The cleanup repeats both paths rather than deriving them, so it is where
     # it can disagree with the three lines above.
     like( $setup, qr{^rm -rf /var/tmp/domainsetup_\S+ /var/tmp/data\.tar\.gz}m, 'and both are cleared away from there' );

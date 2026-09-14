@@ -148,7 +148,7 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
     my $machine = Test::MockModule->new('Trog::Machine');
     $machine->redefine( run_cmd     => sub { my ( $s, @c ) = @_; push @ran, join( ' ', @c );           return 0 } );
     $machine->redefine( run_sudo    => sub { my ( $s, @c ) = @_; push @ran, 'sudo ' . join( ' ', @c ); return 0 } );
-    $machine->redefine( capture_cmd => sub { 'the last few lines' } );
+    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
 
     ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'finishes' );
 
@@ -156,6 +156,27 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
     is( scalar @queue, 2, 'twice, because the Makefile may queue work of its own' );
     ok( ( grep { index( $_, 'until [ -f /var/log/vm.example.test.setup.log ]' ) >= 0 } @ran ),      'waited for the log to appear' );
     ok( ( grep { index( $_, 'while lsof | grep /var/log/vm.example.test.setup.log' ) >= 0 } @ran ), 'and to stop being written' );
+    ok( ( grep { index( $_, 'until [ -f /var/log/vm.example.test.setup.status' ) >= 0 } @ran ),     'and for the result to be recorded' );
+};
+
+# make's exit code is lost to the pipe that tees the log, so setup.sh writes it
+# to a file of its own.  Without reading it this returned 1 whatever happened,
+# and a guest whose build died was provisioned "successfully".
+subtest 'a build make failed is not a build that finished' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $machine->redefine( run_cmd  => sub { 0 } );
+    $machine->redefine( run_sudo => sub { 0 } );
+
+    foreach my $case ( [ "2\n", 'make exited 2' ], [ "1\n", 'make exited 1' ], [ q{}, 'nothing recorded a result' ] ) {
+        my ( $recorded, $desc ) = @$case;
+        $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? $recorded : 'the last few lines' } );
+        ok( !quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), "false when $desc" );
+    }
+
+    $machine->redefine( capture_cmd => sub { my ( $s, $cmd ) = @_; return $cmd =~ m/setup[.]status/ ? "0\n" : 'the last few lines' } );
+    ok( quietly( sub { $guest->wait_for_makefile('vm.example.test') } ), 'and true when it exited zero' );
 };
 
 # These print their progress; the tests do not need to read it.
