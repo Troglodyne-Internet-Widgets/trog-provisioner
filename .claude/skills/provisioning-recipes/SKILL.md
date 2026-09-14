@@ -382,6 +382,13 @@ have each broken a recipe here:
   redirection, so the guard always succeeded and the `useradd` was dead code.
   Do not "fix" this by setting `SHELL := /bin/bash`: `makefile.tt` relies on
   dash's `echo` expanding `\n` when it writes sendmail's config.
+- **`at(1)` hands its job to `/bin/sh` too**, which is what runs `setup.sh` --
+  the script that starts the payload's `make`. The `#!/bin/bash` at the top of
+  that file is a comment as far as `at` is concerned. Recording make's exit code
+  there as `${PIPESTATUS[0]}` died as a bad substitution on the spot: the log
+  was written, the status file never was, and the provision then waited for a
+  file that was never coming. It takes the status in make's own shell instead --
+  `{ make 2>&1; echo $? > status; } | tee log`.
 
 **A template that moves a file `template_files` does not generate** kills the
 target and everything after it. `deluged` and `matrix` both moved an nginx vhost
