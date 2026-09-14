@@ -199,16 +199,23 @@ Where each path component past 'secret:' corresponds to group/key/parameter in a
 
 =cut
 
-my ( $cfile, $sfile, $pfile, $skip_ssh, $dryrun );
+our ( $cfile, $sfile, $pfile, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
     die $Config::Simple::errstr unless $c;
 
     my $global_conf = $c->param( -block => 'global' );
-    my $alias_conf  = $c->param( -block => 'aliases' );
+    my $alias_conf  = $c->param( -block => 'aliases' ) // {};
     my $ns_conf     = $c->param( -block => 'nameservers' );
     my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
+
+    # Config::Simple hands back a bare string for a key with one value and an
+    # array for two, so a domain with a single alias arrives as a string.  Every
+    # consumer here wants the list: the aliases schema declares one, and the
+    # full_aliases below dereferences one, which a string cannot satisfy under
+    # strict refs.
+    $alias_conf->{$_} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$_} ) for keys %$alias_conf;
 
     # No [ips] here any more: addresses live in ips.db, where two runs
     # assigning at once cannot both take the same one.  They are read after the

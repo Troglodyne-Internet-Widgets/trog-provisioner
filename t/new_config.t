@@ -352,4 +352,37 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     );
 };
 
+# Config::Simple hands back a bare string for a key with one value and an array
+# for two.  A single alias anywhere in the map therefore arrived as a string,
+# which the aliases schema refuses and which get_config's caller cannot
+# dereference -- so one domain with one alias refused every domain on the
+# installation.
+subtest 'one alias is a list, as two already were' => sub {
+    my ( $fh, $file ) = File::Temp::tempfile();
+    print $fh <<'IPMAP';
+[global]
+basedir = /bogus
+
+[aliases]
+one.test.local = solo.test.local
+two.test.local = first.test.local, second.test.local
+IPMAP
+    close $fh;
+
+    local $Trog::Provisioner::Config::Generator::cfile = $file;
+    my $aliases = ( Trog::Provisioner::Config::Generator::get_config() )[1];
+
+    is_deeply( $aliases->{'one.test.local'}, ['solo.test.local'],                         'a lone alias is a one-element list rather than a string' );
+    is_deeply( $aliases->{'two.test.local'}, [ 'first.test.local', 'second.test.local' ], 'and a pair is left as the list it already was' );
+
+    my ( $fh2, $bare ) = File::Temp::tempfile();
+    print $fh2 "[global]\nbasedir = /bogus\n";
+    close $fh2;
+
+    local $Trog::Provisioner::Config::Generator::cfile = $bare;
+    my $none = ( Trog::Provisioner::Config::Generator::get_config() )[1];
+
+    is_deeply( $none, {}, 'and a map naming no aliases at all has none, rather than undef' );
+};
+
 done_testing();
