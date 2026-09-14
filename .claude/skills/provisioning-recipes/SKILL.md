@@ -607,7 +607,7 @@ one file that recipe goes out of its way to delete from the guest itself.
 for what it left:**
 
 ```
-.claude/skills/provisioning-recipes/scripts/teardown --orphans --dryrun
+bin/destroy --orphans --dryrun
 ```
 
 Every `.test` directory that no hypervisor has a guest for and no recipe

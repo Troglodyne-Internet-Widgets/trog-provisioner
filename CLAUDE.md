@@ -60,7 +60,7 @@ change under `lib/Provisioner/Recipe/` or `templates/`, invoke the
 Tear it down when you are finished, always, including after a failure.  If a run
 ended without one, this finds what it left:
 
-    .claude/skills/provisioning-recipes/scripts/teardown --orphans --dryrun
+    bin/destroy --orphans --dryrun
 
 A guest is not the only thing a run leaves behind.  An agent given its own
 worktree gets a full checkout under `.claude/worktrees/`, and the harness only
