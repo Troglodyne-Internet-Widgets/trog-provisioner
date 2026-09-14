@@ -205,11 +205,14 @@ collector proves the connection before it reads anything, and dies rather than
 reporting a guest it could not reach as a guest with no logs.
 
 **Then ask whether the build finished, before you read anything else into what
-the guest looks like.** Two lines in `setup.log` answer it: `prove -vm`, where
-the guest's own tests run, and `touch /root/install_complete`, the last thing a
-build that got all the way through does. Neither present means make stopped
-somewhere above, and every conclusion you draw from the guest's state is a
-conclusion about a half-built machine.
+the guest looks like.** The guest records what make exited with in
+`/var/log/$domain.setup.status`, which `collect_artifacts` brings back beside
+the log: anything but `0` is a build that failed, however complete the log
+looks. Guests built before that file existed answer the same question with two
+lines in `setup.log` -- `prove -vm`, where their own tests run, and `touch
+/root/install_complete` -- neither of which appears if make stopped somewhere
+above. Until you have checked, every conclusion you draw from the guest's state
+is a conclusion about a half-built machine.
 
 That matters most for the work a recipe defers. `queue_postrun_task` puts a
 command in `/root/post_install.sh` to be run after the targets, so a build that
