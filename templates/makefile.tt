@@ -3,6 +3,11 @@
 [% END -%]
 
 [% global_targets = ['sysctl', 'packages', 'scripts', 'data', 'ssl', 'ssh', 'sendmail', 'testdeps'] -%]
+[%# Which account owns this guest, and a real choice rather than a fallback: a
+    service account gets the domain directory as its home, while the admin user
+    gets that path symlinked to the home it already has.  Equal means a
+    development box, where su-ing to a service account to run anything is
+    friction nobody wants.  See docs/CONFIGURATION.md on _global user. -%]
 [% IF user -%]
 [% IF user == admin_user -%]
 [% global_targets.unshift('admin_user') -%]
