@@ -24,6 +24,7 @@ use Test::Fatal qw{exception};
 
 use_ok('Provisioner::Recipe');
 use Provisioner::Cookbook();
+use Provisioner::Recipe();
 
 subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     my $tdir = tempdir( CLEANUP => 1 );
@@ -99,6 +100,65 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
 
     my $domain_out = $widget->()->render( domain => 'example.test' );
     like( $domain_out, qr/domain=example\.test/, 'render still renders per-domain template' );
+};
+
+# Every recipe is handed the same set of settings by bin/new_config, and
+# Provisioner::Recipe::global_args is where they are declared -- once, rather
+# than absorbed one at a time into the recipes that got tired of them rendering
+# empty.
+subtest 'the settings every recipe is handed are declared once' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my %prov = ( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
+
+    my $ntp = Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new(%prov);
+    my %got = $ntp->validate( domain => 'x.test.test', admin_user => 'doge', transfer_port => '22', main_ip => undef, gateway => undef );
+
+    # ipmap.cfg is read by Config::Simple, which has no types, so the port
+    # arrives as the string it was written as.
+    is( $got{transfer_port}, 22, 'a port written as a string comes out an integer' );
+
+    # Both genuinely absent where the hypervisor addresses its own guests, so
+    # the declaration says nullable and this is what that buys.
+    ok( exists $got{main_ip} && !defined $got{main_ip}, 'an address the hypervisor has not allocated is accepted as absent' );
+
+    # The same state, and the one this got wrong first: a cloud guest has no
+    # gateway of ours, and Provisioner::Recipe::ubuntu asks for one only where
+    # there are ips.  Declared without nullable, that was refused outright.
+    ok( exists $got{gateway} && !defined $got{gateway}, 'and so is a gateway the platform provides instead' );
+
+    # user is not declared with a default anywhere, so this fallback -- which
+    # runs after validation -- is still what fills it in.
+    is( $got{user}, 'doge', 'user still falls back to admin_user' );
+};
+
+# A recipe that declares a colliding key is describing a different thing spelt
+# the same, and it is the one that knows.  registrar's `user` is the account at
+# the registrar, not the service account, and its default of empty is precisely
+# what stops validate filling it in from admin_user -- without which the lexicon
+# shortcut exports an AUTH_USERNAME for a registrar that wants a token alone.
+subtest 'a recipe that declares one of them keeps its own meaning' => sub {
+    my $dir       = tempdir( CLEANUP => 1 );
+    my $registrar = Provisioner::Cookbook->load( 'registrar', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $dir,
+        distro        => 'ubuntu',
+    );
+
+    my %got = $registrar->validate( domain => 'x.test.test', type => 'easydns', admin_user => 'doge' );
+    is( $got{user}, q{}, 'the registrar account stays empty rather than becoming the admin' );
+};
+
+# The declaration is deliberately not folded into args(): Provisioner::Cookbook
+# spec() calls that, and bin/recipes, bin/new_guest --scaffold and
+# DistroRecipe::global_defaults all read what it returns.  A global declared
+# there would be offered as a field of every recipe to scaffold.
+subtest 'and none of them is offered as a field of a recipe' => sub {
+    my %spec   = Provisioner::Cookbook->spec('nginx');
+    my $props  = $spec{properties} // {};
+    my $global = { Provisioner::Recipe->global_args }->{properties};
+
+    my @leaked = grep { exists $props->{$_} } sort keys %$global;
+    is_deeply( \@leaked, [], 'bin/recipes nginx still says what nginx takes and nothing else' );
 };
 
 subtest 'schema defaults are filled in' => sub {

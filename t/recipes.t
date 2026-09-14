@@ -33,6 +33,7 @@ use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
 use File::Find();
 use Provisioner::Cookbook();
+use Provisioner::Recipe();
 use IPC::Run3();
 use File::Find();
 use File::Path();
@@ -120,11 +121,17 @@ sub salvage_brings_down {
     return -f "$dir/dst/$relative" ? 1 : 0;
 }
 
-# Global vars bin/new_config injects into every template render.
+# Global vars bin/new_config injects into every template render.  The set is
+# Provisioner::Recipe::global_args, and the subtest below keeps the two in step:
+# this was four settings short of what a run actually injects, so nothing here
+# ever rendered against admin_key or gateway.
 my %G = (
     domain                     => 'test.test.test',
-    subdomain                  => 'test',
     tld                        => 'test.test',
+    admin_key                  => 'gh:nobody',
+    gateway                    => '192.168.1.254',
+    cache_ip                   => q{},
+    transfer_ips               => ['192.168.122.251'],
     install_dir                => '/opt/domains',
     data_source                => '/opt/data',
     script_dir                 => '/root/bin',
@@ -165,6 +172,24 @@ my %PROV = (
     # without one is rmtree('/ufw').
     output_dir => tempdir( CLEANUP => 1 ),
 );
+
+# %G stands in for what bin/new_config hands every recipe, and global_args says
+# what that is.  Two lists of the same thing drift: this one was missing
+# admin_key, gateway, cache_ip and transfer_ips, and carried a subdomain that
+# bin/new_config sets to the fqdn and nothing reads.
+subtest 'the globals this file injects are the globals the base class declares' => sub {
+    my $props = { Provisioner::Recipe->global_args }->{properties};
+    is_deeply( [ sort keys %G ], [ sort keys %$props ], 'one set, not two' );
+};
+
+# A default here would be taken for an answer.  koan requires user, and validate
+# fills it in from admin_user only after validation has run -- so a default would
+# satisfy the requirement for every domain that never named a service account.
+subtest 'no setting every recipe is handed carries a default' => sub {
+    my $props = { Provisioner::Recipe->global_args }->{properties};
+    my @with  = grep { exists $props->{$_}{default} } sort keys %$props;
+    is_deeply( \@with, [], 'a global is what a run put there, never what a schema guessed' );
+};
 
 # Test that a recipe renders without error given %G merged with $extra.
 sub renders_ok {

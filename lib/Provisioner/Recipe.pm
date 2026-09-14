@@ -275,6 +275,146 @@ sub args {
     return ();
 }
 
+=head3 %args = $recipe->global_args()
+
+The settings B<every> recipe is handed, declared once.
+
+C<bin/new_config> builds one hash per domain out of F<ipmap.cfg>, the address
+pool, the machine it is running on and the domain's C<_global>, and hands that
+hash to every recipe it renders.  None of those keys belongs to any one recipe,
+so none of them is in any one recipe's C<args()>: they are here, and C<schema>
+lays them B<underneath> whatever the recipe declares for itself.
+
+Underneath, because a recipe that declares a colliding key is describing a
+different thing spelt the same, and it is the one that knows.
+L<Provisioner::Recipe::registrar>'s C<user> is the account at the registrar and
+defaults to empty -- which is what stops C<validate> filling it in from
+C<admin_user> and making the lexicon shortcut export an C<AUTH_USERNAME> for a
+registrar that authenticates with a token alone.
+L<Provisioner::Recipe::matrix>'s C<admin_user> is the Synapse account.
+
+B<Nothing here declares a default, and nothing here is required.>  Three
+reasons, each of which has already cost something:
+
+=over 4
+
+=item * A default would satisfy a recipe that B<requires> the key.  koan
+requires C<user>; a default of the admin account would be taken for an answer on
+every domain that never named a service account.
+
+=item * C<validate> fills C<user> in from C<admin_user> B<after> validation, so
+a required field cannot be satisfied by it -- and C<forget_undefs> drops an
+explicitly-empty key only where a default is declared, so a default here would
+turn C<user:> with nothing after it into that same silent fallback.
+
+=item * C<bin/new_config> writes C<users>, C<resolvers> and the addressing block
+unconditionally over whatever C<_global> said, so a default could never take
+effect and would document an intention that never happens.
+
+=back
+
+C<size> is B<not> here: L<Provisioner::Recipe::vm>'s is the guest disk in bytes
+and L<Provisioner::Recipe::tmpfs>'s is a sizing string like C<50%>.  One word,
+two meanings, neither of them "a setting every recipe is handed" -- and C<vm>
+already owns its one, where C<bin/recipes vm> prints it.  C<cpus> and C<memory>
+are excluded for the same reason, and C<distro>, C<mirror> and C<cache> because
+L<Provisioner::DistroRecipe/args> owns them.
+
+=cut
+
+sub global_args {
+    return (
+        type       => 'object',
+        properties => {
+            domain      => { type => 'string', description => 'The fully qualified domain this recipe is being rendered for.' },
+            tld         => { type => 'string', description => 'Everything after the first label of that domain.' },
+            install_dir => { type => 'string', description => "Where this domain's files live on the guest." },
+            data_source => { type => 'string', description => 'Where on this machine the payload shipped to the guest comes from.' },
+            script_dir  => { type => 'string', description => 'Where the generated helper scripts land on the guest.' },
+
+            user        => { type => 'string', description => 'The service account the application runs as and recipes set ownership to.  Falls back to admin_user, which is a fallback rather than the intended configuration.' },
+            admin_user  => { type => 'string', description => 'The account that administers the guest.' },
+            admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
+            admin_key   => { type => 'string', description => "The administrator's ssh key, as cloud-init's ssh_import_id spells it." },
+
+            # The three that go absent together.  A hypervisor which addresses
+            # its own guests hands out no address of ours, has no NAT bridge to
+            # be reached over, and leaves the guest no gateway of ours to use --
+            # bin/new_config guards all three on manages_addresses, and
+            # Provisioner::Recipe::ubuntu wants a gateway only where there are
+            # ips to go with it.  Typed without nullable, they made a state the
+            # recipes already handle impossible to express.
+            gateway => { type => 'string', nullable => 1, description => 'The IPv4 gateway guests are built with, or nothing where the platform provides one.' },
+            main_ip => { type => 'string', nullable => 1, description => "The guest's static address, or nothing where the hypervisor allocates it." },
+            tld_ip  => { type => 'string', nullable => 1, description => "The hypervisor's NAT bridge address, or nothing where it has none." },
+
+            transfer_ip   => { type => 'string',  description => 'The address of this machine the guest rsyncs its payload from.' },
+            transfer_ips  => { type => 'array',   items       => { type => 'string' }, description => 'Every address of ours that reaches the guest, the fetch address first.' },
+            transfer_user => { type => 'string',  description => 'The account on this machine the guest fetches as.' },
+            transfer_port => { type => 'integer', description => 'The ssh port on this machine.' },
+
+            cache_ip => { type => 'string', description => 'The fetch cache, as an address, or empty for none.' },
+
+            resolvers    => { type => 'array', items => { type => 'string' }, description => 'The nameservers this installation is configured with.' },
+            full_aliases => { type => 'array', items => { type => 'string' }, description => "This domain's aliases, built from the ip map." },
+            modules      => { type => 'array', items => { type => 'string' }, description => 'The recipes on this guest, in the order the makefile runs them.' },
+
+            ipmap       => { type => 'object', additionalProperties => { type => 'string' },                               description => 'Every domain this installation assigns an address to, and its address.' },
+            nameservers => { type => 'object', additionalProperties => { type => 'string' },                               description => 'The public nameservers for the zones this fleet serves.' },
+            aliases     => { type => 'object', additionalProperties => { type => 'array', items => { type => 'string' } }, description => 'Every domain in the map, and the names that also answer for it.' },
+
+            users => {
+                type        => 'array',
+                description => "The accounts cloud-init creates on the guest: the administrator, plus whatever the domain's users.yaml adds.",
+                items       => {
+                    type       => 'object',
+                    properties => {
+                        name          => { type => 'string' },
+                        gecos         => { type => 'string' },
+                        shell         => { type => 'string' },
+                        sudo          => { type => 'string' },
+                        ssh_import_id => { type => 'array', items => { type => 'string' } },
+                    },
+                },
+            },
+
+            packager_invocation        => { type => 'string', description => 'What installs a package on this distribution.' },
+            packager_up_invocation     => { type => 'string', description => 'What upgrades one.' },
+            packager_remove_invocation => { type => 'string', description => 'What removes one.' },
+        },
+    );
+}
+
+=head3 %schema = $recipe->schema()
+
+What C<validate> checks against: this recipe's C<args()> with C<global_args>
+laid underneath its C<properties>.
+
+B<Properties only.>  Every other key in a schema -- C<required>,
+C<additionalProperties>, C<oneOf> -- is the recipe's alone.  Nineteen recipes
+declare a C<required> list, and L<Hash::Merge> concatenates arrays under every
+behaviour it has, so a merge that touched C<required> would hand koan a list
+with two C<user>s in it.
+
+Deliberately B<not> folded into C<args()>.  L<Provisioner::Cookbook/spec> calls
+C<args()>, and C<bin/recipes>, C<bin/new_guest --scaffold>,
+L<Provisioner::Cookbook/defaults>, L<Provisioner::DistroRecipe/global_defaults>
+and C<bin/new_config>'s C<hv_settings> all read what it returns -- so a global
+declared there would be offered as a field of every recipe to scaffold.  Two of
+those read it directly rather than through L<Provisioner::Cookbook/properties>,
+so hiding them at display time would not work either.
+
+=cut
+
+sub schema {
+    my ($self) = @_;
+
+    my %args   = $self->args();
+    my %global = $self->global_args();
+
+    return ( %args, properties => { %{ $global{properties} // {} }, %{ $args{properties} // {} } } );
+}
+
 =head3 @fmts = $recipe->formatters()
 
 Define custom template formatters available both in makefile fragments and generated files.
@@ -628,7 +768,7 @@ guest built to test a recipe as on a production host.
 
 sub validate {
     my ( $self, %opts ) = @_;
-    my %args = $self->args();
+    my %args = $self->schema();
 
     # On a copy, all the way down.  %opts is a shallow copy, so everything
     # nested in it belongs to the caller -- and both the coercion below and any
