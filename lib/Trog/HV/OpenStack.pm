@@ -883,15 +883,7 @@ sub nic_slots          { return $_[0]->_no_such_thing( 'nic_slots',          'th
 sub nic_names          { return $_[0]->_no_such_thing( 'nic_names',          'interface names come from Neutron and cloud-init, not from a PCI slot' ) }
 sub has_tpm            { return $_[0]->_no_such_thing( 'has_tpm',            'a TPM is a property of the flavor or image, not of a host' ) }
 
-=head1 SEE ALSO
-
-L<Trog::HV>, which chose this backend and does the placement arithmetic.
-
-L<Trog::OpenStack::Auth>, which authenticates it.
-
-L<Trog::HV::Libvirt>, the other one.
-
-=cut
+=head1 PROVISIONING
 
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
 
@@ -1104,5 +1096,15 @@ sub would_provision {
 
     return $existing ? $self->guest_ssh_ip($config) : '(not built)';
 }
+
+=head1 SEE ALSO
+
+L<Trog::HV>, which chose this backend and does the placement arithmetic.
+
+L<Trog::OpenStack::Auth>, which authenticates it.
+
+L<Trog::HV::Libvirt>, the other one.
+
+=cut
 
 1;
