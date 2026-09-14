@@ -58,6 +58,7 @@ sub makefile {
             data_fragment          => "echo data\n",
             packages               => [],
             testdeps               => [],
+            testdeps_flags         => [],
             full_aliases           => [],
             packager_invocation    => 'apt-get install -y',
             packager_up_invocation => 'apt-get update',
@@ -95,6 +96,16 @@ subtest 'with hosts to fetch through a cache, it points them there and gives the
 subtest 'without, there is nothing about a cache at all' => sub {
     unlike( makefile( cache_ip => q{}, fetch_hosts => undef ), qr/fetch_via_cache/, 'no cache' );
     unlike( makefile(),                                        qr/fetch_via_cache/, 'nor when nothing was said about one' );
+};
+
+subtest 'testdeps: installed with the flags bin/new_config chose for them' => sub {
+    my ($target) = makefile( testdeps => [qw{Test::More Test::Deep}], testdeps_flags => ['--mirror-only'] ) =~ m/^\Q$STATE\E\/testdeps:\n((?:\t[^\n]*\n)+)/m;
+    like( $target // q{}, qr/^\tcpanm --mirror-only Test::More Test::Deep$/m, 'each flag ahead of the modules' ) or diag $target;
+
+    ($target) = makefile( testdeps => ['Test::More@1.302'], testdeps_flags => [] ) =~ m/^\Q$STATE\E\/testdeps:\n((?:\t[^\n]*\n)+)/m;
+    like( $target // q{}, qr/^\tcpanm Test::More\@1\.302$/m, 'and none when none were chosen' ) or diag $target;
+
+    unlike( makefile(), qr/^\tcpanm/m, 'and no cpanm at all with nothing to install' );
 };
 
 Test::NoWarnings::had_no_warnings();

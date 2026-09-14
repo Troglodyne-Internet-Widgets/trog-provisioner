@@ -39,11 +39,16 @@ else
     # Two: the shebang on cpanm, and the cpanm the perl recipe leaves on root's
     # PATH pointing into /opt/perl5.  Whichever perl cpanm runs under is the one
     # it installs for, so name both.
+    #
+    # --mirror-only: what the mirror's own index names, not cpanmetadb, which
+    # can name a release the mirror no longer has -- see "Which release" in
+    # scripts/cpan_install.  Neither request here needs anything older than the
+    # newest release, which is all that index lists.
     if [ -n "$SOURCE" ]; then
         echo "install_configd: installing Configd from $SOURCE"
-        "$PERL" "$CPANM" --notest "$SOURCE"
+        "$PERL" "$CPANM" --notest --mirror-only "$SOURCE"
     else
-        "$PERL" "$CPANM" --notest "Configd~>=$WANTED"
+        "$PERL" "$CPANM" --notest --mirror-only "Configd~>=$WANTED"
     fi
 
     # A source is not asked for a version before it is unpacked, so ask what it

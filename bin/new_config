@@ -49,6 +49,10 @@ use Provisioner::Cookbook();
 # Better stack traces
 use Carp::Always;
 
+# For mirror_only, so the makefile's testdeps line asks cpanm for a release the
+# way scripts/cpan_install does.  Requiring it runs nothing.
+require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_install' ) );
+
 # For the two merges below that accumulate what several recipes asked of a
 # shared dependency -- not for _base against a domain, which Provisioner::Cookbook
 # does with a merger of its own and the opposite precedence.
@@ -1099,6 +1103,7 @@ sub handle_domain {
             state_dir        => "/etc/provisioner/state/$fqdn",
             global_state_dir => "/etc/provisioner/state",
             testdeps         => \@testdeps,
+            testdeps_flags   => [ Trog::Script::CpanInstall::mirror_only(@testdeps) ],
             fetch_hosts      => @fetch_hosts ? \@fetch_hosts : undef,
         }
     );
