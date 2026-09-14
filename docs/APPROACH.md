@@ -19,5 +19,5 @@
 
 ## Dependencies
 
-* Don't require dependencies for things which are dependencies of recipes you depend on.  Instead, simply die during validate() if the recipe you depend on is not present in `$opts{modules}`.
+* Don't require dependencies for things which are dependencies of recipes you depend on.  Instead, die during `enrich()` if the recipe you depend on is not present in `$opts{modules}` -- that is where every recipe here does it, and `enrich()` is the sub to override.  Never override `validate()`: it is the universal one, and a recipe that replaces it discards the schema it composes and its own `enrich()` with it.
     - Example: `die "This recipe requires the nginxproxy recipe to function" unless List::Util::any { $_ eq 'nginxproxy' } @{$opts{modules}};`

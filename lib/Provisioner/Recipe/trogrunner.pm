@@ -226,12 +226,6 @@ sub args {
     return (
         type       => 'object',
         properties => {
-
-            # Not required: Provisioner::Recipe::validate fills it in from
-            # admin_user, and it does that after validation -- a required field
-            # cannot be satisfied by something that runs later.
-            user => { type => 'string' },
-
             checkout => { type => 'boolean', default => 1 },
 
             # Relative to install_dir/domain, and never the domain directory

@@ -141,6 +141,12 @@ sub _coerce_array {
     return \@_;
 }
 
+# Which of these are lists.  Config::Simple hands back a bare string for a file
+# that names one of them and an arrayref for one that names two, and what every
+# recipe validates against says array -- so a guest with a single resolver would
+# be refused for saying what provision.conf has always meant by it.
+my %LIST_SETTING = map { $_ => 1 } qw{resolvers ips packages transfer_ips};
+
 # Everything provision.conf says, as a plain hash, for handing to a recipe.
 #
 # Config::Simple prefixes every key with the block it came from, and
@@ -153,8 +159,13 @@ sub _coerce_array {
 sub _settings {
     my ($config) = @_;
 
-    my %vars = $config->vars();
-    return map { (s/\Adefault[.]//r) => $vars{$_} } keys %vars;
+    my %vars     = $config->vars();
+    my %settings = map { (s/\Adefault[.]//r) => $vars{$_} } keys %vars;
+
+    $settings{$_} = Provisioner::Utils::coerce_arrayref( $settings{$_} )
+      for grep { exists $settings{$_} } keys %LIST_SETTING;
+
+    return %settings;
 }
 
 #TODO: cpu/gpu passthru accel via techniques such as the following:

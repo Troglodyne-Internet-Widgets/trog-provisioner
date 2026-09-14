@@ -33,6 +33,7 @@ use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
 use File::Find();
 use Provisioner::Cookbook();
+use Provisioner::Recipe();
 use IPC::Run3();
 use File::Find();
 use File::Path();
@@ -120,11 +121,17 @@ sub salvage_brings_down {
     return -f "$dir/dst/$relative" ? 1 : 0;
 }
 
-# Global vars bin/new_config injects into every template render.
+# Global vars bin/new_config injects into every template render.  The set is
+# Provisioner::Recipe::global_args, and the subtest below keeps the two in step:
+# this was four settings short of what a run actually injects, so nothing here
+# ever rendered against admin_key or gateway.
 my %G = (
     domain                     => 'test.test.test',
-    subdomain                  => 'test',
     tld                        => 'test.test',
+    admin_key                  => 'gh:nobody',
+    gateway                    => '192.168.1.254',
+    cache_ip                   => q{},
+    transfer_ips               => ['192.168.122.251'],
     install_dir                => '/opt/domains',
     data_source                => '/opt/data',
     script_dir                 => '/root/bin',
@@ -165,6 +172,24 @@ my %PROV = (
     # without one is rmtree('/ufw').
     output_dir => tempdir( CLEANUP => 1 ),
 );
+
+# %G stands in for what bin/new_config hands every recipe, and global_args says
+# what that is.  Two lists of the same thing drift: this one was missing
+# admin_key, gateway, cache_ip and transfer_ips, and carried a subdomain that
+# bin/new_config sets to the fqdn and nothing reads.
+subtest 'the globals this file injects are the globals the base class declares' => sub {
+    my $props = { Provisioner::Recipe->global_args }->{properties};
+    is_deeply( [ sort keys %G ], [ sort keys %$props ], 'one set, not two' );
+};
+
+# A default here would be taken for an answer.  koan requires user, and validate
+# fills it in from admin_user only after validation has run -- so a default would
+# satisfy the requirement for every domain that never named a service account.
+subtest 'no setting every recipe is handed carries a default' => sub {
+    my $props = { Provisioner::Recipe->global_args }->{properties};
+    my @with  = grep { exists $props->{$_}{default} } sort keys %$props;
+    is_deeply( \@with, [], 'a global is what a run put there, never what a schema guessed' );
+};
 
 # Test that a recipe renders without error given %G merged with $extra.
 sub renders_ok {
@@ -217,6 +242,14 @@ sub rejects_missing {
         my $r = "Provisioner::Recipe::$name"->new(%PROV);
         eval { $r->render( %G, %$extra, $field => undef ) };
         ok( $@, "render() dies without $field" );
+
+        # An operator reads this refusal and has to know what to go and edit.
+        # It used to glue the class to the error -- giving
+        # `Provisioner::Recipe::Ubuntu::koan/user: Missing property.`, a
+        # namespace nobody can edit and no domain at all.
+        like( $@, qr/\bThe \Q$name\E recipe\b/, "and says it is $name refusing" );
+        like( $@, qr{\Q/$field\E:},             "and names $field" );
+        like( $@, qr/\Q$G{domain}\E/,           "and names the domain" );
     };
 }
 
@@ -1776,17 +1809,33 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
     }
 };
 
-# bin/new_config renders every recipe with its configuration and then with
-# modules, the recipes on the guest, so a field by that name is one no domain can
-# set and whose value is never what the recipe meant.  The perl recipe had one,
-# and on a guest cpanm was asked to install nginx and ufw.
+# Every recipe is handed the same settings, the ones
+# Provisioner::Recipe::global_args declares, and a recipe redeclaring one is a
+# second opinion about a field it does not own -- which is how the perl recipe
+# came to take `modules`, the recipes on the guest, and ask cpanm on a guest to
+# install nginx and ufw.
 #
-# full_aliases is written over the same way, and is not checked: mail declares
-# it to describe what new_config hands it, which is the same thing.
-subtest 'no recipe takes a field bin/new_config writes over' => sub {
+# The exemptions are the four recipes that mean something else by the name, or
+# that describe what bin/new_config hands them.  Each says so where it declares
+# the field.
+my %MEANS_SOMETHING_ELSE_BY_IT = (
+    registrar => { user         => 1 },
+    matrix    => { admin_user   => 1 },
+    ldap      => { users        => 1 },
+    mail      => { full_aliases => 1 },
+);
+
+subtest 'no recipe redeclares a setting every recipe is handed' => sub {
+    my %global  = Provisioner::Recipe->global_args();
+    my @globals = sort keys %{ $global{properties} };
+    ok( scalar @globals, 'there are settings to check against' );
+
     foreach my $recipe ( sort @available ) {
-        my %spec = eval { Provisioner::Cookbook->spec($recipe) } or next;
-        ok( !exists $spec{properties}{modules}, "$recipe takes no field called modules" );
+        my %spec       = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        my $deliberate = $MEANS_SOMETHING_ELSE_BY_IT{$recipe} // {};
+
+        my @offenders = grep { exists $spec{properties}{$_} && !$deliberate->{$_} } @globals;
+        is( "@offenders", q{}, "$recipe redeclares none of the settings it is handed" );
     }
 
     # And what it builds from its own list, given the list new_config hands it.
