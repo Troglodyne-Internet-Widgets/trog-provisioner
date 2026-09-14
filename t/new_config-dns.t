@@ -8,8 +8,8 @@ use re '/aa';
 
 =head1 NAME
 
-t/new_config-dns.t - what the depsolver does with a dependency named as an
-interface rather than as a recipe
+t/new_config-dns.t - what the depsolver does with a substitutable dependency,
+one named as an interface rather than as a recipe
 
 =cut
 
@@ -215,8 +215,8 @@ subtest 'a name somebody else holds resolves it to the registrar' => sub {
     ok( defined $makefile, 'and a makefile was written' ) or return;
 
     # The registrar recipe installs the /opt/lexicon shortcut for its provider,
-    # so it has to be on the guest -- letsencrypt asks for the interface and the
-    # depsolver turns that into this.
+    # so it has to be on the guest -- letsencrypt declares a substitutable
+    # dependency and the depsolver turns that into this.
     ok( builds( $makefile, 'registrar' ), 'the registrar recipe is built' );
 };
 

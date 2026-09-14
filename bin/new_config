@@ -223,12 +223,7 @@ sub get_recipe_config {
 }
 
 sub expand_dependent_domains {
-    my $d = shift;
-
-    # Provisioner::Cookbook's walk rather than one of our own.  The recipes ask
-    # it the same question whenever they need the machine rather than the domain
-    # -- which guest runs the DNS server a record goes into -- and two readings
-    # of _shared are two chances to disagree about what is layered onto what.
+    my $d    = shift;
     my $host = Provisioner::Cookbook->host_of( $d, get_recipe_config() );
     return $d unless defined $host;
 
@@ -308,9 +303,10 @@ sub main {
 # recipe is validated would reach no other recipe at all -- see
 # Provisioner::DistroRecipe/global_defaults.
 
-=head2 resolve_interface($interface, $domain_conf, $host_conf, $requiring_conf, $domain)
+=head2 resolve_substitutable_dependency($interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host)
 
-Which recipe satisfies a dependency named as an interface.
+Which recipe satisfies a substitutable dependency: one naming an interface that
+any of several recipes could answer for, rather than naming a recipe outright.
 
 The interface decides -- this asks it, rather than working it out again.  Two
 answers to one question is how the gates this replaced came to disagree, so the
@@ -333,7 +329,7 @@ there, so a domain settles a tie where it already writes it.
 
 =cut
 
-sub resolve_interface {
+sub resolve_substitutable_dependency {
     my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @_;
 
     # It arrives as text out of required_recipes, so nothing has loaded it and
@@ -823,10 +819,11 @@ sub handle_domain {
         );
         foreach my $required ( keys(%dep_recipes) ) {
 
-            # A recipe may depend on an interface rather than on a recipe, and
-            # this is where that becomes one: Provisioner::Cookbook::has takes
-            # \w+ and nothing else, so the name has to be resolved before
-            # anything below tries to load it or put it in the module list.
+            # A dependency may be substitutable -- naming an interface several
+            # recipes could answer for -- and this is where it becomes one of
+            # them: Provisioner::Cookbook::has takes \w+ and nothing else, so the
+            # name has to be resolved before anything below tries to load it or
+            # put it in the module list.
             #
             # Which implementation is the interface's to say, not this loop's.
             # It names the configuration key holding a preference, and that is
@@ -836,7 +833,7 @@ sub handle_domain {
             # know what DNS is.
             if ( index( $required, '::' ) >= 0 ) {
                 my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
-                my $chosen    = resolve_interface( $required, $rconf->{$domain}, $host_conf, $pconf, $domain, $depends_on );
+                my $chosen    = resolve_substitutable_dependency( $required, $rconf->{$domain}, $host_conf, $pconf, $domain, $depends_on );
                 $dep_recipes{$chosen} //= $dep_recipes{$required};
                 delete $dep_recipes{$required};
                 $required = $chosen;

@@ -457,7 +457,8 @@ adding to it. Dependencies of dependencies work, and several recipes can layer
 onto one shared dependency -- `tcms` builds on `tpsgi` and adds to the same
 vhost.
 
-A recipe can also depend on a **capability** rather than on a recipe by name:
+A recipe can also declare a **substitutable dependency** -- depending on a
+capability rather than on a recipe by name:
 
 ```yaml
     letsencrypt:
@@ -467,8 +468,8 @@ A recipe can also depend on a **capability** rather than on a recipe by name:
 `letsencrypt` needs something that can answer a dns-01 challenge, which is
 `Provisioner::DNSRecipe` -- implemented by `pdns`, which serves the zone from the
 guest, and by `registrar`, which is whoever holds it publicly. It asks for the
-interface, and the depsolver resolves that to whichever serves this domain and
-builds it.
+interface -- a substitutable dependency -- and the depsolver resolves that to
+whichever serves this domain and builds it.
 
 Which one is the interface's to decide, not the depsolver's: a name under a
 reserved TLD is always served locally, a domain configured with one of the two

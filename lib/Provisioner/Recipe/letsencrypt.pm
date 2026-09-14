@@ -435,7 +435,7 @@ sub required_recipes {
     # recipe installs the shortcut an operator reaches for, pdns installs the
     # server itself.  Named as the interface rather than as either of them, so
     # bin/new_config resolves it to whichever serves this domain -- see
-    # Provisioner::DNSRecipe and resolve_interface.
+    # Provisioner::DNSRecipe and resolve_substitutable_dependency.
     #
     # Only where the branch above has not already asked for the local one.  Both
     # would resolve to the same recipe under a reserved TLD, and %dep_recipes is

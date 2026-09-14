@@ -279,7 +279,7 @@ subtest 'the shelf has the recipes on it' => sub {
 
 subtest 'implementations of an interface' => sub {
 
-    # What lets bin/new_config satisfy a dependency named as an interface: a
+    # What lets bin/new_config satisfy a substitutable dependency: a
     # recipe can say it needs something that answers a dns-01 challenge without
     # naming the one that happens to exist.
     my @dns = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');

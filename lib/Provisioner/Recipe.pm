@@ -458,11 +458,11 @@ This also enables automatic figuring of what to do with a dependent recipe in th
 In some cases this will allow you to omit configuring it entirely.
 This is configured by setting the sub value.
 
-=head3 Depending on a capability rather than on a recipe
+=head3 Substitutable dependencies
 
-A key naming an interface rather than a recipe -- one with C<::> in it -- is
-resolved by C<bin/new_config> to whichever recipe implements it and serves this
-domain:
+A key naming an interface rather than a recipe -- one with C<::> in it -- is a
+B<substitutable dependency>, and C<bin/new_config> resolves it to whichever
+recipe implements that interface and serves this domain:
 
     my %out = (
         'Provisioner::DNSRecipe' => sub { return () },

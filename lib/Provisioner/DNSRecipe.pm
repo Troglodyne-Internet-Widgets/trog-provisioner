@@ -149,10 +149,10 @@ sub local_implementation { return $LOCAL_IMPLEMENTATION }
 Which configuration key names the implementation a recipe prefers, where more
 than one could answer.  C<dns_preference>.
 
-Declared here so C<bin/new_config> can resolve a dependency on this interface
-without knowing anything about the recipes that declare one: it asks the
-interface which key to read, and reads it out of the configuration of whichever
-recipe asked.
+Declared here so C<bin/new_config> can resolve a substitutable dependency on
+this interface without knowing anything about the recipes that declare one: it
+asks the interface which key to read, and reads it out of the configuration of
+whichever recipe asked.
 
 =cut
 
@@ -191,10 +191,10 @@ rather than fetched -- see C<_configures>.
 
 Asked of the domain's configuration rather than of the module list, because that
 list is not the same before and after the depsolver has run: the two callers
-here sit either side of it.  Both C<bin/new_config>, resolving a dependency on
-this interface, and L<Provisioner::Recipe::letsencrypt>, rendering the hook, ask
-this one question rather than each answering it -- which is how they came to
-disagree before.
+here sit either side of it.  Both C<bin/new_config>, resolving a substitutable
+dependency on this interface, and L<Provisioner::Recipe::letsencrypt>, rendering
+the hook, ask this one question rather than each answering it -- which is how
+they came to disagree before.
 
 =cut
 

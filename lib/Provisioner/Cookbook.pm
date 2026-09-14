@@ -202,7 +202,7 @@ Loads every recipe to ask, which C<names> deliberately does not, and asks once a
 process for each interface: which classes inherit from what is a fact about the
 code rather than about a configuration.
 
-This is what lets C<bin/new_config> resolve a dependency on an interface.  A
+This is what lets C<bin/new_config> resolve a substitutable dependency.  A
 recipe can say it needs something that can answer a dns-01 challenge without
 naming the one that happens to exist.
 
