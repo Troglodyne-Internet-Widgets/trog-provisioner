@@ -122,26 +122,32 @@ C<remote_files> names two things: this domain's mail store, and C</mail/keys>.
 
 C</mail/keys> is not where opendkim keeps its keys -- that is
 C</etc/opendkim/keys>, which belongs to opendkim -- it is a copy of them made
-for the fetch to read. C<bin/new_config> reads a running guest over sftp as the
-admin user and cannot sudo, so a directory a service keeps to itself comes back
-empty and says nothing about having done so; and a signing key that comes back
-empty is a domain whose every past signature stops verifying the next time it is
-built. The copy is 0600 in a 0700 directory owned by the admin account, which is
-as tight as something readable by the fetching user gets.
+for the fetch to read, and stays a copy: C<bin/new_config> reads the guest as
+root now (issue #76), so it could read C</etc/opendkim/keys> directly, but
+repointing C<remote_files> at the real directory is a bigger change than issue
+#98 asks for. What issue #98 did take out is the copy's ownership -- it used to
+be the admin account's, from when the fetch could not sudo and a directory it
+could not read came back empty and said nothing about having done so, which for
+a signing key means every past signature failing to verify the next time it is
+built. The copy is C<root:root> now, still 0600 in a 0700 directory: as tight as
+it gets for something that has to sit outside the daemon that owns the original.
 
 The mail store is salvaged where it stands, and the mode it stands in is
-C<2750>, owned C<dovecot:admin>. That is not tidiness: dovecot copies the mode
+C<2750>, owned C<dovecot:dovecot>. That is not tidiness: dovecot copies the mode
 and the group of the nearest existing parent onto every maildir and message file
 it creates, so the group and the setgid bit on C</mail/E<lt>domainE<gt>> are what
 decide whether the rebuild B<after> the next one still has mail to salvage. The
 fragment used to finish with C<chown -R dovecot:dovecot>, and dovecot keeps its
-maildirs to itself, so the mail survived one rebuild and not two.
+maildirs to itself, so the mail survived one rebuild and not two -- which is
+what widened both the initial directory and this closing chown to the admin
+group. The fetch reads the guest as root now, so issue #98 put C<dovecot:dovecot>
+back in both places.
 
-The cost, in both cases, is that the admin account can read them -- all of this
-domain's mail, and the key that signs its outbound -- and that what comes down
-lands in the provisioner's data directory and in whatever backs that directory
-up. Nothing here is readable by the rest of the guest, which is more than was
-true before, but the data directory should be treated as holding the mail.
+The cost that stays, in both cases, is not who can read them on the guest
+anymore -- nobody outside C<dovecot>, C<opendkim> and root can -- but that what
+comes down still lands in the provisioner's data directory and in whatever
+backs that directory up: all of this domain's mail, and the key that signs its
+outbound, held there regardless of how narrow the guest itself leaves them.
 
 =head3 What still cannot come apart
 
@@ -309,14 +315,14 @@ sub datadirs {
 
 sub restores {
     my ( $self, %opts ) = @_;
-    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
+    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
     # Not the inverse of remote_files, which is why this is said rather than
     # derived: the whole of /mail/keys comes down, and one directory out of it
     # goes back somewhere else entirely.
     return (
         "/etc/opendkim/keys/$domain" => { from => "$install_dir/$domain/.mail/keys/$domain", owner => 'opendkim:opendkim' },
-        "/mail/$domain"              => { from => "$install_dir/$domain/mailnames",          owner => "dovecot:$admin" },
+        "/mail/$domain"              => { from => "$install_dir/$domain/mailnames",          owner => 'dovecot:dovecot' },
     );
 }
 
