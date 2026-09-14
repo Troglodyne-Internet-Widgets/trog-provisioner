@@ -1282,24 +1282,12 @@ sub validate {
     my ( $self, %opts ) = @_;
     my %args = $self->schema();
 
-    # On a copy, all the way down.  %opts is a shallow copy, so everything
-    # nested in it belongs to the caller -- and both the coercion below and any
-    # enrich write through to it.  The validator turning a vhost's `ssl => 1`
-    # into a JSON::PP::Boolean was enough to make the same configuration look
-    # like a different one on the next render.
+    # shallow copy to not pollute later consumers
     %opts = %{ clone( \%opts ) };
 
     forget_undefs( \%opts, \%args );
 
-    # OpenAPIv3 coerces booleans, numbers and strings but not defaults, so
-    # nothing was filling them in and every default in every args() documented
-    # an intention that never happened.
-    #
-    # Added to what it already coerces rather than passed on its own: coerce()
-    # replaces the set rather than extending it, and asking for defaults alone
-    # takes booleans back out -- which turns every `type => boolean, default =>
-    # 1` into "Expected boolean - got number", the default failing the check it
-    # was written to satisfy.
+    # Set default coercion to true so that the defaults in the spec are honored
     my $validator = JSON::Validator::Schema::Troglodyne->new;
     $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
     my @errors = $validator->validate( \%opts, \%args );
