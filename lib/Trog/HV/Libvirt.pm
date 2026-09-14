@@ -149,10 +149,6 @@ with no C<-c> would.
 
 True when the hypervisor is this very machine, i.e. the historical behavior.
 
-=head2 slug
-
-A filesystem-safe token identifying this hypervisor.
-
 =cut
 
 sub uri { return $_[0]->{uri} }
@@ -160,14 +156,6 @@ sub uri { return $_[0]->{uri} }
 sub is_local {
     my ($self) = @_;
     return !defined $self->{host};
-}
-
-sub slug {
-    my ($self) = @_;
-    my $slug = $self->{uri};
-    $slug =~ s/[^A-Za-z0-9]+/_/g;
-    $slug =~ s/\A_+|_+\z//g;
-    return $slug;
 }
 
 =head2 ssh_host, ssh_user, ssh_port, ssh_target
@@ -285,17 +273,9 @@ sub _domain {
     return eval { $vmm->get_domain_by_name($name) };
 }
 
-=over 4
+=head2 domain_exists($name)
 
-=item C<domain_exists($name)>
-
-=item C<domain_is_running($name)>
-
-=item C<domain_xml($name)>
-
-The domain's XML description, or undef if there is no such domain.
-
-=back
+Whether libvirt has a domain of that name, running or not.
 
 =cut
 
@@ -310,14 +290,7 @@ sub guest_names {
     return map { $_->get_name } $self->vmm->list_all_domains();
 }
 
-sub domain_exists     { return defined $_[0]->_domain( $_[1] )                      ? 1 : 0 }
-sub domain_is_running { my $d = $_[0]->_domain( $_[1] ); return $d && $d->is_active ? 1 : 0 }
-
-sub domain_xml {
-    my ( $self, $name ) = @_;
-    my $domain = $self->_domain($name) or return undef;
-    return $domain->get_xml_description();
-}
+sub domain_exists { return defined $_[0]->_domain( $_[1] ) ? 1 : 0 }
 
 =head2 annihilate_domain($name)
 

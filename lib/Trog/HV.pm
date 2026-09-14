@@ -69,8 +69,8 @@ read it: a hash with C<memory_mb>, C<memory_free>, C<memory_committed>, C<cpus>,
 C<cpus_allocatable>, C<cpus_committed>, C<cpus_free>, C<disk_free> and
 C<guests>.
 
-=item * the guest lifecycle -- C<domain_exists>, C<domain_is_running>,
-C<annihilate_domain> -- and the snapshot four, C<snapshot_names>,
+=item * the guest lifecycle -- C<domain_exists> and C<annihilate_domain> --
+and the snapshot four, C<snapshot_names>,
 C<snapshot_current_name>, C<create_snapshot> and C<revert_snapshot>.
 
 =item * C<guest_names>, every guest it has, which is what tells an orphan sweep
@@ -416,7 +416,6 @@ sub _abstract {
 sub build                 { return $_[0]->_abstract('build') }
 sub config_keys           { return $_[0]->_abstract('config_keys') }
 sub domain_exists         { return $_[0]->_abstract('domain_exists') }
-sub domain_is_running     { return $_[0]->_abstract('domain_is_running') }
 sub annihilate_domain     { return $_[0]->_abstract('annihilate_domain') }
 sub guest_names           { return $_[0]->_abstract('guest_names') }
 sub guest_ssh_ip          { return $_[0]->_abstract('guest_ssh_ip') }

@@ -106,12 +106,10 @@ use Trog::HV::OpenStack();
         return 1;
     }
 
-    sub delete_volume  { my ( $s, $id ) = @_; $s->_record( delete_volume => $id ); return 1 }
-    sub create_volume  { my ( $s, %o )  = @_; $s->_record( create_volume => \%o ); return { id => 'vol-new', %o } }
-    sub attach_volume  { my ( $s, @a )  = @_; $s->_record( attach_volume => @a );  return { id => $a[1] } }
-    sub create_image   { my ( $s, @a )  = @_; $s->_record( create_image => @a );   return 1 }
-    sub server_action  { my ( $s, @a )  = @_; $s->_record( server_action => @a );  return 1 }
-    sub console_output { my ( $s, @a )  = @_; $s->_record( console_output => @a ); return "it booted\n" }
+    sub delete_volume { my ( $s, $id ) = @_; $s->_record( delete_volume => $id ); return 1 }
+    sub create_volume { my ( $s, %o )  = @_; $s->_record( create_volume => \%o ); return { id => 'vol-new', %o } }
+    sub create_image  { my ( $s, @a )  = @_; $s->_record( create_image  => @a );  return 1 }
+    sub server_action { my ( $s, @a )  = @_; $s->_record( server_action => @a );  return 1 }
 }
 
 my $FAKE;
@@ -240,11 +238,6 @@ subtest 'a guest is a server with the domain for a name' => sub {
     ok $hv->domain_exists('vm.example.com'),    'exists';
     ok !$hv->domain_exists('nope.example.com'), 'does not';
 
-    ok $hv->domain_is_running('vm.example.com'),     'ACTIVE is running';
-    ok !$hv->domain_is_running('other.example.com'), 'SHUTOFF is not';
-    ok !$hv->domain_is_running('build.example.com'), 'and neither is BUILD -- it exists without being usable';
-    ok !$hv->domain_is_running('nope.example.com'),  'nor is a guest that is not there';
-
     like exception { $hv->server('') }, qr/needs a name/, 'and it wants a name to look for';
 };
 
@@ -316,18 +309,6 @@ subtest 'the address we can actually reach' => sub {
 
     like exception { $hv->guest_ssh_ip( conf_for('gone.example.com') ) }, qr/no guest called/,
       'as is one that is not there';
-};
-
-subtest 'the server list is a summary, so status comes from the detail' => sub {
-    my $hv = cloud();
-    $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
-
-    # Nova's list carries no status.  Asking it would make every guest look
-    # stopped, which is what this did until a real cloud was asked.
-    ok $hv->domain_is_running('vm.example.com'),  'a running guest is seen to be running';
-    ok scalar $FAKE->calls_to('server_from_uid'), 'because the detail was fetched';
-
-    ok $hv->domain_exists('vm.example.com'), 'while existence needs only the list';
 };
 
 subtest 'snapshots live in glance, so the guest is in the name' => sub {
@@ -438,7 +419,7 @@ subtest 'tearing down takes the billable things with it' => sub {
       'and doing it again is not an error, because it is already gone';
 };
 
-subtest 'volumes and the console' => sub {
+subtest 'volumes' => sub {
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
 
@@ -447,16 +428,8 @@ subtest 'volumes and the console' => sub {
     is $made->[1]{size}, 40,                    'a volume of the size asked for';
     is $made->[1]{name}, 'vm.example.com-data', 'named so that teardown will recognise it';
 
-    $hv->attach_volume( 'vm.example.com', 'v9' );
-    my ($attached) = $FAKE->calls_to('attach_volume');
-    is $attached->[1], 'a',  'attaching goes through the server';
-    is $attached->[2], 'v9', 'for that volume';
-
     like exception { $hv->create_volume( 'vm.example.com', 'data' ) }, qr/needs a size_gb/,
       'a volume needs a size';
-
-    is $hv->console_log('vm.example.com'), "it booted\n",
-      'and the console is readable, which is all there is when a guest never comes up';
 };
 
 subtest 'a guest that is there already is rebuilt, not replaced' => sub {

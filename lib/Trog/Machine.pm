@@ -460,9 +460,7 @@ Append a line, but only if it isn't already there.
 
 =item C<put_file($local, $remote, %opts)>
 
-=item C<get_file($remote, $local)>
-
-The other direction, for one file.
+One file, from here to there.
 
 =item C<get_dir($remote, $local, %opts)>
 
@@ -610,13 +608,6 @@ sub get_dir {
     File::Path::make_path($local);
 
     return $self->_rsync( $self->_there($remote), _here($local), %opts );
-}
-
-sub get_file {
-    my ( $self, $remote, $local ) = @_;
-    return File::Copy::copy( $remote, $local ) ? 1 : 0 if $self->is_local;
-
-    return $self->_run( { stdout_file => $local }, 'cat', $remote );
 }
 
 sub append_line {

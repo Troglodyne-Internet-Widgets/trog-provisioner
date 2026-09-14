@@ -223,20 +223,15 @@ The Keystone token, as C<X-Auth-Token> wants it.
 Overrides the parent, which reads it off the HTTP response headers.  A token
 that came out of the cache has no response behind it.
 
-=head2 expires_at
-
-When Keystone says the token stops working, in its own ISO 8601 spelling.
-
 =head2 region, interface
 
 What was passed to the constructor, for callers assembling C<service> options.
 
 =cut
 
-sub token      { return $_[0]->{token} }
-sub expires_at { return $_[0]->{expires_at} }
-sub region     { return $_[0]->{region} }
-sub interface  { return $_[0]->{interface} }
+sub token     { return $_[0]->{token} }
+sub region    { return $_[0]->{region} }
+sub interface { return $_[0]->{interface} }
 
 # The one request this module exists to make.
 sub _authenticate {
