@@ -19,6 +19,8 @@ use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
+use Trog::Config();
+use Trog::Secrets();
 
 use FindBin::libs;
 
@@ -69,18 +71,46 @@ subtest 'no store means no key and no prompt' => sub {
     is( Trog::GuestKey->path( $DOMAIN, "/bogus/nothing/key.rsa" ), undef, 'so there is no key, and nothing was asked' );
 };
 
-subtest 'sealing puts it in the store and takes it off the disk' => sub {
+subtest 'sealing with no store asks for nothing and leaves the key where it is' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/key.rsa", "$KEY\n" );
 
-    my ( %written, $asked );
+    # The other half of the wait path() was guarded against.  seal is the one
+    # bin/new_config reaches on every generate, and it had no guard at all.
+    my $creds = Test::MockModule->new('Trog::Credentials');
+    $creds->redefine( prompt => sub { die "asked for a password with no store to write into\n" } );
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- asserting the store is absent, which is the case under test
+    ok( !-f Trog::Config->path('secrets.kdbx'), 'there is no store in this configuration' );
+    is( Trog::GuestKey->seal( $DOMAIN, "$dir/key.rsa" ), 0, 'sealing does nothing, and nothing was asked' );
+    ok( -f "$dir/key.rsa", 'and the key is still on the disk it was on' );
+};
+
+subtest 'sealing puts it in the store and takes it off the disk' => sub {
+    my $dir   = tempdir( CLEANUP => 1 );
+    my $store = "$dir/secrets.kdbx";
+    File::Slurper::Temp::write_text( "$dir/key.rsa", "$KEY\n" );
+
+    # A real store with somebody else's secret already in it.  Sealing used to
+    # go through Trog::Secrets::write, which builds a new database out of what
+    # it is handed -- so this entry is the one that would have disappeared.
+    Trog::Secrets->write( $store, 'hunter2', 'secret:registrar/easydns/password' => 'REGISTRAR' );
+
+    my $asked = 0;
     my $creds = Test::MockModule->new('Trog::Credentials');
     $creds->redefine( prompt => sub { $asked++; return 'hunter2' } );
-    my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( write => sub { my ( undef, undef, undef, %v ) = @_; %written = %v; return 1 } );
+    my $conf = Test::MockModule->new('Trog::Config');
+    $conf->redefine( path => sub { return $store } );
 
     ok( Trog::GuestKey->seal( $DOMAIN, "$dir/key.rsa" ), 'it seals' );
-    is( $written{ Trog::GuestKey->ref_for($DOMAIN) }, "$KEY\n", 'the whole key went in, newlines and all' );
+
+    my %after = Trog::Secrets->read(
+        $store, 'hunter2',
+        key       => Trog::GuestKey->ref_for($DOMAIN),
+        registrar => 'secret:registrar/easydns/password',
+    );
+    is( $after{key},       "$KEY\n",    'the whole key went in, newlines and all' );
+    is( $after{registrar}, 'REGISTRAR', 'and the secret that was already there is still there' );
     ok( !-e "$dir/key.rsa", 'and the file is gone' );
 
     # write rather than remember: the key is rotated on every real provision, so

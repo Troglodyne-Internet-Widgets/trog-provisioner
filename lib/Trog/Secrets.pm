@@ -286,6 +286,46 @@ sub _confirm_kept {
     return 1;
 }
 
+=head2 replace($file, $password, %value_by_ref)
+
+Set each reference to the value given, in the database that is already there.
+
+The difference from C<write> is the whole point of it: C<write> builds a new
+database holding what it was handed, which is right for a throwaway store and
+catastrophic against a real one -- everything not passed in is simply not in the
+file afterwards.  This opens the store, sets the fields named, and leaves every
+other secret in it alone.
+
+The difference from C<remember> is that this overwrites.  C<remember> keeps
+whatever was there, which is right for a value that should be minted once; a
+guest key is rotated on every provision, so the store has to end up holding the
+current one.
+
+=cut
+
+sub replace {
+    my ( $class, $file, $password, %value_by_ref ) = @_;
+
+    return 0 unless %value_by_ref;
+
+    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+      or die "Could not open $file\n";
+    $kdbx->unlock() or die "Could not unlock $file\n";
+
+    foreach my $ref ( sort keys %value_by_ref ) {
+        my ( $group, $title, $field ) = $class->parse($ref);
+
+        my $g     = $kdbx->find_group( { title => $group } ) // $kdbx->add_group( { title => $group } );
+        my $entry = $kdbx->find_entry( { group => $g->{gid}, title => $title } ) // $kdbx->add_entry( { group => $g->{gid}, title => $title } );
+
+        $entry->{$field} = $value_by_ref{$ref};
+    }
+
+    $kdbx->lock();
+    $kdbx->save_db( $file, $password );
+    return 1;
+}
+
 =head2 parse($reference)
 
 The group, entry and field a reference names.

@@ -81,8 +81,19 @@ sub seal {
     my $private = eval { File::Slurper::read_binary($path) };
     return 0 unless defined $private && length $private;
 
-    Trog::Secrets->write(
-        Trog::Config->path('secrets.kdbx'),
+    # Before the password is asked for, the same way path() asks it: there is
+    # nowhere to put a key without a store, and a prompt in a run with nobody to
+    # type at is a wait rather than a refusal.  bin/new_config reaches this on
+    # every generate, so that wait was the whole suite.
+    my $store = Trog::Config->path('secrets.kdbx');
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store to write into
+    return 0 unless defined $store && -f $store;
+
+    # replace, not write.  write builds a new database out of what it is handed,
+    # which against the real store would leave it holding this key and nothing
+    # else -- every registrar credential and mail password in it gone.
+    Trog::Secrets->replace(
+        $store,
         Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
         $class->ref_for($domain) => $private,
     );
