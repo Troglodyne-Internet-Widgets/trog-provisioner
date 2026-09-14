@@ -13,7 +13,8 @@ t/Provisioner-Recipe-claude.t - whose GitHub identity a guest's claude acts unde
 
 use Test::More;
 use Test::NoWarnings;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 use Cpanel::JSON::XS();
 
 use FindBin::libs;
@@ -87,6 +88,35 @@ subtest 'the commit name follows the account unless it is told otherwise' => sub
 
     my %named = recipe()->validated( %BASE, github_user => 'troglodyne-bot', git_name => 'Somebody Else' );
     is( $named{git_name}, 'Somebody Else', 'and a domain naming one keeps it' );
+};
+
+# A typo here does not fail loudly.  GitHub attributes a commit by its address
+# and by nothing else, so a malformed one attributes the work to nobody, and the
+# log is the only place that ever says so.
+subtest 'an address that is not one is refused' => sub {
+    my %opts = ( %BASE, github_user => 'troglodyne-bot' );
+
+    ok(
+        !exception { recipe()->validated( %opts, git_email => '12345+troglodyne-bot@users.noreply.github.com' ) },
+        'the plus-addressed noreply form GitHub hands a bot is accepted'
+    );
+
+    ok(
+        exception { recipe()->validated( %opts, git_email => 'not-an-address' ) },
+        'something that is not an address is refused'
+    );
+
+    # The case an operator writes meaning "unset", which would otherwise reach
+    # git config as an empty value.
+    ok(
+        exception { recipe()->validated( %opts, git_email => q{} ) },
+        'and so is an empty one'
+    );
+
+    ok(
+        !exception { recipe()->validated(%opts) },
+        'while naming no address at all stays optional'
+    );
 };
 
 # The defect this recipe shipped with: an enabled plugin whose marketplace the

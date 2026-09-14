@@ -68,7 +68,7 @@ sub args {
                 description => 'A personal access token for that account, written secret:GROUP/ENTRY/FIELD.  It seeds gh, so a review reply or a pull request edit from this guest comes from the bot rather than from whoever owns the workstation it was built from.',
             },
             git_email => {
-                type        => 'string',
+                type        => 'email',
                 description => "The address on commits this guest makes.  GitHub attributes a commit by its email and by nothing else, so the token alone will not move authorship -- a bot's <id>+<login>\@users.noreply.github.com will.",
             },
             git_name => {
