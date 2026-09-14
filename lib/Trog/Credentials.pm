@@ -84,7 +84,11 @@ our %KNOWN = map { $_ => 1 } qw{keepass sudo};
 
 our %CREDENTIAL;
 
-=head2 prompt($message, $name)
+# Where prompt asks when it is told to ask at the terminal.  A variable so that
+# a test can point it at a file rather than at whoever is running prove.
+our $TERMINAL = '/dev/tty';
+
+=head2 prompt($message, $name, %opts)
 
 The password, asked for if this run has not already been given it.
 
@@ -98,13 +102,30 @@ asking -- a run driven by something with no terminal hands its passwords in up
 front, and this returns one of those rather than prompting.  Leave the name out
 and it always asks, which is what you want for something there is no name for.
 
+It is asked on standard input, or at the terminal that is on it.  C<terminal>
+asks at F</dev/tty> instead, for a caller whose standard input is already
+spoken for -- C<bin/add_secret --stdin> reads the secret itself from there, and
+leaves nothing behind it to answer a prompt with.  That dies if there is no
+terminal to open.
+
+An empty answer is an answer.  Input that ends before one is given is not, and
+dies rather than handing back nothing as though it were a password.
+
 =cut
 
 sub prompt {
-    my ( $class, $message, $name ) = @_;
+    my ( $class, $message, $name, %opts ) = @_;
     $message //= 'Enter password:';
+    my $what = $name // 'a password';
 
     return $class->get($name) if defined $name && $class->have($name);
+
+    my @at;
+    if ( $opts{terminal} ) {
+        open( my $in,  '<',  $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
+        open( my $out, '>>', $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n";
+        @at = ( -in => $in, -out => $out );
+    }
 
     # IO::Prompter reads from *ARGV, so a program that has arguments -- which
     # bin/new_config and bin/provision both do, the domain being one -- sends it
@@ -115,11 +136,16 @@ sub prompt {
     # Flattening @ARGV to a single string leaves nothing there to open, and it
     # falls back to the terminal or to standard input as intended.
     local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
-    my $answer = IO::Prompter::prompt( $message, -echo => '*' );
+    my $answer = IO::Prompter::prompt( $message, -echo => '*', @at );
 
-    $class->remember( $name, "$answer" ) if defined $name;
+    # False in boolean context only when no line arrived at all; an empty line
+    # is true.
+    die "Nothing was typed for $what: its input ended before an answer.\n" unless $answer;
 
-    return $answer;
+    my $typed = "$answer";
+    $class->remember( $name, $typed ) if defined $name;
+
+    return $typed;
 }
 
 =head2 remember($name, $value)

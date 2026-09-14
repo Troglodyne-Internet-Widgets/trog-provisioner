@@ -20,6 +20,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
 
 use Test::More;
+use Test::Fatal qw{exception};
 use File::Temp();
 use IPC::Run3();
 use Trog::Secrets();
@@ -91,6 +92,48 @@ subtest 'a value read from standard input' => sub {
     chomp $want;
     is( $got{probe}, $want, 'the whole key went in, interior newlines and all' );
     unlike( $got{probe}, qr/\n\z/, 'without the trailing newline' );
+};
+
+# The run that found this: nothing handed in, so the passphrase is really asked
+# for -- and standard input, the key, is already read to the end.  Asked there,
+# the prompt got undef and died on a warning about it.
+subtest 'with --stdin the passphrase is asked at the terminal, not of the spent pipe' => sub {
+    my $kdbx = store();
+    my $key  = "-----BEGIN OPENSSH PRIVATE KEY-----\nc2Vjb25kIGtleQ==\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    my $keyfile = File::Temp->new();
+    print {$keyfile} $key;
+    close $keyfile;
+
+    # A file standing in for /dev/tty, holding the passphrase somebody typed.
+    my $tty = File::Temp->new();
+    print {$tty} "throwaway\n";
+    close $tty;
+
+    Trog::Credentials->forget();
+    my $rc = do {
+        local $Trog::Credentials::TERMINAL = $tty->filename;
+        open( local *STDIN, '<', $keyfile->filename ) or die "could not point stdin at the key: $!";
+        Provisioner::Bin::add_secret::main( '--secrets', $kdbx, qw{--group koan --title asked-github-ssh --stdin} );
+    };
+    is( $rc, 0, 'it reports success' );
+
+    my %got  = Trog::Secrets->read( $kdbx, 'throwaway', probe => 'secret:koan/asked-github-ssh/password' );
+    my $want = $key;
+    chomp $want;
+    is( $got{probe}, $want, 'the key went in, under the passphrase typed at the terminal' );
+
+    # And with no terminal, a sentence saying so rather than a crash.
+    Trog::Credentials->forget();
+    my $why = do {
+        local $Trog::Credentials::TERMINAL = '/bogus/tty';
+        open( local *STDIN, '<', $keyfile->filename ) or die "could not point stdin at the key: $!";
+        exception { Provisioner::Bin::add_secret::main( '--secrets', $kdbx, qw{--group koan --title unasked-github-ssh --stdin} ) };
+    };
+    like( $why, qr{Cannot ask for keepass at a terminal: /bogus/tty}, 'no terminal is refused, naming it' );
+
+    my %none = eval { Trog::Secrets->read( $kdbx, 'throwaway', probe => 'secret:koan/unasked-github-ssh/password' ) };
+    ok( !defined $none{probe}, 'and nothing was stored' );
 };
 
 # pod2usage exits rather than dying, so these have to be real runs -- the same
