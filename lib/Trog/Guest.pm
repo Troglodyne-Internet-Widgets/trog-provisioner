@@ -67,6 +67,10 @@ our $BOOT_TIMEOUT = 300;
 # that is still building has hung.
 our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
+# The build writes this as make exits, so it is there by the time the log is
+# closed; waiting the setup timeout for one that is missing just hangs.
+our $STATUS_GRACE = '60s';
+
 sub new {
     my ( $class, %opts ) = @_;
 
@@ -164,12 +168,18 @@ sub wait_for_cloud_init {
 
 =head2 wait_for_makefile($domain, %opts)
 
-Wait for the payload's Makefile to run to completion.
+Wait for the payload's Makefile to run, and return whether it succeeded.
 
-It is started by C<at>, so this is four waits and not one: the queue has to
-drain, the log has to appear, the log has to stop being written to, and then
-the queue has to drain again -- because the Makefile is entirely at liberty to
-queue more work of its own.
+It is started by C<at>, so this is five waits and not one: the queue has to
+drain, the log has to appear, the log has to stop being written to, the queue
+has to drain again -- because the Makefile is entirely at liberty to queue more
+work of its own -- and then the status file has to appear, which F<setup.sh>
+writes as make exits -- briefly, since a file that is missing by then is not
+coming.
+
+False unless make exited zero, a build that recorded nothing included.  The
+status is read from a file because C<make | tee> reports tee's exit code and
+never make's.
 
 =cut
 
@@ -178,8 +188,9 @@ sub wait_for_makefile {
     my $timeout = $opts{timeout} // $SETUP_TIMEOUT;
     $domain //= $self->name;
 
-    my $log = "/var/log/$domain.setup.log";
-    my $atq = qq{sudo timeout $timeout bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
+    my $log    = "/var/log/$domain.setup.log";
+    my $status = "/var/log/$domain.setup.status";
+    my $atq    = qq{sudo timeout $timeout bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     print "Waiting up to $timeout for ATD queue to flush...\n";
     $self->run_cmd($atq);
@@ -193,9 +204,14 @@ sub wait_for_makefile {
     print "Waiting up to $timeout for any makefile queued ATD jobs to flush...\n";
     $self->run_cmd($atq);
 
+    print "Waiting up to $STATUS_GRACE for the build to record its result...\n";
+    $self->run_cmd(qq{sudo timeout $STATUS_GRACE bash -c 'until [ -f $status ]; do sleep 1; done;'});
+    my $result = $self->capture_cmd("sudo cat $status") // '';
+    $result =~ s/\s+//g;
+
     print "Last log:\n" . ( $self->capture_cmd("sudo tail $log") // '' ) . "\n";
     print "\nDone!\n";
-    return 1;
+    return $result eq '0';
 }
 
 =head1 SEE ALSO

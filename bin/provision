@@ -471,7 +471,8 @@ sub main {
             $guest->wait_for_ssh();
             $guest->wait_for_cloud_init($depends);
             $hv->release_seed($depends);
-            $guest->wait_for_makefile($depends);
+            $guest->wait_for_makefile($depends)
+              or die "The build for $depends failed; read /var/log/$depends.setup.log on the guest\n";
         }
 
     }
@@ -503,7 +504,8 @@ sub main {
     # the pulling-out is only to stop the guest booting off it next time.
     $hv->release_seed($domain);
 
-    $guest->wait_for_makefile($domain);
+    $guest->wait_for_makefile($domain)
+      or die "The build for $domain failed; read /var/log/$domain.setup.log on the guest\n";
 
     return 0;
 }

@@ -46,6 +46,11 @@ when the guest is about to be destroyed.
 The Makefile's output: every recipe's target, in the order they ran, and the
 one that failed if one did.  Start here.
 
+=item F</var/log/$domain.setup.status>
+
+What make exited with, as a number, written after the log is closed.  Anything
+but C<0> means the build failed however complete the log looks.
+
 =item F</var/log/cloud-init.log> and F</var/log/cloud-init-output.log>
 
 What happened before the Makefile: the seed being read, the packages, the users,
@@ -155,6 +160,7 @@ sub artifacts {
     my ($domain) = @_;
     return (
         "/var/log/$domain.setup.log",
+        "/var/log/$domain.setup.status",
         qw{
           /var/log/cloud-init.log
           /var/log/cloud-init-output.log

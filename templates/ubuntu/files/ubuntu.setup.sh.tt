@@ -38,8 +38,11 @@ tar -zxf data.tar.gz -C /var/tmp/domainsetup_[% domain %]
 
 cd /var/tmp/domainsetup_[% domain %]
 
-# Run the makefile
-make 2>&1 | tee /var/log/[% domain %].setup.log
+# Run the makefile.  Braces rather than PIPESTATUS, because at(1) runs this
+# under dash: the status has to be taken in make's own shell, since the
+# pipeline's own exit code is tee's and always 0.
+rm -f /var/log/[% domain %].setup.status
+{ make 2>&1; echo $? > /var/log/[% domain %].setup.status; } | tee /var/log/[% domain %].setup.log
 
 cd /
 rm -rf /var/tmp/domainsetup_[% domain %] /var/tmp/data.tar.gz
