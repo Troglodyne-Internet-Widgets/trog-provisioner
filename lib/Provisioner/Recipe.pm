@@ -28,9 +28,9 @@ Provisioner::Recipe - Base class for the recipes: what every one of them can do,
     use parent qw{Provisioner::Recipe};
 
     sub deps { qw{nginx-full} }
-    sub validate { my ($self, %opts) = @_; return %opts; }
+    sub enrich { my ($self, %opts) = @_; return %opts; }
     sub template_files { ('example.conf.tt' => 'example.conf') }
-    sub args { ( fooArg => { required => 1, default => 'bar', validator => sub {...} } }
+    sub args { ( type => 'object', required => [qw{fooArg}], properties => { fooArg => { type => 'string', default => 'bar' } } ) }
 
 =head2 DESCRIPTION
 
@@ -754,55 +754,6 @@ sub rate_limits {
     return ();
 }
 
-=head3 %opts = $recipe->validate(%opts)
-
-Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
-
-C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
-to get one.  That default is a fallback rather than the intended configuration:
-the service user owns the domain's files and is what the application runs as,
-and most recipes are written for one that is not the admin -- so set it, on a
-guest built to test a recipe as on a production host.
-
-=cut
-
-sub validate {
-    my ( $self, %opts ) = @_;
-    my %args = $self->schema();
-
-    # On a copy, all the way down.  %opts is a shallow copy, so everything
-    # nested in it belongs to the caller -- and both the coercion below and any
-    # enrich write through to it.  The validator turning a vhost's `ssl => 1`
-    # into a JSON::PP::Boolean was enough to make the same configuration look
-    # like a different one on the next render.
-    %opts = %{ clone( \%opts ) };
-
-    forget_undefs( \%opts, \%args );
-
-    # OpenAPIv3 coerces booleans, numbers and strings but not defaults, so
-    # nothing was filling them in and every default in every args() documented
-    # an intention that never happened.
-    #
-    # Added to what it already coerces rather than passed on its own: coerce()
-    # replaces the set rather than extending it, and asking for defaults alone
-    # takes booleans back out -- which turns every `type => boolean, default =>
-    # 1` into "Expected boolean - got number", the default failing the check it
-    # was written to satisfy.
-    my $validator = JSON::Validator::Schema::Troglodyne->new;
-    $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
-    my @errors = $validator->validate( \%opts, \%args );
-    if (@errors) {
-        my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
-        my $where = ( defined $opts{domain} && length $opts{domain} ) ? " for $opts{domain}" : q{};
-
-        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
-    }
-
-    $opts{user} //= $opts{admin_user};
-
-    return $self->enrich(%opts);
-}
-
 =head3 forget_undefs($opts, $schema)
 
 Drop the fields that were named and left empty, so that the schema's default
@@ -1294,6 +1245,62 @@ sub template_path {
     }
 
     die "Could not find the template $file in " . join( ', ', @{ $self->{template_dirs} } ) . "\n";
+}
+
+=head3 %opts = $recipe->validate(%opts)
+
+Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
+
+This is the universal one, and a recipe has no business overriding it: it
+composes the recipe's own C<args> with the settings every recipe is handed from
+C<global_args>, runs the schema over the result, and then calls C<enrich>.  A
+subclass that replaces this discards all three -- its own C<enrich> included,
+since this is what calls it.  Whatever a schema cannot express belongs in
+C<enrich>, which runs afterwards and is the sub to write.
+
+C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
+to get one.  That default is a fallback rather than the intended configuration:
+the service user owns the domain's files and is what the application runs as,
+and most recipes are written for one that is not the admin -- so set it, on a
+guest built to test a recipe as on a production host.
+
+=cut
+
+sub validate {
+    my ( $self, %opts ) = @_;
+    my %args = $self->schema();
+
+    # On a copy, all the way down.  %opts is a shallow copy, so everything
+    # nested in it belongs to the caller -- and both the coercion below and any
+    # enrich write through to it.  The validator turning a vhost's `ssl => 1`
+    # into a JSON::PP::Boolean was enough to make the same configuration look
+    # like a different one on the next render.
+    %opts = %{ clone( \%opts ) };
+
+    forget_undefs( \%opts, \%args );
+
+    # OpenAPIv3 coerces booleans, numbers and strings but not defaults, so
+    # nothing was filling them in and every default in every args() documented
+    # an intention that never happened.
+    #
+    # Added to what it already coerces rather than passed on its own: coerce()
+    # replaces the set rather than extending it, and asking for defaults alone
+    # takes booleans back out -- which turns every `type => boolean, default =>
+    # 1` into "Expected boolean - got number", the default failing the check it
+    # was written to satisfy.
+    my $validator = JSON::Validator::Schema::Troglodyne->new;
+    $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
+    my @errors = $validator->validate( \%opts, \%args );
+    if (@errors) {
+        my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
+        my $where = ( defined $opts{domain} && length $opts{domain} ) ? " for $opts{domain}" : q{};
+
+        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
+    }
+
+    $opts{user} //= $opts{admin_user};
+
+    return $self->enrich(%opts);
 }
 
 =head3 %vars = $recipe->validated(%opts)

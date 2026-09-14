@@ -65,13 +65,37 @@ A package name is a fact about a distribution rather than about the software.
 `t/recipes.t` fails if a recipe that needs packages has no version for some
 distribution.
 
-Everything else stays in the recipe itself:
+Everything else stays in the recipe itself.  What a recipe takes is declared
+rather than checked by hand: `args()` returns an OpenAPI schema, and that one
+declaration validates the configuration, fills in defaults, coerces types and
+documents the recipe for `bin/recipes`.
 
 ```perl
-sub validate {
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{required_option}],
+        properties => {
+            required_option => { type => 'string',  description => 'What it is for' },
+            tuneable        => { type => 'integer', default     => 8 },
+        },
+    );
+}
+```
+
+**Do not override `validate()`.**  It is the universal one: it composes your
+`args()` with the settings every recipe is handed
+(`Provisioner::Recipe::global_args`), runs the schema, and then calls your
+`enrich()`.  A recipe that replaces it loses all three.
+
+For what a schema cannot say -- a value derived from another field, or one only
+the machine can answer -- write `enrich()`, which runs after validation on a
+copy.  It cannot satisfy a `required` field: it runs too late for that.
+
+```perl
+sub enrich {
     my ($self, %opts) = @_;
-    # Validate configuration options
-    die "Required option missing" unless $opts{required_option};
+    $opts{listen_on} //= $opts{main_ip};
     return %opts;
 }
 ```
@@ -159,7 +183,7 @@ trog-provisioner/
 3. **Permissions**: Set files/dirs to 0750 with `user:admin_user` ownership, substituting `user` with the relevant service user (e.g. www-data for nginx) where applicable.
 4. **Symlinks**: Link configs from install_dir to system locations when feasible, this simplifies backup/restore operations.
 5. **Dependencies**: List all package dependencies explicitly in `deps()`
-6. **Validation**: Validate all required options in `validate()`, optionally augmenting them if needed.
+6. **Validation**: Declare what the recipe takes in `args()` -- required fields, types, defaults and descriptions -- rather than checking them in perl. Override `enrich()`, never `validate()`, for what a schema cannot express.
 7. **Documentation**: Include POD with SYNOPSIS showing yaml config example
 
 ## Common Patterns
