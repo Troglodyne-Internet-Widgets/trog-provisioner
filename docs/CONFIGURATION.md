@@ -145,7 +145,20 @@ Variables every recipe's templates for that domain can see.
 
 `user` is the one to know about: the service account the application runs as,
 which recipes set ownership to. Leaving it unset gives you the admin user, which
-is what you want while developing; a production host generally names one.
+is what you want while developing -- su-ing to a service account to run anything
+is friction you do not want on a box you are working on -- while a production
+host generally names one. Naming the admin user explicitly is the same choice
+said out loud: the makefile branches on whether `user` and `admin_user` are
+equal, not on whether `user` was written down.
+
+That choice decides what the domain directory **is**, which matters to anyone
+writing a recipe that puts a file in it. With a service account it is a real
+directory, created as that account's home. With the admin user it is a
+**symlink to `/home/<admin_user>`**, so `~` and the domain directory are the
+same place on a development box and two different places on a production one. A
+recipe that writes into one while assuming the other puts the file somewhere
+nobody reads -- which is what happened to `nvm`, whose shell lines landed in a
+file the login shell never sourced.
 
 `distro` is the other. It names the distribution the guest is built on, which
 decides three things nothing else can: the cloud image its disk is layered over,

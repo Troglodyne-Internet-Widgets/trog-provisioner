@@ -23,7 +23,12 @@ inherits from.
 =cut
 
 sub deps {
-    return qw{nodejs npm};
+
+    # git and gh because this recipe writes a commit identity and seeds the
+    # credential gh reads.  A credential for a client that is not installed is
+    # inert, and the first guest built with one said so plainly: gh: command not
+    # found.
+    return qw{nodejs npm git gh};
 }
 
 1;

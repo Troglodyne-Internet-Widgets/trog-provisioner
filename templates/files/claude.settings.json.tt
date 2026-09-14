@@ -1,8 +1,12 @@
 {
   "enabledPlugins": {
+[% IF modules.grep('perllsp').size() %]
     "perlnavigator@claude-code-perlnavigator": true,
+[% END -%]
+[% IF modules.grep('perl').size() %]
     "perl-development@perigrin-marketplace": true,
-    "perl-sloppin@Troglodyne-Internet-Widgets": true
+[% END %]
+    "perl-slop@troglodyne-marketplace": true
   },
   "extraKnownMarketplaces": {
 [% IF modules.grep('perllsp').size() %]
