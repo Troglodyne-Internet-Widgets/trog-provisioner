@@ -14,6 +14,7 @@ t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
 =cut
 
 use Test::More;
+use Capture::Tiny qw{capture capture_stdout};
 use IPC::Run3();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -324,17 +325,7 @@ sub write_config {
 # something is said on stderr.
 sub says {
     my ($code) = @_;
-    my ( $out, $err ) = ( '', '' );
-    open( my $o, '>', \$out ) or die "capture: $!";
-    open( my $e, '>', \$err ) or die "capture: $!";
-    my @returned;
-    {
-        local *STDOUT = $o;
-        local *STDERR = $e;
-        @returned = $code->();
-    }
-    close $o;
-    close $e;
+    my ( $out, $err, @returned ) = capture { $code->() };
     return ( "$out$err", @returned );
 }
 
@@ -539,9 +530,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     $pool->redefine( release => sub { $released = $_[0]; 1 } );
 
     Trog::HV->forget();
-    open( my $capture, '>', \my $out ) or die $!;
-    my $rc = do { local *STDOUT = $capture; Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
-    close $capture;
+    my ( $out, $rc ) = capture_stdout { Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) };
 
     is( $rc, 0, 'the run finishes rather than stopping on the lookup' );
 

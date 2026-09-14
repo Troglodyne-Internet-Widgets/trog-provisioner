@@ -17,6 +17,7 @@ t/Trog-Machine.t - Trog::Machine: fetching a directory, and not fetching it twic
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
 
 use Test::More;
+use Capture::Tiny qw{capture_stdout};
 use Test::NoWarnings;
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -189,16 +190,13 @@ subtest 'rsync moves what changed and nothing else' => sub {
     # The whole reason any of this is rsync.  A re-provision of a domain whose
     # data has not changed should cost a directory walk, not the data.
     #
-    # Redirected at the file descriptor rather than by localising the glob:
-    # File::Rsync captures the child through IPC::Run3, which saves and restores
-    # the real STDOUT, and an in-memory handle in its place is not something it
-    # can hand back.
-    open( my $saved, '>&', \*STDOUT )    or die "could not save STDOUT: $!";
-    open( STDOUT,    '>',  "$dir/said" ) or die "could not redirect STDOUT: $!";
-    $machine->get_dir( "$dir/src", "$dir/dst", exclude => ['secrets.key'] );
-    open( STDOUT, '>&', $saved ) or die "could not restore STDOUT: $!";
+    # Captured at the file descriptor, which is what Capture::Tiny does, rather
+    # than by localising the glob: File::Rsync captures the child through
+    # IPC::Run3, which saves and restores the real STDOUT, and an in-memory
+    # handle in its place is not something it can hand back.
+    my ($said) = capture_stdout { $machine->get_dir( "$dir/src", "$dir/dst", exclude => ['secrets.key'] ) };
 
-    like( File::Slurper::read_text("$dir/said"), qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}x, 'the second fetch moves nothing, and says so' );
+    like( $said, qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}x, 'the second fetch moves nothing, and says so' );
 };
 
 subtest 'a transfer that fails says which one, and does not pretend' => sub {

@@ -24,6 +24,7 @@ recipe's.
 =cut
 
 use Test::More;
+use Capture::Tiny qw{capture_stdout};
 use Test::NoWarnings;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
@@ -79,9 +80,7 @@ sub _conf {
 
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 
@@ -212,13 +211,7 @@ sub _tuned_xml {
 
     # The XML in scalar context, what it printed on the way in list context: the
     # printed half is the whole of what a downgraded cache mode tells anybody.
-    my ( $xml, $said );
-    {
-        open( my $capture, '>', \$said ) or die $!;
-        local *STDOUT = $capture;
-        ($xml) = domain_xml( $config, \%seed );
-        close $capture;
-    }
+    my ( $said, $xml ) = capture_stdout { domain_xml( $config, \%seed ) };
 
     return wantarray ? ( $xml, $said ) : $xml;
 }

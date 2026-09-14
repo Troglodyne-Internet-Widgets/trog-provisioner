@@ -16,6 +16,7 @@ t/new_guest.t - bin/new_guest and bin/recipes, the two front ends to the cookboo
 =cut
 
 use Test::More;
+use Capture::Tiny qw{capture_stderr};
 use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -37,9 +38,7 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 # These print their progress to stderr; the tests do not need to read it.
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $err ) or die $!;
-    my @result = do { local *STDERR = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stderr { $code->() };
     return wantarray ? @result : $result[0];
 }
 

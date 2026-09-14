@@ -18,6 +18,7 @@ t/guest.t - Trog::Guest: what a freshly built guest has to be waited for
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
 
 use Test::More;
+use Capture::Tiny qw{capture_stdout};
 use File::Temp();
 use Test::MockModule qw{strict};
 
@@ -161,9 +162,7 @@ subtest 'wait_for_makefile waits for the queue twice' => sub {
 # These print their progress; the tests do not need to read it.
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 

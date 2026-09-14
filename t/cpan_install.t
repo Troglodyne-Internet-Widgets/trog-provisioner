@@ -17,6 +17,7 @@ the perl the perl recipe built
 =cut
 
 use Test::More;
+use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Path       qw{make_path};
@@ -63,16 +64,12 @@ sub install {
         }
     );
 
-    my ( $out, $err ) = ( q{}, q{} );
-    my $rc;
-    {
-        local *STDOUT;
-        local *STDERR;
-        open( STDOUT, '>', \$out ) or die $!;
-        open( STDERR, '>', \$err ) or die $!;
-        $rc = eval { Trog::Script::CpanInstall::main( @{ $case{args} } ) };
-        $err .= $@ if $@;
-    }
+    my ( $rc, $died );
+    my ( $out, $err ) = capture {
+        $rc   = eval { Trog::Script::CpanInstall::main( @{ $case{args} } ) };
+        $died = $@;
+    };
+    $err .= $died if $died;
     return { rc => $rc, ran => \@ran, out => $out, err => $err, git_config => \@git_config };
 }
 

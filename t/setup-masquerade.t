@@ -12,6 +12,7 @@ t/setup-masquerade.t - scripts/setup-masquerade: the two rules a VPN needs, and 
 =cut
 
 use Test::More;
+use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir};
@@ -74,10 +75,8 @@ sub run_on {
     # warnings are fatal in this file.
     no warnings 'once';    ## no critic (ProhibitNoWarnings)
     local $Trog::Script::SetupMasquerade::FILE = $path;
-    open( my $capture, '>', \my $said ) or die $!;
-    my $rc = do { local *STDOUT = $capture; Trog::Script::SetupMasquerade::main(@args) };
-    close $capture;
-    return ( $rc, read_text($path), $said // q{} );
+    my ( $said, $rc ) = capture_stdout { Trog::Script::SetupMasquerade::main(@args) };
+    return ( $rc, read_text($path), $said );
 }
 
 subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {

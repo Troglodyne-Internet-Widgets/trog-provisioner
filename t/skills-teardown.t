@@ -14,6 +14,7 @@ t/skills-teardown.t - the provisioning-recipes teardown: what a throwaway run le
 =cut
 
 use Test::More;
+use Capture::Tiny    qw{capture};
 use Test::MockModule qw{strict};
 use File::Path       qw{make_path};
 use File::Temp       qw{tempdir};
@@ -47,17 +48,7 @@ sub scratch_marker {
 # something is said on stderr.
 sub says {
     my ($code) = @_;
-    my ( $out, $err ) = ( '', '' );
-    open( my $o, '>', \$out ) or die "capture: $!";
-    open( my $e, '>', \$err ) or die "capture: $!";
-    my @returned;
-    {
-        local *STDOUT = $o;
-        local *STDERR = $e;
-        @returned = $code->();
-    }
-    close $o;
-    close $e;
+    my ( $out, $err, @returned ) = capture { $code->() };
     return ( "$out$err", @returned );
 }
 

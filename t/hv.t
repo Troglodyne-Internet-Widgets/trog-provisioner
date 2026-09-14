@@ -18,7 +18,8 @@ t/hv.t - Trog::HV: connection URIs, paths, libvirt and capacity
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Capture::Tiny qw{capture_stdout};
+use File::Temp    qw{tempdir};
 use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
@@ -884,9 +885,7 @@ subtest 'the base image is fetched once' => sub {
 
 sub quietly {
     my ($code) = @_;
-    open( my $capture, '>', \my $out ) or die $!;
-    my @result = do { local *STDOUT = $capture; $code->() };
-    close $capture;
+    my ( undef, @result ) = capture_stdout { $code->() };
     return wantarray ? @result : $result[0];
 }
 

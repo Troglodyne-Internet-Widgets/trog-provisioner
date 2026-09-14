@@ -12,6 +12,7 @@ t/preflight.t - bin/preflight: what it checks, and what it tells you to do about
 =cut
 
 use Test::More;
+use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
@@ -35,24 +36,16 @@ use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 my $script = "$FindBin::Bin/../bin/preflight";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
-# Redirected at the file descriptor rather than by localising the glob.  Some
-# checks run a command, and IPC::Run3 saves and restores the real STDOUT around
-# one -- an in-memory handle in its place is not something it can hand back, and
-# everything printed after the first such check goes missing rather than failing.
+# Captured at the file descriptor, which is what Capture::Tiny does, rather than
+# by localising the glob.  Some checks run a command, and IPC::Run3 saves and
+# restores the real STDOUT around one -- an in-memory handle in its place is not
+# something it can hand back, and everything printed after the first such check
+# goes missing rather than failing.
 sub quietly {
     my ($code) = @_;
 
-    my $tmp = File::Temp->new( UNLINK => 1 );
-    open( my $saved, '>&', \*STDOUT ) or die "could not save STDOUT: $!";
-    open( STDOUT,    '>',  "$tmp" )   or die "could not redirect STDOUT: $!";
-
-    my @result = eval { $code->() };
-    my $error  = $@;
-
-    open( STDOUT, '>&', $saved ) or die "could not restore STDOUT: $!";
-    die $error if $error;
-
-    return wantarray ? ( $result[0], File::Slurper::read_text("$tmp") ) : $result[0];
+    my ( $said, @result ) = capture_stdout { $code->() };
+    return wantarray ? ( $result[0], $said ) : $result[0];
 }
 
 # Stands in for the api a cloud hypervisor talks through.
