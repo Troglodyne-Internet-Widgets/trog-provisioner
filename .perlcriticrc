@@ -63,6 +63,14 @@ formats = #!/usr/bin/env perl
 # custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
 # name, from a string.
 allow = IO::Prompter Text::Xslate::Bridge::TT2 re
+[ProhibitUnusedDefinitions]
+# Called, but not in a way the policy can see.  The check_ and note_ subs are
+# named in each backend's preflight_checks and preflight_notes, and bin/preflight
+# calls every one as $hv->$_.  Trog::OpenStack::Auth's token, region and
+# interface are called by OpenStack::Client and OpenStack::MetaAPI, which it is
+# handed to.  The forget subs clear what a module keeps for the rest of a run,
+# and exist so that one test does not see what the last one left.
+allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_cloud_resources check_cloud_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
 [ProhibitPrintSTDERR]
 # Extensions to perl -c
 [CompileTime]
