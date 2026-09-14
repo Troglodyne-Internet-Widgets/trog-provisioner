@@ -35,7 +35,8 @@ use Provisioner::Cookbook();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 
 # No skip_all if the prereqs are missing: a suite that passes because it never
 # ran is worse than one that fails.  bin/provision uses XML::Twig,
@@ -167,6 +168,57 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
 # clear_guest and provision_guest do now -- so a dry run annihilated the domain,
 # deleted both its volumes, made a fresh disk and a seed, and then reported that
 # it had applied nothing.
+# A dry run of a guest that does not exist yet.
+#
+# The one above mocks domain_exists true, so the case a first build is actually
+# in never ran.  bin/provision asked the backend how to reach the address
+# would_provision handed back -- and a cloud looks a guest up by name, so for one
+# that does not exist that was a die rather than an address.  libvirt hid it by
+# handing the placeholder straight back.  main() throws the address away on a dry
+# run either way.
+subtest 'a dry run of a guest that is not there yet' => sub {
+    no warnings 'once';
+    local $Trog::Bin::Provisioner::dryrun = 1;
+    use warnings 'once';
+
+    my $hv  = Test::MockModule->new('Trog::HV::OpenStack');
+    my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    my $loc = Test::MockModule->new('Trog::Local');
+
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/vm.test";
+    File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: doge\n" );
+
+    $hv->redefine( domain_dir    => sub { $dir } );
+    $hv->redefine( domain_exists => sub { 0 } );
+    $hv->redefine( describe      => sub { 'the cloud' } );
+    $loc->redefine( append_line => sub { 1 } );
+
+    # If anything asks, that is the bug: there is no guest to ask about.
+    my $asked = 0;
+    $hv->redefine( guest_ssh_ip => sub { $asked++; die "There is no guest called 'vm.test'\n" } );
+
+    Trog::HV->forget();
+    my $cloud = Trog::HV->new( cloud => 'testcloud', domain_dir => $dir );
+
+    my $config = Config::Simple->new( syntax => 'simple' );
+    $config->param( $_->[0], $_->[1] )
+      for (
+        [ domain        => 'vm.test' ], [ contact_email => 'nobody@vm.test' ],
+        [ admin_user    => 'doge' ],    [ transfer_ip   => '192.168.1.49' ],
+        [ transfer_user => 'doge' ],    [ transfer_port => 22 ],
+      );
+
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+
+    is( $asked, 0,      'nothing asked the cloud how to reach a guest it has not built' );
+    is( $user,  'doge', 'and the dry run came back rather than dying' );
+
+    Trog::HV->forget();
+};
+
 subtest 'a dry run applies nothing' => sub {
 
     # The SUT is a modulino required at runtime, so its `our` is not in scope
