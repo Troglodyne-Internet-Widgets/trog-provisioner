@@ -1,6 +1,61 @@
 use strict;
 use warnings;
 
-use Test::More tests => 1;
+use Test::More;
+
+# Core, so a freshly provisioned guest has it.  Nothing here installs an XS
+# JSON, and this file has to run on the guest rather than on the provisioner.
+use JSON::PP;
 
 ok(qx{which claude}, "claude installed");
+
+# gh reads the credential this recipe seeds, so gh has to be on the guest.  The
+# first one built with that credential had no gh at all, which made the file
+# inert -- installed, correct, and read by nothing.
+ok(qx{which gh}, 'gh is installed, so what this recipe seeds has a client');
+
+my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
+my $settings = do { local (@ARGV, $/) = $settings_path; <> } // '';
+# No early exit here.  Bailing out emitted a plan and exited 0, so a guest
+# missing this file reported a passing run while never reaching the identity
+# assertions below -- which do not depend on it anyway.
+ok(length $settings, 'the settings file is installed');
+
+my $conf = eval { decode_json($settings) };
+ok($conf, 'and it is valid JSON') or diag $settings;
+
+# Every enabled plugin has to name a marketplace this same file declares.  This
+# shipped enabling "perl-sloppin@Troglodyne-Internet-Widgets" -- a plugin that
+# does not exist, from a marketplace named nowhere else in the file -- so it
+# loaded nothing, quietly, on every guest built with this recipe.
+SKIP: {
+    skip 'settings did not parse', 1 unless $conf;
+    my %declared = map { $_ => 1 } keys %{ $conf->{extraKnownMarketplaces} // {} };
+    my @orphans  = grep { my (undef, $m) = split m/\@/, $_, 2; !$m || !$declared{$m} }
+                   keys %{ $conf->{enabledPlugins} // {} };
+    is_deeply(\@orphans, [], 'every enabled plugin comes from a marketplace this file declares')
+        or diag 'declared: ' . join(', ', sort keys %declared);
+}
+
+# The bot identity, where this guest was given one.  A guest configured without
+# github_token has none of this and nothing to check.
+my $hosts = '[% install_dir %]/[% domain %]/.config/gh/hosts.yml';
+SKIP: {
+    skip 'this guest was configured with no github_token', 3 unless -f $hosts;
+
+    my @st = stat $hosts;
+    is(sprintf('%04o', $st[2] & 07777), '0600', 'the token file is readable by nobody else');
+
+    my $text = do { local (@ARGV, $/) = $hosts; <> } // '';
+    like($text, qr/^\s*user:\s*\S+/m,        'it names the account gh acts as');
+    like($text, qr/^\s*oauth_token:\s*\S+/m, 'and carries a token for it');
+}
+
+my $gitconfig = '[% install_dir %]/[% domain %]/.gitconfig';
+SKIP: {
+    skip 'this guest was configured with no git identity', 1 unless -f $gitconfig;
+    my $text = do { local (@ARGV, $/) = $gitconfig; <> } // '';
+    like($text, qr/^\s*name\s*=\s*\S+/m, 'commits from this guest carry a name');
+}
+
+done_testing();

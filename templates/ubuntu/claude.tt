@@ -1,3 +1,20 @@
 command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code
 install -m 0755 -o [% admin_user %] -g [% admin_user %] -d [% install_dir %]/[% domain %]/.claude
 mv claude.settings.json [% install_dir %]/[% domain %]/.claude/settings.json
+[% IF github_token -%]
+install -m 0700 -o [% admin_user %] -g [% admin_user %] -d [% install_dir %]/[% domain %]/.config/gh
+install -m 0600 -o [% admin_user %] -g [% admin_user %] claude.gh-hosts.yml [% install_dir %]/[% domain %]/.config/gh/hosts.yml
+[% END -%]
+[% IF git_name || git_email -%]
+[%# HOME rather than runuser, which would use the passwd home of the account.
+    That is this directory only when user is the admin -- makefile.tt symlinks
+    it to /home/<admin> -- and the home of the service user otherwise, which
+    would put the identity somewhere the token above is not. -%]
+[% IF git_name -%]
+HOME='[% install_dir %]/[% domain %]' git config --global user.name '[% git_name %]'
+[% END -%]
+[% IF git_email -%]
+HOME='[% install_dir %]/[% domain %]' git config --global user.email '[% git_email %]'
+[% END -%]
+chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/.gitconfig
+[% END -%]
