@@ -20,6 +20,7 @@ use Provisioner::Utils();
 use URI();
 use URI::Split();
 use File::Temp();
+use List::Util qw{any};
 
 =head1 Provisioner::Recipe::trogrunner
 
@@ -399,7 +400,7 @@ sub _under_the_domain {
     die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
       if index( $path, '/' ) == 0;
     die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
-      if grep { $_ eq '..' } split( q{/}, $path );
+      if any { $_ eq '..' } split( q{/}, $path );
 
     return 1;
 }

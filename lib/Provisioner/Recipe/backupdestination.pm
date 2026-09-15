@@ -40,11 +40,11 @@ Pair with a VM using L<Provisioner::Recipe::backup> to fully automate backups.
 
 Backups are implemented via SSH authorized key read-only restricted execution of rsyncd as root.
 
-Uses a backup and retention script for the configured host(s), backing up every day at midnight and pruning to 6mos every friday noon.
+Uses a backup and retention script for the configured host(s), backing up every day at midnight and pruning to 6mos every Friday noon.
 
 TODO: make retention period configurable, etc
 
-Touches the file '/root/backup_in_progress' while running in case you want to use that to lock behaviors such as reboots to not disrupt backups.
+Touches the file '/root/backup_in_progress' while running in case you want to use that to lock behaviours such as reboots to not disrupt backups.
 
 Logs backup output to /var/log/backups/$HOST.log, and rotates the logs.
 

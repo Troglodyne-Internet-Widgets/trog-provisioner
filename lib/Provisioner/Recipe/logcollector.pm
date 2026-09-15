@@ -119,7 +119,6 @@ shipping to.
 sub is_multi_tenant { return 0 }
 
 sub args {
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (
         type       => 'object',
         properties => {
@@ -180,7 +179,6 @@ to be.
 sub rate_limits {
     my ( $self, %opts ) = @_;
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     # Defaulted here as well as in args, because required_recipes is asked
     # before anything has been validated.
     my $port = $opts{port}     // 514;

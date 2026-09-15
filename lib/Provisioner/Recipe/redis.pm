@@ -32,7 +32,7 @@ Optional parameters:
 - bind: IP to listen on (default: 127.0.0.1)
 - port: port number (default: 6379)
 - requirepass: authentication password
-- maxmemory: memory limit e.g. 256mb, 1gb
+- maxmemory: memory limit e.g. C<256mb>, C<1gb>
 - maxmemory_policy: eviction policy when maxmemory is hit (default: noeviction)
 - save: set to 0 to disable RDB persistence (pure cache mode)
 

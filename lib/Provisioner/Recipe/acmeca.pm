@@ -120,12 +120,10 @@ our $STEP_CA_VERSION = '0.30.2';
 
 our $DEFAULT_PORT = 9000;
 
-## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
 # Five years.  Shorter than the authority's ten, so it expires before what
 # signed it, and far longer than the guests it serves ever live.
 our $INTERMEDIATE_DAYS = 1825;
 my $DAY = 86_400;
-## use critic
 
 =head2 %schema = $recipe->args()
 

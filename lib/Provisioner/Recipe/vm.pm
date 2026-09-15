@@ -105,9 +105,8 @@ can depend on what libvirt and qemu will take.
 
 sub args {
     return (
-        type     => 'object',
-        required => ['image'],
-        ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+        type       => 'object',
+        required   => ['image'],
         properties => {
             image => {
                 type        => 'string',
@@ -459,7 +458,6 @@ sub _blockio {
     my ( $self, $opts ) = @_;
     return undef unless $self->hv->supports('blockio');
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return {
         logical  => _asked( $opts, 'disk_logical_block_size' )  // 512,
         physical => _asked( $opts, 'disk_physical_block_size' ) // 4096,

@@ -64,7 +64,7 @@ Idea here is to set a developer or agent up in one step by cloning the many repo
 Setup your global git configuration via the skel mechanism in 'adminconfig'.
 
 In the event the repo has a Makefile.PL we will attempt to install its' CPAN deps if the perl target is enabled.
-In so doing we can utilize this recipe as part of smoking your own personal PAN.
+In so doing we can use this recipe as part of smoking your own personal PAN.
 
 If your repos have binary deps, add them to the list of deps you can install in the adminconfig recipe.
 

@@ -1124,9 +1124,8 @@ Render recipe's makefile template.
 
 =cut
 
-sub render {
-    my ($self) = shift;
-    return $self->render_file( $self->{template}, @_ );
+sub render ( $self, %template_vars ) {
+    return $self->render_file( $self->{template}, %template_vars );
 }
 
 =head3 $bool = $recipe->has_global_template()
@@ -1160,9 +1159,8 @@ Only call this after confirming C<has_global_template> returns true.
 
 =cut
 
-sub render_global {
-    my ($self) = shift;
-    return $self->render_file( $self->{global_template}, @_ );
+sub render_global ( $self, %template_vars ) {
+    return $self->render_file( $self->{global_template}, %template_vars );
 }
 
 =head3 $output = render_file($file, %template_vars)
@@ -1171,9 +1169,8 @@ Render specified template file.
 
 =cut
 
-sub render_file {
-    my ( $self, $file ) = ( shift, shift );
-    return $self->render_raw( $file, $self->validated( $self->vars(), @_ ) );
+sub render_file ( $self, $file, %template_vars ) {
+    return $self->render_raw( $file, $self->validated( $self->vars(), %template_vars ) );
 }
 
 =head3 $output = $recipe->render_raw($file, %template_vars)

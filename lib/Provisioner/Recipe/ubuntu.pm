@@ -183,7 +183,7 @@ sub formatters {
 # guest sits on systemd-networkd-wait-online forever without ever saying why.
 #
 # Quoting it costs nothing for the parsers that were already right.
-my $SEXAGESIMAL = qr/\A[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+(?:[.][0-9_]*)?\z/;
+my $SEXAGESIMAL = qr/\A[-+]?\d[\d_]*(?::[0-5]?\d)+(?:[.][\d_]*)?\z/;
 
 # YAML::XS always leads with a document marker and always ends with a newline;
 # neither is wanted where this is being pasted into a document that already has

@@ -24,7 +24,7 @@ use parent qw{Provisioner::Recipe};
 
 Set up the specified mariadb version, put back whatever the guest this one
 replaces had in it, and fall back to the configured dump for a domain that has
-never had a database. Secures the DB and sets the root pw as specified.
+never had a database. Secures the DB and sets the root password as specified.
 
 =head3 What a rebuild keeps
 

@@ -32,7 +32,7 @@ In recipes.yaml:
 
 When you have files on the host which need backing up, but aren't already covered by the provisioning process itself.
 
-Alternatively, if you want to back things up offsite inbetween provisions (almost certain you will) this makes such simple.
+Alternatively, if you want to back things up offsite in between provisions (almost certain you will) this makes such simple.
 
 Pair with a VM using L<Provisioner::Recipe::backupdestination> to fully automate backups.
 

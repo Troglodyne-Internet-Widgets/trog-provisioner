@@ -187,7 +187,7 @@ sub enrich {
             # both proxying to the same app, which is the usual arrangement --
             # declare one upstream between them rather than two of the same.
             my $socket = "$opts{install_dir}/$opts{domain}/$uri";
-            ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
+            ( my $name = "sock_$socket" ) =~ s/\W/_/g;
 
             $upstreams{$name} = $socket;
             $vopts->{proxy_uri} = "http://$name";

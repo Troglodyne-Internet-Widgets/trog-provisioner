@@ -172,7 +172,6 @@ each gets its own.  What they would be sharing is the mirror behind it.
 sub is_multi_tenant { return 0 }
 
 sub args {
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (
         type       => 'object',
         required   => ['releases'],
@@ -297,7 +296,7 @@ C<upstream>, and the vhost and the fragment both have to name the same one.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my ( $host, $path ) = $opts{upstream} =~ m{\A[a-z][a-z\d+.-]*://([^/]+)(/\S*)\z}i;
+    my ( $host, $path ) = $opts{upstream} =~ m{\A[[:alpha:]][[:alnum:]+.-]*://([^/]+)(/\S*)\z};
     die "upstream must be a URL with a path on it, like http://archive.ubuntu.com/ubuntu -- got '$opts{upstream}'\n"
       unless defined $host && defined $path;
 

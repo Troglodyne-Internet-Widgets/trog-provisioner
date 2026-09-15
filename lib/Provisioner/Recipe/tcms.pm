@@ -46,7 +46,7 @@ sub required_recipes {
     my ( $self, %opts ) = @_;
     return (
         nginxproxy => sub {
-            my (%opts) = @_;
+            my (%nginxproxy_opts) = @_;
             return (
                 vhosts => {
                     80 => {
@@ -66,8 +66,8 @@ sub required_recipes {
         # What the checkout says it needs, installed into the perl that recipe
         # builds: see Provisioner::Recipe::perl on cpan_deps.
         perl => sub {
-            my (%opts) = @_;
-            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}}, 'tCMS' )->stringify } ] );
+            my (%perl_opts) = @_;
+            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify } ] );
         },
         tpsgi => sub {
 
