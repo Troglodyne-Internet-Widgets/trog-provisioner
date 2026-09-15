@@ -375,13 +375,18 @@ have each broken a recipe here:
   `Syntax error: end of file unexpected (expecting "done")` from the `for` loop
   inside it. Render a script as a `template_files` entry and install it, which
   is what every other generated script here does.
-- Make runs recipe lines under `/bin/sh`, which is **dash** on Ubuntu, not bash.
-  `gogs` made its four directories in one brace expansion and got a single
-  directory named `{repos,data,log,custom/conf}`, and wrote `id -u gogs
-  &>/dev/null || useradd` — dash reads `&>` as a background `&` and a
-  redirection, so the guard always succeeded and the `useradd` was dead code.
-  Do not "fix" this by setting `SHELL := /bin/bash`: `makefile.tt` relies on
-  dash's `echo` expanding `\n` when it writes sendmail's config.
+- Make runs recipe lines under **bash**: `makefile.tt` sets `SHELL := /bin/bash`
+  and the first-boot package list installs it, so a fragment may use what bash
+  has. It was dash until recently, and the scars are worth knowing because the
+  older fragments were written against it: `gogs` made its four directories in
+  one brace expansion and got a single directory named
+  `{repos,data,log,custom/conf}`, and wrote `id -u gogs &>/dev/null || useradd`,
+  which dash read as a background `&` and a redirection -- so the guard always
+  succeeded and the `useradd` was dead code.
+
+  What still has to be POSIX is anything make does not run. `at` hands its job
+  to `/bin/sh` whatever shebang the script carries, which is why `setup.sh` is
+  started as `bash /root/setup.sh` rather than left to speak for itself.
 
 **A template that moves a file `template_files` does not generate** kills the
 target and everything after it. `deluged` and `matrix` both moved an nginx vhost
