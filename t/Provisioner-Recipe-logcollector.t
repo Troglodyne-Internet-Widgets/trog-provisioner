@@ -78,7 +78,7 @@ subtest 'the fleet logs do not also land in this guest own syslog' => sub {
     # would swallow this guest's local logging as well, and a collector that
     # keeps everybody's logs but not its own is a bad trade.
     like( $conf, qr/input\(type="imtcp"[ ]port="514"[ ]ruleset="logcollector"\)/, 'the input has a ruleset of its own' );
-    like( $conf, qr/ruleset\(name="logcollector"\)[ ]\{.*\bstop\b.*\}/s,          'which ends in stop' );
+    like( $conf, qr/ruleset\(name="logcollector"\)[ ]\{.*\bstop\b.*\}/,           'which ends in stop' );
 };
 
 subtest 'which transports it opens follows what it was asked for' => sub {
@@ -105,7 +105,7 @@ subtest 'rotation reopens the files it rotated' => sub {
     # The configuration this replaced had an empty postrotate/endscript pair, so
     # nothing ever told rsyslog to reopen what had been rotated out from under
     # it and it kept writing to the renamed file forever.
-    like( $conf, qr{postrotate\s+/usr/lib/rsyslog/rsyslog-rotate\s+endscript}s, 'and signalling rsyslog afterwards' );
+    like( $conf, qr{postrotate\s+/usr/lib/rsyslog/rsyslog-rotate\s+endscript}, 'and signalling rsyslog afterwards' );
 };
 
 subtest 'the firewall hole is asked for on the port it actually listens on' => sub {

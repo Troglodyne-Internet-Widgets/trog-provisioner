@@ -75,7 +75,7 @@ subtest 'the fragment fetches each pinned tarball into an emptied directory' => 
     my $ref = '2082d13bb195f3203d41a308b89417426a7deca1';
 
     # The four lines for one plugin, from its fetch on.
-    my @lines = split( "\n", $out );
+    my @lines = split( m/\n/, $out );
     my ($at)  = grep { index( $lines[$_], q{/async.vim/tar.gz/} ) >= 0 } 0 .. $#lines;
     my @async = @lines[ $at .. $at + 3 ];
     like( $async[0], qr{^curl[ ]-fsSL[ ]--retry[ ]3[ ]--retry-all-errors[ ]-o[ ]'perllsp\.async\.tar\.gz'[ ]'https://codeload\.github\.com/prabirshrestha/async\.vim/tar\.gz/$ref'$}, 'fetched as the pinned commit' );                                            ## no critic (RegularExpressions::ProhibitComplexRegexes)

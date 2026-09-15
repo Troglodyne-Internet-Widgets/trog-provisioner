@@ -208,7 +208,7 @@ subtest 'bin/recipes lists them' => sub {
     my ( $out, $err, $rc ) = run_bin('recipes');
     is( $rc, 0, 'exits clean' );
 
-    my @lines = split( "\n", $out );
+    my @lines = split( m/\n/, $out );
     ok( scalar @lines > 20, 'a good few' );
     like( $out, qr/^ntp\s+\S/m, 'each with what it is for' );
 };

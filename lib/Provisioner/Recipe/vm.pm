@@ -520,8 +520,8 @@ sub _devices {
         my $order    = 2;
         my $index    = 0;
 
-        foreach my $diskspec ( grep { $_ } split( "\n", File::Slurper::read_text($spec_file) ) ) {
-            my ( $pool, $disk ) = split( '=', $diskspec );
+        foreach my $diskspec ( grep { $_ } split( m/\n/, File::Slurper::read_text($spec_file) ) ) {
+            my ( $pool, $disk ) = split( m/=/, $diskspec );
             next if $pool eq 'fuse';
 
             $order++;

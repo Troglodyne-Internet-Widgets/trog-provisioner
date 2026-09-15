@@ -340,7 +340,7 @@ the rewrap goes when there is a release with the fix in it.
 sub _rewrap_pem {
     my ($pem) = @_;
 
-    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}s
+    my ( $head, $body, $tail ) = $pem =~ m{\A(-{5}BEGIN[^\n]*-{5})\n(.*)\n(-{5}END[^\n]*-{5})}
       or return $pem;
 
     $body =~ s/\s//g;

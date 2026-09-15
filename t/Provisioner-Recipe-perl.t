@@ -58,7 +58,7 @@ sub rendered {
 # The cpan_install lines of a fragment, each as the words it hands over.
 sub installs {
     my ($fragment) = @_;
-    return map { [m/'([^']*)'/g] } grep { m{/cpan_install\b} } split( "\n", $fragment );
+    return map { [m/'([^']*)'/g] } grep { m{/cpan_install\b} } split( m/\n/, $fragment );
 }
 
 subtest 'every step it is handed is installed in its own target, in order, after the perl' => sub {
@@ -126,7 +126,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
     close($c) or die "Could not close $bin/cpan_install: $!";
     chmod( 0755, "$bin/cpan_install" );
 
-    my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
+    my ($line) = grep { m{/cpan_install\b} } split( m/\n/, rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
 
     # dash, which is what make runs a recipe line under.
     IPC::Run3::run3( [ '/bin/sh', '-c', $line ], \undef, \my $out, \my $err );

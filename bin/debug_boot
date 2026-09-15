@@ -275,7 +275,7 @@ sub fetch {
     )->filename;
     File::Slurper::Temp::write_text( $into, $content );
 
-    my @lines = split "\n", $content;
+    my @lines = split m/\n/, $content;
     ## no critic (ProhibitPrintSTDERR)
     print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines );
     print {*STDERR} "  $_\n" for @lines[ -8 .. -1 ];

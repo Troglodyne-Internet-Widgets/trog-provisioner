@@ -273,7 +273,7 @@ sub remove_authorized_key {
     print "Removing domain SSH key from $ak\n";
     return if $dryrun;
 
-    my @before = split( "\n", $contents );
+    my @before = split( m/\n/, $contents );
     my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
     die "Removing the key for $domain from $ak would drop " . ( scalar(@before) - scalar(@after) ) . " lines, not 1; refusing\n"
       unless scalar(@after) == scalar(@before) - 1;
@@ -334,7 +334,7 @@ sub remove_runner_key {
         die "Could not read $ak on $name; refusing to rewrite it blind\n"
           unless defined $contents && length $contents;
 
-        my @before = split( "\n", $contents );
+        my @before = split( m/\n/, $contents );
         my @after  = grep { index( $_, $material ) < 0 } @before;
         my $going  = scalar(@before) - scalar(@after);
 

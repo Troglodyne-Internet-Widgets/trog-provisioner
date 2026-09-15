@@ -41,7 +41,7 @@ sub run_queue {
     IPC::Run3::run3( [$script], \undef, \my $out, \my $err );
 
     my $done = eval { File::Slurper::read_text($ran) } // '';
-    return { status => $? >> 8, out => $out // '', err => $err // '', ran => [ split( "\n", $done ) ] };
+    return { status => $? >> 8, out => $out // '', err => $err // '', ran => [ split( m/\n/, $done ) ] };
 }
 
 subtest 'every task runs, and the exit code is the answer at the end' => sub {

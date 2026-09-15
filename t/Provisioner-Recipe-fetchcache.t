@@ -157,11 +157,11 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
             qr{location[ ]=[ ]/\.fetchcache/$name[ ]\{\n\s+internal;\n\s+proxy_cache_valid[ ]200[ ]\Q$fresh\E;\n(?:\s+proxy_cache_use_stale[ ]off;\n)?\s+error_page[ ]301[ ]302[ ]303[ ]307[ ]308[ ]=[ ]\@follow_$name;\n\s+proxy_pass[ ]https://\$host\$request_uri;},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$name: fresh for $fresh, fetched as the guest asked for it, redirects followed"
         );
-        like( $vhost, qr/location[ ]\@follow_$name[ ]\{.*?proxy_cache_valid[ ]200[ ]\Q$fresh\E;.*?proxy_pass[ ]\$fetchcache_location;/s, "$name: and a followed redirect is kept as long" );                                                                               ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        like( $vhost, qr/location[ ]\@follow_$name[ ]\{.*?proxy_cache_valid[ ]200[ ]\Q$fresh\E;.*?proxy_pass[ ]\$fetchcache_location;/, "$name: and a followed redirect is kept as long" );                                                                                ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # nginx takes the first regex in a map that matches.
-    my ($map) = $vhost =~ m/^map[ ]"\$host\$request_uri"[ ]\$fetchcache_class[ ]\{\n(.*?)^\}/ms;                                                                                                                                                                           ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    my ($map) = $vhost =~ m/^map[ ]"\$host\$request_uri"[ ]\$fetchcache_class[ ]\{\n(.*?)^\}/m;                                                                                                                                                                            ## no critic (RegularExpressions::ProhibitComplexRegexes)
     my @order = ( $map // q{} ) =~ m/^\s+"~[^\n]*"[ ](\w+);$/mg;
     is_deeply( \@order, [qw{pass aptindex index immutable}], 'what is never kept first, then the most specific first' );
 
@@ -170,14 +170,14 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
     # different moment stops apt outright rather than being an old download.
     # Nothing else wants this -- the cache exists to serve stale.
     foreach my $name (qw{aptindex index immutable default}) {
-        my ($block) = $vhost =~ m/location[ ]=[ ]\/\.fetchcache\/$name[ ]\{(.*?)\n[ ][ ][ ][ ]\}/s;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        my ($block) = $vhost =~ m/location[ ]=[ ]\/\.fetchcache\/$name[ ]\{(.*?)\n[ ][ ][ ][ ]\}/;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         my $off = index( $block // q{}, 'proxy_cache_use_stale off;' ) >= 0 ? 1 : 0;
         is( $off, ( $name eq 'aptindex' ? 1 : 0 ), "$name: stale is " . ( $name eq 'aptindex' ? 'refused' : 'allowed' ) );
     }
     like( $vhost,      qr/^\s+proxy_cache_use_stale[ ]error[ ]timeout/m, 'and the server still serves stale for everything else' );
     like( $map // q{}, qr/^\s+default[ ]default;$/m,                     'and anything else is the default kind' );
 
-    like( $vhost, qr{location[ ]/[ ]\{.*?rewrite[ ]\^[ ]/\.fetchcache/\$fetchcache_class[ ]last;}s, 'every request goes out through the location for its kind' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr{location[ ]/[ ]\{.*?rewrite[ ]\^[ ]/\.fetchcache/\$fetchcache_class[ ]last;}, 'every request goes out through the location for its kind' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'what is never kept goes upstream as it came' => sub {
@@ -185,7 +185,7 @@ subtest 'what is never kept goes upstream as it came' => sub {
 
     like( $vhost, qr{if[ ]\(\$request_method[ ]!~[ ]"\^\(\?:GET\|HEAD\)\$"\)[ ]\{\n\s+rewrite[ ]\^[ ]/\.fetchcache/pass[ ]last;}, 'nothing but GET and HEAD is kept' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
-    my ($pass) = $vhost =~ m{(location[ ]=[ ]/\.fetchcache/pass[ ]\{.*?\n[ ][ ][ ][ ]\})}s;
+    my ($pass) = $vhost =~ m{(location[ ]=[ ]/\.fetchcache/pass[ ]\{.*?\n[ ][ ][ ][ ]\})};
     ok( defined $pass, 'and what is not has a location of its own' ) or return;
 
     like( $pass, qr/^\s+internal;$/m,                         'one nobody can ask for by name' );
@@ -296,7 +296,7 @@ subtest 'the certificate names every host it answers to, and the authority signe
     my ( $vhost, undef, $dir ) = generated( upstreams => { 'upstream.test' => 1 } );
     my $authority = $FETCHCACHE->authority();
 
-    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN[ ]CERTIFICATE-----\n.*?-----END[ ]CERTIFICATE-----\n)/sg;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN[ ]CERTIFICATE-----\n.*?-----END[ ]CERTIFICATE-----\n)/g;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is( scalar @chain, 2,                                              'a certificate with one more after it, as nginx wants a chain' );
     is( $chain[1],     File::Slurper::read_text( $authority->{cert} ), 'which is the authority' );
 

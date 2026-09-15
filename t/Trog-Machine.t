@@ -52,8 +52,8 @@ sub here (@args) {
 subtest 'the ssh rsync is told to use' => sub {
     my $rsh = remote()->_rsh;
 
-    like( $rsh, qr{\A ssh \s -p \s 2222 \b}x,                  'the port, which rsync cannot get from anywhere else' );
-    like( $rsh, qr{-i \s /bogus/domains/vm[.]test/key[.]rsa}x, 'and the key, for the same reason' );
+    like( $rsh, qr{\A ssh \s -p \s 2222 \b},                  'the port, which rsync cannot get from anywhere else' );
+    like( $rsh, qr{-i \s /bogus/domains/vm[.]test/key[.]rsa}, 'and the key, for the same reason' );
 
     # The same options Net::OpenSSH::More puts on its own master.  A guest
     # rebuilt an hour ago presents a host key nothing has seen before, and
@@ -196,7 +196,7 @@ subtest 'rsync moves what changed and nothing else' => sub {
     # handle in its place is not something it can hand back.
     my ($said) = capture_stdout { $machine->get_dir( "$dir/src", "$dir/dst", exclude => ['secrets.key'] ) };
 
-    like( $said, qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}x, 'the second fetch moves nothing, and says so' );
+    like( $said, qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}, 'the second fetch moves nothing, and says so' );
 };
 
 subtest 'a transfer that fails says which one, and does not pretend' => sub {
@@ -249,7 +249,7 @@ subtest 'a file read off a remote machine comes back whole' => sub {
         $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read_text reads it, and a fake that does not set it tests nothing.
         if (wantarray) {
             $self->{scalar_context} = 0;
-            return map { "$_\n" } split( "\n", $self->{content} );
+            return map { "$_\n" } split( m/\n/, $self->{content} );
         }
         $self->{scalar_context} = 1;
         return $self->{content};

@@ -313,7 +313,7 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
 
     # Per disk rather than per domain, libvirt having no domain-wide version of
     # this: a guest with three disks can do three times what the number says.
-    my @throttled = grep { index( $_, '<iotune>' ) >= 0 } split( "\n", $xml );
+    my @throttled = grep { index( $_, '<iotune>' ) >= 0 } split( m/\n/, $xml );
     is( scalar @throttled, 2, 'the throttle lands on every disk, the extra one included' );
 
     # A limit that is not applied is worse than no limit: somebody believes in

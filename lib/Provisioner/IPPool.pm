@@ -463,8 +463,8 @@ sub _guest_addresses {
     my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my ( @found, %seen );
-    foreach my $line ( split "\n", $said ) {
-        my ( $domain, $ip ) = split "\t", $line, 2;
+    foreach my $line ( split m/\n/, $said ) {
+        my ( $domain, $ip ) = split m/\t/, $line, 2;
         next unless defined $domain && length $domain;
         next unless defined $ip     && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
 
@@ -522,7 +522,7 @@ sub _live_addresses {
     my $said = $hv->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my ( %live, %mac );
-    foreach my $line ( split "\n", $said ) {
+    foreach my $line ( split m/\n/, $said ) {
         if ( my ($answered) = $line =~ m/\ALIVE\s+(\d+(?:[.]\d+){3})\z/ ) {
             $live{$answered} = 1;
             next;

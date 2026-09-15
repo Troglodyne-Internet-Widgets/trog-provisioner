@@ -138,7 +138,7 @@ sub _block_order {
     return () unless defined $text;
 
     my @order;
-    foreach my $line ( split "\n", $text ) {
+    foreach my $line ( split m/\n/, $text ) {
         my ($block) = $line =~ m/\A\s*\[([^\]]+)\]/ or next;
         push @order, $block;
     }

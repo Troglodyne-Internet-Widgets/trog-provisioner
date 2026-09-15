@@ -1213,7 +1213,7 @@ sub handle_domain {
     # Absent rather than empty, because Config::Simple hands back an empty string
     # for a bare `key=` and an empty string is not the same as no answer.  And
     # never one of the keys written out above, which would be a duplicate.
-    my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( "\n", $pconf );
+    my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
     $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && defined $global_config->{$_} && length $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
@@ -1415,8 +1415,8 @@ sub _salvage_mtimes {
     my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my %mtime;
-    foreach my $line ( split "\n", $said ) {
-        my ( $path, $stamp ) = split "\t", $line, 2;
+    foreach my $line ( split m/\n/, $said ) {
+        my ( $path, $stamp ) = split m/\t/, $line, 2;
         next unless defined $path && length $path;
         $mtime{$path} = defined $stamp ? $stamp : q{};
     }

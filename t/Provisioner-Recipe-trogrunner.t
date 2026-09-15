@@ -136,7 +136,7 @@ subtest 'a secret in the runner recipes never becomes a password in a file' => s
     # What the runner gets is a reference, exactly as a hand-written
     # recipes.yaml would hold -- so nothing here is a password even though
     # Trog::Secrets would have resolved one had it been spelled the usual way.
-    my $refs = grep { index( $_, 'secret:' ) >= 0 } split( "\n", $yaml );
+    my $refs = grep { index( $_, 'secret:' ) >= 0 } split( m/\n/, $yaml );
     is( $refs, 2, 'both of them, and nothing else that could be a value' );
 };
 
@@ -205,7 +205,7 @@ sub cpan_steps {
         distro        => 'ubuntu',
     );
 
-    my @lines = grep { m{/cpan_install\b} } split( "\n", $perl->render( %$vars, %handed ) );
+    my @lines = grep { m{/cpan_install\b} } split( m/\n/, $perl->render( %$vars, %handed ) );
     return map { [m/'([^']*)'/g] } @lines;
 }
 
@@ -302,7 +302,7 @@ subtest 'the key it generates is one both readers of these agree on' => sub {
     # that; CryptX -- which is what Provisioner::Utils uses to derive the public
     # half out of the store later -- refuses it as "Invalid input packet", and
     # RFC 7468 puts the limit at 64, so the strict reader is the correct one.
-    my @body = grep { !m/^-----/ } split( "\n", $key );
+    my @body = grep { !m/^-----/ } split( m/\n/, $key );
     ok( ( scalar @body > 1 ), 'wrapped rather than written as one line' );
     is( scalar( grep { length($_) > 64 } @body ), 0, 'at no more than 64 columns, which is what RFC 7468 asks' );
 

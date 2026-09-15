@@ -173,7 +173,7 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
     # and a reserved TLD is not a public suffix -- so <guest>.test collapsed to
     # the zone "test", and DELEGATED was composed back onto that, asking for
     # zones/<guest>.test.test.  Every challenge 404'd, on every guest.
-    my @calls = grep { m/^\s+lexicon\s/ } split( "\n", $hook );
+    my @calls = grep { m/^\s+lexicon\s/ } split( m/\n/, $hook );
     is( scalar @calls, 2, 'the hook deploys a record and cleans it up' );
     like( $_, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ) for @calls;
 
@@ -229,7 +229,7 @@ subtest 'the fetcher registers before it asks for anything' => sub {
     # was never made.
     # The commands, not the whole file: the comment above them names both flags,
     # so a raw index() finds the prose rather than the line that runs.
-    my @lines      = split( "\n", $fetcher );
+    my @lines      = split( m/\n/, $fetcher );
     my ($register) = grep { $lines[$_] =~ m/\Adehydrated\b\N*--register/ } 0 .. $#lines;
     my ($cron)     = grep { $lines[$_] =~ m/\Adehydrated\b\N*--cron/ } 0 .. $#lines;
 
@@ -255,7 +255,7 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     # the zone with for --resolve-zone-name, and that step-ca validates through.
     # On a guest the first passed while systemd's stub knew nothing of the zone,
     # so the wait fell through and every challenge failed on zones/.
-    my @soa = grep { m/\bdig[ ]\+short\b/ } split( "\n", $fetcher );
+    my @soa = grep { m/\bdig[ ]\+short\b/ } split( m/\n/, $fetcher );
     is( scalar @soa, 2, 'it waits on the server and on the resolver separately' );
     ok( ( scalar grep { index( $_, '@127.0.0.1' ) >= 0 } @soa ), 'one asks the server directly' );
     ok( ( scalar grep { index( $_, '@' ) < 0 } @soa ),           'and one asks whatever the guest resolves with' );

@@ -286,7 +286,7 @@ subtest 'append_line does not duplicate' => sub {
     $hv->append_line( $ak, 'ssh-rsa BBBB two' );
     $hv->append_line( $ak, 'ssh-rsa AAAA one' );
 
-    my @lines = split( "\n", File::Slurper::read_text($ak) );
+    my @lines = split( m/\n/, File::Slurper::read_text($ak) );
     is( scalar(@lines), 2, 'the repeated key was only written once' );
     is_deeply( \@lines, [ 'ssh-rsa AAAA one', 'ssh-rsa BBBB two' ], 'in order' );
 };
@@ -447,7 +447,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
             if ( $argv[0] eq 'grep' ) {
                 my ( $line, $file ) = @argv[ -2, -1 ];
                 return 1 unless defined $files{$file};
-                return ( grep { $_ eq $line } split( "\n", $files{$file} ) ) ? 0 : 1;
+                return ( grep { $_ eq $line } split( m/\n/, $files{$file} ) ) ? 0 : 1;
             }
             return 0;
         }

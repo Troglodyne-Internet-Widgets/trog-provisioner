@@ -154,9 +154,9 @@ sub wait_for_cloud_init {
       unless ref $parsed eq 'ARRAY';
 
     foreach my $fail ( grep { ( $_->{result} // '' ) eq 'FAIL' } @$parsed ) {
-        my ( $module, $mtarget ) = split( '/', $fail->{name} );
+        my ( $module, $mtarget ) = split( m{/}, $fail->{name} );
         next unless $mtarget;
-        my ( $stage, $target ) = split( '-', $mtarget );
+        my ( $stage, $target ) = split( m/-/, $mtarget );
         next unless $target;
 
         print "$target failed during $stage, re-running...\n";

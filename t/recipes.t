@@ -605,7 +605,7 @@ subtest 'cron MAILTO per script' => sub {
     my $r   = 'Provisioner::Recipe::cron'->new(%PROV);
     my $d   = $G{domain};
     my @out = split(
-        "\n",
+        m/\n/,
         $r->render_file(
             'files/cron.root.domain.tt', %G,
             root_scripts => [
@@ -735,7 +735,7 @@ subtest 'no template comment leaves a quote open' => sub {
         ( my $name = $tt ) =~ s/^\Q$template_dir\E\///;
 
         # Every [%# ... %] block, which may span lines.
-        while ( $body =~ m/(\[%[#].*?%\])/gs ) {
+        while ( $body =~ m/(\[%[#].*?%\])/g ) {
             my $comment = $1;
 
             # A comment ends at the first %] there is, so a directive written
@@ -757,7 +757,7 @@ subtest 'no template comment leaves a quote open' => sub {
             # "Provisioner::Recipe::ubuntu's packager invocation" -- ate two
             # install lines out of the aptmirror fragment that way.
             my $line = 0;
-            foreach my $text ( split( m/\n/xms, $comment ) ) {
+            foreach my $text ( split( m/\n/, $comment ) ) {
                 $line++;
                 foreach my $quote ( q{'}, q{"} ) {
                     my $count = () = $text =~ m/\Q$quote\E/g;
@@ -1068,7 +1068,7 @@ subtest 'no cron template redirects with &>' => sub {
 
     foreach my $tt ( sort @crons ) {
         ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
-        foreach my $line ( split m/\n/xms, File::Slurper::read_text($tt) ) {
+        foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
             next if $line =~ m/^\s*[#]/;    # the comment explaining this rule
             unlike( $line, qr/&>>?/, "$name: no &> in a cron line" ) or diag $line;
         }
@@ -1557,8 +1557,8 @@ subtest 'iouring defers group membership past the makefile' => sub {
 
     # In that order: postrun tasks run in the order they were queued, and a
     # restart ahead of the usermod would restart it back out of the group.
-    my ($usermod) = $out =~ m/\A(.*?)usermod[ ]-aG/s;
-    my ($restart) = $out =~ m/\A(.*?)try-restart/s;
+    my ($usermod) = $out =~ m/\A(.*?)usermod[ ]-aG/;
+    my ($restart) = $out =~ m/\A(.*?)try-restart/;
     ok( length($usermod) < length($restart), 'with the membership queued first' );
 
     # A gid is only knowable on the guest, and the sysctl takes the number.
@@ -1614,7 +1614,7 @@ subtest 'mariadb writes credentials the accounts that need them can use' => sub 
     my @sections = $cnf =~ m/^\[(\w[\w-]*)\]$/gm;
     ok( scalar @sections, 'the credentials file has sections' );
     foreach my $section (@sections) {
-        my ($body) = $cnf =~ m/^\[\Q$section\E\]\n(.*?)(?=^\[|\z)/ms;
+        my ($body) = $cnf =~ m/^\[\Q$section\E\]\n(.*?)(?=^\[|\z)/m;
         like( $body, qr/^socket[ ]=[ ]/m, "[$section] names the socket" );
     }
 
@@ -1651,7 +1651,7 @@ subtest 'the installer configures the server before anything uses it' => sub {
     # The password is in that file, so it does not survive the SQL failing.
     # Including on the run that skips securing, since the file holds root_pw
     # whether or not anything reads it.
-    my ($trap) = $script =~ m/\A(.*?)trap[ ]'rm[ ]-f[ ]"\$SECURE_SQL"'[ ]EXIT/s;
+    my ($trap) = $script =~ m/\A(.*?)trap[ ]'rm[ ]-f[ ]"\$SECURE_SQL"'[ ]EXIT/;
     ok( defined $trap,                            'the secure-installation sql is removed on the way out' );
     ok( defined $trap && length($trap) < $secure, 'from before the run that would use it, not inside it' );
 };
@@ -1714,7 +1714,7 @@ subtest 'a vhost serves files only where a recipe said it has some' => sub {
     # directory the recipe never asked for, on every domain that proxies.
     my $proxy = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
     unlike( $proxy, qr/^\s*root\s/m, 'a vhost with no static_dir is given no root' );
-    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!xs, 'and proxies from / rather than falling through to a named location' );
+    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!, 'and proxies from / rather than falling through to a named location' );
     unlike( $proxy, qr/try_files/, 'with nothing to try before proxying' );
 
     # And the other half: a recipe that does serve files still gets exactly what
@@ -1821,7 +1821,7 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
         # Comments say what used to be here and why it moved; the rule itself is
         # what must not come back.  Directive and comment markers are stripped
         # so a template comment quoting the old line does not read as one.
-        $body =~ s/\[%[#].*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
         $body =~ s/^\s*[#]\N*$//gm;
 
         my ($offender) = $body =~ m/^([^\n]*\bufw\s+(?:allow|deny|limit|reject)\b[^\n]*)$/m;
@@ -1877,7 +1877,7 @@ subtest 'no fragment calls cpanm itself' => sub {
 
     foreach my $tt (@fragments) {
         my $body = File::Slurper::read_text($tt);
-        $body =~ s/\[%[#].*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
         $body =~ s/^\s*[#]\N*$//gm;
 
         my ($offender) = $body =~ m/^([^\n]*\bcpanm\b[^\n]*)$/m;
@@ -2000,8 +2000,8 @@ subtest 'the ufw target runs after every recipe that installs a profile' => sub 
     # kept.  This held by alphabet alone until makefile.tt was made to say it.
     my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
 
-    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/s, 'ufw is named after the ordered modules' );
-    like( $mf, qr/\QIF ufw_fragment\E/,                          'and only when there is a ufw target to name' );
+    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/, 'ufw is named after the ordered modules' );
+    like( $mf, qr/\QIF ufw_fragment\E/,                         'and only when there is a ufw target to name' );
 
     # And bin/new_config is what takes it out of the ordered set, or there would
     # be two targets of the same name and make would keep the second.
@@ -2021,7 +2021,7 @@ subtest 'no firewall profile is named after something in /etc/services' => sub {
     plan skip_all => 'no /etc/services to check against' unless -r '/etc/services';
 
     my %service;
-    foreach my $line ( split m/\n/xms, File::Slurper::read_text('/etc/services') ) {
+    foreach my $line ( split m/\n/, File::Slurper::read_text('/etc/services') ) {
         next if $line =~ m/\A\s*[#]/;
         my ($name) = $line =~ m/\A(\S+)\s/ or next;
 
@@ -2038,7 +2038,7 @@ subtest 'no firewall profile is named after something in /etc/services' => sub {
 
         # Comments here explain which names were skipped and why, so they name
         # the very things being tested for.
-        $body =~ s/\[%[#].*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
 
         foreach my $section ( $body =~ m/^\[([^\]]+)\]\s*$/gm ) {
             ok( !$service{$section}, ( File::Basename::basename($tt) ) . ": [$section] is a name ufw will load" )
@@ -2105,7 +2105,7 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
         next if any { $_ eq $name } @allowed;
 
         my $body = File::Slurper::read_text($tt);
-        $body =~ s/\[%[#].*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
 
         unlike( $body, qr{/restore_state\b}, "$name leaves the restoring to data" );
     }
@@ -2254,7 +2254,7 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
         my $text = eval { File::Slurper::read_text($file) };
         next unless defined $text;
 
-        foreach my $line ( split( "\n", $text ) ) {
+        foreach my $line ( split( m/\n/, $text ) ) {
             next unless $line =~ m/$fetches/;
             while ( $line =~ m{https?://([[:lower:]\d][[:lower:]\d.-]*)}gi ) {
                 my $host = lc $1;

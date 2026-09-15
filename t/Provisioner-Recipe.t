@@ -303,7 +303,7 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
 
     like(
         exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
-        qr/Two[ ]recipes[ ]want[ ]different[ ]things.*port[ ]is[ ]'80'.*'443'/s,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        qr/Two[ ]recipes[ ]want[ ]different[ ]things.*port[ ]is[ ]'80'.*'443'/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a scalar two dependants disagree about dies, naming both values'
     );
 

@@ -150,7 +150,7 @@ sub apply {
     my ( $class, $config, %values ) = @_;
 
     foreach my $path ( keys %values ) {
-        my @steps = split( '/', $path );
+        my @steps = split( m{/}, $path );
         my $leaf  = pop @steps;
 
         # Walked rather than built into a string and eval'd, which is what this
@@ -298,7 +298,7 @@ sub parse {
     die "Malformed secret '" . ( $reference // '' ) . "': must start with secret:\n"
       unless defined $reference && index( $reference, 'secret:' ) == 0;
 
-    my ( $group, $title, $field ) = split( '/', substr( $reference, length 'secret:' ) );
+    my ( $group, $title, $field ) = split( m{/}, substr( $reference, length 'secret:' ) );
     die "Malformed secret '$reference': wanted secret:group/entry/field\n"
       unless defined $group
       && length $group

@@ -276,7 +276,7 @@ CONF
                     # YAML folds a long plain scalar across lines and unfolds it
                     # to a space, which is where the space in a public key
                     # already is.  Master did the same, being the same dumper.
-                    ssh_authorized_keys => [ re(qr/\Assh-rsa[ ]\S+[ ]\S+\z/s) ],
+                    ssh_authorized_keys => [ re(qr/\Assh-rsa[ ]\S+[ ]\S+\z/) ],
                 }
             ],
 

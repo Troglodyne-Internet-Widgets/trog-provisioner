@@ -551,7 +551,7 @@ sub list_dir {
     # ls rather than a listing over the connection: sftp is not used here at
     # all, and for the same reason -- see above.
     my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
-    return grep { length } split( "\n", $listing );
+    return grep { length } split( m/\n/, $listing );
 }
 
 sub read_text {
@@ -626,7 +626,7 @@ sub append_line {
 
     if ( $self->is_local ) {
         my $existing = eval { File::Slurper::read_text($path) };
-        return 1 if defined $existing && any { $_ eq $line } split( "\n", $existing );
+        return 1 if defined $existing && any { $_ eq $line } split( m/\n/, $existing );
         open( my $fh, '>>', $path ) or die "Could not open $path: $!";
         print {$fh} "$line\n";
         close($fh) or die "Could not close $path: $!";

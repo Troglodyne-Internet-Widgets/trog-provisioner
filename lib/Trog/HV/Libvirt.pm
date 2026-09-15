@@ -236,7 +236,7 @@ sub pool_target {
         $pool->get_xml_description();
     } or return undef;
 
-    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>}s;
+    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>};
     return $path;
 }
 
@@ -1051,7 +1051,7 @@ sub qemu_img_options {
 
     # -o help lists the options for the format and exits; it wants no filename.
     my $help    = $self->capture_cmd('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
-    my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gmx );
+    my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gm );
 
     print "Could not ask qemu-img on " . $self->describe . " which qcow2 options it takes,\n" . "so this disk gets none of the optional ones.\n"
       unless %options;

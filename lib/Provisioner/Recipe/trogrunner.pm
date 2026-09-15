@@ -400,7 +400,7 @@ sub _under_the_domain {
     die "trogrunner: $field is relative to the domain directory, so '$path' cannot start with a slash\n"
       if index( $path, '/' ) == 0;
     die "trogrunner: $field is relative to the domain directory, and '$path' climbs out of it\n"
-      if any { $_ eq '..' } split( q{/}, $path );
+      if any { $_ eq '..' } split( m{/}, $path );
 
     return 1;
 }

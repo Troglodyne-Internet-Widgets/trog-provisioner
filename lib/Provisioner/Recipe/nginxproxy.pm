@@ -213,7 +213,7 @@ sub enrich {
             next if $vopts->{ssl_redirect};
             next unless $vopts->{static_dir};
             $serves_static = 1;
-            my @parts = split '/', $vopts->{static_dir};
+            my @parts = split m{/}, $vopts->{static_dir};
             pop @parts;
             my $path = '';
             foreach my $part (@parts) {

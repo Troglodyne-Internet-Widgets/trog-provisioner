@@ -120,7 +120,7 @@ sub current_release {
     return undef unless $res->{success};
 
     my ( $current, $dist );
-    foreach my $line ( split( "\n", $res->{content} ) ) {
+    foreach my $line ( split( m/\n/, $res->{content} ) ) {
         $dist    = $1    if $line =~ m/\A\s*Dist:\s*(\S+)/;
         $current = $dist if $line =~ m/\A\s*Supported:\s*1\s*\z/ && defined $dist;
     }

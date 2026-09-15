@@ -54,7 +54,7 @@ formats = #!/usr/bin/env perl
 # Performance
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
-[Performance::ProhibitRegexForSimpleSubstring]
+[ProhibitRegexForSimpleSubstring]
 [ProhibitUseLib]
 [ProhibitUsageSubs]
 [RequireQwForLiteralLists]

@@ -77,7 +77,7 @@ sub run_it {
         out    => $out // q{},
         err    => $err // q{},
         hosts  => File::Slurper::read_text("$dir/hosts"),
-        log    => [ split( "\n", eval { File::Slurper::read_text("$dir/log") } // q{} ) ],
+        log    => [ split( m/\n/, eval { File::Slurper::read_text("$dir/log") } // q{} ) ],
     };
 }
 
