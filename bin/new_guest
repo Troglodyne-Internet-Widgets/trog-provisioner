@@ -12,6 +12,7 @@ use re '/aasx';
 
 use FindBin::libs;
 
+use Data::Validate::Domain();
 use File::Basename();
 use File::Path qw{make_path};
 use List::Util qw{any};
@@ -135,7 +136,7 @@ sub main {
 
     $hostname //= default_hostname();
     die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
-      unless $hostname =~ m/\A[[:alnum:]]([[:alnum:]-]*[[:alnum:]])?(\.[[:alnum:]]([[:alnum:]-]*[[:alnum:]])?)+\z/i;
+      unless Data::Validate::Domain::is_domain( $hostname, { domain_disable_tld_validation => 1 } );
 
     my ( $config, @todo ) = build(
         $hostname,
