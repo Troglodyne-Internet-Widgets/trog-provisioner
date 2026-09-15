@@ -872,9 +872,7 @@ sub _plaintext_in {
 
 sub readable {
     my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close($fh)                 or die "Could not close $path: $!\n";
-    return 1;
+    return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether it can be read is the whole question; what reads it opens it for itself
 }
 
 =head1 SEE ALSO

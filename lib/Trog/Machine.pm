@@ -501,11 +501,7 @@ runs as, is C<scripts/restore_state>'s job and it is told the owner explicitly.
 
 sub file_exists {
     my ( $self, $path ) = @_;
-    if ( $self->is_local ) {
-        open( my $fh, '<', $path ) or return 0;
-        close($fh)                 or die "Could not close $path: $!";
-        return 1;
-    }
+    return -f $path                                  ? 1 : 0 if $self->is_local;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the question test -f asks of a remote machine
     return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
 }
 

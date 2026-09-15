@@ -1491,15 +1491,15 @@ sub pack_scripts {
     my @packed;
     foreach my $script ( Provisioner::Utils::files_in($from) ) {
 
-        # Opening it proves we may read it; files_in has already left out the
-        # directories.
-        open( my $probe, '<', "$from/$script" ) or next;
-        close($probe)                           or die "Could not close $from/$script: $!\n";
-        copy( "$from/$script", "$to/$script" )
-          or die "Could not copy $script into $to: $!\n";
+        # Copied, and given its mode, from the handle it was opened with, so both
+        # come from the file that was opened rather than whatever that path holds
+        # by then.  files_in has already left out the directories.
+        open( my $in, '<', "$from/$script" ) or next;
+        copy( $in, "$to/$script" )           or die "Could not copy $script into $to: $!\n";
         ## no critic (ProhibitLeadingZeros) -- the policy exempts a
         ## literal handed straight to chmod; this is a mask against a mode.
-        chmod( ( stat("$from/$script") )[2] & 07777, "$to/$script" );
+        chmod( ( stat $in )[2] & 07777, "$to/$script" );
+        close($in) or die "Could not close $from/$script: $!\n";
         push @packed, "scripts/$script";
     }
 

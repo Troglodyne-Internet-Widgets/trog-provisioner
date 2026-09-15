@@ -277,9 +277,7 @@ sub has {
     return 0 unless defined $name && $name =~ m/\A\w+\z/;
 
     my $path = $class->recipe_dir . "/$name.pm";
-    open( my $fh, '<', $path ) or return 0;
-    close($fh)                 or die "Could not close $path: $!\n";
-    return 1;
+    return -f $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one is the whole question; load() opens it for itself
 }
 
 =head2 load($name, %opts)

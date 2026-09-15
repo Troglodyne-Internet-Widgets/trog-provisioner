@@ -160,7 +160,7 @@ sub main {
     }
 
     $output //= Trog::Config->path("recipes.d/$hostname.yaml");
-    if ( !$force && readable($output) ) {
+    if ( !$force && -e $output ) {
         die "$output is already there.\n" . "Pick another --hostname, or pass --force if you meant to replace it.\n";
     }
 
@@ -180,13 +180,6 @@ sub unique {
     my (@in) = @_;
     my %seen;
     return grep { !$seen{$_}++ } @in;
-}
-
-sub readable {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close($fh)                 or die "Could not close $path: $!\n";
-    return 1;
 }
 
 # The _base block of recipes.yaml, which every domain gets merged on top of --

@@ -26,7 +26,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Provisioner::IPPool();
 use YAML::XS();
-use List::Util   qw{all any uniq};
+use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -186,8 +186,6 @@ sub _must_read {
     return $fh;
 }
 
-# The same question where the answer is allowed to be no.
-
 =head2 place_guest_secrets($guest, $domain)
 
 Put the files a recipe reads but must never generate onto the guest, out of the
@@ -221,9 +219,11 @@ sub place_guest_secrets {
     # The same domain directory bin/destroy purges: whatever hypervisor this run
     # is working with says where it is.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
-    return unless _readable($manifest);
+    open( my $fh, '<:raw', $manifest ) or return;
+    my $yaml = do { local $/; <$fh> };
+    close($fh) or die "Could not close $manifest: $!\n";
 
-    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
+    my $wanted = YAML::XS::Load($yaml);
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
@@ -346,13 +346,6 @@ sub _public_half {
     # this, what lands in somebody's authorized_keys is an anonymous line that
     # nobody reading that file can attribute or safely remove by hand.
     return "$pubkey trog-provisioner runner $domain";
-}
-
-sub _readable {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close($fh)                 or die "Could not close $path: $!\n";
-    return 1;
 }
 
 sub main {
@@ -494,7 +487,7 @@ sub main {
     $guest->wait_for_ssh();
 
     my $map = "$domain_dir/$domain/devices.map";
-    if ( _readable($map) ) {
+    if ( -f $map ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one to send; put_file dies if it has gone since
         print "Syncing disk map\n";
         $guest->put_file( $map, '/root/devices.map', sudo => 1 )
           or die "could not sync devices map!";
@@ -537,7 +530,7 @@ sub generate_config {
     # No site data, nothing to generate: somebody is provisioning from a domain
     # directory they wrote by hand, which is a supported thing to do.
     my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
-    unless ( _readable($recipes) || -d $recipe_dir ) {
+    unless ( -f $recipes || -d $recipe_dir ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is site data at all; the generator opens what there is
         print "No recipes at $recipes, building from what is already in $dir/$domain\n";
         return 0;
     }
@@ -816,9 +809,13 @@ sub read_seed {
     my $dir    = Trog::HV->new()->domain_dir . "/$domain";
     my @files  = qw{user-data meta-data network-config};
 
-    if ( all { _readable("$dir/$_") } @files ) {
-        return map { $_ => File::Slurper::read_text("$dir/$_") } @files;
+    my %seed;
+    foreach my $file (@files) {
+        open( my $fh, '<:encoding(UTF-8)', "$dir/$file" ) or last;
+        $seed{$file} = do { local $/; <$fh> };
+        close($fh) or die "Could not close $dir/$file: $!\n";
     }
+    return %seed if keys %seed == @files;
 
     print "No cloud-init configuration beside $domain; building it from provision.conf\n";
     distro_recipe($config)->generate_files(
