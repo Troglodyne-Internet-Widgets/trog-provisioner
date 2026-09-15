@@ -592,13 +592,13 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
     $mock->redefine( new      => sub { bless {}, shift } );
     $mock->redefine( capture2 => sub { $? = 1 << 8; return ( '', "sudo: a password is required\n" ) } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
 
-    my $tty = Test::MockModule->new('Trog::Machine');
-    $tty->redefine( _have_terminal => sub { 0 } );
+    local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
     my $err = exception { $hv->run_sudo(qw{systemctl restart rsyslog}) };
-    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]there[ ]is[ ]no[ ]terminal/, 'says what happened' );
-    like( $err, qr/NOPASSWD/,                                                 'and what to put in sudoers' );
-    like( $err, qr/\broot\b/,                                                 'for the right user' );
+    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]it[ ]could[ ]not[ ]be[ ]asked[ ]for/, 'says what happened' );           ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr{Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal:[ ]/bogus/tty},       'and why it could not ask' );
+    like( $err, qr/NOPASSWD/,                                                          'and what to put in sudoers' );
+    like( $err, qr/\broot\b/,                                                          'for the right user' );
 };
 
 subtest 'the sudo password is asked for the same way every other one is' => sub {
@@ -621,9 +621,6 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
             return ( '', '' );
         }
     );
-
-    my $tty = Test::MockModule->new('Trog::Machine');
-    $tty->redefine( _have_terminal => sub { 1 } );
 
     # One way of asking, in Trog::Credentials, rather than a second one here
     # with Term::ReadKey doing its own echo suppression.

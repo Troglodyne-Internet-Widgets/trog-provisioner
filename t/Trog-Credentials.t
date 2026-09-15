@@ -154,10 +154,10 @@ subtest 'sudo on a machine nobody is watching' => sub {
     require Trog::HV;
 
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( describe       => sub { 'hv.example.test' } );
-    $machine->redefine( ssh_user       => sub { 'ubuntu' } );
-    $machine->redefine( ssh_target     => sub { 'ubuntu@hv.example.test' } );
-    $machine->redefine( _have_terminal => sub { 0 } );
+    $machine->redefine( describe   => sub { 'hv.example.test' } );
+    $machine->redefine( ssh_user   => sub { 'ubuntu' } );
+    $machine->redefine( ssh_target => sub { 'ubuntu@hv.example.test' } );
+    local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
     Trog::HV->forget();
     my $hv = Trog::HV->new( uri => 'qemu+ssh://ubuntu@hv.example.test/system' );
@@ -175,9 +175,9 @@ subtest 'sudo on a machine nobody is watching' => sub {
     Trog::Machine::forget_sudo_passwords();
 
     my $why = exception { Trog::Machine::_ask_for_sudo_password($hv) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    like( $why, qr/no[ ]terminal[ ]to[ ]ask[ ]at/, 'with nothing handed in it refuses' );
-    like( $why, qr/NOPASSWD/,                      'saying how to not need one' );
-    like( $why, qr/Trog::Credentials/,             'and how to hand one in' );
+    like( $why, qr/Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal/, 'with nothing handed in and no terminal it refuses' );
+    like( $why, qr/NOPASSWD/,                                      'saying how to not need one' );
+    like( $why, qr/Trog::Credentials/,                             'and how to hand one in' );
 };
 
 subtest 'remember keeps what was typed for the rest of the run' => sub {

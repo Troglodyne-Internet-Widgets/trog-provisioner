@@ -328,9 +328,6 @@ sub _sudo_key ($self) { return $self->ssh_target // 'localhost' }
 
 sub _remember ( $self, $password ) { return $SUDO_PASSWORD{ $self->_sudo_key } = $password }
 
-# A seam, so the no-terminal path is testable somewhere that has one.
-sub _have_terminal { return -t STDIN ? 1 : 0 }
-
 =head2 forget_sudo_passwords
 
 Drop every remembered password.  Only tests should need this.
@@ -343,22 +340,26 @@ sub _ask_for_sudo_password {
     my ($self) = @_;
 
     # Handed to us up front, by whatever is driving a run that has nobody to ask.
-    # Asked for before the terminal test rather than after it, because the whole
-    # point is that there is no terminal.
     return $self->_remember( Trog::Credentials->get('sudo') ) if Trog::Credentials->have('sudo');
 
-    die 'sudo on '
-      . $self->describe
-      . " wants a password, and there is no terminal to ask at.\n"
-      . 'Either run this where it can ask, give '
-      . ( $self->ssh_user // 'the login user' )
-      . " passwordless sudo there:\n" . '    '
-      . ( $self->ssh_user // 'youruser' )
-      . " ALL=(ALL) NOPASSWD: ALL\n"
-      . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n"
-      unless $self->_have_terminal();
-
-    my $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo' );
+    # At the terminal rather than on standard input, which cron and redirected
+    # runs have pointed somewhere nobody is typing.
+    my $password;
+    eval {
+        $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo', terminal => 1 );
+        1;
+    } or do {
+        die 'sudo on '
+          . $self->describe
+          . " wants a password, and it could not be asked for:\n"
+          . $@
+          . 'Either run this where it can ask, give '
+          . ( $self->ssh_user // 'the login user' )
+          . " passwordless sudo there:\n" . '    '
+          . ( $self->ssh_user // 'youruser' )
+          . " ALL=(ALL) NOPASSWD: ALL\n"
+          . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
+    };
 
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 
