@@ -153,11 +153,12 @@ subtest 'what each recipe depending on it hands over, it takes, and the merge ke
     }
 
     my @installs = installs( rendered(%$merged) );
-    is_deeply( $installs[0], [ 'installdeps', "$INSTALL/$DOMAIN/tCMS" ], 'tcms: what its checkout needs, first, as it was merged first' );
+    is_deeply( $installs[0], [qw{pin libvirt Sys::Virt}],                'tcms: Sys::Virt pinned to the guest libvirt, first, as it was merged first' );
+    is_deeply( $installs[1], [ 'installdeps', "$INSTALL/$DOMAIN/tCMS" ], 'tcms: and then what its checkout needs, which would otherwise take the newest Sys::Virt' );
     ok( ( grep { $_->[0] eq 'installdeps' && $_->[1] eq "$INSTALL/$DOMAIN" } @installs ), 'tpsgi: what the domain checkout needs' );
     ok( ( grep { $_->[-1] eq 'Starman' } @installs ),                                     'tpsgi: and the starman its service is started with' );
-    ok( ( grep { $_->[0] eq 'pin' && $_->[-1] eq 'Sys::Virt' } @installs ),               'trogrunner: Sys::Virt, pinned to what the guest has' );
-    is( scalar @installs, 5, 'all of them, the merge dropping none' );
+    is( ( scalar grep { $_->[0] eq 'pin' && $_->[-1] eq 'Sys::Virt' } @installs ), 2, 'trogrunner: Sys::Virt, pinned to what the guest has, as well as tcms' );
+    is( scalar @installs,                                                          6, 'all of them, the merge dropping none' );
 };
 
 subtest 'the guest has what this recipe installs into the perl needs to build' => sub {
