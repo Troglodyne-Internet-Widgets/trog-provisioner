@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -51,7 +51,7 @@ subtest 'a first build has nothing to restore' => sub {
     my $r = restore( "$tmp/never-fetched", "$tmp/destination" );
     is( $r->{rc}, 0, 'not an error' );
     ok( !-e "$tmp/destination", 'and it did not invent a destination' );
-    like( $r->{said}, qr/nothing salvaged/, 'and says which of the three it was' );
+    like( $r->{said}, qr/nothing[ ]salvaged/, 'and says which of the three it was' );
 };
 
 subtest 'an empty salvage is a fetch that read nothing, and is not restored' => sub {
@@ -113,7 +113,7 @@ subtest 'a destination keeps the mode the recipe made it with' => sub {
     # salvage arrives out of the domain directory the data target owns.  A mail
     # store the recipe had just made 2750 came back 0755, taking with it the
     # setgid bit that is what lets the next fetch read the maildirs at all.
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     chmod 02750, "$tmp/destination";
     chmod 00700, "$tmp/salvaged";
 
@@ -127,7 +127,7 @@ subtest 'a mode it was asked for still wins over the one it found' => sub {
     my $tmp = tempdir( CLEANUP => 1 );
     tree( "$tmp/salvaged", 'db' => "rows\n" );
     make_path("$tmp/destination");
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     chmod 02750, "$tmp/destination";
 
     # Preserving what was there is the default, not an override of the caller.
@@ -147,14 +147,14 @@ subtest 'a single file, and the ownership and mode it is asked for' => sub {
     my $r = restore( "$tmp/salvaged", "$tmp/deeper/destination", '', '0600' );
     is( $r->{rc},                             0,               'restored' );
     is( read_text("$tmp/deeper/destination"), "signing key\n", 'through a directory that did not exist yet' );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( ( stat("$tmp/deeper/destination") )[2] & 07777, 0600, 'with the mode it was given' );
 };
 
 subtest 'it says what it wants when it is called wrong' => sub {
     my $r = restore();
     isnt( $r->{rc}, 0, 'no arguments is an error' );
-    like( $r->{said}, qr/usage: restore_state/, 'and it says how it is called' );
+    like( $r->{said}, qr/usage:[ ]restore_state/, 'and it says how it is called' );
 };
 
 done_testing();

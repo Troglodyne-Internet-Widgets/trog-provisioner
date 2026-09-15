@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -31,19 +31,19 @@ use_ok('Trog::Machine') or BAIL_OUT('Trog::Machine does not load; the install is
 
 # A machine reached over the network, which none of these ever open a
 # connection to: everything asserted on here is decided before rsync runs.
-sub remote {
+sub remote (%overrides) {
     return Trog::Machine->new(
         host     => 'hv.test',
         user     => 'doge',
         port     => 2222,
         key_path => '/bogus/domains/vm.test/key.rsa',
-        @_,
+        %overrides,
     );
 }
 
 # The same object, but the machine is us.  rsync still runs; ssh does not.
-sub here {
-    my $machine = Trog::Machine->new(@_);
+sub here (@args) {
+    my $machine = Trog::Machine->new(@args);
     my $mock    = Test::MockModule->new('Trog::Machine');
     $mock->redefine( is_local => sub { 1 } );
     return ( $machine, $mock );
@@ -52,8 +52,8 @@ sub here {
 subtest 'the ssh rsync is told to use' => sub {
     my $rsh = remote()->_rsh;
 
-    like( $rsh, qr{\A ssh \s -p \s 2222 \b}x,                  'the port, which rsync cannot get from anywhere else' );
-    like( $rsh, qr{-i \s /bogus/domains/vm[.]test/key[.]rsa}x, 'and the key, for the same reason' );
+    like( $rsh, qr{\A ssh \s -p \s 2222 \b},                  'the port, which rsync cannot get from anywhere else' );
+    like( $rsh, qr{-i \s /bogus/domains/vm[.]test/key[.]rsa}, 'and the key, for the same reason' );
 
     # The same options Net::OpenSSH::More puts on its own master.  A guest
     # rebuilt an hour ago presents a host key nothing has seen before, and
@@ -196,7 +196,7 @@ subtest 'rsync moves what changed and nothing else' => sub {
     # handle in its place is not something it can hand back.
     my ($said) = capture_stdout { $machine->get_dir( "$dir/src", "$dir/dst", exclude => ['secrets.key'] ) };
 
-    like( $said, qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}x, 'the second fetch moves nothing, and says so' );
+    like( $said, qr{Total [ ] transferred [ ] file [ ] size: \s* 0\b}, 'the second fetch moves nothing, and says so' );
 };
 
 subtest 'a transfer that fails says which one, and does not pretend' => sub {
@@ -249,12 +249,39 @@ subtest 'a file read off a remote machine comes back whole' => sub {
         $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read_text reads it, and a fake that does not set it tests nothing.
         if (wantarray) {
             $self->{scalar_context} = 0;
-            return map { "$_\n" } split( "\n", $self->{content} );
+            return map { "$_\n" } split( m/\n/, $self->{content} );
         }
         $self->{scalar_context} = 1;
         return $self->{content};
     }
 }
+
+subtest 'what sudo says when it wants a password it cannot ask for' => sub {
+    my $wants = sub { Trog::Machine::_wants_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+
+    is( $wants->("sudo: a password is required\n"),                                                1, 'sudo -n with no passwordless sudo' );
+    is( $wants->("sudo: password is required\n"),                                                  1, 'and without the article' );
+    is( $wants->("sudo: a terminal is required to read the password; either use the -S option\n"), 1, 'no terminal to read one at' );
+    is( $wants->("sudo: no password was provided\n"),                                              1, 'and -S given nothing' );
+
+    is( $wants->("sudo: 1 incorrect password attempt\n"), 0, 'a wrong password is not a missing one' );
+    is( $wants->("a password is required\n"),             0, 'and nothing sudo did not say' );
+    is( $wants->(q{}),                                    0, 'nothing said is nothing wanted' );
+    is( $wants->(undef),                                  0, 'and neither is nothing captured' );
+};
+
+subtest 'what sudo says when the password it was given is wrong' => sub {
+    my $wrong = sub { Trog::Machine::_wrong_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+
+    is( $wrong->("sudo: 1 incorrect password attempt\n"),  1, 'one bad attempt, as sudo counts them' );
+    is( $wrong->("sudo: 3 incorrect password attempts\n"), 1, 'and several' );
+    is( $wrong->("Sorry, try again.\n"),                   1, 'the line it prints between attempts' );
+
+    is( $wrong->("sudo: a password is required\n"),     0, 'wanting a password is not having been given a wrong one' );
+    is( $wrong->("sudo: incorrect password attempt\n"), 0, 'nor is a count that is not there' );
+    is( $wrong->(q{}),                                  0, 'nothing said is nothing wrong' );
+    is( $wrong->(undef),                                0, 'and neither is nothing captured' );
+};
 
 Test::NoWarnings::had_no_warnings();
 done_testing();

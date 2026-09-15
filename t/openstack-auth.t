@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -25,7 +25,7 @@ use POSIX qw{strftime};
 use FindBin::libs;
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::OpenStack::Auth();
 
 # Stands in for OpenStack::Client::Response.  Only the two things the code under
@@ -38,8 +38,8 @@ use Trog::OpenStack::Auth();
         my ( $class, %args ) = @_;
         return bless {%args}, $class;
     }
-    sub decode_json { return $_[0]->{body} }
-    sub header      { return $_[0]->{headers}{ $_[1] } }
+    sub decode_json ($self)          { return $self->{body} }
+    sub header      ( $self, $name ) { return $self->{headers}{$name} }
 }
 
 # An ISO 8601 stamp $offset seconds from now, spelled the way Keystone spells
@@ -126,7 +126,7 @@ subtest 'the request is an application credential request' => sub {
 
     is $auth->token,  'a-token', 'the token comes off the response header';
     is $auth->region, undef,     'no region was asked for';
-    is_deeply [ $auth->services ], [ 'compute', 'identity' ], 'the catalogue is readable through the parent';
+    is_deeply [ $auth->services ], [ 'compute', 'identity' ], 'the catalog is readable through the parent';
 };
 
 subtest 'the endpoint gets the identity version it needs' => sub {
@@ -152,7 +152,7 @@ subtest 'a credential we do not have is not a request we send' => sub {
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', application_credential_id => 'x', cache_dir => $dir ) },
       qr/application_credential_secret/, 'no secret';
     like exception { Trog::OpenStack::Auth->new( '', @CREDS, cache_dir => $dir ) },
-      qr/No Keystone endpoint/, 'no endpoint';
+      qr/No[ ]Keystone[ ]endpoint/, 'no endpoint';
 
     is scalar @REQUESTS, 0, 'and none of them tried the network';
 };
@@ -163,14 +163,14 @@ subtest 'a response that is missing the point is an error' => sub {
         return Test::FakeResponse->new( headers => {}, body => { token => { catalog => catalog() } } );
     };
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', @CREDS, cache_dir => $dir ) },
-      qr/returned no token/, 'no token header';
+      qr/returned[ ]no[ ]token/, 'no token header';
 
     $dir      = fresh();
     $RESPONSE = sub {
         return Test::FakeResponse->new( headers => { 'X-Subject-Token' => 't' }, body => { token => { catalog => [] } } );
     };
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', @CREDS, cache_dir => $dir ) },
-      qr/no service catalog/, 'an empty catalogue';
+      qr/no[ ]service[ ]catalog/, 'an empty catalog';
 
     # Whatever went wrong, the message has to name the endpoint -- a bare "401
     # Unauthorized" does not distinguish a revoked credential from the wrong
@@ -191,7 +191,7 @@ subtest 'the second command does not authenticate again' => sub {
     is scalar @REQUESTS, 1, 'the second one did not';
 
     is $second->token, $first->token, 'and it has the same token';
-    is_deeply [ $second->services ], [ $first->services ], 'and the same catalogue';
+    is_deeply [ $second->services ], [ $first->services ], 'and the same catalog';
     is $second->{response}, undef, 'without an HTTP response behind it';
 
     # The whole reason token() is overridden: the parent reads it off a response
@@ -205,7 +205,7 @@ subtest 'the cached token is not left readable' => sub {
     my $auth = Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
 
     my $path = $auth->cache_path;
-    ok -e $path, 'the cache got written' or return;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    ok -e $path, 'the cache got written' or return;
 
     is sprintf( '%04o', ( stat $path )[2] & 0o7777 ), '0600', 'the file holds a bearer token, so 0600';
     is sprintf( '%04o', ( stat $dir )[2] & 0o7777 ),  '0700', 'and the directory it is in';
@@ -355,7 +355,7 @@ YAML
 
     my @looked_up;
     my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( read => sub { my ( $class, $file, $passphrase, %needed ) = @_; push @looked_up, [ $file, $passphrase, \%needed ]; return ( secret => 'secret-from-kdbx' ) } );
+    $secrets->redefine( lookup => sub { my ( $class, $file, $passphrase, %needed ) = @_; push @looked_up, [ $file, $passphrase, \%needed ]; return ( secret => 'secret-from-kdbx' ) } );
     my $credentials = Test::MockModule->new('Trog::Credentials');
     $credentials->redefine( prompt => sub { 'the-passphrase' } );
 
@@ -377,7 +377,7 @@ YAML
     # But a reference that cannot name anything is wrong on every run, not just
     # on the one whose token has expired.
     $clouds->('secret:openstack/credential');
-    like exception { Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir ) }, qr/Malformed secret/,
+    like exception { Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir ) }, qr/Malformed[ ]secret/,
       'a malformed reference is an error even with a token cached';
 };
 

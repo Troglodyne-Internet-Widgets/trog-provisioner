@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -70,7 +70,7 @@ renders as any other recipe does.  Both are called from C<bin/provision>, which
 is the program that has a hypervisor in hand.
 
 The seam is deliberate.  Everything libvirt-shaped is in this recipe and its
-template, so a second virtualisation platform is another recipe and another
+template, so a second virtualization platform is another recipe and another
 template rather than a rewrite of C<bin/provision>.
 
 =cut
@@ -105,9 +105,8 @@ can depend on what libvirt and qemu will take.
 
 sub args {
     return (
-        type     => 'object',
-        required => ['image'],
-        ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+        type       => 'object',
+        required   => ['image'],
         properties => {
             image => {
                 type        => 'string',
@@ -459,7 +458,6 @@ sub _blockio {
     my ( $self, $opts ) = @_;
     return undef unless $self->hv->supports('blockio');
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return {
         logical  => _asked( $opts, 'disk_logical_block_size' )  // 512,
         physical => _asked( $opts, 'disk_physical_block_size' ) // 4096,
@@ -487,7 +485,7 @@ sub _iotune {
     delete @limit{ grep { !defined $limit{$_} } keys %limit };
     return undef unless %limit;
 
-    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honour them.\n"
+    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honor them.\n"
       unless $hv->supports('iotune');
 
     # libvirt's own rule: a total is a total, and may not be given beside the
@@ -522,8 +520,8 @@ sub _devices {
         my $order    = 2;
         my $index    = 0;
 
-        foreach my $diskspec ( grep { $_ } split( "\n", File::Slurper::read_text($spec_file) ) ) {
-            my ( $pool, $disk ) = split( '=', $diskspec );
+        foreach my $diskspec ( grep { $_ } split( m/\n/, File::Slurper::read_text($spec_file) ) ) {
+            my ( $pool, $disk ) = split( m/=/, $diskspec );
             next if $pool eq 'fuse';
 
             $order++;

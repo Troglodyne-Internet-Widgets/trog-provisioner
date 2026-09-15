@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::DistroRecipe};
 
@@ -120,7 +120,7 @@ sub current_release {
     return undef unless $res->{success};
 
     my ( $current, $dist );
-    foreach my $line ( split( "\n", $res->{content} ) ) {
+    foreach my $line ( split( m/\n/, $res->{content} ) ) {
         $dist    = $1    if $line =~ m/\A\s*Dist:\s*(\S+)/;
         $current = $dist if $line =~ m/\A\s*Supported:\s*1\s*\z/ && defined $dist;
     }
@@ -183,7 +183,7 @@ sub formatters {
 # guest sits on systemd-networkd-wait-online forever without ever saying why.
 #
 # Quoting it costs nothing for the parsers that were already right.
-my $SEXAGESIMAL = qr/\A[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+(?:[.][0-9_]*)?\z/;
+my $SEXAGESIMAL = qr/\A[-+]?\d[\d_]*(?::[0-5]?\d)+(?:[.][\d_]*)?\z/;
 
 # YAML::XS always leads with a document marker and always ends with a newline;
 # neither is wanted where this is being pasted into a document that already has
@@ -204,7 +204,7 @@ sub _indent {
     return $text unless $indent;
 
     my $pad = q{ } x $indent;
-    $text =~ s/^(?=.)/$pad/mg;
+    $text =~ s/^(?=\N)/$pad/mg;
     return $text;
 }
 
@@ -380,7 +380,6 @@ sub guest_keypair {
     foreach my $half ( $path, "$path.pub" ) {
         ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
         die "No $half was made for $opts{domain}\n" unless -f $half;
-        ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
         chmod 0600, $half;
     }
 

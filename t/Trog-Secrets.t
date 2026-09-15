@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -12,13 +12,14 @@ t/Trog-Secrets.t - finding the notes a config leaves, and putting the answers ba
 =cut
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
 
 use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Trog::Secrets();
 
@@ -29,8 +30,7 @@ subtest 'a reference names a group, an entry and a field' => sub {
     );
 
     foreach my $bad ( qw{nope/entry/password secret:group/entry secret: secret:a//c}, undef ) {
-        eval { Trog::Secrets->parse($bad) };
-        like( $@, qr/Malformed secret/, "'" . ( $bad // 'undef' ) . "' is refused" );
+        like( exception { Trog::Secrets->parse($bad) }, qr/Malformed[ ]secret/, "'" . ( $bad // 'undef' ) . "' is refused" );
     }
 };
 
@@ -61,10 +61,10 @@ subtest 'needed() finds them wherever they are' => sub {
     is_deeply( { Trog::Secrets->needed(undef) }, {}, 'nor in one that is not there' );
 };
 
-subtest 'write() then read() is a round trip' => sub {
+subtest 'create() then lookup() is a round trip' => sub {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
 
-    Trog::Secrets->write(
+    Trog::Secrets->create(
         $file, 'hunter2',
         'secret:a/b/password' => 'the password',
         'secret:a/b/username' => 'the user',
@@ -72,7 +72,7 @@ subtest 'write() then read() is a round trip' => sub {
     );
     ok( -f $file, 'a database got written' );    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
 
-    my %values = Trog::Secrets->read(
+    my %values = Trog::Secrets->lookup(
         $file, 'hunter2',
         'where/it/was' => 'secret:a/b/password',
         'and/here'     => 'secret:a/b/username',
@@ -94,7 +94,7 @@ subtest 'replace() sets what it names and leaves the rest of the store alone' =>
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     my $pass = 'throwaway';
 
-    Trog::Secrets->write(
+    Trog::Secrets->create(
         $file, $pass,
         'secret:registrar/easydns/password' => 'REGISTRAR',
         'secret:guests/vm.test/password'    => 'the old key',
@@ -102,44 +102,37 @@ subtest 'replace() sets what it names and leaves the rest of the store alone' =>
 
     ok( Trog::Secrets->replace( $file, $pass, 'secret:guests/vm.test/password' => 'the new key' ), 'it replaces' );
 
-    my %after = Trog::Secrets->read(
+    my %after = Trog::Secrets->lookup(
         $file, $pass,
         key       => 'secret:guests/vm.test/password',
         registrar => 'secret:registrar/easydns/password',
     );
     is( $after{key}, 'the new key', 'the field it named holds the new value' );
 
-    # The whole reason this exists rather than write().  write() builds a fresh
-    # database out of what it is handed, so against a real store it would leave
-    # it holding one entry and nothing else.
+    # The whole reason this exists rather than create().  create() builds a
+    # fresh database out of what it is handed, so against a real store it would
+    # leave it holding one entry and nothing else.
     is( $after{registrar}, 'REGISTRAR', 'and every other secret in the database survived' );
 
     # A reference with nothing behind it yet is added rather than refused: a
     # guest being sealed for the first time has no entry to overwrite.
     ok( Trog::Secrets->replace( $file, $pass, 'secret:guests/new.test/password' => 'minted' ), 'a new reference is added' );
-    my %fresh = Trog::Secrets->read( $file, $pass, k => 'secret:guests/new.test/password' );
+    my %fresh = Trog::Secrets->lookup( $file, $pass, k => 'secret:guests/new.test/password' );
     is( $fresh{k}, 'minted', 'and comes back out' );
 
     is( Trog::Secrets->replace( $file, $pass ), 0, 'nothing asked for is nothing done' );
 };
 
-subtest 'read() says which part it could not find' => sub {
+subtest 'lookup() says which part it could not find' => sub {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
-    Trog::Secrets->write( $file, 'hunter2', 'secret:a/b/password' => 'the password' );
+    Trog::Secrets->create( $file, 'hunter2', 'secret:a/b/password' => 'the password' );
 
     # A reference that resolved to nothing would otherwise arrive on a guest as
     # an empty password, which is worse than not provisioning.
-    eval { Trog::Secrets->read( $file, 'hunter2', p => 'secret:nope/b/password' ) };
-    like( $@, qr/No group 'nope'/, 'a group that is not there' );
-
-    eval { Trog::Secrets->read( $file, 'hunter2', p => 'secret:a/nope/password' ) };
-    like( $@, qr/No entry 'nope' in group 'a'/, 'an entry that is not there' );
-
-    eval { Trog::Secrets->read( $file, 'hunter2', p => 'secret:a/b/username' ) };
-    like( $@, qr/has no username/, 'a field that was never set' );
-
-    eval { Trog::Secrets->read( $file, 'wrong password', p => 'secret:a/b/password' ) };
-    isnt( $@, '', 'and a password that does not open it' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:nope/b/password' ) }, qr/No[ ]group[ ]'nope'/,                    'a group that is not there' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/nope/password' ) }, qr/No[ ]entry[ ]'nope'[ ]in[ ]group[ ]'a'/, 'an entry that is not there' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/b/username' ) },    qr/has[ ]no[ ]username/,                    'a field that was never set' );
+    isnt( exception { Trog::Secrets->lookup( $file, 'wrong password', p => 'secret:a/b/password' ) }, undef, 'and a password that does not open it' );
 };
 
 subtest 'apply() puts them back where the notes were' => sub {
@@ -156,7 +149,7 @@ subtest 'apply() puts them back where the notes were' => sub {
 
     is( $config->{_base}{_global}{registrar}{key},  'resolved',      'into a nested hash' );
     is( $config->{list}[1]{deep},                   'also resolved', 'and through an array index' );
-    is( $config->{_base}{_global}{registrar}{type}, 'easydns',       'leaving its neighbours alone' );
+    is( $config->{_base}{_global}{registrar}{type}, 'easydns',       'leaving its neighbors alone' );
 };
 
 our $ran = 0;
@@ -172,9 +165,9 @@ subtest 'apply() walks the path rather than eval-ing it' => sub {
     # otherwise end whatever delimiter this was written with.
     my $evil = join q{}, "a'", '};', ' main::pwned(); ', '$x->{', "'b";
 
-    local $ran = 0;
+    $ran = 0;
     my $config = { a => { b => 'note' } };
-    eval { Trog::Secrets->apply( $config, "a/$evil" => 'value' ) };
+    is( exception { Trog::Secrets->apply( $config, "a/$evil" => 'value' ) }, undef, 'applying it does not die' );
 
     is( $ran, 0, 'nothing in the path was executed' );
 
@@ -184,18 +177,17 @@ subtest 'apply() walks the path rather than eval-ing it' => sub {
 };
 
 subtest 'apply() refuses a path that leads nowhere' => sub {
-    eval { Trog::Secrets->apply( { a => 'not a ref' }, 'a/b/c' => 'value' ) };
-    like( $@, qr/Could not follow 'a\/b\/c'/, 'rather than autovivifying its way through' );
+    like( exception { Trog::Secrets->apply( { a => 'not a ref' }, 'a/b/c' => 'value' ) }, qr/Could[ ]not[ ]follow[ ]'a\/b\/c'/, 'rather than autovivifying its way through' );
 };
 
 subtest 'the whole cycle, as new_config runs it' => sub {
     my $file   = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     my $config = { recipe => { key => 'secret:g/e/password', other => 'left alone' } };
 
-    Trog::Secrets->write( $file, 'pw', 'secret:g/e/password' => 'the real thing' );
+    Trog::Secrets->create( $file, 'pw', 'secret:g/e/password' => 'the real thing' );
 
     my %needed = Trog::Secrets->needed($config);
-    my %values = Trog::Secrets->read( $file, 'pw', %needed );
+    my %values = Trog::Secrets->lookup( $file, 'pw', %needed );
     Trog::Secrets->apply( $config, %values );
 
     is( $config->{recipe}{key},   'the real thing', 'the note became the password' );
@@ -207,7 +199,7 @@ subtest 'remember makes a secret once and keeps it' => sub {
     my $file = "$dir/secrets.kdbx";
     my $pass = 'throwaway';
 
-    Trog::Secrets->write( $file, $pass, 'secret:existing/entry/password' => 'written by somebody' );
+    Trog::Secrets->create( $file, $pass, 'secret:existing/entry/password' => 'written by somebody' );
 
     my $calls = 0;
     my $make  = sub { $calls++; return "made-$calls" };
@@ -225,13 +217,16 @@ subtest 'remember makes a secret once and keeps it' => sub {
     is( $kept{'secret:existing/entry/password'}, 'written by somebody', 'what an operator wrote down is answered, never replaced' );
 
     # Reading it the ordinary way has to find what remember left.
-    my %read = Trog::Secrets->read( $file, $pass, 'somewhere' => 'secret:matrix/vm.test-signing-key/password' );
-    is( $read{somewhere}, 'made-1', 'and read() finds it like any other entry' );
+    my %read = Trog::Secrets->lookup( $file, $pass, 'somewhere' => 'secret:matrix/vm.test-signing-key/password' );
+    is( $read{somewhere}, 'made-1', 'and lookup() finds it like any other entry' );
 
-    eval {
-        Trog::Secrets->remember( $file, $pass, 'secret:empty/handed/password' => sub { '' } );
-    };
-    like( $@, qr/produced nothing/, 'a generator that makes nothing is an error rather than an empty secret' );
+    like(
+        exception {
+            Trog::Secrets->remember( $file, $pass, 'secret:empty/handed/password' => sub { '' } )
+        },
+        qr/produced[ ]nothing/,
+        'a generator that makes nothing is an error rather than an empty secret'
+    );
 
     is_deeply( { Trog::Secrets->remember( $file, $pass ) }, {}, 'nothing asked for is nothing done' );
 
@@ -239,11 +234,11 @@ subtest 'remember makes a secret once and keeps it' => sub {
     # reference naming another field would store nothing, be answered from
     # memory this run, and be made afresh on every run after -- which is the one
     # failure this whole mechanism exists to prevent.
-    eval {
-        Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test/signing_key' => sub { 'not a field it keeps' } );
+    my $err = exception {
+        Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test/signing_key' => sub { 'not a field it keeps' } )
     };
-    like( $@, qr/did not keep/,         'a field the database drops is an error at once' );
-    like( $@, qr/password or username/, 'and it says which fields there are' );
+    like( $err, qr/did[ ]not[ ]keep/,         'a field the database drops is an error at once' );
+    like( $err, qr/password[ ]or[ ]username/, 'and it says which fields there are' );
 };
 
 done_testing();

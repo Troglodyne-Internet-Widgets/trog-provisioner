@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -25,7 +25,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::garage();
@@ -85,7 +85,7 @@ subtest 'latest_version: the fallback, when GitHub does not answer' => sub {
     local $SIG{__WARN__} = sub { push @warned, @_ };
 
     is( $GARAGE->latest_version, $Provisioner::Recipe::garage::FALLBACK_VERSION, 'a version that is published' );
-    like( "@warned", qr/falling back to \Q$Provisioner::Recipe::garage::FALLBACK_VERSION\E/, 'and says so, since an older garage is otherwise silent' );
+    like( "@warned", qr/falling[ ]back[ ]to[ ]\Q$Provisioner::Recipe::garage::FALLBACK_VERSION\E/, 'and says so, since an older garage is otherwise silent' );
 };
 
 subtest 'enrich: latest is looked up once, and a version named never is' => sub {

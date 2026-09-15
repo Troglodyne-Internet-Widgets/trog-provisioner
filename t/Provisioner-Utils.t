@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -77,9 +77,7 @@ subtest 'write_pem puts a PEM on disk byte for byte' => sub {
     my $dir  = tempdir( CLEANUP => 1 );
     my $path = "$dir/thing.crt";
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     Provisioner::Utils::write_pem( $path, $CERT, 0644 );
-    ## use critic
 
     is( File::Slurper::read_binary($path), $CERT, 'the PEM, unchanged' );
 };
@@ -87,10 +85,10 @@ subtest 'write_pem puts a PEM on disk byte for byte' => sub {
 subtest 'and with the mode it was asked for, which is the whole point for a key' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( "$dir/key.pem",  "key\n",  0600 );
     Provisioner::Utils::write_pem( "$dir/cert.pem", "cert\n", 0644 );
 
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     is( sprintf( '%04o', ( stat "$dir/key.pem" )[2] & 07777 ),  '0600', 'a key is readable by its owner alone' );
     is( sprintf( '%04o', ( stat "$dir/cert.pem" )[2] & 07777 ), '0644', 'and a certificate, being public, by anybody' );
     ## use critic
@@ -100,10 +98,10 @@ subtest 'writing over one that is already there replaces both' => sub {
     my $dir  = tempdir( CLEANUP => 1 );
     my $path = "$dir/rolled.pem";
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( $path, "old\n", 0644 );
     Provisioner::Utils::write_pem( $path, "new\n", 0600 );
 
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     is( File::Slurper::read_binary($path),            "new\n", 'the content is the new one' );
     is( sprintf( '%04o', ( stat $path )[2] & 07777 ), '0600',  'and the mode is not the old one' );
     ## use critic
@@ -114,9 +112,7 @@ subtest 'somewhere it cannot write is fatal, not silent' => sub {
 
     # A key that was not written is a service that will not start.  Whoever is
     # reading the build output should be told, rather than finding out later.
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     ok( exception { Provisioner::Utils::write_pem( "$dir/no/such/dir/key.pem", "key\n", 0600 ) }, 'a directory that does not exist' );
-    ## use critic
 };
 
 Test::NoWarnings::had_no_warnings();

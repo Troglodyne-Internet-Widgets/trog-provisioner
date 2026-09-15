@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::Machine';
 
 use File::Slurper();
@@ -95,7 +95,7 @@ C<user@host>, or the name and address together when we have both.
 
 =cut
 
-sub name { return $_[0]->{name} // $_[0]->ssh_host }
+sub name ($self) { return $self->{name} // $self->ssh_host }
 
 sub describe {
     my ($self) = @_;
@@ -159,9 +159,9 @@ sub wait_for_cloud_init {
       unless ref $parsed eq 'ARRAY';
 
     foreach my $fail ( grep { ( $_->{result} // '' ) eq 'FAIL' } @$parsed ) {
-        my ( $module, $mtarget ) = split( '/', $fail->{name} );
+        my ( $module, $mtarget ) = split( m{/}, $fail->{name} );
         next unless $mtarget;
-        my ( $stage, $target ) = split( '-', $mtarget );
+        my ( $stage, $target ) = split( m/-/, $mtarget );
         next unless $target;
 
         print "$target failed during $stage, re-running...\n";
@@ -330,7 +330,7 @@ sub key_path {
     my $store = _store() or return undef;
 
     my %got = eval {
-        Trog::Secrets->read(
+        Trog::Secrets->lookup(
             $store,
             Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
             key => $class->ref_for_key($domain),
@@ -342,9 +342,9 @@ sub key_path {
     # object goes out of scope, so letting go of it would leave ssh pointed at a
     # path that had just been unlinked.
     my $tmp = File::Temp->new( TEMPLATE => "guest-key-$domain-XXXXXX", TMPDIR => 1 );
-    chmod 0600, "$tmp";    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    chmod 0600, "$tmp";
     print {$tmp} $got{key} =~ m/\n\z/ ? $got{key} : "$got{key}\n";
-    close($tmp);
+    close($tmp) or die "Could not close $tmp: $!\n";
 
     $materialised{$domain} = { handle => $tmp, path => "$tmp" };
     return $materialised{$domain}{path};

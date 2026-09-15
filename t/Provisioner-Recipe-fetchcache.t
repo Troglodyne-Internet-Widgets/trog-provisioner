@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -28,7 +28,7 @@ use FindBin::libs;
 # there, and what these assert on should not depend on the machine.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::fetchcache();
@@ -66,7 +66,7 @@ sub generated {
 # The hosts it answers to, out of its server_name.
 sub allowed {
     my ($vhost) = @_;
-    my ($names) = $vhost =~ m/^\s+server_name ([^;]+);$/m;
+    my ($names) = $vhost =~ m/^\s+server_name[ ]([^;]+);$/m;
     return [ sort split( q{ }, $names // q{} ) ];
 }
 
@@ -102,9 +102,9 @@ subtest 'the upstreams: every host a recipe downloads from, and whatever an oper
 
     # On most guests this is the only server on 443, and so the default one for
     # any name at all.
-    my ($guard) = $defaults =~ m/^map \$host \$fetchcache_allowed \{\n\s+"~\^\(\?:(.*?)\)\$" 1;$/m;
+    my ($guard) = $defaults =~ m/^map[ ]\$host[ ]\$fetchcache_allowed[ ]\{\n\s+"~\^\(\?:(\N*?)\)\$"[ ]1;$/m;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is_deeply( alternatives($guard), \@declared, 'a request for any other host is told apart' );
-    like( $defaults, qr/if \(\$fetchcache_allowed = 0\) \{\n\s+return 421;/, 'and refused' );
+    like( $defaults, qr/if[ ]\(\$fetchcache_allowed[ ]=[ ]0\)[ ]\{\n\s+return[ ]421;/, 'and refused' );
 };
 
 subtest 'a host only a domain configuration names is one the cache answers for' => sub {
@@ -134,14 +134,14 @@ subtest 'a host only a domain configuration names is one the cache answers for' 
 subtest 'what the vhost will not accept' => sub {
 
     # They are written into it as a regex, and into a certificate.
-    like( exception { generated( upstreams => { 'evil.test/x|.*' => 1 } ) }, qr/plain host names/, 'a host that is not a plain DNS name' );
+    like( exception { generated( upstreams => { 'evil.test/x|.*' => 1 } ) }, qr/plain[ ]host[ ]names/, 'a host that is not a plain DNS name' );
 
     my %none = map { $_ => 0 } @{ allowed( ( generated() )[0] ) };
-    like( exception { generated( upstreams => \%none ) }, qr/no upstreams turned on/, 'no hosts at all, which would fetch nothing' );
+    like( exception { generated( upstreams => \%none ) }, qr/no[ ]upstreams[ ]turned[ ]on/, 'no hosts at all, which would fetch nothing' );
 
-    like( exception { generated( resolvers => [] ) }, qr/needs resolvers/, 'and no resolvers to look them up with' );
+    like( exception { generated( resolvers => [] ) }, qr/needs[ ]resolvers/, 'and no resolvers to look them up with' );
 
-    like( exception { generated( resolvers => [ '127.0.0.1', '::1' ] ) }, qr/needs resolvers/, 'or none it can reach' );
+    like( exception { generated( resolvers => [ '127.0.0.1', '::1' ] ) }, qr/needs[ ]resolvers/, 'or none it can reach' );
 };
 
 subtest 'each kind of URL gets its own freshness, and its own redirect handling' => sub {
@@ -154,15 +154,15 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
         # for as long as that kind is fresh.
         like(
             $vhost,
-            qr{location = /\.fetchcache/$name \{\n\s+internal;\n\s+proxy_cache_valid 200 \Q$fresh\E;\n(?:\s+proxy_cache_use_stale off;\n)?\s+error_page 301 302 303 307 308 = \@follow_$name;\n\s+proxy_pass https://\$host\$request_uri;},
+            qr{location[ ]=[ ]/\.fetchcache/$name[ ]\{\n\s+internal;\n\s+proxy_cache_valid[ ]200[ ]\Q$fresh\E;\n(?:\s+proxy_cache_use_stale[ ]off;\n)?\s+error_page[ ]301[ ]302[ ]303[ ]307[ ]308[ ]=[ ]\@follow_$name;\n\s+proxy_pass[ ]https://\$host\$request_uri;},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$name: fresh for $fresh, fetched as the guest asked for it, redirects followed"
         );
-        like( $vhost, qr/location \@follow_$name \{.*?proxy_cache_valid 200 \Q$fresh\E;.*?proxy_pass \$fetchcache_location;/s, "$name: and a followed redirect is kept as long" );
+        like( $vhost, qr/location[ ]\@follow_$name[ ]\{.*?proxy_cache_valid[ ]200[ ]\Q$fresh\E;.*?proxy_pass[ ]\$fetchcache_location;/, "$name: and a followed redirect is kept as long" );                                                                                ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # nginx takes the first regex in a map that matches.
-    my ($map) = $vhost =~ m/^map "\$host\$request_uri" \$fetchcache_class \{\n(.*?)^\}/ms;
-    my @order = ( $map // q{} ) =~ m/^\s+"~[^\n]*" (\w+);$/mg;
+    my ($map) = $vhost =~ m/^map[ ]"\$host\$request_uri"[ ]\$fetchcache_class[ ]\{\n(.*?)^\}/m;                                                                                                                                                                            ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    my @order = ( $map // q{} ) =~ m/^\s+"~[^\n]*"[ ](\w+);$/mg;
     is_deeply( \@order, [qw{pass aptindex index immutable}], 'what is never kept first, then the most specific first' );
 
     # An apt index is the one kind that must not be served stale: InRelease
@@ -170,39 +170,39 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
     # different moment stops apt outright rather than being an old download.
     # Nothing else wants this -- the cache exists to serve stale.
     foreach my $name (qw{aptindex index immutable default}) {
-        my ($block) = $vhost =~ m/location = \/\.fetchcache\/$name \{(.*?)\n    \}/s;
+        my ($block) = $vhost =~ m/location[ ]=[ ]\/\.fetchcache\/$name[ ]\{(.*?)\n[ ][ ][ ][ ]\}/;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         my $off = index( $block // q{}, 'proxy_cache_use_stale off;' ) >= 0 ? 1 : 0;
         is( $off, ( $name eq 'aptindex' ? 1 : 0 ), "$name: stale is " . ( $name eq 'aptindex' ? 'refused' : 'allowed' ) );
     }
-    like( $vhost,      qr/^\s+proxy_cache_use_stale error timeout/m, 'and the server still serves stale for everything else' );
-    like( $map // q{}, qr/^\s+default default;$/m,                   'and anything else is the default kind' );
+    like( $vhost,      qr/^\s+proxy_cache_use_stale[ ]error[ ]timeout/m, 'and the server still serves stale for everything else' );
+    like( $map // q{}, qr/^\s+default[ ]default;$/m,                     'and anything else is the default kind' );
 
-    like( $vhost, qr{location / \{.*?rewrite \^ /\.fetchcache/\$fetchcache_class last;}s, 'every request goes out through the location for its kind' );
+    like( $vhost, qr{location[ ]/[ ]\{.*?rewrite[ ]\^[ ]/\.fetchcache/\$fetchcache_class[ ]last;}, 'every request goes out through the location for its kind' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'what is never kept goes upstream as it came' => sub {
     my ($vhost) = generated();
 
-    like( $vhost, qr{if \(\$request_method !~ "\^\(\?:GET\|HEAD\)\$"\) \{\n\s+rewrite \^ /\.fetchcache/pass last;}, 'nothing but GET and HEAD is kept' );
+    like( $vhost, qr{if[ ]\(\$request_method[ ]!~[ ]"\^\(\?:GET\|HEAD\)\$"\)[ ]\{\n\s+rewrite[ ]\^[ ]/\.fetchcache/pass[ ]last;}, 'nothing but GET and HEAD is kept' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
-    my ($pass) = $vhost =~ m{(location = /\.fetchcache/pass \{.*?\n    \})}s;
+    my ($pass) = $vhost =~ m{(location[ ]=[ ]/\.fetchcache/pass[ ]\{.*?\n[ ][ ][ ][ ]\})};
     ok( defined $pass, 'and what is not has a location of its own' ) or return;
 
-    like( $pass, qr/^\s+internal;$/m,                     'one nobody can ask for by name' );
-    like( $pass, qr/^\s+proxy_cache off;$/m,              'where nothing is kept' );
-    like( $pass, qr/^\s+proxy_set_header Host \$host;$/m, 'which goes to the host it was for' );
-    unlike( $pass, qr/proxy_set_header (?:Authorization|Cookie)/, 'with whatever credentials it came with' );
-    like( $pass, qr/^\s+proxy_intercept_errors off;$/m,  'and hands back its redirects rather than following them' );
-    like( $pass, qr/^\s+proxy_request_buffering off;$/m, 'streaming what it is sent, a git push included' );
+    like( $pass, qr/^\s+internal;$/m,                         'one nobody can ask for by name' );
+    like( $pass, qr/^\s+proxy_cache[ ]off;$/m,                'where nothing is kept' );
+    like( $pass, qr/^\s+proxy_set_header[ ]Host[ ]\$host;$/m, 'which goes to the host it was for' );
+    unlike( $pass, qr/proxy_set_header[ ](?:Authorization|Cookie)/, 'with whatever credentials it came with' );
+    like( $pass, qr/^\s+proxy_intercept_errors[ ]off;$/m,  'and hands back its redirects rather than following them' );
+    like( $pass, qr/^\s+proxy_request_buffering[ ]off;$/m, 'streaming what it is sent, a git push included' );
 };
 
 subtest 'a followed redirect is kept under the URL the guest asked for, and goes nowhere else' => sub {
     my ($vhost) = generated();
 
-    like( $vhost, qr/^\s+proxy_cache_key \$host\$request_uri;$/m, 'the key is the host and the request, which no rewrite or internal redirect changes' );
-    like( $vhost, qr/^\s+recursive_error_pages on;$/m,            'a second hop is followed too' );
+    like( $vhost, qr/^\s+proxy_cache_key[ ]\$host\$request_uri;$/m, 'the key is the host and the request, which no rewrite or internal redirect changes' );
+    like( $vhost, qr/^\s+recursive_error_pages[ ]on;$/m,            'a second hop is followed too' );
 
-    my @guards = $vhost =~ m/if \(\$fetchcache_location ~ "\^https:\/\/\(\(\?:([^)]*)\)\)\/"\) \{\n\s+set \$fetchcache_next \$1;\n\s+\}\n\s+if \(\$fetchcache_next = ""\) \{\n\s+return 502;/g;
+    my @guards = $vhost =~ m/if[ ]\(\$fetchcache_location[ ]~[ ]"\^https:\/\/\(\(\?:([^)]*)\)\)\/"\)[ ]\{\n\s+set[ ]\$fetchcache_next[ ]\$1;\n\s+\}\n\s+if[ ]\(\$fetchcache_next[ ]=[ ]""\)[ ]\{\n\s+return[ ]502;/g;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     ok( scalar @guards, 'a redirect is checked before it is followed' ) or return;
     is_deeply( alternatives($_), allowed($vhost), 'against the hosts it answers to, and only over https' ) for @guards;
 
@@ -210,46 +210,46 @@ subtest 'a followed redirect is kept under the URL the guest asked for, and goes
     # what perls there are from, redirects to www.cpan.org, which adds the
     # slash back with an http:// Location -- and refusing that was a 502, and
     # a guest with no perl.
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^http:\/\/\(\.\*\)\$"\) \{\n\s+set \$fetchcache_location "https:\/\/\$1";/,                  'a redirect to plain http is followed over https' );
-    like( $vhost, qr/^\s+set \$fetchcache_via \$host;$/m,                                                                                        'a redirect naming no host is on the host asked for' );
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/"\) \{\n\s+set \$fetchcache_location "https:\/\/\$fetchcache_via\$fetchcache_location";/, 'and made whole against it before it is checked' );
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/\/"\) \{\n\s+set \$fetchcache_location "https:\$fetchcache_location";/,                   'one naming no scheme is https' );
-    like( $vhost, qr/^\s+set \$fetchcache_via \$fetchcache_next;$/m,                                                                             'and after a hop, a relative one is on the host that hop went to' );
+    like( $vhost, qr/if[ ]\(\$fetchcache_location[ ]~[ ]"\^http:\/\/\(\.\*\)\$"\)[ ]\{\n\s+set[ ]\$fetchcache_location[ ]"https:\/\/\$1";/,                  'a redirect to plain http is followed over https' );                   ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr/^\s+set[ ]\$fetchcache_via[ ]\$host;$/m,                                                                                                'a redirect naming no host is on the host asked for' );
+    like( $vhost, qr/if[ ]\(\$fetchcache_location[ ]~[ ]"\^\/"\)[ ]\{\n\s+set[ ]\$fetchcache_location[ ]"https:\/\/\$fetchcache_via\$fetchcache_location";/, 'and made whole against it before it is checked' );                    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr/if[ ]\(\$fetchcache_location[ ]~[ ]"\^\/\/"\)[ ]\{\n\s+set[ ]\$fetchcache_location[ ]"https:\$fetchcache_location";/,                   'one naming no scheme is https' );                                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr/^\s+set[ ]\$fetchcache_via[ ]\$fetchcache_next;$/m,                                                                                     'and after a hop, a relative one is on the host that hop went to' );
 };
 
 subtest 'upstream is trusted as little as possible' => sub {
     my ($vhost) = generated();
 
-    like( $vhost, qr/^\s+proxy_ssl_verify on;$/m,                                 'its certificate is verified' );
-    like( $vhost, qr/^\s+proxy_ssl_server_name on;$/m,                            'for the name that was asked for' );
-    like( $vhost, qr/^\s+proxy_set_header Authorization "";$/m,                   'no credentials go to it for anything kept' );
-    like( $vhost, qr/^\s+proxy_set_header Cookie "";$/m,                          'nor cookies' );
-    like( $vhost, qr/^\s+proxy_ignore_headers [^;]*\bCache-Control\b/m,           'and its caching headers do not decide what is kept' );
-    like( $vhost, qr/^\s+proxy_cache_use_stale [^;]*\berror\b[^;]*\bhttp_503\b/m, 'what it had is served when upstream fails' );
-    like( $vhost, qr/^\s+resolver 192\.168\.1\.253 8\.8\.8\.8 ipv6=off;$/m,       'looked up through the resolvers it was given' );
+    like( $vhost, qr/^\s+proxy_ssl_verify[ ]on;$/m,                                 'its certificate is verified' );
+    like( $vhost, qr/^\s+proxy_ssl_server_name[ ]on;$/m,                            'for the name that was asked for' );
+    like( $vhost, qr/^\s+proxy_set_header[ ]Authorization[ ]"";$/m,                 'no credentials go to it for anything kept' );
+    like( $vhost, qr/^\s+proxy_set_header[ ]Cookie[ ]"";$/m,                        'nor cookies' );
+    like( $vhost, qr/^\s+proxy_ignore_headers[ ][^;]*\bCache-Control\b/m,           'and its caching headers do not decide what is kept' );
+    like( $vhost, qr/^\s+proxy_cache_use_stale[ ][^;]*\berror\b[^;]*\bhttp_503\b/m, 'what it had is served when upstream fails' );
+    like( $vhost, qr/^\s+resolver[ ]192\.168\.1\.253[ ]8\.8\.8\.8[ ]ipv6=off;$/m,   'looked up through the resolvers it was given' );
 
     # The fleet's list, as a real ipmap.cfg has it: a loopback for guests that
     # run the pdns recursor, which this one does not, and an IPv6 address nginx
     # is told not to use.  Measured on a guest: nginx rotated onto 127.0.0.1
     # and every few lookups was a refused connection.
     my ($fleet) = generated( resolvers => [qw{127.0.0.1 192.168.1.254 8.8.8.8 2600:1700::1}] );
-    like( $fleet, qr/^\s+resolver 192\.168\.1\.254 8\.8\.8\.8 ipv6=off;$/m, 'and only the ones it can reach' );
+    like( $fleet, qr/^\s+resolver[ ]192\.168\.1\.254[ ]8\.8\.8\.8[ ]ipv6=off;$/m, 'and only the ones it can reach' );
 
     # github.com sends five kilobytes of headers, which the default buffer turned
     # into a 502 before the redirect in them was read.
-    like( $vhost, qr/^\s+proxy_buffer_size 16k;$/m, 'with room for GitHub headers' );
+    like( $vhost, qr/^\s+proxy_buffer_size[ ]16k;$/m, 'with room for GitHub headers' );
 };
 
 subtest 'a copy is removed for want of room, never for its age' => sub {
     my ($vhost) = generated();
-    my ($path)  = $vhost =~ m/^(proxy_cache_path [^;]*);$/m;
+    my ($path)  = $vhost =~ m/^(proxy_cache_path[ ][^;]*);$/m;
     ok( defined $path, 'there is a store' ) or return;
 
     # The copy nobody has asked for in a year is the pinned version upstream may
     # no longer have, so age alone must not take it.
-    like( $path, qr/ inactive=100y\b/, 'kept however long since anybody asked for it' );
-    like( $path, qr/ max_size=20g\b/,  'until the store is full' );
-    like( $path, qr/ min_free=5g\b/,   'or the disk under it nearly is' );
+    like( $path, qr/[ ]inactive=100y\b/, 'kept however long since anybody asked for it' );
+    like( $path, qr/[ ]max_size=20g\b/,  'until the store is full' );
+    like( $path, qr/[ ]min_free=5g\b/,   'or the disk under it nearly is' );
 
     my ($off) = generated( min_free_gb => 0 );
     unlike( $off, qr/min_free=/, 'and min_free can be turned off' );
@@ -258,21 +258,21 @@ subtest 'a copy is removed for want of room, never for its age' => sub {
 subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a package mirror' => sub {
     my ( $vhost, undef, undef, $written ) = generated();
 
-    like( $vhost, qr/^\s+listen 443 ssl;$/m,        'it listens on 443, with TLS' );
-    like( $vhost, qr/^\s+listen \[::\]:443 ssl;$/m, 'on IPv6 too' );
+    like( $vhost, qr/^\s+listen[ ]443[ ]ssl;$/m,        'it listens on 443, with TLS' );
+    like( $vhost, qr/^\s+listen[ ]\[::\]:443[ ]ssl;$/m, 'on IPv6 too' );
 
     # Measured on a guest: cpanm fetches CPAN over plain http, and pointed here
     # by name it reached another server on 80 and unpacked a 404.
-    like( $vhost, qr/^\s+listen 80;$/m,        'and on 80, for what asks over plain http' );
-    like( $vhost, qr/^\s+listen \[::\]:80;$/m, 'on IPv6 too' );
-    is( scalar( () = $vhost =~ m/^server \{$/mg ), 1, 'with the same locations for both, being one server' );
+    like( $vhost, qr/^\s+listen[ ]80;$/m,        'and on 80, for what asks over plain http' );
+    like( $vhost, qr/^\s+listen[ ]\[::\]:80;$/m, 'on IPv6 too' );
+    is( scalar( () = $vhost =~ m/^server[ ]\{$/mg ), 1, 'with the same locations for both, being one server' );
 
     unlike( $vhost, qr/default_server|backlog/, 'claiming neither default_server nor the backlog, which whatever else is on those ports may' );
-    like( $vhost, qr{^\s+location = /fetchcache-status \{$}m, 'saying it is there, to whatever asks by one of those names' );
+    like( $vhost, qr{^\s+location[ ]=[ ]/fetchcache-status[ ]\{$}m, 'saying it is there, to whatever asks by one of those names' );
     is_deeply( [ sort @$written ], [qw{fetchcache.crt fetchcache.key fetchcache.nginx.conf}], 'the vhost, a certificate, and its key' );
 
     my ($v4) = generated( ipv6 => 0 );
-    unlike( $v4, qr/listen \[::\]/, 'and IPv4 alone when told to' );
+    unlike( $v4, qr/listen[ ]\[::\]/, 'and IPv4 alone when told to' );
 
     # An aptmirror answers on 80 to the guest name and its address.  nginx
     # routes a port between servers by name, and ignores a second server for a
@@ -286,17 +286,17 @@ subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a
     )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.168.1.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
     my $theirs = File::Slurper::read_text("$mirror/aptmirror.nginx.conf");
 
-    my ($their_names) = $theirs =~ m/^\s+server_name ([^;]+);$/m;
+    my ($their_names) = $theirs =~ m/^\s+server_name[ ]([^;]+);$/m;
     my %ours = map { $_ => 1 } @{ allowed($vhost) };
     is_deeply( [ grep { $ours{$_} } split( q{ }, $their_names // q{} ) ], [], 'it and the mirror answer to no name in common' );
-    like( $theirs, qr/listen 80 backlog=/, 'and the backlog on 80 is the mirror\'s alone' );
+    like( $theirs, qr/listen[ ]80[ ]backlog=/, 'and the backlog on 80 is the mirror\'s alone' );
 };
 
 subtest 'the certificate names every host it answers to, and the authority signed it' => sub {
     my ( $vhost, undef, $dir ) = generated( upstreams => { 'upstream.test' => 1 } );
     my $authority = $FETCHCACHE->authority();
 
-    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)/sg;
+    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN[ ]CERTIFICATE-----\n.*?-----END[ ]CERTIFICATE-----\n)/g;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is( scalar @chain, 2,                                              'a certificate with one more after it, as nginx wants a chain' );
     is( $chain[1],     File::Slurper::read_text( $authority->{cert} ), 'which is the authority' );
 
@@ -309,7 +309,7 @@ subtest 'the certificate names every host it answers to, and the authority signe
     is( extension( $leaf, 'basicConstraints' ), 'CA:FALSE',                      'and able to sign nothing itself' );
     is( extension( $leaf, 'extendedKeyUsage' ), 'TLS Web Server Authentication', 'being for a server alone' );
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers, Plicease::ProhibitLeadingZeros) -- a file mode
+    ## no critic (ProhibitLeadingZeros) -- a file mode
     is( ( stat("$dir/fetchcache.key") )[2] & 0777, 0600, 'its key readable by nobody else' );
     ## use critic
 
@@ -327,7 +327,7 @@ subtest 'the authority is made once, kept in the configuration directory, and it
     is( extension( $ca, 'basicConstraints' ), 'CA:TRUE', 'and one that can sign' );
     IO::Socket::SSL::Utils::CERT_free($ca);
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers, Plicease::ProhibitLeadingZeros) -- a file mode
+    ## no critic (ProhibitLeadingZeros) -- a file mode
     is( ( stat( $first->{key} ) )[2] & 0777, 0600, 'with a key readable by nobody else' );
     ## use critic
 };

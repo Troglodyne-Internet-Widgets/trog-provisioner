@@ -29,7 +29,9 @@ strict = 1
 [Bangs::ProhibitUselessRegexModifiers]
 [Bangs::ProhibitCommentedOutCode]
 [Tics::ProhibitUseBase]
-[Plicease::ProhibitLeadingZeros]
+[ProhibitLeadingZeros]
+# Both take a file mode, and in a position the policy cannot tell by itself.
+allow = Provisioner::Utils::write_pem Test::MockFile::new_dir
 [RegularExpressions::ProhibitEmptyAlternatives]
 [ValuesAndExpressions::UnexpandedSpecialLiteral]
 [CodeLayout::ProhibitIfIfSameLine]
@@ -52,7 +54,7 @@ formats = #!/usr/bin/env perl
 # Performance
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
-[Performance::ProhibitRegexForSimpleSubstring]
+[ProhibitRegexForSimpleSubstring]
 [ProhibitUseLib]
 [ProhibitUsageSubs]
 [RequireQwForLiteralLists]
@@ -70,8 +72,146 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 # interface are called by OpenStack::Client and OpenStack::MetaAPI, which it is
 # handed to.  The forget subs clear what a module keeps for the rest of a run,
 # and exist so that one test does not see what the last one left.
-allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_cloud_resources check_cloud_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
+allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_cloud_resources check_cloud_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination note_plaintext_secrets Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
 [ProhibitPrintSTDERR]
+# Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
+# each of these has to be.
+;
+; Not here on purpose, because something above already does the job better:
+;   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
+;   ControlStructures::ProhibitCascadingIfElse  CognitiveComplexity, which
+;   ControlStructures::ProhibitDeepNests          scores nesting and every
+;   Subroutines::ProhibitExcessComplexity         break in flow, where these
+;                                                 count branches
+;   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
+;   Modules::ProhibitEvilModules                PreferredModules
+;   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions,
+;                                                 which counts only calls from
+;                                                 bin/ and lib/, private or not
+;   TestingAndDebugging::RequireUseWarnings     RequireFatalWarnings
+;   ValuesAndExpressions::ProhibitLeadingZeros  ProhibitLeadingZeros
+;   Modules::RequireVersionVar                  [PkgVersion] in dist.ini
+;   ErrorHandling::RequireCarping               STYLE.md: die with context,
+;                                                 and Carp::Always for the trace
+;
+; Nor these, because every file declares use 5.041, and under it perl will not
+; compile what they report -- or, for the last, no longer needs what it asks for:
+;   InputOutput::ProhibitBarewordDirHandles     no feature "bareword_filehandles"
+;   InputOutput::ProhibitBarewordFileHandles
+;   Objects::ProhibitIndirectSyntax             no feature "indirect"
+;   TestingAndDebugging::RequireUseStrict       strict, which use 5.012 and later
+;                                                 turn on
+;   Variables::ProhibitPerl4PackageNames        no apostrophe as package separator
+;   Modules::RequireEndWithOne                  feature "module_true"
+;
+; Documentation::RequirePodSections is out as well: the sections it asks for are
+; the ones Pod::Weaver writes at build, and weaver.ini names them AUTHORS and
+; COPYRIGHT AND LICENSE where the policy wants AUTHOR and LICENSE AND COPYRIGHT.
+[BuiltinFunctions::ProhibitBooleanGrep]
+[BuiltinFunctions::ProhibitLvalueSubstr]
+[BuiltinFunctions::ProhibitReverseSortBlock]
+[BuiltinFunctions::ProhibitShiftRef]
+[BuiltinFunctions::ProhibitSleepViaSelect]
+[BuiltinFunctions::ProhibitStringyEval]
+[BuiltinFunctions::ProhibitStringySplit]
+[BuiltinFunctions::ProhibitUniversalCan]
+[BuiltinFunctions::ProhibitUniversalIsa]
+[BuiltinFunctions::ProhibitVoidGrep]
+[BuiltinFunctions::ProhibitVoidMap]
+[BuiltinFunctions::RequireBlockGrep]
+[BuiltinFunctions::RequireBlockMap]
+[BuiltinFunctions::RequireGlobFunction]
+[BuiltinFunctions::RequireSimpleSortBlock]
+[ClassHierarchies::ProhibitAutoloading]
+[ClassHierarchies::ProhibitExplicitISA]
+[ClassHierarchies::ProhibitOneArgBless]
+[CodeLayout::ProhibitHardTabs]
+[CodeLayout::ProhibitTrailingWhitespace]
+[CodeLayout::RequireConsistentNewlines]
+[CodeLayout::RequireTidyCode]
+[CodeLayout::RequireTrailingCommas]
+[ControlStructures::ProhibitLabelsWithSpecialBlockNames]
+[ControlStructures::ProhibitMutatingListFunctions]
+[ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
+[ControlStructures::ProhibitUnreachableCode]
+[ControlStructures::ProhibitUntilBlocks]
+[ControlStructures::ProhibitYadaOperator]
+[Documentation::PodSpelling]
+spell_command = aspell --lang=en_US list
+stop_words_file = .pod_stopwords
+[Documentation::RequirePackageMatchesPodName]
+[ErrorHandling::RequireCheckingReturnValueOfEval]
+[InputOutput::ProhibitExplicitStdin]
+[InputOutput::ProhibitInteractiveTest]
+[InputOutput::ProhibitJoinedReadline]
+[InputOutput::ProhibitOneArgSelect]
+[InputOutput::ProhibitReadlineInForLoop]
+[InputOutput::ProhibitTwoArgOpen]
+[InputOutput::RequireBracedFileHandleWithPrint]
+[InputOutput::RequireBriefOpen]
+[InputOutput::RequireCheckedOpen]
+[InputOutput::RequireCheckedSyscalls]
+exclude_functions = print
+[InputOutput::RequireEncodingWithUTF8Layer]
+[Miscellanea::ProhibitFormats]
+[Miscellanea::ProhibitTies]
+[Miscellanea::ProhibitUnrestrictedNoCritic]
+[Miscellanea::ProhibitUselessNoCritic]
+[Modules::ProhibitAutomaticExportation]
+[Modules::ProhibitConditionalUseStatements]
+[Modules::RequireBarewordIncludes]
+[Modules::RequireFilenameMatchesPackage]
+[Modules::RequireNoMatchVarsWithUseEnglish]
+[NamingConventions::Capitalization]
+# STYLE.md: a recipe's package is named for the recipe, in lower case.  The
+# exemptions are matched against each component of a package name rather than
+# the whole of it, so they cannot be confined to Provisioner::Recipe:: -- an
+# all-lower-case component is allowed anywhere, and mixed case still is not.
+package_exemptions = main [a-z][a-z0-9_]*
+[RegularExpressions::ProhibitCaptureWithoutTest]
+[RegularExpressions::ProhibitComplexRegexes]
+[RegularExpressions::ProhibitEnumeratedClasses]
+[RegularExpressions::ProhibitFixedStringMatches]
+[RegularExpressions::ProhibitSingleCharAlternation]
+[RegularExpressions::ProhibitUnusedCapture]
+[RegularExpressions::RequireBracesForMultiline]
+[RegularExpressions::RequireDotMatchAnything]
+[RegularExpressions::RequireExtendedFormatting]
+[Subroutines::ProhibitAmpersandSigils]
+[Subroutines::ProhibitBuiltinHomonyms]
+[Subroutines::ProhibitManyArgs]
+[Subroutines::ProhibitNestedSubs]
+[Subroutines::ProhibitReturnSort]
+[Subroutines::ProhibitSubroutinePrototypes]
+[Subroutines::ProtectPrivateSubs]
+[Subroutines::RequireArgUnpacking]
+[Subroutines::RequireFinalReturn]
+[TestingAndDebugging::ProhibitProlongedStrictureOverride]
+[TestingAndDebugging::RequireTestLabels]
+[ValuesAndExpressions::ProhibitCommaSeparatedStatements]
+[ValuesAndExpressions::ProhibitComplexVersion]
+[ValuesAndExpressions::ProhibitEscapedCharacters]
+[ValuesAndExpressions::ProhibitLongChainsOfMethodCalls]
+[ValuesAndExpressions::ProhibitMismatchedOperators]
+[ValuesAndExpressions::ProhibitMixedBooleanOperators]
+[ValuesAndExpressions::ProhibitQuotesAsQuotelikeOperatorDelimiters]
+[ValuesAndExpressions::ProhibitSpecialLiteralHeredocTerminator]
+[ValuesAndExpressions::ProhibitVersionStrings]
+[ValuesAndExpressions::RequireConstantVersion]
+[ValuesAndExpressions::RequireQuotedHeredocTerminator]
+[ValuesAndExpressions::RequireUpperCaseHeredocTerminator]
+[Variables::ProhibitAugmentedAssignmentInDeclaration]
+[Variables::ProhibitConditionalDeclarations]
+; Variables::ProhibitEvilVariables is not listed: it declines to load until
+; it is given variables to prohibit, and nobody has named any.
+[Variables::ProhibitLocalVars]
+[Variables::ProhibitMatchVars]
+[Variables::ProhibitReusedNames]
+[Variables::ProhibitUnusedVariables]
+[Variables::ProtectPrivateVars]
+[Variables::RequireLexicalLoopIterators]
+[Variables::RequireLocalizedPunctuationVars]
+[Variables::RequireNegativeIndices]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork

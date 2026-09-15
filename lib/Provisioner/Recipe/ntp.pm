@@ -1,12 +1,12 @@
 package Provisioner::Recipe::ntp;
 
-#ABSTRACT: Install and configure chrony for NTP time synchronisation.
+#ABSTRACT: Install and configure chrony for NTP time synchronization.
 
 use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -30,7 +30,7 @@ Or with custom time servers and step threshold:
 
 =head2 DESCRIPTION
 
-Installs and configures chrony for NTP time synchronisation.
+Installs and configures chrony for NTP time synchronization.
 
 By default uses the Debian/Ubuntu vendor NTP pools.  Override with
 a C<servers> list if you want to use your own NTP sources (e.g. local

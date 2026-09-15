@@ -4,7 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -17,7 +17,7 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::Fatal      qw{exception};
@@ -31,12 +31,12 @@ require Trog::Guest;
 # moment.  It keeps what it was constructed with, because refresh_salvage names
 # the host in every message it prints and asks the guest which host that is.
 sub guest_that {
-    my (%behaviour) = @_;
+    my (%behavior) = @_;
 
-    my @probes = @{ $behaviour{mtimes} };
+    my @probes = @{ $behavior{mtimes} };
     my $mock   = Test::MockModule->new('Trog::Guest');
     $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
-    $mock->redefine( run_sudo => sub { $behaviour{exit} } );
+    $mock->redefine( run_sudo => sub { $behavior{exit} } );
     $mock->redefine(
         capture_cmd => sub {
             my $now = shift @probes // $probes[-1];
@@ -48,8 +48,15 @@ sub guest_that {
 }
 
 sub refresh {
-    my (@args) = @_;
-    return Trog::Provisioner::Config::Generator::refresh_salvage( qw{192.168.1.9 admin /nonexistent mariadb}, @args );
+    my ( $commands, $watched ) = @_;
+    return Trog::Provisioner::Config::Generator::refresh_salvage(
+        static_ip  => '192.168.1.9',
+        admin_user => 'admin',
+        cfg_dir    => '/nonexistent',
+        module     => 'mariadb',
+        commands   => $commands,
+        watched    => $watched,
+    );
 }
 
 # Both halves of a salvage want the guest -- refresh_salvage once a module, the
@@ -66,15 +73,15 @@ subtest 'one connection per guest, however many times a run asks for one' => sub
         }
     );
 
-    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
-    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
+    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 
     is( $built,       1,          'asking twice opens one connection' );
     is( $again,       $first,     'and the second ask gets the one already open' );
     is( $first->name, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
 
     # A run configures several domains, and each of them is a different guest.
-    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});
+    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
     is( $built, 2, 'a different guest is a different connection' );
     isnt( $other, $first, 'rather than the last one answered for it' );
 };
@@ -97,7 +104,7 @@ subtest 'a refresh that failed having touched nothing is a warning' => sub {
     local $SIG{__WARN__} = sub { push @said, @_ };
     my $err = exception { refresh( ['dump-it'], ['/var/backups/db'] ) };
     is( $err, undef, 'it does not die' );
-    like( join( q{}, @said ), qr/as old as the last time/, 'and says what came down is stale' );
+    like( join( q{}, @said ), qr/as[ ]old[ ]as[ ]the[ ]last[ ]time/, 'and says what came down is stale' );
 };
 
 subtest 'a refresh that failed having changed something dies before anything is fetched' => sub {
@@ -107,8 +114,8 @@ subtest 'a refresh that failed having changed something dies before anything is 
     # a partial file, not a stale one, and fetching it would carry a corrupt
     # copy home and call it the state of the guest.
     my $err = exception { refresh( ['dump-it'], ['/var/backups/db'] ) };
-    like( $err, qr/after changing what it was refreshing/, 'it dies' );
-    like( $err, qr{/var/backups/db},                       'naming what it touched' );
+    like( $err, qr/after[ ]changing[ ]what[ ]it[ ]was[ ]refreshing/, 'it dies' );
+    like( $err, qr{/var/backups/db},                                 'naming what it touched' );
 };
 
 subtest 'each command is judged against what the one before it left' => sub {
@@ -133,7 +140,7 @@ subtest 'each command is judged against what the one before it left' => sub {
     local $SIG{__WARN__} = sub { push @said, @_ };
     my $err = exception { refresh( [ 'snapshot', 'dump-it' ], ['/var/backups/db'] ) };
     is( $err, undef, 'the second failure is not blamed for the first success' );
-    like( join( q{}, @said ), qr/as old as the last time/, 'and is reported as a stale refresh' );
+    like( join( q{}, @said ), qr/as[ ]old[ ]as[ ]the[ ]last[ ]time/, 'and is reported as a stale refresh' );
 };
 
 subtest 'a recipe that watches nothing is not probed at all' => sub {

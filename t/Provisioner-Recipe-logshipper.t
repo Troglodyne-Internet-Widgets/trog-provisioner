@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -25,7 +25,7 @@ use FindBin::libs;
 # should not depend on which machine they run on.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -120,7 +120,7 @@ subtest 'a guest that would ship to itself ships nowhere' => sub {
 
     my $fragment = $recipe->render_global(%$vars);
     unlike( $fragment, qr{/etc/rsyslog[.]d}, 'and the fragment installs nothing' );
-    like( $fragment, qr/keeps its logs/, 'saying why rather than silently doing nothing' );
+    like( $fragment, qr/keeps[ ]its[ ]logs/, 'saying why rather than silently doing nothing' );
 };
 
 subtest 'naming the recipe without a destination fails the build' => sub {
@@ -136,7 +136,7 @@ subtest 'naming the recipe without a destination fails the build' => sub {
     # and it is worth stopping the build over rather than forwarding nothing.
     like(
         exception { $recipe->validate( domain => $DOMAIN ) },
-        qr/host: Missing property/,
+        qr/host:[ ]Missing[ ]property/,
         'host is required, and the build stops naming the field that is absent'
     );
 };

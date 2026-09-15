@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -30,7 +30,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
 use Provisioner::Cookbook();
 
@@ -62,8 +62,8 @@ subtest 'no domain exits with the usage' => sub {
     my $out = q{};
     IPC::Run3::run3( [ $^X, $script ], \undef, \$out, \$out );
     isnt( $?, 0, 'exits non-zero' );
-    like( $out, qr/No domain passed/, 'saying what was missing' );
-    like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
+    like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
+    like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 };
 
 # --- The hypervisor comes off the config, and --connect beats it -------------
@@ -102,9 +102,9 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     $bin_mock->redefine( read_seed => sub { die "far enough\n" } );
 
     my $run = sub {
+        my @args = @_;
         Trog::HV->forget();
-        eval { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, @_ ) };
-        like( $@, qr/\Afar enough$/m, 'got as far as the hypervisor being built' );
+        like( exception { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, @args ) }, qr/\Afar[ ]enough$/m, 'got as far as the hypervisor being built' );
         return Trog::HV->new();
     };
 
@@ -150,10 +150,10 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
     );
 
     my $why = exception { Trog::Bin::Provisioner::refuse_on_salvage_gaps(0) };
-    like( $why, qr/Refusing to rebuild/,                      'it refuses' );
-    like( $why, qr{redis read nothing out of /var/lib/redis}, 'naming the recipe and the path' );
-    like( $why, qr/vm[.]test/,                                'and the domain it was on' );
-    like( $why, qr/--salvage-gaps-ok/,                        'and the way past it' );
+    like( $why, qr/Refusing[ ]to[ ]rebuild/,                            'it refuses' );
+    like( $why, qr{redis[ ]read[ ]nothing[ ]out[ ]of[ ]/var/lib/redis}, 'naming the recipe and the path' );
+    like( $why, qr/vm[.]test/,                                          'and the domain it was on' );
+    like( $why, qr/--salvage-gaps-ok/,                                  'and the way past it' );
 
     # Said out loud, and then allowed, because somebody typed the flag.
     my @said;
@@ -162,7 +162,7 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
         Trog::Bin::Provisioner::refuse_on_salvage_gaps(1);
     };
     is( $ok, 1, 'the override lets it through' );
-    like( join( q{}, @said ), qr{redis read nothing out of /var/lib/redis}, 'still saying what is being lost' );
+    like( join( q{}, @said ), qr{redis[ ]read[ ]nothing[ ]out[ ]of[ ]/var/lib/redis}, 'still saying what is being lost' );
 };
 
 # It used to stop after clearing the guest and after rendering the XML -- what
@@ -354,8 +354,8 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     );
 
     my $xml = File::Slurper::read_text("$dir/vm.test/domain.xml");
-    like( $xml, qr{<name>vm\.test</name>},                  'the vm recipe wrote the domain XML' );
-    like( $xml, qr{<source file='/bogus/pool/seed\.iso'/>}, 'naming the seed it just made' );
+    like( $xml, qr{<name>vm\.test</name>},                    'the vm recipe wrote the domain XML' );
+    like( $xml, qr{<source[ ]file='/bogus/pool/seed\.iso'/>}, 'naming the seed it just made' );
     unlike( $xml, qr/\[%/, 'with nothing of the template left in it' );
 
     ok( ( grep { $_ eq 'define_domain' } @applied ), 'and the domain was defined from it' );
@@ -426,7 +426,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
 
     is_deeply(
-        [ grep { $_ eq 'annihilate_domain' || m/\Arelease / || $_ eq 'define_domain' } @applied ],
+        [ grep { $_ eq 'annihilate_domain' || m/\Arelease[ ]/ || $_ eq 'define_domain' } @applied ],
         [ 'annihilate_domain', 'release 192.168.122.97', 'release 192.168.122.96', 'define_domain' ],
         'every lease the MAC held is released, after the old guest is gone and before the new one is defined'
     ) or diag "applied: @applied";
@@ -489,12 +489,11 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 
     # Nothing matching at all is an error that says what it looked for.
     my $neither = { network => { ethernets => { enp0s9 => { addresses => [] } } } };
-    eval { Trog::Bin::Provisioner::primary_adapter( $neither, $config, $mac ) };
-    like( $@, qr/Could not find the outbound adapter/, 'otherwise it says so' );
-    like( $@, qr/enp0s9/,                              'listing what the guest does have' );
+    my $err     = exception { Trog::Bin::Provisioner::primary_adapter( $neither, $config, $mac ) };
+    like( $err, qr/Could[ ]not[ ]find[ ]the[ ]outbound[ ]adapter/, 'otherwise it says so' );
+    like( $err, qr/enp0s9/,                                        'listing what the guest does have' );
 
-    eval { Trog::Bin::Provisioner::primary_adapter( {}, $config, $mac ) };
-    like( $@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
+    like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $config, $mac ) }, qr/No[ ]ethernets[ ]at[ ]all/, 'and a netplan with no ethernets is its own error' );
 };
 
 # Reusing a guest means provisioning onto one that is already up, which is how a
@@ -548,8 +547,8 @@ subtest 'a dependency with no configuration is named as the one that is missing'
     # The guard read the tenant's own provision.conf, which is right there, so a
     # dependency that was never configured got past it and died in
     # Config::Simple instead -- naming neither file.
-    like( $err, qr/No provision\.conf for host\.test/, 'the dependency is what it complains about' );
-    like( $err, qr{\Q$dir/host.test/provision.conf\E}, 'and it names the file that is actually absent' );
+    like( $err, qr/No[ ]provision\.conf[ ]for[ ]host\.test/, 'the dependency is what it complains about' );
+    like( $err, qr{\Q$dir/host.test/provision.conf\E},       'and it names the file that is actually absent' );
     unlike( $err, qr{\Q$dir/tenant.test/provision.conf\E}, 'rather than the one that is present' );
 };
 
@@ -586,8 +585,8 @@ sub _layered {
 
     $guest->redefine(
         new => sub {
-            my ( $class, %params ) = @_;
-            @seen{qw{host key}} = @params{qw{host key_path}};
+            my ( $class, %guest_args ) = @_;
+            @seen{qw{host key}} = @guest_args{qw{host key_path}};
             return bless {}, $class;
         }
     );
@@ -631,7 +630,7 @@ sub _pod_section {
         -verbose  => 99,
         -sections => $sections,
     );
-    close $fh;
+    close($fh) or die "Could not close the POD read out of $file: $!";
     return $text // '';
 }
 
@@ -730,7 +729,7 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
 
     is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
-    like( $appended{'one.test.test'}[0], qr/\Assh-ed25519 /, 'the public half, derived rather than stored' );
+    like( $appended{'one.test.test'}[0], qr/\Assh-ed25519[ ]/, 'the public half, derived rather than stored' );
     is( scalar @{ $appended{'one.test.test'} }, 1, 'once each' );
 
     # A derived public key is the key and nothing else, so an unnamed line is

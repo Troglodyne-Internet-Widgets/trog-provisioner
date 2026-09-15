@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -120,12 +120,10 @@ our $STEP_CA_VERSION = '0.30.2';
 
 our $DEFAULT_PORT = 9000;
 
-## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
 # Five years.  Shorter than the authority's ten, so it expires before what
 # signed it, and far longer than the guests it serves ever live.
 our $INTERMEDIATE_DAYS = 1825;
 my $DAY = 86_400;
-## use critic
 
 =head2 %schema = $recipe->args()
 
@@ -295,10 +293,8 @@ sub intermediate {
         ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld,permitted;DNS:localhost" } ],
     );
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( "$output_dir/acmeca-intermediate.key", IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
     Provisioner::Utils::write_pem( "$output_dir/acmeca-intermediate.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
-    ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
     IO::Socket::SSL::Utils::KEY_free($_)  for $key,  $ca_key;

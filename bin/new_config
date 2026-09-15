@@ -10,7 +10,7 @@ use strict;
 use warnings FATAL => 'all';
 
 no warnings qw{experimental};
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -70,7 +70,7 @@ Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
 Builds a new configuration package for VM(s) to be provisioned by Troglodyne provisioner.
 
-Per-domain Behavior is controlled by:
+Per-domain behavior is controlled by:
 
     /etc/trog-provisioner/recipes.yaml
     /etc/trog-provisioner/recipes.d/*.yaml
@@ -308,7 +308,7 @@ sub main {
 # recipe is validated would reach no other recipe at all -- see
 # Provisioner::DistroRecipe/global_defaults.
 
-=head2 resolve_substitutable_dependency($interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host)
+=head2 resolve_substitutable_dependency(%args)
 
 Which recipe satisfies a substitutable dependency: one naming an interface that
 any of several recipes could answer for, rather than naming a recipe outright.
@@ -323,19 +323,21 @@ a recipe this installation actually has, and one that implements what was asked
 for.  A configuration naming something else is a typo, and saying so beats
 loading it and finding out three targets later.
 
-C<$domain_conf> is what the domain itself is configured with.  C<$host_conf> is
-what the machine it is layered onto is, and C<$host> names that machine so a
+C<interface> is the interface that was named, and C<domain> the domain naming it.
+
+C<domain_conf> is what the domain itself is configured with.  C<host_conf> is
+what the machine it is layered onto is, and C<host> names that machine so a
 refusal can say which guest it looked at -- both of those undef for a domain
 with a guest of its own.
 
-C<$requiring_conf> is the configuration of the recipe that declared the
+C<requiring_conf> is the configuration of the recipe that declared the
 dependency: the interface names the key holding a preference and reads it from
 there, so a domain settles a tie where it already writes it.
 
 =cut
 
-sub resolve_substitutable_dependency {
-    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @_;
+sub resolve_substitutable_dependency (%args) {
+    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
 
     # It arrives as text out of required_recipes, so nothing has loaded it and
     # every method call below would be "perhaps you forgot to load".
@@ -378,7 +380,8 @@ sub apply_global_defaults {
 # what each one did, and neither knew about the other -- so a knob added to one
 # was a knob missing from the other.  bin/recipes vm prints the answer now.
 sub hv_settings {
-    return sort keys %{ Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } ) };
+    my @settings = sort keys %{ Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } ) };
+    return @settings;
 }
 
 # Where does this guest go?  Whichever hypervisor already has it, else
@@ -451,7 +454,7 @@ sub handle_domain {
     my $keepass;
     if (%to_replace) {
         $keepass = Trog::Credentials->prompt( 'Enter password:', 'keepass' );
-        my %secrets = Trog::Secrets->read( $sfile, $keepass, %to_replace );
+        my %secrets = Trog::Secrets->lookup( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
 
@@ -838,7 +841,14 @@ sub handle_domain {
             # know what DNS is.
             if ( index( $required, '::' ) >= 0 ) {
                 my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
-                my $chosen    = resolve_substitutable_dependency( $required, $rconf->{$domain}, $host_conf, $pconf, $domain, $depends_on );
+                my $chosen    = resolve_substitutable_dependency(
+                    interface      => $required,
+                    domain_conf    => $rconf->{$domain},
+                    host_conf      => $host_conf,
+                    requiring_conf => $pconf,
+                    domain         => $domain,
+                    host           => $depends_on,
+                );
                 $dep_recipes{$chosen} //= $dep_recipes{$required};
                 delete $dep_recipes{$required};
                 $required = $chosen;
@@ -847,7 +857,8 @@ sub handle_domain {
             my $manual_args = delete $pconf->{$required} // {};
 
             # See about autocomputing the options if possible.
-            my %depargs  = $dep_recipes{$required}->( %$global_config, %$pconf ) if ref $dep_recipes{$required} eq 'CODE';
+            my %depargs;
+            %depargs = $dep_recipes{$required}->( %$global_config, %$pconf ) if ref $dep_recipes{$required} eq 'CODE';
             my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
 
             # The big problem here is simple. Dep recipes can be rendered only once, but sometimes accomodate data from multiple requestors.
@@ -855,7 +866,7 @@ sub handle_domain {
             push( @modules, $required ) unless any { $required eq $_ };
             $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
 
-            # Hash::Merge picks a side where two dependants disagree.  The recipe
+            # Hash::Merge picks a side where two dependents disagree.  The recipe
             # being depended on is the only thing that knows whether either side
             # is right, so it gets asked -- and dies if it does not know.
             Provisioner::Cookbook->load( $required, distro => $distro_name )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
@@ -956,7 +967,14 @@ sub handle_domain {
 
             # Asked before any of it comes down, so what does is what the guest
             # looks like now rather than whenever its cron last ran.
-            refresh_salvage( $static_ip, $admin_user, $cfg_dir, $module, [ $builder->remote_prepare( $global_config->{install_dir}, $fqdn ) ], [ sort keys %tg ] );
+            refresh_salvage(
+                static_ip  => $static_ip,
+                admin_user => $admin_user,
+                cfg_dir    => $cfg_dir,
+                module     => $module,
+                commands   => [ $builder->remote_prepare( $global_config->{install_dir}, $fqdn ) ],
+                watched    => [ sort keys %tg ],
+            );
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
@@ -1202,7 +1220,7 @@ sub handle_domain {
     # Absent rather than empty, because Config::Simple hands back an empty string
     # for a bare `key=` and an empty string is not the same as no answer.  And
     # never one of the keys written out above, which would be a duplicate.
-    my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( "\n", $pconf );
+    my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
     $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && defined $global_config->{$_} && length $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
@@ -1282,9 +1300,13 @@ sub handle_domain {
     return 0;
 }
 
-=head2 refresh_salvage($static_ip, $admin_user, $cfg_dir, $module, $commands, $watched)
+=head2 refresh_salvage(%args)
 
 Ask the guest to bring what is about to be salvaged up to date.
+
+C<static_ip>, C<admin_user> and C<cfg_dir> say which guest to ask and how to
+reach it, C<module> names the recipe asking, and C<commands> is what its
+C<remote_prepare> handed over.
 
 A dump written nightly and fetched at noon is twelve hours out of date, and the
 difference is everything that happened in between -- which is exactly what a
@@ -1294,7 +1316,7 @@ C<remote_prepare>; this runs it, as root, on the guest being salvaged.
 A failure is usually a warning.  The guest may not have the script yet, and last
 night's dump is worth more than none -- which is what dying here would leave.
 
-B<Unless it changed something first.>  C<$watched> is what is about to come
+B<Unless it changed something first.>  C<watched> is what is about to come
 down, and the newest mtime under each of those paths is taken before and after
 every command.  A command that failed having touched none of them left last
 night's dump exactly as it was, and that is the case the warning is for.  One
@@ -1312,7 +1334,7 @@ sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
     # The address may be a cidr, which is not a thing to connect to.
-    ( my $host = $static_ip ) =~ s{/.*\z}{};
+    ( my $host = $static_ip ) =~ s{/\N*\z}{};
 
     # One connection per guest, and not one per recipe.  Both callers ask for
     # this inside the loop over the modules -- refresh_salvage once a module and
@@ -1341,8 +1363,8 @@ sub _salvage_guest {
     );
 }
 
-sub refresh_salvage {
-    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @_;
+sub refresh_salvage (%args) {
+    my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @args{qw{static_ip admin_user cfg_dir module commands watched}};
 
     return unless @$commands;
     $watched //= [];
@@ -1398,8 +1420,8 @@ sub _salvage_mtimes {
     my $said = $guest->capture_cmd("sudo sh -c '$quoted'") // q{};
 
     my %mtime;
-    foreach my $line ( split "\n", $said ) {
-        my ( $path, $stamp ) = split "\t", $line, 2;
+    foreach my $line ( split m/\n/, $said ) {
+        my ( $path, $stamp ) = split m/\t/, $line, 2;
         next unless defined $path && length $path;
         $mtime{$path} = defined $stamp ? $stamp : q{};
     }
@@ -1469,15 +1491,15 @@ sub pack_scripts {
     my @packed;
     foreach my $script ( Provisioner::Utils::files_in($from) ) {
 
-        # Opening it proves we may read it; files_in has already left out the
-        # directories.
-        open( my $probe, '<', "$from/$script" ) or next;
-        close $probe;
-        copy( "$from/$script", "$to/$script" )
-          or die "Could not copy $script into $to: $!\n";
-        ## no critic (Plicease::ProhibitLeadingZeros) -- the policy exempts a
+        # Copied, and given its mode, from the handle it was opened with, so both
+        # come from the file that was opened rather than whatever that path holds
+        # by then.  files_in has already left out the directories.
+        open( my $in, '<', "$from/$script" ) or next;
+        copy( $in, "$to/$script" )           or die "Could not copy $script into $to: $!\n";
+        ## no critic (ProhibitLeadingZeros) -- the policy exempts a
         ## literal handed straight to chmod; this is a mask against a mode.
-        chmod( ( stat("$from/$script") )[2] & 07777, "$to/$script" );
+        chmod( ( stat $in )[2] & 07777, "$to/$script" );
+        close($in) or die "Could not close $from/$script: $!\n";
         push @packed, "scripts/$script";
     }
 
@@ -1582,7 +1604,6 @@ sub _dir_has_files {
 
                     # Symlinks count and are not followed: one salvaged off a
                     # guest can point anywhere, including back up its own tree.
-                    ## no critic (ValuesAndExpressions::ProhibitFiletest_l, ValuesAndExpressions::ProhibitFiletest_d)
                     die $found if -l $File::Find::name || !-d $File::Find::name;
                 },
             },
@@ -1601,7 +1622,7 @@ sub _get_sftp {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
     # IP might be cidr, we don't care about that
-    $static_ip =~ s|/.*$||;
+    $static_ip =~ s|/\N*$||;
     my $target_is_up = 0;
 
     # The old guest's key, which is the one that gets us in to the guest that is

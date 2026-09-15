@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -187,7 +187,7 @@ sub enrich {
             # both proxying to the same app, which is the usual arrangement --
             # declare one upstream between them rather than two of the same.
             my $socket = "$opts{install_dir}/$opts{domain}/$uri";
-            ( my $name = "sock_$socket" ) =~ s/[^A-Za-z0-9_]/_/g;
+            ( my $name = "sock_$socket" ) =~ s/\W/_/g;
 
             $upstreams{$name} = $socket;
             $vopts->{proxy_uri} = "http://$name";
@@ -213,7 +213,7 @@ sub enrich {
             next if $vopts->{ssl_redirect};
             next unless $vopts->{static_dir};
             $serves_static = 1;
-            my @parts = split '/', $vopts->{static_dir};
+            my @parts = split m{/}, $vopts->{static_dir};
             pop @parts;
             my $path = '';
             foreach my $part (@parts) {

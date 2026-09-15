@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 # Basically our 'install script'
 
@@ -68,12 +68,12 @@ sub main {
 
 # TODO ensure kvm is installed/configured to provide DHCP internal IPs
 sub setup_kvm {
-    1;
+    return 1;
 }
 
 # TODO Setup a bridge device on a public IP
 sub setup_public_bridge {
-    1;
+    return 1;
 }
 
 # TODO: xorriso, which is what builds the cloud-init seed.  bin/preflight's
@@ -81,7 +81,7 @@ sub setup_public_bridge {
 # hypervisor rather than of the machine driving the run -- because this is
 # where the seed is actually made.
 sub setup_iso_builder {
-    1;
+    return 1;
 }
 
 # TODO: the storage pool, and a filesystem under it that can carry a quota.
@@ -91,7 +91,7 @@ sub setup_iso_builder {
 # Provisioner::Recipe::trogrunner, and note_pool_quota in bin/preflight, which
 # says whether this machine has one.
 sub setup_storage_pool {
-    1;
+    return 1;
 }
 
 # TODO: the two apparmor items nothing else does -- the libvirt-qemu profile
@@ -99,12 +99,12 @@ sub setup_storage_pool {
 # /usr/libexec/virtiofs-better, which has none anywhere.  bin/provision
 # installs the binary on first use; the profile is still the operator's.
 sub setup_apparmor {
-    1;
+    return 1;
 }
 
 # TODO: Configure firewall for all the above services
 sub setup_firewall {
-    1;
+    return 1;
 }
 
 exit main(@ARGV) unless caller;

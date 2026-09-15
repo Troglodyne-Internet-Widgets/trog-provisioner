@@ -4,7 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -17,7 +17,7 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Capture::Tiny qw{capture_stdout};
@@ -31,7 +31,7 @@ require_ok("$FindBin::Bin/../bin/reseed_ips") or die "could not require SUT: $@"
 
 sub fresh_db {
     Trog::SQLite::forget();
-    $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );
+    $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- set for the subtest that called this, after it returns
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\ngateway=10.9.9.1\n" );
     return;
 }
@@ -74,18 +74,18 @@ subtest 'the report says which way each address went' => sub {
 
     my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( \%before, \%after, 0 ) };
 
-    like( $said, qr/10[.]0[.]0[.]4\s+recorded as new[.]test/,          'an address that arrived' );
-    like( $said, qr/10[.]0[.]0[.]1\s+freed \(was gone[.]test\)/,       'one that went' );
-    like( $said, qr/10[.]0[.]0[.]3\s+now moved[.]test, was insitu:aa/, 'and one that changed hands' );
-    like( $said, qr/1 added, 1 freed, 1 changed hands/,                'counted up' );
+    like( $said, qr/10[.]0[.]0[.]4\s+recorded[ ]as[ ]new[.]test/,            'an address that arrived' );
+    like( $said, qr/10[.]0[.]0[.]1\s+freed[ ]\(was[ ]gone[.]test\)/,         'one that went' );
+    like( $said, qr/10[.]0[.]0[.]3\s+now[ ]moved[.]test,[ ]was[ ]insitu:aa/, 'and one that changed hands' );
+    like( $said, qr/1[ ]added,[ ]1[ ]freed,[ ]1[ ]changed[ ]hands/,          'counted up' );
     unlike( $said, qr/10[.]0[.]0[.]2/, 'while one that did not move is not mentioned' );
 };
 
 subtest 'a dry run says would, and a real one does not' => sub {
     my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( { '10.0.0.1' => 'a.test' }, {}, 1 ) };
 
-    like( $said, qr/would be freed/,  'said in the conditional' );
-    like( $said, qr/Nothing written/, 'and says so plainly' );
+    like( $said, qr/would[ ]be[ ]freed/, 'said in the conditional' );
+    like( $said, qr/Nothing[ ]written/,  'and says so plainly' );
 };
 
 done_testing();

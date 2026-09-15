@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -12,12 +12,8 @@ t/guest.t - Trog::Guest: what a freshly built guest has to be waited for
 
 =cut
 
-# A -f or -x in here is asserting on a file this test just made, in a temporary
-# directory nothing else can see.  There is no window for it to be wrong in, so
-# the TOCTOU policies have nothing to catch.
-## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
-
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stdout};
 use File::Temp();
 use Test::MockModule qw{strict};
@@ -33,7 +29,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use Trog::Guest();
 
 my $DOMAIN = 'vm.test.test';
@@ -43,8 +39,7 @@ my $KEY    = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n---
 # is Trog::Machine's and is tested in t/hv.t.  What is here is the rest.
 
 subtest 'a guest needs somewhere to connect to' => sub {
-    eval { Trog::Guest->new( user => 'ubuntu' ) };
-    like( $@, qr/needs a host/, 'refuses to be built without one' );
+    like( exception { Trog::Guest->new( user => 'ubuntu' ) }, qr/needs[ ]a[ ]host/, 'refuses to be built without one' );
 };
 
 subtest 'identity' => sub {
@@ -75,20 +70,23 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
     my $machine = Test::MockModule->new('Trog::Machine');
 
     $ports->redefine( wait_port => sub { 0 } );
-    eval {
-        quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } );
+    my $err = exception {
+        quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } )
     };
-    like( $@, qr/never came up after 1s/, 'a port that never opens is an error' );
-    like( $@, qr/vm\.example\.test/,      'naming the guest' );
+    like( $err, qr/never[ ]came[ ]up[ ]after[ ]1s/, 'a port that never opens is an error' );
+    like( $err, qr/vm\.example\.test/,              'naming the guest' );
 
     # A port that opens but a connection that will not: checking only the first
     # is how you get a confusing failure three steps later.
     $ports->redefine( wait_port => sub { 1 } );
     $machine->redefine( ssh => sub { undef } );
-    eval {
-        quietly( sub { $guest->wait_for_ssh } );
-    };
-    like( $@, qr/Could not establish an SSH connection/, 'and so is that' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_ssh } )
+        },
+        qr/Could[ ]not[ ]establish[ ]an[ ]SSH[ ]connection/,
+        'and so is that'
+    );
 
     $machine->redefine( ssh => sub { bless {}, 'FakeSSH' } );
     is( quietly( sub { $guest->wait_for_ssh } ), $guest, 'otherwise we get the guest back' );
@@ -130,10 +128,13 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
     $machine->redefine( run_sudo    => sub { 1 } );
     $machine->redefine( capture_cmd => sub { '[]' } );
 
-    eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
-    };
-    like( $@, qr/Cloud init reported failure/, 'dies' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
+        },
+        qr/Cloud[ ]init[ ]reported[ ]failure/,
+        'dies'
+    );
 };
 
 subtest 'cloud-init that does not return JSON is fatal' => sub {
@@ -144,10 +145,13 @@ subtest 'cloud-init that does not return JSON is fatal' => sub {
     $machine->redefine( run_sudo    => sub { 0 } );
     $machine->redefine( capture_cmd => sub { 'command not found' } );
 
-    eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
-    };
-    like( $@, qr/did not return a JSON array/, 'dies rather than carrying on blind' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
+        },
+        qr/did[ ]not[ ]return[ ]a[ ]JSON[ ]array/,
+        'dies rather than carrying on blind'
+    );
 };
 
 subtest 'wait_for_makefile waits for the queue twice' => sub {
@@ -209,7 +213,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     require Trog::Machine;
 
     my %seconds = ( s => 1, m => 60, h => 3600 );
-    my ( $n, $unit ) = $Trog::Guest::SETUP_TIMEOUT =~ m/\A([0-9]+)([smh]?)\z/;
+    my ( $n, $unit ) = $Trog::Guest::SETUP_TIMEOUT =~ m/\A(\d+)([smh]?)\z/;
     ok( $n, "SETUP_TIMEOUT parses ($Trog::Guest::SETUP_TIMEOUT)" );
     my $setup = $n * ( $seconds{ $unit || 's' } // 1 );
 
@@ -217,7 +221,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     my $atq = qq{sudo timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     cmp_ok(
-        Trog::Machine::_hang_limit($atq), '>=', $setup,
+        Trog::Machine::_hang_limit($atq), '>=', $setup,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'the hang detector gives the wait at least as long as the wait asks for'
     );
 };
@@ -279,9 +283,9 @@ subtest 'sealing puts it in the store and takes it off the disk' => sub {
     File::Slurper::Temp::write_text( "$dir/key.rsa", "$KEY\n" );
 
     # A real store with somebody else's secret already in it.  Sealing used to
-    # go through Trog::Secrets::write, which builds a new database out of what
+    # go through Trog::Secrets::create, which builds a new database out of what
     # it is handed -- so this entry is the one that would have disappeared.
-    Trog::Secrets->write( $store, 'hunter2', 'secret:registrar/easydns/password' => 'REGISTRAR' );
+    Trog::Secrets->create( $store, 'hunter2', 'secret:registrar/easydns/password' => 'REGISTRAR' );
 
     my $asked = 0;
     my $creds = Test::MockModule->new('Trog::Credentials');
@@ -291,7 +295,7 @@ subtest 'sealing puts it in the store and takes it off the disk' => sub {
 
     ok( Trog::Guest->seal_key( $DOMAIN, "$dir/key.rsa" ), 'it seals' );
 
-    my %after = Trog::Secrets->read(
+    my %after = Trog::Secrets->lookup(
         $store, 'hunter2',
         key       => Trog::Guest->ref_for_key($DOMAIN),
         registrar => 'secret:registrar/easydns/password',
@@ -310,7 +314,7 @@ subtest 'sealing nothing is not sealing' => sub {
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
 
     my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( write => sub { die "wrote an empty key into the store\n" } );
+    $secrets->redefine( create => sub { die "wrote an empty key into the store\n" } );
 
     # A dry run leaves no key to seal, and a domain that has never been built
     # has none either.  Writing an empty value would be worse than doing
@@ -326,7 +330,7 @@ subtest 'a sealed key is fetched once and lands somewhere private' => sub {
     my $creds = Test::MockModule->new('Trog::Credentials');
     $creds->redefine( prompt => sub { return 'hunter2' } );
     my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( read => sub { $reads++; return ( key => $KEY ) } );
+    $secrets->redefine( lookup => sub { $reads++; return ( key => $KEY ) } );
 
     my $path = Trog::Guest->key_path( 'fetched.test.test', '/bogus/nothing/key.rsa' );
     ok( defined $path, 'a path comes back' ) or return;
@@ -336,7 +340,7 @@ subtest 'a sealed key is fetched once and lands somewhere private' => sub {
     # 0600, because this is the credential for a machine and it is now sitting
     # in a world-readable directory.
     my @stat = stat($path);
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( sprintf( '%04o', $stat[2] & 07777 ), '0600', 'readable by nobody else' );
 
     # Asked for twice in a run it is fetched once: every guest this touches

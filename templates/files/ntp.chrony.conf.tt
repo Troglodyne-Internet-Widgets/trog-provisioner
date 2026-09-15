@@ -12,7 +12,7 @@ driftfile /var/lib/chrony/chrony.drift
 # Log tracking, measurements, and statistics to files
 logdir /var/log/chrony
 
-# Enable NTP kernel synchronisation
+# Enable NTP kernel synchronization
 rtcsync
 
 # Reduce clock error spikes from bad samples

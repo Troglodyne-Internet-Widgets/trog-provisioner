@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -18,8 +18,10 @@ t/hv.t - Trog::HV: connection URIs, paths, libvirt and capacity
 ## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
 
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stdout};
 use File::Temp    qw{tempdir};
+use List::Util    qw{any};
 use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
@@ -31,7 +33,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
@@ -40,9 +42,9 @@ use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 
 # Every subtest wants a hypervisor of its own, and new() hands back the last one
 # it built unless you ask for something different.
-sub fresh {
+sub fresh (@args) {
     Trog::HV->forget();
-    return Trog::HV->new(@_);
+    return Trog::HV->new(@args);
 }
 
 # --- Defaults: no URI means we are the hypervisor -----------------------------
@@ -100,16 +102,15 @@ subtest 'bracketed IPv6 host' => sub {
 
 subtest 'unparseable URI dies' => sub {
     Trog::HV->forget();
-    eval { Trog::HV->new( uri => 'not a uri' ) };
-    like( $@, qr/Could not parse libvirt connection URI/, 'dies loudly' );
+    like( exception { Trog::HV->new( uri => 'not a uri' ) }, qr/Could[ ]not[ ]parse[ ]libvirt[ ]connection[ ]URI/, 'dies loudly' );
 };
 
 # --- Transports that give us no shell ----------------------------------------
 subtest 'a remote transport with no shell is refused up front' => sub {
     Trog::HV->forget();
-    eval { Trog::HV->new( uri => 'qemu+tcp://hv2.example.test/system' ) };
-    like( $@, qr/gives us no shell/,  'tcp:// is rejected rather than half-working' );
-    like( $@, qr/qemu\+ssh:\/\/root/, 'and names the transport to use instead' );
+    my $err = exception { Trog::HV->new( uri => 'qemu+tcp://hv2.example.test/system' ) };
+    like( $err, qr/gives[ ]us[ ]no[ ]shell/, 'tcp:// is rejected rather than half-working' );
+    like( $err, qr/qemu\+ssh:\/\/root/,      'and names the transport to use instead' );
 };
 
 # --- Paths --------------------------------------------------------------------
@@ -141,8 +142,9 @@ subtest 'a backend that leaves something out is told what' => sub {
     # In words, at the call, rather than "Can't locate object method" from
     # somewhere up in bin/provision.
     foreach my $method (@owed) {
-        ok( !eval { $half->$method('vm.test'); 1 }, "$method dies" );
-        like( $@, qr/\ATrog::HV::HalfDone does not implement \Q$method\E, which every backend has to$/, 'naming the backend and what it owes' );
+        my $err = exception { $half->$method('vm.test') };
+        ok( $err, "$method dies" );
+        like( $err, qr/\ATrog::HV::HalfDone[ ]does[ ]not[ ]implement[ ]\Q$method\E,[ ]which[ ]every[ ]backend[ ]has[ ]to$/, 'naming the backend and what it owes' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # And the two there are owe nothing.
@@ -204,8 +206,8 @@ subtest 'an existing pool says where it is, and is believed' => sub {
 
     package FakePoolVMM;
 
-    sub new                      { my ( $class, $path ) = @_; return bless { path => $path }, $class }
-    sub get_storage_pool_by_name { return FakePool->new( $_[0]->{path} ) }
+    sub new                                   { my ( $class, $path ) = @_; return bless { path => $path }, $class }
+    sub get_storage_pool_by_name ( $self, $ ) { return FakePool->new( $self->{path} ) }
 }
 
 {
@@ -246,9 +248,9 @@ subtest 'guest_ssh_ip' => sub {
         'a remote hypervisor uses the bridged static IP, which we can actually route to'
     );
 
-    eval { $remote->guest_ssh_ip( $conf_without, '192.168.122.50' ) };
-    like( $@, qr/requires the guest to have a/, 'and says so when there is none' );
-    like( $@, qr/\bips\b/,                      'naming the config key to set' );
+    my $err = exception { $remote->guest_ssh_ip( $conf_without, '192.168.122.50' ) };
+    like( $err, qr/requires[ ]the[ ]guest[ ]to[ ]have[ ]a/, 'and says so when there is none' );
+    like( $err, qr/\bips\b/,                                'naming the config key to set' );
 };
 
 # --- The URI terraform gets is not always the one Sys::Virt gets -------------
@@ -284,7 +286,7 @@ subtest 'append_line does not duplicate' => sub {
     $hv->append_line( $ak, 'ssh-rsa BBBB two' );
     $hv->append_line( $ak, 'ssh-rsa AAAA one' );
 
-    my @lines = split( "\n", File::Slurper::read_text($ak) );
+    my @lines = split( m/\n/, File::Slurper::read_text($ak) );
     is( scalar(@lines), 2, 'the repeated key was only written once' );
     is_deeply( \@lines, [ 'ssh-rsa AAAA one', 'ssh-rsa BBBB two' ], 'in order' );
 };
@@ -383,7 +385,9 @@ subtest 'remote work goes through commands with an exit status' => sub {
             $content = do {
                 open( my $fh, '<', $opts->{stdin_file} ) or return 0;
                 local $/;
-                <$fh>;
+                my $slurped = <$fh>;
+                close($fh) or die "Could not close $opts->{stdin_file}: $!";
+                $slurped;
             } if defined $opts->{stdin_file};
 
             $append ? ( $files{ $argv[1] } .= $content ) : ( $files{ $argv[1] } = $content );
@@ -412,7 +416,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
             my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;
             $files{ $argv[2] } = delete $files{ $argv[1] } if $argv[0] eq 'mv';
 
-            $? = 0;
+            $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
@@ -443,7 +447,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
             if ( $argv[0] eq 'grep' ) {
                 my ( $line, $file ) = @argv[ -2, -1 ];
                 return 1 unless defined $files{$file};
-                return ( grep { $_ eq $line } split( "\n", $files{$file} ) ) ? 0 : 1;
+                return ( grep { $_ eq $line } split( m/\n/, $files{$file} ) ) ? 0 : 1;
             }
             return 0;
         }
@@ -482,9 +486,9 @@ subtest 'remote work goes through commands with an exit status' => sub {
     is( $tee->{opts}{stdin_data}, "conf\n", 'with no password anywhere near it' );
 
     my $said = join '|', map { "@{$_->{cmd}}" } @commands;
-    like( $said, qr{sudo -n mv /tmp/staged\.XXXX /etc/rsyslog\.d/10-vm\.conf}, 'then moved into place' );
-    like( $said, qr{sudo -n chown root:root},                                  'chowned' );
-    like( $said, qr{sudo -n chmod 0644},                                       'and chmodded, since tee would have used our umask' );
+    like( $said, qr{sudo[ ]-n[ ]mv[ ]/tmp/staged\.XXXX[ ]/etc/rsyslog\.d/10-vm\.conf}, 'then moved into place' );                               ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $said, qr{sudo[ ]-n[ ]chown[ ]root:root},                                    'chowned' );
+    like( $said, qr{sudo[ ]-n[ ]chmod[ ]0644},                                         'and chmodded, since tee would have used our umask' );
     is( $files{'/etc/rsyslog.d/10-vm.conf'}, "conf\n", 'and the bytes ended up there' );
 
     # put_file streams the local file down the same pipe.
@@ -507,7 +511,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
         $files{$ak}, "ssh-rsa THEIRS somebody\nssh-rsa AAAA one\nssh-rsa BBBB two\n",
         'the keys already there survive, and the repeat was written once'
     );
-    ok( ( grep { "@{$_->{cmd}}" =~ m/\Atee -a / } @commands ), 'because it appends' );
+    ok( ( grep { "@{$_->{cmd}}" =~ m/\Atee[ ]-a[ ]/ } @commands ), 'because it appends' );
     ok(
         !( grep { "@{$_->{cmd}}" eq "tee $ak" } @commands ),
         'and never rewrites the whole file, which is how you lock somebody out'
@@ -525,13 +529,13 @@ subtest 'a hang is an error with a name on it' => sub {
     local $Trog::Machine::HANG_TIMEOUT = 1;
 
     my $started = time;
-    eval { $hv->write_text( '/tmp/somewhere', "x\n" ) };
-    my $took = time - $started;
+    my $err     = exception { $hv->write_text( '/tmp/somewhere', "x\n" ) };
+    my $took    = time - $started;
 
-    like( $@, qr/Gave up on the hypervisor/,          'we stop waiting' );
-    like( $@, qr/qemu\+ssh:\/\/root\@fakehv\/system/, 'saying which one' );
-    like( $@, qr/tee \/tmp\/somewhere/,               'and what we were doing' );
-    like( $@, qr/permission\s+problem/,               'and what it usually means' );
+    like( $err, qr/Gave[ ]up[ ]on[ ]the[ ]hypervisor/,  'we stop waiting' );
+    like( $err, qr/qemu\+ssh:\/\/root\@fakehv\/system/, 'saying which one' );
+    like( $err, qr/tee[ ]\/tmp\/somewhere/,             'and what we were doing' );
+    like( $err, qr/permission\s+problem/,               'and what it usually means' );
     cmp_ok( $took, '<', 10, 'and we did it near the deadline, not after the sleep' );
 };
 
@@ -548,11 +552,11 @@ subtest 'a sudo password is asked for once and then remembered' => sub {
             push @attempts, { cmd => [@cmd], stdin => $opts->{stdin_data} };
 
             # -n gets the message sudo gives when it cannot ask.
-            if ( grep { $_ eq '-n' } @cmd ) {
-                $? = 1 << 8;
+            if ( any { $_ eq '-n' } @cmd ) {
+                $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
                 return ( '', "sudo: a password is required\n" );
             }
-            $? = 0;
+            $? = 0;             ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
@@ -586,15 +590,15 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
 
     my $mock = Test::MockModule->new('Net::OpenSSH::More');
     $mock->redefine( new      => sub { bless {}, shift } );
-    $mock->redefine( capture2 => sub { $? = 1 << 8; return ( '', "sudo: a password is required\n" ) } );
+    $mock->redefine( capture2 => sub { $? = 1 << 8; return ( '', "sudo: a password is required\n" ) } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
 
-    my $tty = Test::MockModule->new('Trog::Machine');
-    $tty->redefine( _have_terminal => sub { 0 } );
+    local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
-    eval { $hv->run_sudo(qw{systemctl restart rsyslog}) };
-    like( $@, qr/wants a password, and there is no terminal/, 'says what happened' );
-    like( $@, qr/NOPASSWD/,                                   'and what to put in sudoers' );
-    like( $@, qr/\broot\b/,                                   'for the right user' );
+    my $err = exception { $hv->run_sudo(qw{systemctl restart rsyslog}) };
+    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]it[ ]could[ ]not[ ]be[ ]asked[ ]for/, 'says what happened' );           ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr{Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal:[ ]/bogus/tty},       'and why it could not ask' );
+    like( $err, qr/NOPASSWD/,                                                          'and what to put in sudoers' );
+    like( $err, qr/\broot\b/,                                                          'for the right user' );
 };
 
 subtest 'the sudo password is asked for the same way every other one is' => sub {
@@ -609,17 +613,14 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
             my ( $self, $opts, @cmd ) = @_;
 
             # -n is the probe; it fails by design, which is what sends us to ask.
-            if ( grep { $_ eq '-n' } @cmd ) {
-                $? = 1 << 8;
+            if ( any { $_ eq '-n' } @cmd ) {
+                $? = 1 << 8;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
                 return ( '', "sudo: a password is required\n" );
             }
-            $? = 0;
+            $? = 0;             ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
-
-    my $tty = Test::MockModule->new('Trog::Machine');
-    $tty->redefine( _have_terminal => sub { 1 } );
 
     # One way of asking, in Trog::Credentials, rather than a second one here
     # with Term::ReadKey doing its own echo suppression.
@@ -630,8 +631,8 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
     quietly( sub { $hv->run_sudo(qw{true}) } );
 
     is( scalar @asked, 1, 'asked once' );
-    like( $asked[0], qr/\[sudo\] password for root/, 'saying who it is for' );
-    like( $asked[0], qr/hv/,                         'and which machine' );
+    like( $asked[0], qr/\[sudo\][ ]password[ ]for[ ]root/, 'saying who it is for' );
+    like( $asked[0], qr/hv/,                               'and which machine' );
 };
 
 # --- Building things, which is what terraform used to do ----------------------
@@ -653,13 +654,13 @@ subtest 'a disk is an overlay on the base image' => sub {
     );
 
     is( $path, '/opt/terraform/disks/vm.example.test-qcow2', 'made, and its path came back' );
-    like( $created[0], qr{<name>vm\.example\.test-qcow2</name>}, 'named' );
-    like( $created[0], qr{<capacity unit='bytes'>42949672960<},  'sized' );
+    like( $created[0], qr{<name>vm\.example\.test-qcow2</name>},  'named' );
+    like( $created[0], qr{<capacity[ ]unit='bytes'>42949672960<}, 'sized' );
     like(
-        $created[0], qr{<backingStore><path>/opt/terraform/disks/baseimage-qcow2</path>},
+        $created[0], qr{<backingStore><path>/opt/terraform/disks/baseimage-qcow2</path>},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'laid over the base image rather than copying it'
     );
-    like( $created[0], qr{<format type='qcow2'/></backingStore>}, 'which is qcow2 too' );
+    like( $created[0], qr{<format[ ]type='qcow2'/></backingStore>}, 'which is qcow2 too' );
 
     # One that is already there is left alone: it is a guest's filesystem.
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.example.test-qcow2' } );
@@ -722,7 +723,7 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
     like( $command, qr/oflag=direct/,                         'by doing the same O_DIRECT open qemu is about to do' );
     like( $command, qr/bs=4096/,                              'with a block a direct write can actually be aligned to' );
     like( $command, qr{/opt/terraform/disks/\.odirect-probe}, 'in the pool, which is the filesystem in question' );
-    like( $command, qr/rm -f/,                                'and takes the probe file away again' );
+    like( $command, qr/rm[ ]-f/,                              'and takes the probe file away again' );
 
     # Named filesystems are exactly what this stopped doing: tmpfs takes an
     # O_DIRECT write on a current kernel and ZFS has since 2.3, so a list of
@@ -783,8 +784,8 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
 
     quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ) } );
 
-    like( $created[0], qr{<clusterSize unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
-    like( $created[0], qr{<features><extended_l2/></features>},             'and so does subcluster allocation' );
+    like( $created[0], qr{<clusterSize[ ]unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
+    like( $created[0], qr{<features><extended_l2/></features>},               'and so does subcluster allocation' );
 
     # Neither is retrofittable: both are properties of the image as created, so
     # a disk that already exists stays exactly as it is.  It is a filesystem.
@@ -841,10 +842,10 @@ subtest 'the base image is fetched once' => sub {
     quietly( sub { $hv->base_image('https://example.test/noble.img') } );
 
     ok(
-        ( grep { m/curl .*\.partial/ } @ran ),
+        ( grep { m/curl[ ]\N*\.partial/ } @ran ),
         'downloaded to a partial name, so libvirt never sees a half a file'
     );
-    ok( ( grep { m/\Amv .*\.partial / } @ran ), 'and moved into place after' );
+    ok( ( grep { m/\Amv[ ]\N*\.partial[ ]/ } @ran ), 'and moved into place after' );
 
     # Already there: no fetch at all.
     @ran = ();
@@ -857,8 +858,7 @@ subtest 'the base image is fetched once' => sub {
 
     # No image and no URL is an error, not an empty download.
     $mock->redefine( volume_path => sub { undef } );
-    eval { $hv->base_image(undef) };
-    like( $@, qr/No image URL configured/, 'and nothing to fetch is an error' );
+    like( exception { $hv->base_image(undef) }, qr/No[ ]image[ ]URL[ ]configured/, 'and nothing to fetch is an error' );
 };
 
 {
@@ -879,8 +879,8 @@ subtest 'the base image is fetched once' => sub {
 
     package FakeBuildVolume;
 
-    sub new      { my ( $class, $path ) = @_; return bless { path => $path }, $class }
-    sub get_path { return $_[0]->{path} }
+    sub new              { my ( $class, $path ) = @_; return bless { path => $path }, $class }
+    sub get_path ($self) { return $self->{path} }
 }
 
 sub quietly {
@@ -896,7 +896,7 @@ subtest 'a guest MAC is derived from its name and does not move' => sub {
     my $nat    = $hv->guest_mac( 'vm.example.test', 0 );
     my $bridge = $hv->guest_mac( 'vm.example.test', 1 );
 
-    like( $nat, qr/\A52:54:00(:[0-9a-f]{2}){3}\z/, 'a QEMU-prefixed MAC' );
+    like( $nat, qr/\A52:54:00(:[\da-f]{2}){3}\z/, 'a QEMU-prefixed MAC' );
     isnt( $nat, $bridge, 'the two interfaces differ' );
 
     is(
@@ -957,8 +957,8 @@ subtest 'leases are looked up by MAC, not by name' => sub {
 
     package FakeLeaseVMM;
 
-    sub new                 { my ( $class, $asked ) = @_; return bless { asked => $asked }, $class }
-    sub get_network_by_name { return FakeNet->new( $_[0]->{asked} ) }
+    sub new                              { my ( $class, $asked ) = @_; return bless { asked => $asked }, $class }
+    sub get_network_by_name ( $self, $ ) { return FakeNet->new( $self->{asked} ) }
 }
 
 {
@@ -1014,21 +1014,107 @@ subtest 'a command that names its own timeout is not called hung before it' => s
     # back as a failure.  Only the remote path reaches _unhang, which is why
     # this never appeared against a local hypervisor.
     is(
-        Trog::Machine::_hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,
+        Trog::Machine::_hang_limit('virsh list --all'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'an ordinary command gets the default'
     );
 
     is(
-        Trog::Machine::_hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),
+        Trog::Machine::_hang_limit("sudo timeout 180m bash -c 'until :; do :; done'"),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         180 * 60 + 60, 'one that says 180m gets 180m and a minute'
     );
 
     is(
-        Trog::Machine::_hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,
+        Trog::Machine::_hang_limit('sudo timeout 90 something'), $Trog::Machine::HANG_TIMEOUT,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'and one shorter than the default does not lower it'
     );
 
-    is( Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );
+    is( Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 };
+
+# --- What libvirt refuses stops the run ---------------------------------------
+subtest 'libvirt refusing to set up, start or remove something is an error' => sub {
+    my %refuse;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( vmm       => sub { FakeRefusingVMM->new( \%refuse ) } );
+    $mock->redefine( _domain   => sub { FakeRefusing->new( \%refuse ) } );
+    $mock->redefine( pool_path => sub { '/bogus/pool' } );
+
+    my $hv = fresh( uri => 'qemu+ssh://hv/system' );
+    is( exception { $hv->define_domain('<domain/>') }, undef, 'nothing refused, nothing to say' );
+
+    %refuse = ( set_autostart => 1 );
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could[ ]not[ ]set[ ]vm\.test[ ]to[ ]start[ ]with[ ]the[ ]host:[ ]set_autostart[ ]refused/, 'a domain that will not autostart' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+
+    %refuse = ( create => 1 );
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could[ ]not[ ]start[ ]vm\.test:[ ]create[ ]refused/, 'a domain that will not start' );
+
+    %refuse = ( build => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
+        },
+        qr/Could[ ]not[ ]build[ ]the[ ]storage[ ]pool[ ]tf_disks[ ]at[ ]\/bogus\/pool:[ ]build[ ]refused/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        'a pool that will not build'
+    );
+
+    %refuse = ( create => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
+        },
+        qr/Could[ ]not[ ]start[ ]the[ ]storage[ ]pool[ ]tf_disks:[ ]create[ ]refused/,                        ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        'a pool that will not start'
+    );
+
+    %refuse = ( refresh => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->refresh_pool } )
+        },
+        qr/Could[ ]not[ ]refresh[ ]the[ ]storage[ ]pool[ ]tf_disks:[ ]refresh[ ]refused/,                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        'a pool that will not refresh'
+    );
+
+    %refuse = ( undefine => 1 );
+    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could[ ]not[ ]undefine[ ]vm\.test:[ ]undefine[ ]refused/, 'a domain that will not go' );
+
+    %refuse = ( destroy => 1 );
+    is( $hv->annihilate_domain('vm.test'), 1, 'one that is already off is not stopped at all, so it still goes' );
+
+    %refuse = ( destroy => 1, running => 1 );
+    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could[ ]not[ ]stop[ ]vm\.test:[ ]destroy[ ]refused/, 'but a running one that will not stop is an error' );
+};
+
+{
+
+    package FakeRefusingVMM;
+
+    sub new                      ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
+    sub get_storage_pool_by_name ( $self, $ )        { die "no such pool\n" }
+    sub define_storage_pool      ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
+    sub define_domain            ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
+}
+
+{
+
+    package FakeRefusing;
+
+    # A pool or a domain, refusing whatever the test has named, and running only
+    # when it names that too.
+    sub new           ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
+    sub get_name      ($self)             { return 'vm.test' }
+    sub is_active     ($self)             { return $self->{refuse}{running} ? 1 : 0 }
+    sub set_autostart ( $self, $ )        { return $self->_or_refuse('set_autostart') }
+    sub create        ($self)             { return $self->_or_refuse('create') }
+    sub build         ( $self, $ )        { return $self->_or_refuse('build') }
+    sub refresh       ($self)             { return $self->_or_refuse('refresh') }
+    sub destroy       ($self)             { return $self->_or_refuse('destroy') }
+    sub undefine      ( $self, @ )        { return $self->_or_refuse('undefine') }
+
+    sub _or_refuse ( $self, $what ) {
+        die "$what refused\n" if $self->{refuse}{$what};
+        return 1;
+    }
+}
 
 done_testing;

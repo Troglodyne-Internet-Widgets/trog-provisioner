@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -56,7 +56,7 @@ starman its service is started with:
         );
     },
 
-C<bin/new_config> merges what every dependant hands over, each list after the
+C<bin/new_config> merges what every dependent hands over, each list after the
 one before, so this recipe is configured once with all of them; anything
 written under C<perl> for the domain itself comes after those.  Each step is a
 hash naming one of four verbs, which are F<scripts/cpan_install>'s:
@@ -84,10 +84,10 @@ they were handed over: there and then, rather than deferred.
 
 That target runs after the fragment of every recipe that depends on this one,
 because C<bin/new_config> puts a required recipe after the last recipe that
-required it.  So a checkout a dependant's fragment makes is there to install
+required it.  So a checkout a dependent's fragment makes is there to install
 from.  And it is finished before the deferred work starts, so a service a
-dependant starts in the postrun has its modules by then.  Deferred instead, they
-would be queued behind whatever those dependants had already queued, the
+dependent starts in the postrun has its modules by then.  Deferred instead, they
+would be queued behind whatever those dependents had already queued, the
 service start included.
 
 A step that fails stops the makefile, as a perl that fails to build does.

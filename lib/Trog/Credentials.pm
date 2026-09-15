@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use IO::Prompter();
 
@@ -120,12 +120,7 @@ sub prompt {
 
     return $class->get($name) if defined $name && $class->have($name);
 
-    my @at;
-    if ( $opts{terminal} ) {
-        open( my $in,  '<',  $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
-        open( my $out, '>>', $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n";
-        @at = ( -in => $in, -out => $out );
-    }
+    my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
 
     # IO::Prompter reads from *ARGV, so a program that has arguments -- which
     # bin/new_config and bin/provision both do, the domain being one -- sends it
@@ -135,7 +130,7 @@ sub prompt {
     #
     # Flattening @ARGV to a single string leaves nothing there to open, and it
     # falls back to the terminal or to standard input as intended.
-    local *ARGV = join ' ', @ARGV;    ## no critic (CompileTime)
+    local *ARGV = join ' ', @ARGV;
     my $answer = IO::Prompter::prompt( $message, -echo => '*', @at );
 
     # False in boolean context only when no line arrived at all; an empty line
@@ -146,6 +141,13 @@ sub prompt {
     $class->remember( $name, $typed ) if defined $name;
 
     return $typed;
+}
+
+# One end of the terminal, opened with $mode, for IO::Prompter to ask at.
+sub _terminal {
+    my ( $mode, $what ) = @_;
+    open( my $fh, $mode, $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
+    return $fh;
 }
 
 =head2 remember($name, $value)
@@ -224,7 +226,7 @@ sub load {
         chomp $line;
         last unless length $line;
 
-        my ( $name, $value ) = $line =~ m/^(\w+):[ ]?(.*)$/;
+        my ( $name, $value ) = $line =~ m/^(\w+):[ ]?(\N*)$/;
         die "Could not read the credentials given on standard input.\n" . "Expected 'name: value', got: $line\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
           unless defined $name;
 

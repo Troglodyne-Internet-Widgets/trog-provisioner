@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -52,7 +52,7 @@ sub required_recipes {
     my ( $self, %opts ) = @_;
     return (
         nginxproxy => sub {
-            my (%opts) = @_;
+            my (%nginxproxy_opts) = @_;
             return (
                 vhosts => {
                     80 => {
@@ -73,11 +73,11 @@ sub required_recipes {
         # builds: see Provisioner::Recipe::perl on cpan_deps, and L</DESCRIPTION>
         # on why Sys::Virt goes first.
         perl => sub {
-            my (%opts) = @_;
+            my (%perl_opts) = @_;
             return (
                 cpan_deps => [
                     { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
-                    { installdeps => Path::Tiny::path( @opts{qw{install_dir domain}}, 'tCMS' )->stringify },
+                    { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
                 ],
             );
         },

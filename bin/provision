@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use FindBin();
 use FindBin::libs;
 use Config::Simple();
@@ -26,7 +26,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Provisioner::IPPool();
 use YAML::XS();
-use List::Util   qw{any uniq};
+use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -137,8 +137,8 @@ hypervisor" means when it isn't this machine.
 
 =cut
 
-sub _coerce_array {
-    return \@_;
+sub _coerce_array (@values) {
+    return \@values;
 }
 
 # Which of these are lists.  Config::Simple hands back a bare string for a file
@@ -186,8 +186,6 @@ sub _must_read {
     return $fh;
 }
 
-# The same question where the answer is allowed to be no.
-
 =head2 place_guest_secrets($guest, $domain)
 
 Put the files a recipe reads but must never generate onto the guest, out of the
@@ -221,13 +219,15 @@ sub place_guest_secrets {
     # The same domain directory bin/destroy purges: whatever hypervisor this run
     # is working with says where it is.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
-    return unless _readable($manifest);
+    open( my $fh, '<:raw', $manifest ) or return;
+    my $yaml = do { local $/; <$fh> };
+    close($fh) or die "Could not close $manifest: $!\n";
 
-    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
+    my $wanted = YAML::XS::Load($yaml);
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
-    my %values = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
+    my %values = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
 
     foreach my $path ( sort keys %$wanted ) {
         my $value = $values{$path};
@@ -348,17 +348,9 @@ sub _public_half {
     return "$pubkey trog-provisioner runner $domain";
 }
 
-sub _readable {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close $fh;
-    return 1;
-}
-
 sub main {
     my @args = @_;
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
     my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok );
@@ -424,10 +416,10 @@ sub main {
       unless $no_config || defined $domain_dir_from_cli;
 
     my $cfile = "$domain_dir/$domain/provision.conf";
-    close _must_read( $cfile, "No provision.conf for $domain" );
+    close( _must_read( $cfile, "No provision.conf for $domain" ) ) or die "Could not close $cfile: $!\n";
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    close _must_read( $udf, "No users.yaml for $domain" );
+    close( _must_read( $udf, "No users.yaml for $domain" ) ) or die "Could not close $udf: $!\n";
 
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
@@ -446,7 +438,7 @@ sub main {
 
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
-    close _must_read( $data, "No data to host for $domain" );
+    close( _must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
 
     # Its storage pool, and a fix for a sillyness in virtiofs -- or nothing, on a
     # hypervisor that has neither.
@@ -459,7 +451,7 @@ sub main {
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        close _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" );
+        close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
         my $dconfig = Config::Simple->new($dcfile);
 
         #XXX should probably die here if the admin_users differ!
@@ -495,7 +487,7 @@ sub main {
     $guest->wait_for_ssh();
 
     my $map = "$domain_dir/$domain/devices.map";
-    if ( _readable($map) ) {
+    if ( -f $map ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one to send; put_file dies if it has gone since
         print "Syncing disk map\n";
         $guest->put_file( $map, '/root/devices.map', sudo => 1 )
           or die "could not sync devices map!";
@@ -538,7 +530,7 @@ sub generate_config {
     # No site data, nothing to generate: somebody is provisioning from a domain
     # directory they wrote by hand, which is a supported thing to do.
     my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
-    unless ( _readable($recipes) || -d $recipe_dir ) {
+    unless ( -f $recipes || -d $recipe_dir ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is site data at all; the generator opens what there is
         print "No recipes at $recipes, building from what is already in $dir/$domain\n";
         return 0;
     }
@@ -551,7 +543,7 @@ sub generate_config {
 
     push @INC, '.';
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
-    require $generator;    ## no critic (Modules::RequireBarewordIncludes)
+    require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
 
     # Which here means only that a guest that is up keeps the key it is up with;
@@ -613,7 +605,7 @@ sub refuse_on_salvage_gaps {
 # --connect is the manual override and skips every question below.  Otherwise,
 # if there is a hypervisors.conf, it decides: the guest goes where it already
 # lives, or where it fits.  With no fleet configured we are back to the old
-# behaviour, where provision.conf carried the connection details itself.
+# behavior, where provision.conf carried the connection details itself.
 sub choose_hypervisor {
     my ( $config, $domain, $opts ) = @_;
 
@@ -649,7 +641,7 @@ sub provision_domain {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
-    return reprovision_guest( $hv, $config, $domain, $reuse, $reuser, $depends ) if $reuse;
+    return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends ) if $reuse;
 
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This
@@ -676,8 +668,8 @@ sub provision_domain {
 # the guest built for foo.test rather than getting one of its own.  Only two
 # things here are the hypervisor's: what MAC the guest's second interface has,
 # and clearing anything left standing under this domain's own name.
-sub reprovision_guest {
-    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @_;
+sub reprovision_guest (%args) {
+    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @args{qw{hv config domain reuse reuser depends}};
 
     return ( $reuser, $reuse ) if $dryrun;
 
@@ -699,7 +691,7 @@ sub reprovision_guest {
     my $guest = Trog::Guest->new( name => $domain, host => $reuse, user => $reuser, key_path => $key );
 
     refresh_cloud_init( $guest, $domain_dir, $domain );
-    merge_guest_addresses( $guest, $hv, $config, $domain_dir, $domain, $built_for );
+    merge_guest_addresses( guest => $guest, hv => $hv, config => $config, domain_dir => $domain_dir, domain => $domain, built_for => $built_for );
 
     print "Syncing setup script\n";
     $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
@@ -737,8 +729,8 @@ sub refresh_cloud_init {
 #
 # The interface belongs to $built_for, the domain the machine was built for,
 # while the addresses belong to $domain -- two different names on a shared host.
-sub merge_guest_addresses {
-    my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @_;
+sub merge_guest_addresses (%args) {
+    my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @args{qw{guest hv config domain_dir domain built_for}};
 
     my $ips         = _coerce_array( $config->param('ips') );
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
@@ -817,9 +809,13 @@ sub read_seed {
     my $dir    = Trog::HV->new()->domain_dir . "/$domain";
     my @files  = qw{user-data meta-data network-config};
 
-    unless ( any { !_readable("$dir/$_") } @files ) {
-        return map { $_ => File::Slurper::read_text("$dir/$_") } @files;
+    my %seed;
+    foreach my $file (@files) {
+        open( my $fh, '<:encoding(UTF-8)', "$dir/$file" ) or last;
+        $seed{$file} = do { local $/; <$fh> };
+        close($fh) or die "Could not close $dir/$file: $!\n";
     }
+    return %seed if keys %seed == @files;
 
     print "No cloud-init configuration beside $domain; building it from provision.conf\n";
     distro_recipe($config)->generate_files(

@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -40,7 +40,7 @@ and is configured separately.
 =head2 Nothing depends on this
 
 No recipe puts C<aptmirror> in its C<required_recipes>, and none should.  A
-mirror is an optimisation an installation opts into by naming this recipe for
+mirror is an optimization an installation opts into by naming this recipe for
 one domain; making anything require it would drag a mirror host into every
 guest's dependency graph and turn "I would like to build a web server" into "I
 would like to build a web server and several hundred gigabytes of Ubuntu".
@@ -172,7 +172,6 @@ each gets its own.  What they would be sharing is the mirror behind it.
 sub is_multi_tenant { return 0 }
 
 sub args {
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (
         type       => 'object',
         required   => ['releases'],
@@ -297,7 +296,7 @@ C<upstream>, and the vhost and the fragment both have to name the same one.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my ( $host, $path ) = $opts{upstream} =~ m{\A[a-z][a-z\d+.-]*://([^/]+)(/\S*)\z}i;
+    my ( $host, $path ) = $opts{upstream} =~ m{\A[[:alpha:]][[:alnum:]+.-]*://([^/]+)(/\S*)\z};
     die "upstream must be a URL with a path on it, like http://archive.ubuntu.com/ubuntu -- got '$opts{upstream}'\n"
       unless defined $host && defined $path;
 

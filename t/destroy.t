@@ -5,15 +5,16 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
-t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
+t/destroy.t - bin/destroy: tearing a guest down without taking its neighbors
 
 =cut
 
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture capture_stdout};
 use IPC::Run3();
 use Test::MockModule qw{strict};
@@ -30,7 +31,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use Provisioner::Cookbook();
 use Trog::HV();
 
@@ -210,8 +211,7 @@ subtest 'a public key that is not one matches nothing, and says so' => sub {
     my $hv      = Test::MockModule->new('Trog::HV');
     $hv->redefine( write_text => sub { $touched++; return 1 } );
 
-    eval { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) };
-    like( $@, qr/does not look like one; refusing/, 'refused rather than matched' );
+    like( exception { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) }, qr/does[ ]not[ ]look[ ]like[ ]one;[ ]refusing/, 'refused rather than matched' );
     is( $touched, 0, 'and nothing was rewritten' );
 };
 
@@ -267,8 +267,8 @@ subtest 'main exits with the usage when given no domain' => sub {
     my $out = q{};
     IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", '--dryrun' ], \undef, \$out, \$out );
     isnt( $?, 0, 'exits non-zero' );
-    like( $out, qr/No domain passed/, 'saying what was missing' );
-    like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
+    like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
+    like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 };
 
 subtest 'the POD documents the interface' => sub {
@@ -280,7 +280,7 @@ subtest 'the POD documents the interface' => sub {
         -verbose  => 99,
         -sections => 'SYNOPSIS|OPTIONS',
     );
-    close $fh;
+    close($fh) or die "Could not close the POD capture: $!";
 
     like( $text, qr/--purge/,      'POD documents --purge' );
     like( $text, qr/--dryrun/,     'POD documents --dryrun' );
@@ -303,7 +303,7 @@ subtest 'the POD documents the interface' => sub {
     }
 
     package Test::Libvirt::Domain;
-    sub get_name { return $_[0]->{name} }
+    sub get_name ($self) { return $self->{name} }
 }
 
 # The data source these act on.  No hypervisors.conf is written into the
@@ -346,7 +346,7 @@ subtest 'purge_data_dir takes the domain data directory, and dryrun does not' =>
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    ntp:\n" );
     Provisioner::Cookbook->forget();
     ($said) = says( sub { Trog::Bin::Destroy::purge_data_dir( 'kept.test', undef, 0 ) } );
-    like( $said, qr/says where the data source is/, 'with no data source it says there is nothing to remove' );
+    like( $said, qr/says[ ]where[ ]the[ ]data[ ]source[ ]is/, 'with no data source it says there is nothing to remove' );
     ok( -d "$data/kept.test", 'rather than guessing where one is' );
     File::Path::remove_tree("$data/kept.test");
 };
@@ -419,7 +419,7 @@ subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
 
     my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
     is( $rc, 1, 'the sweep fails rather than carrying on' );
-    like( $said, qr/nothing is swept/, 'and says so' );
+    like( $said, qr/nothing[ ]is[ ]swept/, 'and says so' );
 
     # The guests it holds are exactly the ones that would look like orphans.
     ok( -d "$data/orphan.test", 'nothing was removed on the strength of a list it could not get' );
@@ -432,7 +432,7 @@ subtest 'a sweep with nothing to do says so' => sub {
     write_config( 'named.test' => 1 );
 
     my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
-    like( $said, qr/belongs to a guest that is gone/, 'says there is nothing' );
+    like( $said, qr/belongs[ ]to[ ]a[ ]guest[ ]that[ ]is[ ]gone/, 'says there is nothing' );
     is( $rc, 0, 'and is not a failure' );
 };
 
@@ -463,7 +463,7 @@ subtest 'with no data source, the domain directories are still swept' => sub {
     local @Test::Libvirt::DOMAINS = ();
 
     my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
-    like( $said, qr/only the domain directories are swept/, 'saying there is no data source' );
+    like( $said, qr/only[ ]the[ ]domain[ ]directories[ ]are[ ]swept/, 'saying there is no data source' );
     ok( !-e "$domains/orphan.test", 'and sweeping where guests are built all the same' );
     is( $rc, 0, 'which is not a failure' );
 
@@ -477,11 +477,11 @@ subtest '--orphans takes no domain, and a name of only dots is not one' => sub {
     my $out = q{};
     IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", qw{--orphans --dryrun} ], \undef, \$out, \$out );
     is( $?, 0, '--orphans runs without one' );
-    unlike( $out, qr/No domain passed/, 'rather than asking for a domain' );
+    unlike( $out, qr/No[ ]domain[ ]passed/, 'rather than asking for a domain' );
 
     IPC::Run3::run3( [ $^X, "$FindBin::Bin/../bin/destroy", qw{--dryrun --purge-data ..} ], \undef, \$out, \$out );
     isnt( $?, 0, 'a domain that is only dots is refused' );
-    like( $out, qr/not a domain/, 'saying so, before it names anything to remove' );
+    like( $out, qr/not[ ]a[ ]domain/, 'saying so, before it names anything to remove' );
 };
 
 subtest '--purge-data is asked for, and never implied by --purge' => sub {
@@ -539,7 +539,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     # elsewhere, so asking dies on the libvirt socket before the address is back.
     is_deeply( \@asked, [], 'no hypervisor is asked to destroy anything' );
     is( $released, 'tenant.test', 'and the address goes back to the pool' );
-    like( $out, qr/only what is on this side goes/, 'saying it is cleaning up this side alone' );
+    like( $out, qr/only[ ]what[ ]is[ ]on[ ]this[ ]side[ ]goes/, 'saying it is cleaning up this side alone' );
 
     # This replaces the class-wide hypervisor, which is why the subtest sits last
     # in the file: the ones above it resolve their paths through Trog::HV->new()

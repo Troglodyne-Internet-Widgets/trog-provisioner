@@ -344,7 +344,7 @@ killing, and you need to look for the actually relevant timeout.
 
 **Beware guards that only one path reaches.** `_unhang` returns early when the
 hypervisor is local, so this never appeared against a local one. A guard on one
-path means two code paths with different behaviour and only one of them getting
+path means two code paths with different behavior and only one of them getting
 daily use.
 
 **Do not conclude "it is just slow" from a truncated measurement.**

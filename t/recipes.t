@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,13 +24,14 @@ use Provisioner::Utils();
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
+use List::Util       qw{any};
 use File::Find();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
@@ -69,7 +70,8 @@ sub fragments {
     foreach my $dir (@template_dirs) {
         push( @found, glob("$dir/*.tt") );
     }
-    return sort @found;
+    my @sorted = sort @found;
+    return @sorted;
 }
 
 # Where a recipe's fragment actually is, out of that path, or undef.
@@ -197,7 +199,7 @@ sub renders_ok {
     $desc //= $name;
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    subtest $desc => sub {
+    return subtest $desc => sub {
 
         # Through Cookbook, so this exercises the distro's version of the recipe
         # -- which is where the package names are -- rather than the generic
@@ -238,18 +240,18 @@ sub rejects_missing {
     $desc //= "$name rejects missing $field";
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    subtest $desc => sub {
-        my $r = "Provisioner::Recipe::$name"->new(%PROV);
-        eval { $r->render( %G, %$extra, $field => undef ) };
-        ok( $@, "render() dies without $field" );
+    return subtest $desc => sub {
+        my $r   = "Provisioner::Recipe::$name"->new(%PROV);
+        my $err = exception { $r->render( %G, %$extra, $field => undef ) };
+        ok( $err, "render() dies without $field" );
 
         # An operator reads this refusal and has to know what to go and edit.
         # It used to glue the class to the error -- giving
         # `Provisioner::Recipe::Ubuntu::koan/user: Missing property.`, a
         # namespace nobody can edit and no domain at all.
-        like( $@, qr/\bThe \Q$name\E recipe\b/, "and says it is $name refusing" );
-        like( $@, qr{\Q/$field\E:},             "and names $field" );
-        like( $@, qr/\Q$G{domain}\E/,           "and names the domain" );
+        like( $err, qr/\bThe[ ]\Q$name\E[ ]recipe\b/, "and says it is $name refusing" );
+        like( $err, qr{\Q/$field\E:},                 "and names $field" );
+        like( $err, qr/\Q$G{domain}\E/,               "and names the domain" );
     };
 }
 
@@ -374,7 +376,7 @@ subtest 'every rsync of a payload names the machine holding it' => sub {
                 function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
             );
             my $out = $xslate->render_string( File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
-            next unless index( $out, 'rsync' ) >= 0;
+            next if index( $out, 'rsync' ) < 0;
             $seen{$recipe}++;
             unlike( $out, qr/\@:/, "$recipe: no empty host between the user and the path" );
             like( $out, qr/\@\Q$G{transfer_ip}\E:/, "$recipe: rsyncs from $G{transfer_ip}" );
@@ -458,12 +460,12 @@ subtest 'openvpn pushes redirect-gateway only when the domain asks' => sub {
     unlike( $off, qr/redirect-gateway/, 'a domain that says nothing gets no push at all' );
 
     my $on = $vpn->()->render_file( 'files/openvpn.server.conf.tt', %G, redirect_gateway => 1 );
-    like( $on, qr/^push "redirect-gateway def1 bypass-dhcp"$/m, 'and one that asks for an exit node gets it' );
+    like( $on, qr/^push[ ]"redirect-gateway[ ]def1[ ]bypass-dhcp"$/m, 'and one that asks for an exit node gets it' );
 
     # Unset takes OpenVPN's historical net30, a /30 per client, which upstream
     # has deprecated.  Both configurations say so, since it is not the client's
     # to choose.
-    like( $_, qr/^topology subnet$/m, 'and either way the server names its topology' ) for ( $on, $off );
+    like( $_, qr/^topology[ ]subnet$/m, 'and either way the server names its topology' ) for ( $on, $off );
 };
 
 # ----------------------------------------------------------------
@@ -531,11 +533,11 @@ subtest 'the rate limit rule is written for the protocol it was given' => sub {
     my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-ratelimits");
 
     ok( index( $script, '*/*) proto=${spec##*/}' ) >= 0, 'the protocol is read off a port spec that carries one' );
-    like( $script, qr/^\s*proto=tcp$/m,           'and defaults to tcp when there is none' );
-    like( $script, qr/-p \$proto --dport \$port/, 'the rule names that protocol' );
+    like( $script, qr/^\s*proto=tcp$/m,                 'and defaults to tcp when there is none' );
+    like( $script, qr/-p[ ]\$proto[ ]--dport[ ]\$port/, 'the rule names that protocol' );
 
     # Or 53/tcp and 53/udp share a table and each counts the other's traffic.
-    like( $script, qr/--hashlimit-name trog\$proto\$port/, 'and gets a table of its own, per port and protocol' );
+    like( $script, qr/--hashlimit-name[ ]trog\$proto\$port/, 'and gets a table of its own, per port and protocol' );
 };
 
 # ----------------------------------------------------------------
@@ -567,7 +569,7 @@ subtest 'ufw settles rate limits by taking the higher, and nothing else' => sub 
     # misconfiguration somebody has to settle.
     like(
         exception { $r->reconcile( { port_forwards => 'a' }, { port_forwards => 'b' } ) },
-        qr/different things from ufw/,
+        qr/different[ ]things[ ]from[ ]ufw/,
         'a field it has no rule for dies, named for the recipe to set it under'
     );
 };
@@ -603,7 +605,7 @@ subtest 'cron MAILTO per script' => sub {
     my $r   = 'Provisioner::Recipe::cron'->new(%PROV);
     my $d   = $G{domain};
     my @out = split(
-        "\n",
+        m/\n/,
         $r->render_file(
             'files/cron.root.domain.tt', %G,
             root_scripts => [
@@ -619,8 +621,11 @@ subtest 'cron MAILTO per script' => sub {
     my %to;
     my $current = '';
     foreach my $line (@out) {
-        $current = $1       if $line =~ m/^MAILTO="([^"]*)"$/;
-        $to{$1}  = $current if $line =~ m{command (/\S+)};
+        my ($mailto) = $line =~ m/^MAILTO="([^"]*)"$/;
+        $current = $mailto if defined $mailto;
+
+        my ($script) = $line =~ m{command[ ](/\S+)};
+        $to{$script} = $current if defined $script;
     }
 
     is(
@@ -670,7 +675,7 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
     like( $out, qr/enabled:\s*true/,        'redis block has enabled: true' );
     like( $out, qr/host:\s*"127\.0\.0\.1"/, 'redis host defaults to 127.0.0.1' );
     like( $out, qr/port:\s*6379/,           'redis port defaults to 6379' );
-    unlike( $out, qr/^\s+password: "/m, 'no redis password field when redis_password is not set' );
+    unlike( $out, qr/^\s+password:[ ]"/m, 'no redis password field when redis_password is not set' );
 };
 
 subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loaded' => sub {
@@ -730,7 +735,7 @@ subtest 'no template comment leaves a quote open' => sub {
         ( my $name = $tt ) =~ s/^\Q$template_dir\E\///;
 
         # Every [%# ... %] block, which may span lines.
-        while ( $body =~ m/(\[%#.*?%\])/gs ) {
+        while ( $body =~ m/(\[%[#].*?%\])/g ) {
             my $comment = $1;
 
             # A comment ends at the first %] there is, so a directive written
@@ -804,14 +809,14 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
     ok( scalar @tests, 'there are guest tests to check' );
 
     foreach my $tt ( sort @tests ) {
-        ( my $name = $tt ) =~ s{.*/}{};
+        ( my $name = $tt ) =~ s{\N*/}{};
 
         my $rendered = eval { $xslate->render( "tests/$name", \%vars ) };
         ok( defined $rendered, "$name renders" ) or do { diag $@; next };
 
         # It has to be Perl.
         my $file = "$dir/" . ( $name =~ s/[.]tt\z/.t/r );
-        File::Slurper::write_text( $file, $rendered );
+        File::Slurper::Temp::write_text( $file, $rendered );
 
         my ( $out, $err ) = ( q{}, q{} );
         IPC::Run3::run3( [ $^X, '-c', $file ], \undef, \$out, \$err );
@@ -819,7 +824,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
 
         # And it has to assert something, or Test::More exits 255 on it.
         ok(
-            $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
+            $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$name makes at least one assertion or says why it is not"
         );
     }
@@ -872,7 +877,7 @@ subtest 'a recipe that salvages state puts it back' => sub {
 # database it protects", and the salvage has always honoured it -- but the backup
 # recipe serves the same directories over rsyncd as root, and carried the file
 # anyway.  Its own exclude was spelled `excludes`, which is not an rsyncd module
-# parameter at all: rsyncd neither honours nor complains about it, so every
+# parameter at all: rsyncd neither honors nor complains about it, so every
 # pattern written there was handed to the client.
 subtest 'what a recipe refuses to salvage is refused to the backup as well' => sub {
     my @skippers = grep {
@@ -894,7 +899,7 @@ subtest 'what a recipe refuses to salvage is refused to the backup as well' => s
 
     foreach my $recipe (@skippers) {
         foreach my $pattern ( Provisioner::Cookbook->load($recipe)->remote_skip() ) {
-            like( $conf, qr/^exclude = .*\Q$pattern\E/m, "$recipe: $pattern is kept out of the backup too" );
+            like( $conf, qr/^exclude[ ]=[ ]\N*\Q$pattern\E/m, "$recipe: $pattern is kept out of the backup too" );
         }
     }
 };
@@ -936,7 +941,7 @@ subtest 'a secret only some domains want is only placed for those' => sub {
     # refuses a key with a blank line on the end.
     my $key = $entry->{generate}->();
     unlike( $key, qr/\n\z/, 'the generated key carries no trailing newline of its own' );
-    like( $key, qr/\A-----BEGIN OPENSSH PRIVATE KEY-----/, 'and is an OpenSSH private key' );
+    like( $key, qr/\A-----BEGIN[ ]OPENSSH[ ]PRIVATE[ ]KEY-----/, 'and is an OpenSSH private key' );
 };
 
 subtest 'the bot ssh key is not in the payload any more' => sub {
@@ -950,7 +955,7 @@ subtest 'the bot ssh key is not in the payload any more' => sub {
 
     my $fragment = $koan->render( %G, %{ $required_config{koan} }, github_ssh_identity => 1 );
     unlike( $fragment, qr/install\s+\S*\s*koan-ssh-privkey/, 'and the fragment installs no such file' );
-    like( $fragment, qr{chown \S+ '/opt/domains/\S+/\.ssh/id_koan'}, 'it gives away what bin/provision already placed' );
+    like( $fragment, qr{chown[ ]\S+[ ]'/opt/domains/\S+/\.ssh/id_koan'}, 'it gives away what bin/provision already placed' );
 };
 
 # A file placed out of the secret store is one the guest must never hand back:
@@ -1019,7 +1024,9 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
             ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
         }
 
-        ok( scalar( eval { $class->remote_files( $install, $domain ) } ), "$recipe: and it has something to salvage afterwards" );
+        my @salvaged;
+        is( exception { @salvaged = $class->remote_files( $install, $domain ) }, undef, "$recipe: remote_files answers" );
+        ok( scalar @salvaged, "$recipe: and it has something to salvage afterwards" );
     }
 };
 
@@ -1062,7 +1069,7 @@ subtest 'no cron template redirects with &>' => sub {
     foreach my $tt ( sort @crons ) {
         ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
         foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
-            next if $line =~ m/^\s*#/;    # the comment explaining this rule
+            next if $line =~ m/^\s*[#]/;    # the comment explaining this rule
             unlike( $line, qr/&>>?/, "$name: no &> in a cron line" ) or diag $line;
         }
     }
@@ -1146,7 +1153,7 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     # key is supposed to die with its machine: carried over it would outlive the
     # machine it was made for, and in a backup beside the database it protects it
     # would not be protecting anything.
-    my %files  = Provisioner::Recipe::tcms->remote_files( '/opt/domains', 'test.test.test' );
+    my %files  = 'Provisioner::Recipe::tcms'->remote_files( '/opt/domains', 'test.test.test' );
     my $wanted = '/opt/domains/test.test.test/tCMS/config/';
     ok(
         ( grep { index( $wanted, $_ ) == 0 } keys(%files) ),
@@ -1161,7 +1168,7 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
         'and the checkout, so a rebuild serves the commit the guest was serving'
     ) or diag "salvages: " . join( ', ', sort keys %files );
 
-    my @skip = Provisioner::Recipe::tcms->remote_skip();
+    my @skip = 'Provisioner::Recipe::tcms'->remote_skip();
     ok( scalar(@skip),                                'and says something in it must stay behind' );
     ok( !salvage_brings_down( 'secrets.key', @skip ), 'which is the vault key' );
 
@@ -1197,7 +1204,7 @@ subtest 'the recipes covered by a configd language ask for it' => sub {
 subtest 'configd takes the union of what asked for it' => sub {
     my $r = 'Provisioner::Recipe::configd'->new(%PROV);
 
-    # Which is how they arrive: Hash::Merge joins two dependants' arrays, so a
+    # Which is how they arrive: Hash::Merge joins two dependents' arrays, so a
     # language two recipes both need is in the list twice.  Rendering `configd
     # adopt postfix` twice is harmless and looks like a bug in the makefile.
     my %opts = $r->validate( %G, languages => [qw{postfix redis postfix opendkim}] );
@@ -1221,10 +1228,10 @@ subtest 'the makefile fragment adopts every language it was given' => sub {
 
         # Once during the build, so the fragment directories exist and a bad
         # language name fails the build rather than the postrun.
-        like( $out, qr{configd adopt --no-restart '$language'}, "$language is adopted without restarting anything" );
+        like( $out, qr{configd[ ]adopt[ ]--no-restart[ ]'$language'}, "$language is adopted without restarting anything" );
 
         # And once after it, when every recipe has written its fragments.
-        like( $out, qr{queue_postrun_task /usr/bin/configd adopt '$language'}, "and adopted again once the makefile is done" );
+        like( $out, qr{queue_postrun_task[ ]/usr/bin/configd[ ]adopt[ ]'$language'}, "and adopted again once the makefile is done" );
     }
 };
 
@@ -1283,8 +1290,8 @@ subtest 'redis writes a fragment and keeps the packaged config underneath' => su
     # An empty save is what turns RDB persistence off; adding snapshot points
     # without it only ever means more snapshots than the package asked for.
     my $off = 'Provisioner::Recipe::redis'->new(%PROV)->render_file( 'files/redis.conf.tt', %G, save => 0 );
-    like( $off, qr/^save ""$/m, 'save: 0 clears every snapshot point named before it' );
-    unlike( $off, qr/^save \d/m, 'and names none of its own' );
+    like( $off, qr/^save[ ]""$/m, 'save: 0 clears every snapshot point named before it' );
+    unlike( $off, qr/^save[ ]\d/m, 'and names none of its own' );
 };
 
 subtest 'the address classes do not overlap' => sub {
@@ -1296,22 +1303,22 @@ subtest 'the address classes do not overlap' => sub {
     my $domain = $r->render_file( 'files/mail.postfix.main.tt',        %G );
     my $guest  = $r->render_file( 'files/mail.postfix.main.global.tt', %G );
 
-    is( ( $domain =~ m/^virtual_mailbox_domains = (.*)$/m )[0], $G{domain}, 'the domain is a virtual mailbox domain' );
+    is( ( $domain =~ m/^virtual_mailbox_domains[ ]=[ ](\N*)$/m )[0], $G{domain}, 'the domain is a virtual mailbox domain' );
     unlike( $domain, qr/^mydestination/m, 'and the per-domain half adds nothing to mydestination' );
 
     # The guest's hostname is the domain it hosts, so the postfix package's own
     # main.cf names that domain in mydestination and accumulation can only add
     # to it.  Without the reset, local delivery wins the tie and the domain's
     # mail stops reaching anybody's mailbox.
-    like( $guest, qr/^mydestination =$/m,                         'the guest-wide half resets mydestination' );
-    like( $guest, qr/^mydestination = \$myhostname, localhost$/m, 'before naming what is actually local' );
+    like( $guest, qr/^mydestination[ ]=$/m,                             'the guest-wide half resets mydestination' );
+    like( $guest, qr/^mydestination[ ]=[ ]\$myhostname,[ ]localhost$/m, 'before naming what is actually local' );
 };
 
 subtest 'an authenticated sender must own the address' => sub {
     my $r     = 'Provisioner::Recipe::mail'->new(%PROV);
     my $guest = $r->render_file( 'files/mail.postfix.main.global.tt', %G );
 
-    my ($senders) = $guest =~ m/^smtpd_sender_restrictions = (.*)$/m;
+    my ($senders) = $guest =~ m/^smtpd_sender_restrictions[ ]=[ ](\N*)$/m;
     ok( $senders, 'there is a sender restriction list' ) or return;
 
     # A restriction list stops at the first permit, so behind
@@ -1335,12 +1342,12 @@ subtest 'the sender login map covers every address a user sends from' => sub {
         mail_aliases => [ { from => 'sales', to => 'me' }, { from => 'help', to => 'someone@elsewhere.test' } ],
     );
 
-    like( $map, qr/^me\@\Q$G{domain}\E me\@\Q$G{domain}\E$/m,    'an account owns its own address' );
-    like( $map, qr/^sales\@\Q$G{domain}\E me\@\Q$G{domain}\E$/m, 'an alias is owned by who it delivers to' );
+    like( $map, qr/^me\@\Q$G{domain}\E[ ]me\@\Q$G{domain}\E$/m,    'an account owns its own address' );
+    like( $map, qr/^sales\@\Q$G{domain}\E[ ]me\@\Q$G{domain}\E$/m, 'an alias is owned by who it delivers to' );
 
     # Appending the domain to an address that already has one gives an owner
     # nobody can ever log in as.
-    like( $map, qr/^help\@\Q$G{domain}\E someone\@elsewhere\.test$/m, 'and an alias out of the domain keeps its address' );
+    like( $map, qr/^help\@\Q$G{domain}\E[ ]someone\@elsewhere\.test$/m, 'and an alias out of the domain keeps its address' );
 };
 
 # ----------------------------------------------------------------
@@ -1358,8 +1365,8 @@ subtest 'tmpfs writes a unit systemd can see, and only enables it' => sub {
     # re-pulls that target and mounts it.  Since it happens either way, it
     # happens here, where every recipe after this sees the same /tmp and a
     # failure fails the build.
-    like( $out, qr{systemctl enable --now tmp\.mount}, 'and is mounted, not merely enabled' );
-    unlike( $out, qr{queue_postrun_task\s+systemctl enable}, 'synchronously, rather than deferred' );
+    like( $out, qr{systemctl[ ]enable[ ]--now[ ]tmp\.mount}, 'and is mounted, not merely enabled' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]enable}, 'synchronously, rather than deferred' );
 };
 
 subtest 'pdns makes the credential its own API is reached with' => sub {
@@ -1382,13 +1389,13 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
     # socket path.  The DCV hook had this right; the per-domain shortcut did
     # not, and nothing on a guest runs the shortcut, so nothing caught it.
     my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/lexicon.shortcut.sh.tt', %G, %{ $required_config{pdns} } );
-    like( $short, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
-    unlike( $short, qr/^export LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
+    like( $short, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
+    unlike( $short, qr/^export[ ]LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
 
     # A fresh recipe per render: validated() memoises onto the object, so a
     # second render through the same one answers with the first one's options.
     my $hook = Provisioner::Cookbook->load( 'letsencrypt', distro => $DISTRO )->new(%PROV)->render_file( 'files/ssl.dehydrated.hook.tt', %G, dns_preference => 'pdns' );
-    like( $hook, qr/^export LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
+    like( $hook, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'and the hook and the shortcut agree on it' );
 };
 
 subtest 'the resolver is live before anything reads a zone back through it' => sub {
@@ -1400,8 +1407,8 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
     # makefile, the restart ran fourth in the postrun, the fetcher ran second
     # through a stub that could not see the zone, and pdns was asked for
     # zones/. and answered 404.
-    like( $out, qr{^systemctl restart systemd-resolved$}m, 'the resolver is restarted where it is configured' );
-    unlike( $out, qr{queue_postrun_task\s+systemctl restart systemd-resolved}, 'rather than deferred behind its dependants' );
+    like( $out, qr{^systemctl[ ]restart[ ]systemd-resolved$}m, 'the resolver is restarted where it is configured' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]restart[ ]systemd-resolved}, 'rather than deferred behind its dependents' );
 };
 
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
@@ -1429,13 +1436,13 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
         }
     );
 
-    like( $setup, qr{data\.tar\.gz /var/tmp$}m,            'the payload is fetched into /var/tmp' );
-    like( $setup, qr{tar -zxf data\.tar\.gz -C /var/tmp/}, 'unpacked there' );
-    like( $setup, qr{^cd /var/tmp/domainsetup_}m,          'and make runs from there' );
+    like( $setup, qr{data\.tar\.gz[ ]/var/tmp$}m,                  'the payload is fetched into /var/tmp' );
+    like( $setup, qr{tar[ ]-zxf[ ]data\.tar\.gz[ ]-C[ ]/var/tmp/}, 'unpacked there' );
+    like( $setup, qr{^cd[ ]/var/tmp/domainsetup_}m,                'and make runs from there' );
 
     # `make | tee` exits with tee's status, which is always 0, so the guest
     # records make's own and bin/provision reads that rather than guessing.
-    like( $setup, qr{^rm -f /var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
+    like( $setup, qr{^rm[ ]-f[ ]/var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
     my $records = '{ make 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
     like( $setup, qr/\Q$records\E/, "and make's own exit code is what gets recorded" );
 
@@ -1443,12 +1450,12 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # Ubuntu, where the shebang is a comment.  Written with PIPESTATUS it died
     # there as a bad substitution: the log was written, the status never was,
     # and bin/provision then waited for a file that was never coming.
-    ( my $commands = $setup ) =~ s/^\s*#.*$//gm;
+    ( my $commands = $setup ) =~ s/^\s*[#]\N*$//gm;
     unlike( $commands, qr/PIPESTATUS|\[\[/, 'and nothing in it needs bash to run' );
 
     # The cleanup repeats both paths rather than deriving them, so it is where
     # it can disagree with the three lines above.
-    like( $setup, qr{^rm -rf /var/tmp/domainsetup_\S+ /var/tmp/data\.tar\.gz}m, 'and both are cleared away from there' );
+    like( $setup, qr{^rm[ ]-rf[ ]/var/tmp/domainsetup_\S+[ ]/var/tmp/data\.tar\.gz}m, 'and both are cleared away from there' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'tmpfs escapes a percentage and leaves a byte size alone' => sub {
@@ -1456,7 +1463,7 @@ subtest 'tmpfs escapes a percentage and leaves a byte size alone' => sub {
         my ($size) = @_;
         my %opts   = defined $size ? ( size => $size ) : ();
         my $unit   = 'Provisioner::Recipe::tmpfs'->new(%PROV)->render_file( 'files/tmpfs.mount.tt', %G, %opts );
-        my ($line) = $unit =~ m/^Options=(.*)$/m;
+        my ($line) = $unit =~ m/^Options=(\N*)$/m;
         return $line // q{};
     };
 
@@ -1536,22 +1543,22 @@ subtest 'iouring collects the accounts of the recipes actually present' => sub {
 subtest 'iouring defers group membership past the makefile' => sub {
     my $out = 'Provisioner::Recipe::iouring'->new(%PROV)->render_global( %G, modules => ['mariadb'] );
 
-    like( $out, qr/groupadd --system 'io_uring'/, 'the group is made up front' );
+    like( $out, qr/groupadd[ ]--system[ ]'io_uring'/, 'the group is made up front' );
 
     # mysql belongs to mariadb, whose target has not run yet -- iouring sorts
     # ahead of it.
-    like( $out, qr/queue_postrun_task .*usermod -aG 'io_uring' 'mysql'/, 'and membership waits for the accounts to exist' );
+    like( $out, qr/queue_postrun_task[ ]\N*usermod[ ]-aG[ ]'io_uring'[ ]'mysql'/, 'and membership waits for the accounts to exist' );
     unlike( $out, qr/^usermod/m, 'rather than being attempted during the build' );
 
     # A process reads its groups at start and not again, and mariadb was started
     # by its own recipe during the makefile -- so without a restart it runs its
     # whole first life outside the group it was just put in.
-    like( $out, qr/queue_postrun_task systemctl try-restart 'mariadb'/, 'and the service is restarted so it picks the group up' );
+    like( $out, qr/queue_postrun_task[ ]systemctl[ ]try-restart[ ]'mariadb'/, 'and the service is restarted so it picks the group up' );
 
     # In that order: postrun tasks run in the order they were queued, and a
     # restart ahead of the usermod would restart it back out of the group.
-    my ($usermod) = $out =~ m/\A(.*?)usermod -aG/s;
-    my ($restart) = $out =~ m/\A(.*?)try-restart/s;
+    my ($usermod) = $out =~ m/\A(.*?)usermod[ ]-aG/;
+    my ($restart) = $out =~ m/\A(.*?)try-restart/;
     ok( length($usermod) < length($restart), 'with the membership queued first' );
 
     # A gid is only knowable on the guest, and the sysctl takes the number.
@@ -1568,12 +1575,12 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     # The bintar pins exactly too, and is built against libaio -- so InnoDB
     # cannot use io_uring however the guest is configured.  The repository
     # builds are Debian's and depend on liburing2.
-    like( $out, qr{install_mariadb\.sh "11\.4\.4"}, 'the installer gets the version it was given' );
+    like( $out, qr{install_mariadb\.sh[ ]"11\.4\.4"}, 'the installer gets the version it was given' );
 
     # The fragment asks for the install; how to do it is the script's, which is
     # what keeps the file holding root_pw out of /etc/mysql when the SQL fails.
     like(
-        $out, qr{install_mariadb\.sh "[^"]+" "mariadb-provisioner\.cnf" "secure_installation\.sql"},
+        $out, qr{install_mariadb\.sh[ ]"[^"]+"[ ]"mariadb-provisioner\.cnf"[ ]"secure_installation\.sql"},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'the config and the secure-installation sql are handed to it'
     );
 
@@ -1590,11 +1597,11 @@ subtest 'mariadb writes credentials the accounts that need them can use' => sub 
     # repository point --defaults-file at one.  The bintar layout had a single
     # /opt/mysql/my.cnf carrying these; dropping it broke them.
     my $out = $r->render( %G, %{ $required_config{mariadb} } );
-    like( $out, qr{mariadb-client\.cnf /root/\.my\.cnf},                    'root gets one' );
-    like( $out, qr{-o \Q$G{admin_user}\E .*mariadb-client\.cnf.*\.my\.cnf}, 'and so does the admin' );
-    like( $out, qr{install -m 0600 },                                       'both 0600, since they carry the password' );
+    like( $out, qr{mariadb-client\.cnf[ ]/root/\.my\.cnf},                        'root gets one' );
+    like( $out, qr{-o[ ]\Q$G{admin_user}\E[ ]\N*mariadb-client\.cnf\N*\.my\.cnf}, 'and so does the admin' );
+    like( $out, qr{install[ ]-m[ ]0600[ ]},                                       'both 0600, since they carry the password' );
 
-    like( $out, qr{mariadb-client-service\.cnf.*\Q$G{user}\E}, 'and the service user gets its own' );
+    like( $out, qr{mariadb-client-service\.cnf\N*\Q$G{user}\E}, 'and the service user gets its own' );
 
     # Unless it is the admin, where one file per home means the service one
     # would land on top of theirs.
@@ -1607,15 +1614,15 @@ subtest 'mariadb writes credentials the accounts that need them can use' => sub 
     my @sections = $cnf =~ m/^\[(\w[\w-]*)\]$/gm;
     ok( scalar @sections, 'the credentials file has sections' );
     foreach my $section (@sections) {
-        my ($body) = $cnf =~ m/^\[\Q$section\E\]\n(.*?)(?=^\[|\z)/ms;
-        like( $body, qr/^socket = /m, "[$section] names the socket" );
+        my ($body) = $cnf =~ m/^\[\Q$section\E\]\n(.*?)(?=^\[|\z)/m;
+        like( $body, qr/^socket[ ]=[ ]/m, "[$section] names the socket" );
     }
 
     # And the service user's has no password: what that account may do is the
     # dump's business.
     my $service = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.service.cnf.tt', %G, %{ $required_config{mariadb} }, user => 'www-data' );
     unlike( $service, qr/^\s*password\s*=/m, 'the service account gets no password' );
-    like( $service, qr/^user = www-data$/m, 'just the socket and who to be' );
+    like( $service, qr/^user[ ]=[ ]www-data$/m, 'just the socket and who to be' );
 };
 
 subtest 'a changed root password re-runs the securing' => sub {
@@ -1624,7 +1631,7 @@ subtest 'a changed root password re-runs the securing' => sub {
     # A bare "has this ever run" marker leaves the database on the old password
     # while every .my.cnf claims the new one, and the first thing to notice is a
     # backup that stopped working.
-    like( $script, qr/sha256sum < "\$SECURE_SQL"/, 'the marker is keyed on the SQL, not on having run' );
+    like( $script, qr/sha256sum[ ]<[ ]"\$SECURE_SQL"/, 'the marker is keyed on the SQL, not on having run' );
 };
 
 subtest 'the installer configures the server before anything uses it' => sub {
@@ -1644,7 +1651,7 @@ subtest 'the installer configures the server before anything uses it' => sub {
     # The password is in that file, so it does not survive the SQL failing.
     # Including on the run that skips securing, since the file holds root_pw
     # whether or not anything reads it.
-    my ($trap) = $script =~ m/\A(.*?)trap 'rm -f "\$SECURE_SQL"' EXIT/s;
+    my ($trap) = $script =~ m/\A(.*?)trap[ ]'rm[ ]-f[ ]"\$SECURE_SQL"'[ ]EXIT/;
     ok( defined $trap,                            'the secure-installation sql is removed on the way out' );
     ok( defined $trap && length($trap) < $secure, 'from before the run that would use it, not inside it' );
 };
@@ -1656,21 +1663,21 @@ subtest 'install_mariadb.sh keeps the version it was handed' => sub {
     # the script's own scope renamed the release we were asked for to
     # "24.04.4 LTS (Noble Numbat)" and sent it looking for a repository under
     # that.  A guest found this; nothing here could have.
-    like( $script, qr/CODENAME=\$\(\. \/etc\/os-release/, 'the codename is read in a subshell instead' );
-    like( $script, qr/^MARIADB_VERSION=\$1$/m,            'and what it was handed keeps a name of its own' );
+    like( $script, qr/CODENAME=\$\(\.[ ]\/etc\/os-release/, 'the codename is read in a subshell instead' );
+    like( $script, qr/^MARIADB_VERSION=\$1$/m,              'and what it was handed keeps a name of its own' );
 };
 
 subtest 'the root password survives being put in a SQL string' => sub {
     my $sql = sub {
         my ($pw)   = @_;
         my $out    = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mysql.secure_installation.tt', %G, %{ $required_config{mariadb} }, root_pw => $pw );
-        my ($line) = $out =~ m/^(ALTER USER.*)$/m;
+        my ($line) = $out =~ m/^(ALTER[ ]USER\N*)$/m;
         return $line // q{};
     };
 
     # Xslate escapes for HTML by default, and this is SQL: without mark_raw an
     # apostrophe becomes &#39; and the account gets a password nobody typed.
-    unlike( $sql->(q{pa'ss}), qr/&#39;/, 'no HTML escaping reaches the SQL' );
+    unlike( $sql->(q{pa'ss}), qr/&[#]39;/, 'no HTML escaping reaches the SQL' );
 
     # And a quote or a backslash would otherwise end the literal early.
     like( $sql->(q{pa'ss}),  qr/PASSWORD\('pa\\'ss'\)/,  'a quote is escaped for the SQL literal' );
@@ -1678,19 +1685,19 @@ subtest 'the root password survives being put in a SQL string' => sub {
 
     # unix_socket has to survive: it is how root connects from this machine, and
     # everything the recipe runs afterwards depends on it.
-    like( $sql->('plain'), qr/IDENTIFIED VIA unix_socket OR mysql_native_password/, 'socket auth is kept alongside the password' );
+    like( $sql->('plain'), qr/IDENTIFIED[ ]VIA[ ]unix_socket[ ]OR[ ]mysql_native_password/, 'socket auth is kept alongside the password' );
 
     # An option file has its own rules: the value is double-quoted there, so a
     # double quote ends it early where a single one is harmless.
     my $cnf = sub {
         my ($pw)   = @_;
         my $out    = 'Provisioner::Recipe::mariadb'->new(%PROV)->render_file( 'files/mariadb.client.cnf.tt', %G, %{ $required_config{mariadb} }, root_pw => $pw );
-        my ($line) = $out =~ m/^password = (.*)$/m;
+        my ($line) = $out =~ m/^password[ ]=[ ](\N*)$/m;
         return $line // q{};
     };
     is( $cnf->(q{pa"ss}),  q{"pa\\"ss"},  'a double quote is escaped for the option file' );
     is( $cnf->(q{pa\\ss}), q{"pa\\\\ss"}, 'and so is a backslash' );
-    unlike( $cnf->(q{pa'ss}), qr/&#39;/, 'and nothing is HTML-escaped on the way' );
+    unlike( $cnf->(q{pa'ss}), qr/&[#]39;/, 'and nothing is HTML-escaped on the way' );
 };
 
 subtest 'a vhost serves files only where a recipe said it has some' => sub {
@@ -1707,15 +1714,15 @@ subtest 'a vhost serves files only where a recipe said it has some' => sub {
     # directory the recipe never asked for, on every domain that proxies.
     my $proxy = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
     unlike( $proxy, qr/^\s*root\s/m, 'a vhost with no static_dir is given no root' );
-    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!xs, 'and proxies from / rather than falling through to a named location' );
+    like( $proxy, qr!location \s+ / \s+ \{ .*? proxy_pass!, 'and proxies from / rather than falling through to a named location' );
     unlike( $proxy, qr/try_files/, 'with nothing to try before proxying' );
 
     # And the other half: a recipe that does serve files still gets exactly what
     # it named, with the proxy behind it as the fallback.
     my $static = $vhost->( 443 => { ssl => 1, proxy_uri => 'run/app.sock', static_dir => 'www/static' } );
-    like( $static, qr{^\s*root /opt/domains/test\.test\.test/www/static;}m, 'a declared static_dir is the root' );
-    like( $static, qr/try_files \$uri .*\@default/,                         'statics are tried before the proxy' );
-    like( $static, qr/location \@default \{/,                               'and the proxy is the fallback it names' );
+    like( $static, qr{^\s*root[ ]/opt/domains/test\.test\.test/www/static;}m, 'a declared static_dir is the root' );
+    like( $static, qr/try_files[ ]\$uri[ ]\N*\@default/,                      'statics are tried before the proxy' );
+    like( $static, qr/location[ ]\@default[ ]\{/,                             'and the proxy is the fallback it names' );
 
     # nocache_prefix and auth_statics both serve files out of the static root.
     # matrix sets a nocache_prefix and no static_dir, so this block used to be
@@ -1726,7 +1733,7 @@ subtest 'a vhost serves files only where a recipe said it has some' => sub {
     # public_dir is an alias rather than a root, so it is the one thing here that
     # does not need a static_dir behind it.  deluged sets it and nothing else.
     my $public = $vhost->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:8112', public_dir => 'torrents' } );
-    like( $public, qr{^\s*alias /opt/domains/test\.test\.test/torrents;}m, 'a public_dir is still served without one' );
+    like( $public, qr{^\s*alias[ ]/opt/domains/test\.test\.test/torrents;}m, 'a public_dir is still served without one' );
     unlike( $public, qr/^\s*root\s/m, 'and still brings no root with it' );
 };
 
@@ -1743,20 +1750,20 @@ subtest 'nginxproxy opens exactly as much of the domain directory as a docroot n
     # neither -- but a pure proxy has nothing under there nginx ever opens, so
     # granting it traversal would be exposure with nothing to show for it.
     my $proxy = $frag->( 443 => { ssl => 1, proxy_uri => 'http://127.0.0.1:3000' } );
-    unlike( $proxy, qr/chmod o\+x/, 'a vhost with no static_dir gets no traversal at all' );
+    unlike( $proxy, qr/chmod[ ]o\+x/, 'a vhost with no static_dir gets no traversal at all' );
 
     # www/static is two directories under the domain root, and data leaves both
     # of them 0750 once it has actually rsynced content down -- so both need
     # opening, the way a guest seeded with real content under www/ showed only
     # one of them was.
     my $static = $frag->( 443 => { ssl => 1, proxy_uri => 'run/app.sock', static_dir => 'www/static' } );
-    like( $static, qr{chmod o\+x '/opt/domains/test\.test\.test'$}m, 'the domain directory gets traversal' );
+    like( $static, qr{chmod[ ]o\+x[ ]'/opt/domains/test\.test\.test'$}m, 'the domain directory gets traversal' );
     like(
-        $static, qr{chmod o\+x '/opt/domains/test\.test\.test/www'$}m,
+        $static, qr{chmod[ ]o\+x[ ]'/opt/domains/test\.test\.test/www'$}m,
         'and so does the directory static_dir sits under'
     );
     unlike(
-        $static, qr{chmod o\+x '/opt/domains/test\.test\.test/www/static'},
+        $static, qr{chmod[ ]o\+x[ ]'/opt/domains/test\.test\.test/www/static'},
         'but not static_dir itself -- that is a group change, not a traverse bit'
     );
 
@@ -1767,7 +1774,7 @@ subtest 'nginxproxy opens exactly as much of the domain directory as a docroot n
     # directory itself claiming to be theirs.
     like(
         $static,
-        qr{chown -R \Q$G{user}\E:www-data '/opt/domains/test\.test\.test/www/static'},
+        qr{chown[ ]-R[ ]\Q$G{user}\E:www-data[ ]'/opt/domains/test\.test\.test/www/static'},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'static_dir is chowned recursively, not just retagged at the top'
     ) or diag $static;
 
@@ -1776,7 +1783,7 @@ subtest 'nginxproxy opens exactly as much of the domain directory as a docroot n
     # arrangement redis and mail keep their own later writes in.
     like(
         $static,
-        qr{find '/opt/domains/test\.test\.test/www/static' -type d -exec chmod g\+s},
+        qr{find[ ]'/opt/domains/test\.test\.test/www/static'[ ]-type[ ]d[ ]-exec[ ]chmod[ ]g\+s},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and every directory under static_dir is left setgid for what gets written later'
     );
 };
@@ -1814,8 +1821,8 @@ subtest 'a recipe that needs a port open declares a profile rather than a rule' 
         # Comments say what used to be here and why it moved; the rule itself is
         # what must not come back.  Directive and comment markers are stripped
         # so a template comment quoting the old line does not read as one.
-        $body =~ s/\[%#.*?%\]//gs;
-        $body =~ s/^\s*#.*$//gm;
+        $body =~ s/\[%[#].*?%\]//g;
+        $body =~ s/^\s*[#]\N*$//gm;
 
         my ($offender) = $body =~ m/^([^\n]*\bufw\s+(?:allow|deny|limit|reject)\b[^\n]*)$/m;
         is( $offender, undef, ( File::Basename::basename($tt) ) . ' adds no firewall rule of its own' );
@@ -1870,8 +1877,8 @@ subtest 'no fragment calls cpanm itself' => sub {
 
     foreach my $tt (@fragments) {
         my $body = File::Slurper::read_text($tt);
-        $body =~ s/\[%#.*?%\]//gs;
-        $body =~ s/^\s*#.*$//gm;
+        $body =~ s/\[%[#].*?%\]//g;
+        $body =~ s/^\s*[#]\N*$//gm;
 
         my ($offender) = $body =~ m/^([^\n]*\bcpanm\b[^\n]*)$/m;
         is( $offender, undef, ( File::Basename::basename($tt) ) . ' leaves CPAN to the perl recipe' );
@@ -1884,12 +1891,12 @@ subtest 'the firewall reset is one that can actually run' => sub {
     # `ufw reset` prompts, and a provision has no terminal to answer from: it
     # read EOF, printed "Aborted", and the first thing the target did was
     # nothing.  Everything after it in that list is only true if this runs.
-    like( $script, qr/\[qw\{--force reset\}\]/, 'the reset is forced' );
+    like( $script, qr/\[qw\{--force[ ]reset\}\]/, 'the reset is forced' );
 };
 
 subtest 'ufw own limit is applied to nothing, and cannot come back by accident' => sub {
     my $script = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-rules");
-    ( my $code = $script ) =~ s/^\s*#.*$//gm;
+    ( my $code = $script ) =~ s/^\s*[#]\N*$//gm;
 
     # Six connections in thirty seconds, hardcoded in ufw with no per-profile
     # knob.  Applied to a web profile it rate limited real visitors off the site
@@ -1900,7 +1907,7 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     # changes as a branch under a hash nothing ever filled -- reading exactly
     # like the mechanism while being unreachable.  This is what makes putting it
     # back a decision rather than an oversight.
-    unlike( $code, qr/^\s*push\(.*"limit"/m, 'no rule is pushed with ufw limit' );
+    unlike( $code, qr/^\s*push\(\N*"limit"/m, 'no rule is pushed with ufw limit' );
 
     # The delete is not the same thing and has to stay: it takes off limits an
     # older provision left on a profile, which ufw keeps alongside an allow
@@ -1916,7 +1923,7 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     # them from.  They were still being passed after the branch went dead.
     my $fragment = File::Slurper::read_text( fragment_file('ubuntu/ufw.tt') );
     unlike( $fragment, qr{setup-ufw-rules\S*\s*\[%\s*FOR}, 'and none are passed to the script that no longer limits' );
-    like( $fragment, qr/setup-ufw-ratelimits.*EXEMPT/, 'only to the one that does' );
+    like( $fragment, qr/setup-ufw-ratelimits\N*EXEMPT/, 'only to the one that does' );
 };
 
 subtest 'the service user is made once per machine, not once per domain' => sub {
@@ -1928,12 +1935,12 @@ subtest 'the service user is made once per machine, not once per domain' => sub 
     # directory the two lines below it make.
     my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
 
-    my ($target) = $mf =~ m/^\Q[% state_dir %]\E\/service_user:\n((?:\t.*\n)+)/m;
+    my ($target) = $mf =~ m/^\Q[% state_dir %]\E\/service_user:\n((?:\t\N*\n)+)/m;
     ok( $target, 'there is a service_user target' ) or return;
 
-    like( $target, qr/^\tgetent passwd \Q[% user %]\E.*\|\|.*useradd/m, 'the account is only added when it is not already there' );
-    like( $target, qr{^\tmkdir -p \Q[% install_dir %]/[% domain %]\E}m, 'and this domain still gets its own directory' );
-    like( $target, qr/^\tchown \Q[% user %]:[% admin_user %]\E/m,       'owned by the account it shares' );
+    like( $target, qr/^\tgetent[ ]passwd[ ]\Q[% user %]\E\N*\|\|\N*useradd/m, 'the account is only added when it is not already there' );
+    like( $target, qr{^\tmkdir[ ]-p[ ]\Q[% install_dir %]/[% domain %]\E}m,   'and this domain still gets its own directory' );
+    like( $target, qr/^\tchown[ ]\Q[% user %]:[% admin_user %]\E/m,           'owned by the account it shares' );
 };
 
 subtest 'the services that cannot be told about a second domain are named here' => sub {
@@ -1981,8 +1988,8 @@ subtest 'the admin checkout symlink survives a second domain on the machine' => 
     # with it, the way useradd did in the service_user target.
     my $fragment = File::Slurper::read_text( fragment_file("admincode.tt") );
 
-    like( $fragment, qr{^test -e /home/\Q[% admin_user %]/[% basedir %]\E \|\| }m, 'the link is only made when the name is free' );
-    like( $fragment, qr{ln -s \Q[% install_dir %]/[% domain %]/[% basedir %]\E}m,  'and still points at this domain own checkout' );
+    like( $fragment, qr{^test[ ]-e[ ]/home/\Q[% admin_user %]/[% basedir %]\E[ ]\|\|[ ]}m, 'the link is only made when the name is free' );
+    like( $fragment, qr{ln[ ]-s[ ]\Q[% install_dir %]/[% domain %]/[% basedir %]\E}m,      'and still points at this domain own checkout' );
 };
 
 subtest 'the ufw target runs after every recipe that installs a profile' => sub {
@@ -1993,14 +2000,14 @@ subtest 'the ufw target runs after every recipe that installs a profile' => sub 
     # kept.  This held by alphabet alone until makefile.tt was made to say it.
     my $mf = File::Slurper::read_text("$template_dir/../templates/makefile.tt");
 
-    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/s, 'ufw is named after the ordered modules' );
-    like( $mf, qr/\QIF ufw_fragment\E/,                          'and only when there is a ufw target to name' );
+    like( $mf, qr/\Qall:\E.*\Qmodules_ordered\E.*ufw_fragment/, 'ufw is named after the ordered modules' );
+    like( $mf, qr/\QIF ufw_fragment\E/,                         'and only when there is a ufw target to name' );
 
     # And bin/new_config is what takes it out of the ordered set, or there would
     # be two targets of the same name and make would keep the second.
     my $gen = File::Slurper::read_text("$FindBin::Bin/../bin/new_config");
-    like( $gen, qr/my \$ufw_fragment = delete \$fragments\{ufw\}/,         'the fragment is lifted out of the module set' );
-    like( $gen, qr{grep \{ \$_ ne "/etc/provisioner/state/\$fqdn/ufw" \}}, 'and off the prerequisite list with it' );
+    like( $gen, qr/my[ ]\$ufw_fragment[ ]=[ ]delete[ ]\$fragments\{ufw\}/,           'the fragment is lifted out of the module set' );
+    like( $gen, qr{grep[ ]\{[ ]\$_[ ]ne[ ]"/etc/provisioner/state/\$fqdn/ufw"[ ]\}}, 'and off the prerequisite list with it' );          ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'no firewall profile is named after something in /etc/services' => sub {
@@ -2031,7 +2038,7 @@ subtest 'no firewall profile is named after something in /etc/services' => sub {
 
         # Comments here explain which names were skipped and why, so they name
         # the very things being tested for.
-        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
 
         foreach my $section ( $body =~ m/^\[([^\]]+)\]\s*$/gm ) {
             ok( !$service{$section}, ( File::Basename::basename($tt) ) . ": [$section] is a name ufw will load" )
@@ -2075,7 +2082,7 @@ subtest 'the masquerade rules are written after the firewall is reset' => sub {
     # and routed nowhere.  post_install runs after every target.
     my $out = 'Provisioner::Recipe::openvpn'->new(%PROV)->render( %G, %{ $required_config{openvpn} // {} } );
 
-    like( $out, qr{queue_postrun_task \S*/setup-masquerade}, 'the masquerade write is deferred past the makefile' );
+    like( $out, qr{queue_postrun_task[ ]\S*/setup-masquerade}, 'the masquerade write is deferred past the makefile' );
 };
 
 subtest 'nothing restores state from a fragment that data could do' => sub {
@@ -2095,10 +2102,10 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
     foreach my $tt (@fragments) {
         my $name = File::Basename::basename( $tt, '.tt' );
         $name =~ s/[.]global\z//;
-        next if grep { $_ eq $name } @allowed;
+        next if any { $_ eq $name } @allowed;
 
         my $body = File::Slurper::read_text($tt);
-        $body =~ s/\[%#.*?%\]//gs;
+        $body =~ s/\[%[#].*?%\]//g;
 
         unlike( $body, qr{/restore_state\b}, "$name leaves the restoring to data" );
     }
@@ -2241,21 +2248,21 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
         "$FindBin::Bin/../templates", "$FindBin::Bin/../scripts",
     );
 
-    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;
+    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     my %seen;
     foreach my $file ( sort @sources ) {
         my $text = eval { File::Slurper::read_text($file) };
         next unless defined $text;
 
-        foreach my $line ( split( "\n", $text ) ) {
+        foreach my $line ( split( m/\n/, $text ) ) {
             next unless $line =~ m/$fetches/;
-            while ( $line =~ m{https?://([a-z\d][a-z\d.-]*)}gi ) {
+            while ( $line =~ m{https?://([[:lower:]\d][[:lower:]\d.-]*)}gi ) {
                 my $host = lc $1;
 
                 # An address is the guest talking to itself, and a template
                 # variable is not a host until it is rendered.
                 next if $host =~ m/\A[\d.]+\z/;
-                $seen{$host} //= $file =~ s{.*/}{}r;
+                $seen{$host} //= $file =~ s{\N*/}{}r;
             }
         }
     }

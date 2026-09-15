@@ -1,8 +1,9 @@
+#!/usr/bin/env perl
 use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -23,7 +24,7 @@ use Provisioner::Utils();
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Provisioner::Cookbook();
 use YAML::XS();
 use File::Temp qw{tempdir tempfile};
@@ -49,7 +50,7 @@ require Trog::HV;
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
+require Trog::HV::Libvirt;
 my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
@@ -63,7 +64,7 @@ $hv_mock->redefine( sshd_port => sub { 22 } );
 require Trog::Config;
 require Trog::Credentials;
 require Trog::Secrets;
-Trog::Secrets->write( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
+Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
 Trog::Credentials->remember( keepass => 'throwaway' );
 
 # Every recipe there is, by the name the configuration uses.  The Cookbook's
@@ -247,12 +248,12 @@ $recipes_raw{_base} = {
 my $recipes = YAML::XS::Dump( \%recipes_raw );
 
 my ( $ih, $ipmap_file ) = tempfile();
-print $ih $ipmap;
-close $ih;
+print {$ih} $ipmap;
+close($ih) or die "Could not close $ipmap_file: $!";
 
 my ( $rh, $recipe_file ) = tempfile();
-print $rh $recipes;
-close $rh;
+print {$rh} $recipes;
+close($rh) or die "Could not close $recipe_file: $!";
 
 # First make sure this recpie actually has tests to run on the remote
 test_recipe('data');
@@ -278,7 +279,6 @@ sub test_recipe {
         output_dir => $tmpdir,
     );
 
-    no strict 'refs';
     my $r = "Provisioner::Recipe::$recipe"->new(%opt);
 
     my @tests = $r->tests();
@@ -286,23 +286,22 @@ sub test_recipe {
 
     my %files = $r->template_files();
 
-    do_provision( $recipe, $ipmap_file, $recipe_file, \@tests, %files );
-
     # TODO Actually run trog-provisioner.
 
     #TODO re-run generator and make sure everything in remote_files was backed up, and that we do have remote_files
 
+    return do_provision( $recipe, $ipmap_file, $recipe_file, \@tests, %files );
 }
 
 sub do_provision {
-    my ( $recipe, $ipmap_file, $recipe_file, $tests, %files ) = @_;
+    my ( $recipe, $ipmap_path, $recipes_path, $tests, %files ) = @_;
 
     my $provisioner_bin = '/opt/trog-provisioner/bin/provision';
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $ipmap_file,
-            '--recipes', $recipe_file,
+            '--ipmap',   $ipmap_path,
+            '--recipes', $recipes_path,
             '--skip_ssh',
             "$recipe.test.test",
         )
@@ -322,4 +321,5 @@ sub do_provision {
         $tname =~ s/tt$/t/;
         ok( -f "$ddir/t/$tname", "test generated in $ddir/t/$tname" ) or die "nothing generated in $ddir";
     }
+    return;
 }

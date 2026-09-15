@@ -71,7 +71,7 @@ thing contributes to.  If a field can arrive from `required_recipes`, from
 ## Check it rather than reasoning about it
 
 A schema question is answerable in a minute, and reasoning about validator
-behaviour is how the above got written in the first place.  Put the cases in a
+behavior is how the above got written in the first place.  Put the cases in a
 script and look:
 
     perl -Ilib -MProvisioner::Recipe::ufw -e '

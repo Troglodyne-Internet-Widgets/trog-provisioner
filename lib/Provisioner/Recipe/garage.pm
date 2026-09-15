@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Crypt::PRNG();
 
@@ -165,7 +165,7 @@ sub _newest_stable_tag {
     my $tags = eval { Cpanel::JSON::XS::decode_json( $res->{content} ) };
     foreach my $tag ( @{ ref $tags eq 'ARRAY' ? $tags : [] } ) {
         next unless ref $tag eq 'HASH' && defined $tag->{name};
-        return $tag->{name} if $tag->{name} =~ m{\Av[0-9]+[.][0-9]+[.][0-9]+\z};
+        return $tag->{name} if $tag->{name} =~ m{\Av\d+[.]\d+[.]\d+\z};
     }
     return undef;
 }

@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use FindBin::libs;
 use Provisioner::IPPool();
 use Provisioner::Cookbook();
@@ -105,7 +105,6 @@ storage pool -- are left alone.
 sub main {
     my @args = @_;
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
     my ( $purge, $purge_data, $orphans, $dryrun, $uri, $domain_dir, $hvconf );
@@ -274,7 +273,7 @@ sub remove_authorized_key {
     print "Removing domain SSH key from $ak\n";
     return if $dryrun;
 
-    my @before = split( "\n", $contents );
+    my @before = split( m/\n/, $contents );
     my @after  = grep { $_ !~ m/\Q$pubkey\E/ } @before;
     die "Removing the key for $domain from $ak would drop " . ( scalar(@before) - scalar(@after) ) . " lines, not 1; refusing\n"
       unless scalar(@after) == scalar(@before) - 1;
@@ -318,7 +317,7 @@ sub remove_runner_key {
     # authorizes anything, so it is what has to go.
     my ($material) = ( split( q{ }, $pubkey ) )[1];
     die "The public key beside $domain does not look like one; refusing to match on it\n"
-      unless defined $material && length($material) > 32;
+      if !defined $material || length($material) <= 32;
 
     my $config      = eval { Provisioner::Cookbook->domain_config($domain) } // {};
     my $hypervisors = ( $config->{trogrunner} // {} )->{hypervisors}         // {};
@@ -335,7 +334,7 @@ sub remove_runner_key {
         die "Could not read $ak on $name; refusing to rewrite it blind\n"
           unless defined $contents && length $contents;
 
-        my @before = split( "\n", $contents );
+        my @before = split( m/\n/, $contents );
         my @after  = grep { index( $_, $material ) < 0 } @before;
         my $going  = scalar(@before) - scalar(@after);
 
@@ -417,7 +416,7 @@ nowhere to look.
 sub sweep_orphans {
     my ( $uri, $hvconf, $dryrun ) = @_;
 
-    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
     # Every guest anywhere in the fleet.  A hypervisor that cannot be asked stops
     # the sweep rather than being skipped: the guests it holds are exactly the
@@ -446,7 +445,6 @@ sub sweep_orphans {
     # name => the copies of it there are, as [ machine, path ] pairs.
     my %found;
     foreach my $root (@roots) {
-        ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
         push @{ $found{ File::Basename::basename($_) } }, [ $here, $_ ] for grep { -d $_ } glob "$root/*.test";
 
         foreach my $hv (@hvs) {
