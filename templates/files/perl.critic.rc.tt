@@ -45,7 +45,7 @@ config = .preferred_modules.ini
 formats = #!/usr/bin/env perl
 # Performance
 [logicLAB::ProhibitShellDispatch]
-[Performance::ProhibitRegexForSimpleSubstring]
+[ProhibitRegexForSimpleSubstring]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork
