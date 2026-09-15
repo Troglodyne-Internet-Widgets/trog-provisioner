@@ -249,6 +249,14 @@ C<key_path> hands back the file when there is one.  An installation whose domain
 have a F<key.rsa> on disk goes on using it, and each domain seals itself the next
 time it is provisioned -- there is nothing to migrate and no run to make first.
 
+=head2 They are the domain's, not a guest's
+
+Class methods taking a domain, rather than methods on a guest, because two of
+the callers have no guest to call one on: C<bin/new_config> seals at generate
+time, before the guest exists or has an address, and C<bin/guest_key> is handed
+a domain and nothing else.  C<new> refuses a guest with no host, so making these
+instance methods would mean inventing one.
+
 =head2 $ref = Trog::Guest->ref_for_key($domain)
 
 The reference the store keeps this domain's key under.
