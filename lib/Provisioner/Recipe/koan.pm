@@ -17,7 +17,6 @@ our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
 
 use Crypt::PRNG();
 use File::Temp();
-use IPC::Run3();
 use File::Slurper();
 
 =head1 Provisioner::Recipe::koan
@@ -399,16 +398,12 @@ sub guest_secrets {
         "$install_dir/$domain/.ssh/id_koan" => {
             ref => "secret:koan/$domain-github-ssh/password",
 
-            # ssh-keygen rather than a library: what has to come out is an
-            # OpenSSH private key, and it is the thing that defines the format.
             # ed25519 because it is short enough to sit in a password field
             # comfortably, and passphrase-less because the bot runs unattended.
             generate => sub {
                 my $dir  = File::Temp::tempdir( CLEANUP => 1 );
                 my $path = "$dir/id_koan";
-                IPC::Run3::run3( [ qw{ssh-keygen -t ed25519 -N}, q{}, qw{-C koan -f}, $path, '-q' ], \undef, \undef, undef );
-                ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- asking whether ssh-keygen produced a file, which is what the test is for
-                die "ssh-keygen made no key for $domain\n" unless -f $path;
+                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, 'koan' );
 
                 # Without the trailing newline: bin/provision writes the value
                 # with one of its own, and ssh-keygen refuses a key with a blank
