@@ -169,7 +169,9 @@ sub configured_fetch_hosts {
             # A configuration naming a recipe this installation does not have is
             # somebody else's error to report, not a reason to fetch nothing.
             next unless $class->has($recipe);
-            push( @hosts, eval { $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) } );
+            eval { push( @hosts, $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) ); 1 } or do {
+                die "The $recipe recipe could not say which hosts $domain fetches from: $@";
+            };
         }
     }
 

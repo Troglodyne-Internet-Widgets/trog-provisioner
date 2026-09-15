@@ -634,4 +634,19 @@ subtest 'configured_fetch_hosts copes with a configuration that is not there' =>
     is_deeply( [ Provisioner::Cookbook->configured_fetch_hosts ], [], 'no configuration, no hosts, no exception' );
 };
 
+subtest 'configured_fetch_hosts names a recipe that cannot answer, rather than leaving its hosts out' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml",                  "_base:\n  _global:\n    distro: ubuntu\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.d/somewhere.test.yaml", "somewhere.test:\n  koan:\n    repo_url: \"https://gitea.internal/o/koan.git\"\n" );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    my $koan = Test::MockModule->new('Provisioner::Recipe::koan');
+    $koan->redefine( fetch_hosts => sub { die "no idea\n" } );
+
+    my $err = exception { Provisioner::Cookbook->configured_fetch_hosts };
+    like( $err, qr/The koan recipe could not say which hosts somewhere\.test fetches from/, 'names the recipe and the domain' );      ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr/no idea/,                                                                'and passes on what the recipe said' );
+};
+
 done_testing();

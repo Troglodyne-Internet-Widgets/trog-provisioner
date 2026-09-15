@@ -1034,4 +1034,86 @@ subtest 'a command that names its own timeout is not called hung before it' => s
     is( Trog::Machine::_hang_limit(undef), $Trog::Machine::HANG_TIMEOUT, 'undef is the default' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 };
 
+# --- What libvirt refuses stops the run ---------------------------------------
+subtest 'libvirt refusing to set up, start or remove something is an error' => sub {
+    my %refuse;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( vmm       => sub { FakeRefusingVMM->new( \%refuse ) } );
+    $mock->redefine( _domain   => sub { FakeRefusing->new( \%refuse ) } );
+    $mock->redefine( pool_path => sub { '/bogus/pool' } );
+
+    my $hv = fresh( uri => 'qemu+ssh://hv/system' );
+    is( exception { $hv->define_domain('<domain/>') }, undef, 'nothing refused, nothing to say' );
+
+    %refuse = ( set_autostart => 1 );
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could not set vm\.test to start with the host: set_autostart refused/, 'a domain that will not autostart' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+
+    %refuse = ( create => 1 );
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could not start vm\.test: create refused/, 'a domain that will not start' );
+
+    %refuse = ( build => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
+        },
+        qr/Could not build the storage pool tf_disks at \/bogus\/pool: build refused/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        'a pool that will not build'
+    );
+
+    %refuse = ( create => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
+        },
+        qr/Could not start the storage pool tf_disks: create refused/,
+        'a pool that will not start'
+    );
+
+    %refuse = ( refresh => 1 );
+    like(
+        exception {
+            quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->refresh_pool } )
+        },
+        qr/Could not refresh the storage pool tf_disks: refresh refused/,
+        'a pool that will not refresh'
+    );
+
+    %refuse = ( undefine => 1 );
+    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could not undefine vm\.test: undefine refused/, 'a domain that will not go' );
+
+    %refuse = ( destroy => 1 );
+    is( $hv->annihilate_domain('vm.test'), 1, 'but one that is already off still goes' );
+};
+
+{
+
+    package FakeRefusingVMM;
+
+    sub new                      ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
+    sub get_storage_pool_by_name ( $self, $ )        { die "no such pool\n" }
+    sub define_storage_pool      ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
+    sub define_domain            ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
+}
+
+{
+
+    package FakeRefusing;
+
+    # A pool or a domain, refusing whatever the test has named.
+    sub new           ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
+    sub get_name      ($self)             { return 'vm.test' }
+    sub is_active     ($self)             { return 0 }
+    sub set_autostart ( $self, $ )        { return $self->_or_refuse('set_autostart') }
+    sub create        ($self)             { return $self->_or_refuse('create') }
+    sub build         ( $self, $ )        { return $self->_or_refuse('build') }
+    sub refresh       ($self)             { return $self->_or_refuse('refresh') }
+    sub destroy       ($self)             { return $self->_or_refuse('destroy') }
+    sub undefine      ( $self, @ )        { return $self->_or_refuse('undefine') }
+
+    sub _or_refuse ( $self, $what ) {
+        die "$what refused\n" if $self->{refuse}{$what};
+        return 1;
+    }
+}
+
 done_testing;

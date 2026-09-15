@@ -306,16 +306,20 @@ sub annihilate_domain {
     my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
 
-    # A domain that is already shut off can't be destroyed, and that's the
-    # normal case here rather than a problem.
-    eval { $domain->destroy() };
+    eval { $domain->destroy(); 1 } or do {
+
+        # A domain that is already shut off can't be destroyed, and that's the
+        # normal case here rather than a problem.
+    };
     eval {
         $domain->undefine( Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA() );
         1;
     } or do {
 
         # Older libvirt without nvram support for this domain type.
-        eval { $domain->undefine() };
+        eval { $domain->undefine(); 1 } or do {
+            die "Could not undefine $name: $@";
+        };
     };
     return 1;
 }
@@ -487,11 +491,17 @@ sub pool {
   <target><path>$path</path></target>
 </pool>
 XML
-        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ) };
+        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ); 1 } or do {
+            die "Could not build the storage pool $name at $path: $@";
+        };
         $pool->set_autostart(1);
     }
 
-    eval { $pool->create() } unless $pool->is_active();
+    if ( !$pool->is_active() ) {
+        eval { $pool->create(); 1 } or do {
+            die "Could not start the storage pool $name: $@";
+        };
+    }
     return $self->{_pools}{$name} = $pool;
 }
 
@@ -626,7 +636,9 @@ sub delete_volume {
 
 sub refresh_pool {
     my ( $self, $name ) = @_;
-    eval { $self->pool($name)->refresh() };
+    eval { $self->pool($name)->refresh(); 1 } or do {
+        die 'Could not refresh the storage pool ' . ( $name // $self->pool_name ) . ": $@";
+    };
     return 1;
 }
 
@@ -699,8 +711,16 @@ sub define_domain {
     my ( $self, $xml, %opts ) = @_;
 
     my $domain = $self->vmm->define_domain($xml);
-    eval { $domain->set_autostart(1) } if $opts{autostart} // 1;
-    eval { $domain->create() } unless $domain->is_active();
+    if ( $opts{autostart} // 1 ) {
+        eval { $domain->set_autostart(1); 1 } or do {
+            die 'Could not set ' . $domain->get_name() . " to start with the host: $@";
+        };
+    }
+    if ( !$domain->is_active() ) {
+        eval { $domain->create(); 1 } or do {
+            die 'Could not start ' . $domain->get_name() . ": $@";
+        };
+    }
 
     return $domain;
 }
