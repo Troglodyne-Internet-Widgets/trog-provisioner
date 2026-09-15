@@ -404,6 +404,23 @@ between — silently, with no error and a zero exit. The nginx vhost came out tw
 bytes long. `t/recipes.t` checks every template comment closes its quotes; run
 it after editing one.
 
+**A template test can be reading bytecode compiled from a file you have already
+fixed.** Xslate keeps compiled templates in `~/.xslate_cache` and decides
+whether one is stale by mtime, at one-second granularity -- so an edit landing
+in the same second as the compile is not seen at all. Measured: render a
+template, rewrite it immediately, render again in a fresh process, and the first
+version comes back; a second later the change appears. The cache is also keyed
+by the path string it was handed, so `templates` and `t/../templates` are two
+separate entries, and a render you do by hand can look right while the test
+carries on failing.
+
+That combination is what makes it nasty. The file on disk is byte-correct, a
+render you do yourself agrees with you, the test fails anyway -- and it keeps
+failing after you restore the file, because the restore lands inside the same
+second. The tell is a failure that survives a correct restore, usually in a
+suspiciously fast run. `rm -rf ~/.xslate_cache/*<this checkout>*` clears it.
+It bites the break-it-on-purpose loop hardest, which is the loop worth doing.
+
 **A default on a field that is only true sometimes is wrong for everything
 else.** `nginxproxy` defaulted `ssl` to true for every vhost, so a port 80 vhost
 that asked for neither `ssl` nor `ssl_redirect` came out `listen 80 ssl` and
