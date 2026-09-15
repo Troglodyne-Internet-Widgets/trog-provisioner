@@ -40,6 +40,12 @@ master says today.
 
 TODO: allow specification of specific SHA to check out.
 
+tCMS requires C<Sys::Virt>, so it is installed before the rest of what the
+checkout needs, at the version pkg-config reports for the guest's libvirt.  Left
+to the dependency list, cpanm takes the newest, whose build wants a libvirt far
+newer than the distribution ships -- the same reason
+L<Provisioner::Recipe::trogrunner> pins it.
+
 =cut
 
 sub required_recipes {
@@ -64,10 +70,16 @@ sub required_recipes {
         },
 
         # What the checkout says it needs, installed into the perl that recipe
-        # builds: see Provisioner::Recipe::perl on cpan_deps.
+        # builds: see Provisioner::Recipe::perl on cpan_deps, and L</DESCRIPTION>
+        # on why Sys::Virt goes first.
         perl => sub {
             my (%perl_opts) = @_;
-            return ( cpan_deps => [ { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify } ] );
+            return (
+                cpan_deps => [
+                    { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } },
+                    { installdeps => Path::Tiny::path( @perl_opts{qw{install_dir domain}}, 'tCMS' )->stringify },
+                ],
+            );
         },
         tpsgi => sub {
 
