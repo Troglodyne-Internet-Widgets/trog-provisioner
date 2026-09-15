@@ -39,6 +39,12 @@ use Trog::HV();
 use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 
+# These patterns quotemeta a literal on purpose: a fixture string this test
+# wrote itself, full of dots and slashes that would otherwise need escaping one
+# at a time.  The policy is about production code, where a \Q...\E round
+# anything but an interpolated value is usually an accident.
+## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
+
 require_ok("$FindBin::Bin/../bin/destroy")
   or BAIL_OUT('bin/destroy does not load; the install is incomplete');
 
