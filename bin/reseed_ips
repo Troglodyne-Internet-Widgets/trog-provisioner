@@ -107,10 +107,7 @@ sub main {
 
     unless ($ok) {
         my $err = $@ || "reseed failed\n";
-        eval { $db->do('ROLLBACK'); 1 } or do {
-
-            # The failure worth reporting is $err, not a rollback of it that could not run.
-        };
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- the failure worth reporting is $err, not a rollback of it that could not run
         die $err;
     }
 

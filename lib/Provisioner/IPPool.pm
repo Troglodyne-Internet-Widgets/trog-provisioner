@@ -259,10 +259,7 @@ sub assign {
 
     if ( !defined $chosen ) {
         my $err = $@ || "Could not assign an IP to $domain\n";
-        eval { $db->do('ROLLBACK'); 1 } or do {
-
-            # The failure worth reporting is $err, not a rollback of it that could not run.
-        };
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- the failure worth reporting is $err, not a rollback of it that could not run
         die $err;
     }
 
