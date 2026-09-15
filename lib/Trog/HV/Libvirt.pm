@@ -1402,7 +1402,7 @@ What C<bin/preflight> asks of this backend, in order.
 =cut
 
 sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_fetch_sources check_libvirt check_sys_virt_in_step check_config} }
-sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota} }
+sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
 
 sub check_reachable {
     my ($self) = @_;

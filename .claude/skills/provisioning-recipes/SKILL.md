@@ -375,13 +375,18 @@ have each broken a recipe here:
   `Syntax error: end of file unexpected (expecting "done")` from the `for` loop
   inside it. Render a script as a `template_files` entry and install it, which
   is what every other generated script here does.
-- Make runs recipe lines under `/bin/sh`, which is **dash** on Ubuntu, not bash.
-  `gogs` made its four directories in one brace expansion and got a single
-  directory named `{repos,data,log,custom/conf}`, and wrote `id -u gogs
-  &>/dev/null || useradd` — dash reads `&>` as a background `&` and a
-  redirection, so the guard always succeeded and the `useradd` was dead code.
-  Do not "fix" this by setting `SHELL := /bin/bash`: `makefile.tt` relies on
-  dash's `echo` expanding `\n` when it writes sendmail's config.
+- Make runs recipe lines under **bash**: `makefile.tt` sets `SHELL := /bin/bash`
+  and the first-boot package list installs it, so a fragment may use what bash
+  has. It was dash until recently, and the scars are worth knowing because the
+  older fragments were written against it: `gogs` made its four directories in
+  one brace expansion and got a single directory named
+  `{repos,data,log,custom/conf}`, and wrote `id -u gogs &>/dev/null || useradd`,
+  which dash read as a background `&` and a redirection -- so the guard always
+  succeeded and the `useradd` was dead code.
+
+  What still has to be POSIX is anything make does not run. `at` hands its job
+  to `/bin/sh` whatever shebang the script carries, which is why `setup.sh` is
+  started as `bash /root/setup.sh` rather than left to speak for itself.
 
 **A template that moves a file `template_files` does not generate** kills the
 target and everything after it. `deluged` and `matrix` both moved an nginx vhost
@@ -398,6 +403,23 @@ aliases` opens a string that runs to the next quote and swallows everything
 between — silently, with no error and a zero exit. The nginx vhost came out two
 bytes long. `t/recipes.t` checks every template comment closes its quotes; run
 it after editing one.
+
+**A template test can be reading bytecode compiled from a file you have already
+fixed.** Xslate keeps compiled templates in `~/.xslate_cache` and decides
+whether one is stale by mtime, at one-second granularity -- so an edit landing
+in the same second as the compile is not seen at all. Measured: render a
+template, rewrite it immediately, render again in a fresh process, and the first
+version comes back; a second later the change appears. The cache is also keyed
+by the path string it was handed, so `templates` and `t/../templates` are two
+separate entries, and a render you do by hand can look right while the test
+carries on failing.
+
+That combination is what makes it nasty. The file on disk is byte-correct, a
+render you do yourself agrees with you, the test fails anyway -- and it keeps
+failing after you restore the file, because the restore lands inside the same
+second. The tell is a failure that survives a correct restore, usually in a
+suspiciously fast run. `rm -rf ~/.xslate_cache/*<this checkout>*` clears it.
+It bites the break-it-on-purpose loop hardest, which is the loop worth doing.
 
 **A default on a field that is only true sometimes is wrong for everything
 else.** `nginxproxy` defaulted `ssl` to true for every vhost, so a port 80 vhost

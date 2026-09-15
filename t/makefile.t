@@ -108,6 +108,19 @@ subtest 'testdeps: installed with the flags bin/new_config chose for them' => su
     unlike( makefile(), qr/^\tcpanm/m, 'and no cpanm at all with nothing to install' );
 };
 
+# Recipe lines ran under dash until recently, and dash's echo expands \n where
+# bash's does not -- so sendmail's config is written with printf, and the shell
+# is named rather than inherited from whatever make would pick.
+subtest 'the makefile names its shell, and writes sendmail config without relying on one' => sub {
+    my $mf = makefile();
+
+    like( $mf, qr{^SHELL[ ]:=[ ]/bin/bash$}m, 'recipe lines run under bash' );
+
+    my ($sendmail) = $mf =~ m/^\Q$STATE\E\/sendmail:\n((?:\t[^\n]*\n)+)/m;
+    like( $sendmail   // q{}, qr/\Qprintf '%s\E/, 'starttls is appended with printf' ) or diag $sendmail;
+    unlike( $sendmail // q{}, qr/\Qecho "include\E/, 'and not with an echo only dash expands' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

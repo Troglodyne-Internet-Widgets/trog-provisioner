@@ -849,7 +849,7 @@ What C<bin/preflight> asks of this backend, in order.
 =cut
 
 sub preflight_checks { return qw{check_reachable check_cloud_resources check_cloud_quota check_rsync check_transfer_ip check_fetch_sources check_config} }
-sub preflight_notes  { return qw{note_stale_image note_apt_mirror} }
+sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
 # The cloud equivalent of "can we reach the hypervisor": whether the credential
 # in clouds.yaml gets us a token, and whether the catalogue that comes back has

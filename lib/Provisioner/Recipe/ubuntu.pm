@@ -296,7 +296,7 @@ sub enrich {
     # have always been.
     $opts{runcmd} = [
         qq{echo "root:$opts{contact_email}\n" > /etc/aliases },
-        'at now -f /root/setup.sh',
+        q{echo 'bash /root/setup.sh' | at now},
     ];
 
     # Straight out of the recipe's own templates, so a distribution that wants a
@@ -309,7 +309,8 @@ sub enrich {
 # What cloud-init installs before the makefile runs, which is not quite what the
 # recipes asked for.
 #
-# atd is how the makefile gets started at all, make is what runs it, and
+# atd is how the makefile gets started at all, make is what runs it, bash is
+# the shell it runs recipe lines with, and
 # something has to accept mail -- sendmail unless a recipe has asked for postfix,
 # which conflicts with it.
 sub _first_boot_packages {
@@ -317,7 +318,7 @@ sub _first_boot_packages {
 
     my @pkgs = @{ Provisioner::Utils::coerce_arrayref($packages) };
     push( @pkgs, 'sendmail' ) unless any { $_ eq 'postfix' } @pkgs;
-    push( @pkgs, qw{at make} );
+    push( @pkgs, qw{at bash make} );
 
     return [ uniq @pkgs ];
 }

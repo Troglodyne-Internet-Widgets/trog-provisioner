@@ -1,3 +1,6 @@
+# Recipe lines run under bash, not the /bin/sh make would pick.
+SHELL := /bin/bash
+
 [% FOR var IN vars.keys().sort() %]
 [% var %] := [% vars.$var | mark_raw %]
 [% END -%]
@@ -88,8 +91,8 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
     existence there is nothing to check the split against -- see issue #36. -%]
 [% state_dir %]/sendmail:
 	# Make sure mailing works by forcing send-only lo and enabling starttls
-	! grep starttls.m4 /etc/mail/sendmail.mc && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/sendmail.mc; /bin/true
-	! grep starttls.m4 /etc/mail/submit.mc && echo "include(\`/etc/mail/tls/starttls.m4')dnl\n" >> /etc/mail/submit.mc; /bin/true
+	! grep starttls.m4 /etc/mail/sendmail.mc && printf '%s\n\n' "include(\`/etc/mail/tls/starttls.m4')dnl" >> /etc/mail/sendmail.mc; /bin/true
+	! grep starttls.m4 /etc/mail/submit.mc && printf '%s\n\n' "include(\`/etc/mail/tls/starttls.m4')dnl" >> /etc/mail/submit.mc; /bin/true
 	test -f /etc/mail/sendmail.conf && sed -i -e "s/eth0/lo/gm" /etc/mail/sendmail.conf; /bin/true
 	#XXX something mangles this later
 	test -f /etc/mail/sendmail.conf && chattr +ie /etc/mail/sendmail.conf; /bin/true

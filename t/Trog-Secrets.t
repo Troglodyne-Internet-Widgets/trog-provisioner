@@ -90,6 +90,39 @@ subtest 'create() then lookup() is a round trip' => sub {
     );
 };
 
+subtest 'replace() sets what it names and leaves the rest of the store alone' => sub {
+    my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+    my $pass = 'throwaway';
+
+    Trog::Secrets->create(
+        $file, $pass,
+        'secret:registrar/easydns/password' => 'REGISTRAR',
+        'secret:guests/vm.test/password'    => 'the old key',
+    );
+
+    ok( Trog::Secrets->replace( $file, $pass, 'secret:guests/vm.test/password' => 'the new key' ), 'it replaces' );
+
+    my %after = Trog::Secrets->lookup(
+        $file, $pass,
+        key       => 'secret:guests/vm.test/password',
+        registrar => 'secret:registrar/easydns/password',
+    );
+    is( $after{key}, 'the new key', 'the field it named holds the new value' );
+
+    # The whole reason this exists rather than create().  create() builds a
+    # fresh database out of what it is handed, so against a real store it would
+    # leave it holding one entry and nothing else.
+    is( $after{registrar}, 'REGISTRAR', 'and every other secret in the database survived' );
+
+    # A reference with nothing behind it yet is added rather than refused: a
+    # guest being sealed for the first time has no entry to overwrite.
+    ok( Trog::Secrets->replace( $file, $pass, 'secret:guests/new.test/password' => 'minted' ), 'a new reference is added' );
+    my %fresh = Trog::Secrets->lookup( $file, $pass, k => 'secret:guests/new.test/password' );
+    is( $fresh{k}, 'minted', 'and comes back out' );
+
+    is( Trog::Secrets->replace( $file, $pass ), 0, 'nothing asked for is nothing done' );
+};
+
 subtest 'lookup() says which part it could not find' => sub {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     Trog::Secrets->create( $file, 'hunter2', 'secret:a/b/password' => 'the password' );
