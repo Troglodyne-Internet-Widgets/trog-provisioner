@@ -245,14 +245,13 @@ sub remember {
         $made{$ref}   = 1;
     }
 
-    $kdbx->lock();
-
     # Only when there is something new to keep.  Saving rewrites the whole
     # database, and a run that read but did not add has no business doing that
     # to the file every other domain is also being provisioned out of.
     return %values unless %made;
 
     $kdbx->save_db( $file, $password );
+    $kdbx->lock();
     $class->_confirm_kept( $file, $password, \%values, \%made );
 
     return %values;
@@ -321,8 +320,8 @@ sub replace {
         $entry->{$field} = $value_by_ref{$ref};
     }
 
-    $kdbx->lock();
     $kdbx->save_db( $file, $password );
+    $kdbx->lock();
     return 1;
 }
 
