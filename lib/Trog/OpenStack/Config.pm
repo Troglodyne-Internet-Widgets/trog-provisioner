@@ -48,7 +48,7 @@ that matters to nobody calling this, so it is flattened away.
 # Where clouds.yaml is looked for, in order.
 #
 # OS_CLIENT_CONFIG_FILE first, because that is the variable every other
-# OpenStack client honours and somebody who has set it means it.  Then the
+# OpenStack client honors and somebody who has set it means it.  Then the
 # installation's own configuration directory, so a deployment can carry a file
 # of its own.  Then the two paths a person's own file lands in -- the documented
 # one, and the top of $HOME, which is where you end up if you just saved what

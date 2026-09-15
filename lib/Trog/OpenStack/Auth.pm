@@ -62,8 +62,8 @@ a secret, issued by Keystone, scoped to a project when it was made -- so there
 is nothing to give it.
 
 This is that request instead.  Everything after the token is the parent's:
-C<service> resolves a service type against the catalogue and hands back an
-L<OpenStack::Client> pointed at it, and C<services> lists what the catalogue
+C<service> resolves a service type against the catalog and hands back an
+L<OpenStack::Client> pointed at it, and C<services> lists what the catalog
 had.  Only C<token> is overridden, because a token restored from cache never
 had an HTTP response to read it out of.
 
@@ -415,7 +415,7 @@ sub _store {
 =head1 REQUIREMENTS
 
 Handing this to L<OpenStack::MetaAPI> needs a version of it whose C<BUILDARGS>
-honours an C<auth> that was passed in.  Releases up to 0.003 rebuild it from
+honors an C<auth> that was passed in.  Releases up to 0.003 rebuild it from
 their arguments unconditionally and throw away the object, which loses the
 credential this module exists to carry.  The check is one line:
 

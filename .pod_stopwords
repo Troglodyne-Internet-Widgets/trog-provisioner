@@ -1,5 +1,5 @@
 # Words Documentation::PodSpelling takes as spelled right, named in .perlcriticrc.
-# aspell is asked for British English, which is what the POD here is written in,
+# aspell is asked for American English, which is what the POD here is written in,
 # so what is left is vocabulary no dictionary has -- commands, daemons, file and
 # option names, recipe names -- and the pieces of a token aspell splits at a
 # digit, like the IPv of IPv4.  A misspelling does not belong here: fix it.

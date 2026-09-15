@@ -33,13 +33,13 @@ Each domain gets its own php-fpm pool listening on a dedicated unix socket, so
 multiple roundcube installs can coexist on the same host.
 
 User data (contacts, identities, preferences) lives in a SQLite database in
-$install_dir/webmail.$domain_data, which is initialised from Roundcube's
+$install_dir/webmail.$domain_data, which is initialized from Roundcube's
 sqlite.initial.sql as it will not autocreate. That directory is registered in
 remote_files, so it comes down off a guest being rebuilt and is picked up by the
 'backup' recipe.
 
 Coming down is only half of it: the fragment calls C<restore_state> to put it
-back where the DSN in config.inc.php points, and initialises the schema only
+back where the DSN in config.inc.php points, and initializes the schema only
 when that left nothing there. Nobody can type a contact list back in, so the
 alternative to restoring it is losing it.
 

@@ -7,7 +7,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/Provisioner-Cookbook.t - the catalogue: what recipes exist, and what a config for one looks like
+t/Provisioner-Cookbook.t - the catalog: what recipes exist, and what a config for one looks like
 
 =cut
 
@@ -185,7 +185,7 @@ subtest 'a list in _base is added to rather than replaced' => sub {
         'one.test' => { adminconfig => { pkgs => ['emacs'] } },
     };
 
-    # Every Hash::Merge behaviour concatenates arrays, including the one this
+    # Every Hash::Merge behavior concatenates arrays, including the one this
     # used to have, so fixing the precedence did not change this and no
     # precedence could.  Asserted rather than left to be discovered: it is the
     # one place _base does not behave the way the rest of it now does, and it
@@ -558,7 +558,7 @@ subtest 'a distribution is a directory of recipes, and is found by being one' =>
 
 subtest 'load with a distribution' => sub {
     is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'a recipe with a version for this distribution' );
-    is( Provisioner::Cookbook->load( 'nginx', distro => 'Ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'however it is capitalised' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'Ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'however it is capitalized' );
     is( Provisioner::Cookbook->load( 'nginx', distro => 'nosuch' ), 'Provisioner::Recipe::nginx',         'and the recipe itself where there is no version for it' );
 
     # Absence is the only thing that falls back.  A subclass that does not

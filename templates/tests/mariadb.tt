@@ -21,7 +21,7 @@ chomp $status;
 is($status, 'active', 'mariadb is running');
 
 ok(-d '/var/lib/mysql', 'the packaged data directory exists');
-ok(-f '/var/lib/mysql/ibdata1', 'and was initialised');
+ok(-f '/var/lib/mysql/ibdata1', 'and was initialized');
 
 # Our configuration went in as a drop-in the packaged server reads, and it read
 # it -- a drop-in in the wrong directory is a setting that looks applied.

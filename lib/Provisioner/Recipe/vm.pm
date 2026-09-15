@@ -70,7 +70,7 @@ renders as any other recipe does.  Both are called from C<bin/provision>, which
 is the program that has a hypervisor in hand.
 
 The seam is deliberate.  Everything libvirt-shaped is in this recipe and its
-template, so a second virtualisation platform is another recipe and another
+template, so a second virtualization platform is another recipe and another
 template rather than a rewrite of C<bin/provision>.
 
 =cut
@@ -485,7 +485,7 @@ sub _iotune {
     delete @limit{ grep { !defined $limit{$_} } keys %limit };
     return undef unless %limit;
 
-    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honour them.\n"
+    die "disk_*_bytes_sec/disk_*_iops_sec need libvirt 0.9.8, and " . $hv->describe . " is older.\n" . "Remove them from provision.conf, or build this guest somewhere that can honor them.\n"
       unless $hv->supports('iotune');
 
     # libvirt's own rule: a total is a total, and may not be given beside the

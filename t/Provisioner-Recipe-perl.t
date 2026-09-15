@@ -82,7 +82,7 @@ subtest 'every step it is handed is installed in its own target, in order, after
         'one cpan_install each, in the order handed over, every word quoted'
     );
     ok( index( $out, 'build_latest_perl.sh' ) < index( $out, 'cpan_install' ), 'after the perl they go into is built' );
-    unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependants queued' );
+    unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependents queued' );
 
     # cpanm, Module::Build and Dist::Zilla are build_latest_perl.sh's, so a perl
     # nobody hands anything to installs nothing of its own.
@@ -145,7 +145,7 @@ subtest 'what each recipe depending on it hands over, it takes, and the merge ke
         is( ref $required{perl}, 'CODE', "$name depends on perl" ) or next;
 
         # As bin/new_config asks: the dependency is handed the guest and the
-        # dependant's configuration, and what comes back is merged in.
+        # dependent's configuration, and what comes back is merged in.
         my %handed = $required{perl}->(%GUEST);
         ok( scalar @{ $handed{cpan_deps} // [] }, "$name hands it something to install" );
         $merged = Hash::Merge::merge( $merged, \%handed );
@@ -172,7 +172,7 @@ subtest 'the guest has what this recipe installs into the perl needs to build' =
     ok( $deps{perlbrew},     'and perlbrew, which builds the perl and brings a compiler with it' );
 };
 
-subtest 'a dependant told no install_dir dies, rather than installing from somewhere else' => sub {
+subtest 'a dependent told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
     like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined,[ ]positive-length/, 'tcms' );
 

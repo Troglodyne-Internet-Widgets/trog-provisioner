@@ -149,7 +149,7 @@ subtest 'apply() puts them back where the notes were' => sub {
 
     is( $config->{_base}{_global}{registrar}{key},  'resolved',      'into a nested hash' );
     is( $config->{list}[1]{deep},                   'also resolved', 'and through an array index' );
-    is( $config->{_base}{_global}{registrar}{type}, 'easydns',       'leaving its neighbours alone' );
+    is( $config->{_base}{_global}{registrar}{type}, 'easydns',       'leaving its neighbors alone' );
 };
 
 our $ran = 0;

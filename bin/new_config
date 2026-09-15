@@ -70,7 +70,7 @@ Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
 Builds a new configuration package for VM(s) to be provisioned by Troglodyne provisioner.
 
-Per-domain behaviour is controlled by:
+Per-domain behavior is controlled by:
 
     /etc/trog-provisioner/recipes.yaml
     /etc/trog-provisioner/recipes.d/*.yaml
@@ -866,7 +866,7 @@ sub handle_domain {
             push( @modules, $required ) unless any { $required eq $_ };
             $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
 
-            # Hash::Merge picks a side where two dependants disagree.  The recipe
+            # Hash::Merge picks a side where two dependents disagree.  The recipe
             # being depended on is the only thing that knows whether either side
             # is right, so it gets asked -- and dies if it does not know.
             Provisioner::Cookbook->load( $required, distro => $distro_name )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );

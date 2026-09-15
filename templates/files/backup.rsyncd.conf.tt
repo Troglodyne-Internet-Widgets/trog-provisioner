@@ -13,7 +13,7 @@ path = [% targets.$target %]
 uid = root
 gid = root
 [%# exclude, singular.  rsyncd has no parameter called excludes: it is not one
-    of the module parameters at all, and rsyncd neither honours nor complains
+    of the module parameters at all, and rsyncd neither honors nor complains
     about it -- so every pattern written here was served to the client instead.
     Checked against a real rsyncd rather than against the manual. -%]
 [% IF excludes.$target %]

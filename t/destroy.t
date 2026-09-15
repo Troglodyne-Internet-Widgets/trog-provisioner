@@ -9,7 +9,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
+t/destroy.t - bin/destroy: tearing a guest down without taking its neighbors
 
 =cut
 

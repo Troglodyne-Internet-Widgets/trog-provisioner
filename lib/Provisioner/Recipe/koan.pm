@@ -89,7 +89,7 @@ use File::Slurper();
             #   matrix_password:     "hunter2"       # one-shot  bootstrap mints fresh device
             # matrix_pickle_key: "<64-hex>"          # optional; auto-gen if absent
 
-            # Behaviour knobs (all optional)
+            # Behavior knobs (all optional)
             max_runs_per_day: 10
             interval_seconds: 60
 
@@ -213,7 +213,7 @@ are present, and that a CLI provider token is supplied where required.
 
 =head3 template_files
 
-Renders the env file, behaviour config, project list and two systemd
+Renders the env file, behavior config, project list and two systemd
 units into the config bundle.
 
 =head3 datadirs

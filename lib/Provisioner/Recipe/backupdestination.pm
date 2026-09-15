@@ -44,7 +44,7 @@ Uses a backup and retention script for the configured host(s), backing up every 
 
 TODO: make retention period configurable, etc
 
-Touches the file '/root/backup_in_progress' while running in case you want to use that to lock behaviours such as reboots to not disrupt backups.
+Touches the file '/root/backup_in_progress' while running in case you want to use that to lock behaviors such as reboots to not disrupt backups.
 
 Logs backup output to /var/log/backups/$HOST.log, and rotates the logs.
 

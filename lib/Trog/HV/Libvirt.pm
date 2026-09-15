@@ -147,7 +147,7 @@ with no C<-c> would.
 
 =head2 is_local
 
-True when the hypervisor is this very machine, i.e. the historical behaviour.
+True when the hypervisor is this very machine, i.e. the historical behavior.
 
 =cut
 

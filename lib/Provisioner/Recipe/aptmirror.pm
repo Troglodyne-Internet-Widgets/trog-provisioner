@@ -40,7 +40,7 @@ and is configured separately.
 =head2 Nothing depends on this
 
 No recipe puts C<aptmirror> in its C<required_recipes>, and none should.  A
-mirror is an optimisation an installation opts into by naming this recipe for
+mirror is an optimization an installation opts into by naming this recipe for
 one domain; making anything require it would drag a mirror host into every
 guest's dependency graph and turn "I would like to build a web server" into "I
 would like to build a web server and several hundred gigabytes of Ubuntu".

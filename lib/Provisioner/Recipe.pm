@@ -50,7 +50,7 @@ The last component of the package name must be lowercase --
 C<Provisioner::Recipe::nginx>, never C<::Nginx>.  The makefile has uppercase
 targets of its own, and the case is what keeps a recipe from colliding with one.
 
-A recipe may have one specialisation per distribution, under a capitalised
+A recipe may have one specialization per distribution, under a capitalized
 namespace named for it: C<Provisioner::Recipe::Ubuntu::nginx>, a subclass of
 C<Provisioner::Recipe::nginx>.  It answers to the same name, is looked up by
 C<Provisioner::Cookbook/load> out of the C<distro> a domain is configured with,
@@ -171,9 +171,9 @@ other.  See C<bin/new_config> for the search path.
 =head3 $name = $recipe->recipe_name()
 
 The name this recipe answers to, of a class or an object: the last component of
-the class, so that a distro's specialisation of a recipe --
+the class, so that a distro's specialization of a recipe --
 C<Provisioner::Recipe::Ubuntu::pdns> -- answers to the same name and looks for
-the same fragment as the recipe it specialises.  Sharing the fragment is the
+the same fragment as the recipe it specializes.  Sharing the fragment is the
 point: what a distro changes is the package list, not the makefile.
 
 Undef for a class not named as a recipe.
@@ -286,7 +286,7 @@ so none of them is in any one recipe's C<args()>: they are here, and C<schema>
 lays them B<underneath> whatever the recipe declares for itself.
 
 Underneath, because a recipe that declares a colliding key is describing a
-different thing spelt the same, and it is the one that knows.
+different thing spelled the same, and it is the one that knows.
 L<Provisioner::Recipe::registrar>'s C<user> is the account at the registrar and
 defaults to empty -- which is what stops C<validate> filling it in from
 C<admin_user> and making the lexicon shortcut export an C<AUTH_USERNAME> for a
@@ -405,7 +405,7 @@ laid underneath its C<properties>.
 B<Properties only.>  Every other key in a schema -- C<required>,
 C<additionalProperties>, C<oneOf> -- is the recipe's alone.  Nineteen recipes
 declare a C<required> list, and L<Hash::Merge> concatenates arrays under every
-behaviour it has, so a merge that touched C<required> would hand koan a list
+behavior it has, so a merge that touched C<required> would hand koan a list
 with two C<user>s in it.
 
 Deliberately B<not> folded into C<args()>.  L<Provisioner::Cookbook/spec> calls
@@ -478,7 +478,7 @@ L<Provisioner::Recipe::fetchcache> -- which cannot depend on any one domain.
 
 B<Every recipe that downloads anything declares this.>  A recipe that fetches a
 tarball, clones a checkout, or pulls a key and says nothing here is a recipe
-whose downloads never reach the cache -- so it is slower than its neighbours,
+whose downloads never reach the cache -- so it is slower than its neighbors,
 and it is the one that fails when upstream does.  Nothing enforced that for a
 long time and nine hosts went undeclared; C<t/recipes.t> now checks what it can
 see.
@@ -646,7 +646,7 @@ sub required_recipes {
 
     # Likewise for state: a recipe that says where its salvage goes back is a
     # recipe that depends on the thing which puts it there.  data walks what
-    # every dependant handed it, rather than each fragment calling restore_state
+    # every dependent handed it, rather than each fragment calling restore_state
     # for itself.
     my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
@@ -656,7 +656,7 @@ sub required_recipes {
 
 =head3 $merged = $recipe->reconcile($merged, $incoming)
 
-Settle what two dependants disagreed about.
+Settle what two dependents disagreed about.
 
 A recipe that several others depend on is configured once, out of whatever each
 of them asked for.  Where two of them ask for the same field and want different
@@ -704,7 +704,7 @@ sub _reconcile_into {
 
 =head3 $value = $recipe->resolve_conflict($path, $mine, $theirs)
 
-Which of two values a pair of dependants asked for this recipe to use.
+Which of two values a pair of dependents asked for this recipe to use.
 
 C<$path> is the field they disagreed about, as an arrayref of keys from the top
 of the recipe's configuration.

@@ -96,7 +96,7 @@ survives a rebuild: see L</args>.
 =head3 args
 
 C<secret_key> has no default, deliberately.  It signs sessions and encrypts 2FA
-enrolments, and it used to be minted afresh by every C<bin/new_config> run --
+enrollments, and it used to be minted afresh by every C<bin/new_config> run --
 which is a rotation rather than a default: re-provisioning logged everybody out
 and voided every second factor, unless an operator had thought to pin the key in
 C<recipes.yaml>.
@@ -206,7 +206,7 @@ sub fetch_hosts {
     my ($class) = @_;
 
     # api.github.com as well: gogs.mirror.sh asks it which repositories an
-    # account or an organisation has before cloning any of them.
+    # account or an organization has before cloning any of them.
     return ( 'api.github.com', $class->github_release_hosts );
 }
 

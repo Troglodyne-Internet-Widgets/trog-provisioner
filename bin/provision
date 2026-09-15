@@ -612,7 +612,7 @@ sub refuse_on_salvage_gaps {
 # --connect is the manual override and skips every question below.  Otherwise,
 # if there is a hypervisors.conf, it decides: the guest goes where it already
 # lives, or where it fits.  With no fleet configured we are back to the old
-# behaviour, where provision.conf carried the connection details itself.
+# behavior, where provision.conf carried the connection details itself.
 sub choose_hypervisor {
     my ( $config, $domain, $opts ) = @_;
 

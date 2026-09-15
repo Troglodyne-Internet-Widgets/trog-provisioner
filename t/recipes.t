@@ -877,7 +877,7 @@ subtest 'a recipe that salvages state puts it back' => sub {
 # database it protects", and the salvage has always honoured it -- but the backup
 # recipe serves the same directories over rsyncd as root, and carried the file
 # anyway.  Its own exclude was spelled `excludes`, which is not an rsyncd module
-# parameter at all: rsyncd neither honours nor complains about it, so every
+# parameter at all: rsyncd neither honors nor complains about it, so every
 # pattern written there was handed to the client.
 subtest 'what a recipe refuses to salvage is refused to the backup as well' => sub {
     my @skippers = grep {
@@ -1204,7 +1204,7 @@ subtest 'the recipes covered by a configd language ask for it' => sub {
 subtest 'configd takes the union of what asked for it' => sub {
     my $r = 'Provisioner::Recipe::configd'->new(%PROV);
 
-    # Which is how they arrive: Hash::Merge joins two dependants' arrays, so a
+    # Which is how they arrive: Hash::Merge joins two dependents' arrays, so a
     # language two recipes both need is in the list twice.  Rendering `configd
     # adopt postfix` twice is harmless and looks like a bug in the makefile.
     my %opts = $r->validate( %G, languages => [qw{postfix redis postfix opendkim}] );
@@ -1408,7 +1408,7 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
     # through a stub that could not see the zone, and pdns was asked for
     # zones/. and answered 404.
     like( $out, qr{^systemctl[ ]restart[ ]systemd-resolved$}m, 'the resolver is restarted where it is configured' );
-    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]restart[ ]systemd-resolved}, 'rather than deferred behind its dependants' );
+    unlike( $out, qr{queue_postrun_task\s+systemctl[ ]restart[ ]systemd-resolved}, 'rather than deferred behind its dependents' );
 };
 
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {

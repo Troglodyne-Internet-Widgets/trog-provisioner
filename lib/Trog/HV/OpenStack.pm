@@ -235,10 +235,10 @@ reads.
 1, always.
 
 A libvirt host is asked for its physical CPU count, and how many vCPUs per core
-is acceptable is our judgement to make.  A quota is not a physical count -- it
+is acceptable is our judgment to make.  A quota is not a physical count -- it
 is already the number of cores this project may run -- so there is nothing left
 to overcommit, and multiplying it by four would invent headroom the cloud will
-refuse to honour.
+refuse to honor.
 
 =cut
 
@@ -762,7 +762,7 @@ sub _wait_for_gone {
 
 =head2 create_volume($domain, $purpose, size_gb => $n)
 
-A Cinder volume for a guest, named so that teardown can recognise it.
+A Cinder volume for a guest, named so that teardown can recognize it.
 
 =cut
 
@@ -852,7 +852,7 @@ sub preflight_checks { return qw{check_reachable check_cloud_resources check_clo
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
 # The cloud equivalent of "can we reach the hypervisor": whether the credential
-# in clouds.yaml gets us a token, and whether the catalogue that comes back has
+# in clouds.yaml gets us a token, and whether the catalog that comes back has
 # the three services a guest needs.  Everything below needs this to have worked.
 sub check_reachable {
     my ($self) = @_;
@@ -869,12 +869,12 @@ FIX
     my %offered = map  { $_ => 1 } @services;
     my @missing = grep { !$offered{$_} } qw{compute image network};
 
-    return $self->_verdict( 0, 'The catalogue is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
+    return $self->_verdict( 0, 'The catalog is missing: ' . join( ', ', @missing ), <<'FIX' ) if @missing;
 A guest needs Nova to run on, Glance to boot from and Neutron to be addressed
 on.  A credential scoped to a project without all three cannot build one.
 FIX
 
-    return $self->_verdict( 1, 'Authenticated; the catalogue offers ' . scalar(@services) . ' services', q{} );
+    return $self->_verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
 }
 
 # The same question check_transfer_ip asks, which a cloud cannot answer the same
@@ -911,7 +911,7 @@ FIX
 }
 
 # Whether the flavor, image and network hypervisors.conf names are things this
-# cloud has.  Each is a name it has to recognise, and one wrong fails a provision
+# cloud has.  Each is a name it has to recognize, and one wrong fails a provision
 # minutes in, with an error from the API rather than from us.
 sub check_cloud_resources {
     my ($self) = @_;

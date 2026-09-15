@@ -95,7 +95,7 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
     my ( $hv, $mock ) = cloud_hv();
 
     my ($ok) = quietly( sub { $hv->check_reachable } );
-    ok $ok->{ok}, 'a credential that authenticates and a catalogue with the three services';
+    ok $ok->{ok}, 'a credential that authenticates and a catalog with the three services';
 
     ($ok) = quietly( sub { $hv->check_cloud_resources } );
     ok $ok->{ok}, 'a flavor, image and network the cloud has';
@@ -110,7 +110,7 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
 
     my ( $thin, $thin_mock ) = cloud_hv( api => { services => [qw{compute volumev3}] } );
     ($failed) = quietly( sub { $thin->check_reachable } );
-    ok !$failed->{ok}, 'a catalogue without Glance or Neutron cannot build a guest';
+    ok !$failed->{ok}, 'a catalog without Glance or Neutron cannot build a guest';
     like $failed->{what}, qr/image,[ ]network/, 'and it says which are missing';
 };
 

@@ -36,7 +36,7 @@ if [ "$$INSTALLED_VER" != "[% version %]" ]; then \
 fi
 [% UNLESS secret_key -%]
 # The session key belongs to the guest, not to this configuration.  It signs
-# sessions and encrypts 2FA enrolments, and it used to arrive as sixty-four
+# sessions and encrypts 2FA enrollments, and it used to arrive as sixty-four
 # characters minted by whichever new_config run wrote this file -- so every
 # re-provision logged everybody out and voided every second factor.
 #

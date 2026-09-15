@@ -110,7 +110,7 @@ subtest 'who actually asks' => sub {
     is( Trog::Credentials->prompt( 'sudo:', 'sudo' ), 'typed at a terminal', 'one that was not is asked for' );
     is( $asked,                                       1,                     'exactly once' );
 
-    # Something with no name is always asked for, which is the old behaviour and
+    # Something with no name is always asked for, which is the old behavior and
     # what anything without a name in the block should get.
     is( Trog::Credentials->prompt('something else:'), 'typed at a terminal', 'and an unnamed password is always asked for' );
     is( $asked,                                       2,                     'again' );

@@ -56,7 +56,7 @@ the other two's newest are from 2020 and 2021, hundreds of commits behind.  The
 schema demands a full 40-character SHA, so bumping one means resolving it first.
 
 *Stale when:* enough has changed upstream to be worth taking, which is a
-judgement rather than an event.  *Check:* compare each pin against the repo's
+judgment rather than an event.  *Check:* compare each pin against the repo's
 default branch; a force-push or rename shows up as a 404 at build time.
 
 ## Versions this repository chooses

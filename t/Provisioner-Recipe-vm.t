@@ -320,7 +320,7 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
     # it.  So this is the one knob here that is fatal rather than skipped.
     like(
         exception { _tuned_xml( libvirt => _libvirt( 0, 9, 0 ), qemu => 9_000_000, config => \%limits ) },
-        qr/need[ ]libvirt[ ]0\.9\.8/, 'and a hypervisor too old to honour it fails the build'
+        qr/need[ ]libvirt[ ]0\.9\.8/, 'and a hypervisor too old to honor it fails the build'
     );
 
     like(

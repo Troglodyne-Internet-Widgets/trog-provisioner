@@ -13,7 +13,7 @@ somebody else's job
 
 =head1 DESCRIPTION
 
-Every step in the script is a stub, so there is no behaviour to assert on.  What
+Every step in the script is a stub, so there is no behavior to assert on.  What
 there is, and what this pins, is the B<scope>: this script is about the machine
 that hosts guests, and the machine that runs the provisioner is a guest that
 L<Provisioner::Recipe::trogrunner> builds.

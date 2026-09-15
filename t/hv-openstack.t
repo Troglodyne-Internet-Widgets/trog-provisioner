@@ -426,7 +426,7 @@ subtest 'volumes' => sub {
     my $vol = $hv->create_volume( 'vm.example.com', 'data', size_gb => 40 );
     my ($made) = $FAKE->calls_to('create_volume');
     is $made->[1]{size}, 40,                    'a volume of the size asked for';
-    is $made->[1]{name}, 'vm.example.com-data', 'named so that teardown will recognise it';
+    is $made->[1]{name}, 'vm.example.com-data', 'named so that teardown will recognize it';
 
     like exception { $hv->create_volume( 'vm.example.com', 'data' ) }, qr/needs[ ]a[ ]size_gb/,
       'a volume needs a size';

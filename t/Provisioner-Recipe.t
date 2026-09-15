@@ -131,7 +131,7 @@ subtest 'the settings every recipe is handed are declared once' => sub {
     is( $got{user}, 'doge', 'user still falls back to admin_user' );
 };
 
-# A recipe that declares a colliding key is describing a different thing spelt
+# A recipe that declares a colliding key is describing a different thing spelled
 # the same, and it is the one that knows.  registrar's `user` is the account at
 # the registrar, not the service account, and its default of empty is precisely
 # what stops validate filling it in from admin_user -- without which the lexicon
@@ -304,7 +304,7 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
     like(
         exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
         qr/Two[ ]recipes[ ]want[ ]different[ ]things.*port[ ]is[ ]'80'.*'443'/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
-        'a scalar two dependants disagree about dies, naming both values'
+        'a scalar two dependents disagree about dies, naming both values'
     );
 
     # The path is what somebody has to go and set, so it has to be the whole path.
@@ -336,7 +336,7 @@ subtest 'a distribution version of a recipe answers to the same name' => sub {
     }
 
     # The name is taken from the last component of the class, so a subclass
-    # renders the same fragment as the recipe it specialises.  Sharing the
+    # renders the same fragment as the recipe it specializes.  Sharing the
     # fragment is the point: what a distribution changes is deps.
     my $specific = 'Provisioner::Recipe::Ubuntu::widget'->new( template_dirs => [$tdir], output_dir => $tdir );
     is( $specific->{template},        'widget.tt',        'the subclass looks for the recipe fragment' );

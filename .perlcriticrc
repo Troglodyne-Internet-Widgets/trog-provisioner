@@ -137,7 +137,7 @@ allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources c
 [ControlStructures::ProhibitUntilBlocks]
 [ControlStructures::ProhibitYadaOperator]
 [Documentation::PodSpelling]
-spell_command = aspell --lang=en_GB list
+spell_command = aspell --lang=en_US list
 stop_words_file = .pod_stopwords
 [Documentation::RequirePackageMatchesPodName]
 [ErrorHandling::RequireCheckingReturnValueOfEval]

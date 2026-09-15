@@ -25,7 +25,7 @@ Remove systemd's "stub resolver".
 
 Particularly useful if you plan on installing an actual DNS server, such as pdns.
 
-Also useful in network environments where its default behaviour is unhelpful.
+Also useful in network environments where its default behavior is unhelpful.
 
 =head2 What answers instead
 

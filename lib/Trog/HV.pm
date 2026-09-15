@@ -437,7 +437,7 @@ sub would_provision       ( $self, @ ) { return $self->_abstract('would_provisio
 
 Whether one more guest will fit, and which hypervisor it fits on best.
 
-The numbers come from a backend's C<capacity>; the judgement is here, so that
+The numbers come from a backend's C<capacity>; the judgment is here, so that
 every backend is placed on by the same rules rather than each inventing its own.
 
 =head2 reserve_memory, reserve_cpus, reserve_disk, max_guests, cpu_overcommit
@@ -539,7 +539,7 @@ What a hypervisor can be asked about itself, before a guest is built on it.
 
 C<bin/preflight> prints these; it does not know them.  Which questions are worth
 asking depends entirely on the backend -- passwordless sudo means nothing to a
-cloud, and a Keystone catalogue means nothing to libvirt -- so each one says
+cloud, and a Keystone catalog means nothing to libvirt -- so each one says
 which it answers and in what order, and the script walks that list.  It used to
 branch on C<builds_by_api> in two places to decide, which is a decision only the
 backend can make correctly.
@@ -576,7 +576,7 @@ sub _verdict {
 
 Declared here and answered by the backend, because both questions are real for
 either kind and neither has a shared answer.  Reaching a machine is an ssh
-login; reaching a cloud is a credential that authenticates and a catalogue with
+login; reaching a cloud is a credential that authenticates and a catalog with
 compute, image and network in it.  Finding the address a guest fetches from
 means asking the routing table about a NAT bridge, or reading it out of
 F<ipmap.cfg> because a cloud has nothing to ask until the guest exists.

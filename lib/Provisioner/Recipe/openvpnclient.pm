@@ -53,7 +53,7 @@ tunnel, each reading F</etc/openvpn/client/E<lt>nameE<gt>.conf>.
 So everything here is named for the domain -- the instance, the configuration,
 the directory the certificates land in, the log, and the interface.  Two domains
 share nothing but the openvpn package, which is what lets this recipe sit on a
-machine with another of its kind when most of its neighbours cannot.
+machine with another of its kind when most of its neighbors cannot.
 
 =head3 Why nothing here is salvaged
 

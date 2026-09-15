@@ -126,7 +126,7 @@ subtest 'the request is an application credential request' => sub {
 
     is $auth->token,  'a-token', 'the token comes off the response header';
     is $auth->region, undef,     'no region was asked for';
-    is_deeply [ $auth->services ], [ 'compute', 'identity' ], 'the catalogue is readable through the parent';
+    is_deeply [ $auth->services ], [ 'compute', 'identity' ], 'the catalog is readable through the parent';
 };
 
 subtest 'the endpoint gets the identity version it needs' => sub {
@@ -170,7 +170,7 @@ subtest 'a response that is missing the point is an error' => sub {
         return Test::FakeResponse->new( headers => { 'X-Subject-Token' => 't' }, body => { token => { catalog => [] } } );
     };
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', @CREDS, cache_dir => $dir ) },
-      qr/no[ ]service[ ]catalog/, 'an empty catalogue';
+      qr/no[ ]service[ ]catalog/, 'an empty catalog';
 
     # Whatever went wrong, the message has to name the endpoint -- a bare "401
     # Unauthorized" does not distinguish a revoked credential from the wrong
@@ -191,7 +191,7 @@ subtest 'the second command does not authenticate again' => sub {
     is scalar @REQUESTS, 1, 'the second one did not';
 
     is $second->token, $first->token, 'and it has the same token';
-    is_deeply [ $second->services ], [ $first->services ], 'and the same catalogue';
+    is_deeply [ $second->services ], [ $first->services ], 'and the same catalog';
     is $second->{response}, undef, 'without an HTTP response behind it';
 
     # The whole reason token() is overridden: the parent reads it off a response

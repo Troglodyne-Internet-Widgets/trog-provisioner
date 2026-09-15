@@ -253,8 +253,8 @@ sub directors {
 The distributions there are recipes for, lowercased -- the C<distro> a domain's
 C<_global> may name.
 
-One per capitalised subdirectory of the recipe directory: C<Recipe/Ubuntu/>
-holds Ubuntu's specialisations, and C<Recipe/ubuntu.pm> is the distro recipe
+One per capitalized subdirectory of the recipe directory: C<Recipe/Ubuntu/>
+holds Ubuntu's specializations, and C<Recipe/ubuntu.pm> is the distro recipe
 itself.  Read off the directory rather than listed, so adding a distribution is
 adding files.
 
@@ -288,10 +288,10 @@ Load the recipe and hand back its class name.  Dies naming the recipe, and
 saying what there is instead, because a typo here is the likeliest reason to
 be calling it.
 
-C<distro> asks for that distribution's specialisation of the recipe --
+C<distro> asks for that distribution's specialization of the recipe --
 C<Provisioner::Recipe::Ubuntu::nginx> rather than C<Provisioner::Recipe::nginx>
 -- and is how the package names for a build get chosen.  A recipe with no
-specialisation for that distribution comes back as itself, which is right: most
+specialization for that distribution comes back as itself, which is right: most
 recipes install nothing, and a shared C<deps> is a shared C<deps>.
 
 B<Absence is the only thing that falls back.>  The subclass is looked for on
@@ -562,7 +562,7 @@ sub placeholders_in {
 # Two merges, wanting opposite things, so two mergers.
 #
 # Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
-# behaviour, so the functional interface means one thing inside that script and
+# behavior, so the functional interface means one thing inside that script and
 # the default anywhere else.
 #
 # _base is a base of defaults and a domain overrides it, so that merge takes the
@@ -682,7 +682,7 @@ A domain overrides what C<_base> says: C<_base> is a base of defaults, and a
 domain naming the same field gets its own value.  Nested objects merge key by
 key, so a domain saying one thing about a recipe keeps everything else C<_base>
 said about it.  B<Lists concatenate rather than replace> -- a domain adding to a
-list C<_base> names gets both, which is what every C<Hash::Merge> behaviour does
+list C<_base> names gets both, which is what every C<Hash::Merge> behavior does
 and is worth knowing before putting a list in C<_base>.
 
 That is a correction.  Until it was made this merge took C<_base>'s side, so a

@@ -31,12 +31,12 @@ require Trog::Guest;
 # moment.  It keeps what it was constructed with, because refresh_salvage names
 # the host in every message it prints and asks the guest which host that is.
 sub guest_that {
-    my (%behaviour) = @_;
+    my (%behavior) = @_;
 
-    my @probes = @{ $behaviour{mtimes} };
+    my @probes = @{ $behavior{mtimes} };
     my $mock   = Test::MockModule->new('Trog::Guest');
     $mock->redefine( new      => sub { my ( $class, %opts ) = @_; return bless {%opts}, $class } );
-    $mock->redefine( run_sudo => sub { $behaviour{exit} } );
+    $mock->redefine( run_sudo => sub { $behavior{exit} } );
     $mock->redefine(
         capture_cmd => sub {
             my $now = shift @probes // $probes[-1];

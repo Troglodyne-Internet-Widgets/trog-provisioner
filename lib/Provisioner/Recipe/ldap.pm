@@ -78,7 +78,7 @@ hour.
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One slapd, and its suffix, its organisation and its TLS certificate are
+False.  One slapd, and its suffix, its organization and its TLS certificate are
 all named for the domain it was configured with.
 
 This recipe is the machine's half already, which makes the second domain's case

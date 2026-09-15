@@ -126,7 +126,7 @@ C<kernel.io_uring_disabled> is written to F</etc/sysctl.d/> B<and> applied with
 C<sysctl -p>, and the two can disagree. Tightening at runtime works; loosening
 may not, depending on the kernel. So the fragment reads the value back after
 applying it and says so when the running kernel kept its own -- the file is
-still correct, and the next boot honours it.
+still correct, and the next boot honors it.
 
 =head3 deps
 
