@@ -342,9 +342,9 @@ sub key_path {
     # object goes out of scope, so letting go of it would leave ssh pointed at a
     # path that had just been unlinked.
     my $tmp = File::Temp->new( TEMPLATE => "guest-key-$domain-XXXXXX", TMPDIR => 1 );
-    chmod 0600, "$tmp";    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    chmod 0600, "$tmp";
     print {$tmp} $got{key} =~ m/\n\z/ ? $got{key} : "$got{key}\n";
-    close($tmp);
+    close($tmp) or die "Could not close $tmp: $!\n";
 
     $materialised{$domain} = { handle => $tmp, path => "$tmp" };
     return $materialised{$domain}{path};

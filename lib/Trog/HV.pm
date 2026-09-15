@@ -855,7 +855,7 @@ sub _plaintext_in {
     # fill in -- which new_config refuses to build from, so it is not a secret
     # sitting anywhere.
     return ()      if $node =~ m/\Asecret:/;
-    return ($path) if $node =~ m/-----BEGIN[ ][A-Z ]*PRIVATE[ ]KEY-----/;
+    return ($path) if $node =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
     return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
 
     my ($field) = $path =~ m/([^.\[\]]+)\z/;

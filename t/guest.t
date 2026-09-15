@@ -340,7 +340,7 @@ subtest 'a sealed key is fetched once and lands somewhere private' => sub {
     # 0600, because this is the credential for a machine and it is now sitting
     # in a world-readable directory.
     my @stat = stat($path);
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( sprintf( '%04o', $stat[2] & 07777 ), '0600', 'readable by nobody else' );
 
     # Asked for twice in a run it is fetched once: every guest this touches
