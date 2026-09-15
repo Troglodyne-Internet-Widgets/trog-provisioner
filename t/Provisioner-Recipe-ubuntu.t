@@ -260,9 +260,10 @@ CONF
             package_update   => bool(1),
             package_upgrade  => bool(1),
 
-            # atd is how the makefile gets started, make is what runs it, and
+            # atd is how the makefile gets started, make is what runs it, bash is
+            # the shell it runs recipe lines with, and
             # something has to take mail -- none of which any recipe asked for.
-            packages => [qw{nginx mariadb-server sendmail at make}],
+            packages => [qw{nginx mariadb-server sendmail at bash make}],
 
             # The guest's own key, authorized on the admin rather than on root.
             users => [
@@ -295,7 +296,7 @@ CONF
             # The newline in the middle of the first of these is as it has always
             # been, and is why runcmd is built as a list rather than written out
             # in the template: a YAML sequence item cannot carry one inline.
-            runcmd => [ qq{echo "root:$EMAIL\n" > /etc/aliases }, 'at now -f /root/setup.sh' ],
+            runcmd => [ qq{echo "root:$EMAIL\n" > /etc/aliases }, q{echo 'bash /root/setup.sh' | at now} ],
         },
         'user-data'
     );
