@@ -92,7 +92,7 @@ sub template_dirs {
     my ( $class, $distro, @libdirs ) = @_;
 
     my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
-    return [ map { ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ } @bases ];
+    return [ map { ( ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ ) } @bases ];
 }
 
 =head2 names

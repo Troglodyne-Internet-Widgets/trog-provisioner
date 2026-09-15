@@ -423,7 +423,7 @@ sub _addresses {
     return map {
         my $network = $_;
         map {
-            { %$_, network => $network }
+            { %$_, network => $network }    ## no critic (ValuesAndExpressions::ProhibitCommaSeparatedStatements) -- an anonymous hash, which PPI reads as a block
         } @{ $addresses->{$network} }
     } sort keys %$addresses;
 }

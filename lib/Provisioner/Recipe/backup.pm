@@ -73,7 +73,7 @@ sub enrich {
 
     my ( %default_targets, %default_skips );
     foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
+        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
         my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
         my @skip     = "Provisioner::Recipe::$module"->remote_skip();
         my @ts       = sort keys(%mtargets);

@@ -427,7 +427,7 @@ sub enrich {
     $opts{passthrough} = $PASSTHROUGH;
     $opts{classes}     = [
         map {
-            { %$_, fresh => $opts{ $_->{fresh} } }
+            { %$_, fresh => $opts{ $_->{fresh} } }    ## no critic (ValuesAndExpressions::ProhibitCommaSeparatedStatements) -- an anonymous hash, which PPI reads as a block
         } $self->classes
     ];
 
