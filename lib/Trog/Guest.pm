@@ -281,13 +281,7 @@ sub seal_key {
     my $private = eval { File::Slurper::read_binary($path) };
     return 0 unless defined $private && length $private;
 
-    # Before the password is asked for, the same way path() asks it: there is
-    # nowhere to put a key without a store, and a prompt in a run with nobody to
-    # type at is a wait rather than a refusal.  bin/new_config reaches this on
-    # every generate, so that wait was the whole suite.
-    my $store = Trog::Config->path('secrets.kdbx');
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store to write into
-    return 0 unless defined $store && -f $store;
+    my $store = _store() or return 0;
 
     # replace, not write.  write builds a new database out of what it is handed,
     # which against the real store would leave it holding this key and nothing
@@ -309,9 +303,9 @@ there is no key for it anywhere.
 
 C<$on_disk> is where the key used to be kept, which the caller knows and this
 does not: asking L<Trog::HV> would drag L<Sys::Virt> into everything that wants
-to reach a guest, and where a domain directory is has never been this module's
-question.  Given one that exists, that is the answer -- see L</A guest built
-before this still works>.
+to reach a guest, and where a domain directory is is L<Trog::HV>'s question
+rather than this one.  Given one that exists, that is the answer -- see
+L</A guest built before this still works>.
 
 Otherwise the store's copy, written to a temporary file that belongs to this
 process and goes away with it.  Asked for twice in one run it is fetched once.
@@ -333,14 +327,7 @@ sub key_path {
     state %materialised;
     return $materialised{$domain}{path} if $materialised{$domain};
 
-    # Before the password is asked for, not after.  An installation with no
-    # store cannot be holding a key, and asking would mean a prompt with nothing
-    # behind it -- which in a run with nobody to type at is not a refusal, it is
-    # a wait.  That is how the test suite came to hang the first time this was
-    # wired up.
-    my $store = Trog::Config->path('secrets.kdbx');
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store to ask
-    return undef unless defined $store && -f $store;
+    my $store = _store() or return undef;
 
     my %got = eval {
         Trog::Secrets->read(
@@ -361,6 +348,17 @@ sub key_path {
 
     $materialised{$domain} = { handle => $tmp, path => "$tmp" };
     return $materialised{$domain}{path};
+}
+
+# The store, or nothing, asked before any password is.  An installation with no
+# store cannot be holding a key, and asking for one would mean a prompt with
+# nothing behind it -- which in a run with nobody to type at is a wait rather
+# than a refusal.  bin/new_config reaches this on every generate, so that wait
+# was the whole suite.
+sub _store {
+    my $store = Trog::Config->path('secrets.kdbx');
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store at all
+    return defined $store && -f $store ? $store : undef;
 }
 
 =head1 SEE ALSO
