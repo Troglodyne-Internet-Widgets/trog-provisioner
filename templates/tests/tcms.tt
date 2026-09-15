@@ -25,6 +25,15 @@ like($cpanm_version, qr/cpanm|App::cpanminus/i, 'and it runs') or diag $cpanm_ve
 
 # git refuses to operate in a checkout owned by another account, and the service
 # user is not the admin.
+my ($perl) = reverse sort glob('/opt/perl5/*/bin/perl');
+
+# The modules the checkout needs that build against a system library, each of
+# which stopped the perl target when its package was missing.
+foreach my $module (qw{Sys::Virt Imager::File::PNG Trog::TOTP}) {
+    my $loaded = `$perl -M$module -e 1 2>&1`;
+    is($?, 0, "$module loads in the perl the recipe built") or diag $loaded;
+}
+
 my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;
 like($safe, qr{\Q$dir\E}, 'the checkout is registered as a git safe.directory') or diag $safe;
 
