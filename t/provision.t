@@ -562,6 +562,14 @@ sub _layered {
     my $dir  = tempdir( CLEANUP => 1 );
     my %seen = ( cleared => [] );
 
+    # The key each guest is opened with, on disk -- which is what a domain built
+    # before there was a store still has.  Trog::Guest->key_path hands back the
+    # file when there is one, and that is the case this subtest is about.
+    foreach my $d ( grep { defined } $domain, $depends ) {
+        mkdir "$dir/$d";
+        File::Slurper::Temp::write_text( "$dir/$d/key.rsa", "PRIVATE\n" );
+    }
+
     my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $bin   = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     my $guest = Test::MockModule->new('Trog::Guest');
