@@ -367,16 +367,18 @@ sub _ask_for_sudo_password {
 }
 
 # What sudo says when it wants a password it cannot ask for.
+our @WANTS_PASSWORD = ( 'sudo: a password is required', 'sudo: password is required', 'sudo: a terminal is required', 'sudo: no password was provided' );
+
 sub _wants_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo:[ ](?:a[ ])?(?:password[ ]is[ ]required|a[ ]terminal[ ]is[ ]required|no[ ]password[ ]was[ ]provided)/ ? 1 : 0;
+    return ( any { index( $output, $_ ) >= 0 } @WANTS_PASSWORD ) ? 1 : 0;
 }
 
 sub _wrong_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo:[ ]\d+[ ]incorrect[ ]password[ ]attempt|Sorry,[ ]try[ ]again/ ? 1 : 0;
+    return $output =~ m/sudo:\s\d+\sincorrect\spassword\sattempt|Sorry,\stry\sagain/ ? 1 : 0;
 }
 
 =head2 run_sudo(@argv)

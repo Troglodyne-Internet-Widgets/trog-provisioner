@@ -256,5 +256,32 @@ subtest 'a file read off a remote machine comes back whole' => sub {
     }
 }
 
+subtest 'what sudo says when it wants a password it cannot ask for' => sub {
+    my $wants = sub { Trog::Machine::_wants_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+
+    is( $wants->("sudo: a password is required\n"),                                                1, 'sudo -n with no passwordless sudo' );
+    is( $wants->("sudo: password is required\n"),                                                  1, 'and without the article' );
+    is( $wants->("sudo: a terminal is required to read the password; either use the -S option\n"), 1, 'no terminal to read one at' );
+    is( $wants->("sudo: no password was provided\n"),                                              1, 'and -S given nothing' );
+
+    is( $wants->("sudo: 1 incorrect password attempt\n"), 0, 'a wrong password is not a missing one' );
+    is( $wants->("a password is required\n"),             0, 'and nothing sudo did not say' );
+    is( $wants->(q{}),                                    0, 'nothing said is nothing wanted' );
+    is( $wants->(undef),                                  0, 'and neither is nothing captured' );
+};
+
+subtest 'what sudo says when the password it was given is wrong' => sub {
+    my $wrong = sub { Trog::Machine::_wrong_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+
+    is( $wrong->("sudo: 1 incorrect password attempt\n"),  1, 'one bad attempt, as sudo counts them' );
+    is( $wrong->("sudo: 3 incorrect password attempts\n"), 1, 'and several' );
+    is( $wrong->("Sorry, try again.\n"),                   1, 'the line it prints between attempts' );
+
+    is( $wrong->("sudo: a password is required\n"),     0, 'wanting a password is not having been given a wrong one' );
+    is( $wrong->("sudo: incorrect password attempt\n"), 0, 'nor is a count that is not there' );
+    is( $wrong->(q{}),                                  0, 'nothing said is nothing wrong' );
+    is( $wrong->(undef),                                0, 'and neither is nothing captured' );
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
