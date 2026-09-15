@@ -379,7 +379,6 @@ sub guest_keypair {
     foreach my $half ( $path, "$path.pub" ) {
         ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
         die "No $half was made for $opts{domain}\n" unless -f $half;
-        ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
         chmod 0600, $half;
     }
 

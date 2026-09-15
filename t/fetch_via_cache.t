@@ -47,9 +47,7 @@ File::Slurper::Temp::write_text( "$bin/update-ca-certificates", <<'UPDATE' );
 #!/bin/bash
 echo "update-ca-certificates" >> "$FAKE_LOG"
 UPDATE
-## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
 chmod( 0755, "$bin/curl", "$bin/update-ca-certificates" );
-## use critic
 
 my $HOSTS = "127.0.0.1\tlocalhost\n192.168.1.5\tguest.test.test guest\n";
 my $CACHE = '192.168.1.9';

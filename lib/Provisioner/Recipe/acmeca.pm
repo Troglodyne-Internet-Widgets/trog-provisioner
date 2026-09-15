@@ -295,10 +295,8 @@ sub intermediate {
         ext       => [ { sn => 'nameConstraints', data => "critical,permitted;DNS:.$tld,permitted;DNS:localhost" } ],
     );
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( "$output_dir/acmeca-intermediate.key", IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
     Provisioner::Utils::write_pem( "$output_dir/acmeca-intermediate.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
-    ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($_) for $cert, $ca_cert;
     IO::Socket::SSL::Utils::KEY_free($_)  for $key,  $ca_key;

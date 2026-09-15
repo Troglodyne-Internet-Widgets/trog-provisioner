@@ -358,7 +358,6 @@ sub _readable {
 sub main {
     my @args = @_;
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
     my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok );

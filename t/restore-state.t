@@ -113,7 +113,7 @@ subtest 'a destination keeps the mode the recipe made it with' => sub {
     # salvage arrives out of the domain directory the data target owns.  A mail
     # store the recipe had just made 2750 came back 0755, taking with it the
     # setgid bit that is what lets the next fetch read the maildirs at all.
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     chmod 02750, "$tmp/destination";
     chmod 00700, "$tmp/salvaged";
 
@@ -127,7 +127,7 @@ subtest 'a mode it was asked for still wins over the one it found' => sub {
     my $tmp = tempdir( CLEANUP => 1 );
     tree( "$tmp/salvaged", 'db' => "rows\n" );
     make_path("$tmp/destination");
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     chmod 02750, "$tmp/destination";
 
     # Preserving what was there is the default, not an override of the caller.
@@ -147,7 +147,7 @@ subtest 'a single file, and the ownership and mode it is asked for' => sub {
     my $r = restore( "$tmp/salvaged", "$tmp/deeper/destination", '', '0600' );
     is( $r->{rc},                             0,               'restored' );
     is( read_text("$tmp/deeper/destination"), "signing key\n", 'through a directory that did not exist yet' );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( ( stat("$tmp/deeper/destination") )[2] & 07777, 0600, 'with the mode it was given' );
 };
 

@@ -74,7 +74,7 @@ subtest 'the manifest says where a secret goes, never what it is' => sub {
     is( $read->{'/opt/domains/matrix.vm.test/homeserver.signing.key'}{owner}, 'matrix-synapse:matrix-synapse', 'with the owner the file has to end up with' );
     is( $read->{'/opt/domains/matrix.vm.test/homeserver.signing.key'}{mode},  '0600',                          'and the mode' );
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    ## no critic (ProhibitLeadingZeros) -- a file mode, which is octal
     is( ( stat $manifest )[2] & 07777, 0600, 'and the manifest is ours alone' );
 };
 

@@ -309,7 +309,7 @@ subtest 'the certificate names every host it answers to, and the authority signe
     is( extension( $leaf, 'basicConstraints' ), 'CA:FALSE',                      'and able to sign nothing itself' );
     is( extension( $leaf, 'extendedKeyUsage' ), 'TLS Web Server Authentication', 'being for a server alone' );
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers, Plicease::ProhibitLeadingZeros) -- a file mode
+    ## no critic (ProhibitLeadingZeros) -- a file mode
     is( ( stat("$dir/fetchcache.key") )[2] & 0777, 0600, 'its key readable by nobody else' );
     ## use critic
 
@@ -327,7 +327,7 @@ subtest 'the authority is made once, kept in the configuration directory, and it
     is( extension( $ca, 'basicConstraints' ), 'CA:TRUE', 'and one that can sign' );
     IO::Socket::SSL::Utils::CERT_free($ca);
 
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers, Plicease::ProhibitLeadingZeros) -- a file mode
+    ## no critic (ProhibitLeadingZeros) -- a file mode
     is( ( stat( $first->{key} ) )[2] & 0777, 0600, 'with a key readable by nobody else' );
     ## use critic
 };

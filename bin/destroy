@@ -105,7 +105,6 @@ storage pool -- are left alone.
 sub main {
     my @args = @_;
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     umask 0022;
 
     my ( $purge, $purge_data, $orphans, $dryrun, $uri, $domain_dir, $hvconf );

@@ -29,7 +29,9 @@ strict = 1
 [Bangs::ProhibitUselessRegexModifiers]
 [Bangs::ProhibitCommentedOutCode]
 [Tics::ProhibitUseBase]
-[Plicease::ProhibitLeadingZeros]
+[ProhibitLeadingZeros]
+# Both take a file mode, and in a position the policy cannot tell by itself.
+allow = Provisioner::Utils::write_pem Test::MockFile::new_dir
 [RegularExpressions::ProhibitEmptyAlternatives]
 [ValuesAndExpressions::UnexpandedSpecialLiteral]
 [CodeLayout::ProhibitIfIfSameLine]

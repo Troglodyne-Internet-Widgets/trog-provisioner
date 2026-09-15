@@ -469,10 +469,8 @@ sub authority {
     );
 
     # The key first: the pair is only taken as made once both are there.
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
     Provisioner::Utils::write_pem( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
-    ## use critic
 
     IO::Socket::SSL::Utils::CERT_free($cert);
     IO::Socket::SSL::Utils::KEY_free($key);
@@ -505,7 +503,6 @@ sub certify {
         ext       => [ { sn => 'subjectAltName', data => join( ',', map { "DNS:$_" } @hosts ) } ],
     );
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
     Provisioner::Utils::write_pem( "$output_dir/fetchcache.key", IO::Socket::SSL::Utils::PEM_key2string($key),                                                    0600 );
     Provisioner::Utils::write_pem( "$output_dir/fetchcache.crt", IO::Socket::SSL::Utils::PEM_cert2string($cert) . File::Slurper::read_text( $authority->{cert} ), 0644 );
     ## use critic

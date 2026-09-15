@@ -85,9 +85,7 @@ _base:
 RECIPES
 
     # Setup fake files/dirs
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
@@ -146,10 +144,7 @@ _base:
       - vim
 RECIPES
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-
-    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 

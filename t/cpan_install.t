@@ -36,7 +36,6 @@ make_path("$PERL/bin");
 for my $tool (qw{cpanm dzil}) {
     open( my $fh, '>', "$PERL/bin/$tool" ) or die $!;
     close $fh;
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     chmod( 0755, "$PERL/bin/$tool" );
 }
 my $CPANM = "$PERL/bin/cpanm";

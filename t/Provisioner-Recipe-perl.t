@@ -124,9 +124,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
     open( my $c, '>', "$bin/cpan_install" ) or die $!;
     print {$c} qq{#!/bin/bash\nprintf '%s\\n' "\$\@" > $bin/out\n};
     close $c;
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
     chmod( 0755, "$bin/cpan_install" );
-    ## use critic
 
     my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
 

@@ -1470,7 +1470,7 @@ sub pack_scripts {
         close $probe;
         copy( "$from/$script", "$to/$script" )
           or die "Could not copy $script into $to: $!\n";
-        ## no critic (Plicease::ProhibitLeadingZeros) -- the policy exempts a
+        ## no critic (ProhibitLeadingZeros) -- the policy exempts a
         ## literal handed straight to chmod; this is a mask against a mode.
         chmod( ( stat("$from/$script") )[2] & 07777, "$to/$script" );
         push @packed, "scripts/$script";

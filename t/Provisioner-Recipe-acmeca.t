@@ -127,7 +127,7 @@ subtest 'the intermediate may not vouch for anything outside the TLD it was made
 subtest 'the private key belongs to the guest which holds it alone' => sub {
     my ( undef, $dir ) = generated();
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- file modes, which are octal
+    ## no critic (ProhibitLeadingZeros) -- file modes, which are octal
     my @stat = stat("$dir/acmeca-intermediate.key");
     ok( @stat, 'the intermediate key was written' ) or return;
     is( sprintf( '%04o', $stat[2] & 07777 ), '0600', 'nobody but its owner can read it' );
