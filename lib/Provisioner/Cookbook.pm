@@ -260,7 +260,8 @@ adding files.
 
 sub distros {
     my ($class) = @_;
-    return sort map { lc } Provisioner::Utils::dirs_in( $class->recipe_dir );
+    my @distros = sort map { lc } Provisioner::Utils::dirs_in( $class->recipe_dir );
+    return @distros;
 }
 
 =head2 has($name)
@@ -273,8 +274,9 @@ sub has {
     my ( $class, $name ) = @_;
     return 0 unless defined $name && $name =~ m/\A\w+\z/;
 
-    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return 0;
-    close $fh;
+    my $path = $class->recipe_dir . "/$name.pm";
+    open( my $fh, '<', $path ) or return 0;
+    close($fh)                 or die "Could not close $path: $!\n";
     return 1;
 }
 
@@ -338,13 +340,15 @@ and 42 opens instead of 42 module loads.
 sub abstract {
     my ( $class, $name ) = @_;
 
-    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return undef;
+    my $path = $class->recipe_dir . "/$name.pm";
+    open( my $fh, '<', $path ) or return undef;
     while ( my $line = <$fh> ) {
         next unless $line =~ m/\A\s*#\s*ABSTRACT:\s*(.+?)\s*\z/;
-        close $fh;
-        return $1;
+        my $abstract = $1;
+        close($fh) or die "Could not close $path: $!\n";
+        return $abstract;
     }
-    close $fh;
+    close($fh) or die "Could not close $path: $!\n";
     return undef;
 }
 
@@ -734,7 +738,7 @@ sub host_of {
 
     foreach my $host ( keys %{$shared} ) {
         next unless ref $shared->{$host} eq 'ARRAY';
-        return $host if grep { $_ eq $domain } @{ $shared->{$host} };
+        return $host if List::Util::any { $_ eq $domain } @{ $shared->{$host} };
     }
 
     return;

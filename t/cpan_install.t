@@ -35,7 +35,7 @@ my $PERL      = "$PERL_ROOT/perl5.44.0";
 make_path("$PERL/bin");
 for my $tool (qw{cpanm dzil}) {
     open( my $fh, '>', "$PERL/bin/$tool" ) or die $!;
-    close $fh;
+    close($fh)                             or die "Could not close $PERL/bin/$tool: $!";
     chmod( 0755, "$PERL/bin/$tool" );
 }
 my $CPANM = "$PERL/bin/cpanm";
@@ -52,9 +52,9 @@ sub install {
     my ( @ran, @git_config );
 
     # no_auto: it was loaded from its path above, so there is no module file to load.
-    my $script = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
-    $script->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; return $case{fails} && $cmd[0] =~ $case{fails} ? 1 : 0 } );
-    $script->redefine(
+    my $cpan_install = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
+    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; return $case{fails} && $cmd[0] =~ $case{fails} ? 1 : 0 } );
+    $cpan_install->redefine(
         capture_in => sub {
             my ( $dir, @cmd ) = @_;
             push @ran,        [ $dir, @cmd ];

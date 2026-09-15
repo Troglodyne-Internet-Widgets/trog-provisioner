@@ -141,12 +141,12 @@ sub transfer_ips {
         # The port is arbitrary and never used.  Discard is as good as anything
         # and says plainly that nothing is going anywhere.
         unless ( connect( $sock, Socket::pack_sockaddr_in( 9, $packed ) ) ) {
-            close $sock;
+            close($sock) or die "Could not close the socket towards $peer: $!\n";
             next;
         }
 
         my $me = getsockname($sock);
-        close $sock;
+        close($sock) or die "Could not close the socket towards $peer: $!\n";
         next unless $me;
 
         my ( undef, $address ) = Socket::unpack_sockaddr_in($me);

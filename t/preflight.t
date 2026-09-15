@@ -15,6 +15,7 @@ use Test::More;
 use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
+use List::Util();
 use File::Slurper();
 use File::Slurper::Temp();
 use Provisioner::Cookbook();
@@ -24,13 +25,13 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 
 my $script = "$FindBin::Bin/../bin/preflight";
@@ -53,19 +54,19 @@ sub quietly {
 
     package Test::PreflightCloud;
 
-    sub new      { my ( $c, %a ) = @_; return bless {%a}, $c }
-    sub auth     { return $_[0] }
-    sub services { return @{ $_[0]->{services} } }
+    sub new { my ( $c, %a ) = @_; return bless {%a}, $c }
+    sub auth     ($self) { return $self }
+    sub services ($self) { return @{ $self->{services} } }
 
     sub look_by_id_or_name {
         my ( $self, $kind, $name ) = @_;
-        die "Cannot find '$kind' for id/name '$name'\n" unless grep { $_ eq $name } @{ $self->{$kind} // [] };
+        die "Cannot find '$kind' for id/name '$name'\n" unless List::Util::any { $_ eq $name } @{ $self->{$kind} // [] };
         return { name => $name };
     }
 
     sub image_from_name {
         my ( $self, $name ) = @_;
-        return unless grep { $_ eq $name } @{ $self->{images} // [] };
+        return unless List::Util::any { $_ eq $name } @{ $self->{images} // [] };
         return { name => $name };
     }
 }
@@ -138,9 +139,9 @@ subtest 'a cloud runs out of quota, not of hardware' => sub {
 };
 
 subtest 'libvirt packs its version into one integer' => sub {
-    is( Trog::HV::Libvirt::_version_string(10000000), '10.0.0', 'major only' );
-    is( Trog::HV::Libvirt::_version_string(9004000),  '9.4.0',  'and minor' );
-    is( Trog::HV::Libvirt::_version_string(8000012),  '8.0.12', 'and release' );
+    is( Trog::HV::Libvirt::_version_string(10000000), '10.0.0', 'major only' );     ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( Trog::HV::Libvirt::_version_string(9004000),  '9.4.0',  'and minor' );      ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( Trog::HV::Libvirt::_version_string(8000012),  '8.0.12', 'and release' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 };
 
 subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
@@ -312,7 +313,7 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     foreach my $file (qw{ipmap.cfg recipes.yaml}) {
         open( my $fh, '>', "$dir/$file" ) or die $!;
-        close $fh;
+        close($fh)                        or die "Could not close $dir/$file: $!";
     }
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( $result->{ok}, 'and passes once they are there' );
@@ -377,7 +378,7 @@ subtest 'a fleet with no package mirror is told what that costs' => sub {
 
     my $note = $write->("---\nweb.troglodyne.net:\n    nginx:\n");
     ok( !$note->{ok}, 'domains but no mirror is worth saying' );
-    like( $note->{fix}, qr/bin\/new_guest --hostname aptmirror\.troglodyne\.net aptmirror/, 'naming the command, under the parent the fleet already uses' );
+    like( $note->{fix}, qr/bin\/new_guest --hostname aptmirror\.troglodyne\.net aptmirror/, 'naming the command, under the parent the fleet already uses' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The more annoying of the two: the work is done and nothing is using it.
     $note = $write->("---\nweb.troglodyne.net:\n    nginx:\naptmirror.troglodyne.net:\n    aptmirror:\n        releases: [noble]\n");

@@ -21,7 +21,7 @@ use Config::Simple();
 use MIME::Base64();
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use FindBin::libs;
 
@@ -51,8 +51,8 @@ use Trog::HV::OpenStack();
         return grep { $_->[0] eq $what } @{ $self->{calls} };
     }
 
-    sub limits        { return $_[0]->{limits} }
-    sub volume_limits { return $_[0]->{volume_limits} }
+    sub limits        ($self) { return $self->{limits} }
+    sub volume_limits ($self) { return $self->{volume_limits} }
 
     sub list_images {
         my ( $self, %query ) = @_;
@@ -65,7 +65,7 @@ use Trog::HV::OpenStack();
         my @hit = grep { ( $_->{name} // '' ) eq $name } @{ $self->{images} };
         return $hit[0];
     }
-    sub volumes { return @{ $_[0]->{volumes} } }
+    sub volumes ($self) { return @{ $self->{volumes} } }
 
     # Nova's server list returns id, name and links and nothing else -- no
     # status, no addresses.  A fake that handed back the whole record would let
@@ -91,7 +91,7 @@ use Trog::HV::OpenStack();
         return $full;
     }
 
-    sub networks { return @{ $_[0]->{networks} // [] } }
+    sub networks ($self) { return @{ $self->{networks} // [] } }
 
     sub create_vm {
         my ( $self, %opts ) = @_;

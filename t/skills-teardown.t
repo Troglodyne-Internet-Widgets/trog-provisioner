@@ -27,7 +27,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/teardown")
   or BAIL_OUT('the teardown script does not load');
@@ -37,7 +37,7 @@ sub scratch_marker {
 
     # The script is required at runtime, so this is the only mention of its
     # package variable that the compiler ever sees.
-    no warnings 'once';    ## no critic (ProhibitNoWarnings)
+    no warnings 'once';
     my $marker = $ENV{TROG_PROVISIONER_CONFIG} . '/' . $Trog::Skill::Teardown::MARKER;
     return unlink $marker unless $present;
     File::Slurper::Temp::write_text( $marker, "Built by scratch_config; safe to remove.\n" );
@@ -84,7 +84,7 @@ subtest 'the data directory goes with a throwaway guest, and only with one' => s
 subtest 'what bin/destroy is asked for' => sub {
     my @ran;
     my $run3 = Test::MockModule->new('IPC::Run3');
-    $run3->redefine( run3 => sub { push @ran, $_[0]; $? = 0; return 1 } );
+    $run3->redefine( run3 => sub { push @ran, $_[0]; $? = 0; return 1 } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real run3
 
     says( sub { Trog::Skill::Teardown::destroy_guest( 'vm.test', 'qemu:///system', undef, 1, 1 ) } );
     my @cmd = @{ $ran[0] }[ 2 .. $#{ $ran[0] } ];

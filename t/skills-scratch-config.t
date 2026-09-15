@@ -14,9 +14,6 @@ it builds, and what it refuses to take from the installation
 
 =cut
 
-# Asking whether a directory was made is what several of these are about.
-## no critic (ValuesAndExpressions::ProhibitFiletest_d, ValuesAndExpressions::ProhibitFiletest_f)
-
 use Test::More;
 use File::Temp qw{tempdir};
 use File::Slurper();
@@ -30,7 +27,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 require_ok("$FindBin::Bin/../.claude/skills/provisioning-recipes/scripts/scratch_config")
   or BAIL_OUT('the scratch_config script does not load');

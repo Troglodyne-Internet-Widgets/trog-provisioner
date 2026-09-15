@@ -26,7 +26,7 @@ it answers.
 
     my %needed = Trog::Secrets->needed($config);
     if (%needed) {
-        my %values = Trog::Secrets->read($file, Trog::Credentials->prompt('Enter password:', 'keepass'), %needed);
+        my %values = Trog::Secrets->lookup($file, Trog::Credentials->prompt('Enter password:', 'keepass'), %needed);
         Trog::Secrets->apply($config, %values);
     }
 
@@ -37,9 +37,9 @@ A recipe does not carry a password; it carries a note saying where one is:
     registrar:
         key: "secret:troglodyne/easydns_token/password"
 
-C<needed> finds every one of those, wherever it is nested.  C<read> resolves
+C<needed> finds every one of those, wherever it is nested.  C<lookup> resolves
 them against a KeePass database.  C<apply> puts the answers back where the notes
-were.  C<write> makes a database, which is what a test harness wants and what
+were.  C<create> makes a database, which is what a test harness wants and what
 nothing else should.
 
 =head2 The syntax of a reference
@@ -92,7 +92,7 @@ sub needed {
     return %found;
 }
 
-=head2 read($file, $password, %needed)
+=head2 lookup($file, $password, %needed)
 
 Resolve references against the database, as a map of the same paths to the
 values behind them.
@@ -103,7 +103,7 @@ as an empty password.
 
 =cut
 
-sub read {
+sub lookup {
     my ( $class, $file, $password, %needed ) = @_;
 
     die "Nothing to look up.\n" unless %needed;
@@ -169,7 +169,7 @@ sub apply {
     return $config;
 }
 
-=head2 write($file, $password, %value_by_ref)
+=head2 create($file, $password, %value_by_ref)
 
 Make a database holding a value for each reference given.
 
@@ -178,7 +178,7 @@ is the caller's business, not this module's.
 
 =cut
 
-sub write {
+sub create {
     my ( $class, $file, $password, %value_by_ref ) = @_;
 
     my $kdbx = File::KeePass::KDBX->new;

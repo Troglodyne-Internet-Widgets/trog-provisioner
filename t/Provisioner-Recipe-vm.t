@@ -39,7 +39,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Trog::HV();
 
@@ -154,10 +154,13 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     foreach my $missing (qw{user-data meta-data network-config}) {
         my %partial = %seed;
         delete $partial{$missing};
-        eval {
-            quietly( sub { domain_xml( $config, \%partial ) } );
-        };
-        like( $@, qr/No $missing to build the cloud-init seed/, "a missing $missing is an error" );
+        like(
+            exception {
+                quietly( sub { domain_xml( $config, \%partial ) } )
+            },
+            qr/No $missing to build the cloud-init seed/,
+            "a missing $missing is an error"
+        );
     }
 };
 
@@ -269,7 +272,7 @@ subtest 'a current hypervisor gets the lot' => sub {
     like( $xml, qr/discard='unmap'/,           'the guest fstrim reaches the host' );
     like( $xml, qr/discard_no_unref='on'/,     'without unrefing the cluster it just freed' );
     like(
-        $xml, qr/<blockio logical_block_size='512' physical_block_size='4096'\/>/,
+        $xml, qr/<blockio logical_block_size='512' physical_block_size='4096'\/>/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and the guest is told its sectors are 4K, before it lays a filesystem out for 512'
     );
 
@@ -391,7 +394,7 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
         qemu    => _libvirt( 9,  0, 0 ),
         hv      => { partition => '/machine/runner', pool_name => 'runner_disks' },
     );
-    like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );
+    like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );                                                       ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $confined, qr/<source pool='runner_disks'/,                                       'out of the pool it was given, rather than the literal that used to be here' );
 };
 

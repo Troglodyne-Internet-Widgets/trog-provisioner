@@ -171,8 +171,8 @@ True.  Neutron allocates, and F<ipmap.cfg>'s pool has no part in it.
 
 sub builds_by_api     { return 1 }
 sub manages_addresses { return 1 }
-sub cloud             { return $_[0]->{cloud} }
-sub describe          { return 'the OpenStack cloud ' . $_[0]->{cloud} }
+sub cloud    ($self) { return $self->{cloud} }
+sub describe ($self) { return 'the OpenStack cloud ' . $self->{cloud} }
 
 =head2 uri
 
@@ -194,13 +194,13 @@ because there is no sensible guess at which image or flavor somebody meant.
 
 =cut
 
-sub flavor            { return $_[0]->{flavor} }
-sub image             { return $_[0]->{image} }
-sub network           { return $_[0]->{network} }
-sub floating_network  { return $_[0]->{floating_network} }
-sub availability_zone { return $_[0]->{availability_zone} }
-sub keypair           { return $_[0]->{keypair} }
-sub security_group    { return $_[0]->{security_group} // 'default' }
+sub flavor            ($self) { return $self->{flavor} }
+sub image             ($self) { return $self->{image} }
+sub network           ($self) { return $self->{network} }
+sub floating_network  ($self) { return $self->{floating_network} }
+sub availability_zone ($self) { return $self->{availability_zone} }
+sub keypair           ($self) { return $self->{keypair} }
+sub security_group    ($self) { return $self->{security_group} // 'default' }
 
 =head1 THE API
 
@@ -370,7 +370,7 @@ sub guest_names {
     return map { $_->{name} } grep { ref $_ } $self->api->servers();
 }
 
-sub domain_exists { return defined $_[0]->server( $_[1] ) ? 1 : 0 }
+sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
 
 =head2 guest_ssh_ip($config, $lease)
 
@@ -431,7 +431,7 @@ sub _addresses {
 # ssh would take either, but the rest of this toolkit deals in IPv4 -- 'ips' in
 # provision.conf is a list of them -- so handing back a v6 address would be
 # handing it somewhere that cannot hold it.
-sub _is_ipv4 { return ( $_[0]->{addr} // '' ) =~ m/\A[0-9]+(?:[.][0-9]+){3}\z/ ? 1 : 0 }
+sub _is_ipv4 ($address) { return ( $address->{addr} // '' ) =~ m/\A\d+(?:[.]\d+){3}\z/ ? 1 : 0 }
 
 # Is this network one the outside world can route to?
 #
@@ -469,7 +469,7 @@ sub snapshot_names {
     # the project also holds.  Narrowing to one guest is the name prefix, and
     # that Glance cannot do -- it matches a name exactly or not at all.
     my @images =
-      sort { ( $b->{created_at} // '' ) cmp ( $a->{created_at} // '' ) }
+      reverse sort { ( $a->{created_at} // '' ) cmp ( $b->{created_at} // '' ) }
       grep { ref $_ && index( $_->{name} // '', "$domain\@" ) == 0 } $self->api->list_images( image_type => 'snapshot' );
 
     return map { substr $_->{name}, length("$domain\@") } @images;
@@ -634,7 +634,7 @@ sub rebuild_guest {
 sub _image_id {
     my ( $self, $image ) = @_;
 
-    return $image if $image =~ m/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i;
+    return $image if $image =~ m/\A[[:xdigit:]]{8}(?:-[[:xdigit:]]{4}){3}-[[:xdigit:]]{12}\z/;
 
     my $found = $self->api->image_from_name($image);
     $found = $found->[0] if ref $found eq 'ARRAY';
@@ -824,21 +824,21 @@ sub _no_such_thing {
     die ref($self) . " has no $method: $because\n";
 }
 
-sub define_domain { return $_[0]->_no_such_thing( 'define_domain', 'a Nova server is not defined from libvirt XML -- use create_guest' ) }
-sub cloudinit_iso { return $_[0]->_no_such_thing( 'cloudinit_iso', 'Nova takes cloud-init as user_data, so there is no ISO to build' ) }
-sub eject_cdrom   { return $_[0]->_no_such_thing( 'eject_cdrom',   'there is no cdrom' ) }
-sub pool_path     { return $_[0]->_no_such_thing( 'pool_path',     'there is no storage pool' ) }
-sub pool_target   { return $_[0]->_no_such_thing( 'pool_target',   'there is no storage pool' ) }
-sub nuke_pool     { return $_[0]->_no_such_thing( 'nuke_pool',     'there is no storage pool' ) }
-sub base_image    { return $_[0]->_no_such_thing( 'base_image',    'a root disk comes from a Glance image, not a downloaded file' ) }
-sub create_disk   { return $_[0]->_no_such_thing( 'create_disk',   'a disk is a Cinder volume -- use create_volume' ) }
-sub lease_ip      { return $_[0]->_no_such_thing( 'lease_ip',      'Neutron assigns addresses; there is no lease table' ) }
+sub define_domain ( $self, @ ) { return $self->_no_such_thing( 'define_domain', 'a Nova server is not defined from libvirt XML -- use create_guest' ) }
+sub cloudinit_iso ( $self, @ ) { return $self->_no_such_thing( 'cloudinit_iso', 'Nova takes cloud-init as user_data, so there is no ISO to build' ) }
+sub eject_cdrom   ( $self, @ ) { return $self->_no_such_thing( 'eject_cdrom',   'there is no cdrom' ) }
+sub pool_path     ( $self, @ ) { return $self->_no_such_thing( 'pool_path',     'there is no storage pool' ) }
+sub pool_target   ( $self, @ ) { return $self->_no_such_thing( 'pool_target',   'there is no storage pool' ) }
+sub nuke_pool     ( $self, @ ) { return $self->_no_such_thing( 'nuke_pool',     'there is no storage pool' ) }
+sub base_image    ( $self, @ ) { return $self->_no_such_thing( 'base_image',    'a root disk comes from a Glance image, not a downloaded file' ) }
+sub create_disk   ( $self, @ ) { return $self->_no_such_thing( 'create_disk',   'a disk is a Cinder volume -- use create_volume' ) }
+sub lease_ip      ( $self, @ ) { return $self->_no_such_thing( 'lease_ip',      'Neutron assigns addresses; there is no lease table' ) }
 
-sub release_dhcp_lease { return $_[0]->_no_such_thing( 'release_dhcp_lease', 'Neutron assigns addresses; there is no lease to release' ) }
-sub guest_mac          { return $_[0]->_no_such_thing( 'guest_mac',          'Neutron assigns the MAC, so it cannot be derived from the name' ) }
-sub nic_slots          { return $_[0]->_no_such_thing( 'nic_slots',          'there is no PCI topology to pin an interface to' ) }
-sub nic_names          { return $_[0]->_no_such_thing( 'nic_names',          'interface names come from Neutron and cloud-init, not from a PCI slot' ) }
-sub has_tpm            { return $_[0]->_no_such_thing( 'has_tpm',            'a TPM is a property of the flavor or image, not of a host' ) }
+sub release_dhcp_lease ( $self, @ ) { return $self->_no_such_thing( 'release_dhcp_lease', 'Neutron assigns addresses; there is no lease to release' ) }
+sub guest_mac          ( $self, @ ) { return $self->_no_such_thing( 'guest_mac',          'Neutron assigns the MAC, so it cannot be derived from the name' ) }
+sub nic_slots          ( $self, @ ) { return $self->_no_such_thing( 'nic_slots',          'there is no PCI topology to pin an interface to' ) }
+sub nic_names          ( $self, @ ) { return $self->_no_such_thing( 'nic_names',          'interface names come from Neutron and cloud-init, not from a PCI slot' ) }
+sub has_tpm            ( $self, @ ) { return $self->_no_such_thing( 'has_tpm',            'a TPM is a property of the flavor or image, not of a host' ) }
 
 =head1 PROVISIONING
 

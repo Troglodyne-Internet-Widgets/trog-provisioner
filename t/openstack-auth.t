@@ -25,7 +25,7 @@ use POSIX qw{strftime};
 use FindBin::libs;
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::OpenStack::Auth();
 
 # Stands in for OpenStack::Client::Response.  Only the two things the code under
@@ -38,8 +38,8 @@ use Trog::OpenStack::Auth();
         my ( $class, %args ) = @_;
         return bless {%args}, $class;
     }
-    sub decode_json { return $_[0]->{body} }
-    sub header      { return $_[0]->{headers}{ $_[1] } }
+    sub decode_json ($self)          { return $self->{body} }
+    sub header      ( $self, $name ) { return $self->{headers}{$name} }
 }
 
 # An ISO 8601 stamp $offset seconds from now, spelled the way Keystone spells
@@ -205,7 +205,7 @@ subtest 'the cached token is not left readable' => sub {
     my $auth = Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
 
     my $path = $auth->cache_path;
-    ok -e $path, 'the cache got written' or return;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
+    ok -e $path, 'the cache got written' or return;
 
     is sprintf( '%04o', ( stat $path )[2] & 0o7777 ), '0600', 'the file holds a bearer token, so 0600';
     is sprintf( '%04o', ( stat $dir )[2] & 0o7777 ),  '0700', 'and the directory it is in';
@@ -355,7 +355,7 @@ YAML
 
     my @looked_up;
     my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( read => sub { my ( $class, $file, $passphrase, %needed ) = @_; push @looked_up, [ $file, $passphrase, \%needed ]; return ( secret => 'secret-from-kdbx' ) } );
+    $secrets->redefine( lookup => sub { my ( $class, $file, $passphrase, %needed ) = @_; push @looked_up, [ $file, $passphrase, \%needed ]; return ( secret => 'secret-from-kdbx' ) } );
     my $credentials = Test::MockModule->new('Trog::Credentials');
     $credentials->redefine( prompt => sub { 'the-passphrase' } );
 

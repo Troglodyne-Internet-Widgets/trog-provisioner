@@ -42,7 +42,7 @@ Provisioner::Recipe helpers.
 
 =head3 already_required($module)
 
-Avoid double-require sub redefs.
+Avoid double-require sub redefinitions.
 
 Returns BOOLEAN.
 
@@ -70,7 +70,6 @@ the same answer as one holding nothing and is what every caller wants.
 
 sub files_in {
     my ($dir) = @_;
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
     return () unless defined $dir && -d $dir;
 
     my @found;
@@ -97,7 +96,8 @@ sub files_in {
         $dir
     );
 
-    return sort @found;
+    my @sorted = sort @found;
+    return @sorted;
 }
 
 =head3 coerce_arrayref($value)
@@ -134,7 +134,6 @@ is what is I<in> a directory rather than what is under it.
 
 sub dirs_in {
     my ($dir) = @_;
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
     return () unless defined $dir && -d $dir;
 
     my @found;
@@ -143,7 +142,6 @@ sub dirs_in {
             no_chdir => 1,
             wanted   => sub {
                 my $path = $File::Find::name;
-                ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
                 return unless -d $path;
                 return if $path eq $dir;
 
@@ -155,7 +153,8 @@ sub dirs_in {
         $dir
     );
 
-    return sort @found;
+    my @sorted = sort @found;
+    return @sorted;
 }
 
 =head3 lastuniq(@array)
@@ -245,7 +244,8 @@ sub host_of {
     # parses to the host "github.com:o", and ssh://git@github.com:22/r.git reads
     # 22 as the port and drops it from the path.  Handed the address as written,
     # URI returns a URI::_generic, which has no host method at all.
-    return $1 if $url =~ m{\A[^/\s]+\@([a-z\d][a-z\d.-]*):}i;
+    my ($scp_host) = $url =~ m{\A[^/\s]+\@([[:alnum:]][[:alnum:].-]*):};
+    return $scp_host if defined $scp_host;
 
     my $host = eval { URI->new($url)->host };
     return $host ? lc $host : ();
@@ -259,7 +259,7 @@ sub fleet_address {
     # The scheme, rather than counting dots: aptmirror.example.test and
     # mirror.example.test are both dotted, and only one of them says how to get
     # there.
-    return ( url => $name ) if $name =~ m{\A[a-z][a-z\d+.-]*://}i;
+    return ( url => $name ) if $name =~ m{\A[[:alpha:]][[:alnum:]+.-]*://};
 
     return ( self => q{} ) if $name eq ( $opts{domain} // q{} );
 
@@ -387,14 +387,14 @@ my %ECC_CURVES = (
 # a 32bit big-endian length followed by that many bytes; an 'mpint' is the same,
 # but holding a minimal-length big-endian integer which gets a leading zero byte
 # when its high bit is set (so it isn't read back as negative).
-sub _sshstr { return pack( 'N/a*', $_[0] ) }
+sub _sshstr ($string) { return pack( 'N/a*', $string ) }
 
 sub _mpint {
     my ($hex) = @_;
     $hex = "0$hex" if length($hex) % 2;
     my $bin = pack( 'H*', $hex );
     $bin =~ s{^\x00+}{};
-    $bin = "\x00$bin" if !length($bin) || ord( substr( $bin, 0, 1 ) ) & 0x80;
+    $bin = chr(0) . $bin if !length($bin) || ord( substr( $bin, 0, 1 ) ) & 0x80;
     return _sshstr($bin);
 }
 

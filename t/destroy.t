@@ -14,6 +14,7 @@ t/destroy.t - bin/destroy: tearing a guest down without taking its neighbours
 =cut
 
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture capture_stdout};
 use IPC::Run3();
 use Test::MockModule qw{strict};
@@ -30,7 +31,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use Provisioner::Cookbook();
 use Trog::HV();
 
@@ -210,8 +211,7 @@ subtest 'a public key that is not one matches nothing, and says so' => sub {
     my $hv      = Test::MockModule->new('Trog::HV');
     $hv->redefine( write_text => sub { $touched++; return 1 } );
 
-    eval { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) };
-    like( $@, qr/does not look like one; refusing/, 'refused rather than matched' );
+    like( exception { Trog::Bin::Destroy::remove_runner_key( $domain, 0 ) }, qr/does not look like one; refusing/, 'refused rather than matched' );
     is( $touched, 0, 'and nothing was rewritten' );
 };
 
@@ -280,7 +280,7 @@ subtest 'the POD documents the interface' => sub {
         -verbose  => 99,
         -sections => 'SYNOPSIS|OPTIONS',
     );
-    close $fh;
+    close($fh) or die "Could not close the POD capture: $!";
 
     like( $text, qr/--purge/,      'POD documents --purge' );
     like( $text, qr/--dryrun/,     'POD documents --dryrun' );
@@ -303,7 +303,7 @@ subtest 'the POD documents the interface' => sub {
     }
 
     package Test::Libvirt::Domain;
-    sub get_name { return $_[0]->{name} }
+    sub get_name ($self) { return $self->{name} }
 }
 
 # The data source these act on.  No hypervisors.conf is written into the

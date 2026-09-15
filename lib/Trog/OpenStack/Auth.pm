@@ -196,7 +196,7 @@ sub _from_keepass {
     Trog::Secrets->parse($reference);
 
     return sub {
-        my %found = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
+        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
         return $found{secret};
     };
 }
@@ -229,9 +229,9 @@ What was passed to the constructor, for callers assembling C<service> options.
 
 =cut
 
-sub token     { return $_[0]->{token} }
-sub region    { return $_[0]->{region} }
-sub interface { return $_[0]->{interface} }
+sub token     ($self) { return $self->{token} }
+sub region    ($self) { return $self->{region} }
+sub interface ($self) { return $self->{interface} }
 
 # The one request this module exists to make.
 sub _authenticate {

@@ -317,7 +317,7 @@ sub remove_runner_key {
     # authorizes anything, so it is what has to go.
     my ($material) = ( split( q{ }, $pubkey ) )[1];
     die "The public key beside $domain does not look like one; refusing to match on it\n"
-      unless defined $material && length($material) > 32;
+      if !defined $material || length($material) <= 32;
 
     my $config      = eval { Provisioner::Cookbook->domain_config($domain) } // {};
     my $hypervisors = ( $config->{trogrunner} // {} )->{hypervisors}         // {};
@@ -416,7 +416,7 @@ nowhere to look.
 sub sweep_orphans {
     my ( $uri, $hvconf, $dryrun ) = @_;
 
-    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->all;
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
     # Every guest anywhere in the fleet.  A hypervisor that cannot be asked stops
     # the sweep rather than being skipped: the guests it holds are exactly the
@@ -445,7 +445,6 @@ sub sweep_orphans {
     # name => the copies of it there are, as [ machine, path ] pairs.
     my %found;
     foreach my $root (@roots) {
-        ## no critic (ValuesAndExpressions::ProhibitFiletest_d)
         push @{ $found{ File::Basename::basename($_) } }, [ $here, $_ ] for grep { -d $_ } glob "$root/*.test";
 
         foreach my $hv (@hvs) {

@@ -14,7 +14,7 @@ t/restore.t - bin/restore: putting a guest back to a snapshot
 
 BEGIN {
     # Stub Net::EmptyPort so tests don't do real network waits
-    $INC{'Net/EmptyPort.pm'} = 1;
+    $INC{'Net/EmptyPort.pm'} = 1;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the stub has to stay loaded for the whole file
 
     package Net::EmptyPort;
     sub wait_port { return 1 }
@@ -22,13 +22,14 @@ BEGIN {
 
 BEGIN {
     # Stub Net::OpenSSH::More so tests don't need real SSH
-    $INC{'Net/OpenSSH/More.pm'} = 1;
+    $INC{'Net/OpenSSH/More.pm'} = 1;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the stub has to stay loaded for the whole file
 
     package Net::OpenSSH::More;
-    sub new { bless {}, shift }
+    sub new { return bless {}, shift }
 }
 
 use Test::More;
+use Test::Fatal qw{exception};
 use IPC::Run3();
 use File::Temp       qw{tempdir};
 use Test::MockModule qw{strict};
@@ -45,7 +46,7 @@ use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 require_ok("$FindBin::Bin/../bin/restore")
   or BAIL_OUT('bin/restore does not load; the install is incomplete');
@@ -53,7 +54,7 @@ require_ok("$FindBin::Bin/../bin/restore")
 # Point --hvconf at nothing, so these never read the fleet file of whatever
 # machine the suite happens to be running on.
 my $NO_FLEET = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
-sub main_restore { return Trog::Bin::Restore::main( '--hvconf', $NO_FLEET, @_ ) }
+sub main_restore (@args) { return Trog::Bin::Restore::main( '--hvconf', $NO_FLEET, @args ) }
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section( "$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS' );
@@ -88,8 +89,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { () } );
 
-    eval { main_restore( '--latest', 'myvm.lan' ) };
-    like( $@, qr/No snapshots found/, 'main() dies when no snapshots exist' );
+    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/No snapshots found/, 'main() dies when no snapshots exist' );
 }
 
 # --name for nonexistent snapshot -> dies
@@ -97,8 +97,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { ( 'snap-a', 'snap-b' ) } );
 
-    eval { main_restore(qw{--name snap-z myvm.lan}) };
-    like( $@, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there' );
+    like( exception { main_restore(qw{--name snap-z myvm.lan}) }, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there' );
 }
 
 # Revert fails -> dies
@@ -107,8 +106,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 0 } );
 
-    eval { main_restore( '--latest', 'myvm.lan' ) };
-    like( $@, qr/Failed to revert/, 'main() dies when the revert fails' );
+    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/Failed to revert/, 'main() dies when the revert fails' );
 }
 
 # Missing provision.conf -> dies
@@ -117,8 +115,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 1 } );
 
-    eval { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) };
-    like( $@, qr/No provision\.conf to read/, 'main() dies when provision.conf is missing' );
+    like( exception { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) }, qr/No provision\.conf to read/, 'main() dies when provision.conf is missing' );
 }
 
 # Helper: build a minimal provision.conf in a temp dir
@@ -128,13 +125,13 @@ sub _make_conf {
     mkdir $ddir or die $!;
     open my $fh, '>', "$ddir/provision.conf" or die $!;
     for my $k ( keys %params ) {
-        print $fh "$k=$params{$k}\n";
+        print {$fh} "$k=$params{$k}\n";
     }
-    close $fh;
+    close($fh) or die "Could not close $ddir/provision.conf: $!";
 
     # Create dummy key so wait_for_ssh doesn't die early
     open my $kf, '>', "$ddir/key.rsa" or die $!;
-    close $kf;
+    close($kf) or die "Could not close $ddir/key.rsa: $!";
     return $ddir;
 }
 
@@ -242,7 +239,7 @@ sub _pod_section {
         -verbose  => 99,
         -sections => $sections,
     );
-    close $fh;
+    close($fh) or die "Could not close the POD read out of $file: $!";
     return $text // '';
 }
 

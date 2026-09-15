@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use Cpanel::JSON::XS();
 use Getopt::Long qw{GetOptionsFromArray};
+use List::Util   qw{max};
 use Pod::Usage   qw{pod2usage};
 
 use Provisioner::Cookbook();
@@ -130,7 +131,7 @@ sub list {
         return 0;
     }
 
-    my ($width) = sort { $b <=> $a } map { length } @names;
+    my $width = max( map { length } @names );
     foreach my $name (@names) {
         printf "%-*s  %s\n", $width, $name, Provisioner::Cookbook->abstract($name) // '';
     }

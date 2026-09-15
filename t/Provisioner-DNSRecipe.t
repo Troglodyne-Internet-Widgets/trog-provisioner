@@ -88,7 +88,7 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     # --pdns-server is LEXICON_POWERDNS_PDNS_SERVER.  Its legacy fallback only
     # strips _AUTH_, so the shorter spelling resolved to nothing and this
     # shortcut asked the default endpoint of a server that has none.
-    like( $out, qr{^export LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );
+    like( $out, qr{^export LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     unlike( $out, qr{^export LEXICON_POWERDNS_SERVER=}m, 'and not the one it ignores' );
 
     like( $out, qr{^export LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$}m, 'the token' );

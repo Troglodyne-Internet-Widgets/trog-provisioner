@@ -25,6 +25,7 @@ you happened to run it from.
 =cut
 
 use Test::More;
+use Test::MockModule qw{strict};
 use Pod::Usage();
 
 use FindBin;
@@ -54,11 +55,11 @@ subtest 'the steps are the ones a hypervisor needs, and their numbers are the ex
     is( Trog::Bin::SetupProvisioner::main(), 0, 'all of them pass, all of them being stubs' );
 
     foreach my $i ( 0 .. $#steps ) {
-        ## no critic (ProhibitNoStrict, ProhibitNoWarningsRedefine) -- the whole assertion is which position in main() a failing step maps to, and the only way to make one fail is to replace it.
-        no strict 'refs';
-        no warnings 'redefine';
-        my $name = "Trog::Bin::SetupProvisioner::$steps[$i]";
-        local *{$name} = sub { 0 };
+
+        # no_auto: the modulino is already loaded, and there is no .pm for
+        # Test::MockModule to go looking for.
+        my $mock = Test::MockModule->new( 'Trog::Bin::SetupProvisioner', no_auto => 1 );
+        $mock->redefine( $steps[$i] => sub { 0 } );
         is( Trog::Bin::SetupProvisioner::main(), $i + 1, "$steps[$i] failing is exit " . ( $i + 1 ) );
     }
 };
@@ -88,7 +89,7 @@ sub _pod_section {
         -input   => $file, -output   => $fh, -exitval => 'NOEXIT',
         -verbose => 99,    -sections => $section,
     );
-    close $fh;
+    close($fh) or die "Could not close the POD read out of $file: $!";
     return $out;
 }
 

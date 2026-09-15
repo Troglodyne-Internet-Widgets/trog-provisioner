@@ -12,12 +12,8 @@ t/guest.t - Trog::Guest: what a freshly built guest has to be waited for
 
 =cut
 
-# A -f or -x in here is asserting on a file this test just made, in a temporary
-# directory nothing else can see.  There is no window for it to be wrong in, so
-# the TOCTOU policies have nothing to catch.
-## no critic (ValuesAndExpressions::ProhibitFiletest_f, ValuesAndExpressions::ProhibitFiletest_rwxRWX)
-
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stdout};
 use File::Temp();
 use Test::MockModule qw{strict};
@@ -28,15 +24,14 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use Trog::Guest();
 
 # A guest and a hypervisor reach their far side the same way, so the transport
 # is Trog::Machine's and is tested in t/hv.t.  What is here is the rest.
 
 subtest 'a guest needs somewhere to connect to' => sub {
-    eval { Trog::Guest->new( user => 'ubuntu' ) };
-    like( $@, qr/needs a host/, 'refuses to be built without one' );
+    like( exception { Trog::Guest->new( user => 'ubuntu' ) }, qr/needs a host/, 'refuses to be built without one' );
 };
 
 subtest 'identity' => sub {
@@ -67,20 +62,23 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
     my $machine = Test::MockModule->new('Trog::Machine');
 
     $ports->redefine( wait_port => sub { 0 } );
-    eval {
-        quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } );
+    my $err = exception {
+        quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } )
     };
-    like( $@, qr/never came up after 1s/, 'a port that never opens is an error' );
-    like( $@, qr/vm\.example\.test/,      'naming the guest' );
+    like( $err, qr/never came up after 1s/, 'a port that never opens is an error' );
+    like( $err, qr/vm\.example\.test/,      'naming the guest' );
 
     # A port that opens but a connection that will not: checking only the first
     # is how you get a confusing failure three steps later.
     $ports->redefine( wait_port => sub { 1 } );
     $machine->redefine( ssh => sub { undef } );
-    eval {
-        quietly( sub { $guest->wait_for_ssh } );
-    };
-    like( $@, qr/Could not establish an SSH connection/, 'and so is that' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_ssh } )
+        },
+        qr/Could not establish an SSH connection/,
+        'and so is that'
+    );
 
     $machine->redefine( ssh => sub { bless {}, 'FakeSSH' } );
     is( quietly( sub { $guest->wait_for_ssh } ), $guest, 'otherwise we get the guest back' );
@@ -122,10 +120,13 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
     $machine->redefine( run_sudo    => sub { 1 } );
     $machine->redefine( capture_cmd => sub { '[]' } );
 
-    eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
-    };
-    like( $@, qr/Cloud init reported failure/, 'dies' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
+        },
+        qr/Cloud init reported failure/,
+        'dies'
+    );
 };
 
 subtest 'cloud-init that does not return JSON is fatal' => sub {
@@ -136,10 +137,13 @@ subtest 'cloud-init that does not return JSON is fatal' => sub {
     $machine->redefine( run_sudo    => sub { 0 } );
     $machine->redefine( capture_cmd => sub { 'command not found' } );
 
-    eval {
-        quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } );
-    };
-    like( $@, qr/did not return a JSON array/, 'dies rather than carrying on blind' );
+    like(
+        exception {
+            quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
+        },
+        qr/did not return a JSON array/,
+        'dies rather than carrying on blind'
+    );
 };
 
 subtest 'wait_for_makefile waits for the queue twice' => sub {
@@ -201,7 +205,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     require Trog::Machine;
 
     my %seconds = ( s => 1, m => 60, h => 3600 );
-    my ( $n, $unit ) = $Trog::Guest::SETUP_TIMEOUT =~ m/\A([0-9]+)([smh]?)\z/;
+    my ( $n, $unit ) = $Trog::Guest::SETUP_TIMEOUT =~ m/\A(\d+)([smh]?)\z/;
     ok( $n, "SETUP_TIMEOUT parses ($Trog::Guest::SETUP_TIMEOUT)" );
     my $setup = $n * ( $seconds{ $unit || 's' } // 1 );
 
@@ -209,7 +213,7 @@ subtest 'the hang detector allows the setup timeout it is wrapping' => sub {
     my $atq = qq{sudo timeout $Trog::Guest::SETUP_TIMEOUT bash -c 'until [ \$(atq | wc -l) = 0 ]; do sleep 1; done;'};
 
     cmp_ok(
-        Trog::Machine::_hang_limit($atq), '>=', $setup,
+        Trog::Machine::_hang_limit($atq), '>=', $setup,    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'the hang detector gives the wait at least as long as the wait asks for'
     );
 };

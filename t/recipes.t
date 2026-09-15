@@ -24,13 +24,14 @@ use Provisioner::Utils();
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::NoWarnings;
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw(tempdir);
+use List::Util       qw{any};
 use File::Find();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
@@ -69,7 +70,8 @@ sub fragments {
     foreach my $dir (@template_dirs) {
         push( @found, glob("$dir/*.tt") );
     }
-    return sort @found;
+    my @sorted = sort @found;
+    return @sorted;
 }
 
 # Where a recipe's fragment actually is, out of that path, or undef.
@@ -197,7 +199,7 @@ sub renders_ok {
     $desc //= $name;
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    subtest $desc => sub {
+    return subtest $desc => sub {
 
         # Through Cookbook, so this exercises the distro's version of the recipe
         # -- which is where the package names are -- rather than the generic
@@ -238,18 +240,18 @@ sub rejects_missing {
     $desc //= "$name rejects missing $field";
     local $Test::Builder::Level = $Test::Builder::Level + 1;
 
-    subtest $desc => sub {
-        my $r = "Provisioner::Recipe::$name"->new(%PROV);
-        eval { $r->render( %G, %$extra, $field => undef ) };
-        ok( $@, "render() dies without $field" );
+    return subtest $desc => sub {
+        my $r   = "Provisioner::Recipe::$name"->new(%PROV);
+        my $err = exception { $r->render( %G, %$extra, $field => undef ) };
+        ok( $err, "render() dies without $field" );
 
         # An operator reads this refusal and has to know what to go and edit.
         # It used to glue the class to the error -- giving
         # `Provisioner::Recipe::Ubuntu::koan/user: Missing property.`, a
         # namespace nobody can edit and no domain at all.
-        like( $@, qr/\bThe \Q$name\E recipe\b/, "and says it is $name refusing" );
-        like( $@, qr{\Q/$field\E:},             "and names $field" );
-        like( $@, qr/\Q$G{domain}\E/,           "and names the domain" );
+        like( $err, qr/\bThe \Q$name\E recipe\b/, "and says it is $name refusing" );
+        like( $err, qr{\Q/$field\E:},             "and names $field" );
+        like( $err, qr/\Q$G{domain}\E/,           "and names the domain" );
     };
 }
 
@@ -374,7 +376,7 @@ subtest 'every rsync of a payload names the machine holding it' => sub {
                 function => { tabinate => Text::Xslate::html_builder( sub { $_[0] } ) },
             );
             my $out = $xslate->render_string( File::Slurper::read_text($tt), { %G, %{ $required_config{$recipe} // {} } } );
-            next unless index( $out, 'rsync' ) >= 0;
+            next if index( $out, 'rsync' ) < 0;
             $seen{$recipe}++;
             unlike( $out, qr/\@:/, "$recipe: no empty host between the user and the path" );
             like( $out, qr/\@\Q$G{transfer_ip}\E:/, "$recipe: rsyncs from $G{transfer_ip}" );
@@ -619,8 +621,11 @@ subtest 'cron MAILTO per script' => sub {
     my %to;
     my $current = '';
     foreach my $line (@out) {
-        $current = $1       if $line =~ m/^MAILTO="([^"]*)"$/;
-        $to{$1}  = $current if $line =~ m{command (/\S+)};
+        my ($mailto) = $line =~ m/^MAILTO="([^"]*)"$/;
+        $current = $mailto if defined $mailto;
+
+        my ($script) = $line =~ m{command (/\S+)};
+        $to{$script} = $current if defined $script;
     }
 
     is(
@@ -752,7 +757,7 @@ subtest 'no template comment leaves a quote open' => sub {
             # "Provisioner::Recipe::ubuntu's packager invocation" -- ate two
             # install lines out of the aptmirror fragment that way.
             my $line = 0;
-            foreach my $text ( split( m/\n/, $comment ) ) {
+            foreach my $text ( split( m/\n/xms, $comment ) ) {
                 $line++;
                 foreach my $quote ( q{'}, q{"} ) {
                     my $count = () = $text =~ m/\Q$quote\E/g;
@@ -811,7 +816,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
 
         # It has to be Perl.
         my $file = "$dir/" . ( $name =~ s/[.]tt\z/.t/r );
-        File::Slurper::write_text( $file, $rendered );
+        File::Slurper::Temp::write_text( $file, $rendered );
 
         my ( $out, $err ) = ( q{}, q{} );
         IPC::Run3::run3( [ $^X, '-c', $file ], \undef, \$out, \$err );
@@ -819,7 +824,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
 
         # And it has to assert something, or Test::More exits 255 on it.
         ok(
-            $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,
+            $rendered =~ m/\b(?:ok|is|isnt|like|unlike|cmp_ok|is_deeply|pass|fail|plan|skip_all|BAIL_OUT)\b/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$name makes at least one assertion or says why it is not"
         );
     }
@@ -1019,7 +1024,9 @@ subtest 'what a recipe asks the guest to run before a salvage is something it in
             ) or diag "remote_prepare wants $command and nothing in $recipe installs it";
         }
 
-        ok( scalar( eval { $class->remote_files( $install, $domain ) } ), "$recipe: and it has something to salvage afterwards" );
+        my @salvaged;
+        is( exception { @salvaged = $class->remote_files( $install, $domain ) }, undef, "$recipe: remote_files answers" );
+        ok( scalar @salvaged, "$recipe: and it has something to salvage afterwards" );
     }
 };
 
@@ -1061,7 +1068,7 @@ subtest 'no cron template redirects with &>' => sub {
 
     foreach my $tt ( sort @crons ) {
         ( my $name = $tt ) =~ s{^\Q$template_dir\E/}{};
-        foreach my $line ( split m/\n/, File::Slurper::read_text($tt) ) {
+        foreach my $line ( split m/\n/xms, File::Slurper::read_text($tt) ) {
             next if $line =~ m/^\s*#/;    # the comment explaining this rule
             unlike( $line, qr/&>>?/, "$name: no &> in a cron line" ) or diag $line;
         }
@@ -1146,7 +1153,7 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
     # key is supposed to die with its machine: carried over it would outlive the
     # machine it was made for, and in a backup beside the database it protects it
     # would not be protecting anything.
-    my %files  = Provisioner::Recipe::tcms->remote_files( '/opt/domains', 'test.test.test' );
+    my %files  = 'Provisioner::Recipe::tcms'->remote_files( '/opt/domains', 'test.test.test' );
     my $wanted = '/opt/domains/test.test.test/tCMS/config/';
     ok(
         ( grep { index( $wanted, $_ ) == 0 } keys(%files) ),
@@ -1161,7 +1168,7 @@ subtest 'what a rebuild is not allowed to carry over' => sub {
         'and the checkout, so a rebuild serves the commit the guest was serving'
     ) or diag "salvages: " . join( ', ', sort keys %files );
 
-    my @skip = Provisioner::Recipe::tcms->remote_skip();
+    my @skip = 'Provisioner::Recipe::tcms'->remote_skip();
     ok( scalar(@skip),                                'and says something in it must stay behind' );
     ok( !salvage_brings_down( 'secrets.key', @skip ), 'which is the vault key' );
 
@@ -1573,7 +1580,7 @@ subtest 'mariadb installs from its own repository at the exact release' => sub {
     # The fragment asks for the install; how to do it is the script's, which is
     # what keeps the file holding root_pw out of /etc/mysql when the SQL fails.
     like(
-        $out, qr{install_mariadb\.sh "[^"]+" "mariadb-provisioner\.cnf" "secure_installation\.sql"},
+        $out, qr{install_mariadb\.sh "[^"]+" "mariadb-provisioner\.cnf" "secure_installation\.sql"},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'the config and the secure-installation sql are handed to it'
     );
 
@@ -1767,7 +1774,7 @@ subtest 'nginxproxy opens exactly as much of the domain directory as a docroot n
     # directory itself claiming to be theirs.
     like(
         $static,
-        qr{chown -R \Q$G{user}\E:www-data '/opt/domains/test\.test\.test/www/static'},
+        qr{chown -R \Q$G{user}\E:www-data '/opt/domains/test\.test\.test/www/static'},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'static_dir is chowned recursively, not just retagged at the top'
     ) or diag $static;
 
@@ -1776,7 +1783,7 @@ subtest 'nginxproxy opens exactly as much of the domain directory as a docroot n
     # arrangement redis and mail keep their own later writes in.
     like(
         $static,
-        qr{find '/opt/domains/test\.test\.test/www/static' -type d -exec chmod g\+s},
+        qr{find '/opt/domains/test\.test\.test/www/static' -type d -exec chmod g\+s},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and every directory under static_dir is left setgid for what gets written later'
     );
 };
@@ -2014,7 +2021,7 @@ subtest 'no firewall profile is named after something in /etc/services' => sub {
     plan skip_all => 'no /etc/services to check against' unless -r '/etc/services';
 
     my %service;
-    foreach my $line ( split m/\n/, File::Slurper::read_text('/etc/services') ) {
+    foreach my $line ( split m/\n/xms, File::Slurper::read_text('/etc/services') ) {
         next if $line =~ m/\A\s*[#]/;
         my ($name) = $line =~ m/\A(\S+)\s/ or next;
 
@@ -2095,7 +2102,7 @@ subtest 'nothing restores state from a fragment that data could do' => sub {
     foreach my $tt (@fragments) {
         my $name = File::Basename::basename( $tt, '.tt' );
         $name =~ s/[.]global\z//;
-        next if grep { $_ eq $name } @allowed;
+        next if any { $_ eq $name } @allowed;
 
         my $body = File::Slurper::read_text($tt);
         $body =~ s/\[%#.*?%\]//gs;
@@ -2241,7 +2248,7 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
         "$FindBin::Bin/../templates", "$FindBin::Bin/../scripts",
     );
 
-    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;
+    my $fetches = qr/(?:curl|wget|git\s+clone|add-apt-repository|apt-add-repository)/;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     my %seen;
     foreach my $file ( sort @sources ) {
         my $text = eval { File::Slurper::read_text($file) };
@@ -2249,7 +2256,7 @@ subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
 
         foreach my $line ( split( "\n", $text ) ) {
             next unless $line =~ m/$fetches/;
-            while ( $line =~ m{https?://([a-z\d][a-z\d.-]*)}gi ) {
+            while ( $line =~ m{https?://([[:lower:]\d][[:lower:]\d.-]*)}gi ) {
                 my $host = lc $1;
 
                 # An address is the guest talking to itself, and a template

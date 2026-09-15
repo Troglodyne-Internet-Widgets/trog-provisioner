@@ -147,11 +147,11 @@ with no C<-c> would.
 
 =head2 is_local
 
-True when the hypervisor is this very machine, i.e. the historical behavior.
+True when the hypervisor is this very machine, i.e. the historical behaviour.
 
 =cut
 
-sub uri { return $_[0]->{uri} }
+sub uri ($self) { return $self->{uri} }
 
 sub is_local {
     my ($self) = @_;
@@ -177,7 +177,7 @@ sub ssh_host {
     return undef;
 }
 
-sub describe { return 'the hypervisor at ' . $_[0]->uri }
+sub describe ($self) { return 'the hypervisor at ' . $self->uri }
 
 =head1 PATHS
 
@@ -209,8 +209,8 @@ of them at once.
 
 =cut
 
-sub pool_name { return $_[0]->{pool_name} // 'tf_disks' }
-sub partition { return $_[0]->{partition} }
+sub pool_name ($self) { return $self->{pool_name} // 'tf_disks' }
+sub partition ($self) { return $self->{partition} }
 
 sub pool_path {
     my ($self) = @_;
@@ -290,7 +290,7 @@ sub guest_names {
     return map { $_->get_name } $self->vmm->list_all_domains();
 }
 
-sub domain_exists { return defined $_[0]->_domain( $_[1] ) ? 1 : 0 }
+sub domain_exists ( $self, $name ) { return defined $self->_domain($name) ? 1 : 0 }
 
 =head2 annihilate_domain($name)
 
@@ -361,7 +361,7 @@ sub lease_ips {
     my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
 
     my @ips;
-    foreach my $lease ( sort { ( $b->{expirytime} // 0 ) <=> ( $a->{expirytime} // 0 ) } @leases ) {
+    foreach my $lease ( reverse sort { ( $a->{expirytime} // 0 ) <=> ( $b->{expirytime} // 0 ) } @leases ) {
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
         next
           if defined $opts{hostname}
@@ -1187,7 +1187,7 @@ sub qcow2_tuning {
     my $cluster = $tuning{cluster_size} // $QCOW2_DEFAULT_CLUSTER;
     my $wanted  = int( $capacity / $cluster ) * $entry;
 
-    return %tuning unless $wanted > $QCOW2_METADATA_DEFAULT && $self->supports('metadata_cache');
+    return %tuning if $wanted <= $QCOW2_METADATA_DEFAULT || !$self->supports('metadata_cache');
 
     $tuning{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
     return %tuning;
@@ -1348,7 +1348,7 @@ The guest's own overlay and its seed, those of them there are.
 
 =cut
 
-sub release_seed { return $_[0]->eject_cdrom( $_[1] ) }
+sub release_seed ( $self, $domain ) { return $self->eject_cdrom($domain) }
 
 sub guest_volumes {
     my ( $self, $domain ) = @_;
@@ -1631,7 +1631,7 @@ sub note_pool_quota {
     # it is the filesystem -- the pool is a directory, and libvirt reports what
     # statvfs says about whatever it is mounted on.
     return { ok => 1 }
-      unless defined $bytes && abs( $bytes - ( $info->{capacity} // 0 ) ) < 1_073_741_824;
+      if !defined $bytes || abs( $bytes - ( $info->{capacity} // 0 ) ) >= 1_073_741_824;
 
     return {
         ok   => 0,

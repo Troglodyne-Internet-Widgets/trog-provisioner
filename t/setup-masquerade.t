@@ -73,7 +73,7 @@ sub run_on {
     # The script is required at run time, so at this file's compile time nothing
     # has declared $FILE and naming it here is a "used only once" warning -- and
     # warnings are fatal in this file.
-    no warnings 'once';    ## no critic (ProhibitNoWarnings)
+    no warnings 'once';
     local $Trog::Script::SetupMasquerade::FILE = $path;
     my ( $said, $rc ) = capture_stdout { Trog::Script::SetupMasquerade::main(@args) };
     return ( $rc, read_text($path), $said );
@@ -102,7 +102,7 @@ subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {
     my $decls = () = $after =~ m/^:trog-nat /mg;
     is( $decls, 1, 'and declared once, since twice is a file iptables-restore refuses' );
     like(
-        $after, qr{^-A ufw-before-forward -d 10[.]8[.]0[.]0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT$}m,
+        $after, qr{^-A ufw-before-forward -d 10[.]8[.]0[.]0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and the answers get back to it'
     );
 
@@ -176,7 +176,7 @@ subtest 'a rule written before there were markers is swept up, and a stranger is
     unlike( $after, qr{^-A POSTROUTING -s 10[.]8[.]0[.]0/24 }m, 'the POSTROUTING copy an older version wrote is gone' );
 
     like(
-        $after, qr{^-A POSTROUTING -s 172[.]16[.]0[.]0/12 -o eth9 -j MASQUERADE$}m,
+        $after, qr{^-A POSTROUTING -s 172[.]16[.]0[.]0/12 -o eth9 -j MASQUERADE$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a masquerade for something else is somebody elses and is left alone'
     );
 };

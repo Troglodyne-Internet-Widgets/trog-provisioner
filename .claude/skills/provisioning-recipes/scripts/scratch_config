@@ -223,7 +223,7 @@ sub build {
     # Visibly fake, so that anything reaching a real service with one is refused
     # rather than quietly working.  What the values are is this harness's
     # business; making the database is Trog::Secrets'.
-    Trog::Secrets->write(
+    Trog::Secrets->create(
         "$dir/secrets.kdbx", $password,
         map { $_ => 'throwaway:' . substr( $_, length 'secret:' ) } @refs
     );

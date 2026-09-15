@@ -17,7 +17,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use File::Temp qw{tempdir};
 use Test::More;
 use Test::Fatal qw{exception};
@@ -51,8 +51,8 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
 
     # Create the global template file
     open my $fh, '>', "$tdir/widget.global.tt" or die $!;
-    print $fh "global_setup=[% global_flag %]\n";
-    close $fh;
+    print {$fh} "global_setup=[% global_flag %]\n";
+    close($fh) or die "Could not close $tdir/widget.global.tt: $!";
 
     ok( $with_global->has_global_template(),     'has_global_template true after file created' );
     ok( !$without_global->has_global_template(), 'has_global_template still false for noglobal recipe' );
@@ -60,8 +60,8 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
     # Multiple template dirs - found in second dir
     my $tdir2 = tempdir( CLEANUP => 1 );
     open my $fh2, '>', "$tdir2/other.global.tt" or die $!;
-    print $fh2 "other\n";
-    close $fh2;
+    print {$fh2} "other\n";
+    close($fh2) or die "Could not close $tdir2/other.global.tt: $!";
 
     my $multi_dir = bless {
         template        => 'other.tt',
@@ -73,8 +73,8 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
 
     # Rendering tests - need a full recipe object via new()
     open my $tt_fh, '>', "$tdir/widget.tt" or die $!;
-    print $tt_fh "domain=[% domain %]\n";
-    close $tt_fh;
+    print {$tt_fh} "domain=[% domain %]\n";
+    close($tt_fh) or die "Could not close $tdir/widget.tt: $!";
 
     # One per configuration, as new_config builds them: validated() memoizes on
     # the object, so the two renders below are two objects rather than one asked
@@ -218,7 +218,7 @@ subtest 'a recipe gets its declared defaults end to end' => sub {
     # Counts what validate() actually did, since the point of a memo is the
     # work it does not do.
     package Test::Recipe::Memo;
-    our @ISA      = ('Provisioner::Recipe');
+    our @ISA      = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
     our $enriched = 0;
 
     sub args {
@@ -270,15 +270,15 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     # A recipe of no distribution, named as a recipe because new() works out
     # the fragment from the name.
     package Provisioner::Recipe::nametest;
-    our @ISA = ('Provisioner::Recipe');
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
 }
 
 subtest 'recipe_name is the last component, whichever distro specialised it' => sub {
     my $tdir = tempdir( CLEANUP => 1 );
-    is( Provisioner::Recipe::nametest->recipe_name,                                                       'nametest', 'of a class' );
-    is( Provisioner::Recipe::nametest->new( template_dirs => [$tdir], output_dir => $tdir )->recipe_name, 'nametest', 'of an object' );
-    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->recipe_name,                          'nginx',    'and of a distribution version of a recipe, which shares the fragment' );
-    is( Provisioner::Recipe->recipe_name,                                                                 undef,      'and nothing for a class that is not one' );
+    is( 'Provisioner::Recipe::nametest'->recipe_name,                                                       'nametest', 'of a class' );
+    is( 'Provisioner::Recipe::nametest'->new( template_dirs => [$tdir], output_dir => $tdir )->recipe_name, 'nametest', 'of an object' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' )->recipe_name,                            'nginx',    'and of a distribution version of a recipe, which shares the fragment' );
+    is( Provisioner::Recipe->recipe_name,                                                                   undef,      'and nothing for a class that is not one' );
 };
 
 subtest 'reconcile() hands disagreements to the recipe, and dies by default' => sub {
@@ -338,7 +338,7 @@ subtest 'a distribution version of a recipe answers to the same name' => sub {
     # The name is taken from the last component of the class, so a subclass
     # renders the same fragment as the recipe it specialises.  Sharing the
     # fragment is the point: what a distribution changes is deps.
-    my $specific = Provisioner::Recipe::Ubuntu::widget->new( template_dirs => [$tdir], output_dir => $tdir );
+    my $specific = 'Provisioner::Recipe::Ubuntu::widget'->new( template_dirs => [$tdir], output_dir => $tdir );
     is( $specific->{template},        'widget.tt',        'the subclass looks for the recipe fragment' );
     is( $specific->{global_template}, 'widget.global.tt', 'and its global one' );
 
@@ -348,7 +348,7 @@ subtest 'a distribution version of a recipe answers to the same name' => sub {
         use parent -norequire, 'Provisioner::Recipe::widget';
     }
     like(
-        exception { Provisioner::Recipe::Ubuntu::Deeper::widget->new( template_dirs => [$tdir], output_dir => $tdir ) },
+        exception { 'Provisioner::Recipe::Ubuntu::Deeper::widget'->new( template_dirs => [$tdir], output_dir => $tdir ) },
         qr/Could not extract recipe name/,
         'but only one level deep, so a class name that is not a recipe name is refused'
     );
@@ -357,8 +357,8 @@ subtest 'a distribution version of a recipe answers to the same name' => sub {
 subtest 'render_raw renders without going back through validate' => sub {
     my $tdir = tempdir( CLEANUP => 1 );
     open( my $fh, '>', "$tdir/inner.tt" ) or die $!;
-    print $fh 'inner sees [% thing %]';
-    close $fh;
+    print {$fh} 'inner sees [% thing %]';
+    close($fh) or die "Could not close $tdir/inner.tt: $!";
 
     # What an enrich needs: it runs inside validate, so asking for a render that
     # validates would call it again, and again.  This one asserts that by
@@ -380,10 +380,10 @@ subtest 'render_raw renders without going back through validate' => sub {
         }
     }
 
-    my $r = Provisioner::Recipe::embedder->new( template_dirs => [$tdir], output_dir => $tdir );
+    my $r = 'Provisioner::Recipe::embedder'->new( template_dirs => [$tdir], output_dir => $tdir );
     open( $fh, '>', "$tdir/embedder.tt" ) or die $!;
-    print $fh 'outer got: [% embedded %]';
-    close $fh;
+    print {$fh} 'outer got: [% embedded %]';
+    close($fh) or die "Could not close $tdir/embedder.tt: $!";
 
     is( $r->render( thing => 'a value' ),      'outer got: inner sees a value', 'a recipe can put one of its templates inside another' );
     is( $Provisioner::Recipe::embedder::CALLS, 1,                               'and enrich ran once rather than recursing' );
@@ -395,14 +395,14 @@ subtest 'generate_files writes what template_files names' => sub {
 
     mkdir "$tdir/files";
     open( my $fh, '>', "$tdir/files/gen.rendered.tt" ) or die $!;
-    print $fh 'for [% domain %]';
-    close $fh;
+    print {$fh} 'for [% domain %]';
+    close($fh) or die "Could not close $tdir/files/gen.rendered.tt: $!";
 
     # A name that does not end in .tt is copied rather than rendered, which is
     # what you want for something with no variables in it.
     open( $fh, '>', "$tdir/files/gen.verbatim.conf" ) or die $!;
-    print $fh 'left [% alone %]';
-    close $fh;
+    print {$fh} 'left [% alone %]';
+    close($fh) or die "Could not close $tdir/files/gen.verbatim.conf: $!";
 
     {
 
@@ -414,7 +414,7 @@ subtest 'generate_files writes what template_files names' => sub {
         }
     }
 
-    my @written = Provisioner::Recipe::gen->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.test' );
+    my @written = 'Provisioner::Recipe::gen'->new( template_dirs => [$tdir], output_dir => $out )->generate_files( $out, domain => 'vm.example.test' );
 
     is_deeply( [ sort @written ], [qw{rendered.conf verbatim.conf}], 'and says what it wrote, relative to where' );
     is( File::Slurper::read_text("$out/rendered.conf"), 'for vm.example.test', 'a .tt is rendered' );

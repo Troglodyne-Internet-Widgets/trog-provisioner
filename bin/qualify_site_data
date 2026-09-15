@@ -187,7 +187,7 @@ sub qualify_recipes {
         my $changed = 0;
         my @out     = map {
             my $line = $_;
-            if ( $line =~ m/\A([A-Za-z0-9_-]+):\s*\z/ && $1 ne '_base' && $1 ne '_shared' ) {
+            if ( $line =~ m/\A([\w-]+):\s*\z/ && $1 ne '_base' && $1 ne '_shared' ) {
                 print "  $file: $1 -> $1.$tld\n";
                 $changed = 1;
                 "$1.$tld:";

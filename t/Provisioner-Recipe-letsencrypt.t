@@ -28,7 +28,7 @@ use FindBin::libs;
 # with, so a fleet that happened to name one of the domains below would change
 # what this file asserts.
 ## no critic (CompileTime) -- setting it at compile time is the point.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::letsencrypt();
@@ -128,7 +128,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # rendered no export, because new_config supplies an empty token before the
     # depsolver has added the pdns this recipe asks for.
     my $hook = $slurp->('domain.hook');
-    like( $hook, qr/^export LEXICON_POWERDNS_AUTH_TOKEN="[0-9a-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
+    like( $hook, qr/^export LEXICON_POWERDNS_AUTH_TOKEN="[\da-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
 };
 
 subtest 'a reserved TLD is served locally whatever reached the module list' => sub {

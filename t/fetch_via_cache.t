@@ -92,8 +92,8 @@ subtest 'on: the hosts the cache answers for, and no others' => sub {
 
     is( $run->{status}, 0,                                                    'it exits zero' );
     is( $run->{hosts},  $HOSTS . block(qw{www.cpan.org codeload.github.com}), 'the two it answers for point at it, after what was already there' );
-    like( $run->{err}, qr/\Q$CACHE\E does not answer for github\.com, so it comes from upstream/, 'and the one it does not is left alone, saying so' );
-    like( $run->{out}, qr/through the cache at \Q$CACHE\E: www\.cpan\.org codeload\.github\.com/, 'saying which went through it' );
+    like( $run->{err}, qr/\Q$CACHE\E does not answer for github\.com, so it comes from upstream/, 'and the one it does not is left alone, saying so' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $run->{out}, qr/through the cache at \Q$CACHE\E: www\.cpan\.org codeload\.github\.com/, 'saying which went through it' );                        ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     is( File::Slurper::read_text("$dir/anchor.crt"),                  "an authority\n", 'the authority is trusted' );
     is( ( grep { $_ eq 'update-ca-certificates' } @{ $run->{log} } ), 1,                'and the trust store rebuilt with it' );
@@ -101,7 +101,7 @@ subtest 'on: the hosts the cache answers for, and no others' => sub {
     # By name, at the address, and trusting nothing but the authority: what the
     # guest will do once /etc/hosts says so, asked before it does.
     my ($asked) = grep { index( $_, 'www.cpan.org' ) >= 0 } @{ $run->{log} };
-    like( $asked, qr{--resolve www\.cpan\.org:443:\Q$CACHE\E --cacert \Q$dir\E/ca\.crt https://www\.cpan\.org/fetchcache-status\z}, 'each asked for by name, at the cache, trusting the authority alone' );
+    like( $asked, qr{--resolve www\.cpan\.org:443:\Q$CACHE\E --cacert \Q$dir\E/ca\.crt https://www\.cpan\.org/fetchcache-status\z}, 'each asked for by name, at the cache, trusting the authority alone' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'on twice: the second answer replaces the first' => sub {

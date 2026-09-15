@@ -25,7 +25,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -97,7 +97,7 @@ subtest 'the refresh goes through that same unit' => sub {
     my ( $dir, undef ) = generated( refresh => '30 4 * * 6' );
     my $cron = slurp( $dir, 'aptmirror.cron' );
 
-    like( $cron, qr/^30 4 \* \* 6 root systemctl start --no-block apt-mirror\.service$/m, 'on the configured schedule' );
+    like( $cron, qr/^30 4 \* \* 6 root systemctl start --no-block apt-mirror\.service$/m, 'on the configured schedule' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # Starting the unit rather than running apt-mirror is what stops a refresh
     # landing mid-sync from running a second one over the same spool: systemd
@@ -123,7 +123,7 @@ subtest 'the vhost answers for the address, not only the name' => sub {
     unlike( $vhost, qr/default_server/, 'without claiming default_server' );
 
     like( $vhost, qr{^\s+location /ubuntu/ \{$}m,                                             'served at the path the distro tells guests to use' );
-    like( $vhost, qr{^\s+alias /var/spool/apt-mirror/mirror/archive\.ubuntu\.com/ubuntu/;$}m, 'out of where apt-mirror actually puts it' );
+    like( $vhost, qr{^\s+alias /var/spool/apt-mirror/mirror/archive\.ubuntu\.com/ubuntu/;$}m, 'out of where apt-mirror actually puts it' );            ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $vhost, qr{^\s+location = /mirror-status \{$}m,                                     'and says when it last finished a sync' );
 
     unlike( $vhost, qr/listen 443|ssl_certificate/, 'no TLS: the guest certificate is self-signed and apt will not fetch through one' );
@@ -135,7 +135,7 @@ subtest 'where the copy lands follows from the upstream' => sub {
     # written down -- and the vhost and the fragment have to name the same one.
     my ( $dir, undef, $recipe, $vars ) = generated( upstream => 'http://mirror.example.test/ubuntu-ports', spool => '/srv/mirror' );
 
-    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias /srv/mirror/mirror/mirror\.example\.test/ubuntu-ports/;}, 'the alias follows upstream and spool' );
+    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias /srv/mirror/mirror/mirror\.example\.test/ubuntu-ports/;}, 'the alias follows upstream and spool' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     like(
         exception { generated( upstream => 'mirror.example.test' ) },

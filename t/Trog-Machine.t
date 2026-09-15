@@ -31,19 +31,19 @@ use_ok('Trog::Machine') or BAIL_OUT('Trog::Machine does not load; the install is
 
 # A machine reached over the network, which none of these ever open a
 # connection to: everything asserted on here is decided before rsync runs.
-sub remote {
+sub remote (%overrides) {
     return Trog::Machine->new(
         host     => 'hv.test',
         user     => 'doge',
         port     => 2222,
         key_path => '/bogus/domains/vm.test/key.rsa',
-        @_,
+        %overrides,
     );
 }
 
 # The same object, but the machine is us.  rsync still runs; ssh does not.
-sub here {
-    my $machine = Trog::Machine->new(@_);
+sub here (@args) {
+    my $machine = Trog::Machine->new(@args);
     my $mock    = Test::MockModule->new('Trog::Machine');
     $mock->redefine( is_local => sub { 1 } );
     return ( $machine, $mock );

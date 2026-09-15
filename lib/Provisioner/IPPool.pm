@@ -259,7 +259,10 @@ sub assign {
 
     if ( !defined $chosen ) {
         my $err = $@ || "Could not assign an IP to $domain\n";
-        eval { $db->do('ROLLBACK') };
+        eval { $db->do('ROLLBACK'); 1 } or do {
+
+            # The failure worth reporting is $err, not a rollback of it that could not run.
+        };
         die $err;
     }
 
@@ -463,7 +466,7 @@ sub _guest_addresses {
     foreach my $line ( split "\n", $said ) {
         my ( $domain, $ip ) = split "\t", $line, 2;
         next unless defined $domain && length $domain;
-        next unless defined $ip     && $ip =~ m/\A[0-9]+(?:[.][0-9]+){3}\z/;
+        next unless defined $ip     && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
 
         # A domain answers on the NAT bridge as well, so it turns up more than
         # once.  Which of its addresses belongs to the pool is decided by the
@@ -511,7 +514,7 @@ sub _live_addresses {
     # Unquoted addresses, then the whole script quoted once: these come out of
     # the pool as numbers and need no quoting of their own, and quoting them
     # individually closed the sh -c around them, so the sweep never ran at all.
-    my @addresses = grep { m/\A[0-9]+(?:[.][0-9]+){3}\z/ } @$pool;
+    my @addresses = grep { m/\A\d+(?:[.]\d+){3}\z/ } @$pool;
     my $script    = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } @addresses;
     $script .= " wait; ip -4 neigh show dev $bridge";
 
@@ -520,12 +523,12 @@ sub _live_addresses {
 
     my ( %live, %mac );
     foreach my $line ( split "\n", $said ) {
-        if ( my ($answered) = $line =~ m/\ALIVE\s+([0-9]+(?:[.][0-9]+){3})\z/ ) {
+        if ( my ($answered) = $line =~ m/\ALIVE\s+(\d+(?:[.]\d+){3})\z/ ) {
             $live{$answered} = 1;
             next;
         }
 
-        my ( $ip, $hw ) = $line =~ m/\A([0-9]+(?:[.][0-9]+){3})\s+lladdr\s+(\S+)/ or next;
+        my ( $ip, $hw ) = $line =~ m/\A(\d+(?:[.]\d+){3})\s+lladdr\s+(\S+)/ or next;
         $mac{$ip}  = $hw;
         $live{$ip} = 1 if $line =~ m/\bREACHABLE\b/;
     }
@@ -538,7 +541,7 @@ sub _live_addresses {
 # to stop everything else being recorded.
 sub _resolve {
     my ($host) = @_;
-    return $host if $host =~ m/\A[0-9]+(?:[.][0-9]+){3}\z/;
+    return $host if $host =~ m/\A\d+(?:[.]\d+){3}\z/;
 
     require Socket;
     my $packed = Socket::inet_aton($host) or return undef;

@@ -90,7 +90,7 @@ C<user@host>, or the name and address together when we have both.
 
 =cut
 
-sub name { return $_[0]->{name} // $_[0]->ssh_host }
+sub name ($self) { return $self->{name} // $self->ssh_host }
 
 sub describe {
     my ($self) = @_;

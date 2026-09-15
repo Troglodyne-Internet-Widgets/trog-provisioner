@@ -16,6 +16,7 @@ t/new_guest.t - bin/new_guest and bin/recipes, the two front ends to the cookboo
 =cut
 
 use Test::More;
+use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stderr};
 use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
@@ -30,7 +31,7 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 my $script = "$FindBin::Bin/../bin/new_guest";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
@@ -57,7 +58,7 @@ subtest 'a default hostname is unique, and under a TLD reserved for this' => sub
     my $one = Trog::Bin::NewGuest::default_hostname();
     my $two = Trog::Bin::NewGuest::default_hostname();
 
-    like( $one, qr/\A[0-9a-f-]{36}\.test\z/, 'a UUID under .test' );
+    like( $one, qr/\A[\da-f-]{36}\.test\z/, 'a UUID under .test' );
     isnt( $one, $two, 'and a different one each time' );
 };
 
@@ -156,11 +157,11 @@ subtest 'writing a guest' => sub {
 
     # A hostname collision is the usual reason to find a file already there,
     # and quietly replacing somebody's configuration is not a good answer.
-    eval {
-        quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname scratch.test ntp}) } );
+    my $err = exception {
+        quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname scratch.test ntp}) } )
     };
-    like( $@, qr/already there/, 'refuses to overwrite' );
-    like( $@, qr/--force/,       'and says what to do about it' );
+    like( $err, qr/already there/, 'refuses to overwrite' );
+    like( $err, qr/--force/,       'and says what to do about it' );
 
     is(
         quietly( sub { Trog::Bin::NewGuest::main(qw{--force --hostname scratch.test ntp}) } ), 0,
@@ -172,19 +173,22 @@ subtest 'it checks every recipe name before writing any of the file' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 
-    eval {
-        quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname x.test ntp nosuchrecipe alsobogus}) } );
+    my $err = exception {
+        quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname x.test ntp nosuchrecipe alsobogus}) } )
     };
-    like( $@, qr/'nosuchrecipe'/, 'names the bad one' );
-    like( $@, qr/'alsobogus'/,    'and the other one, rather than stopping at the first' );
+    like( $err, qr/'nosuchrecipe'/, 'names the bad one' );
+    like( $err, qr/'alsobogus'/,    'and the other one, rather than stopping at the first' );
     ok( !-e "$dir/recipes.d/x.test.yaml", 'and wrote nothing' );
 };
 
 subtest 'a hostname has to be one' => sub {
-    eval {
-        quietly( sub { Trog::Bin::NewGuest::main(qw{--stdout --hostname bare ntp}) } );
-    };
-    like( $@, qr/not a fully qualified domain name/, 'a bare label is refused' );
+    like(
+        exception {
+            quietly( sub { Trog::Bin::NewGuest::main(qw{--stdout --hostname bare ntp}) } )
+        },
+        qr/not a fully qualified domain name/,
+        'a bare label is refused'
+    );
 };
 
 subtest 'the document goes to stdout and the commentary to stderr' => sub {

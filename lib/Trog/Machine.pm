@@ -10,6 +10,7 @@ use File::Basename();
 use File::Path();
 use File::Copy();
 use File::Temp();
+use List::Util qw{any};
 use File::Rsync();
 use File::Slurper();
 use IPC::Run3();
@@ -124,10 +125,10 @@ What to call this machine in an error message.
 
 =cut
 
-sub ssh_host { return $_[0]->{host} }
-sub ssh_user { return $_[0]->{user} }
-sub ssh_port { return $_[0]->{port} // 22 }
-sub ssh_key  { return $_[0]->{key_path} }
+sub ssh_host ($self) { return $self->{host} }
+sub ssh_user ($self) { return $self->{user} }
+sub ssh_port ($self) { return $self->{port} // 22 }
+sub ssh_key  ($self) { return $self->{key_path} }
 sub is_local { return 0 }
 
 sub ssh_target {
@@ -137,7 +138,7 @@ sub ssh_target {
     return defined $user ? "$user\@$host" : $host;
 }
 
-sub describe { return $_[0]->ssh_target // 'this machine' }
+sub describe ($self) { return $self->ssh_target // 'this machine' }
 
 =head1 THE MACHINE A GUEST FETCHES FROM
 
@@ -323,9 +324,9 @@ sub sudo_password {
     return $SUDO_PASSWORD{ $self->_sudo_key };
 }
 
-sub _sudo_key { return $_[0]->ssh_target // 'localhost' }
+sub _sudo_key ($self) { return $self->ssh_target // 'localhost' }
 
-sub _remember { return $SUDO_PASSWORD{ $_[0]->_sudo_key } = $_[1] }
+sub _remember ( $self, $password ) { return $SUDO_PASSWORD{ $self->_sudo_key } = $password }
 
 # A seam, so the no-terminal path is testable somewhere that has one.
 sub _have_terminal { return -t STDIN ? 1 : 0 }
@@ -499,7 +500,7 @@ sub file_exists {
     my ( $self, $path ) = @_;
     if ( $self->is_local ) {
         open( my $fh, '<', $path ) or return 0;
-        close $fh;
+        close($fh)                 or die "Could not close $path: $!";
         return 1;
     }
     return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
@@ -625,10 +626,10 @@ sub append_line {
 
     if ( $self->is_local ) {
         my $existing = eval { File::Slurper::read_text($path) };
-        return 1 if defined $existing && grep { $_ eq $line } split( "\n", $existing );
+        return 1 if defined $existing && any { $_ eq $line } split( "\n", $existing );
         open( my $fh, '>>', $path ) or die "Could not open $path: $!";
         print {$fh} "$line\n";
-        close($fh);
+        close($fh) or die "Could not close $path: $!";
         return 1;
     }
 
@@ -877,7 +878,7 @@ sub _write_local {
 
     my $tmp = File::Temp->new( UNLINK => 1 );
     print {$tmp} $content;
-    close $tmp;
+    close($tmp) or die "Could not close $tmp: $!";
     my $ok = $self->run_sudo( qw{cp}, "$tmp", $path ) == 0;
     $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $path ) if $ok;
     return $ok ? 1 : 0;

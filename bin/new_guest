@@ -14,6 +14,7 @@ use FindBin::libs;
 
 use File::Basename();
 use File::Path qw{make_path};
+use List::Util qw{any};
 use File::Slurper();
 use File::Slurper::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
@@ -134,7 +135,7 @@ sub main {
 
     $hostname //= default_hostname();
     die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
-      unless $hostname =~ m/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\z/i;
+      unless $hostname =~ m/\A[[:alnum:]]([[:alnum:]-]*[[:alnum:]])?(\.[[:alnum:]]([[:alnum:]-]*[[:alnum:]])?)+\z/i;
 
     my ( $config, @todo ) = build(
         $hostname,
@@ -183,7 +184,7 @@ sub unique {
 sub readable {
     my ($path) = @_;
     open( my $fh, '<', $path ) or return 0;
-    close $fh;
+    close($fh)                 or die "Could not close $path: $!\n";
     return 1;
 }
 
@@ -224,7 +225,7 @@ sub build {
     # new_config requires it, being how the guest gets its payload at all.  If
     # _base configures it, which is the usual arrangement, leave it alone.
     my @wanted = @$recipes;
-    push @wanted, 'data' unless grep { $_ eq 'data' } @wanted or exists $base->{data};
+    push @wanted, 'data' unless any { $_ eq 'data' } @wanted or exists $base->{data};
 
     my %domain = ( _global => \%global );
     my @todo;

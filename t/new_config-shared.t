@@ -23,7 +23,7 @@ use FindBin::libs;
 # depend on which machine it runs on, and the pool it takes an address out of
 # has to be one of ours.
 ## no critic (CompileTime) -- setting it at compile time is the point.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::MockModule qw{strict};
@@ -38,7 +38,7 @@ use Provisioner::Cookbook();
 Provisioner::Cookbook->load('nosnap');
 
 require Trog::HV;
-require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
+require Trog::HV::Libvirt;
 
 # The two facts the generator asks a hypervisor for.  Answered here because what
 # this file is about is what the generator refuses, and asking a real one would
@@ -95,11 +95,11 @@ IPMAP
 
     my ( $ih, $ipmap_file ) = tempfile();
     print {$ih} $ipmap;
-    close $ih;
+    close($ih) or die "Could not close $ipmap_file: $!";
 
     my ( $rh, $recipe_file ) = tempfile();
     print {$rh} YAML::XS::Dump( \%recipes );
-    close $rh;
+    close($rh) or die "Could not close $recipe_file: $!";
 
     # Nothing to reset between runs: each one generates the host again, which
     # replaces what it recorded last time.

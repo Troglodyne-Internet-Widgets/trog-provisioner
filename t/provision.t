@@ -30,7 +30,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
 use Provisioner::Cookbook();
 
@@ -102,9 +102,9 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     $bin_mock->redefine( read_seed => sub { die "far enough\n" } );
 
     my $run = sub {
+        my @args = @_;
         Trog::HV->forget();
-        eval { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, @_ ) };
-        like( $@, qr/\Afar enough$/m, 'got as far as the hypervisor being built' );
+        like( exception { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, @args ) }, qr/\Afar enough$/m, 'got as far as the hypervisor being built' );
         return Trog::HV->new();
     };
 
@@ -489,12 +489,11 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
 
     # Nothing matching at all is an error that says what it looked for.
     my $neither = { network => { ethernets => { enp0s9 => { addresses => [] } } } };
-    eval { Trog::Bin::Provisioner::primary_adapter( $neither, $config, $mac ) };
-    like( $@, qr/Could not find the outbound adapter/, 'otherwise it says so' );
-    like( $@, qr/enp0s9/,                              'listing what the guest does have' );
+    my $err     = exception { Trog::Bin::Provisioner::primary_adapter( $neither, $config, $mac ) };
+    like( $err, qr/Could not find the outbound adapter/, 'otherwise it says so' );
+    like( $err, qr/enp0s9/,                              'listing what the guest does have' );
 
-    eval { Trog::Bin::Provisioner::primary_adapter( {}, $config, $mac ) };
-    like( $@, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
+    like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $config, $mac ) }, qr/No ethernets at all/, 'and a netplan with no ethernets is its own error' );
 };
 
 # Reusing a guest means provisioning onto one that is already up, which is how a
@@ -578,8 +577,8 @@ sub _layered {
 
     $guest->redefine(
         new => sub {
-            my ( $class, %params ) = @_;
-            @seen{qw{host key}} = @params{qw{host key_path}};
+            my ( $class, %guest_args ) = @_;
+            @seen{qw{host key}} = @guest_args{qw{host key_path}};
             return bless {}, $class;
         }
     );
@@ -623,7 +622,7 @@ sub _pod_section {
         -verbose  => 99,
         -sections => $sections,
     );
-    close $fh;
+    close($fh) or die "Could not close the POD read out of $file: $!";
     return $text // '';
 }
 

@@ -44,13 +44,13 @@ use Provisioner::Utils();
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 # Loaded so that blessing into it below blesses into something real, and so
 # Test::MockModule in strict mode has methods to find.  The backend rather than
 # Trog::HV, because that is where the libvirt methods these mocks replace live,
 # and Trog::HV requires it lazily.
-use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
 use Provisioner::Cookbook();
 
@@ -60,7 +60,7 @@ my $EMAIL     = q{o'brien&sons@test.test};
 my $RESOLVERS = [ '192.168.1.253', '8.8.8.8' ];
 
 # The guest's own configuration, as bin/new_config hands it over.
-sub settings {
+sub settings (%overrides) {
     return (
         domain        => $DOMAIN,
         ips           => ['192.168.1.10'],
@@ -84,7 +84,7 @@ sub settings {
         # What bin/new_config hands over as the ip pool's assignments, which is
         # how a mirror named by bare domain gets resolved to an address.
         ipmap => { 'm.test.test' => '192.168.1.9' },
-        @_,
+        %overrides,
     );
 }
 
@@ -161,7 +161,7 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     # basedir out of ipmap.cfg.  It used to be told the hypervisor's domain_dir,
     # which has been the wrong machine since the guest stopped fetching from
     # there -- the same path only by both of them defaulting to /opt/domains.
-    like( $setup, qr{transfer.\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );
+    like( $setup, qr{transfer.\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 # The documents a guest with no mirror configured gets, written out rather than
@@ -284,7 +284,7 @@ CONF
 
                 # Any private key container ssh will load: Net::SSH::Perl::Key
                 # writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.
-                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\A-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/) },
+                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\A-----BEGIN [[:upper:]\d ]*PRIVATE KEY-----/) },
                 { path => '/root/.ssh/id_rsa.pub', owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\Assh-rsa /) },
                 { path => '/root/setup.sh',        owner => 'root:root', permissions => '0775', defer => bool(1), content => re(qr/cloud-init status --wait/) },
 
@@ -322,11 +322,11 @@ subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
 
     # 59 is the last sexagesimal digit, so the quoting stops at exactly the
     # point PyYAML stops misreading.
-    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:59:22'), q{'52:54:00:11:59:22'}, '59 is still a base-60 digit' );
-    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:60:22'), '52:54:00:11:60:22',    'and 60 is not, so it needs no quoting' );
+    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:59:22'), q{'52:54:00:11:59:22'}, '59 is still a base-60 digit' );              ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    is( Provisioner::Recipe::ubuntu::_yaml('52:54:00:11:60:22'), '52:54:00:11:60:22',    'and 60 is not, so it needs no quoting' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 
     # It is a scalar rule, and must not reach into a structure being dumped.
-    is( Provisioner::Recipe::ubuntu::_yaml( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );
+    is( Provisioner::Recipe::ubuntu::_yaml( [qw{a b}] ), "- a\n- b", 'a list is dumped as it always was' );                            ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 };
 
 subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub {
@@ -379,7 +379,7 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
     # which writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.  Both
     # load; what matters is that the halves belong together, which is what
     # ssh_pubkey_from_private answers.
-    like( $first, qr/\A-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/, 'a domain with no key gets one' );
+    like( $first, qr/\A-----BEGIN [[:upper:]\d ]*PRIVATE KEY-----/, 'a domain with no key gets one' );
     is(
         Provisioner::Utils::ssh_pubkey_from_private("$dir/key.rsa"),
         ( File::Slurper::read_text("$dir/key.rsa.pub") =~ s/ [^ ]*\n?\z//r ),

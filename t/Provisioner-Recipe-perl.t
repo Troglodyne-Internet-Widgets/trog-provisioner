@@ -24,7 +24,7 @@ use FindBin::libs;
 # Never the installation's real /etc/trog-provisioner.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -123,7 +123,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
     my $bin = tempdir( CLEANUP => 1 );
     open( my $c, '>', "$bin/cpan_install" ) or die $!;
     print {$c} qq{#!/bin/bash\nprintf '%s\\n' "\$\@" > $bin/out\n};
-    close $c;
+    close($c) or die "Could not close $bin/cpan_install: $!";
     chmod( 0755, "$bin/cpan_install" );
 
     my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
@@ -134,6 +134,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
 
     open( my $got, '<', "$bin/out" ) or die $!;
     chomp( my @args = <$got> );
+    close($got) or die "Could not close $bin/out: $!";
     is_deeply( \@args, [ '--notest', 'install', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ], 'one argument per word, the space and the > included' );
 };
 

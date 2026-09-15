@@ -26,7 +26,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Provisioner::IPPool();
 use YAML::XS();
-use List::Util   qw{any uniq};
+use List::Util   qw{all any uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -137,8 +137,8 @@ hypervisor" means when it isn't this machine.
 
 =cut
 
-sub _coerce_array {
-    return \@_;
+sub _coerce_array (@values) {
+    return \@values;
 }
 
 # Which of these are lists.  Config::Simple hands back a bare string for a file
@@ -227,7 +227,7 @@ sub place_guest_secrets {
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
-    my %values = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
+    my %values = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), %needed );
 
     foreach my $path ( sort keys %$wanted ) {
         my $value = $values{$path};
@@ -351,7 +351,7 @@ sub _public_half {
 sub _readable {
     my ($path) = @_;
     open( my $fh, '<', $path ) or return 0;
-    close $fh;
+    close($fh)                 or die "Could not close $path: $!\n";
     return 1;
 }
 
@@ -423,10 +423,10 @@ sub main {
       unless $no_config || defined $domain_dir_from_cli;
 
     my $cfile = "$domain_dir/$domain/provision.conf";
-    close _must_read( $cfile, "No provision.conf for $domain" );
+    close( _must_read( $cfile, "No provision.conf for $domain" ) ) or die "Could not close $cfile: $!\n";
 
     my $udf = "$domain_dir/$domain/users.yaml";
-    close _must_read( $udf, "No users.yaml for $domain" );
+    close( _must_read( $udf, "No users.yaml for $domain" ) ) or die "Could not close $udf: $!\n";
 
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
@@ -445,7 +445,7 @@ sub main {
 
     $domain_dir = $hv->domain_dir;
     my $data = "$domain_dir/$domain/data.tar.gz";
-    close _must_read( $data, "No data to host for $domain" );
+    close( _must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
 
     # Its storage pool, and a fix for a sillyness in virtiofs -- or nothing, on a
     # hypervisor that has neither.
@@ -458,7 +458,7 @@ sub main {
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
         my $dcfile = "$domain_dir/$depends/provision.conf";
-        close _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" );
+        close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
         my $dconfig = Config::Simple->new($dcfile);
 
         #XXX should probably die here if the admin_users differ!
@@ -541,7 +541,7 @@ sub generate_config {
 
     push @INC, '.';
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
-    require $generator;    ## no critic (Modules::RequireBarewordIncludes)
+    require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
 
     # Which here means only that a guest that is up keeps the key it is up with;
@@ -639,7 +639,7 @@ sub provision_domain {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
-    return reprovision_guest( $hv, $config, $domain, $reuse, $reuser, $depends ) if $reuse;
+    return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends ) if $reuse;
 
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This
@@ -666,8 +666,8 @@ sub provision_domain {
 # the guest built for foo.test rather than getting one of its own.  Only two
 # things here are the hypervisor's: what MAC the guest's second interface has,
 # and clearing anything left standing under this domain's own name.
-sub reprovision_guest {
-    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @_;
+sub reprovision_guest (%args) {
+    my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @args{qw{hv config domain reuse reuser depends}};
 
     return ( $reuser, $reuse ) if $dryrun;
 
@@ -689,7 +689,7 @@ sub reprovision_guest {
     my $guest = Trog::Guest->new( name => $domain, host => $reuse, user => $reuser, key_path => $key );
 
     refresh_cloud_init( $guest, $domain_dir, $domain );
-    merge_guest_addresses( $guest, $hv, $config, $domain_dir, $domain, $built_for );
+    merge_guest_addresses( guest => $guest, hv => $hv, config => $config, domain_dir => $domain_dir, domain => $domain, built_for => $built_for );
 
     print "Syncing setup script\n";
     $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
@@ -727,8 +727,8 @@ sub refresh_cloud_init {
 #
 # The interface belongs to $built_for, the domain the machine was built for,
 # while the addresses belong to $domain -- two different names on a shared host.
-sub merge_guest_addresses {
-    my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @_;
+sub merge_guest_addresses (%args) {
+    my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @args{qw{guest hv config domain_dir domain built_for}};
 
     my $ips         = _coerce_array( $config->param('ips') );
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
@@ -807,7 +807,7 @@ sub read_seed {
     my $dir    = Trog::HV->new()->domain_dir . "/$domain";
     my @files  = qw{user-data meta-data network-config};
 
-    unless ( any { !_readable("$dir/$_") } @files ) {
+    if ( all { _readable("$dir/$_") } @files ) {
         return map { $_ => File::Slurper::read_text("$dir/$_") } @files;
     }
 

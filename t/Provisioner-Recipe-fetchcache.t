@@ -28,7 +28,7 @@ use FindBin::libs;
 # there, and what these assert on should not depend on the machine.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::fetchcache();
@@ -102,7 +102,7 @@ subtest 'the upstreams: every host a recipe downloads from, and whatever an oper
 
     # On most guests this is the only server on 443, and so the default one for
     # any name at all.
-    my ($guard) = $defaults =~ m/^map \$host \$fetchcache_allowed \{\n\s+"~\^\(\?:(.*?)\)\$" 1;$/m;
+    my ($guard) = $defaults =~ m/^map \$host \$fetchcache_allowed \{\n\s+"~\^\(\?:(.*?)\)\$" 1;$/m;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is_deeply( alternatives($guard), \@declared, 'a request for any other host is told apart' );
     like( $defaults, qr/if \(\$fetchcache_allowed = 0\) \{\n\s+return 421;/, 'and refused' );
 };
@@ -154,10 +154,10 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
         # for as long as that kind is fresh.
         like(
             $vhost,
-            qr{location = /\.fetchcache/$name \{\n\s+internal;\n\s+proxy_cache_valid 200 \Q$fresh\E;\n(?:\s+proxy_cache_use_stale off;\n)?\s+error_page 301 302 303 307 308 = \@follow_$name;\n\s+proxy_pass https://\$host\$request_uri;},
+            qr{location = /\.fetchcache/$name \{\n\s+internal;\n\s+proxy_cache_valid 200 \Q$fresh\E;\n(?:\s+proxy_cache_use_stale off;\n)?\s+error_page 301 302 303 307 308 = \@follow_$name;\n\s+proxy_pass https://\$host\$request_uri;},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$name: fresh for $fresh, fetched as the guest asked for it, redirects followed"
         );
-        like( $vhost, qr/location \@follow_$name \{.*?proxy_cache_valid 200 \Q$fresh\E;.*?proxy_pass \$fetchcache_location;/s, "$name: and a followed redirect is kept as long" );
+        like( $vhost, qr/location \@follow_$name \{.*?proxy_cache_valid 200 \Q$fresh\E;.*?proxy_pass \$fetchcache_location;/s, "$name: and a followed redirect is kept as long" );                                                             ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # nginx takes the first regex in a map that matches.
@@ -177,13 +177,13 @@ subtest 'each kind of URL gets its own freshness, and its own redirect handling'
     like( $vhost,      qr/^\s+proxy_cache_use_stale error timeout/m, 'and the server still serves stale for everything else' );
     like( $map // q{}, qr/^\s+default default;$/m,                   'and anything else is the default kind' );
 
-    like( $vhost, qr{location / \{.*?rewrite \^ /\.fetchcache/\$fetchcache_class last;}s, 'every request goes out through the location for its kind' );
+    like( $vhost, qr{location / \{.*?rewrite \^ /\.fetchcache/\$fetchcache_class last;}s, 'every request goes out through the location for its kind' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'what is never kept goes upstream as it came' => sub {
     my ($vhost) = generated();
 
-    like( $vhost, qr{if \(\$request_method !~ "\^\(\?:GET\|HEAD\)\$"\) \{\n\s+rewrite \^ /\.fetchcache/pass last;}, 'nothing but GET and HEAD is kept' );
+    like( $vhost, qr{if \(\$request_method !~ "\^\(\?:GET\|HEAD\)\$"\) \{\n\s+rewrite \^ /\.fetchcache/pass last;}, 'nothing but GET and HEAD is kept' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     my ($pass) = $vhost =~ m{(location = /\.fetchcache/pass \{.*?\n    \})}s;
     ok( defined $pass, 'and what is not has a location of its own' ) or return;
@@ -202,7 +202,7 @@ subtest 'a followed redirect is kept under the URL the guest asked for, and goes
     like( $vhost, qr/^\s+proxy_cache_key \$host\$request_uri;$/m, 'the key is the host and the request, which no rewrite or internal redirect changes' );
     like( $vhost, qr/^\s+recursive_error_pages on;$/m,            'a second hop is followed too' );
 
-    my @guards = $vhost =~ m/if \(\$fetchcache_location ~ "\^https:\/\/\(\(\?:([^)]*)\)\)\/"\) \{\n\s+set \$fetchcache_next \$1;\n\s+\}\n\s+if \(\$fetchcache_next = ""\) \{\n\s+return 502;/g;
+    my @guards = $vhost =~ m/if \(\$fetchcache_location ~ "\^https:\/\/\(\(\?:([^)]*)\)\)\/"\) \{\n\s+set \$fetchcache_next \$1;\n\s+\}\n\s+if \(\$fetchcache_next = ""\) \{\n\s+return 502;/g;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     ok( scalar @guards, 'a redirect is checked before it is followed' ) or return;
     is_deeply( alternatives($_), allowed($vhost), 'against the hosts it answers to, and only over https' ) for @guards;
 
@@ -210,10 +210,10 @@ subtest 'a followed redirect is kept under the URL the guest asked for, and goes
     # what perls there are from, redirects to www.cpan.org, which adds the
     # slash back with an http:// Location -- and refusing that was a 502, and
     # a guest with no perl.
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^http:\/\/\(\.\*\)\$"\) \{\n\s+set \$fetchcache_location "https:\/\/\$1";/,                  'a redirect to plain http is followed over https' );
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^http:\/\/\(\.\*\)\$"\) \{\n\s+set \$fetchcache_location "https:\/\/\$1";/,                  'a redirect to plain http is followed over https' );                   ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $vhost, qr/^\s+set \$fetchcache_via \$host;$/m,                                                                                        'a redirect naming no host is on the host asked for' );
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/"\) \{\n\s+set \$fetchcache_location "https:\/\/\$fetchcache_via\$fetchcache_location";/, 'and made whole against it before it is checked' );
-    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/\/"\) \{\n\s+set \$fetchcache_location "https:\$fetchcache_location";/,                   'one naming no scheme is https' );
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/"\) \{\n\s+set \$fetchcache_location "https:\/\/\$fetchcache_via\$fetchcache_location";/, 'and made whole against it before it is checked' );                    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr/if \(\$fetchcache_location ~ "\^\/\/"\) \{\n\s+set \$fetchcache_location "https:\$fetchcache_location";/,                   'one naming no scheme is https' );                                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
     like( $vhost, qr/^\s+set \$fetchcache_via \$fetchcache_next;$/m,                                                                             'and after a hop, a relative one is on the host that hop went to' );
 };
 
@@ -296,7 +296,7 @@ subtest 'the certificate names every host it answers to, and the authority signe
     my ( $vhost, undef, $dir ) = generated( upstreams => { 'upstream.test' => 1 } );
     my $authority = $FETCHCACHE->authority();
 
-    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)/sg;
+    my @chain = File::Slurper::read_text("$dir/fetchcache.crt") =~ m/(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)/sg;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is( scalar @chain, 2,                                              'a certificate with one more after it, as nginx wants a chain' );
     is( $chain[1],     File::Slurper::read_text( $authority->{cert} ), 'which is the authority' );
 

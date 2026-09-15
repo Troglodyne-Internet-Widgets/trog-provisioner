@@ -12,13 +12,14 @@ t/Provisioner-Cookbook.t - the catalogue: what recipes exist, and what a config 
 =cut
 
 use Test::More;
+use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 
 use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use File::Temp();
 use File::Slurper::Temp();
@@ -312,9 +313,9 @@ subtest 'has() and load()' => sub {
     is( Provisioner::Cookbook->load('ntp'), 'Provisioner::Recipe::ntp', 'loads and names the class' );
     isa_ok( Provisioner::Cookbook->load('ntp'), 'Provisioner::Recipe' );
 
-    eval { Provisioner::Cookbook->load('nosuchrecipe') };
-    like( $@, qr/No recipe named 'nosuchrecipe'/, 'says which name it did not know' );
-    like( $@, qr/bin\/recipes/,                   'and where to find the ones it does' );
+    my $err = exception { Provisioner::Cookbook->load('nosuchrecipe') };
+    like( $err, qr/No recipe named 'nosuchrecipe'/, 'says which name it did not know' );
+    like( $err, qr/bin\/recipes/,                   'and where to find the ones it does' );
 };
 
 subtest 'abstract() reads the file rather than loading it' => sub {
@@ -341,7 +342,7 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
 {
 
     package Provisioner::Recipe::t_scaffold;
-    our @ISA = ('Provisioner::Recipe');
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
 
     sub args {
         return (
@@ -593,7 +594,7 @@ subtest 'fetch_hosts: every host any recipe downloads from, once each' => sub {
     ok( ( grep { $_ eq 'www.cpan.org' } @hosts ), 'CPAN among them, which the perl recipe names' );
 
     # The cache writes each into a regex and a certificate.
-    my @bad = grep { !m/\A(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z\d](?:[a-z\d-]*[a-z\d])?\z/ } @hosts;
+    my @bad = grep { !m/\A(?:[[:lower:]\d](?:[[:lower:]\d-]*[[:lower:]\d])?\.)+[[:lower:]\d](?:[[:lower:]\d-]*[[:lower:]\d])?\z/ } @hosts;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is_deeply( \@bad, [], 'every one of them a plain, lowercase host name' );
 };
 

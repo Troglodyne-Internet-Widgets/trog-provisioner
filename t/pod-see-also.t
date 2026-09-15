@@ -32,6 +32,20 @@ ok( scalar( grep { m{/lib/.+\.pm\z} } @files ), "found the modules under $root/l
 
 foreach my $file ( sort @files ) {
     open( my $fh, '<', $file ) or die "$file: $!";
+    my ( $has, @nested ) = see_also($fh);
+    close($fh) or die "Could not close $file: $!";
+    next unless $has;
+
+    ( my $name = $file ) =~ s{\A\Q$root\E/}{};
+    is_deeply( \@nested, [], "$name has only paragraphs under its SEE ALSO, which is all dzil's SeeAlso section will read" )
+      or diag( 'Move SEE ALSO below these, or give them a =head1 of their own:', "\n", @nested );
+}
+
+done_testing();
+
+# Whether the POD has a SEE ALSO, and every command paragraph nested inside one.
+sub see_also {
+    my ($fh) = @_;
     my ( $has, $under, @nested );
     while ( my $line = <$fh> ) {
         if ( $line =~ /^=head1\s+(.*)/ ) {
@@ -41,12 +55,5 @@ foreach my $file ( sort @files ) {
         }
         push @nested, "line $.: $line" if $under && $line =~ /^=(?!cut\b|pod\b)\w/;
     }
-    close $fh;
-    next unless $has;
-
-    ( my $name = $file ) =~ s{\A\Q$root\E/}{};
-    is_deeply( \@nested, [], "$name has only paragraphs under its SEE ALSO, which is all dzil's SeeAlso section will read" )
-      or diag( 'Move SEE ALSO below these, or give them a =head1 of their own:', "\n", @nested );
+    return ( $has, @nested );
 }
-
-done_testing();

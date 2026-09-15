@@ -17,7 +17,7 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::Fatal      qw{exception};
@@ -48,8 +48,15 @@ sub guest_that {
 }
 
 sub refresh {
-    my (@args) = @_;
-    return Trog::Provisioner::Config::Generator::refresh_salvage( qw{192.168.1.9 admin /nonexistent mariadb}, @args );
+    my ( $commands, $watched ) = @_;
+    return Trog::Provisioner::Config::Generator::refresh_salvage(
+        static_ip  => '192.168.1.9',
+        admin_user => 'admin',
+        cfg_dir    => '/nonexistent',
+        module     => 'mariadb',
+        commands   => $commands,
+        watched    => $watched,
+    );
 }
 
 # Both halves of a salvage want the guest -- refresh_salvage once a module, the
@@ -66,15 +73,15 @@ subtest 'one connection per guest, however many times a run asks for one' => sub
         }
     );
 
-    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
-    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});
+    my $first = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my $again = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.1/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 
     is( $built,       1,          'asking twice opens one connection' );
     is( $again,       $first,     'and the second ask gets the one already open' );
     is( $first->name, '10.0.0.1', 'the address it connects to is not the cidr it was given' );
 
     # A run configures several domains, and each of them is a different guest.
-    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});
+    my $other = Trog::Provisioner::Config::Generator::_salvage_guest(qw{10.0.0.2/24 admin /nonexistent});    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
     is( $built, 2, 'a different guest is a different connection' );
     isnt( $other, $first, 'rather than the last one answered for it' );
 };

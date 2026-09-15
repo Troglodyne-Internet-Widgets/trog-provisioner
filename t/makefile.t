@@ -89,7 +89,7 @@ subtest 'with hosts to fetch through a cache, it points them there and gives the
     unlike( $target // q{}, qr/touch/, 'and never marked done, so a make run again asks the cache again' );
 
     my ($recipe) = $mf =~ m/^all:[^\n]*\n((?:\t[^\n]*\n)+)/m;
-    like( $recipe // q{}, qr{post_install \|\| touch /root/\.postrun_failed\n\t/root/bin/fetch_via_cache off\n}, 'every host given back once the deferred work is done' );
+    like( $recipe // q{}, qr{post_install \|\| touch /root/\.postrun_failed\n\t/root/bin/fetch_via_cache off\n}, 'every host given back once the deferred work is done' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     ok( index( $recipe // q{}, 'fetch_via_cache off' ) < index( $recipe // q{}, "$STATE/test" ), 'and before the tests, which ask about the guest as it will be left' );
 };
 

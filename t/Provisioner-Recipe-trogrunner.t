@@ -27,7 +27,7 @@ use FindBin::libs;
 # should not depend on which machine they run on.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -407,7 +407,7 @@ subtest 'the symlink is made with -n, or the second provision fails' => sub {
     # Without -n, ln follows the link it made last time and puts the new one
     # inside the directory, which fails as "File exists" on a re-provision and
     # nowhere else.
-    like( $fragment, qr{ln -sfn '\Q$INSTALL/$DOMAIN\E/etc/trog-provisioner' /etc/trog-provisioner}, 'pointed at the domain copy' );
+    like( $fragment, qr{ln -sfn '\Q$INSTALL/$DOMAIN\E/etc/trog-provisioner' /etc/trog-provisioner}, 'pointed at the domain copy' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The domain directory is a home only when the domain names a service user,
     # and this recipe does not require one -- so a dotfile there is read by
