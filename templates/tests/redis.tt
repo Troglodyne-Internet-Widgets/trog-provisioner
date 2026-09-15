@@ -34,20 +34,15 @@ SKIP: {
     }
 }
 
-# The salvage half of remote_files, and the half that fails without a word.
-# bin/new_config fetches /var/lib/redis over sftp as [% admin_user %] with no
-# sudo, and the package leaves that directory redis:redis 0750 -- which reads
-# back as an empty directory rather than as a refusal, so a guest can look
-# perfectly well backed up for months.  Ask it the way the fetch asks it.
+# The salvage half of remote_files. bin/new_config fetches /var/lib/redis as
+# root now (issue #76), so the package's own redis:redis 0750 is enough for the
+# fetch to read it -- and issue #98 took back the admin group and the setgid bit
+# that used to buy that when the fetch had neither. Ask for the package default,
+# not the widened one.
 my @dstat = stat '/var/lib/redis';
-is(scalar getgrgid($dstat[5] // -1), '[% admin_user %]', 'the redis data directory is group [% admin_user %]');
-ok($dstat[2] & 02000, 'and setgid, so what redis writes next belongs to that group too')
+is(scalar getgrgid($dstat[5] // -1), 'redis', 'the redis data directory is still group redis');
+ok(!($dstat[2] & 02000), 'and not setgid, since nothing needs the group carried onto new files')
     or diag sprintf('mode is %04o', $dstat[2] & 07777);
-
-# The unit ships UMask=007, so redis writes 0660 and the group above is what
-# makes that readable.  Nothing here is worth much if the answer to this is no.
-my $denied = `su -s /bin/sh -c 'find /var/lib/redis ! -readable -print' [% admin_user %] 2>&1`;
-is($denied, '', '[% admin_user %] can read every last thing in it') or diag $denied;
 
 # And the restore half.  What was salvaged lands in the domain directory, and
 # restore_state moves it out of there -- so anything still sitting in it while
