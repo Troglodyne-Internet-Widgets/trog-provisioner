@@ -70,13 +70,19 @@ sub main {
         # this is being told what to type, and a file and line from inside this
         # script is not the part they need.
         ## no critic (ProhibitPrintSTDERR)
-        print {*STDERR} "No [ip_pool] section found in $cfile\n";
-        print {*STDERR} "Add one like:\n\n";
-        print {*STDERR} "  [ip_pool]\n";
-        print {*STDERR} "  addresses = 192.168.1.10 192.168.1.11 192.168.1.12\n\n";
-        print {*STDERR} "  OR\n\n";
-        print {*STDERR} "  [ip_pool]\n";
-        print {*STDERR} "  cidr = 192.168.1.0/24\n\n";
+        print {*STDERR} <<"GUIDANCE";
+No [ip_pool] section found in $cfile
+Add one like:
+
+  [ip_pool]
+  addresses = 192.168.1.10 192.168.1.11 192.168.1.12
+
+  OR
+
+  [ip_pool]
+  cidr = 192.168.1.0/24
+
+GUIDANCE
         ## use critic
         return 1;
     }
