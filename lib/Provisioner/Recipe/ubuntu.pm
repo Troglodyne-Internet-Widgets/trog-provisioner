@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::DistroRecipe};
 
@@ -204,7 +204,7 @@ sub _indent {
     return $text unless $indent;
 
     my $pad = q{ } x $indent;
-    $text =~ s/^(?=.)/$pad/mg;
+    $text =~ s/^(?=\N)/$pad/mg;
     return $text;
 }
 

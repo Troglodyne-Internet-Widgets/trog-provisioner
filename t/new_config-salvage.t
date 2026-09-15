@@ -4,7 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -104,7 +104,7 @@ subtest 'a refresh that failed having touched nothing is a warning' => sub {
     local $SIG{__WARN__} = sub { push @said, @_ };
     my $err = exception { refresh( ['dump-it'], ['/var/backups/db'] ) };
     is( $err, undef, 'it does not die' );
-    like( join( q{}, @said ), qr/as old as the last time/, 'and says what came down is stale' );
+    like( join( q{}, @said ), qr/as[ ]old[ ]as[ ]the[ ]last[ ]time/, 'and says what came down is stale' );
 };
 
 subtest 'a refresh that failed having changed something dies before anything is fetched' => sub {
@@ -114,8 +114,8 @@ subtest 'a refresh that failed having changed something dies before anything is 
     # a partial file, not a stale one, and fetching it would carry a corrupt
     # copy home and call it the state of the guest.
     my $err = exception { refresh( ['dump-it'], ['/var/backups/db'] ) };
-    like( $err, qr/after changing what it was refreshing/, 'it dies' );
-    like( $err, qr{/var/backups/db},                       'naming what it touched' );
+    like( $err, qr/after[ ]changing[ ]what[ ]it[ ]was[ ]refreshing/, 'it dies' );
+    like( $err, qr{/var/backups/db},                                 'naming what it touched' );
 };
 
 subtest 'each command is judged against what the one before it left' => sub {
@@ -140,7 +140,7 @@ subtest 'each command is judged against what the one before it left' => sub {
     local $SIG{__WARN__} = sub { push @said, @_ };
     my $err = exception { refresh( [ 'snapshot', 'dump-it' ], ['/var/backups/db'] ) };
     is( $err, undef, 'the second failure is not blamed for the first success' );
-    like( join( q{}, @said ), qr/as old as the last time/, 'and is reported as a stale refresh' );
+    like( join( q{}, @said ), qr/as[ ]old[ ]as[ ]the[ ]last[ ]time/, 'and is reported as a stale refresh' );
 };
 
 subtest 'a recipe that watches nothing is not probed at all' => sub {

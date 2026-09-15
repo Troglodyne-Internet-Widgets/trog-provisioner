@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -135,9 +135,9 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     my $xml = quietly( sub { domain_xml( $config, \%seed ) } );
 
     is_deeply( \%got, \%seed, 'all three reach the seed, as a hash' );
-    like( $xml, qr{<source file='/pool/seed\.iso'/>}, 'and the ISO is attached to the domain' );
-    like( $xml, qr{<name>vm\.example\.test</name>},   'which is named after the guest' );
-    like( $xml, qr{<source bridge='br0'/>},           'on the outbound bridge' );
+    like( $xml, qr{<source[ ]file='/pool/seed\.iso'/>}, 'and the ISO is attached to the domain' );
+    like( $xml, qr{<name>vm\.example\.test</name>},     'which is named after the guest' );
+    like( $xml, qr{<source[ ]bridge='br0'/>},           'on the outbound bridge' );
     unlike( $xml, qr/\[%/,  'with nothing of the template left in it' );
     unlike( $xml, qr/<tpm/, 'and no TPM, the hypervisor having none to make one mean anything' );
 
@@ -146,8 +146,8 @@ subtest 'the seed is built from all three NoCloud files' => sub {
     # file worth trusting.  See Trog::HV::has_tpm.
     $hv_mock->redefine( has_tpm => sub { 1 } );
     my $with_tpm = quietly( sub { domain_xml( $config, \%seed ) } );
-    like( $with_tpm, qr{<tpm model='tpm-crb'>},                     'a hypervisor with a TPM gives its guests one' );
-    like( $with_tpm, qr{<backend type='emulator' version='2\.0'/>}, 'emulated, and 2.0' );
+    like( $with_tpm, qr{<tpm[ ]model='tpm-crb'>},                       'a hypervisor with a TPM gives its guests one' );
+    like( $with_tpm, qr{<backend[ ]type='emulator'[ ]version='2\.0'/>}, 'emulated, and 2.0' );
     unlike( $with_tpm, qr/\[%/, 'still with nothing of the template left in it' );
     $hv_mock->redefine( has_tpm => sub { 0 } );
 
@@ -158,7 +158,7 @@ subtest 'the seed is built from all three NoCloud files' => sub {
             exception {
                 quietly( sub { domain_xml( $config, \%partial ) } )
             },
-            qr/No $missing to build the cloud-init seed/,
+            qr/No[ ]$missing[ ]to[ ]build[ ]the[ ]cloud-init[ ]seed/,
             "a missing $missing is an error"
         );
     }
@@ -260,7 +260,7 @@ subtest 'a middling hypervisor gets exactly the half of it that it can take' => 
     like( $xml, qr/<blockio/,        'and sector sizes, since 0.10.2' );
 
     unlike( $xml, qr/discard_no_unref=/, 'but not discard_no_unref, which wants libvirt 9.5 and qemu 8.1' );
-    unlike( $xml, qr/<iothread id=/,     'and no queue mapping, which wants libvirt 10.0 and qemu 9.0' );
+    unlike( $xml, qr/<iothread[ ]id=/,   'and no queue mapping, which wants libvirt 10.0 and qemu 9.0' );
 };
 
 subtest 'a current hypervisor gets the lot' => sub {
@@ -272,7 +272,7 @@ subtest 'a current hypervisor gets the lot' => sub {
     like( $xml, qr/discard='unmap'/,           'the guest fstrim reaches the host' );
     like( $xml, qr/discard_no_unref='on'/,     'without unrefing the cluster it just freed' );
     like(
-        $xml, qr/<blockio logical_block_size='512' physical_block_size='4096'\/>/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        $xml, qr/<blockio[ ]logical_block_size='512'[ ]physical_block_size='4096'\/>/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and the guest is told its sectors are 4K, before it lays a filesystem out for 512'
     );
 
@@ -294,7 +294,7 @@ subtest 'more than one iothread is only spread where qemu can spread it' => sub 
 
     my $xml = _tuned_xml(%new);
     like( $xml, qr/<iothreads>4<\/iothreads>/, 'the domain gets the pool it asked for' );
-    like( $xml, qr/<iothread id='4'\/>/,       'and the disk maps its queues across all of it' );
+    like( $xml, qr/<iothread[ ]id='4'\/>/,     'and the disk maps its queues across all of it' );
     unlike( $xml, qr/<driver[^>]*iothread='/, 'so it does not also name a single one, which is mutually exclusive' );
 
     # qemu 8.2 has iothreads but not iothread-vq-mapping, so the pool is still
@@ -302,7 +302,7 @@ subtest 'more than one iothread is only spread where qemu can spread it' => sub 
     my $unmapped = _tuned_xml( %new, qemu => 8_002_000 );
     like( $unmapped, qr/<iothreads>4<\/iothreads>/, 'a qemu without vq mapping still gets the pool' );
     like( $unmapped, qr/iothread='1'/,              'with the disk pinned to one of them' );
-    unlike( $unmapped, qr/<iothread id=/, 'rather than a mapping it would refuse to start with' );
+    unlike( $unmapped, qr/<iothread[ ]id=/, 'rather than a mapping it would refuse to start with' );
 };
 
 subtest 'the throttle is per disk, and says so when it cannot be honoured' => sub {
@@ -320,7 +320,7 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
     # it.  So this is the one knob here that is fatal rather than skipped.
     like(
         exception { _tuned_xml( libvirt => _libvirt( 0, 9, 0 ), qemu => 9_000_000, config => \%limits ) },
-        qr/need libvirt 0\.9\.8/, 'and a hypervisor too old to honour it fails the build'
+        qr/need[ ]libvirt[ ]0\.9\.8/, 'and a hypervisor too old to honour it fails the build'
     );
 
     like(
@@ -330,7 +330,7 @@ subtest 'the throttle is per disk, and says so when it cannot be honoured' => su
                 config  => { disk_total_iops_sec => 2000, disk_read_iops_sec => 1000 }
             );
         },
-        qr/never both/,
+        qr/never[ ]both/,
         'as does asking for a total and one of its halves, which libvirt refuses'
     );
 };
@@ -358,18 +358,18 @@ subtest 'a ZFS pool that refuses is told which of the two things it is' => sub {
     my %zfs = ( libvirt => 10_000_000, qemu => 9_000_000, fstype => 'zfs', direct_io => 0 );
 
     like(
-        _tuned_output( %zfs, zfs_version => '2.2.7' ), qr/Direct I\/O arrived in 2\.3, so this wants an upgrade/,
+        _tuned_output( %zfs, zfs_version => '2.2.7' ), qr/Direct[ ]I\/O[ ]arrived[ ]in[ ]2\.3,[ ]so[ ]this[ ]wants[ ]an[ ]upgrade/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a release without Direct I/O at all is told to upgrade'
     );
     like(
-        _tuned_output( %zfs, zfs_version => '2.3.1' ), qr/zfs get direct/,
+        _tuned_output( %zfs, zfs_version => '2.3.1' ), qr/zfs[ ]get[ ]direct/,
         'and one that has it is pointed at the pool and the dataset instead'
     );
 
     # 2.10 is a later release than 2.3, which a string comparison gets backwards
     # and would send somebody off to upgrade a version they already have.
     like(
-        _tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs get direct/,
+        _tuned_output( %zfs, zfs_version => '2.10.0' ), qr/zfs[ ]get[ ]direct/,
         'and 2.10 is read as later than 2.3, not earlier'
     );
 };
@@ -383,7 +383,7 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     # was given is the failure this asserts against.
     my $default = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ) );
     unlike( $default, qr/<partition>/, 'nothing written when the hypervisor names no partition' );
-    like( $default, qr/<source pool='tf_disks'/, 'and the pool everything has always used' );
+    like( $default, qr/<source[ ]pool='tf_disks'/, 'and the pool everything has always used' );
 
     # Both together, because both are named in one hypervisors.conf block and
     # they are the only two limits a guest can be held to: the pool is where a
@@ -395,7 +395,7 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
         hv      => { partition => '/machine/runner', pool_name => 'runner_disks' },
     );
     like( $confined, qr{<resource>\s*<partition>/machine/runner</partition>\s*</resource>}, 'the slice it was given' );                                                       ## no critic (RegularExpressions::ProhibitComplexRegexes)
-    like( $confined, qr/<source pool='runner_disks'/,                                       'out of the pool it was given, rather than the literal that used to be here' );
+    like( $confined, qr/<source[ ]pool='runner_disks'/,                                     'out of the pool it was given, rather than the literal that used to be here' );
 };
 
 # --- Which netplan entry gets the static IP ----------------------------------

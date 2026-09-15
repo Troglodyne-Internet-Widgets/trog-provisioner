@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Clone qw{clone};
 use Cwd();
@@ -345,7 +345,7 @@ sub abstract {
     my $path = $class->recipe_dir . "/$name.pm";
     open( my $fh, '<', $path ) or return undef;
     while ( my $line = <$fh> ) {
-        next unless $line =~ m/\A\s*#\s*ABSTRACT:\s*(.+?)\s*\z/;
+        next unless $line =~ m/\A\s*[#]\s*ABSTRACT:\s*(\N+?)\s*\z/;
         my $abstract = $1;
         close($fh) or die "Could not close $path: $!\n";
         return $abstract;

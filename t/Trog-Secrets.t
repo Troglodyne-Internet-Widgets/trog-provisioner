@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -30,7 +30,7 @@ subtest 'a reference names a group, an entry and a field' => sub {
     );
 
     foreach my $bad ( qw{nope/entry/password secret:group/entry secret: secret:a//c}, undef ) {
-        like( exception { Trog::Secrets->parse($bad) }, qr/Malformed secret/, "'" . ( $bad // 'undef' ) . "' is refused" );
+        like( exception { Trog::Secrets->parse($bad) }, qr/Malformed[ ]secret/, "'" . ( $bad // 'undef' ) . "' is refused" );
     }
 };
 
@@ -96,9 +96,9 @@ subtest 'lookup() says which part it could not find' => sub {
 
     # A reference that resolved to nothing would otherwise arrive on a guest as
     # an empty password, which is worse than not provisioning.
-    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:nope/b/password' ) }, qr/No group 'nope'/,              'a group that is not there' );
-    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/nope/password' ) }, qr/No entry 'nope' in group 'a'/, 'an entry that is not there' );
-    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/b/username' ) },    qr/has no username/,              'a field that was never set' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:nope/b/password' ) }, qr/No[ ]group[ ]'nope'/,                    'a group that is not there' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/nope/password' ) }, qr/No[ ]entry[ ]'nope'[ ]in[ ]group[ ]'a'/, 'an entry that is not there' );
+    like( exception { Trog::Secrets->lookup( $file, 'hunter2',        p => 'secret:a/b/username' ) },    qr/has[ ]no[ ]username/,                    'a field that was never set' );
     isnt( exception { Trog::Secrets->lookup( $file, 'wrong password', p => 'secret:a/b/password' ) }, undef, 'and a password that does not open it' );
 };
 
@@ -144,7 +144,7 @@ subtest 'apply() walks the path rather than eval-ing it' => sub {
 };
 
 subtest 'apply() refuses a path that leads nowhere' => sub {
-    like( exception { Trog::Secrets->apply( { a => 'not a ref' }, 'a/b/c' => 'value' ) }, qr/Could not follow 'a\/b\/c'/, 'rather than autovivifying its way through' );
+    like( exception { Trog::Secrets->apply( { a => 'not a ref' }, 'a/b/c' => 'value' ) }, qr/Could[ ]not[ ]follow[ ]'a\/b\/c'/, 'rather than autovivifying its way through' );
 };
 
 subtest 'the whole cycle, as new_config runs it' => sub {
@@ -191,7 +191,7 @@ subtest 'remember makes a secret once and keeps it' => sub {
         exception {
             Trog::Secrets->remember( $file, $pass, 'secret:empty/handed/password' => sub { '' } )
         },
-        qr/produced nothing/,
+        qr/produced[ ]nothing/,
         'a generator that makes nothing is an error rather than an empty secret'
     );
 
@@ -204,8 +204,8 @@ subtest 'remember makes a secret once and keeps it' => sub {
     my $err = exception {
         Trog::Secrets->remember( $file, $pass, 'secret:matrix/vm.test/signing_key' => sub { 'not a field it keeps' } )
     };
-    like( $err, qr/did not keep/,         'a field the database drops is an error at once' );
-    like( $err, qr/password or username/, 'and it says which fields there are' );
+    like( $err, qr/did[ ]not[ ]keep/,         'a field the database drops is an error at once' );
+    like( $err, qr/password[ ]or[ ]username/, 'and it says which fields there are' );
 };
 
 done_testing();

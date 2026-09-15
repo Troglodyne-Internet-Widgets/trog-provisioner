@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -152,7 +152,7 @@ subtest 'a credential we do not have is not a request we send' => sub {
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', application_credential_id => 'x', cache_dir => $dir ) },
       qr/application_credential_secret/, 'no secret';
     like exception { Trog::OpenStack::Auth->new( '', @CREDS, cache_dir => $dir ) },
-      qr/No Keystone endpoint/, 'no endpoint';
+      qr/No[ ]Keystone[ ]endpoint/, 'no endpoint';
 
     is scalar @REQUESTS, 0, 'and none of them tried the network';
 };
@@ -163,14 +163,14 @@ subtest 'a response that is missing the point is an error' => sub {
         return Test::FakeResponse->new( headers => {}, body => { token => { catalog => catalog() } } );
     };
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', @CREDS, cache_dir => $dir ) },
-      qr/returned no token/, 'no token header';
+      qr/returned[ ]no[ ]token/, 'no token header';
 
     $dir      = fresh();
     $RESPONSE = sub {
         return Test::FakeResponse->new( headers => { 'X-Subject-Token' => 't' }, body => { token => { catalog => [] } } );
     };
     like exception { Trog::OpenStack::Auth->new( 'https://k.example.net/v3', @CREDS, cache_dir => $dir ) },
-      qr/no service catalog/, 'an empty catalogue';
+      qr/no[ ]service[ ]catalog/, 'an empty catalogue';
 
     # Whatever went wrong, the message has to name the endpoint -- a bare "401
     # Unauthorized" does not distinguish a revoked credential from the wrong
@@ -377,7 +377,7 @@ YAML
     # But a reference that cannot name anything is wrong on every run, not just
     # on the one whose token has expired.
     $clouds->('secret:openstack/credential');
-    like exception { Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir ) }, qr/Malformed secret/,
+    like exception { Trog::OpenStack::Auth->from_cloud( undef, cache_dir => $dir ) }, qr/Malformed[ ]secret/,
       'a malformed reference is an error even with a token cached';
 };
 

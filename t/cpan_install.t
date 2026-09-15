@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 # The script is loaded when the test runs rather than when it compiles, so perl
 # sees each of its package variables named once here and calls that a typo.
@@ -117,7 +117,7 @@ subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => s
         capture_exit => { "$PERL/bin/dzil listdeps"   => 128 },
     );
     is( $r->{rc}, 128, 'listdeps failing fails the step, with its exit code' );
-    like( $r->{err}, qr{dzil listdeps --missing exited 128 in /bogus/checkout}, 'naming which dzil and where' );
+    like( $r->{err}, qr{dzil[ ]listdeps[ ]--missing[ ]exited[ ]128[ ]in[ ]/bogus/checkout}, 'naming which dzil and where' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     $r = install(
         args         => [qw{dzil /bogus/checkout}],
@@ -134,7 +134,7 @@ subtest 'pin: the version pkg-config reports, asked when it runs' => sub {
 
     $r = install( args => [qw{pin libvirt Sys::Virt}] );
     is( $r->{rc}, 1, 'pkg-config knowing nothing is a failure' );
-    like( $r->{err}, qr/pkg-config knows no libvirt/, 'saying so, rather than installing the newest' );
+    like( $r->{err}, qr/pkg-config[ ]knows[ ]no[ ]libvirt/, 'saying so, rather than installing the newest' );
 
     $r = install( args => [qw{pin libvirt Sys::Virt}], capture => { 'pkg-config --modversion' => ["10.0.0\n"] }, capture_exit => { 'pkg-config --modversion' => 1 } );
     is( $r->{rc},                                            1, 'and so is pkg-config failing, whatever it printed' );
@@ -186,7 +186,7 @@ subtest 'it has to be told what to do, and have a perl to do it in' => sub {
     is( install( args => [qw{frobnicate x}] )->{rc}, 2, 'and so is one it does not know' );
 
     my $r = install( args => [qw{install Moo}], perl_root => tempdir( CLEANUP => 1 ) );
-    like( $r->{err}, qr/nothing is built under/, 'and no built perl is said plainly, naming where it looked' );
+    like( $r->{err}, qr/nothing[ ]is[ ]built[ ]under/, 'and no built perl is said plainly, naming where it looked' );
 };
 
 done_testing();

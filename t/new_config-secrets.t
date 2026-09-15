@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -119,7 +119,7 @@ subtest 'the manifest is not something the guest is handed' => sub {
     # use for it either way, and a file that rides along is a file that ends up
     # in the tarball every backup keeps.
     my $packer = File::Slurper::read_text("$FindBin::Bin/../bin/new_config");
-    my ($members) = $packer =~ m/my \@members = \((.*?)\);/s;
+    my ($members) = $packer =~ m/my[ ]\@members[ ]=[ ]\((.*?)\);/s;
 
     ok( defined $members, 'found what goes into data.tar.gz' );
     unlike( $members // '', qr/guest-secrets/, 'and the manifest is not among it' );

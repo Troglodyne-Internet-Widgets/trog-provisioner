@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -50,8 +50,8 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 # pod2usage exits rather than dying.
 my ( $out, $rc ) = _run("$FindBin::Bin/../bin/snapshot");
 isnt( $rc, 0, 'no arguments exits non-zero' );
-like( $out, qr/No domain passed/, 'saying what was missing' );
-like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
+like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
+like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 
 # libvirt refuses to snapshot -> dies
 {
@@ -59,7 +59,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
     $hv_mock->redefine( create_snapshot       => sub { 0 } );
     $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
-    like( exception { main_snapshot('myvm.lan') }, qr/Failed to create snapshot/, 'main() dies when the snapshot fails' );
+    like( exception { main_snapshot('myvm.lan') }, qr/Failed[ ]to[ ]create[ ]snapshot/, 'main() dies when the snapshot fails' );
 }
 
 # No current snapshot after create -> dies
@@ -68,7 +68,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { undef } );
 
-    like( exception { main_snapshot('myvm.lan') }, qr/No current snapshot/, 'main() dies when no snapshot is current after create' );
+    like( exception { main_snapshot('myvm.lan') }, qr/No[ ]current[ ]snapshot/, 'main() dies when no snapshot is current after create' );
 }
 
 # Current snapshot unchanged -> dies
@@ -77,7 +77,7 @@ like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
     $hv_mock->redefine( create_snapshot       => sub { 1 } );
     $hv_mock->redefine( snapshot_current_name => sub { 'same-snap' } );
 
-    like( exception { main_snapshot('myvm.lan') }, qr/unchanged after create/, 'main() dies when the current snapshot does not change' );
+    like( exception { main_snapshot('myvm.lan') }, qr/unchanged[ ]after[ ]create/, 'main() dies when the current snapshot does not change' );
 }
 
 # Happy path -- nothing was current before

@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -396,7 +396,7 @@ first.
 sub template_subdir {
     my ($self) = @_;
     my $name = Scalar::Util::blessed($self) || $self;
-    $name =~ s/\A.*:://;
+    $name =~ s/\A\N*:://;
     return $name;
 }
 

@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 # A -f in here is asserting on a file this test just made, in a temporary
 # directory nothing else can see.  There is no window for it to be wrong in.
@@ -160,8 +160,8 @@ subtest 'writing a guest' => sub {
     my $err = exception {
         quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname scratch.test ntp}) } )
     };
-    like( $err, qr/already there/, 'refuses to overwrite' );
-    like( $err, qr/--force/,       'and says what to do about it' );
+    like( $err, qr/already[ ]there/, 'refuses to overwrite' );
+    like( $err, qr/--force/,         'and says what to do about it' );
 
     is(
         quietly( sub { Trog::Bin::NewGuest::main(qw{--force --hostname scratch.test ntp}) } ), 0,
@@ -186,7 +186,7 @@ subtest 'a hostname has to be one' => sub {
         exception {
             quietly( sub { Trog::Bin::NewGuest::main(qw{--stdout --hostname bare ntp}) } )
         },
-        qr/not a fully qualified domain name/,
+        qr/not[ ]a[ ]fully[ ]qualified[ ]domain[ ]name/,
         'a bare label is refused'
     );
 };
@@ -198,9 +198,9 @@ subtest 'the document goes to stdout and the commentary to stderr' => sub {
     my $config = YAML::XS::Load($out);
     ok( exists $config->{'piped.test'}, 'stdout is the document, and nothing else' ) or diag $out;
 
-    like( $err, qr/Fill these in/,              'stderr says what is left' );
-    like( $err, qr/mariadb\.root_pw/,           'naming it' );
-    like( $err, qr/bin\/provision piped\.test/, 'and what to run next' );
+    like( $err, qr/Fill[ ]these[ ]in/,            'stderr says what is left' );
+    like( $err, qr/mariadb\.root_pw/,             'naming it' );
+    like( $err, qr/bin\/provision[ ]piped\.test/, 'and what to run next' );
 };
 
 # --- bin/recipes -------------------------------------------------------------
@@ -250,8 +250,8 @@ subtest 'bin/recipes NAME says what it downloads from' => sub {
 subtest 'bin/recipes on a name that is not one' => sub {
     my ( $out, $err, $rc ) = run_bin( 'recipes', 'nosuchrecipe' );
     isnt( $rc, 0, 'fails' );
-    like( $err, qr/No recipe named 'nosuchrecipe'/, 'saying so' );
-    like( $err, qr/bin\/recipes/,                   'and where to look' );
+    like( $err, qr/No[ ]recipe[ ]named[ ]'nosuchrecipe'/, 'saying so' );
+    like( $err, qr/bin\/recipes/,                         'and where to look' );
 };
 
 subtest 'bin/recipes --scaffold shows what new_guest would write' => sub {

@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -144,10 +144,10 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     my ( $dir, $recipe, $vars ) = built( hypervisors => \%HYDRA, hypervisor_access => 'least' );
     my $conf = slurp( $dir, 'trogrunner.hypervisors.conf' );
 
-    like( $conf, qr/^\[hydra\]$/m,                              'one block per hypervisor' );
-    like( $conf, qr/^pool_path\s+= \/pool\/vm-disks\/runner$/m, 'the pool it is confined to' );
-    like( $conf, qr/^pool_name\s+= runner_disks$/m,             'named as well as pathed, or libvirt ignores the path' );
-    like( $conf, qr/^partition\s+= \/machine\/runner$/m,        'and the slice its guests land in' );
+    like( $conf, qr/^\[hydra\]$/m,                                'one block per hypervisor' );
+    like( $conf, qr/^pool_path\s+=[ ]\/pool\/vm-disks\/runner$/m, 'the pool it is confined to' );
+    like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,             'named as well as pathed, or libvirt ignores the path' );
+    like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,        'and the slice its guests land in' );
 
     # Not for the fleet file -- for ssh-keyscan.  libvirt's qemu+ssh transport
     # verifies host keys where Net::OpenSSH::More does not, so an unseeded
@@ -159,12 +159,12 @@ subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
     is( $got{hypervisors}{hydra}{ssh_port}, 2222,              'and the port, when it is not 22' );
 
     my $fragment = $recipe->render(%$vars);
-    like( $fragment, qr/ssh-keyscan -p '2222' 'hydra\.test\.test'/, 'which is what gets scanned' );
+    like( $fragment, qr/ssh-keyscan[ ]-p[ ]'2222'[ ]'hydra\.test\.test'/, 'which is what gets scanned' );
 
     # Into the home ssh will read, asked of passwd, rather than into the domain
     # directory -- which is a home only when the domain names a service user.
-    like( $fragment, qr/getent passwd 'doge'/, 'the home is asked for rather than assumed' );
-    like( $fragment, qr{known_hosts},          'and that is where the host keys go' );
+    like( $fragment, qr/getent[ ]passwd[ ]'doge'/, 'the home is asked for rather than assumed' );
+    like( $fragment, qr{known_hosts},              'and that is where the host keys go' );
     unlike( $fragment, qr{\Q$INSTALL/$DOMAIN\E/\.ssh/known_hosts}, 'not beside the key, where ssh would never read them' );
 };
 
@@ -177,7 +177,7 @@ subtest 'a hypervisor we could not get a shell on is refused here, not on the gu
         exception {
             built( hypervisors => { far => { libvirt_uri => 'qemu+tcp://far.test.test/system' } } );
         },
-        qr/needs an ssh transport/,
+        qr/needs[ ]an[ ]ssh[ ]transport/,
         'named, with the URI it should have had'
     );
 };
@@ -253,12 +253,12 @@ subtest 'nothing reaches CPAN from its own fragment' => sub {
 
 subtest 'the checkout is optional, which is the case koan needs' => sub {
     my ( undef, $with, $wvars ) = built();
-    like( $with->render(%$wvars), qr{git clone --branch 'master'}, 'cloned by default' );
+    like( $with->render(%$wvars), qr{git[ ]clone[ ]--branch[ ]'master'}, 'cloned by default' );
 
     my ( undef, $without, $ovars ) = built( checkout => 0, deps_from => ['/srv/code/trog-provisioner'] );
     my $fragment = $without->render(%$ovars);
 
-    unlike( $fragment, qr/git clone/, 'and not at all when the runner manages its own' );
+    unlike( $fragment, qr/git[ ]clone/, 'and not at all when the runner manages its own' );
     ok( ( grep { $_->[-2] eq 'dzil'                  && $_->[-1] eq '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'deps come from where it says instead' );
     ok( !( grep { $_->[-1] =~ m{/trog-provisioner\z} && $_->[-1] ne '/srv/code/trog-provisioner' } cpan_steps( $without, $ovars ) ), 'and not from a checkout that was never made' );
 };
@@ -270,7 +270,7 @@ subtest 'the checkout cannot be the domain directory' => sub {
     # after the packages, in a way that reads as a git problem.
     like(
         exception { built( checkout_dir => '.' ) },
-        qr/will not drop a repo into the domain directory/,
+        qr/will[ ]not[ ]drop[ ]a[ ]repo[ ]into[ ]the[ ]domain[ ]directory/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'refused while somebody is still reading the output'
     );
 };
@@ -280,9 +280,9 @@ subtest 'a path meant to be under the domain directory has to be' => sub {
     # `store: /etc/trog-provisioner/secrets.kdbx` is the obvious thing to write
     # and means something else: it renders under the domain directory anyway,
     # as //etc/..., and fails as a missing file rather than as a mistake.
-    like( exception { built( store        => '/etc/trog-provisioner/secrets.kdbx' ) }, qr/cannot start with a slash/, 'an absolute store is refused' );
-    like( exception { built( store        => '../../etc/secrets.kdbx' ) },             qr/climbs out of it/,          'and so is one that climbs out' );
-    like( exception { built( checkout_dir => '/srv/code' ) },                          qr/cannot start with a slash/, 'the same for the checkout' );
+    like( exception { built( store        => '/etc/trog-provisioner/secrets.kdbx' ) }, qr/cannot[ ]start[ ]with[ ]a[ ]slash/, 'an absolute store is refused' );
+    like( exception { built( store        => '../../etc/secrets.kdbx' ) },             qr/climbs[ ]out[ ]of[ ]it/,            'and so is one that climbs out' );
+    like( exception { built( checkout_dir => '/srv/code' ) },                          qr/cannot[ ]start[ ]with[ ]a[ ]slash/, 'the same for the checkout' );
 
     # Only when there is a checkout to put anywhere.  A runner that manages its
     # own repositories never uses the field.
@@ -296,7 +296,7 @@ subtest 'the key it generates is one both readers of these agree on' => sub {
     my ($path) = keys %secrets;
 
     my $key = $secrets{$path}{generate}->();
-    like( $key, qr/\A-----BEGIN OPENSSH PRIVATE KEY-----\n/, 'an OpenSSH private key' );
+    like( $key, qr/\A-----BEGIN[ ]OPENSSH[ ]PRIVATE[ ]KEY-----\n/, 'an OpenSSH private key' );
 
     # Net::SSH::Perl::Key writes the whole payload on one line.  OpenSSH reads
     # that; CryptX -- which is what Provisioner::Utils uses to derive the public
@@ -314,7 +314,7 @@ subtest 'the key it generates is one both readers of these agree on' => sub {
     chmod 0600, $tmp->filename;
 
     my $pub = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
-    like( $pub // "died: $@", qr/\Assh-ed25519 /, 'and bin/provision can derive its public half' );
+    like( $pub // "died: $@", qr/\Assh-ed25519[ ]/, 'and bin/provision can derive its public half' );
 };
 
 subtest 'the key is declared always, and never salvaged' => sub {
@@ -407,7 +407,7 @@ subtest 'the symlink is made with -n, or the second provision fails' => sub {
     # Without -n, ln follows the link it made last time and puts the new one
     # inside the directory, which fails as "File exists" on a re-provision and
     # nowhere else.
-    like( $fragment, qr{ln -sfn '\Q$INSTALL/$DOMAIN\E/etc/trog-provisioner' /etc/trog-provisioner}, 'pointed at the domain copy' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $fragment, qr{ln[ ]-sfn[ ]'\Q$INSTALL/$DOMAIN\E/etc/trog-provisioner'[ ]/etc/trog-provisioner}, 'pointed at the domain copy' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The domain directory is a home only when the domain names a service user,
     # and this recipe does not require one -- so a dotfile there is read by

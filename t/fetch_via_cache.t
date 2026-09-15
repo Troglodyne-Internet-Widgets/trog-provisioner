@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -92,8 +92,8 @@ subtest 'on: the hosts the cache answers for, and no others' => sub {
 
     is( $run->{status}, 0,                                                    'it exits zero' );
     is( $run->{hosts},  $HOSTS . block(qw{www.cpan.org codeload.github.com}), 'the two it answers for point at it, after what was already there' );
-    like( $run->{err}, qr/\Q$CACHE\E does not answer for github\.com, so it comes from upstream/, 'and the one it does not is left alone, saying so' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
-    like( $run->{out}, qr/through the cache at \Q$CACHE\E: www\.cpan\.org codeload\.github\.com/, 'saying which went through it' );                        ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $run->{err}, qr/\Q$CACHE\E[ ]does[ ]not[ ]answer[ ]for[ ]github\.com,[ ]so[ ]it[ ]comes[ ]from[ ]upstream/, 'and the one it does not is left alone, saying so' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $run->{out}, qr/through[ ]the[ ]cache[ ]at[ ]\Q$CACHE\E:[ ]www\.cpan\.org[ ]codeload\.github\.com/,         'saying which went through it' );                        ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     is( File::Slurper::read_text("$dir/anchor.crt"),                  "an authority\n", 'the authority is trusted' );
     is( ( grep { $_ eq 'update-ca-certificates' } @{ $run->{log} } ), 1,                'and the trust store rebuilt with it' );
@@ -101,7 +101,7 @@ subtest 'on: the hosts the cache answers for, and no others' => sub {
     # By name, at the address, and trusting nothing but the authority: what the
     # guest will do once /etc/hosts says so, asked before it does.
     my ($asked) = grep { index( $_, 'www.cpan.org' ) >= 0 } @{ $run->{log} };
-    like( $asked, qr{--resolve www\.cpan\.org:443:\Q$CACHE\E --cacert \Q$dir\E/ca\.crt https://www\.cpan\.org/fetchcache-status\z}, 'each asked for by name, at the cache, trusting the authority alone' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $asked, qr{--resolve[ ]www\.cpan\.org:443:\Q$CACHE\E[ ]--cacert[ ]\Q$dir\E/ca\.crt[ ]https://www\.cpan\.org/fetchcache-status\z}, 'each asked for by name, at the cache, trusting the authority alone' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'on twice: the second answer replaces the first' => sub {
@@ -118,7 +118,7 @@ subtest 'a cache that answers for nothing changes nothing in /etc/hosts' => sub 
 
     is( $run->{status}, 0,      'and is no reason to fail' );
     is( $run->{hosts},  $HOSTS, 'every host still goes upstream' );
-    like( $run->{out}, qr/through the cache at \Q$CACHE\E: nothing/, 'which it says' );
+    like( $run->{out}, qr/through[ ]the[ ]cache[ ]at[ ]\Q$CACHE\E:[ ]nothing/, 'which it says' );
 };
 
 subtest 'off gives every host back, and the authority with them' => sub {
@@ -141,7 +141,7 @@ subtest 'told nothing it can use, it says how and changes nothing' => sub {
 
     my $none = run_it( $dir, [], );
     is( $none->{status}, 2, 'no verb is a usage error' );
-    like( $none->{err}, qr/usage: fetch_via_cache on ADDRESS AUTHORITY HOST/, 'saying what it takes' );
+    like( $none->{err}, qr/usage:[ ]fetch_via_cache[ ]on[ ]ADDRESS[ ]AUTHORITY[ ]HOST/, 'saying what it takes' );
 
     my $missing = run_it( $dir, ['www.cpan.org'], 'on', $CACHE, "$dir/no-such-authority", 'www.cpan.org' );
     is( $missing->{status}, 2,      'nor is an authority that is not there' );

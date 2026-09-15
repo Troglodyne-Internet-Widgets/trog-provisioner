@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -51,7 +51,7 @@ subtest 'a first build has nothing to restore' => sub {
     my $r = restore( "$tmp/never-fetched", "$tmp/destination" );
     is( $r->{rc}, 0, 'not an error' );
     ok( !-e "$tmp/destination", 'and it did not invent a destination' );
-    like( $r->{said}, qr/nothing salvaged/, 'and says which of the three it was' );
+    like( $r->{said}, qr/nothing[ ]salvaged/, 'and says which of the three it was' );
 };
 
 subtest 'an empty salvage is a fetch that read nothing, and is not restored' => sub {
@@ -154,7 +154,7 @@ subtest 'a single file, and the ownership and mode it is asked for' => sub {
 subtest 'it says what it wants when it is called wrong' => sub {
     my $r = restore();
     isnt( $r->{rc}, 0, 'no arguments is an error' );
-    like( $r->{said}, qr/usage: restore_state/, 'and it says how it is called' );
+    like( $r->{said}, qr/usage:[ ]restore_state/, 'and it says how it is called' );
 };
 
 done_testing();

@@ -4,7 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -130,7 +130,7 @@ subtest 'with --stdin the passphrase is asked at the terminal, not of the spent 
         open( local *STDIN, '<', $keyfile->filename ) or die "could not point stdin at the key: $!";
         exception { Provisioner::Bin::add_secret::main( '--secrets', $kdbx, qw{--group koan --title unasked-github-ssh --stdin} ) };
     };
-    like( $why, qr{Cannot ask for keepass at a terminal: /bogus/tty}, 'no terminal is refused, naming it' );
+    like( $why, qr{Cannot[ ]ask[ ]for[ ]keepass[ ]at[ ]a[ ]terminal:[ ]/bogus/tty}, 'no terminal is refused, naming it' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     my %none = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:koan/unasked-github-ssh/password' ) };
     ok( !defined $none{probe}, 'and nothing was stored' );
@@ -154,7 +154,7 @@ subtest 'standard input and a value on the command line is refused' => sub {
     # gets stored, so this exits on the usage rather than choosing.
     my ( $rc, $out ) = run_add( \"from the pipe\n", '--secrets', $kdbx, qw{--group t --title both --stdin -- fromtheargv} );
     isnt( $rc, 0, 'it exits non-zero' );
-    like( $out, qr/not both/, 'saying it will not pick one' );
+    like( $out, qr/not[ ]both/, 'saying it will not pick one' );
 
     my %got = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:t/both/password' ) };
     ok( !defined $got{probe}, 'and nothing was stored either way' );
@@ -167,7 +167,7 @@ subtest 'an empty standard input is no value at all' => sub {
     # whatever authenticated with it fails somewhere far from here.
     my ( $rc, $out ) = run_add( \undef, '--secrets', $kdbx, qw{--group t --title empty --stdin} );
     isnt( $rc, 0, 'it exits non-zero' );
-    like( $out, qr/Need a value/, 'saying there was nothing to store' );
+    like( $out, qr/Need[ ]a[ ]value/, 'saying there was nothing to store' );
 
     my %got = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:t/empty/password' ) };
     ok( !defined $got{probe}, 'and stored nothing' );
@@ -189,7 +189,7 @@ subtest 'a reference that already holds something is left alone' => sub {
         $rc = add( '--secrets', $kdbx, qw{--group seed --title entry --}, 'something else' );
     }
     isnt( $rc, 0, 'a different value is refused' );
-    like( join( '', @said ), qr/will not replace it/, 'and says why' );
+    like( join( '', @said ), qr/will[ ]not[ ]replace[ ]it/, 'and says why' );
 
     my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:seed/entry/password' );
     is( $got{probe}, 'already here', 'leaving the store as it was' );
@@ -202,7 +202,7 @@ subtest 'a field the database does not keep is an error, not a success' => sub {
     # and a tool that reported success would have written nothing.
     my $rc = eval { add( '--secrets', $kdbx, qw{--group g --title t --field notes -- value} ) };
     is( $rc, undef, 'it dies rather than returning' );
-    like( $@, qr/password or username/, 'naming the fields that are kept' ) or diag $@;
+    like( $@, qr/password[ ]or[ ]username/, 'naming the fields that are kept' ) or diag $@;
 };
 
 done_testing();

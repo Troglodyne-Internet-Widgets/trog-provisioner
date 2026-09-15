@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use File::Find();
 use List::Util   qw{any};
@@ -344,7 +344,7 @@ sub _rewrap_pem {
       or return $pem;
 
     $body =~ s/\s//g;
-    return join( "\n", $head, ( $body =~ m/(.{1,64})/g ), $tail ) . "\n";
+    return join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n";
 }
 
 sub write_ssh_keypair {

@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::Machine';
 
 use Trog::Config();
@@ -773,7 +773,7 @@ before it has DNS.  A mirror somewhere else is named as a URL instead.
 FIX
     }
 
-    my ($parent) = map { m/\A[^.]+[.](.+)\z/ ? $1 : () } @domains;
+    my ($parent) = map { m/\A[^.]+[.](\N+)\z/ ? $1 : () } @domains;
     my $suggested = 'aptmirror.' . ( $parent // 'example.com' );
 
     return { ok => 0, what => 'No package mirror is configured', fix => <<"FIX" };

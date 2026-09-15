@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -96,11 +96,11 @@ IPMAP
 }
 
 subtest 'module names: whatever the mirror index names' => sub {
-    like( testdeps_target(qw{Test::Deep Test::Differences}), qr/^\tcpanm --mirror-only Test::Deep Test::Differences$/m, 'cpanm is told --mirror-only' );
+    like( testdeps_target(qw{Test::Deep Test::Differences}), qr/^\tcpanm[ ]--mirror-only[ ]Test::Deep[ ]Test::Differences$/m, 'cpanm is told --mirror-only' );
 };
 
 subtest 'a release older than the newest: resolved as before, since the index does not list one' => sub {
-    like( testdeps_target( 'Test::Deep', 'Test::Differences@0.69' ), qr/^\tcpanm Test::Deep Test::Differences\@0\.69$/m, 'cpanm is not told --mirror-only' );
+    like( testdeps_target( 'Test::Deep', 'Test::Differences@0.69' ), qr/^\tcpanm[ ]Test::Deep[ ]Test::Differences\@0\.69$/m, 'cpanm is not told --mirror-only' );
 };
 
 done_testing;

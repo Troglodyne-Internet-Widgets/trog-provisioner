@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::Machine';
 
 use Socket();
@@ -132,7 +132,7 @@ sub transfer_ips {
 
         # A cidr is a network rather than something to connect to, and the
         # addresses a domain is configured with are written as one.
-        ( my $peer = $towards ) =~ s{/.*\z}{};
+        ( my $peer = $towards ) =~ s{/\N*\z}{};
 
         my $packed = Socket::inet_aton($peer) or next;
 

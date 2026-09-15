@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -72,14 +72,14 @@ subtest 'a name it does not know is an error, not a shrug' => sub {
     # it", on a run with no terminal, which hangs or dies minutes later.
     like(
         exception { load_block("keypass: mistyped\n") },
-        qr/Unknown credential 'keypass'/,
+        qr/Unknown[ ]credential[ ]'keypass'/,
         'a misspelled name is refused'
     );
-    like( exception { load_block("keypass: mistyped\n") }, qr/keepass, sudo/, 'and it says what the names are' );
+    like( exception { load_block("keypass: mistyped\n") }, qr/keepass,[ ]sudo/, 'and it says what the names are' );
 
     like(
         exception { load_block("just a bare password\n") },
-        qr/Expected 'name: value'/,
+        qr/Expected[ ]'name:[ ]value'/,
         'and so is a bare line, which is what an older caller would have sent'
     );
 };
@@ -141,13 +141,13 @@ subtest 'asking at the terminal, for a caller whose standard input is spoken for
     # typed.  That is no answer, and saying so beats a warning about undef.
     $tty = $terminal->(q{});
     local $Trog::Credentials::TERMINAL = $tty->filename;
-    like( exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) }, qr/Nothing was typed for sudo: its input ended/, 'input that ends with no answer is refused' );
+    like( exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) }, qr/Nothing[ ]was[ ]typed[ ]for[ ]sudo:[ ]its[ ]input[ ]ended/, 'input that ends with no answer is refused' );
     is( Trog::Credentials->have('sudo'), 0, 'and nothing is remembered for it' );
 
     local $Trog::Credentials::TERMINAL = '/bogus/tty';
     my $why = exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) };
-    like( $why, qr{Cannot ask for sudo at a terminal: /bogus/tty}, 'no terminal to open is refused' );
-    like( $why, qr/already spoken for/,                            'saying why it had to be the terminal' );
+    like( $why, qr{Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal:[ ]/bogus/tty}, 'no terminal to open is refused' );
+    like( $why, qr/already[ ]spoken[ ]for/,                                      'saying why it had to be the terminal' );
 };
 
 subtest 'sudo on a machine nobody is watching' => sub {
@@ -175,9 +175,9 @@ subtest 'sudo on a machine nobody is watching' => sub {
     Trog::Machine::forget_sudo_passwords();
 
     my $why = exception { Trog::Machine::_ask_for_sudo_password($hv) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
-    like( $why, qr/no terminal to ask at/, 'with nothing handed in it refuses' );
-    like( $why, qr/NOPASSWD/,              'saying how to not need one' );
-    like( $why, qr/Trog::Credentials/,     'and how to hand one in' );
+    like( $why, qr/no[ ]terminal[ ]to[ ]ask[ ]at/, 'with nothing handed in it refuses' );
+    like( $why, qr/NOPASSWD/,                      'saying how to not need one' );
+    like( $why, qr/Trog::Credentials/,             'and how to hand one in' );
 };
 
 subtest 'remember keeps what was typed for the rest of the run' => sub {
@@ -191,7 +191,7 @@ subtest 'remember keeps what was typed for the rest of the run' => sub {
 
     # The allowlist is the whole point of the module: a name nobody can ask for
     # is a name that would sit here being never used.
-    like( exception { Trog::Credentials->remember( 'keypass', 'a typo' ) }, qr/Unknown credential/, 'a name that is not one is refused' );
+    like( exception { Trog::Credentials->remember( 'keypass', 'a typo' ) }, qr/Unknown[ ]credential/, 'a name that is not one is refused' );
 
     Trog::Credentials->forget();
     ok( !Trog::Credentials->have('keepass'), 'and forget clears it like any other' );

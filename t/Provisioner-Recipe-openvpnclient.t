@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -74,11 +74,11 @@ subtest 'the fragment names the domain throughout' => sub {
     like( $fragment, qr{openvpn-client\@first[.]test},            'the unit is instanced on the domain' );
     like( $fragment, qr{/etc/openvpn/client/first[.]test[.]conf}, 'the configuration is where that instance reads it' );
     like( $fragment, qr{/etc/openvpn/client/first[.]test/},       'and the certificates land in a directory of its own' );
-    like( $fragment, qr{wait_for_iface \Q$opts{device}\E},        'the wait is on the interface this domain was given' );
+    like( $fragment, qr{wait_for_iface[ ]\Q$opts{device}\E},      'the wait is on the interface this domain was given' );
 
     # tun0 is whichever tunnel came up first, which on a guest holding two is
     # not necessarily this one.
-    unlike( $fragment, qr{wait_for_iface tun0\b}, 'rather than on whichever came up first' );
+    unlike( $fragment, qr{wait_for_iface[ ]tun0\b}, 'rather than on whichever came up first' );
 };
 
 subtest 'the configuration points at what belongs to this domain' => sub {
@@ -90,7 +90,7 @@ subtest 'the configuration points at what belongs to this domain' => sub {
     $recipe->generate_files( $dir, %vars );
     my $conf = File::Slurper::read_text("$dir/client.conf");
 
-    like( $conf, qr/^dev \Q$opts{device}\E$/m,                               'the device is named rather than left to openvpn' );
+    like( $conf, qr/^dev[ ]\Q$opts{device}\E$/m,                             'the device is named rather than left to openvpn' );
     like( $conf, qr{^ca\s+/etc/openvpn/client/first[.]test/ca[.]crt$}m,      'the authority is this domain copy' );
     like( $conf, qr{^key\s+/etc/openvpn/client/first[.]test/client[.]key$}m, 'and so is the key' );
     like( $conf, qr{openvpn-client-first[.]test[.]log},                      'and the log cannot collide with another tunnel' );

@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -111,12 +111,12 @@ subtest 'assign: dies when the pool is exhausted' => sub {
     my $pool = { addresses => '10.9.9.10' };
 
     Provisioner::IPPool::assign( 'a.test', $pool );
-    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool exhausted/, 'says so' );
+    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool[ ]exhausted/, 'says so' );
 };
 
 subtest 'assign: dies when no pool is configured' => sub {
     fresh_db();
-    like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No \[ip_pool\] section/, 'says so' );
+    like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No[ ]\[ip_pool\][ ]section/, 'says so' );
 };
 
 subtest 'release: gives it back, and only for a guest' => sub {

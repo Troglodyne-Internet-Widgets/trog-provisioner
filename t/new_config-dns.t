@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -188,7 +188,7 @@ IPMAP
     # resolved -- so the hook exported the reference and authenticated with
     # nothing.
     my $text = File::Slurper::read_text($hook);
-    like( $text, qr/^export LEXICON_EASYDNS_AUTH_TOKEN="REAL-PASSWORD"$/m, 'the hook carries the password the store holds' );
+    like( $text, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN="REAL-PASSWORD"$/m, 'the hook carries the password the store holds' );
     unlike( $text, qr/secret:/, 'and nowhere in it says where the password is instead of what it is' );
 };
 

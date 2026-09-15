@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -85,7 +85,7 @@ subtest 'latest_version: the fallback, when GitHub does not answer' => sub {
     local $SIG{__WARN__} = sub { push @warned, @_ };
 
     is( $GARAGE->latest_version, $Provisioner::Recipe::garage::FALLBACK_VERSION, 'a version that is published' );
-    like( "@warned", qr/falling back to \Q$Provisioner::Recipe::garage::FALLBACK_VERSION\E/, 'and says so, since an older garage is otherwise silent' );
+    like( "@warned", qr/falling[ ]back[ ]to[ ]\Q$Provisioner::Recipe::garage::FALLBACK_VERSION\E/, 'and says so, since an older garage is otherwise silent' );
 };
 
 subtest 'enrich: latest is looked up once, and a version named never is' => sub {

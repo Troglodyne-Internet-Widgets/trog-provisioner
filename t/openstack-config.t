@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -48,7 +48,7 @@ sub clean_env {
 sub write_clouds {
     my ( $path, $content ) = @_;
 
-    my ($dir) = $path =~ m{^(.*)/[^/]+$};
+    my ($dir) = $path =~ m{^(\N*)/[^/]+$};
     File::Path::make_path($dir);
     File::Slurper::Temp::write_binary( $path, $content );
 
@@ -139,9 +139,9 @@ YAML
     );
 
     my $err = exception { Trog::OpenStack::Config->load() };
-    like $err, qr/more than one cloud/, 'picking one at random is not on offer';
-    like $err, qr/prod, staging/,       'and it says what there was to choose from';
-    like $err, qr/OS_CLOUD/,            'and how to choose';
+    like $err, qr/more[ ]than[ ]one[ ]cloud/, 'picking one at random is not on offer';
+    like $err, qr/prod,[ ]staging/,           'and it says what there was to choose from';
+    like $err, qr/OS_CLOUD/,                  'and how to choose';
 
     is Trog::OpenStack::Config->load('staging')->{auth_url}, 'https://staging.example.net:5000/v3',
       'naming one works';
@@ -180,24 +180,24 @@ subtest 'an empty environment variable is not an override' => sub {
 
 subtest 'what the errors say' => sub {
     clean_env();
-    like exception { Trog::OpenStack::Config->load() }, qr/Could not read clouds\.yaml/,
+    like exception { Trog::OpenStack::Config->load() }, qr/Could[ ]not[ ]read[ ]clouds\.yaml/,
       'no file at all';
     like exception { Trog::OpenStack::Config->load() }, qr/\Q$ENV{HOME}\E/,
       'and it lists where it looked';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", "not: a clouds file\n" );
-    like exception { Trog::OpenStack::Config->load() }, qr/no 'clouds' block/,
+    like exception { Trog::OpenStack::Config->load() }, qr/no[ ]'clouds'[ ]block/,
       'a yaml file that is not a clouds.yaml';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", "clouds:\n  openstack:\n    region_name: RegionOne\n" );
-    like exception { Trog::OpenStack::Config->load() }, qr/no auth_url/,
+    like exception { Trog::OpenStack::Config->load() }, qr/no[ ]auth_url/,
       'a cloud with nowhere to authenticate';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", $ONE_CLOUD );
-    like exception { Trog::OpenStack::Config->load('nope') }, qr/no cloud named 'nope'/,
+    like exception { Trog::OpenStack::Config->load('nope') }, qr/no[ ]cloud[ ]named[ ]'nope'/,
       'a cloud that is not there';
     like exception { Trog::OpenStack::Config->load('nope') }, qr/openstack/,
       'and it says which one there was';

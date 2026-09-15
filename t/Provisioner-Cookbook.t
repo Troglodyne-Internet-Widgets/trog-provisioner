@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -314,8 +314,8 @@ subtest 'has() and load()' => sub {
     isa_ok( Provisioner::Cookbook->load('ntp'), 'Provisioner::Recipe' );
 
     my $err = exception { Provisioner::Cookbook->load('nosuchrecipe') };
-    like( $err, qr/No recipe named 'nosuchrecipe'/, 'says which name it did not know' );
-    like( $err, qr/bin\/recipes/,                   'and where to find the ones it does' );
+    like( $err, qr/No[ ]recipe[ ]named[ ]'nosuchrecipe'/, 'says which name it did not know' );
+    like( $err, qr/bin\/recipes/,                         'and where to find the ones it does' );
 };
 
 subtest 'abstract() reads the file rather than loading it' => sub {
@@ -645,8 +645,8 @@ subtest 'configured_fetch_hosts names a recipe that cannot answer, rather than l
     $koan->redefine( fetch_hosts => sub { die "no idea\n" } );
 
     my $err = exception { Provisioner::Cookbook->configured_fetch_hosts };
-    like( $err, qr/The koan recipe could not say which hosts somewhere\.test fetches from/, 'names the recipe and the domain' );      ## no critic (RegularExpressions::ProhibitComplexRegexes)
-    like( $err, qr/no idea/,                                                                'and passes on what the recipe said' );
+    like( $err, qr/The[ ]koan[ ]recipe[ ]could[ ]not[ ]say[ ]which[ ]hosts[ ]somewhere\.test[ ]fetches[ ]from/, 'names the recipe and the domain' );      ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr/no[ ]idea/,                                                                                  'and passes on what the recipe said' );
 };
 
 done_testing();

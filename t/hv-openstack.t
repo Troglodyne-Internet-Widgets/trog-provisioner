@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -134,7 +134,7 @@ sub cloud {
 }
 
 subtest 'a cloud has to be named' => sub {
-    like exception { Trog::HV::OpenStack->build() }, qr/needs a 'cloud'/,
+    like exception { Trog::HV::OpenStack->build() }, qr/needs[ ]a[ ]'cloud'/,
       'there is no guessing which of somebody\'s clouds was meant';
 
     my $hv = cloud();
@@ -238,7 +238,7 @@ subtest 'a guest is a server with the domain for a name' => sub {
     ok $hv->domain_exists('vm.example.com'),    'exists';
     ok !$hv->domain_exists('nope.example.com'), 'does not';
 
-    like exception { $hv->server('') }, qr/needs a name/, 'and it wants a name to look for';
+    like exception { $hv->server('') }, qr/needs[ ]a[ ]name/, 'and it wants a name to look for';
 };
 
 subtest 'two guests with one name is a thing to be told about' => sub {
@@ -250,7 +250,7 @@ subtest 'two guests with one name is a thing to be told about' => sub {
         ]
     );
 
-    like exception { $hv->server('vm.example.com') }, qr/refusing to guess/,
+    like exception { $hv->server('vm.example.com') }, qr/refusing[ ]to[ ]guess/,
       'because picking one of them would be picking which guest to destroy';
 };
 
@@ -303,11 +303,11 @@ subtest 'the address we can actually reach' => sub {
       'a fixed address on an external network is reachable, and is used';
 
     my $err = exception { $hv->guest_ssh_ip( conf_for('nofloat.example.com') ) };
-    like $err, qr/no address we can reach/,  'a guest with only a tenant address is an error';
-    like $err, qr/internal \(10\.0\.0\.6\)/, 'and it says what the guest is on';
-    like $err, qr/floating_network/,         'and what to configure';
+    like $err, qr/no[ ]address[ ]we[ ]can[ ]reach/, 'a guest with only a tenant address is an error';
+    like $err, qr/internal[ ]\(10\.0\.0\.6\)/,      'and it says what the guest is on';
+    like $err, qr/floating_network/,                'and what to configure';
 
-    like exception { $hv->guest_ssh_ip( conf_for('gone.example.com') ) }, qr/no guest called/,
+    like exception { $hv->guest_ssh_ip( conf_for('gone.example.com') ) }, qr/no[ ]guest[ ]called/,
       'as is one that is not there';
 };
 
@@ -343,7 +343,7 @@ subtest 'snapshots live in glance, so the guest is in the name' => sub {
     is $action->[2]{rebuild}{imageRef}, 'i1',
       'reverting rebuilds onto that image, which keeps the server and its floating IP';
 
-    like exception { $hv->revert_snapshot( 'vm.example.com', 'never' ) }, qr/no snapshot called 'never'/,
+    like exception { $hv->revert_snapshot( 'vm.example.com', 'never' ) }, qr/no[ ]snapshot[ ]called[ ]'never'/,
       'and a snapshot that does not exist says so';
 };
 
@@ -376,7 +376,7 @@ subtest 'building a guest' => sub {
 
     is $hv->create_guest( name => 'x', flavor => 'other' )->{name}, 'x', 'a per-guest override works';
 
-    like exception { $hv->create_guest() }, qr/needs a name/, 'a guest needs a name';
+    like exception { $hv->create_guest() }, qr/needs[ ]a[ ]name/, 'a guest needs a name';
 };
 
 subtest 'building a guest the configuration cannot describe' => sub {
@@ -384,7 +384,7 @@ subtest 'building a guest the configuration cannot describe' => sub {
     $FAKE = Test::FakeCloud->new();
 
     my $err = exception { $hv->create_guest( name => 'vm.example.com' ) };
-    like $err, qr/needs 'image'/,     'says which one is missing';
+    like $err, qr/needs[ ]'image'/,   'says which one is missing';
     like $err, qr/hypervisors\.conf/, 'and where to put it';
     is scalar $FAKE->calls_to('create_vm'), 0, 'and nothing was built';
 };
@@ -428,7 +428,7 @@ subtest 'volumes' => sub {
     is $made->[1]{size}, 40,                    'a volume of the size asked for';
     is $made->[1]{name}, 'vm.example.com-data', 'named so that teardown will recognise it';
 
-    like exception { $hv->create_volume( 'vm.example.com', 'data' ) }, qr/needs a size_gb/,
+    like exception { $hv->create_volume( 'vm.example.com', 'data' ) }, qr/needs[ ]a[ ]size_gb/,
       'a volume needs a size';
 };
 
@@ -454,15 +454,15 @@ subtest 'a guest that is there already is rebuilt, not replaced' => sub {
     $hv->rebuild_guest( 'vm.example.com', image => '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b' );
     is $asked[0][2]{rebuild}{imageRef}, '0b8f6a4e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', 'an image named by id is used as it is';
 
-    like exception { $hv->rebuild_guest( 'vm.example.com', image => 'nosuch' ) }, qr/no image called 'nosuch'/,
+    like exception { $hv->rebuild_guest( 'vm.example.com', image => 'nosuch' ) }, qr/no[ ]image[ ]called[ ]'nosuch'/,
       'an image that is not there is said, not sent';
-    like exception { $hv->rebuild_guest('gone.example.com') }, qr/no guest called 'gone.example.com'/,
+    like exception { $hv->rebuild_guest('gone.example.com') }, qr/no[ ]guest[ ]called[ ]'gone\Nexample\Ncom'/,
       'and so is a guest that is not';
 
     # ERROR does not change on its own, so it is not something to wait out.
     $FAKE->{servers}[0]{status} = 'ERROR';
     $FAKE->{servers}[0]{fault}  = { message => 'No valid host was found' };
-    like exception { $hv->rebuild_guest('vm.example.com') }, qr/left it in ERROR: No valid host was found/,
+    like exception { $hv->rebuild_guest('vm.example.com') }, qr/left[ ]it[ ]in[ ]ERROR:[ ]No[ ]valid[ ]host[ ]was[ ]found/,
       'a rebuild that failed says so at once, with what Nova said';
 
     $mock->unmock('_nova');
@@ -484,20 +484,20 @@ subtest 'what it refuses to pretend to' => sub {
     # Each of these is a libvirt noun.  Answering undef would let the caller
     # carry the wrong answer somewhere else before failing.
     my %because = (
-        define_domain      => qr/not defined from libvirt XML/,
-        cloudinit_iso      => qr/no ISO to build/,
-        eject_cdrom        => qr/no cdrom/,
-        pool_path          => qr/no storage pool/,
-        pool_target        => qr/no storage pool/,
-        nuke_pool          => qr/no storage pool/,
-        base_image         => qr/Glance image/,
-        create_disk        => qr/Cinder volume/,
-        lease_ip           => qr/no lease table/,
-        release_dhcp_lease => qr/no lease to release/,
-        guest_mac          => qr/Neutron assigns the MAC/,
-        nic_slots          => qr/no PCI topology/,
-        nic_names          => qr/Neutron and cloud-init/,
-        has_tpm            => qr/property of the flavor or image/,
+        define_domain      => qr/not[ ]defined[ ]from[ ]libvirt[ ]XML/,
+        cloudinit_iso      => qr/no[ ]ISO[ ]to[ ]build/,
+        eject_cdrom        => qr/no[ ]cdrom/,
+        pool_path          => qr/no[ ]storage[ ]pool/,
+        pool_target        => qr/no[ ]storage[ ]pool/,
+        nuke_pool          => qr/no[ ]storage[ ]pool/,
+        base_image         => qr/Glance[ ]image/,
+        create_disk        => qr/Cinder[ ]volume/,
+        lease_ip           => qr/no[ ]lease[ ]table/,
+        release_dhcp_lease => qr/no[ ]lease[ ]to[ ]release/,
+        guest_mac          => qr/Neutron[ ]assigns[ ]the[ ]MAC/,
+        nic_slots          => qr/no[ ]PCI[ ]topology/,
+        nic_names          => qr/Neutron[ ]and[ ]cloud-init/,
+        has_tpm            => qr/property[ ]of[ ]the[ ]flavor[ ]or[ ]image/,
     );
 
     # authorized_keys and hv_user used to be in this table.  They are

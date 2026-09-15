@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -287,7 +287,7 @@ sub fetch {
 
     my $content = eval { $guest->capture_cmd("sudo cat '$remote'") } // q{};
 
-    my $name  = $remote =~ s{.*/}{}r;
+    my $name  = $remote =~ s{\N*/}{}r;
     my $local = "$into/$name";
     File::Slurper::Temp::write_text( $local, $content );
 

@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -201,7 +201,7 @@ sub console {
     # libvirt writes the guest's serial output straight here, so nothing has to
     # hold a pty open, and the capture starts at the first line of firmware
     # rather than whenever something managed to attach.
-    $xml =~ s{<serial type='pty'>}{<serial type='file'><source path='$log'/>}
+    $xml =~ s{<serial[ ]type='pty'>}{<serial type='file'><source path='$log'/>}
       or die "$domain has no pty serial port to redirect.\n";
 
     redefine( $hv, $domain, $xml );
@@ -236,7 +236,7 @@ sub restore {
     # libvirt reformats what it is given, so the file serial comes back as an
     # element with the source on its own line rather than the one-liner that
     # went in.  Matched on the log path, which is the part that is ours.
-    $xml =~ s{<serial type='file'>\s*<source path='\Q$log\E'\s*/>}{<serial type='pty'>};
+    $xml =~ s{<serial[ ]type='file'>\s*<source[ ]path='\Q$log\E'\s*/>}{<serial type='pty'>};
     $xml =~ s{<bootmenu[^>]*/>}{};
 
     redefine( $hv, $domain, $xml );

@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use IO::Prompter();
 
@@ -226,7 +226,7 @@ sub load {
         chomp $line;
         last unless length $line;
 
-        my ( $name, $value ) = $line =~ m/^(\w+):[ ]?(.*)$/;
+        my ( $name, $value ) = $line =~ m/^(\w+):[ ]?(\N*)$/;
         die "Could not read the credentials given on standard input.\n" . "Expected 'name: value', got: $line\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
           unless defined $name;
 

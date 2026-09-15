@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use Config::Simple();
 use File::Slurper();
 use List::Util qw{reduce};

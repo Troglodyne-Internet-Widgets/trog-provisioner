@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -303,7 +303,7 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
 
     like(
         exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
-        qr/Two recipes want different things.*port is '80'.*'443'/s,
+        qr/Two[ ]recipes[ ]want[ ]different[ ]things.*port[ ]is[ ]'80'.*'443'/s,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a scalar two dependants disagree about dies, naming both values'
     );
 
@@ -316,7 +316,7 @@ subtest 'reconcile() hands disagreements to the recipe, and dies by default' => 
 
     like(
         exception { $r->reconcile( { port => 80 }, { port => 443 } ) },
-        qr/set port explicitly under/,
+        qr/set[ ]port[ ]explicitly[ ]under/,
         'and says what to do about it'
     );
 };
@@ -349,7 +349,7 @@ subtest 'a distribution version of a recipe answers to the same name' => sub {
     }
     like(
         exception { 'Provisioner::Recipe::Ubuntu::Deeper::widget'->new( template_dirs => [$tdir], output_dir => $tdir ) },
-        qr/Could not extract recipe name/,
+        qr/Could[ ]not[ ]extract[ ]recipe[ ]name/,
         'but only one level deep, so a class name that is not a recipe name is refused'
     );
 };

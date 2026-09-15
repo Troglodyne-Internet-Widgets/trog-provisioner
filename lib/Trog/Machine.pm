@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use File::Basename();
 use File::Path();
 use File::Copy();
@@ -369,13 +369,13 @@ sub _ask_for_sudo_password {
 sub _wants_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo: (?:a )?(?:password is required|a terminal is required|no password was provided)/ ? 1 : 0;
+    return $output =~ m/sudo:[ ](?:a[ ])?(?:password[ ]is[ ]required|a[ ]terminal[ ]is[ ]required|no[ ]password[ ]was[ ]provided)/ ? 1 : 0;
 }
 
 sub _wrong_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo: \d+ incorrect password attempt|Sorry, try again/ ? 1 : 0;
+    return $output =~ m/sudo:[ ]\d+[ ]incorrect[ ]password[ ]attempt|Sorry,[ ]try[ ]again/ ? 1 : 0;
 }
 
 =head2 run_sudo(@argv)
@@ -790,7 +790,7 @@ sub _rsync {
         return 0;
     }
 
-    my ($moved) = grep { m/^Total transferred file size/ } @{ $rsync->out || [] };
+    my ($moved) = grep { m/^Total[ ]transferred[ ]file[ ]size/ } @{ $rsync->out || [] };
     print $moved if $moved;
 
     return 1;

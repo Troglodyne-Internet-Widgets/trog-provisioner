@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -102,15 +102,15 @@ subtest 'bracketed IPv6 host' => sub {
 
 subtest 'unparseable URI dies' => sub {
     Trog::HV->forget();
-    like( exception { Trog::HV->new( uri => 'not a uri' ) }, qr/Could not parse libvirt connection URI/, 'dies loudly' );
+    like( exception { Trog::HV->new( uri => 'not a uri' ) }, qr/Could[ ]not[ ]parse[ ]libvirt[ ]connection[ ]URI/, 'dies loudly' );
 };
 
 # --- Transports that give us no shell ----------------------------------------
 subtest 'a remote transport with no shell is refused up front' => sub {
     Trog::HV->forget();
     my $err = exception { Trog::HV->new( uri => 'qemu+tcp://hv2.example.test/system' ) };
-    like( $err, qr/gives us no shell/,  'tcp:// is rejected rather than half-working' );
-    like( $err, qr/qemu\+ssh:\/\/root/, 'and names the transport to use instead' );
+    like( $err, qr/gives[ ]us[ ]no[ ]shell/, 'tcp:// is rejected rather than half-working' );
+    like( $err, qr/qemu\+ssh:\/\/root/,      'and names the transport to use instead' );
 };
 
 # --- Paths --------------------------------------------------------------------
@@ -144,7 +144,7 @@ subtest 'a backend that leaves something out is told what' => sub {
     foreach my $method (@owed) {
         my $err = exception { $half->$method('vm.test') };
         ok( $err, "$method dies" );
-        like( $err, qr/\ATrog::HV::HalfDone does not implement \Q$method\E, which every backend has to$/, 'naming the backend and what it owes' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        like( $err, qr/\ATrog::HV::HalfDone[ ]does[ ]not[ ]implement[ ]\Q$method\E,[ ]which[ ]every[ ]backend[ ]has[ ]to$/, 'naming the backend and what it owes' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     }
 
     # And the two there are owe nothing.
@@ -249,8 +249,8 @@ subtest 'guest_ssh_ip' => sub {
     );
 
     my $err = exception { $remote->guest_ssh_ip( $conf_without, '192.168.122.50' ) };
-    like( $err, qr/requires the guest to have a/, 'and says so when there is none' );
-    like( $err, qr/\bips\b/,                      'naming the config key to set' );
+    like( $err, qr/requires[ ]the[ ]guest[ ]to[ ]have[ ]a/, 'and says so when there is none' );
+    like( $err, qr/\bips\b/,                                'naming the config key to set' );
 };
 
 # --- The URI terraform gets is not always the one Sys::Virt gets -------------
@@ -486,9 +486,9 @@ subtest 'remote work goes through commands with an exit status' => sub {
     is( $tee->{opts}{stdin_data}, "conf\n", 'with no password anywhere near it' );
 
     my $said = join '|', map { "@{$_->{cmd}}" } @commands;
-    like( $said, qr{sudo -n mv /tmp/staged\.XXXX /etc/rsyslog\.d/10-vm\.conf}, 'then moved into place' );
-    like( $said, qr{sudo -n chown root:root},                                  'chowned' );
-    like( $said, qr{sudo -n chmod 0644},                                       'and chmodded, since tee would have used our umask' );
+    like( $said, qr{sudo[ ]-n[ ]mv[ ]/tmp/staged\.XXXX[ ]/etc/rsyslog\.d/10-vm\.conf}, 'then moved into place' );                               ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $said, qr{sudo[ ]-n[ ]chown[ ]root:root},                                    'chowned' );
+    like( $said, qr{sudo[ ]-n[ ]chmod[ ]0644},                                         'and chmodded, since tee would have used our umask' );
     is( $files{'/etc/rsyslog.d/10-vm.conf'}, "conf\n", 'and the bytes ended up there' );
 
     # put_file streams the local file down the same pipe.
@@ -511,7 +511,7 @@ subtest 'remote work goes through commands with an exit status' => sub {
         $files{$ak}, "ssh-rsa THEIRS somebody\nssh-rsa AAAA one\nssh-rsa BBBB two\n",
         'the keys already there survive, and the repeat was written once'
     );
-    ok( ( grep { "@{$_->{cmd}}" =~ m/\Atee -a / } @commands ), 'because it appends' );
+    ok( ( grep { "@{$_->{cmd}}" =~ m/\Atee[ ]-a[ ]/ } @commands ), 'because it appends' );
     ok(
         !( grep { "@{$_->{cmd}}" eq "tee $ak" } @commands ),
         'and never rewrites the whole file, which is how you lock somebody out'
@@ -532,9 +532,9 @@ subtest 'a hang is an error with a name on it' => sub {
     my $err     = exception { $hv->write_text( '/tmp/somewhere', "x\n" ) };
     my $took    = time - $started;
 
-    like( $err, qr/Gave up on the hypervisor/,          'we stop waiting' );
+    like( $err, qr/Gave[ ]up[ ]on[ ]the[ ]hypervisor/,  'we stop waiting' );
     like( $err, qr/qemu\+ssh:\/\/root\@fakehv\/system/, 'saying which one' );
-    like( $err, qr/tee \/tmp\/somewhere/,               'and what we were doing' );
+    like( $err, qr/tee[ ]\/tmp\/somewhere/,             'and what we were doing' );
     like( $err, qr/permission\s+problem/,               'and what it usually means' );
     cmp_ok( $took, '<', 10, 'and we did it near the deadline, not after the sleep' );
 };
@@ -596,9 +596,9 @@ subtest 'with no terminal to ask at, say what to configure' => sub {
     $tty->redefine( _have_terminal => sub { 0 } );
 
     my $err = exception { $hv->run_sudo(qw{systemctl restart rsyslog}) };
-    like( $err, qr/wants a password, and there is no terminal/, 'says what happened' );
-    like( $err, qr/NOPASSWD/,                                   'and what to put in sudoers' );
-    like( $err, qr/\broot\b/,                                   'for the right user' );
+    like( $err, qr/wants[ ]a[ ]password,[ ]and[ ]there[ ]is[ ]no[ ]terminal/, 'says what happened' );
+    like( $err, qr/NOPASSWD/,                                                 'and what to put in sudoers' );
+    like( $err, qr/\broot\b/,                                                 'for the right user' );
 };
 
 subtest 'the sudo password is asked for the same way every other one is' => sub {
@@ -634,8 +634,8 @@ subtest 'the sudo password is asked for the same way every other one is' => sub 
     quietly( sub { $hv->run_sudo(qw{true}) } );
 
     is( scalar @asked, 1, 'asked once' );
-    like( $asked[0], qr/\[sudo\] password for root/, 'saying who it is for' );
-    like( $asked[0], qr/hv/,                         'and which machine' );
+    like( $asked[0], qr/\[sudo\][ ]password[ ]for[ ]root/, 'saying who it is for' );
+    like( $asked[0], qr/hv/,                               'and which machine' );
 };
 
 # --- Building things, which is what terraform used to do ----------------------
@@ -657,13 +657,13 @@ subtest 'a disk is an overlay on the base image' => sub {
     );
 
     is( $path, '/opt/terraform/disks/vm.example.test-qcow2', 'made, and its path came back' );
-    like( $created[0], qr{<name>vm\.example\.test-qcow2</name>}, 'named' );
-    like( $created[0], qr{<capacity unit='bytes'>42949672960<},  'sized' );
+    like( $created[0], qr{<name>vm\.example\.test-qcow2</name>},  'named' );
+    like( $created[0], qr{<capacity[ ]unit='bytes'>42949672960<}, 'sized' );
     like(
         $created[0], qr{<backingStore><path>/opt/terraform/disks/baseimage-qcow2</path>},    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'laid over the base image rather than copying it'
     );
-    like( $created[0], qr{<format type='qcow2'/></backingStore>}, 'which is qcow2 too' );
+    like( $created[0], qr{<format[ ]type='qcow2'/></backingStore>}, 'which is qcow2 too' );
 
     # One that is already there is left alone: it is a guest's filesystem.
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.example.test-qcow2' } );
@@ -726,7 +726,7 @@ subtest 'whether a pool takes O_DIRECT is asked of it, not inferred from its nam
     like( $command, qr/oflag=direct/,                         'by doing the same O_DIRECT open qemu is about to do' );
     like( $command, qr/bs=4096/,                              'with a block a direct write can actually be aligned to' );
     like( $command, qr{/opt/terraform/disks/\.odirect-probe}, 'in the pool, which is the filesystem in question' );
-    like( $command, qr/rm -f/,                                'and takes the probe file away again' );
+    like( $command, qr/rm[ ]-f/,                              'and takes the probe file away again' );
 
     # Named filesystems are exactly what this stopped doing: tmpfs takes an
     # O_DIRECT write on a current kernel and ZFS has since 2.3, so a list of
@@ -787,8 +787,8 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
 
     quietly( sub { $hv->create_disk( 'big-qcow2', backing => '/base', capacity => 200 * 1024**3 ) } );
 
-    like( $created[0], qr{<clusterSize unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
-    like( $created[0], qr{<features><extended_l2/></features>},             'and so does subcluster allocation' );
+    like( $created[0], qr{<clusterSize[ ]unit='bytes'>1048576</clusterSize>}, 'the cluster size reaches the volume' );
+    like( $created[0], qr{<features><extended_l2/></features>},               'and so does subcluster allocation' );
 
     # Neither is retrofittable: both are properties of the image as created, so
     # a disk that already exists stays exactly as it is.  It is a filesystem.
@@ -845,10 +845,10 @@ subtest 'the base image is fetched once' => sub {
     quietly( sub { $hv->base_image('https://example.test/noble.img') } );
 
     ok(
-        ( grep { m/curl .*\.partial/ } @ran ),
+        ( grep { m/curl[ ]\N*\.partial/ } @ran ),
         'downloaded to a partial name, so libvirt never sees a half a file'
     );
-    ok( ( grep { m/\Amv .*\.partial / } @ran ), 'and moved into place after' );
+    ok( ( grep { m/\Amv[ ]\N*\.partial[ ]/ } @ran ), 'and moved into place after' );
 
     # Already there: no fetch at all.
     @ran = ();
@@ -861,7 +861,7 @@ subtest 'the base image is fetched once' => sub {
 
     # No image and no URL is an error, not an empty download.
     $mock->redefine( volume_path => sub { undef } );
-    like( exception { $hv->base_image(undef) }, qr/No image URL configured/, 'and nothing to fetch is an error' );
+    like( exception { $hv->base_image(undef) }, qr/No[ ]image[ ]URL[ ]configured/, 'and nothing to fetch is an error' );
 };
 
 {
@@ -1046,17 +1046,17 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     is( exception { $hv->define_domain('<domain/>') }, undef, 'nothing refused, nothing to say' );
 
     %refuse = ( set_autostart => 1 );
-    like( exception { $hv->define_domain('<domain/>') }, qr/Could not set vm\.test to start with the host: set_autostart refused/, 'a domain that will not autostart' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could[ ]not[ ]set[ ]vm\.test[ ]to[ ]start[ ]with[ ]the[ ]host:[ ]set_autostart[ ]refused/, 'a domain that will not autostart' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     %refuse = ( create => 1 );
-    like( exception { $hv->define_domain('<domain/>') }, qr/Could not start vm\.test: create refused/, 'a domain that will not start' );
+    like( exception { $hv->define_domain('<domain/>') }, qr/Could[ ]not[ ]start[ ]vm\.test:[ ]create[ ]refused/, 'a domain that will not start' );
 
     %refuse = ( build => 1 );
     like(
         exception {
             quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
         },
-        qr/Could not build the storage pool tf_disks at \/bogus\/pool: build refused/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        qr/Could[ ]not[ ]build[ ]the[ ]storage[ ]pool[ ]tf_disks[ ]at[ ]\/bogus\/pool:[ ]build[ ]refused/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a pool that will not build'
     );
 
@@ -1065,7 +1065,7 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
         exception {
             quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->pool } )
         },
-        qr/Could not start the storage pool tf_disks: create refused/,
+        qr/Could[ ]not[ ]start[ ]the[ ]storage[ ]pool[ ]tf_disks:[ ]create[ ]refused/,                        ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a pool that will not start'
     );
 
@@ -1074,12 +1074,12 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
         exception {
             quietly( sub { fresh( uri => 'qemu+ssh://hv/system' )->refresh_pool } )
         },
-        qr/Could not refresh the storage pool tf_disks: refresh refused/,
+        qr/Could[ ]not[ ]refresh[ ]the[ ]storage[ ]pool[ ]tf_disks:[ ]refresh[ ]refused/,                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a pool that will not refresh'
     );
 
     %refuse = ( undefine => 1 );
-    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could not undefine vm\.test: undefine refused/, 'a domain that will not go' );
+    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could[ ]not[ ]undefine[ ]vm\.test:[ ]undefine[ ]refused/, 'a domain that will not go' );
 
     %refuse = ( destroy => 1 );
     is( $hv->annihilate_domain('vm.test'), 1, 'but one that is already off still goes' );

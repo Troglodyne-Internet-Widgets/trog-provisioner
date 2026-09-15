@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -101,9 +101,9 @@ subtest '--console points the serial at a file' => sub {
         }
     );
 
-    like( $seen->{defined}, qr{<serial type='file'>},                        'the serial is a file now' );
-    like( $seen->{defined}, qr{<source path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
-    unlike( $seen->{defined}, qr{<serial type='pty'>}, 'and is no longer a pty' );
+    like( $seen->{defined}, qr{<serial[ ]type='file'>},                        'the serial is a file now' );
+    like( $seen->{defined}, qr{<source[ ]path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
+    unlike( $seen->{defined}, qr{<serial[ ]type='pty'>}, 'and is no longer a pty' );
     is( $seen->{restarted}, 1, 'restarted, because the boot we want has not happened yet' );
 };
 
@@ -117,8 +117,8 @@ subtest '--console refuses a guest already set up for it' => sub {
             }
         );
     };
-    like( $err, qr/already logs its console to a file/, 'says so' );
-    like( $err, qr/--fetch/,                            'and what to use instead' );
+    like( $err, qr/already[ ]logs[ ]its[ ]console[ ]to[ ]a[ ]file/, 'says so' );
+    like( $err, qr/--fetch/,                                        'and what to use instead' );
 };
 
 subtest '--hold adds a boot menu, once' => sub {
@@ -131,7 +131,7 @@ subtest '--hold adds a boot menu, once' => sub {
         }
     );
 
-    like( $seen->{defined}, qr{<bootmenu enable='yes' timeout='15000'/>}, 'with the timeout asked for' );
+    like( $seen->{defined}, qr{<bootmenu[ ]enable='yes'[ ]timeout='15000'/>}, 'with the timeout asked for' );
     is( $seen->{restarted}, 1, 'and restarted' );
 
     # Adding a second one would make libvirt reject the whole domain.
@@ -164,7 +164,7 @@ subtest '--restore undoes both, through what libvirt gives back' => sub {
         }
     );
 
-    like( $seen->{defined}, qr{<serial type='pty'>}, 'the serial is a pty again' );
+    like( $seen->{defined}, qr{<serial[ ]type='pty'>}, 'the serial is a pty again' );
     unlike( $seen->{defined}, qr{<bootmenu}, 'and the boot menu is gone' );
 };
 
@@ -179,8 +179,8 @@ subtest 'the kernel command line edit leaves the newline alone' => sub {
     my $add = $line;
     $add =~ s/^([ \t]*linux[ \t]+\S+[^\n]*?)([ \t]+single)?[ \t]*$/$1 single/m;
 
-    like( $add, qr/console=ttyS0 single\n\z/, 'single goes on the end of the line' );
-    like( $add, qr/\n\z/,                     'and the newline is still there' );
+    like( $add, qr/console=ttyS0[ ]single\n\z/, 'single goes on the end of the line' );
+    like( $add, qr/\n\z/,                       'and the newline is still there' );
 
     $add =~ s/^([ \t]*linux[ \t]+\S+[^\n]*?)([ \t]+single)?[ \t]*$/$1 single/m;
     is( count_of( $add, 'single' ), 1, 'running it twice does not say it twice' );
@@ -248,7 +248,7 @@ subtest 'a domain with no running display says so' => sub {
     my $mock = with_vmm( dom => FakeDom->new( xml => q{<graphics type='vnc' port='-1'>} ) );
     my $err  = exception { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
     ok( $err, 'vnc stops rather than printing a port' );
-    like( $err, qr/has no display to connect to/, 'and says why' );
+    like( $err, qr/has[ ]no[ ]display[ ]to[ ]connect[ ]to/, 'and says why' );
 };
 
 subtest 'a screenshot is streamed straight here, and named for what it is' => sub {

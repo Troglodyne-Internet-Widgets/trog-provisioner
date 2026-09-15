@@ -10,7 +10,7 @@ use strict;
 use warnings FATAL => 'all';
 
 no warnings qw{experimental};
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -1327,7 +1327,7 @@ sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
     # The address may be a cidr, which is not a thing to connect to.
-    ( my $host = $static_ip ) =~ s{/.*\z}{};
+    ( my $host = $static_ip ) =~ s{/\N*\z}{};
 
     # One connection per guest, and not one per recipe.  Both callers ask for
     # this inside the loop over the modules -- refresh_salvage once a module and
@@ -1617,7 +1617,7 @@ sub _get_sftp {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
     # IP might be cidr, we don't care about that
-    $static_ip =~ s|/.*$||;
+    $static_ip =~ s|/\N*$||;
     my $target_is_up = 0;
 
     my $key2use = "$cfg_dir/key.rsa";

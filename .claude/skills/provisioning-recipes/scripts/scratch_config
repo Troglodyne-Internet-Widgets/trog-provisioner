@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -218,7 +218,7 @@ sub build {
     my %needed = Trog::Secrets->needed( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") ) );
     my @refs   = sort keys %{ { map { $_ => 1 } values %needed } };
 
-    my $password = File::Temp::tempdir() =~ s{.*/}{}r;    # a throwaway name for a throwaway store
+    my $password = File::Temp::tempdir() =~ s{\N*/}{}r;    # a throwaway name for a throwaway store
 
     # Visibly fake, so that anything reaching a real service with one is refused
     # rather than quietly working.  What the values are is this harness's

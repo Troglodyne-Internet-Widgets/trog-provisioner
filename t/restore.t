@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -69,14 +69,14 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 {
     my ( $out, $rc ) = _run("$FindBin::Bin/../bin/restore");
     isnt( $rc, 0, 'no arguments exits non-zero' );
-    like( $out, qr/No domain passed/, 'saying what was missing' );
-    like( $out, qr/Usage:/,           'and printing the usage out of the POD' );
+    like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
+    like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 }
 
 {
     my ( $out, $rc ) = _run( "$FindBin::Bin/../bin/restore", 'myvm.lan' );
     isnt( $rc, 0, 'a domain with no mode exits non-zero' );
-    like( $out, qr/exactly one of --latest/, 'saying which flags to pick between' );
+    like( $out, qr/exactly[ ]one[ ]of[ ]--latest/, 'saying which flags to pick between' );
 }
 
 {
@@ -89,7 +89,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { () } );
 
-    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/No snapshots found/, 'main() dies when no snapshots exist' );
+    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/No[ ]snapshots[ ]found/, 'main() dies when no snapshots exist' );
 }
 
 # --name for nonexistent snapshot -> dies
@@ -97,7 +97,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { ( 'snap-a', 'snap-b' ) } );
 
-    like( exception { main_restore(qw{--name snap-z myvm.lan}) }, qr/not found for myvm.lan/, 'main() dies when the named snapshot is not there' );
+    like( exception { main_restore(qw{--name snap-z myvm.lan}) }, qr/not[ ]found[ ]for[ ]myvm\Nlan/, 'main() dies when the named snapshot is not there' );
 }
 
 # Revert fails -> dies
@@ -106,7 +106,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 0 } );
 
-    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/Failed to revert/, 'main() dies when the revert fails' );
+    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/Failed[ ]to[ ]revert/, 'main() dies when the revert fails' );
 }
 
 # Missing provision.conf -> dies
@@ -115,7 +115,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 1 } );
 
-    like( exception { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) }, qr/No provision\.conf to read/, 'main() dies when provision.conf is missing' );
+    like( exception { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) }, qr/No[ ]provision\.conf[ ]to[ ]read/, 'main() dies when provision.conf is missing' );
 }
 
 # Helper: build a minimal provision.conf in a temp dir

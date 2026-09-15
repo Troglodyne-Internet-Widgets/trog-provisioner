@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -161,7 +161,7 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     # basedir out of ipmap.cfg.  It used to be told the hypervisor's domain_dir,
     # which has been the wrong machine since the guest stopped fetching from
     # there -- the same path only by both of them defaulting to /opt/domains.
-    like( $setup, qr{transfer.\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $setup, qr{transfer\N\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 # The documents a guest with no mirror configured gets, written out rather than
@@ -276,7 +276,7 @@ CONF
                     # YAML folds a long plain scalar across lines and unfolds it
                     # to a space, which is where the space in a public key
                     # already is.  Master did the same, being the same dumper.
-                    ssh_authorized_keys => [ re(qr/\Assh-rsa \S+ \S+\z/s) ],
+                    ssh_authorized_keys => [ re(qr/\Assh-rsa[ ]\S+[ ]\S+\z/s) ],
                 }
             ],
 
@@ -284,9 +284,9 @@ CONF
 
                 # Any private key container ssh will load: Net::SSH::Perl::Key
                 # writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.
-                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\A-----BEGIN [[:upper:]\d ]*PRIVATE KEY-----/) },
-                { path => '/root/.ssh/id_rsa.pub', owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\Assh-rsa /) },
-                { path => '/root/setup.sh',        owner => 'root:root', permissions => '0775', defer => bool(1), content => re(qr/cloud-init status --wait/) },
+                { path => '/root/.ssh/id_rsa',     owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\A-----BEGIN[ ][[:upper:]\d ]*PRIVATE[ ]KEY-----/) },
+                { path => '/root/.ssh/id_rsa.pub', owner => 'root:root', permissions => '0600', defer => bool(1), content => re(qr/\Assh-rsa[ ]/) },
+                { path => '/root/setup.sh',        owner => 'root:root', permissions => '0775', defer => bool(1), content => re(qr/cloud-init[ ]status[ ]--wait/) },
 
                 # No mirrorlist, and so nothing left that cloud-init has to write
                 # before it installs anything: it was the only defer: false entry.
@@ -317,8 +317,8 @@ subtest 'a MAC with no hex letters in it survives the trip to PyYAML' => sub {
     my ( $dir, undef ) = generated( nat_mac => '52:54:00:11:44:22', bridge_mac => '52:54:00:f8:83:fc' );
     my $config = File::Slurper::read_text("$dir/network-config");
 
-    like( $config, qr/^\s+mac_address: '52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
-    like( $config, qr/^\s+mac_address: 52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
+    like( $config, qr/^\s+mac_address:[ ]'52:54:00:11:44:22'$/m, 'an all-decimal MAC is quoted' );
+    like( $config, qr/^\s+mac_address:[ ]52:54:00:f8:83:fc$/m,   'and one with hex letters is left alone' );
 
     # 59 is the last sexagesimal digit, so the quoting stops at exactly the
     # point PyYAML stops misreading.
@@ -341,13 +341,13 @@ subtest 'a guest with no addresses falls back to DHCP on both interfaces' => sub
 subtest 'a guest with addresses and no gateway is refused' => sub {
     like(
         exception { generated( gateway => undef ) },
-        qr/MUST SET gateway/,
+        qr/MUST[ ]SET[ ]gateway/,
         'rather than written out with a static subnet routing nowhere'
     );
 
     like(
         exception { generated( contact_email => undef ) },
-        qr/MUST SET contact_email/,
+        qr/MUST[ ]SET[ ]contact_email/,
         'and root mail has to have somewhere to go'
     );
 };
@@ -379,10 +379,10 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
     # which writes RSA as PKCS1 PEM where ssh-keygen wrote an OpenSSH one.  Both
     # load; what matters is that the halves belong together, which is what
     # ssh_pubkey_from_private answers.
-    like( $first, qr/\A-----BEGIN [[:upper:]\d ]*PRIVATE KEY-----/, 'a domain with no key gets one' );
+    like( $first, qr/\A-----BEGIN[ ][[:upper:]\d ]*PRIVATE[ ]KEY-----/, 'a domain with no key gets one' );
     is(
         Provisioner::Utils::ssh_pubkey_from_private("$dir/key.rsa"),
-        ( File::Slurper::read_text("$dir/key.rsa.pub") =~ s/ [^ ]*\n?\z//r ),
+        ( File::Slurper::read_text("$dir/key.rsa.pub") =~ s/[ ][^ ]*\n?\z//r ),
         'and its public half is the one written beside it'
     );
 
@@ -448,7 +448,7 @@ subtest 'a mirror named as a URL is used as written' => sub {
         'apt is redirected at the mirrorlist'
     );
     cmp_deeply( $user_data->{apt}{security}, $user_data->{apt}{primary}, 'for security too' );
-    like( $user_data->{apt}{conf}, qr/AllowInsecureRepositories: true;/, 'and unverified repositories are allowed, as they have always been with a mirror' );
+    like( $user_data->{apt}{conf}, qr/AllowInsecureRepositories:[ ]true;/, 'and unverified repositories are allowed, as they have always been with a mirror' );
 
     my ($mirrorlist) = grep { $_->{path} eq '/etc/apt/mirrorlist' } @{ $user_data->{write_files} };
     ok( $mirrorlist, 'the mirrorlist is written' ) or return;
@@ -477,7 +477,7 @@ subtest 'a bare name is resolved out of the ip pool' => sub {
 subtest 'a name nothing has an address for is refused' => sub {
     like(
         exception { generated( mirror => 'nowhere.test.test' ) },
-        qr/named as a URL instead/,
+        qr/named[ ]as[ ]a[ ]URL[ ]instead/,
         'saying to use a URL, rather than writing http:/// into the guest and failing at first boot'
     );
 };

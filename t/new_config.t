@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -108,7 +108,7 @@ RECIPES
 
     like(
         $result,
-        qr/No recipe configuration.*testdomain\.test\.local/i,
+        qr/No[ ]recipe[ ]configuration\N*testdomain\.test\.local/i,
         'dies with helpful message when domain is missing from recipe config',
     );
 
@@ -164,7 +164,7 @@ RECIPES
         )
     };
 
-    like( $result, qr/No recipe configuration/i, 'it says the recipe is missing' );
+    like( $result, qr/No[ ]recipe[ ]configuration/i, 'it says the recipe is missing' );
     is(
         _slurp($ipmap_file), $before,
         'and ipmap.cfg is untouched, so the typo cost no address'
@@ -277,7 +277,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     );
     ok( $absent,              'a path holding nothing is still reported' );
     ok( !$absent->{alarming}, 'but not as a problem, because that is what a first build looks like' );
-    like( $absent->{message}, qr/nothing to salvage/, 'and it says why there was nothing' );
+    like( $absent->{message}, qr/nothing[ ]to[ ]salvage/, 'and it says why there was nothing' );
 
     # The one that matters: the guest has files there and we came away with none.
     my $lost = Trog::Provisioner::Config::Generator::_salvage_gap(      ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
@@ -293,7 +293,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # No longer blamed on permissions.  The fetch runs as root at the far end, so
     # saying the admin user could not read it would send somebody to fix
     # something that is not broken.
-    unlike( $lost->{message}, qr/cannot read|unprivileged|no sudo/, 'and does not blame a permission that is no longer the cause' );
+    unlike( $lost->{message}, qr/cannot[ ]read|unprivileged|no[ ]sudo/, 'and does not blame a permission that is no longer the cause' );
     is( $lost->{recipe}, 'redis', 'the recipe comes back out for the summary at the end of the run' );
 
     # test exits 0 or 1 and nothing else, so anything else is the question not
@@ -306,7 +306,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
         destination => $empty,
     );
     ok( $dropped->{alarming}, 'a check that could not be run at all stays a problem' );
-    like( $dropped->{message}, qr/could not ask/, 'and says that is what happened, rather than guessing' );
+    like( $dropped->{message}, qr/could[ ]not[ ]ask/, 'and says that is what happened, rather than guessing' );
 };
 
 subtest 'an empty tree of directories is not a salvage' => sub {

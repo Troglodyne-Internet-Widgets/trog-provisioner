@@ -4,7 +4,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -74,18 +74,18 @@ subtest 'the report says which way each address went' => sub {
 
     my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( \%before, \%after, 0 ) };
 
-    like( $said, qr/10[.]0[.]0[.]4\s+recorded as new[.]test/,          'an address that arrived' );
-    like( $said, qr/10[.]0[.]0[.]1\s+freed \(was gone[.]test\)/,       'one that went' );
-    like( $said, qr/10[.]0[.]0[.]3\s+now moved[.]test, was insitu:aa/, 'and one that changed hands' );
-    like( $said, qr/1 added, 1 freed, 1 changed hands/,                'counted up' );
+    like( $said, qr/10[.]0[.]0[.]4\s+recorded[ ]as[ ]new[.]test/,            'an address that arrived' );
+    like( $said, qr/10[.]0[.]0[.]1\s+freed[ ]\(was[ ]gone[.]test\)/,         'one that went' );
+    like( $said, qr/10[.]0[.]0[.]3\s+now[ ]moved[.]test,[ ]was[ ]insitu:aa/, 'and one that changed hands' );
+    like( $said, qr/1[ ]added,[ ]1[ ]freed,[ ]1[ ]changed[ ]hands/,          'counted up' );
     unlike( $said, qr/10[.]0[.]0[.]2/, 'while one that did not move is not mentioned' );
 };
 
 subtest 'a dry run says would, and a real one does not' => sub {
     my ($said) = capture_stdout { Provisioner::Bin::reseed_ips::report( { '10.0.0.1' => 'a.test' }, {}, 1 ) };
 
-    like( $said, qr/would be freed/,  'said in the conditional' );
-    like( $said, qr/Nothing written/, 'and says so plainly' );
+    like( $said, qr/would[ ]be[ ]freed/, 'said in the conditional' );
+    like( $said, qr/Nothing[ ]written/,  'and says so plainly' );
 };
 
 done_testing();

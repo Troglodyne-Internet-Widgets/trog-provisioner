@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -85,24 +85,24 @@ subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {
 
     is( $rc, 0, 'it succeeds' );
 
-    like( $after, qr{^-A trog-nat -s 10[.]8[.]0[.]0/24 -o eth0 -j MASQUERADE$}m, 'the subnet is masqueraded out of the named interface' );
-    like( $after, qr{^-A ufw-before-forward -s 10[.]8[.]0[.]0/24 -j ACCEPT$}m,   'and forwarded, which is what makes the masquerade reachable' );
+    like( $after, qr{^-A[ ]trog-nat[ ]-s[ ]10[.]8[.]0[.]0/24[ ]-o[ ]eth0[ ]-j[ ]MASQUERADE$}m, 'the subnet is masqueraded out of the named interface' );           ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $after, qr{^-A[ ]ufw-before-forward[ ]-s[ ]10[.]8[.]0[.]0/24[ ]-j[ ]ACCEPT$}m,       'and forwarded, which is what makes the masquerade reachable' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # In a chain of our own, reached by one jump.  ufw reloads with
     # iptables-restore --noflush, which flushes a user chain the input declares
     # and never flushes a built-in one -- so a MASQUERADE written straight into
     # POSTROUTING gained a duplicate on every reload and this cannot.
-    like( $after, qr{^:trog-nat - \[0:0\]$}m,        'the chain is declared' );
-    like( $after, qr{^-A POSTROUTING -j trog-nat$}m, 'and POSTROUTING jumps to it' );
+    like( $after, qr{^:trog-nat[ ]-[ ]\[0:0\]$}m,          'the chain is declared' );
+    like( $after, qr{^-A[ ]POSTROUTING[ ]-j[ ]trog-nat$}m, 'and POSTROUTING jumps to it' );
 
     # Declared before it is used, or iptables-restore refuses the file and ufw
     # does not start.
     ok( index( $after, ':trog-nat' ) < index( $after, '-A POSTROUTING -j trog-nat' ), 'declared above the jump' );
 
-    my $decls = () = $after =~ m/^:trog-nat /mg;
+    my $decls = () = $after =~ m/^:trog-nat[ ]/mg;
     is( $decls, 1, 'and declared once, since twice is a file iptables-restore refuses' );
     like(
-        $after, qr{^-A ufw-before-forward -d 10[.]8[.]0[.]0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        $after, qr{^-A[ ]ufw-before-forward[ ]-d[ ]10[.]8[.]0[.]0/24[ ]-m[ ]conntrack[ ]--ctstate[ ]RELATED,ESTABLISHED[ ]-j[ ]ACCEPT$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'and the answers get back to it'
     );
 
@@ -127,7 +127,7 @@ subtest 'a VPN subnet gets forwarded and masqueraded, in one nat table' => sub {
 subtest 'running it again changes nothing, and reloads nothing' => sub {
     my $path = rules_file();
     my ( undef, $first, $said ) = run_on( $path, '10.8.0.0/24=eth0' );
-    like( $said, qr/^Wrote 1 masquerade and 2 forwarding rule/, 'the first run says what it wrote' );
+    like( $said, qr/^Wrote[ ]1[ ]masquerade[ ]and[ ]2[ ]forwarding[ ]rule/, 'the first run says what it wrote' );
 
     $reloads = 0;
     my ( $rc, $second, $quiet ) = run_on( $path, '10.8.0.0/24=eth0' );
@@ -143,16 +143,16 @@ subtest 'a subnet that changed does not leave the old one behind' => sub {
     my ( undef, $after ) = run_on( $path, '10.9.0.0/24=eth0' );
 
     unlike( $after, qr/10[.]8[.]0[.]0/, 'nothing of the old subnet is left' );
-    like( $after, qr{^-A trog-nat -s 10[.]9[.]0[.]0/24 -o eth0 -j MASQUERADE$}m, 'and the new one is masqueraded' );
-    like( $after, qr{^-A ufw-before-forward -s 10[.]9[.]0[.]0/24 -j ACCEPT$}m,   'and forwarded' );
+    like( $after, qr{^-A[ ]trog-nat[ ]-s[ ]10[.]9[.]0[.]0/24[ ]-o[ ]eth0[ ]-j[ ]MASQUERADE$}m, 'and the new one is masqueraded' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $after, qr{^-A[ ]ufw-before-forward[ ]-s[ ]10[.]9[.]0[.]0/24[ ]-j[ ]ACCEPT$}m,       'and forwarded' );                     ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     my $nats = () = $after =~ m/^[*]nat\b/mg;
     is( $nats, 1, 'still one nat table' );
 
-    my $decls = () = $after =~ m/^:trog-nat /mg;
+    my $decls = () = $after =~ m/^:trog-nat[ ]/mg;
     is( $decls, 1, 'and still one chain declaration' );
 
-    my $jumps = () = $after =~ m/^-A POSTROUTING -j trog-nat$/mg;
+    my $jumps = () = $after =~ m/^-A[ ]POSTROUTING[ ]-j[ ]trog-nat$/mg;
     is( $jumps, 1, 'and one jump into it' );
 };
 
@@ -167,16 +167,16 @@ subtest 'a rule written before there were markers is swept up, and a stranger is
     my $path = rules_file($legacy);
     my ( undef, $after ) = run_on( $path, '10.8.0.0/24=eth0' );
 
-    my $ours = () = $after =~ m{^-A \S+ -s 10[.]8[.]0[.]0/24 .*MASQUERADE$}mg;
+    my $ours = () = $after =~ m{^-A[ ]\S+[ ]-s[ ]10[.]8[.]0[.]0/24[ ]\N*MASQUERADE$}mg;
     is( $ours, 1, 'one rule for the subnet, not the old one and the new one' );
-    like( $after, qr{^-A trog-nat -s 10[.]8[.]0[.]0/24 -o eth0 -j MASQUERADE$}m, 'and it is the one this run wrote, in the chain' );
+    like( $after, qr{^-A[ ]trog-nat[ ]-s[ ]10[.]8[.]0[.]0/24[ ]-o[ ]eth0[ ]-j[ ]MASQUERADE$}m, 'and it is the one this run wrote, in the chain' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The old shape went straight into POSTROUTING, so a guest provisioned
     # before this has one to be swept rather than only a marked block to drop.
-    unlike( $after, qr{^-A POSTROUTING -s 10[.]8[.]0[.]0/24 }m, 'the POSTROUTING copy an older version wrote is gone' );
+    unlike( $after, qr{^-A[ ]POSTROUTING[ ]-s[ ]10[.]8[.]0[.]0/24[ ]}m, 'the POSTROUTING copy an older version wrote is gone' );
 
     like(
-        $after, qr{^-A POSTROUTING -s 172[.]16[.]0[.]0/12 -o eth9 -j MASQUERADE$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+        $after, qr{^-A[ ]POSTROUTING[ ]-s[ ]172[.]16[.]0[.]0/12[ ]-o[ ]eth9[ ]-j[ ]MASQUERADE$}m,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'a masquerade for something else is somebody elses and is left alone'
     );
 };
@@ -186,7 +186,7 @@ subtest 'the interface is asked of the guest when the domain does not name one' 
     my ( undef, $after ) = run_on( $path, '10.8.0.0/24' );
 
     like(
-        $after, qr{^-A trog-nat -s 10[.]8[.]0[.]0/24 -o ens4 -j MASQUERADE$}m,
+        $after, qr{^-A[ ]trog-nat[ ]-s[ ]10[.]8[.]0[.]0/24[ ]-o[ ]ens4[ ]-j[ ]MASQUERADE$}m,         ## no critic (RegularExpressions::ProhibitComplexRegexes)
         'it masquerades out of the interface the default route leaves by'
     );
 };
@@ -198,7 +198,7 @@ subtest 'and a guest with no default route is told to name one rather than left 
     my $path = rules_file();
     like(
         exception { run_on( $path, '10.8.0.0/24' ) },
-        qr/no default route/,
+        qr/no[ ]default[ ]route/,
         'which is an error, because a rule left out here looks exactly like a working VPN'
     );
 };

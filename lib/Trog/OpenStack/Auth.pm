@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent 'OpenStack::Client::Auth::v3';
 
@@ -398,7 +398,7 @@ sub _store {
     );
 
     my $ok = eval {
-        my ($dir) = $path =~ m{^(.*)/[^/]+$};
+        my ($dir) = $path =~ m{^(\N*)/[^/]+$};
         File::Path::make_path( $dir, { mode => 0o700 } );
 
         # Atomically, because two provisions running at once would otherwise

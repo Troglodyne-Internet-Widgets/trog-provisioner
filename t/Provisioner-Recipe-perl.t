@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -92,23 +92,23 @@ subtest 'every step it is handed is installed in its own target, in order, after
 subtest 'test suites are skipped unless cpan_notest is off' => sub {
     my @steps = ( { install => ['Moo'] } );
 
-    like( rendered( cpan_deps => \@steps ), qr{^/root/bin/cpan_install --notest 'install' 'Moo'$}m, 'skipped when nothing says, which is the default' );
-    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'run when it is off' );
-    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'whatever the step is' );
+    like( rendered( cpan_deps => \@steps ), qr{^/root/bin/cpan_install[ ]--notest[ ]'install'[ ]'Moo'$}m, 'skipped when nothing says, which is the default' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install[ ]'install'[ ]'Moo'$}m, 'run when it is off' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install[ ]'install'[ ]'Moo'$}m, 'whatever the step is' );
 };
 
 subtest 'a step that cannot be one is refused by the schema' => sub {
     foreach my $case (
-        [ { install     => ['Moo'], dzil => '/bogus' }, qr/oneOf rules 0, 2 match/,           'two verbs' ],
-        [ { notest      => 0 },                         qr/Missing property/,                 'none' ],
-        [ { install     => ['Moo'], notest => 0 },      qr/Properties not allowed: notest/,   'a key no step has' ],
-        [ { pin         => { module => 'Sys::Virt' } }, qr{/pin/pkgconfig: Missing property}, 'a pin without the package it pins to' ],
-        [ { install     => [] },                        qr/Not enough items/,                 'an install of nothing' ],
-        [ { install     => ["O'Reilly"] },              qr/does not match/,                   'a quote' ],
-        [ { install     => ['Moo$HOME'] },              qr/does not match/,                   'a dollar, which make would eat' ],
-        [ { installdeps => '/bogus`id`' },              qr/does not match/,                   'a backtick' ],
-        [ { dzil        => "/bogus\n/other" },          qr/does not match/,                   'a newline' ],
-        [ { installdeps => '/bogus\\other' },           qr/does not match/,                   'a backslash' ],
+        [ { install     => ['Moo'], dzil => '/bogus' }, qr/oneOf[ ]rules[ ]0,[ ]2[ ]match/,       'two verbs' ],
+        [ { notest      => 0 },                         qr/Missing[ ]property/,                   'none' ],
+        [ { install     => ['Moo'], notest => 0 },      qr/Properties[ ]not[ ]allowed:[ ]notest/, 'a key no step has' ],
+        [ { pin         => { module => 'Sys::Virt' } }, qr{/pin/pkgconfig:[ ]Missing[ ]property}, 'a pin without the package it pins to' ],
+        [ { install     => [] },                        qr/Not[ ]enough[ ]items/,                 'an install of nothing' ],
+        [ { install     => ["O'Reilly"] },              qr/does[ ]not[ ]match/,                   'a quote' ],
+        [ { install     => ['Moo$HOME'] },              qr/does[ ]not[ ]match/,                   'a dollar, which make would eat' ],
+        [ { installdeps => '/bogus`id`' },              qr/does[ ]not[ ]match/,                   'a backtick' ],
+        [ { dzil        => "/bogus\n/other" },          qr/does[ ]not[ ]match/,                   'a newline' ],
+        [ { installdeps => '/bogus\\other' },           qr/does[ ]not[ ]match/,                   'a backslash' ],
     ) {
         my ( $step, $error, $what ) = @$case;
         like( exception { rendered( cpan_deps => [$step] ) }, qr{/cpan_deps/0[^\n]*$error}, $what );
@@ -174,10 +174,10 @@ subtest 'the guest has what this recipe installs into the perl needs to build' =
 
 subtest 'a dependant told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
-    like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined, positive-length/, 'tcms' );
+    like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined,[ ]positive-length/, 'tcms' );
 
     %required = recipe('tpsgi')->required_recipes();
-    like( exception { $required{perl}->( install_dir => $INSTALL ) }, qr/defined, positive-length/, 'tpsgi' );
+    like( exception { $required{perl}->( install_dir => $INSTALL ) }, qr/defined,[ ]positive-length/, 'tpsgi' );
 };
 
 Test::NoWarnings::had_no_warnings();

@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -85,7 +85,7 @@ subtest "the Makefile moves the scripts into place" => sub {
         { state_dir => '/etc/provisioner/state/vm', script_dir => '/root/bin' }
     );
 
-    like( $out, qr{^\tmv scripts/\* /root/bin/$}m, 'moves them out of the extracted tarball' );
+    like( $out, qr{^\tmv[ ]scripts/\*[ ]/root/bin/$}m, 'moves them out of the extracted tarball' );
 };
 
 sub _slurp {

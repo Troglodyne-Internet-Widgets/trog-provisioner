@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::HV';
 
 use Sys::Virt();
@@ -778,7 +778,7 @@ sub guest_mac {
     $index //= 0;
 
     my $digest = Digest::SHA::sha256_hex("$domain/$index");
-    return join( ':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/ );
+    return join( ':', qw{52 54 00}, $digest =~ m/\A(\N\N)(\N\N)(\N\N)/ );
 }
 
 sub nic_slots  { return ( 3, 4 ) }
@@ -1705,7 +1705,7 @@ sub note_log_destination {
     # distribution's or another recipe's.
     my %known = map       { $_ => 1 } @domains;
     my @stale = sort grep { $known{$_} }
-      map { m/\A10-(.+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
+      map { m/\A10-(\N+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
 
     if (@stale) {
 

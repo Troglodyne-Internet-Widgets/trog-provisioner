@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use FindBin::libs;
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
@@ -112,7 +112,7 @@ sub qualify_ipmap {
     foreach my $line (@lines) {
         $current = $1 if $line =~ m/\A\s*\[(\w+)\]/;
         next unless $current eq 'ips';
-        next unless $line =~ m/\A\s*([^=\s]+)\s*=\s*(.*?)\s*\z/;
+        next unless $line =~ m/\A\s*([^=\s]+)\s*=\s*(\N*?)\s*\z/;
         my ( $key, $value ) = ( $1, $2 );
         push @{ $claims{ index( $key, q{.} ) >= 0 ? $key : "$key.$tld" } }, "$key = $value";
     }
@@ -148,7 +148,7 @@ sub qualify_ipmap {
             next;
         }
 
-        if ( ( $block eq 'ips' || $block eq 'aliases' ) && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(.*)\z/ ) {
+        if ( ( $block eq 'ips' || $block eq 'aliases' ) && $line =~ m/\A(\s*)([^=\s]+)(\s*=\s*)(\N*)\z/ ) {
             my ( $lead, $key, $eq, $value ) = ( $1, $2, $3, $4 );
             my $new_key = index( $key, q{.} ) >= 0 ? $key : "$key.$tld";
 

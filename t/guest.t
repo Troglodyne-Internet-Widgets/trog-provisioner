@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -31,7 +31,7 @@ use Trog::Guest();
 # is Trog::Machine's and is tested in t/hv.t.  What is here is the rest.
 
 subtest 'a guest needs somewhere to connect to' => sub {
-    like( exception { Trog::Guest->new( user => 'ubuntu' ) }, qr/needs a host/, 'refuses to be built without one' );
+    like( exception { Trog::Guest->new( user => 'ubuntu' ) }, qr/needs[ ]a[ ]host/, 'refuses to be built without one' );
 };
 
 subtest 'identity' => sub {
@@ -65,8 +65,8 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
     my $err = exception {
         quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } )
     };
-    like( $err, qr/never came up after 1s/, 'a port that never opens is an error' );
-    like( $err, qr/vm\.example\.test/,      'naming the guest' );
+    like( $err, qr/never[ ]came[ ]up[ ]after[ ]1s/, 'a port that never opens is an error' );
+    like( $err, qr/vm\.example\.test/,              'naming the guest' );
 
     # A port that opens but a connection that will not: checking only the first
     # is how you get a confusing failure three steps later.
@@ -76,7 +76,7 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
         exception {
             quietly( sub { $guest->wait_for_ssh } )
         },
-        qr/Could not establish an SSH connection/,
+        qr/Could[ ]not[ ]establish[ ]an[ ]SSH[ ]connection/,
         'and so is that'
     );
 
@@ -124,7 +124,7 @@ subtest 'a cloud-init that reports failure is fatal' => sub {
         exception {
             quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
         },
-        qr/Cloud init reported failure/,
+        qr/Cloud[ ]init[ ]reported[ ]failure/,
         'dies'
     );
 };
@@ -141,7 +141,7 @@ subtest 'cloud-init that does not return JSON is fatal' => sub {
         exception {
             quietly( sub { $guest->wait_for_cloud_init('vm.example.test') } )
         },
-        qr/did not return a JSON array/,
+        qr/did[ ]not[ ]return[ ]a[ ]JSON[ ]array/,
         'dies rather than carrying on blind'
     );
 };

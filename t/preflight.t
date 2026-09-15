@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -105,13 +105,13 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
     my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope', image => 'not-an-image' } );
     my ($failed) = quietly( sub { $bad->check_cloud_resources } );
     ok !$failed->{ok}, 'and it notices when they are not';
-    like $failed->{what}, qr/flavor 'm1\.nope'/,    'naming the flavor';
-    like $failed->{what}, qr/image 'not-an-image'/, 'and the image';
+    like $failed->{what}, qr/flavor[ ]'m1\.nope'/,    'naming the flavor';
+    like $failed->{what}, qr/image[ ]'not-an-image'/, 'and the image';
 
     my ( $thin, $thin_mock ) = cloud_hv( api => { services => [qw{compute volumev3}] } );
     ($failed) = quietly( sub { $thin->check_reachable } );
     ok !$failed->{ok}, 'a catalogue without Glance or Neutron cannot build a guest';
-    like $failed->{what}, qr/image, network/, 'and it says which are missing';
+    like $failed->{what}, qr/image,[ ]network/, 'and it says which are missing';
 };
 
 subtest 'a cloud runs out of quota, not of hardware' => sub {
@@ -123,7 +123,7 @@ subtest 'a cloud runs out of quota, not of hardware' => sub {
 
     my ($ok) = quietly( sub { $hv->check_cloud_quota } );
     ok $ok->{ok}, 'room for one more';
-    like $ok->{what}, qr{4/10 instances}, 'and it says how much room';
+    like $ok->{what}, qr{4/10[ ]instances}, 'and it says how much room';
 
     $mock->redefine( capacity => sub { return { %$capacity, memory_free => 0, cpus_free => 0 } } );
     my ($failed) = quietly( sub { $hv->check_cloud_quota } );
@@ -157,14 +157,14 @@ subtest 'Sys::Virt has to be in step with the hypervisor' => sub {
     $sv->redefine( VERSION => sub { '10.0.0' } );
     my ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
     ok( $result->{ok}, 'the same release passes' );
-    like( $result->{what}, qr/Sys::Virt 10\.0\.0 matches libvirt 10\.0\.0/, 'saying both versions' );
+    like( $result->{what}, qr/Sys::Virt[ ]10\.0\.0[ ]matches[ ]libvirt[ ]10\.0\.0/, 'saying both versions' );
 
     # A release apart in either direction is out of step.
     foreach my $version (qw{9.4.0 11.0.0}) {
         $sv->redefine( VERSION => sub { $version } );
         ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
         ok( !$result->{ok}, "$version against 10.0.0 fails" );
-        like( $result->{fix}, qr/bring this machine to 10\.0\.0/, 'and says which way to move' );
+        like( $result->{fix}, qr/bring[ ]this[ ]machine[ ]to[ ]10\.0\.0/, 'and says which way to move' );
     }
 
     # A patch release apart is not: lockstep is on major.minor.
@@ -183,7 +183,7 @@ subtest 'a hypervisor that will not answer is reported, not thrown' => sub {
 
     ($result) = quietly( sub { Trog::HV->new()->check_sys_virt_in_step } );
     ok( !$result->{ok}, 'and so does the version check, rather than dying on the way' );
-    like( $result->{fix}, qr/Fix that first/, 'pointing at the one above it' );
+    like( $result->{fix}, qr/Fix[ ]that[ ]first/, 'pointing at the one above it' );
 };
 
 subtest 'passwordless sudo is the one that would hang the run' => sub {
@@ -196,9 +196,9 @@ subtest 'passwordless sudo is the one that would hang the run' => sub {
     $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::HV->new()->check_passwordless_sudo } );
     ok( !$result->{ok}, 'and failing does not' );
-    like( $result->{fix}, qr/NOPASSWD/,                  'the guidance is the sudoers line' );
-    like( $result->{fix}, qr/hangs rather than failing/, 'and says why it matters more than it looks' );
-    like( $result->{fix}, qr/take it away again/,        'and that it is a real grant of root' );
+    like( $result->{fix}, qr/NOPASSWD/,                        'the guidance is the sudoers line' );
+    like( $result->{fix}, qr/hangs[ ]rather[ ]than[ ]failing/, 'and says why it matters more than it looks' );
+    like( $result->{fix}, qr/take[ ]it[ ]away[ ]again/,        'and that it is a real grant of root' );
 };
 
 subtest 'rsync is the one thing both ends have to have' => sub {
@@ -218,8 +218,8 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( !$result->{ok}, 'missing on the hypervisor fails' );
-    like( $result->{what}, qr/doge\@hv[.]test/,   'naming the end that has not got it' );
-    like( $result->{fix},  qr/apt install rsync/, 'and how to fix it' );
+    like( $result->{what}, qr/doge\@hv[.]test/,       'naming the end that has not got it' );
+    like( $result->{fix},  qr/apt[ ]install[ ]rsync/, 'and how to fix it' );
 
     # Missing here, which is just as fatal and much easier to overlook: this is
     # the machine that runs the rsync, not the one it talks to.
@@ -227,7 +227,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     $which->redefine( which => sub { undef } );
     ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( !$result->{ok}, 'missing here fails too' );
-    like( $result->{what}, qr/this machine/, 'naming this end' );
+    like( $result->{what}, qr/this[ ]machine/, 'naming this end' );
 
     # A local hypervisor is one machine, and is not asked twice about it.
     $hv->redefine( is_local => sub { 1 } );
@@ -291,10 +291,10 @@ subtest 'a directory a recipe fetches has to be on this machine' => sub {
     $write->("---\n_base:\n    adminconfig:\n        skel: \"$dir/gone\"\none.test:\n    adminconfig:\ntwo.test:\n    openvpnclient:\n        cert_dir: $dir/alsogone\n");
     ($result) = quietly( sub { Trog::HV->new()->check_fetch_sources } );
     ok( !$result->{ok}, 'one that is not fails' );
-    like( $result->{what}, qr/\b2 fetched directories/,         'counting the paths rather than the domains that wanted them' );
-    like( $result->{fix},  qr{\Q$dir/gone\E \Q(adminconfig)\E}, 'naming the path and the recipe that asked' );
-    like( $result->{fix},  qr{alsogone \Q(openvpnclient)\E},    'for each of them' );
-    like( $result->{fix},  qr{rsync -a hv[.]test:},             'and how to bring one over from the hypervisor' );
+    like( $result->{what}, qr/\b2[ ]fetched[ ]directories/,       'counting the paths rather than the domains that wanted them' );
+    like( $result->{fix},  qr{\Q$dir/gone\E[ ]\Q(adminconfig)\E}, 'naming the path and the recipe that asked' );
+    like( $result->{fix},  qr{alsogone[ ]\Q(openvpnclient)\E},    'for each of them' );
+    like( $result->{fix},  qr{rsync[ ]-a[ ]hv[.]test:},           'and how to bring one over from the hypervisor' );
 
     # Nothing to check is not a failure: a fleet may run no recipe that fetches
     # a directory of the operator's at all.
@@ -309,7 +309,7 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     my ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( !$result->{ok}, 'an empty directory fails' );
-    like( $result->{what}, qr/ipmap\.cfg, recipes\.yaml/, 'naming what is missing' );
+    like( $result->{what}, qr/ipmap\.cfg,[ ]recipes\.yaml/, 'naming what is missing' );
 
     foreach my $file (qw{ipmap.cfg recipes.yaml}) {
         open( my $fh, '>', "$dir/$file" ) or die $!;
@@ -335,11 +335,11 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     my ( $rc, $out ) = quietly( sub { Trog::Bin::Preflight::main() } );
     is( $rc, 1, 'exits non-zero' );
 
-    like( $out, qr/sudo/,                  'the sudo failure is in there' );
-    like( $out, qr/ISO builder/,           'and the ISO builder' );
-    like( $out, qr/libvirt/,               'and libvirt' );
-    like( $out, qr/Missing from/,          'and the configuration' );
-    like( $out, qr/6 things to fix first/, 'counted, all in one run' );
+    like( $out, qr/sudo/,                          'the sudo failure is in there' );
+    like( $out, qr/ISO[ ]builder/,                 'and the ISO builder' );
+    like( $out, qr/libvirt/,                       'and libvirt' );
+    like( $out, qr/Missing[ ]from/,                'and the configuration' );
+    like( $out, qr/6[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
 };
 
 subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {
@@ -378,13 +378,13 @@ subtest 'a fleet with no package mirror is told what that costs' => sub {
 
     my $note = $write->("---\nweb.troglodyne.net:\n    nginx:\n");
     ok( !$note->{ok}, 'domains but no mirror is worth saying' );
-    like( $note->{fix}, qr/bin\/new_guest --hostname aptmirror\.troglodyne\.net aptmirror/, 'naming the command, under the parent the fleet already uses' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $note->{fix}, qr/bin\/new_guest[ ]--hostname[ ]aptmirror\.troglodyne\.net[ ]aptmirror/, 'naming the command, under the parent the fleet already uses' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The more annoying of the two: the work is done and nothing is using it.
     $note = $write->("---\nweb.troglodyne.net:\n    nginx:\naptmirror.troglodyne.net:\n    aptmirror:\n        releases: [noble]\n");
     ok( !$note->{ok}, 'a mirror nobody points at is worth saying louder' );
-    like( $note->{what}, qr/aptmirror\.troglodyne\.net mirrors the archive/, 'naming the guest that is doing the mirroring' );
-    like( $note->{fix},  qr/mirror: aptmirror\.troglodyne\.net/,             'and the line that would use it' );
+    like( $note->{what}, qr/aptmirror\.troglodyne\.net[ ]mirrors[ ]the[ ]archive/, 'naming the guest that is doing the mirroring' );
+    like( $note->{fix},  qr/mirror:[ ]aptmirror\.troglodyne\.net/,                 'and the line that would use it' );
 
     # Either spelling counts as pointing at one.
     is_deeply( $write->("---\n_base:\n    _global:\n        mirror: aptmirror.troglodyne.net\nweb.troglodyne.net:\n    nginx:\n"), { ok => 1 }, 'a mirror in _base _global is enough' );
@@ -414,8 +414,8 @@ subtest 'a fleet with nothing keeping its logs is told so, once there is a sink'
 
     my $note = $write->("---\nlogs.troglodyne.net:\n    logcollector:\n");
     ok( !$note->{ok}, 'a sink with nothing shipping to it is worth saying' );
-    like( $note->{what}, qr/logs\.troglodyne\.net collects logs/, 'naming the guest doing the collecting' );
-    like( $note->{fix},  qr/host: logs\.troglodyne\.net/,         'and the line that would use it' );
+    like( $note->{what}, qr/logs\.troglodyne\.net[ ]collects[ ]logs/, 'naming the guest doing the collecting' );
+    like( $note->{fix},  qr/host:[ ]logs\.troglodyne\.net/,           'and the line that would use it' );
 
     is_deeply(
         $write->("---\n_base:\n    logshipper:\n        host: logs.troglodyne.net\nlogs.troglodyne.net:\n    logcollector:\n"),
@@ -444,7 +444,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
 
     my $note = Trog::HV->new()->note_log_destination;
     ok( !$note->{ok}, 'leftovers are worth a note' );
-    like( $note->{what}, qr/\A2 rsyslog drop-ins/, 'counting only the ones written for a domain we know about' );
+    like( $note->{what}, qr/\A2[ ]rsyslog[ ]drop-ins/, 'counting only the ones written for a domain we know about' );
     unlike( $note->{fix}, qr/notours|20-ufw|50-default/, 'and leaving everything else on that machine alone' );
 
     # Comma-joined with no spaces, or the brace expansion it prints cannot be
