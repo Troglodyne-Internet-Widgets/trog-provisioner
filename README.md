@@ -150,7 +150,7 @@ That means:
 3. **The guest needs a routable address.**  We normally find a new VM by its libvirt NAT lease (`192.168.122.x`), which is only reachable from the HV itself.  When the HV is remote we SSH to the first entry in `ips` instead, so a remote build requires `ips` to be set in provision.conf.  You'll get a clear error rather than a hang if you forget.
 
 
-4. **The domain directory is not copied to the HV at all.**  It used to be, the whole of it, because the guest fetched its payload from the hypervisor -- which meant the guest's private key was on the hypervisor too.  The guest fetches from *this* machine now, so neither is true; the key does not leave here, and since it is kept in the secret store rather than in the domain directory it is not at rest here either.  See `perldoc Trog::GuestKey`.
+4. **The domain directory is not copied to the HV at all.**  It used to be, the whole of it, because the guest fetched its payload from the hypervisor -- which meant the guest's private key was on the hypervisor too.  The guest fetches from *this* machine now, so neither is true; the key does not leave here, and since it is kept in the secret store rather than in the domain directory it is not at rest here either.  See `perldoc Trog::Guest`.
 
     Anything *outside* the domain directory that a guest expects to find on the HV -- `dir=` entries in `mounts.txt` point at hypervisor-side paths, for instance -- is yours to provision, and always was.
 

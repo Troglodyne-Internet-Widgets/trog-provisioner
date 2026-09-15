@@ -15,7 +15,6 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
 use Trog::Guest();
-use Trog::GuestKey();
 use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
@@ -469,7 +468,7 @@ sub main {
 
         # After, not before: provision_domain is what mints this key and puts it
         # in the store, so asking any earlier is asking about the guest that was.
-        $skey = Trog::GuestKey->path( $depends, "$domain_dir/$depends/key.rsa" );
+        $skey = Trog::Guest->key_path( $depends, "$domain_dir/$depends/key.rsa" );
         if ( !$dryrun ) {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
             $guest->wait_for_ssh();
@@ -487,7 +486,7 @@ sub main {
 
     # Same reason as above: the key this needs is the one provision_domain just
     # made.  A domain with a dependency uses that one, which is already in hand.
-    $skey //= Trog::GuestKey->path( $domain, "$domain_dir/$domain/key.rsa" );
+    $skey //= Trog::Guest->key_path( $domain, "$domain_dir/$domain/key.rsa" );
 
     # bin/guest_key rather than the path: the key is in the store, and what
     # $skey holds is a temporary file that goes when this process does.
@@ -688,7 +687,7 @@ sub reprovision_guest {
     # named an admin user -- which will not do if the box has been locked down.
     my $built_for  = $depends // $domain;
     my $domain_dir = $hv->domain_dir;
-    my $key        = Trog::GuestKey->path( $built_for, "$domain_dir/$built_for/key.rsa" );
+    my $key        = Trog::Guest->key_path( $built_for, "$domain_dir/$built_for/key.rsa" );
 
     # Any VM still standing under this domain's own name, which is the guest it
     # had to itself before being moved onto this one.  Only with --depends: there

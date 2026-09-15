@@ -14,7 +14,7 @@ use Pod::Usage;
 
 use FindBin::libs;
 
-use Trog::GuestKey();
+use Trog::Guest();
 use Trog::HV();
 
 =head1 NAME
@@ -28,7 +28,7 @@ guest_key - hand back the key a guest is reached with.
 =head1 DESCRIPTION
 
 The private half of a guest's key lives in the secret store rather than in the
-domain directory -- see L<Trog::GuestKey>.  Everything that provisions, restores
+domain directory -- see L<Trog::Guest>.  Everything that provisions, restores
 or asks a guest something gets it from there without being told to, so this is
 not needed for any of that.
 
@@ -76,7 +76,7 @@ sub main {
     # Where it used to be kept, which is still where it is for a domain that has
     # not been provisioned since sealing.
     my $on_disk = Trog::HV->new()->domain_dir . "/$domain/key.rsa";
-    my $path    = Trog::GuestKey->path( $domain, $on_disk );
+    my $path    = Trog::Guest->key_path( $domain, $on_disk );
 
     die "No key for $domain, in the store or at $on_disk.\n" . "A domain that has never been provisioned has none yet.\n"
       unless defined $path;
@@ -88,7 +88,7 @@ sub main {
     die "$out is already there.  Move it aside, or pick another name.\n" if -e $out;
 
     File::Copy::copy( $path, $out ) or die "Could not write $out: $!\n";
-    chmod 0600, $out or die "Could not make $out private: $!\n";    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    chmod 0600, $out or die "Could not make $out private: $!\n";
 
     warn "$out is the way in to $domain, and it will stay there until you remove it.\n";
     return _print($out);

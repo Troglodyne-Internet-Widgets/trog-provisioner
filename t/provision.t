@@ -563,7 +563,7 @@ sub _layered {
     my %seen = ( cleared => [] );
 
     # The key each guest is opened with, on disk -- which is what a domain built
-    # before there was a store still has.  Trog::GuestKey->path hands back the
+    # before there was a store still has.  Trog::Guest->key_path hands back the
     # file when there is one, and that is the case this subtest is about.
     foreach my $d ( grep { defined } $domain, $depends ) {
         mkdir "$dir/$d";

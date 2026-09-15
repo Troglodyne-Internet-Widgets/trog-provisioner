@@ -33,7 +33,6 @@ use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
 use Trog::Guest();
-use Trog::GuestKey();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Local();
@@ -1163,7 +1162,7 @@ sub handle_domain {
     # is what mints it -- and not on a dry run, where guest_keypair deliberately
     # leaves the existing key alone and taking it off the disk would be losing
     # the way into a guest nobody asked us to touch.
-    Trog::GuestKey->seal( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
+    Trog::Guest->seal_key( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
 
     # Build a provision.conf
 
@@ -1332,7 +1331,7 @@ sub _salvage_guest {
     # The key may not be here yet, in which case say nothing about one rather
     # than name a file that is not there: ssh has an agent and a config of its
     # own, and either is a better answer than an -i nothing can read.
-    my $key = Trog::GuestKey->path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
+    my $key = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     return $guest{$id} = Trog::Guest->new(
         name => $host,
@@ -1609,7 +1608,7 @@ sub _get_sftp {
     # up -- this runs before generate_files rotates it.  Out of the store unless
     # a domain provisioned before sealing still has one on disk.  The domain is
     # the last component of the config directory, which is what it is made from.
-    my $key2use = Trog::GuestKey->path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
+    my $key2use = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     my $ssh = Net::SFTP::Foreign->new(
         host     => $static_ip,
