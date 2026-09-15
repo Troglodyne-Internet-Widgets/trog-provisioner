@@ -1,10 +1,12 @@
 # Troglodyne perlcritic policy
-# Maximally severe to LART agents into compliance
+# Maximally severe to LART agents into compliance.  The same policies as
+# trog-provisioner's own .perlcriticrc, without the allow lists and stop words
+# that only describe that repository.
 severity  = 1
 only      = 1
 force     = 0
 verbose   = 1
-#theme     = 
+#theme     =
 #include   =
 #exclude   =
 criticism-fatal = 1
@@ -15,7 +17,9 @@ allow-unsafe = 1
 [Documentation::RequirePod]
 # Security
 [ValuesAndExpressions::PreventSQLInjection]
-[CodeLayout::RequireASCII]
+; [CodeLayout::RequireASCII] is not here on purpose.  Code that declares
+; use 5.041 gets source::encoding "ascii", which makes a non-ASCII character a
+; compile error -- stricter than the policy, and not skippable.
 [RegularExpressions::RequireDefault]
 strict = 1
 # PEBCAK catches
@@ -36,16 +40,158 @@ strict = 1
 [ValuesAndExpressions::ProhibitFiletest_rwxRWX]
 # Bikeshed
 [CognitiveComplexity::ProhibitExcessCognitiveComplexity]
-warn_level = 4
-info_level = 3
+warn_level = 40
+info_level = 30
 [Variables::ProhibitUselessInitialization]
 [PreferredModules]
 config = .preferred_modules.ini
+[PreferredBinaries]
+config = .preferred_binaries.ini
 [logicLAB::RequireSheBang]
 formats = #!/usr/bin/env perl
 # Performance
 [logicLAB::ProhibitShellDispatch]
+[ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
+[ProhibitUseLib]
+[ProhibitUsageSubs]
+[RequireQwForLiteralLists]
+[ProhibitNoWarningsRedefine]
+[RequireFatalWarnings]
+[ProhibitUnusedImports]
+# use re '/aasx' is a pragma, not an import anything calls.
+allow = re
+[ProhibitUnusedDefinitions]
+[ProhibitPrintSTDERR]
+# Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
+# each of these has to be.
+;
+; Not here on purpose, because something above already does the job better:
+;   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
+;   ControlStructures::ProhibitCascadingIfElse  CognitiveComplexity, which
+;   ControlStructures::ProhibitDeepNests          scores nesting and every
+;   Subroutines::ProhibitExcessComplexity         break in flow, where these
+;                                                 count branches
+;   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
+;   Modules::ProhibitEvilModules                PreferredModules
+;   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions
+;   TestingAndDebugging::RequireUseWarnings     RequireFatalWarnings
+;   ValuesAndExpressions::ProhibitLeadingZeros  ProhibitLeadingZeros
+;   Modules::RequireVersionVar                  [PkgVersion], where Dist::Zilla builds it
+;   ErrorHandling::RequireCarping               die with context, and Carp::Always
+;                                                 for the trace
+;
+; Nor these, because under use 5.041 perl will not compile what they report --
+; or, for the last, no longer needs what it asks for:
+;   InputOutput::ProhibitBarewordDirHandles     no feature "bareword_filehandles"
+;   InputOutput::ProhibitBarewordFileHandles
+;   Objects::ProhibitIndirectSyntax             no feature "indirect"
+;   TestingAndDebugging::RequireUseStrict       strict, which use 5.012 and later
+;                                                 turn on
+;   Variables::ProhibitPerl4PackageNames        no apostrophe as package separator
+;   Modules::RequireEndWithOne                  feature "module_true"
+;
+; Documentation::RequirePodSections is out as well: the sections it asks for are
+; the ones Pod::Weaver writes at build.
+[BuiltinFunctions::ProhibitBooleanGrep]
+[BuiltinFunctions::ProhibitLvalueSubstr]
+[BuiltinFunctions::ProhibitReverseSortBlock]
+[BuiltinFunctions::ProhibitShiftRef]
+[BuiltinFunctions::ProhibitSleepViaSelect]
+[BuiltinFunctions::ProhibitStringyEval]
+[BuiltinFunctions::ProhibitStringySplit]
+[BuiltinFunctions::ProhibitUniversalCan]
+[BuiltinFunctions::ProhibitUniversalIsa]
+[BuiltinFunctions::ProhibitVoidGrep]
+[BuiltinFunctions::ProhibitVoidMap]
+[BuiltinFunctions::RequireBlockGrep]
+[BuiltinFunctions::RequireBlockMap]
+[BuiltinFunctions::RequireGlobFunction]
+[BuiltinFunctions::RequireSimpleSortBlock]
+[ClassHierarchies::ProhibitAutoloading]
+[ClassHierarchies::ProhibitExplicitISA]
+[ClassHierarchies::ProhibitOneArgBless]
+[CodeLayout::ProhibitHardTabs]
+[CodeLayout::ProhibitTrailingWhitespace]
+[CodeLayout::RequireConsistentNewlines]
+[CodeLayout::RequireTidyCode]
+[CodeLayout::RequireTrailingCommas]
+[ControlStructures::ProhibitLabelsWithSpecialBlockNames]
+[ControlStructures::ProhibitMutatingListFunctions]
+[ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
+[ControlStructures::ProhibitUnreachableCode]
+[ControlStructures::ProhibitUntilBlocks]
+[ControlStructures::ProhibitYadaOperator]
+[Documentation::PodSpelling]
+spell_command = aspell --lang=en_US list
+[Documentation::RequirePackageMatchesPodName]
+[ErrorHandling::RequireCheckingReturnValueOfEval]
+[InputOutput::ProhibitExplicitStdin]
+[InputOutput::ProhibitInteractiveTest]
+[InputOutput::ProhibitJoinedReadline]
+[InputOutput::ProhibitOneArgSelect]
+[InputOutput::ProhibitReadlineInForLoop]
+[InputOutput::ProhibitTwoArgOpen]
+[InputOutput::RequireBracedFileHandleWithPrint]
+[InputOutput::RequireBriefOpen]
+[InputOutput::RequireCheckedOpen]
+[InputOutput::RequireCheckedSyscalls]
+exclude_functions = print
+[InputOutput::RequireEncodingWithUTF8Layer]
+[Miscellanea::ProhibitFormats]
+[Miscellanea::ProhibitTies]
+[Miscellanea::ProhibitUnrestrictedNoCritic]
+[Miscellanea::ProhibitUselessNoCritic]
+[Modules::ProhibitAutomaticExportation]
+[Modules::ProhibitConditionalUseStatements]
+[Modules::RequireBarewordIncludes]
+[Modules::RequireFilenameMatchesPackage]
+[Modules::RequireNoMatchVarsWithUseEnglish]
+[NamingConventions::Capitalization]
+[RegularExpressions::ProhibitCaptureWithoutTest]
+[RegularExpressions::ProhibitComplexRegexes]
+[RegularExpressions::ProhibitEnumeratedClasses]
+[RegularExpressions::ProhibitFixedStringMatches]
+[RegularExpressions::ProhibitSingleCharAlternation]
+[RegularExpressions::ProhibitUnusedCapture]
+[RegularExpressions::RequireBracesForMultiline]
+[RegularExpressions::RequireDotMatchAnything]
+[RegularExpressions::RequireExtendedFormatting]
+[Subroutines::ProhibitAmpersandSigils]
+[Subroutines::ProhibitBuiltinHomonyms]
+[Subroutines::ProhibitManyArgs]
+[Subroutines::ProhibitNestedSubs]
+[Subroutines::ProhibitReturnSort]
+[Subroutines::ProhibitSubroutinePrototypes]
+[Subroutines::ProtectPrivateSubs]
+[Subroutines::RequireArgUnpacking]
+[Subroutines::RequireFinalReturn]
+[TestingAndDebugging::ProhibitProlongedStrictureOverride]
+[TestingAndDebugging::RequireTestLabels]
+[ValuesAndExpressions::ProhibitCommaSeparatedStatements]
+[ValuesAndExpressions::ProhibitComplexVersion]
+[ValuesAndExpressions::ProhibitEscapedCharacters]
+[ValuesAndExpressions::ProhibitLongChainsOfMethodCalls]
+[ValuesAndExpressions::ProhibitMismatchedOperators]
+[ValuesAndExpressions::ProhibitMixedBooleanOperators]
+[ValuesAndExpressions::ProhibitQuotesAsQuotelikeOperatorDelimiters]
+[ValuesAndExpressions::ProhibitSpecialLiteralHeredocTerminator]
+[ValuesAndExpressions::ProhibitVersionStrings]
+[ValuesAndExpressions::RequireConstantVersion]
+[ValuesAndExpressions::RequireQuotedHeredocTerminator]
+[ValuesAndExpressions::RequireUpperCaseHeredocTerminator]
+[Variables::ProhibitAugmentedAssignmentInDeclaration]
+[Variables::ProhibitConditionalDeclarations]
+; Variables::ProhibitEvilVariables is not listed: it declines to load until
+; it is given variables to prohibit.
+[Variables::ProhibitLocalVars]
+[Variables::ProhibitMatchVars]
+[Variables::ProhibitReusedNames]
+[Variables::ProhibitUnusedVariables]
+[Variables::ProtectPrivateVars]
+[Variables::RequireLexicalLoopIterators]
+[Variables::RequireLocalizedPunctuationVars]
+[Variables::RequireNegativeIndices]
 # Extensions to perl -c
 [CompileTime]
 # Good idea, but module doesn't install due to bad testsuite...we'll have to fork
