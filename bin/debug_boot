@@ -477,10 +477,7 @@ sub restart {
     my ( $hv, $domain ) = @_;
 
     my $dom = $hv->vmm->get_domain_by_name($domain);
-    eval { $dom->destroy(); 1 } or do {
-
-        # Already off is fine: the create below is the part that has to work.
-    };
+    $dom->destroy() if $dom->is_active();
     sleep 2;
     $dom = $hv->vmm->get_domain_by_name($domain);
     $dom->create();

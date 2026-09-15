@@ -1079,7 +1079,10 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     like( exception { $hv->annihilate_domain('vm.test') }, qr/Could[ ]not[ ]undefine[ ]vm\.test:[ ]undefine[ ]refused/, 'a domain that will not go' );
 
     %refuse = ( destroy => 1 );
-    is( $hv->annihilate_domain('vm.test'), 1, 'but one that is already off still goes' );
+    is( $hv->annihilate_domain('vm.test'), 1, 'one that is already off is not stopped at all, so it still goes' );
+
+    %refuse = ( destroy => 1, running => 1 );
+    like( exception { $hv->annihilate_domain('vm.test') }, qr/Could[ ]not[ ]stop[ ]vm\.test:[ ]destroy[ ]refused/, 'but a running one that will not stop is an error' );
 };
 
 {
@@ -1096,10 +1099,11 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
 
     package FakeRefusing;
 
-    # A pool or a domain, refusing whatever the test has named.
+    # A pool or a domain, refusing whatever the test has named, and running only
+    # when it names that too.
     sub new           ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
     sub get_name      ($self)             { return 'vm.test' }
-    sub is_active     ($self)             { return 0 }
+    sub is_active     ($self)             { return $self->{refuse}{running} ? 1 : 0 }
     sub set_autostart ( $self, $ )        { return $self->_or_refuse('set_autostart') }
     sub create        ($self)             { return $self->_or_refuse('create') }
     sub build         ( $self, $ )        { return $self->_or_refuse('build') }

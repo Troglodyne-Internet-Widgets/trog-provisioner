@@ -306,11 +306,9 @@ sub annihilate_domain {
     my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
 
-    eval { $domain->destroy(); 1 } or do {
-
-        # A domain that is already shut off can't be destroyed, and that's the
-        # normal case here rather than a problem.
-    };
+    if ( $domain->is_active() ) {
+        eval { $domain->destroy(); 1 } or die "Could not stop $name: $@";
+    }
     eval {
         $domain->undefine( Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA() );
         1;
