@@ -12,10 +12,8 @@ Restart=on-failure
 RestartSec=5
 LimitNOFILE=[% nofile_limit %]
 # 0027 rather than the 0022 systemd would otherwise use, so what garage writes
-# under its data and metadata directories is readable by the group and by nobody
-# else.  templates/garage.tt hands that group to the admin user, because
-# bin/new_config salvages both directories over sftp as that user with no sudo
-# and cannot read a thing it is not in the group for.
+# under its data and metadata directories is readable by the garage group and by
+# nobody else -- narrower than the default regardless of who else can read it.
 UMask=0027
 
 [Install]
