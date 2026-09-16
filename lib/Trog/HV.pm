@@ -672,13 +672,29 @@ sub check_config {
 
     my $dir = Trog::Config->dir;
 
-    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml};
+    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml admin_authorized_keys};
+
+    # A key file holding nothing is worse than one that is not there: it passes
+    # a check for existence and then stops bin/new_config, which is the round
+    # trip this check exists to save.
+    push( @missing, 'admin_authorized_keys' )
+      if !@missing && !-s "$dir/admin_authorized_keys";
+
     return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) unless @missing;
 
-    return $self->_verdict( 0, "Missing from $dir: " . join( ', ', @missing ), <<"FIX" );
-These are where an installation says which machines exist and what every guest
-gets.  See Trog::Config for where this directory is and how to point it
-somewhere else.
+    return $self->_verdict( 0, "Missing or empty in $dir: " . join( ', ', @missing ), <<"FIX" );
+These are where an installation says which machines exist, what every guest
+gets, and who may log in to one.  See Trog::Config for where this directory is
+and how to point it somewhere else.
+
+admin_authorized_keys is the administrator's public keys, one per line, written
+into every guest cloud-init builds.  Seed it from an online identity with:
+
+    ssh-import-id -o $dir/admin_authorized_keys gh:YOURNAME
+
+lp: for Launchpad.  Holding them here rather than naming an identity for the
+guest to resolve is deliberate: cloud-init would fetch them from GitHub while
+the guest boots, which delays every provision and fails when GitHub is down.
 FIX
 }
 

@@ -130,7 +130,7 @@ sub salvage_brings_down {
 my %G = (
     domain                     => 'test.test.test',
     tld                        => 'test.test',
-    admin_key                  => 'gh:nobody',
+    admin_keys                 => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAnobodyskey nobody'],
     gateway                    => '192.168.1.254',
     cache_ip                   => q{},
     transfer_ips               => ['192.168.122.251'],
@@ -177,7 +177,7 @@ my %PROV = (
 
 # %G stands in for what bin/new_config hands every recipe, and global_args says
 # what that is.  Two lists of the same thing drift: this one was missing
-# admin_key, gateway, cache_ip and transfer_ips, and carried a subdomain that
+# admin_keys, gateway, cache_ip and transfer_ips, and carried a subdomain that
 # bin/new_config sets to the fqdn and nothing reads.
 subtest 'the globals this file injects are the globals the base class declares' => sub {
     my $props = { Provisioner::Recipe->global_args }->{properties};

@@ -50,7 +50,7 @@ sub built {
         script_dir  => '/root/bin',
         admin_user  => 'doge',
         admin_email => 'doge@test.test',
-        admin_key   => 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey doge',
+        admin_keys  => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey doge'],
         gateway     => '192.168.1.254',
         main_ip     => '192.168.1.50',
         %extra,
@@ -107,10 +107,15 @@ subtest 'a runner told nothing at all can still build a guest' => sub {
     my ($dir) = built();
     my $cfg = slurp( $dir, 'trogrunner.ipmap.cfg' );
 
-    foreach my $required (qw{admin_user admin_key admin_gecos admin_email gateway resolvers}) {
+    foreach my $required (qw{admin_user admin_gecos admin_email gateway resolvers}) {
         like( $cfg, qr/^\Q$required\E=\S/m, "$required is not empty" )
           or diag "bin/new_config on the runner would die: Must set $required in global section";
     }
+
+    # The keys left ipmap.cfg for a file of their own, and an empty one is the
+    # same failure in different clothes: a runner that builds guests nobody can
+    # log in to.
+    like( slurp( $dir, 'trogrunner.admin_authorized_keys' ), qr/\Assh-/, 'and the administrator keys came down with it' );
 };
 
 subtest 'a secret in the runner recipes never becomes a password in a file' => sub {

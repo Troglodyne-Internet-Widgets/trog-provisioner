@@ -347,7 +347,7 @@ sub global_args {
             user        => { type => 'string', description => 'The service account the application runs as and recipes set ownership to.  Falls back to admin_user, which is a fallback rather than the intended configuration.' },
             admin_user  => { type => 'string', description => 'The account that administers the guest.' },
             admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
-            admin_key   => { type => 'string', description => "The administrator's ssh key, as cloud-init's ssh_import_id spells it." },
+            admin_keys  => { type => 'array',  items       => { type => 'string' }, description => "The administrator's ssh keys, read from admin_authorized_keys beside the rest of the configuration and written straight into the guest." },
 
             # The three that go absent together.  A hypervisor which addresses
             # its own guests hands out no address of ours, has no NAT bridge to

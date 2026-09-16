@@ -16,7 +16,10 @@ use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
 use Trog::HV();
+use Trog::Local();
+use Trog::Config();
 use Trog::Hypervisors();
+use IO::Prompter();
 
 =head1 NAME
 
@@ -103,7 +106,56 @@ sub main {
         print "    $_\n" for split( m/\n/, $failure->{fix} );
         print "\n";
     }
+
+    seed_admin_keys();
     return 1;
+}
+
+# Offer to fill in admin_authorized_keys from an online identity, when that is
+# what is missing and there is somebody there to ask.  ssh-import-id is what
+# fetches them, which is the same thing cloud-init used to do on every guest at
+# first boot -- done once here instead, against a file every guest is built from.
+#
+# Only ever at a terminal.  bin/preflight is run unattended by the provisioning
+# workflow, where a question has nowhere to be answered from, and a check that
+# blocks is worse than one that reports.
+sub seed_admin_keys {
+    my $path = Trog::Config->path('admin_authorized_keys');
+    return 0 if -e $path;
+
+    return 0 unless interactive();
+
+    # IO::Prompter reads from *ARGV, which here holds this program's own
+    # arguments and sends it off to open a file named after one.  Flattening it
+    # leaves nothing there to open; see Trog::Credentials, which does the same.
+    local *ARGV = join ' ', @ARGV;
+
+    # The two ssh-import-id answers to, as a hash rather than a match: what the
+    # answer has to be one of is the thing worth writing down.
+    my %offered = map { $_ => 1 } qw{gh lp};
+
+    my $service = IO::Prompter::prompt('Seed it now? Which service [gh, lp, or empty to skip]:');
+    my $at      = "$service";
+    return 0 unless $offered{$at};
+
+    my $who = IO::Prompter::prompt('Whose keys, as that service spells the name:');
+    return 0 unless length "$who";
+
+    my @cmd = ( 'ssh-import-id', '-o', $path, "$at:$who" );
+    print 'Running ' . join( ' ', @cmd ) . "\n";
+
+    # Through the machine we are running on rather than a bare system(): it is
+    # how everything else here runs a command, and it is the half of this a test
+    # can stand in for.
+    return Trog::Local->new()->run_cmd(@cmd) == 0 ? 1 : 0;
+}
+
+# Whether there is anybody there to answer a question.  Its own sub because a
+# filetest on a real handle is not something a test can stand in for, and both
+# answers are worth covering.
+sub interactive {
+    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether there is anybody to ask is exactly what this decides
+    return ( -t *STDIN && -t *STDOUT ) ? 1 : 0;
 }
 
 sub hypervisor {

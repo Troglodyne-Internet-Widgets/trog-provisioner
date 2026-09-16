@@ -413,8 +413,14 @@ sub handle_domain {
     my $admin_user = $global_conf->{admin_user};
     die "Must set admin_user in global section of $cfile" unless $admin_user;
 
-    my $admin_key = $global_conf->{admin_key};
-    die "Must set admin_key in global section of $cfile" unless $admin_key;
+    # The administrator's keys, kept beside the rest of the configuration rather
+    # than named as a gh: identity for cloud-init to fetch at first boot.  That
+    # fetch went to GitHub while the guest was coming up, so a slow answer
+    # delayed every provision and an outage would have stopped one -- and a raw
+    # public key had nowhere to go at all.
+    my $keyfile    = Trog::Config->path('admin_authorized_keys');
+    my @admin_keys = grep { length && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
+    die "No administrator keys in $keyfile.\nbin/preflight will offer to seed it with ssh-import-id.\n" unless @admin_keys;
 
     my $admin_gecos = $global_conf->{admin_gecos};
     die "Must set admin_gecos in global section of $cfile" unless $admin_gecos;
@@ -638,11 +644,11 @@ sub handle_domain {
     my $user_conf = {
         users => [
             {
-                gecos         => $admin_gecos,
-                name          => $admin_user,
-                shell         => '/bin/bash',
-                sudo          => 'ALL=(ALL) NOPASSWD:ALL',
-                ssh_import_id => [$admin_key],
+                gecos               => $admin_gecos,
+                name                => $admin_user,
+                shell               => '/bin/bash',
+                sudo                => 'ALL=(ALL) NOPASSWD:ALL',
+                ssh_authorized_keys => [@admin_keys],
             },
             @data_users,
         ],
@@ -722,12 +728,14 @@ sub handle_domain {
     $global_config->{admin_user}   = $admin_user;
     $global_config->{admin_email}  = $admin_email;
 
-    # The other two halves of who administers a guest and where it sits, out of
-    # the same [global] block as the two above.  They were the only members of
-    # it a recipe could not see, which read as an oversight rather than a
-    # decision -- Provisioner::Recipe::trogrunner is what noticed, needing to
-    # write an ipmap.cfg of its own and having no way to ask what this one says.
-    $global_config->{admin_key}     = $admin_key;
+    # The other halves of who administers a guest and where it sits.  The gateway
+    # is out of the same [global] block as the two above and was the member of it
+    # a recipe could not see, which read as an oversight rather than a decision --
+    # Provisioner::Recipe::trogrunner is what noticed, needing to write an
+    # ipmap.cfg of its own and having no way to ask what this one says.  The keys
+    # are here for the same reason: a runner has to authorize somebody on the
+    # guests it builds, and they are no longer a setting it could copy.
+    $global_config->{admin_keys}    = [@admin_keys];
     $global_config->{gateway}       = $gateway;
     $global_config->{domain}        = $fqdn;
     $global_config->{ipmap}         = $ip_conf;

@@ -9,6 +9,7 @@ points somewhere else; every command also takes `--ipmap`, `--recipes` and
 |---|---|
 | `hypervisors.conf` | the machines you can build on, and what to spare on each |
 | `ipmap.cfg` | addresses, nameservers, the address pool, and who administers it all |
+| `admin_authorized_keys` | the administrator's public keys, written into every guest cloud-init builds |
 | `recipes.yaml` | the base recipe every guest gets |
 | `recipes.d/` | one file per guest, named for it |
 | `secrets.kdbx` | the passwords the recipes reach for, and a cloud's credential secret when `clouds.yaml` refers to it |
@@ -27,7 +28,6 @@ Static addresses for guests, and the details every domain inherits.
 [global]
 basedir=/opt/domains
 admin_user=test
-admin_key=gh:test
 admin_gecos=Testy Testerson
 admin_email=test@test.test
 [ips]
@@ -60,9 +60,32 @@ more than one way to be reached and the kernel picks the wrong one.
 
 `bin/new_config tickle.test.test` writes a configuration for that name at that
 address. It populates a `users.yaml` creating the admin user, granting them
-admin rights and importing their GitHub key; you can add to that with a
-`users.yaml` in the data directory. Aliases become vhost aliases and CNAMEs if
-you have picked the recipes that do that.
+admin rights and authorizing the keys from `admin_authorized_keys`; you can add
+to that with a `users.yaml` in the data directory. Aliases become vhost aliases
+and CNAMEs if you have picked the recipes that do that.
+
+## admin_authorized_keys
+
+The administrator's public keys, one per line, in the format sshd reads. Blank
+lines and `#` comments are ignored. Every guest cloud-init builds is given
+these, on the account that can sudo.
+
+`bin/preflight` checks the file is there and offers to fill it in from an online
+identity when there is a terminal to ask at. To do it by hand:
+
+```
+ssh-import-id -o /etc/trog-provisioner/admin_authorized_keys gh:yourname
+```
+
+`lp:` for Launchpad. A key you have locally can simply be appended; nothing here
+requires that they came from a service.
+
+This used to be a single `admin_key` in `ipmap.cfg` naming an identity
+(`gh:someone`) which cloud-init resolved **on the guest, at first boot**. That
+made every provision wait on GitHub answering, and fail when it did not -- and a
+raw public key had no way in at all. Holding the keys here resolves them once,
+where a failure is somebody's to look at rather than a guest that will not come
+up.
 
 ## recipes.yaml and recipes.d/
 
@@ -336,7 +359,7 @@ runner.example.test:
 ```
 
 Nothing in it is required, and `config` inherits `admin_user`, `admin_email`,
-`admin_key` and `gateway` from the guest's own -- a runner administers what it
+`admin_keys` and `gateway` from the guest's own -- a runner administers what it
 builds the way this installation administers it, unless told otherwise. Give it
 `addresses` and `cidr` though: without an address pool it has none to hand out,
 and every guest it tries to build stops on "cannot auto-assign IP".
@@ -487,12 +510,8 @@ listening on one port both get the higher of their rate limits. See
 
 ## Known gaps
 
-Two, both carried over from the old documentation and both still true:
+One, carried over from the old documentation and still true:
 
-* `admin_key` is handed to cloud-init as an `ssh_import_id`, so it names an
-  account to import from (`gh:someone`) rather than a key. A raw public key has
-  no way in here; put it in the domain's `users.yaml`, which takes
-  `ssh_authorized_keys`.
 * A few recipes -- `mail` most of all -- were not idempotent the way the global
   fragment mechanism wants, because the software they configure has no `conf.d`
   directory and the config file had to be edited rather than added to. The
