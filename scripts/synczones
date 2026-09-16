@@ -129,10 +129,15 @@ sub zonediff {
         my $raw = $to_sync->plain;
         my $update_id;
 
-        # Build plain form(s)
+        # Build plain form(s): the record as it arrived, that plus a trailing
+        # dot, that in quotes, and that with its quotes taken off -- because a
+        # provider may hand back any of them for what the zonefile renders one
+        # way.  /r on the last: without it the substitution answers with how
+        # many quotes it removed rather than the string, and strips them from
+        # content before the three above are built from it.
         @$zones_actual = map {
             my $s     = $_;
-            my $dquot = $_->{content} =~ s/"//g;
+            my $dquot = $_->{content} =~ s/"//gr;
             $s->{plain} = "$_->{name}. $_->{ttl} IN $_->{type} $_->{content}";
             $s->{pdot}  = "$s->{plain}.";
             $s->{pquot} = qq|$_->{name}. $_->{ttl} IN $_->{type} "$_->{content}"|;
