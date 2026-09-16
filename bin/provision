@@ -26,7 +26,7 @@ use File::Slurper::Temp();
 use File::Temp();
 use Provisioner::IPPool();
 use YAML::XS();
-use List::Util   qw{uniq};
+use List::Util   qw{all uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -218,12 +218,12 @@ sub place_guest_secrets {
 
     # The same domain directory bin/destroy purges: whatever hypervisor this run
     # is working with says where it is.
+    # No manifest is the ordinary case: new_config writes one only for a domain
+    # whose recipes ask for a secret, and --no-config writes none at all.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
-    open( my $fh, '<:raw', $manifest ) or return;
-    my $yaml = do { local $/; <$fh> };
-    close($fh) or die "Could not close $manifest: $!\n";
+    return unless -e $manifest;
 
-    my $wanted = YAML::XS::Load($yaml);
+    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;
@@ -809,13 +809,12 @@ sub read_seed {
     my $dir    = Trog::HV->new()->domain_dir . "/$domain";
     my @files  = qw{user-data meta-data network-config};
 
-    my %seed;
-    foreach my $file (@files) {
-        open( my $fh, '<:encoding(UTF-8)', "$dir/$file" ) or last;
-        $seed{$file} = do { local $/; <$fh> };
-        close($fh) or die "Could not close $dir/$file: $!\n";
-    }
-    return %seed if keys %seed == @files;
+    # Which of the two this is: a domain new_config generated a seed for, or one
+    # somebody wrote by hand that has only a provision.conf.  read_text dies on
+    # anything else that stops it reading one.
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a seed to reuse at all
+    return map { $_ => scalar File::Slurper::read_text("$dir/$_") } @files
+      if all { -f "$dir/$_" } @files;
 
     print "No cloud-init configuration beside $domain; building it from provision.conf\n";
     distro_recipe($config)->generate_files(
