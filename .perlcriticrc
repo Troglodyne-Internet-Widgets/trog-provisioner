@@ -27,6 +27,7 @@ strict = 1
 [Subroutines::ProhibitAmbiguousFunctionCalls]
 [ValuesAndExpressions::ProhibitSingleArgArraySlice]
 [Bangs::ProhibitUselessRegexModifiers]
+[RegularExpressions::PreventUselessMetacharacterEscapes]
 [Bangs::ProhibitCommentedOutCode]
 [Tics::ProhibitUseBase]
 [ProhibitLeadingZeros]
