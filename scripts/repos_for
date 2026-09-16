@@ -1,71 +1,81 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 package Trog::repogetter;
 
+use 5.014;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use Data::Dumper;
 use Carp::Always;
-use Getopt::Long qw{GetOptionsFromArray};
 use File::pushd qw{pushd};
 use Pithub;
 
 sub main {
 
-	my ($API_URL, $API_TOKEN, @entities) = @ARGV;
+    my ( $API_URL, $API_TOKEN, @entities ) = @ARGV;
 
-	die "API URL must be first arg" unless $API_URL;
-	die "API Token must be second arg" unless $API_TOKEN;
+    die "API URL must be first arg"    unless $API_URL;
+    die "API Token must be second arg" unless $API_TOKEN;
 
-	my %cache;
-	my $cfile = "$ENV{HOME}/.repos_for.dump";
-	my $c = do($cfile) if -f $cfile;
-	%cache = %$c if ref $c eq 'HASH';
+    my %cache;
+    my $cfile = "$ENV{HOME}/.repos_for.dump";
 
-	if (!exists $cache{$API_URL}) {
-		foreach my $entity (@entities) {
-			my $ph = Pithub->new(
-				user => $entity,
-				api_uri => $API_URL,
-				token   => $API_TOKEN,
-			);
+    # Declared before the conditional: "my $x if COND" is undefined behaviour,
+    # and perl keeps such a variable static between calls rather than undef.
+    my $c;
+    $c     = do($cfile) if -f $cfile;          ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a cache to read, and do() on a missing file says nothing useful
+    %cache = %$c        if ref $c eq 'HASH';
 
-			my $result = $ph->repos->list();
-			$result->auto_pagination(1);
-			while (my $row = $result->next) {
-				my $owning_entity = $row->{owner}->{login};
-				$cache{$API_URL}{$owning_entity}{$row->{name}} = {
-					clone_url 	   => $row->{clone_url},
-					ssh_url        => $row->{ssh_url},
-					default_branch => $row->{default_branch},
-				}
-			}
-		}
-		# Store the cache
-		open(my $fh, '>', $cfile);
-		print $fh Dumper(\%cache);
-		close($fh);
-	}
+    if ( !exists $cache{$API_URL} ) {
+        foreach my $entity (@entities) {
+            my $ph = Pithub->new(
+                user    => $entity,
+                api_uri => $API_URL,
+                token   => $API_TOKEN,
+            );
 
-	foreach my $entity (@entities) {
-		foreach my $repo (keys(%{$cache{$API_URL}{$entity}})) {
-			my $robj = $cache{$API_URL}{$entity}{$repo};
-			# Clone it unless it's already present.
-			next if -d $repo;
-			print "Cloning $repo...\n";
-			system(qw{git clone}, $robj->{clone_url});
-			# If we couldn't clone it, we can try the SSH URI in case the user setup a key in their skel.
-			if (!-d $repo) {
-				system(qw{git clone}, $robj->{ssh_url});
-				next if -d $repo;
-			}
-			next unless -d $repo;
-			my $d = pushd($repo);
-			print "Rewriting origin in $repo...\n";
-			system(qw{git remote set-url origin}, $robj->{ssh_url});
-		}
-	}
+            my $result = $ph->repos->list();
+            $result->auto_pagination(1);
+            while ( my $row = $result->next ) {
+                my $owning_entity = $row->{owner}->{login};
+                $cache{$API_URL}{$owning_entity}{ $row->{name} } = {
+                    clone_url      => $row->{clone_url},
+                    ssh_url        => $row->{ssh_url},
+                    default_branch => $row->{default_branch},
+                };
+            }
+        }
+
+        # Store the cache
+        open( my $fh, '>', $cfile ) or die "Cannot write $cfile: $!\n";
+        print {$fh} Dumper( \%cache );
+        close($fh) or die "Cannot close $cfile: $!\n";
+    }
+
+    foreach my $entity (@entities) {
+        foreach my $repo ( keys( %{ $cache{$API_URL}{$entity} } ) ) {
+            my $robj = $cache{$API_URL}{$entity}{$repo};
+
+            # Clone it unless it's already present.
+            next if -d $repo;
+            print "Cloning $repo...\n";
+            system( qw{git clone}, $robj->{clone_url} );
+
+            # If we couldn't clone it, we can try the SSH URI in case the user setup a key in their skel.
+            if ( !-d $repo ) {
+                system( qw{git clone}, $robj->{ssh_url} );
+                next if -d $repo;
+            }
+            next unless -d $repo;
+            my $d = pushd($repo);
+            print "Rewriting origin in $repo...\n";
+            system( qw{git remote set-url origin}, $robj->{ssh_url} );
+        }
+    }
+
+    return 0;
 }
 
 exit main(@ARGV) unless caller;

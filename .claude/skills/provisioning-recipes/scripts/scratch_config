@@ -172,21 +172,25 @@ sub main {
         return 0;
     }
 
-    print {*STDERR} "Scratch configuration in $dir\n";
-    print {*STDERR} "  copied from $source: ipmap.cfg" . ( $has_fleet   ? ", hypervisors.conf\n"                                 : "\n" );
-    print {*STDERR} '  admin_authorized_keys ' .         ( $keys_copied ? "copied, so a scratch guest lets the same people in\n" : "built here, the installation having none to copy\n" );
-    print {*STDERR} "  recipes.yaml built here, so none of the installation's credentials are wanted\n";
-    print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
+    my $report = "Scratch configuration in $dir\n";
+    $report .= "  copied from $source: ipmap.cfg" . ( $has_fleet   ? ", hypervisors.conf\n"                                 : "\n" );
+    $report .= '  admin_authorized_keys ' .         ( $keys_copied ? "copied, so a scratch guest lets the same people in\n" : "built here, the installation having none to copy\n" );
+    $report .= "  recipes.yaml built here, so none of the installation's credentials are wanted\n";
+    $report .= "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
-    print {*STDERR} "  recipes.d/ left empty, so a guest gets what new_guest names and nothing else\n";
-    print {*STDERR} "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
-    print {*STDERR} "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
-    print {*STDERR} "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
-    print {*STDERR} "    $_\n" for @refs;
-    print {*STDERR} "\n";
+    $report .= "  recipes.d/ left empty, so a guest gets what new_guest names and nothing else\n";
+    $report .= "  cpan_notest: 0 in _base's _global, so CPAN test suites run\n"       if $cpan_tests;
+    $report .= "  cache: $cache in _base's _global, so guests provision through it\n" if $cache;
+    $report .= "  secrets.kdbx built with " . scalar(@refs) . " throwaway value" . ( @refs == 1 ? '' : 's' ) . ":\n";
+    $report .= join( q{}, map { "    $_\n" } @refs );
+    $report .= "\n";
 
-    print "export TROG_PROVISIONER_CONFIG=$dir\n";
-    print "export TROG_SCRATCH_PASS=$password\n";
+    # STDERR because the caller runs this as eval "$(scratch_config)": whatever
+    # reaches STDOUT is executed by their shell, so the two export lines below
+    # are the only things allowed there.
+    print {*STDERR} $report;    ## no critic (ProhibitPrintSTDERR)
+
+    print "export TROG_PROVISIONER_CONFIG=$dir\n" . "export TROG_SCRATCH_PASS=$password\n";
     return 0;
 }
 
@@ -256,7 +260,8 @@ sub build {
     my $has_fleet = copy( "$source/$fleet", "$dir/$fleet" ) ? 1 : 0;
 
     my %needed = Trog::Secrets->needed( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") ) );
-    my @refs   = sort keys %{ { map { $_ => 1 } values %needed } };
+    my %unique = map { $_ => 1 } values %needed;
+    my @refs   = sort keys %unique;
 
     my $password = File::Temp::tempdir() =~ s{\N*/}{}r;    # a throwaway name for a throwaway store
 
@@ -295,7 +300,7 @@ sub remove {
       unless -f "$dir/$MARKER";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
 
     remove_tree($dir);
-    print {*STDERR} "Removed $dir\n";
+    print {*STDERR} "Removed $dir\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT is the caller's shell input
     return 0;
 }
 

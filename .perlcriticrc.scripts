@@ -1,0 +1,222 @@
+# Troglodyne perlcritic policy for scripts/
+#
+# What is in scripts/ ships to a guest and runs on whatever perl the distro put
+# there, before anything has built a newer one -- so it cannot declare
+# use 5.041 the way bin/ and lib/ do.  It standardizes on use 5.014 instead:
+# the floor that has /aa, and low enough for any system perl still worth
+# provisioning onto.
+#
+# That one difference is the whole reason this file exists rather than a few
+# exclusions bolted onto .perlcriticrc.  That profile omits seven policies on
+# the stated grounds that perl will not compile what they report under 5.041 --
+# and none of that reasoning survives at 5.014, so each of the seven is named
+# below.  They are the point of this file as much as the exclusions are: without
+# them a bareword filehandle in scripts/ is caught by nothing at all.
+#
+# Dropped here, and why:
+#
+#   RegularExpressions::RequireDefault              use re '/aasx' is how bin/
+#   RegularExpressions::RequireDotMatchAnything     and lib/ satisfy these in one
+#   RegularExpressions::RequireExtendedFormatting   line, and /x makes literal
+#     whitespace in a pattern vanish.  setup-masquerade matches iptables-restore
+#     output with spaces in the pattern -- "^-A POSTROUTING -s ... -j MASQUERADE"
+#     and "^:$NAT_CHAIN " -- so turning /x on there stops those matching and
+#     silently leaves the rule it meant to remove in place.
+#
+#   logicLAB::ProhibitShellDispatch                 driving ufw, iptables and
+#     cpanm is what these scripts are for.  There is no library for `ufw allow`,
+#     and the policy fires 23 times saying so.
+#
+#   Documentation::RequirePod                       a script installed on a guest
+#   Documentation::PodSpelling                      is read by whoever is standing
+#   ProhibitUsageSubs                               on the guest, and --help is
+#     how they ask.  A usage() sub is the right shape for that, not a duplicate
+#     of POD nobody there will run perldoc against.
+#
+#   ProhibitPrintSTDERR                             every one of these is a
+#     helper run from a makefile target or a postrun task, where STDERR is the
+#     channel progress belongs on and STDOUT is left for whatever the caller
+#     reads back.
+
+severity  = 1
+only      = 1
+force     = 0
+verbose   = 1
+criticism-fatal = 1
+color     = 1
+allow-unsafe = 1
+
+# The seven .perlcriticrc leaves out because use 5.041 makes them unnecessary.
+# Nothing here declares 5.041, so each of them is load-bearing again.
+[InputOutput::ProhibitBarewordDirHandles]
+[InputOutput::ProhibitBarewordFileHandles]
+[Objects::ProhibitIndirectSyntax]
+[TestingAndDebugging::RequireUseStrict]
+[Variables::ProhibitPerl4PackageNames]
+[Modules::RequireEndWithOne]
+[CodeLayout::RequireASCII]
+
+# Usability
+[Modules::RequirePerlVersion]
+# Security
+[ValuesAndExpressions::PreventSQLInjection]
+# PEBCAK catches
+[BuiltinFunctions::ProhibitDeleteOnArrays]
+[Subroutines::ProhibitAmbiguousFunctionCalls]
+[ValuesAndExpressions::ProhibitSingleArgArraySlice]
+[Bangs::ProhibitUselessRegexModifiers]
+[RegularExpressions::PreventUselessMetacharacterEscapes]
+[Bangs::ProhibitCommentedOutCode]
+[Tics::ProhibitUseBase]
+[ProhibitLeadingZeros]
+# Both take a file mode, and in a position the policy cannot tell by itself.
+allow = Provisioner::Utils::write_pem Test::MockFile::new_dir
+[RegularExpressions::ProhibitEmptyAlternatives]
+[ValuesAndExpressions::UnexpandedSpecialLiteral]
+[CodeLayout::ProhibitIfIfSameLine]
+[ValuesAndExpressions::ConstantBeforeLt]
+[ValuesAndExpressions::ProhibitDuplicateHashKeys]
+# any access checks are necessarily a TOCTOU waiting to happen
+[ValuesAndExpressions::ProhibitFiletest_f]
+[ValuesAndExpressions::ProhibitFiletest_rwxRWX]
+# Bikeshed
+[CognitiveComplexity::ProhibitExcessCognitiveComplexity]
+warn_level = 40
+info_level = 30
+[Variables::ProhibitUselessInitialization]
+# A list of its own, differing from .preferred_modules.ini in exactly one
+# stanza: JSON.  Everything under scripts/ runs on a guest's system perl, where
+# neither XS parser exists and there is no CPAN client to fetch one until the
+# perl recipe has run -- while Provisioner::Recipe::Ubuntu::pdns installs
+# libjson-perl for exactly this, next to libconfig-simple-perl and
+# libnet-dns-perl.  Cpanel::JSON::XS stays right for bin/ and lib/, which run on
+# the provisioner.
+#
+# That reasoning is here rather than in the file it describes because
+# [PreferredModules] parses its config with Config::INI, which has no comment
+# syntax at all: a '#' line is a syntax error, and the policy reports it only as
+# "Invalid configuration file".  Hence not one comment over there.
+[PreferredModules]
+config = .preferred_modules.scripts.ini
+[PreferredBinaries]
+config = .preferred_binaries.ini
+# /usr/bin/perl rather than env perl: these run on the guest's system perl, and
+# an env shebang resolves to whatever is first on PATH -- which, once the perl
+# recipe has built one under /opt/perl5, is not necessarily the one they are
+# written against.
+[logicLAB::RequireSheBang]
+formats = #!/usr/bin/perl
+# Performance
+[ProhibitPipeOpen]
+[ProhibitRegexForSimpleSubstring]
+[ProhibitUseLib]
+[RequireQwForLiteralLists]
+[ProhibitNoWarningsRedefine]
+[RequireFatalWarnings]
+[ProhibitUnusedImports]
+# Neither of these can be seen statically: IO::Prompter installs prompt() from a
+# custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
+# name, from a string.
+allow = IO::Prompter Text::Xslate::Bridge::TT2 re
+# Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
+# each of these has to be.
+[BuiltinFunctions::ProhibitBooleanGrep]
+[BuiltinFunctions::ProhibitLvalueSubstr]
+[BuiltinFunctions::ProhibitReverseSortBlock]
+[BuiltinFunctions::ProhibitShiftRef]
+[BuiltinFunctions::ProhibitSleepViaSelect]
+[BuiltinFunctions::ProhibitStringyEval]
+[BuiltinFunctions::ProhibitStringySplit]
+[BuiltinFunctions::ProhibitUniversalCan]
+[BuiltinFunctions::ProhibitUniversalIsa]
+[BuiltinFunctions::ProhibitVoidGrep]
+[BuiltinFunctions::ProhibitVoidMap]
+[BuiltinFunctions::RequireBlockGrep]
+[BuiltinFunctions::RequireBlockMap]
+[BuiltinFunctions::RequireGlobFunction]
+[BuiltinFunctions::RequireSimpleSortBlock]
+[ClassHierarchies::ProhibitAutoloading]
+[ClassHierarchies::ProhibitExplicitISA]
+[ClassHierarchies::ProhibitOneArgBless]
+[CodeLayout::ProhibitHardTabs]
+[CodeLayout::ProhibitTrailingWhitespace]
+[CodeLayout::RequireConsistentNewlines]
+[CodeLayout::RequireTidyCode]
+[CodeLayout::RequireTrailingCommas]
+[ControlStructures::ProhibitLabelsWithSpecialBlockNames]
+[ControlStructures::ProhibitMutatingListFunctions]
+[ControlStructures::ProhibitNegativeExpressionsInUnlessAndUntilConditions]
+[ControlStructures::ProhibitUnreachableCode]
+[ControlStructures::ProhibitUntilBlocks]
+[ControlStructures::ProhibitYadaOperator]
+[Documentation::RequirePackageMatchesPodName]
+[ErrorHandling::RequireCheckingReturnValueOfEval]
+[InputOutput::ProhibitExplicitStdin]
+[InputOutput::ProhibitInteractiveTest]
+[InputOutput::ProhibitJoinedReadline]
+[InputOutput::ProhibitOneArgSelect]
+[InputOutput::ProhibitReadlineInForLoop]
+[InputOutput::ProhibitTwoArgOpen]
+[InputOutput::RequireBracedFileHandleWithPrint]
+[InputOutput::RequireBriefOpen]
+[InputOutput::RequireCheckedOpen]
+[InputOutput::RequireCheckedSyscalls]
+exclude_functions = print
+[InputOutput::RequireEncodingWithUTF8Layer]
+[Miscellanea::ProhibitFormats]
+[Miscellanea::ProhibitTies]
+[Miscellanea::ProhibitUnrestrictedNoCritic]
+[Miscellanea::ProhibitUselessNoCritic]
+[Modules::ProhibitAutomaticExportation]
+[Modules::ProhibitConditionalUseStatements]
+[Modules::RequireBarewordIncludes]
+[Modules::RequireFilenameMatchesPackage]
+[Modules::RequireNoMatchVarsWithUseEnglish]
+[NamingConventions::Capitalization]
+# STYLE.md: a recipe's package is named for the recipe, in lower case.  The
+# exemptions are matched against each component of a package name rather than
+# the whole of it, so they cannot be confined to Provisioner::Recipe:: -- an
+# all-lower-case component is allowed anywhere, and mixed case still is not.
+package_exemptions = main [a-z][a-z0-9_]*
+[RegularExpressions::ProhibitCaptureWithoutTest]
+[RegularExpressions::ProhibitComplexRegexes]
+[RegularExpressions::ProhibitEnumeratedClasses]
+[RegularExpressions::ProhibitFixedStringMatches]
+[RegularExpressions::ProhibitSingleCharAlternation]
+[RegularExpressions::ProhibitUnusedCapture]
+[RegularExpressions::RequireBracesForMultiline]
+[Subroutines::ProhibitAmpersandSigils]
+[Subroutines::ProhibitBuiltinHomonyms]
+[Subroutines::ProhibitManyArgs]
+[Subroutines::ProhibitNestedSubs]
+[Subroutines::ProhibitReturnSort]
+[Subroutines::ProhibitSubroutinePrototypes]
+[Subroutines::ProtectPrivateSubs]
+[Subroutines::RequireArgUnpacking]
+[Subroutines::RequireFinalReturn]
+[TestingAndDebugging::ProhibitProlongedStrictureOverride]
+[TestingAndDebugging::RequireTestLabels]
+[ValuesAndExpressions::ProhibitCommaSeparatedStatements]
+[ValuesAndExpressions::ProhibitComplexVersion]
+[ValuesAndExpressions::ProhibitEscapedCharacters]
+[ValuesAndExpressions::ProhibitLongChainsOfMethodCalls]
+[ValuesAndExpressions::ProhibitMismatchedOperators]
+[ValuesAndExpressions::ProhibitMixedBooleanOperators]
+[ValuesAndExpressions::ProhibitQuotesAsQuotelikeOperatorDelimiters]
+[ValuesAndExpressions::ProhibitSpecialLiteralHeredocTerminator]
+[ValuesAndExpressions::ProhibitVersionStrings]
+[ValuesAndExpressions::RequireConstantVersion]
+[ValuesAndExpressions::RequireQuotedHeredocTerminator]
+[ValuesAndExpressions::RequireUpperCaseHeredocTerminator]
+[Variables::ProhibitAugmentedAssignmentInDeclaration]
+[Variables::ProhibitConditionalDeclarations]
+[Variables::ProhibitLocalVars]
+[Variables::ProhibitMatchVars]
+[Variables::ProhibitReusedNames]
+[Variables::ProhibitUnusedVariables]
+[Variables::ProtectPrivateVars]
+[Variables::RequireLexicalLoopIterators]
+[Variables::RequireLocalizedPunctuationVars]
+[Variables::RequireNegativeIndices]
+# Extensions to perl -c
+[CompileTime]

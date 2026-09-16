@@ -23,6 +23,18 @@
 # .t is in there because not one of the test files is executable, so the shebang
 # rule would catch none of them.
 #
+# Which profile judges it is a separate question from whether it qualifies, and
+# the answer is the path.  What is under scripts/ ships to a guest and runs on
+# that guest's system perl, so it declares use 5.014 where everything else here
+# declares use 5.041 -- and .perlcriticrc leaves seven policies out on the
+# stated grounds that 5.041 makes them unnecessary, which is not true one
+# directory over.  .perlcriticrc.scripts names those seven and drops what does
+# not fit a script whose job is to drive ufw, iptables or cpanm.
+#
+# Qualification first and routing second, rather than one case statement doing
+# both: scripts/smoke_perl_modules.pl matches the .pl rule as well as scripts/,
+# and a single pass would file it under whichever arm it reached first.
+#
 # Both passes read the working tree rather than the index, so a file staged in
 # part is judged whole.  That is deliberate: perltidy rewrites the file on disk
 # and the hook stages what it wrote, so the working copy is what lands anyway,
@@ -43,28 +55,43 @@ exec 1>&2
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
 perl_files=''
+scripts_files=''
 for file in $staged
 do
     test -f "$file" || continue
 
+    is_perl=''
     case "$file" in
         *.pm|*.pl|*.PL|*.t)
-            perl_files="$perl_files $file"
-            continue
+            is_perl=1
+            ;;
+        *)
+            if test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'
+            then
+                is_perl=1
+            fi
             ;;
     esac
 
-    if test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'
-    then
-        perl_files="$perl_files $file"
-    fi
+    test -n "$is_perl" || continue
+
+    case "$file" in
+        scripts/*)
+            scripts_files="$scripts_files $file"
+            ;;
+        *)
+            perl_files="$perl_files $file"
+            ;;
+    esac
 done
 
-# Quoted here, because a bare [ $perl_files ] is a syntax error the moment there
+all_files="$perl_files $scripts_files"
+
+# Quoted here, because a bare [ $all_files ] is a syntax error the moment there
 # is more than one file -- which would stop the hook working in exactly the
 # commits that need it most.  Unquoted below, because there the word splitting is
 # what turns one string into an argument list.
-if [ -z "$perl_files" ]
+if [ -z "$perl_files" ] && [ -z "$scripts_files" ]
 then
     exit 0
 fi
@@ -73,26 +100,34 @@ if command -v perltidy >/dev/null 2>&1
 then
     echo "Auto-tidying perl changes..."
 
+    # One tidy pass over both lists: .perltidyrc does not vary by path, and only
+    # the critic profile does.
+    #
     # -bext='/' makes perltidy delete the backup it would otherwise leave
     # sitting next to the file as <name>.bak.
-    perltidy -b -bext='/' $perl_files || {
+    perltidy -b -bext='/' $all_files || {
         echo "pre-commit: perltidy failed, leaving the commit alone."
         exit 1
     }
 
-    git update-index --add $perl_files
+    git update-index --add $all_files
     echo "Done."
 else
     echo "pre-commit: perltidy is not on PATH, skipping the tidy pass."
 fi
 
-# bin/, lib/ and t/ and nowhere else, because that is the run CLAUDE.md defines
-# and therefore the only tree anybody has ever held to this profile.  The perl
-# under .claude/skills/scripts has not been: teardown answers it with eight
-# findings and scratch_config with fourteen, mostly print-to-STDERR in tools
-# whose job is to report progress.  A hook that judged them would refuse every
-# commit touching a file nobody has ever cleaned, which is a worse thing to hand
-# somebody than a gap.  Tidy still runs over everything; tidiness is harmless.
+# .perlcriticrc judges bin/, lib/ and t/ and nowhere else, because that is the
+# run CLAUDE.md defines and therefore the only tree anybody has ever held to it.
+# The perl under .claude/skills/scripts has not been: teardown answers it with
+# eight findings, every one a print-to-STDERR in a tool whose job is to report
+# progress.  A hook that judged them would refuse every commit touching a file
+# nobody has ever cleaned, which is a worse thing to hand somebody than a gap.
+#
+# scripts/ is not that gap.  It has a profile of its own because what is there
+# runs on a guest's system perl, and it is clean under it, so there is nothing
+# to excuse it from.
+#
+# Tidy still runs over everything; tidiness is harmless.
 critic_files=''
 for file in $perl_files
 do
@@ -101,23 +136,37 @@ do
     esac
 done
 
-# After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in the
-# profile, so running this first would fail the commit over the one thing the
+# After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in both
+# profiles, so running this first would fail the commit over the one thing the
 # hook had already set out to fix by itself.
-if [ -n "$critic_files" ] && command -v perlcritic >/dev/null 2>&1
+if [ -n "$critic_files$scripts_files" ] && command -v perlcritic >/dev/null 2>&1
 then
     echo "Running perlcritic..."
 
-    if perlcritic --profile .perlcriticrc $critic_files
+    # Both passes run even when the first has already failed, so one commit
+    # shows every objection rather than one profile's worth at a time.
+    critic_failed=''
+
+    if [ -n "$critic_files" ]
     then
-        echo "Done."
-    else
+        perlcritic --profile .perlcriticrc $critic_files || critic_failed=1
+    fi
+
+    if [ -n "$scripts_files" ]
+    then
+        perlcritic --profile .perlcriticrc.scripts $scripts_files || critic_failed=1
+    fi
+
+    if [ -n "$critic_failed" ]
+    then
         echo
         echo "pre-commit: perlcritic refused the above.  Either fix them, or say"
         echo "why with a '## no critic (Policy::Name)' and the reason beside it."
         echo "To commit without this check at all: git commit --no-verify"
         exit 1
     fi
+
+    echo "Done."
 else
     echo "pre-commit: perlcritic is not on PATH, skipping the critic pass."
 fi
