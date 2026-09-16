@@ -714,7 +714,7 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     my $private = _throwaway_key();
     my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $private );
 
-    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values, 0 ) } );
+    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
 
     is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
     like( $appended{'one.test.test'}[0], qr/\Assh-ed25519[ ]/, 'the public half, derived rather than stored' );
@@ -729,18 +729,6 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     my $written = File::Slurper::read_text("$dir/$domain/hypervisor-key.pub");
     chomp $written;
     is( $written, $appended{'one.test.test'}[0], 'and written beside the domain for the revoke' );
-};
-
-subtest 'a dry run reaches no hypervisor at all' => sub {
-    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( domain_config => sub { { trogrunner => { hypervisor_access => 'full', hypervisors => { one => { libvirt_uri => 'qemu+ssh://r@one.test.test/system' } } } } } );
-
-    my $touched = 0;
-    my $hv      = Test::MockModule->new('Trog::HV');
-    $hv->redefine( append_line => sub { $touched++; return 1 } );
-
-    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {}, 1 ), 0, 'nothing happens' );
-    is( $touched,                                                                  0, 'and nobody authorized_keys is written' );
 };
 
 subtest 'a guest that is not a runner, or one that asked for nothing' => sub {

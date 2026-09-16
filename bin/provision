@@ -184,7 +184,7 @@ sub _must_read {
     return $fh;
 }
 
-=head2 place_guest_secrets($guest, $domain, $dryrun)
+=head2 place_guest_secrets($guest, $domain)
 
 Put the files a recipe reads but must never generate onto the guest, out of the
 secret store.
@@ -200,9 +200,6 @@ did not arrive is a guest that will make itself a new identity, which is the
 whole thing this exists to stop; better to fail here, where an operator is
 watching, than three minutes later on the guest.
 
-C<$dryrun> is handed on to C<authorize_runner_key>, which is the only part of
-this that writes anywhere but the guest.
-
 =cut
 
 # Once per run, whichever path reached it first.  A guest being re-provisioned
@@ -213,7 +210,7 @@ this that writes anywhere but the guest.
 my %PLACED;
 
 sub place_guest_secrets {
-    my ( $guest, $domain, $dryrun ) = @_;
+    my ( $guest, $domain ) = @_;
 
     return if $PLACED{$domain}++;
 
@@ -252,19 +249,22 @@ sub place_guest_secrets {
         print "Placed $path on $domain from $wanted->{$path}{ref}\n";
     }
 
-    authorize_runner_key( $domain, \%values, $dryrun );
+    authorize_runner_key( $domain, \%values );
     return 1;
 }
 
-=head2 authorize_runner_key($domain, $values, $dryrun)
+=head2 authorize_runner_key($domain, $values)
 
 Let a runner's key in to each hypervisor it was configured to build guests on.
 
 The same kind of change as C<authorize_guest_key> and here for the same reason:
-it is a change to a machine that is not the guest, so it belongs on the line
-C<--dryrun> is drawn on rather than in the recipe.  It is here rather than
-beside that one because this is where the key has already been resolved out of
-the store -- doing it anywhere else means asking for the store password twice.
+it is a change to a machine that is not the guest, so it belongs in the tool
+rather than in the recipe.  It is here rather than beside that one because this
+is where the key has already been resolved out of the store -- doing it
+anywhere else means asking for the store password twice.
+
+A dry run never reaches this.  C<provision_domain> returns before anything that
+places a secret, and that is the only place the decision is made.
 
 Which hypervisors, and whether at all, is a configuration question, so
 L<Provisioner::Cookbook> is what answers it.  Nothing happens for a domain that
@@ -278,8 +278,7 @@ without needing the store password.
 =cut
 
 sub authorize_runner_key {
-    my ( $domain, $values, $dryrun ) = @_;
-    return 0 if $dryrun;
+    my ( $domain, $values ) = @_;
 
     my $config = eval { Provisioner::Cookbook->domain_config($domain) } // {};
     my %grant  = Provisioner::Cookbook->load('trogrunner')->grant( $config->{trogrunner} );
@@ -493,7 +492,7 @@ sub main {
 
     # Before cloud-init has finished, and so well before the makefile it
     # schedules starts: these are what a recipe reads rather than generates.
-    place_guest_secrets( $guest, $domain, $dryrun );
+    place_guest_secrets( $guest, $domain );
 
     $guest->wait_for_cloud_init($domain);
 
@@ -697,8 +696,7 @@ sub reprovision_guest (%args) {
     $guest->put_file( "$domain_dir/$domain/setup.sh", "/root/setup-$domain.sh", sudo => 1, mode => '0755' )
       or die "Could not ship the setup script to $domain";
 
-    # Never a dry run: provision_domain returns before it reaches this.
-    place_guest_secrets( $guest, $domain, 0 );
+    place_guest_secrets( $guest, $domain );
 
     print "Scheduling job to run setup script\n";
     print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
@@ -815,11 +813,13 @@ sub read_seed {
 
 Let the guest's key in to this machine, which is the one holding its payload.
 
-A change to this machine rather than to the domain directory, which is the line
-C<--dryrun> is drawn on -- and the reason this is here rather than in the recipe
-that makes the key.  F<bin/destroy> is what takes it back out again, and it
-would know nothing about one left behind by a configuration run that never
-became a guest.
+A change to this machine rather than to the domain directory, and the reason
+this is here rather than in the recipe that makes the key.  F<bin/destroy> is
+what takes it back out again, and it would know nothing about one left behind by
+a configuration run that never became a guest.
+
+A dry run never reaches this, for the same reason C<authorize_runner_key> does
+not: C<provision_domain> returns first.
 
 =cut
 
