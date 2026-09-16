@@ -1,12 +1,16 @@
 #!/bin/sh
 
-# Auto-tidy staged Perl before it lands.
+# Tidy the staged Perl, then refuse the commit if perlcritic objects to it.
 #
 # STYLE.md says to run perltidy and there is a .perltidyrc to run it with, and
 # for a long time neither was true of the tree -- so touching any file meant a
 # hundred lines of reformatting attached to a three line change, and the usual
 # answer to that is to not tidy, which is how it got that way.  This is what
 # keeps it from happening again.
+#
+# The critic pass is that argument one step on.  CLAUDE.md asks for perlcritic
+# before every commit, and a check that lives in a document is a check somebody
+# has to remember; this is the same check where it cannot be forgotten.
 #
 # Install it: cp git-hooks/pre-commit .git/hooks/
 #
@@ -18,53 +22,87 @@
 #
 # .t is in there because not one of the test files is executable, so the shebang
 # rule would catch none of them.
+#
+# Both passes read the working tree rather than the index, so a file staged in
+# part is judged whole.  That is deliberate: perltidy rewrites the file on disk
+# and the hook stages what it wrote, so the working copy is what lands anyway,
+# and two passes disagreeing about which bytes they were looking at would be a
+# worse thing to own than this.
+#
+# Both passes run from the top of the working tree, which is where git puts a
+# hook and is the only place they work at all: the profile names .pod_stopwords
+# and the two preferred_*.ini by relative path, and ProhibitUnusedDefinitions
+# answers "is this sub called anywhere" by reading bin/ and lib/ out of the
+# current directory rather than out of the files it was handed.
 
 # Redirect output to stderr.
 exec 1>&2
-
-if ! command -v perltidy >/dev/null 2>&1
-then
-    echo "pre-commit: perltidy is not on PATH, skipping the tidy pass."
-    exit 0
-fi
 
 # ACMR so that a file deleted in this commit is not handed to perltidy, which
 # would fail on a path that is no longer there.
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
-to_tidy=''
+perl_files=''
 for file in $staged
 do
     test -f "$file" || continue
 
     case "$file" in
         *.pm|*.pl|*.PL|*.t)
-            to_tidy="$to_tidy $file"
+            perl_files="$perl_files $file"
             continue
             ;;
     esac
 
     if test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'
     then
-        to_tidy="$to_tidy $file"
+        perl_files="$perl_files $file"
     fi
 done
 
-# Quoted here, because a bare [ $to_tidy ] is a syntax error the moment there is
-# more than one file -- which would stop the hook working in exactly the commits
-# that need it most.  Unquoted below, because there the word splitting is what
-# turns one string into an argument list.
-if [ -n "$to_tidy" ]
+# Quoted here, because a bare [ $perl_files ] is a syntax error the moment there
+# is more than one file -- which would stop the hook working in exactly the
+# commits that need it most.  Unquoted below, because there the word splitting is
+# what turns one string into an argument list.
+if [ -z "$perl_files" ]
+then
+    exit 0
+fi
+
+if command -v perltidy >/dev/null 2>&1
 then
     echo "Auto-tidying perl changes..."
 
     # -bext='/' makes perltidy delete the backup it would otherwise leave
     # sitting next to the file as <name>.bak.
-    perltidy -b -bext='/' $to_tidy || {
+    perltidy -b -bext='/' $perl_files || {
         echo "pre-commit: perltidy failed, leaving the commit alone."
         exit 1
     }
 
-    git update-index --add $to_tidy
+    git update-index --add $perl_files
     echo "Done."
+else
+    echo "pre-commit: perltidy is not on PATH, skipping the tidy pass."
+fi
+
+# After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in the
+# profile, so running this first would fail the commit over the one thing the
+# hook had already set out to fix by itself.
+if command -v perlcritic >/dev/null 2>&1
+then
+    echo "Running perlcritic..."
+
+    if perlcritic --profile .perlcriticrc $perl_files
+    then
+        echo "Done."
+    else
+        echo
+        echo "pre-commit: perlcritic refused the above.  Either fix them, or say"
+        echo "why with a '## no critic (Policy::Name)' and the reason beside it."
+        echo "To commit without this check at all: git commit --no-verify"
+        exit 1
+    fi
+else
+    echo "pre-commit: perlcritic is not on PATH, skipping the critic pass."
 fi
