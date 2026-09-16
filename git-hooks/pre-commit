@@ -86,14 +86,29 @@ else
     echo "pre-commit: perltidy is not on PATH, skipping the tidy pass."
 fi
 
+# bin/, lib/ and t/ and nowhere else, because that is the run CLAUDE.md defines
+# and therefore the only tree anybody has ever held to this profile.  The perl
+# under .claude/skills/scripts has not been: teardown answers it with eight
+# findings and scratch_config with fourteen, mostly print-to-STDERR in tools
+# whose job is to report progress.  A hook that judged them would refuse every
+# commit touching a file nobody has ever cleaned, which is a worse thing to hand
+# somebody than a gap.  Tidy still runs over everything; tidiness is harmless.
+critic_files=''
+for file in $perl_files
+do
+    case "$file" in
+        bin/*|lib/*|t/*) critic_files="$critic_files $file" ;;
+    esac
+done
+
 # After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in the
 # profile, so running this first would fail the commit over the one thing the
 # hook had already set out to fix by itself.
-if command -v perlcritic >/dev/null 2>&1
+if [ -n "$critic_files" ] && command -v perlcritic >/dev/null 2>&1
 then
     echo "Running perlcritic..."
 
-    if perlcritic --profile .perlcriticrc $perl_files
+    if perlcritic --profile .perlcriticrc $critic_files
     then
         echo "Done."
     else

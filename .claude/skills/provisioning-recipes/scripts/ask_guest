@@ -53,7 +53,14 @@ sub main {
     my $host    = $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) )
       or die "Could not find a lease for $domain, so there is nothing to ask.\n";
 
-    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" ) );
+    # Undef means the store was never opened: key_path prompts for its password,
+    # and a script has nothing to type into.  Unchecked, ssh is then handed no
+    # key at all and the guest refuses with "Permission denied (publickey)",
+    # which names the one thing that is not wrong.
+    my $key = Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" )
+      or die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | ask_guest $domain <command>\n};
+
+    my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => $key );
 
     # Quoted the same way collect_artifacts does, so a command containing an
     # awk program does not close the quoting early and get answered with a

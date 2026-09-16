@@ -224,7 +224,15 @@ sub connect_to {
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$domain";
 
-    $key  //= Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" );
+    $key //= Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" );
+
+    # Before the connection rather than after it fails.  key_path prompts for
+    # the store's password and a script has nothing to type into, so it comes
+    # back undef -- and ssh offered no key is refused with "Permission denied
+    # (publickey)", which reads as a guest that will not have us rather than a
+    # store we never opened.
+    die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
+      unless defined $key;
     $user //= admin_user("$cfg_dir/provision.conf");
 
     # The guest answers on its NAT lease whether or not its static address ever

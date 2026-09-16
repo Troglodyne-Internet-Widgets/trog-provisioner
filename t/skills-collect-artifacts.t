@@ -14,7 +14,9 @@ t/skills-collect-artifacts.t - the provisioning-recipes collector: what it can s
 =cut
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
 use File::Slurper();
 
 use FindBin;
@@ -85,6 +87,36 @@ subtest 'a file that is genuinely not there is still reported missing' => sub {
     ok( !$got->{ok}, 'not collected' );
     is( $got->{why}, 'not there', 'and says which of the two it was' );
     ok( !-e "$into/new-outblocked.log", 'with nothing written for it' );
+};
+
+# Enough of a hypervisor to get as far as the key.  Trog::HV is mocked rather
+# than this script's own package: Test::MockModule loads what it is given, and
+# the collector is required by path rather than from @INC, so naming it here is
+# "Can't locate Trog/Skill/CollectArtifacts.pm" and a subtest that never runs.
+{
+
+    package FakeHV;
+
+    sub domain_dir { return '/bogus/domains' }
+}
+
+subtest 'a key the store never gave up is said so, rather than handed to ssh as nothing' => sub {
+    my $hv = Test::MockModule->new('Trog::HV');
+    $hv->redefine( new => sub { return bless {}, 'FakeHV' } );
+
+    # What a script gets: key_path asks for the store's password, nothing is
+    # typed, and it comes back undef.
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( key_path => sub { return undef } );
+
+    # A uri, so hypervisor() takes its first branch and asks Trog::HV directly.
+    my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', undef, undef, undef, 'qemu:///bogus' ) };
+
+    # \s+ rather than spaces: this file is under re '/aasx', so a literal space
+    # in a pattern is ignored and the match would pass on anything.
+    like( $err, qr/No \s+ key \s+ for \s+ vm[.]test/,   'names the domain it has no key for' );
+    like( $err, qr/password \s+ goes \s+ on \s+ stdin/, 'and says how to give the store one' );
+    unlike( $err, qr/Permission \s+ denied/, 'instead of leaving ssh to report a refusal it cannot explain' );
 };
 
 done_testing();
