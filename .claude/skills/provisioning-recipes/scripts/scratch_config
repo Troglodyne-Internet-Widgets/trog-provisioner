@@ -23,6 +23,7 @@ use YAML::XS();
 
 use Trog::Config();
 use Trog::Secrets();
+use Provisioner::Utils();
 
 =head1 NAME
 
@@ -51,6 +52,18 @@ Copied.  A guest built from it gets an address out of the real pool, and out of
 the copy's C<[ips]> block, so it cannot be handed one that is already spoken
 for.  The assignment is written to the copy, so the real map does not grow an
 entry for a guest that will not exist by lunchtime.
+
+=item F<admin_authorized_keys>
+
+Copied when the installation has one.  These are public keys rather than a
+credential, so this is the F<ipmap.cfg> case and not the F<secrets.kdbx> one.
+
+A throwaway pair is minted when it has none, so that a scratch run works on an
+installation nobody has seeded yet -- C<bin/new_config> refuses to build a guest
+with nobody authorized on it.  Nothing is lost by the stand-in: what actually
+reaches a scratch guest is the domain key, which
+L<Provisioner::Recipe::ubuntu> authorizes on every guest it builds whatever else
+is in the list.
 
 =item F<recipes.yaml>
 
@@ -152,7 +165,7 @@ sub main {
     my $source = Trog::Config->dir;
     $dir //= File::Temp::tempdir( 'trog-scratch-XXXXXXXX', TMPDIR => 1 );
 
-    my ( $password, $has_fleet, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests, cache => $cache );
+    my ( $password, $has_fleet, $keys_copied, @refs ) = build( $source, $dir, cpan_tests => $cpan_tests, cache => $cache );
 
     if ($print_dir) {
         print "$dir\n";
@@ -160,7 +173,8 @@ sub main {
     }
 
     print {*STDERR} "Scratch configuration in $dir\n";
-    print {*STDERR} "  copied from $source: ipmap.cfg" . ( $has_fleet ? ", hypervisors.conf\n" : "\n" );
+    print {*STDERR} "  copied from $source: ipmap.cfg" . ( $has_fleet   ? ", hypervisors.conf\n"                                 : "\n" );
+    print {*STDERR} '  admin_authorized_keys ' .         ( $keys_copied ? "copied, so a scratch guest lets the same people in\n" : "built here, the installation having none to copy\n" );
     print {*STDERR} "  recipes.yaml built here, so none of the installation's credentials are wanted\n";
     print {*STDERR} "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
@@ -189,6 +203,32 @@ sub build {
     # nothing in there is a credential.
     copy( "$source/ipmap.cfg", "$dir/ipmap.cfg" )
       or die "Could not copy $source/ipmap.cfg into the scratch config: $!\n";
+
+    # Somebody has to be authorized or bin/new_config will not build a guest at
+    # all.  Copied when the installation has keys -- they are public, so this is
+    # the ipmap case rather than the secrets one -- and a throwaway pair minted
+    # when it has none, so a scratch run works before anybody has seeded one.
+    # Nothing is lost by the stand-in: what reaches a scratch guest is the domain
+    # key, which Provisioner::Recipe::ubuntu authorizes on every guest it builds
+    # whatever else is in the list.
+    my $ED25519_BITS = 256;
+    my $keys_copied  = -f "$source/admin_authorized_keys" ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one to copy is the whole question
+
+    if ($keys_copied) {
+        copy( "$source/admin_authorized_keys", "$dir/admin_authorized_keys" )
+          or die "Could not copy $source/admin_authorized_keys into the scratch config: $!\n";
+    }
+    else {
+        Provisioner::Utils::write_ssh_keypair( "$dir/scratch_admin_key", Ed25519 => $ED25519_BITS, 'scratch' );
+
+        # It sets no mode of its own, so the umask decides and the private half
+        # lands readable by anyone on this machine.  Setting it is the caller's,
+        # the same way Provisioner::Recipe::ubuntu's guest_keypair does it.
+        chmod 0600, "$dir/scratch_admin_key", "$dir/scratch_admin_key.pub";
+
+        copy( "$dir/scratch_admin_key.pub", "$dir/admin_authorized_keys" )
+          or die "Could not write a throwaway key into the scratch config: $!\n";
+    }
 
     # And the _base, built rather than taken: see the POD above for what copying
     # it cost.  Its data source is inside this directory, so a throwaway guest
@@ -229,7 +269,7 @@ sub build {
     );
     chmod 0600, "$dir/secrets.kdbx";
 
-    return ( $password, $has_fleet, @refs );
+    return ( $password, $has_fleet, $keys_copied, @refs );
 }
 
 # The mirror the installation provisions through, when it has one.  Read rather

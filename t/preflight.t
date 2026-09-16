@@ -315,14 +315,74 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     my ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( !$result->{ok}, 'an empty directory fails' );
-    like( $result->{what}, qr/ipmap\.cfg,[ ]recipes\.yaml/, 'naming what is missing' );
+    like( $result->{what}, qr/ipmap\.cfg,[ ]recipes\.yaml,[ ]admin_authorized_keys/, 'naming what is missing' );
+    like( $result->{fix},  qr/ssh-import-id/,                                        'and how to seed the keys' );
 
-    foreach my $file (qw{ipmap.cfg recipes.yaml}) {
+    foreach my $file (qw{ipmap.cfg recipes.yaml admin_authorized_keys}) {
         open( my $fh, '>', "$dir/$file" ) or die $!;
         close($fh)                        or die "Could not close $dir/$file: $!";
     }
+
+    # Nobody authorized is not a configuration a guest can be built from, and an
+    # empty file would otherwise pass here and stop bin/new_config instead --
+    # one round trip later, which is the thing this check exists to save.
+    ($result) = quietly( sub { Trog::HV->new()->check_config } );
+    ok( !$result->{ok}, 'a key file with nothing in it is no better than none' );
+    like( $result->{what}, qr/admin_authorized_keys/, 'and that is the one it names' );
+
+    File::Slurper::Temp::write_text( "$dir/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAsomebodyskey somebody\n" );
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( $result->{ok}, 'and passes once they are there' );
+};
+
+# Saying the keys are missing is check_config's; offering to fetch them is not.
+# A verdict is a thing to print, and this is a thing to ask -- so it lives apart,
+# and the asking has to be impossible when there is nobody to answer.
+subtest 'the missing keys can be seeded, but only at a terminal' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    my $path = "$dir/admin_authorized_keys";
+
+    my $preflight_mock = Test::MockModule->new( 'Trog::Bin::Preflight', no_auto => 1 );
+    my $prompt         = Test::MockModule->new('IO::Prompter');
+    my $machine        = Test::MockModule->new('Trog::Machine');
+
+    my ( @ran, @answers );
+    $machine->redefine( run_cmd => sub { my ( $self, @argv ) = @_; push @ran, join( ' ', @argv ); return 0 } );
+    $prompt->redefine( prompt => sub { return shift @answers } );
+
+    # The unattended run the provisioning workflow makes.  A question there has
+    # nowhere to be answered from, so it would block rather than fail -- which is
+    # worse than the check simply reporting the file is missing.
+    $preflight_mock->redefine( interactive => sub { 0 } );
+    @answers = qw{gh somebody};
+    my ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
+    is( $rc, 0, 'with nobody there it does not ask' );
+    is_deeply( \@ran, [], 'and runs nothing' );
+
+    $preflight_mock->redefine( interactive => sub { 1 } );
+    @answers = qw{gh somebody};
+    ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
+    is( $rc, 1, 'asked and answered, it seeds' );
+    is_deeply( \@ran, ["ssh-import-id -o $path gh:somebody"], 'from the identity the answers named' );
+
+    # Neither gh nor lp is how somebody says no, and ssh-import-id knows no
+    # other service to be handed.
+    @ran     = ();
+    @answers = qw{nope somebody};
+    ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
+    is( $rc, 0, 'an answer it cannot import from is a decline, not an error' );
+    is_deeply( \@ran, [], 'running nothing' );
+
+    @ran = ();
+    open( my $fh, '>', $path )                                                or die "Could not write $path: $!";
+    print {$fh} "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAsomebodyskey somebody\n" or die "Could not write $path: $!";
+    close($fh)                                                                or die "Could not close $path: $!";
+
+    @answers = qw{gh somebody};
+    ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
+    is( $rc, 0, 'and a file already there is never offered for' );
+    is_deeply( \@ran, [], 'nor anything run against it' );
 };
 
 subtest 'every check reports rather than dying, so one run gets the whole list' => sub {
@@ -344,7 +404,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/sudo/,                          'the sudo failure is in there' );
     like( $out, qr/ISO[ ]builder/,                 'and the ISO builder' );
     like( $out, qr/libvirt/,                       'and libvirt' );
-    like( $out, qr/Missing[ ]from/,                'and the configuration' );
+    like( $out, qr/Missing[ ]or[ ]empty[ ]in/,     'and the configuration' );
     like( $out, qr/6[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
 };
 

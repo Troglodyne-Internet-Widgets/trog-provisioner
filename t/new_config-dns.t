@@ -36,6 +36,10 @@ use Provisioner::Cookbook();
 use Trog::Credentials();
 use Trog::Secrets();
 
+# The administrator's keys are read out of the configuration directory now,
+# rather than named as an identity for cloud-init to fetch at first boot.
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAdogeskey doge\n" );
+
 require Trog::HV;
 require Trog::HV::Libvirt;
 
@@ -66,7 +70,6 @@ ip=192.168.1.50
 basedir=$tmpdir/domains
 transfer_user=doge
 admin_user=doge
-admin_key=gh:teodesian
 admin_email=bogus\@test.test
 admin_gecos=Test Test
 gateway=192.168.1.254
@@ -143,7 +146,6 @@ ip=192.168.1.50
 basedir=$tmpdir/domains
 transfer_user=doge
 admin_user=doge
-admin_key=gh:teodesian
 admin_email=bogus\@test.test
 admin_gecos=Test Test
 gateway=192.168.1.254

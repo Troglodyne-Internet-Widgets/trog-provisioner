@@ -115,6 +115,34 @@ sub loaded {
     return YAML::XS::Load( File::Slurper::read_binary("$dir/$file") );
 }
 
+# bin/new_config hands the admin user the keys out of admin_authorized_keys, and
+# _users adds the guest's own to the same list.  Whichever of the two went in
+# first, losing the other is silent: the operator locked out of a guest that
+# built perfectly well, or a guest this machine cannot get back into to run the
+# makefile.
+subtest 'the domain key joins the administrator keys rather than replacing them' => sub {
+    my $theirs = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAoperatorskey operator';
+
+    my ( $dir, undef ) = generated(
+        users => [
+            {
+                name                => 'admin', gecos => $GECOS, shell => '/bin/bash',
+                sudo                => 'ALL=(ALL) NOPASSWD:ALL',
+                ssh_authorized_keys => [$theirs],
+            }
+        ]
+    );
+
+    my ($admin) = grep { $_->{name} eq 'admin' } @{ loaded( $dir, 'user-data' )->{users} };
+    my @keys = @{ $admin->{ssh_authorized_keys} // [] };
+
+    ok( ( grep { $_ eq $theirs } @keys ), 'the keys the configuration supplied are still there' )
+      or diag explain \@keys;
+    ok( ( grep { m/\Assh-rsa[ ]/ } @keys ), 'and the domain key was added beside them' )
+      or diag explain \@keys;
+    is( scalar @keys, 2, 'both, and nothing invented' );
+};
+
 subtest 'a guest a service made has no interfaces of ours to match on' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 

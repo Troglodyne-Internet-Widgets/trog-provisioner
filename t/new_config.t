@@ -64,7 +64,6 @@ subtest "new_config dies when passed a domain with no configuration" => sub {
 [global]
 basedir     = $basedir
 admin_user  = tester
-admin_key   = bogus
 admin_gecos = Test User
 admin_email = test\@test.test
 gateway = 192.168.1.254
@@ -97,6 +96,12 @@ RECIPES
     # However we still have to mock it to prevent explosions in our own code!
     my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
 
+    # Read out of the configuration directory rather than fetched by cloud-init,
+    # and MockFile is strict here: an unmocked read is fatal, not a miss.  The
+    # path is the one Trog::Config resolves, which is the environment override
+    # this file sets in BEGIN rather than the basedir the rest of these mock.
+    my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
+
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
             '--ipmap',   $ipmap_file,
@@ -123,7 +128,6 @@ subtest "a domain with no recipe costs nothing" => sub {
 [global]
 basedir     = $basedir
 admin_user  = tester
-admin_key   = bogus
 admin_gecos = Test User
 admin_email = test\@test.test
 gateway = 192.168.1.254
@@ -152,6 +156,12 @@ RECIPES
     print {$fh} $ipmap;
     close($fh) or die "Could not close $ipmap_file: $!";
     my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
+
+    # Read out of the configuration directory rather than fetched by cloud-init,
+    # and MockFile is strict here: an unmocked read is fatal, not a miss.  The
+    # path is the one Trog::Config resolves, which is the environment override
+    # this file sets in BEGIN rather than the basedir the rest of these mock.
+    my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
 
     my $before = _slurp($ipmap_file);
 

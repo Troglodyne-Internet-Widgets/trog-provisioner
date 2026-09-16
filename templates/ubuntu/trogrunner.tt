@@ -27,6 +27,7 @@ ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisio
 
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.ipmap.cfg    '[% install_dir %]/[% domain %]/etc/trog-provisioner/ipmap.cfg'
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
+install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
 [% IF hypervisors.keys().size() %]
 # Rendered always, installed only when a fleet was named: no file at all means
 # "this machine", which is what libvirt does anyway and what a runner that is

@@ -70,6 +70,30 @@ sub scratch {
     return ( YAML::XS::Load( File::Slurper::read_binary("$dir/recipes.yaml") ), $dir );
 }
 
+# bin/new_config refuses to build a guest with nobody authorized on it, so a
+# scratch configuration has to end up with keys whatever the installation has.
+subtest 'somebody is authorized on a scratch guest either way' => sub {
+    my $operator = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAoperatorskey operator\n";
+
+    my $source = installation();
+    File::Slurper::Temp::write_text( "$source/admin_authorized_keys", $operator );
+
+    my ( undef, $dir ) = scratch( source => $source );
+    is( File::Slurper::read_text("$dir/admin_authorized_keys"), $operator, 'the installation keys are copied as they stand' );
+
+    # And an installation nobody has seeded yet still produces a configuration a
+    # guest can be built from.  Nothing is lost by the stand-in: what reaches a
+    # scratch guest is the domain key, which the ubuntu recipe authorizes on
+    # every guest whatever else is in the list.
+    my ( undef, $bare ) = scratch( source => installation() );
+    like( File::Slurper::read_text("$bare/admin_authorized_keys"), qr/\Assh-/, 'and a throwaway one is minted when it has none' );
+
+    # write_ssh_keypair sets no mode, so without a chmod of our own the umask
+    # decides and the private half is readable by anyone on this machine.
+    my $mode = ( stat("$bare/scratch_admin_key") )[2] & oct('7777');
+    is( sprintf( '%04o', $mode ), '0600', 'with the private half of it kept to ourselves' );
+};
+
 subtest 'the base is built here rather than taken from the installation' => sub {
     my ( $recipes, $dir ) = scratch();
 

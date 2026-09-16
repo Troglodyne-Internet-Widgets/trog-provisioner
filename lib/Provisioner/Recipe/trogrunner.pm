@@ -34,7 +34,7 @@ use List::Util qw{any};
 
             config:
                 # Inherited from this guest's own when unset: admin_user,
-                # admin_email, admin_key and gateway.
+                # admin_email, admin_keys and gateway.
                 resolvers: "192.168.1.254, 1.1.1.1"
 
                 # The pool the runner hands addresses out of.  Without these it
@@ -266,7 +266,7 @@ sub args {
                     admin_user     => { type => 'string' },
                     admin_email    => { type => 'string' },
                     admin_gecos    => { type => 'string', default => 'Administrator' },
-                    admin_key      => { type => 'string', default => q{} },
+                    admin_keys     => { type => 'array',  items   => { type => 'string' }, default => [] },
                     gateway        => { type => 'string', default => q{} },
                     resolvers      => { type => 'string', default => '1.1.1.1, 8.8.8.8' },
                     dhcp_devname   => { type => 'string', default => 'ens3' },
@@ -312,8 +312,8 @@ sub args {
             recipes => { type => 'object', default => {} },
 
             # A keepass database in this domain's data directory to install as
-            # the runner's own.  Empty is fine: bin/preflight wants ipmap.cfg
-            # and recipes.yaml, and nothing else.
+            # the runner's own.  Empty is fine: bin/preflight wants ipmap.cfg,
+            # recipes.yaml and admin_authorized_keys, and nothing else.
             store => { type => 'string', default => q{} },
 
             hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
@@ -351,20 +351,23 @@ sub enrich {
     # [global] block this guest was built from, so they are here.
     #
     # These are not decoration: bin/new_config refuses to generate anything
-    # without admin_user, admin_key, admin_gecos, admin_email, gateway and
-    # resolvers, so a runner that defaulted any of them to empty could not build
-    # a single guest.  Measured on one, which is how the missing two were found.
+    # without admin_user, admin_gecos, admin_email, gateway and resolvers, or
+    # without keys in admin_authorized_keys -- so a runner that defaulted any of
+    # them to empty could not build a single guest.  Measured on one, which is
+    # how the missing two were found.
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};
 
-    foreach my $inherited (qw{admin_key gateway}) {
-        $opts{config}{$inherited} = $opts{$inherited}
-          unless length( $opts{config}{$inherited} // q{} );
-    }
+    # ||= rather than //=: the schema defaults both of these to empty rather
+    # than leaving them absent, so "nobody said" reaches here as an empty
+    # string, which //= would keep.
+    $opts{config}{gateway} ||= $opts{gateway};
+    $opts{config}{ip}      ||= $opts{main_ip};
 
-    # The schema defaults this to empty rather than leaving it absent, so an
-    # empty string is what "nobody said" looks like here.
-    $opts{config}{ip} = $opts{main_ip} unless length( $opts{config}{ip} // q{} );
+    # A list rather than a setting, so what nobody said is an empty list here
+    # instead of the empty string the two above test for.
+    $opts{config}{admin_keys} = $opts{admin_keys}
+      unless @{ $opts{config}{admin_keys} // [] };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !length( $opts{checkout_dir} // q{} ) || $opts{checkout_dir} eq '.' );
@@ -480,10 +483,11 @@ sub grant {
 
 sub template_files {
     return (
-        'trogrunner.ipmap.cfg.tt'        => 'trogrunner.ipmap.cfg',
-        'trogrunner.recipes.yaml.tt'     => 'trogrunner.recipes.yaml',
-        'trogrunner.hypervisors.conf.tt' => 'trogrunner.hypervisors.conf',
-        'trogrunner.profile.tt'          => 'trogrunner.profile',
+        'trogrunner.ipmap.cfg.tt'             => 'trogrunner.ipmap.cfg',
+        'trogrunner.admin_authorized_keys.tt' => 'trogrunner.admin_authorized_keys',
+        'trogrunner.recipes.yaml.tt'          => 'trogrunner.recipes.yaml',
+        'trogrunner.hypervisors.conf.tt'      => 'trogrunner.hypervisors.conf',
+        'trogrunner.profile.tt'               => 'trogrunner.profile',
     );
 }
 
