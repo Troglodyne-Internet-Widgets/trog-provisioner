@@ -186,7 +186,7 @@ the cache did about it: `MISS`, `HIT`, `STALE`. Tear both guests down at the end
 ## Read what happened
 
 ```
-.claude/skills/provisioning-recipes/scripts/collect_artifacts "$DOMAIN"
+echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/collect_artifacts "$DOMAIN"
 ```
 
 Prints a directory holding whichever of these it found:
@@ -242,8 +242,13 @@ an unrelated network problem.
 ## Ask the guest, while you still have one
 
 ```
-.claude/skills/provisioning-recipes/scripts/ask_guest "$DOMAIN" 'postconf -h mydestination'
+echo "$TROG_SCRATCH_PASS" | .claude/skills/provisioning-recipes/scripts/ask_guest "$DOMAIN" 'postconf -h mydestination'
 ```
+
+The password on stdin for the same reason bin/provision wants it: the guest's
+key lives in the store, and asking for it is what opens that.  Without it these
+two are refused with `Permission denied (publickey)`, which looks like a guest
+problem and is not.
 
 Runs a command on the guest as root and prints what it said. `collect_artifacts`
 gets the four logs and then the guest is usually destroyed; this is for the part

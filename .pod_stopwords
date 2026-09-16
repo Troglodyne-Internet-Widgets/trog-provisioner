@@ -182,6 +182,7 @@ cgroup
 chmod
 chmodded
 chmods
+chown
 chowns
 chrony
 chronyd
@@ -353,6 +354,7 @@ regenerable
 registrable
 renderer
 repo
+repointing
 repoints
 repos
 reprovision
@@ -428,6 +430,7 @@ undef
 undefine
 undefines
 unix
+unlinked
 untuned
 upgrader
 uri

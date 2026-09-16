@@ -318,7 +318,7 @@ sub datadirs {
 }
 
 sub restores {
-    my ( $self, %opts ) = @_;
+    my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
     # Not the inverse of remote_files, which is why this is said rather than

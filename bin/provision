@@ -485,9 +485,10 @@ sub main {
     # made.  A domain with a dependency uses that one, which is already in hand.
     $skey //= Trog::Guest->key_path( $domain, "$domain_dir/$domain/key.rsa" );
 
-    # bin/guest_key rather than the path: the key is in the store, and what
-    # $skey holds is a temporary file that goes when this process does.
-    print "ssh -i \$(bin/guest_key $domain) $user\@$ip\n";
+    # --out rather than a $(...): the key is in the store, and what bin/guest_key
+    # writes without --out is a temporary file it unlinks on the way out -- so a
+    # substitution hands ssh a path that stopped existing before ssh started.
+    print "bin/guest_key --out $domain.key $domain && ssh -i $domain.key $user\@$ip\n";
     my $guest = Trog::Guest->new( name => $domain, host => $ip, user => $user, key_path => $skey );
     $guest->wait_for_ssh();
 

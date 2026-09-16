@@ -35,12 +35,15 @@ not needed for any of that.
 It is for the times you want to be the one holding it: an ssh by hand, an rsync
 this tool does not do, a debugging session.
 
-    ssh -i "$(bin/guest_key vm.example.com)" admin@vm.example.com
+    bin/guest_key --out /tmp/vm.key vm.example.com
+    ssh -i /tmp/vm.key admin@vm.example.com
 
 With no C<--out> the key is written to a private temporary file, and B<the path
 is printed rather than the key>.  That file belongs to this process and goes
-away when it exits -- which is what the shell substitution above wants, since
-ssh has opened it by then.
+away when it exits -- so a command substitution is no use here.  The shell runs
+this to completion before ssh starts, and the path it captured has already been
+unlinked by then.  Without C<--out> this is for a caller that reads the path and
+opens it in the same process, which is what everything in lib/ does.
 
 C<--out> writes it somewhere of your choosing and leaves it there.  That is a
 copy of the credential for the machine, back on a disk, which is the thing
