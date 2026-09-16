@@ -1818,7 +1818,7 @@ sub provision_guest {
     $vm->generate_files( $dir, %settings, %storage, domain => $domain );
 
     my $file = "$dir/domain.xml";
-    print "Wrote $file\n";
+    print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain
 
     print "Defining and starting $domain...\n";
     $self->define_domain( File::Slurper::read_text($file) );

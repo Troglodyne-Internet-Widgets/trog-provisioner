@@ -118,6 +118,9 @@ formats = #!/usr/bin/perl
 # custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
 # name, from a string.
 allow = IO::Prompter Text::Xslate::Bridge::TT2 re
+# Kept here as well as in .perlcriticrc: dropping ProhibitPrintSTDERR says which
+# handle a helper may write to, not that it may write to it in pieces.
+[InputOutput::ProhibitRepeatedPrints]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 [BuiltinFunctions::ProhibitBooleanGrep]
