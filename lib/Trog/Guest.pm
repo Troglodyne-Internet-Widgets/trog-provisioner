@@ -222,8 +222,7 @@ sub wait_for_makefile {
     my $result = $self->capture_cmd("sudo cat $status") // '';
     $result =~ s/\s+//g;
 
-    print "Last log:\n" . ( $self->capture_cmd("sudo tail $log") // '' ) . "\n";
-    print "\nDone!\n";
+    print "Last log:\n" . ( $self->capture_cmd("sudo tail $log") // '' ) . "\n\nDone!\n";
     return $result eq '0';
 }
 

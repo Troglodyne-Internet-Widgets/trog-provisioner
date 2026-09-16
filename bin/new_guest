@@ -248,17 +248,16 @@ sub report {
     # ran this, deliberately on the channel --stdout is not, and warn would put
     # a source location on each line of it.
     ## no critic (ProhibitPrintSTDERR)
-    print {*STDERR} "\n";
-    print {*STDERR} "Wrote $output\n" if defined $output;
-    print {*STDERR} sprintf(
+    my $summary = "\n";
+    $summary .= "Wrote $output\n" if defined $output;
+    $summary .= sprintf(
         "%s: %d recipe%s (%s)\n",
         $hostname, scalar @$recipes, ( @$recipes == 1 ? '' : 's' ), join( ', ', @$recipes )
     );
+    print {*STDERR} $summary;
 
     if (@$todo) {
-        print {*STDERR} "\nFill these in before provisioning:\n";
-        print {*STDERR} "  $_\n" for @$todo;
-        print {*STDERR} "\nA CHANGEME left in place fails validation naming the key,\n" . "so nothing gets provisioned half-configured.\n";
+        print {*STDERR} "\nFill these in before provisioning:\n" . join( q{}, map { "  $_\n" } @$todo ) . "\nA CHANGEME left in place fails validation naming the key,\n" . "so nothing gets provisioned half-configured.\n";
     }
     else {
         print {*STDERR} "\nNothing to fill in.\n";

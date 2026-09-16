@@ -116,15 +116,12 @@ GUIDANCE
       scalar(@pool_ips), scalar(@used), scalar(@available);
 
     if ( @used && $assigned ) {
-        print "Assigned:\n";
-        printf "  %-20s %s\n", $_, $assigned{$_} for @used;
-        print "\n";
+        print "Assigned:\n" . join( q{}, map { sprintf "  %-20s %s\n", $_, $assigned{$_} } @used ) . "\n";
     }
 
     if (@available) {
         if ($available) {
-            print "Available:\n";
-            printf "  %s\n", $_ for @available;
+            print "Available:\n" . join( q{}, map { sprintf "  %s\n", $_ } @available );
         }
     }
     else {

@@ -707,9 +707,7 @@ sub reprovision_guest (%args) {
 
     place_guest_secrets( $guest, $domain );
 
-    print "Scheduling job to run setup script\n";
-    print $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh");
-    print "Done.\n";
+    print "Scheduling job to run setup script\n" . $guest->capture_cmd("sudo at now -f /root/setup-$domain.sh") . "Done.\n";
 
     return ( $reuser, $reuse );
 }
