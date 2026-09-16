@@ -66,7 +66,7 @@ Both directories used to be owned C<garage> with the admin user as their group
 and the setgid bit set, from when the fetch was an sftp session as that user
 with no sudo and C<garage:garage> 0750 read back as an empty directory and said
 nothing about it: the objects were readable from then on by whoever held the
-admin account, and travelled into the data directory and into whatever backup
+admin account, and traveled into the data directory and into whatever backup
 was taken of it.
 
 The fetch reads the guest as root now (issue #76), so that is no longer needed,
