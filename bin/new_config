@@ -1475,8 +1475,7 @@ sub write_guest_secrets {
     File::Slurper::Temp::write_binary( $manifest, YAML::XS::Dump( \%manifest ) );
     chmod 0600, $manifest;
 
-    print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n";
-    print "  $_ <- $manifest{$_}{ref}\n" for sort keys %manifest;
+    print "Wrote $manifest: " . scalar( keys %manifest ) . " file(s) for bin/provision to place on $fqdn\n" . join( q{}, map { "  $_ <- $manifest{$_}{ref}\n" } sort keys %manifest );
 
     return \%held;
 }

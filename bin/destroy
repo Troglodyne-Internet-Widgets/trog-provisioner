@@ -151,8 +151,9 @@ sub main {
 
     $domain_dir = $hv->domain_dir;
 
-    print "Destroying domain: $domain\n";
-    print "[DRY RUN] No changes will be made.\n" if $dryrun;
+    my $announce = "Destroying domain: $domain\n";
+    $announce .= "[DRY RUN] No changes will be made.\n" if $dryrun;
+    print $announce;
 
     # 1. Stop and undefine the VM
     #

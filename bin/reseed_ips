@@ -164,13 +164,20 @@ sub report {
     my @removed = grep { !$after->{$_} } sort keys %$before;
     my @moved   = grep { $before->{$_} && $after->{$_} && $before->{$_} ne $after->{$_} } sort keys %$after;
 
-    printf "  %-18s %s\n", $_, "${would}recorded as $after->{$_}"            for @added;
-    printf "  %-18s %s\n", $_, "${would}freed (was $before->{$_})"           for @removed;
-    printf "  %-18s %s\n", $_, "${would}now $after->{$_}, was $before->{$_}" for @moved;
+    my $summary = join(
+        q{},
+        ( map { sprintf "  %-18s %s\n", $_, "${would}recorded as $after->{$_}" } @added ),
+        ( map { sprintf "  %-18s %s\n", $_, "${would}freed (was $before->{$_})" } @removed ),
+        ( map { sprintf "  %-18s %s\n", $_, "${would}now $after->{$_}, was $before->{$_}" } @moved ),
+    );
 
-    printf "%s: %d added, %d freed, %d changed hands; %d addresses spoken for\n",
-      ( $dryrun ? 'Nothing written' : 'Reseeded' ),
-      scalar @added, scalar @removed, scalar @moved, scalar keys %$after;
+    $summary .= sprintf(
+        "%s: %d added, %d freed, %d changed hands; %d addresses spoken for\n",
+        ( $dryrun ? 'Nothing written' : 'Reseeded' ),
+        scalar @added, scalar @removed, scalar @moved, scalar keys %$after
+    );
+
+    print $summary;
 
     return 0;
 }

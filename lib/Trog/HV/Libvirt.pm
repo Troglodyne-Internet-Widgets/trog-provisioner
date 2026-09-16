@@ -1818,7 +1818,7 @@ sub provision_guest {
     $vm->generate_files( $dir, %settings, %storage, domain => $domain );
 
     my $file = "$dir/domain.xml";
-    print "Wrote $file\n";
+    print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain
 
     print "Defining and starting $domain...\n";
     $self->define_domain( File::Slurper::read_text($file) );
@@ -1854,8 +1854,10 @@ sub would_provision {
     my ( $self, $config, %opts ) = @_;
 
     my $domain = $config->param('domain');
-    print "Would terminate the existing $domain and delete its volumes\n" if $self->domain_exists($domain);
-    print "Would create the disk $domain-qcow2 and a cloud-init seed on " . $self->describe . ", then define and start $domain\n";
+    my $plan   = q{};
+    $plan .= "Would terminate the existing $domain and delete its volumes\n" if $self->domain_exists($domain);
+    $plan .= "Would create the disk $domain-qcow2 and a cloud-init seed on " . $self->describe . ", then define and start $domain\n";
+    print $plan;
 
     return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) ) // 'bogus';
 }

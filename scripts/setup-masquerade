@@ -1,9 +1,11 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 package Trog::Script::SetupMasquerade;
 
+use 5.014;
+
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 =head1 setup-masquerade
 
@@ -82,7 +84,7 @@ sub main {
 
     open( my $fh, '<', $FILE ) or die "Cannot read $FILE: $!";
     my $content = do { local $/; <$fh> };
-    close $fh;
+    close($fh) or die "Cannot close $FILE: $!\n";
 
     my ( @nat, @filter, @subnets );
     foreach my $arg (@args) {
@@ -115,8 +117,8 @@ sub main {
     return 0 if $content eq $original;
 
     open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!";
-    print $out $content;
-    close $out;
+    print {$out} $content;
+    close($out) or die "Cannot write $FILE: $!\n";
 
     print 'Wrote ' . scalar(@nat) . ' masquerade and ' . scalar(@filter) . " forwarding rule(s) to $FILE\n";
 
@@ -238,7 +240,7 @@ sub _insert_before_commit {
     my ( $inside, $done ) = ( 0, 0 );
     foreach my $line ( split( /\n/, $text, -1 ) ) {
         $inside = 1 if $line =~ m/^[*]\Q$table\E\b/;
-        if ( $inside && !$done && $line =~ m/^COMMIT$/ ) {
+        if ( $inside && !$done && $line eq 'COMMIT' ) {
             push( @out, $begin, @rules, $end );
             ( $inside, $done ) = ( 0, 1 );
         }

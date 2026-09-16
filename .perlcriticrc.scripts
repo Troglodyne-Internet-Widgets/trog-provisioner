@@ -1,27 +1,65 @@
-# Troglodyne perlcritic policy
+# Troglodyne perlcritic policy for scripts/
+#
+# What is in scripts/ ships to a guest and runs on whatever perl the distro put
+# there, before anything has built a newer one -- so it cannot declare
+# use 5.041 the way bin/ and lib/ do.  It standardizes on use 5.014 instead:
+# the floor that has /aa, and low enough for any system perl still worth
+# provisioning onto.
+#
+# That one difference is the whole reason this file exists rather than a few
+# exclusions bolted onto .perlcriticrc.  That profile omits seven policies on
+# the stated grounds that perl will not compile what they report under 5.041 --
+# and none of that reasoning survives at 5.014, so each of the seven is named
+# below.  They are the point of this file as much as the exclusions are: without
+# them a bareword filehandle in scripts/ is caught by nothing at all.
+#
+# Dropped here, and why:
+#
+#   RegularExpressions::RequireDefault              use re '/aasx' is how bin/
+#   RegularExpressions::RequireDotMatchAnything     and lib/ satisfy these in one
+#   RegularExpressions::RequireExtendedFormatting   line, and /x makes literal
+#     whitespace in a pattern vanish.  setup-masquerade matches iptables-restore
+#     output with spaces in the pattern -- "^-A POSTROUTING -s ... -j MASQUERADE"
+#     and "^:$NAT_CHAIN " -- so turning /x on there stops those matching and
+#     silently leaves the rule it meant to remove in place.
+#
+#   logicLAB::ProhibitShellDispatch                 driving ufw, iptables and
+#     cpanm is what these scripts are for.  There is no library for `ufw allow`,
+#     and the policy fires 23 times saying so.
+#
+#   Documentation::RequirePod                       a script installed on a guest
+#   Documentation::PodSpelling                      is read by whoever is standing
+#   ProhibitUsageSubs                               on the guest, and --help is
+#     how they ask.  A usage() sub is the right shape for that, not a duplicate
+#     of POD nobody there will run perldoc against.
+#
+#   ProhibitPrintSTDERR                             every one of these is a
+#     helper run from a makefile target or a postrun task, where STDERR is the
+#     channel progress belongs on and STDOUT is left for whatever the caller
+#     reads back.
+
 severity  = 1
 only      = 1
 force     = 0
 verbose   = 1
-#theme     = 
-#include   =
-#exclude   =
 criticism-fatal = 1
 color     = 1
 allow-unsafe = 1
+
+# The seven .perlcriticrc leaves out because use 5.041 makes them unnecessary.
+# Nothing here declares 5.041, so each of them is load-bearing again.
+[InputOutput::ProhibitBarewordDirHandles]
+[InputOutput::ProhibitBarewordFileHandles]
+[Objects::ProhibitIndirectSyntax]
+[TestingAndDebugging::RequireUseStrict]
+[Variables::ProhibitPerl4PackageNames]
+[Modules::RequireEndWithOne]
+[CodeLayout::RequireASCII]
+
 # Usability
 [Modules::RequirePerlVersion]
-[Documentation::RequirePod]
 # Security
 [ValuesAndExpressions::PreventSQLInjection]
-; [CodeLayout::RequireASCII] is not here on purpose.  Every file declares
-; use 5.041, which turns on source::encoding "ascii" and makes a non-ASCII
-; character in code a compile error -- stricter than the policy, and not
-; skippable.  The policy also applies to POD, where the only thing it ever
-; caught was a contributor's name in the section Dist::Zilla generates, and
-; spelling somebody's name wrong is not a code standard.
-[RegularExpressions::RequireDefault]
-strict = 1
 # PEBCAK catches
 [BuiltinFunctions::ProhibitDeleteOnArrays]
 [Subroutines::ProhibitAmbiguousFunctionCalls]
@@ -46,18 +84,32 @@ allow = Provisioner::Utils::write_pem Test::MockFile::new_dir
 warn_level = 40
 info_level = 30
 [Variables::ProhibitUselessInitialization]
+# A list of its own, differing from .preferred_modules.ini in exactly one
+# stanza: JSON.  Everything under scripts/ runs on a guest's system perl, where
+# neither XS parser exists and there is no CPAN client to fetch one until the
+# perl recipe has run -- while Provisioner::Recipe::Ubuntu::pdns installs
+# libjson-perl for exactly this, next to libconfig-simple-perl and
+# libnet-dns-perl.  Cpanel::JSON::XS stays right for bin/ and lib/, which run on
+# the provisioner.
+#
+# That reasoning is here rather than in the file it describes because
+# [PreferredModules] parses its config with Config::INI, which has no comment
+# syntax at all: a '#' line is a syntax error, and the policy reports it only as
+# "Invalid configuration file".  Hence not one comment over there.
 [PreferredModules]
-config = .preferred_modules.ini
+config = .preferred_modules.scripts.ini
 [PreferredBinaries]
 config = .preferred_binaries.ini
+# /usr/bin/perl rather than env perl: these run on the guest's system perl, and
+# an env shebang resolves to whatever is first on PATH -- which, once the perl
+# recipe has built one under /opt/perl5, is not necessarily the one they are
+# written against.
 [logicLAB::RequireSheBang]
-formats = #!/usr/bin/env perl
+formats = #!/usr/bin/perl
 # Performance
-[logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
 [ProhibitUseLib]
-[ProhibitUsageSubs]
 [RequireQwForLiteralLists]
 [ProhibitNoWarningsRedefine]
 [RequireFatalWarnings]
@@ -66,49 +118,11 @@ formats = #!/usr/bin/env perl
 # custom import rather than @EXPORT, and Text::Xslate loads its TT2 bridge by
 # name, from a string.
 allow = IO::Prompter Text::Xslate::Bridge::TT2 re
-[ProhibitUnusedDefinitions]
-# Called, but not in a way the policy can see.  The check_ and note_ subs are
-# named in each backend's preflight_checks and preflight_notes, and bin/preflight
-# calls every one as $hv->$_.  Trog::OpenStack::Auth's token, region and
-# interface are called by OpenStack::Client and OpenStack::MetaAPI, which it is
-# handed to.  The forget subs clear what a module keeps for the rest of a run,
-# and exist so that one test does not see what the last one left.
-allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_cloud_resources check_cloud_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination note_plaintext_secrets Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
-[ProhibitPrintSTDERR]
+# Kept here as well as in .perlcriticrc: dropping ProhibitPrintSTDERR says which
+# handle a helper may write to, not that it may write to it in pieces.
 [InputOutput::ProhibitRepeatedPrints]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
-;
-; Not here on purpose, because something above already does the job better:
-;   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
-;   ControlStructures::ProhibitCascadingIfElse  CognitiveComplexity, which
-;   ControlStructures::ProhibitDeepNests          scores nesting and every
-;   Subroutines::ProhibitExcessComplexity         break in flow, where these
-;                                                 count branches
-;   InputOutput::ProhibitBacktickOperators      logicLAB::ProhibitShellDispatch
-;   Modules::ProhibitEvilModules                PreferredModules
-;   Subroutines::ProhibitUnusedPrivateSubroutines  ProhibitUnusedDefinitions,
-;                                                 which counts only calls from
-;                                                 bin/ and lib/, private or not
-;   TestingAndDebugging::RequireUseWarnings     RequireFatalWarnings
-;   ValuesAndExpressions::ProhibitLeadingZeros  ProhibitLeadingZeros
-;   Modules::RequireVersionVar                  [PkgVersion] in dist.ini
-;   ErrorHandling::RequireCarping               STYLE.md: die with context,
-;                                                 and Carp::Always for the trace
-;
-; Nor these, because every file declares use 5.041, and under it perl will not
-; compile what they report -- or, for the last, no longer needs what it asks for:
-;   InputOutput::ProhibitBarewordDirHandles     no feature "bareword_filehandles"
-;   InputOutput::ProhibitBarewordFileHandles
-;   Objects::ProhibitIndirectSyntax             no feature "indirect"
-;   TestingAndDebugging::RequireUseStrict       strict, which use 5.012 and later
-;                                                 turn on
-;   Variables::ProhibitPerl4PackageNames        no apostrophe as package separator
-;   Modules::RequireEndWithOne                  feature "module_true"
-;
-; Documentation::RequirePodSections is out as well: the sections it asks for are
-; the ones Pod::Weaver writes at build, and weaver.ini names them AUTHORS and
-; COPYRIGHT AND LICENSE where the policy wants AUTHOR and LICENSE AND COPYRIGHT.
 [BuiltinFunctions::ProhibitBooleanGrep]
 [BuiltinFunctions::ProhibitLvalueSubstr]
 [BuiltinFunctions::ProhibitReverseSortBlock]
@@ -138,9 +152,6 @@ allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources c
 [ControlStructures::ProhibitUnreachableCode]
 [ControlStructures::ProhibitUntilBlocks]
 [ControlStructures::ProhibitYadaOperator]
-[Documentation::PodSpelling]
-spell_command = aspell --lang=en_US list
-stop_words_file = .pod_stopwords
 [Documentation::RequirePackageMatchesPodName]
 [ErrorHandling::RequireCheckingReturnValueOfEval]
 [InputOutput::ProhibitExplicitStdin]
@@ -177,8 +188,6 @@ package_exemptions = main [a-z][a-z0-9_]*
 [RegularExpressions::ProhibitSingleCharAlternation]
 [RegularExpressions::ProhibitUnusedCapture]
 [RegularExpressions::RequireBracesForMultiline]
-[RegularExpressions::RequireDotMatchAnything]
-[RegularExpressions::RequireExtendedFormatting]
 [Subroutines::ProhibitAmpersandSigils]
 [Subroutines::ProhibitBuiltinHomonyms]
 [Subroutines::ProhibitManyArgs]
@@ -204,8 +213,6 @@ package_exemptions = main [a-z][a-z0-9_]*
 [ValuesAndExpressions::RequireUpperCaseHeredocTerminator]
 [Variables::ProhibitAugmentedAssignmentInDeclaration]
 [Variables::ProhibitConditionalDeclarations]
-; Variables::ProhibitEvilVariables is not listed: it declines to load until
-; it is given variables to prohibit, and nobody has named any.
 [Variables::ProhibitLocalVars]
 [Variables::ProhibitMatchVars]
 [Variables::ProhibitReusedNames]
@@ -216,9 +223,3 @@ package_exemptions = main [a-z][a-z0-9_]*
 [Variables::RequireNegativeIndices]
 # Extensions to perl -c
 [CompileTime]
-# Good idea, but module doesn't install due to bad testsuite...we'll have to fork
-#[Dynamic::ValidateAgainstSymbolTable]
-#at_inc_suffix=lib
-#inspect_required_modules=1
-#inspect_autoloaders=1
-#max_recursion=2

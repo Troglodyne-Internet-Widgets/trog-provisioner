@@ -196,6 +196,7 @@ conf
 config
 configd
 configs
+cpan
 cpanm
 cpanmetadb
 cpuid
@@ -297,6 +298,7 @@ microversion
 milters
 mirrorlist
 misconfigured
+mistyped
 mtime
 mydestination
 mysqldump
@@ -451,4 +453,5 @@ webmail
 websocket
 whitespace
 yaml
+zonediff
 zonefile

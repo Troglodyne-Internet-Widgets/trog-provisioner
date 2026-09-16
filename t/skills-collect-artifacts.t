@@ -110,7 +110,7 @@ subtest 'a key the store never gave up is said so, rather than handed to ssh as 
     $guest->redefine( key_path => sub { return undef } );
 
     # A uri, so hypervisor() takes its first branch and asks Trog::HV directly.
-    my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', undef, undef, undef, 'qemu:///bogus' ) };
+    my $err = exception { Trog::Skill::CollectArtifacts::connect_to( 'vm.test', uri => 'qemu:///bogus' ) };
 
     # \s+ rather than spaces: this file is under re '/aasx', so a literal space
     # in a pattern is ignored and the match would pass on anything.

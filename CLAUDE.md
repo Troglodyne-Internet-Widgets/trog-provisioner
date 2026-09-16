@@ -91,13 +91,21 @@ Before you commit, in this order:
 Then the mechanical ones:
 
     perl -c <each changed .pm or bin/ script>
-    perlcritic --profile .perlcriticrc bin/ lib/ t/
+    perlcritic --profile .perlcriticrc         bin/ lib/ t/
+    perlcritic --profile .perlcriticrc.scripts scripts/
     podchecker <each changed file>
     prove -lm -j8 t/
 
-The hook does the tidy and that perlcritic line for you, over the files you
+Two profiles, and the path decides which.  What is under `scripts/` ships to a
+guest and runs on that guest's system perl, so it declares `use 5.014` where
+everything else here declares `use 5.041` -- and `.perlcriticrc` leaves seven
+policies out on the stated grounds that 5.041 makes them unnecessary, which is
+not true one directory over.  `.perlcriticrc.scripts` names those seven and
+drops what does not fit a script whose job is to drive ufw, iptables or cpanm.
+
+The hook does the tidy and both perlcritic lines for you, over the files you
 staged, once it is installed: `cp git-hooks/pre-commit .git/hooks/`.  Do that
-once, in any checkout you intend to commit from -- a commit the profile objects
+once, in any checkout you intend to commit from -- a commit a profile objects
 to then does not happen.  `perl -c`, `podchecker` and the suite stay yours to
 run.
 

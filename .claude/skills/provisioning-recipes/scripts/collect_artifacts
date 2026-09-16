@@ -133,7 +133,7 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $guest = connect_to( $domain, $user, $key, $host, $uri, $hvconf );
+    my $guest = connect_to( $domain, user => $user, key => $key, host => $host, uri => $uri, hvconf => $hvconf );
 
     $into //= File::Temp::tempdir( "trog-artifacts-$domain-XXXXXX", TMPDIR => 1 );
     make_path($into);
@@ -145,12 +145,14 @@ sub main {
     my @results = map { capture_to( $guest, $_->[0], "$into/$_->[1]" ) } probes();
     push @results, map { fetch( $guest, $domain, $_, $into ) } artifacts($domain);
 
-    print {*STDERR} "\n";
-    printf {*STDERR} "%-34s %s\n", $_->{remote},
-      ( $_->{ok} ? "-> $_->{local} ($_->{bytes} bytes)" : $_->{why} ) for @results;
+    # The report goes to STDERR because STDOUT carries one thing, the artifact
+    # directory, for a caller to read straight out of.
+    ## no critic (ProhibitPrintSTDERR)
+    print {*STDERR} "\n" . join( q{}, map { sprintf "%-34s %s\n", $_->{remote}, ( $_->{ok} ? "-> $_->{local} ($_->{bytes} bytes)" : $_->{why} ) } @results );
 
     my @absent = grep { !$_->{ok} } @results;
     print {*STDERR} "\n" . scalar(@absent) . " of " . scalar(@results) . " not there, which is itself worth reading something into.\n" if @absent;
+    ## use critic
 
     print "$into\n";
     return 0;
@@ -218,13 +220,13 @@ sub capture_to {
 
 # Everything about how to reach the guest, from the configuration that built it.
 sub connect_to {
-    my ( $domain, $user, $key, $host, $uri, $hvconf ) = @_;
+    my ( $domain, %opts ) = @_;
 
-    my $hv         = hypervisor( $domain, $uri, $hvconf );
+    my $hv         = hypervisor( $domain, $opts{uri}, $opts{hvconf} );
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$domain";
 
-    $key //= Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" );
+    my $key = $opts{key} // Trog::Guest->key_path( $domain, "$cfg_dir/key.rsa" );
 
     # Before the connection rather than after it fails.  key_path prompts for
     # the store's password and a script has nothing to type into, so it comes
@@ -233,14 +235,15 @@ sub connect_to {
     # store we never opened.
     die "No key for $domain, in the store or at $cfg_dir/key.rsa.\n" . "If it is in the store, the password goes on stdin, as for bin/provision:\n" . qq{    echo "\$TROG_SCRATCH_PASS" | collect_artifacts $domain\n}
       unless defined $key;
-    $user //= admin_user("$cfg_dir/provision.conf");
+
+    my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
 
     # The guest answers on its NAT lease whether or not its static address ever
     # came up, which is the case that matters when something went wrong.
-    $host //= $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) );
+    my $host = $opts{host} // $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) );
     die "Could not find a lease for $domain, so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
 
-    print {*STDERR} "Collecting from $domain at $user\@$host\n";
+    print {*STDERR} "Collecting from $domain at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
 
     my $guest = Trog::Guest->new( name => $domain, host => $host, user => $user, key_path => $key );
 

@@ -92,9 +92,7 @@ sub main {
     if (@notes) {
         print "\nNot required, but worth having:\n\n";
         foreach my $note (@notes) {
-            print "  * $note->{what}\n";
-            print "    $_\n" for split( m/\n/, $note->{fix} );
-            print "\n";
+            print "  * $note->{what}\n" . join( q{}, map { "    $_\n" } split( m/\n/, $note->{fix} ) ) . "\n";
         }
     }
 
@@ -102,9 +100,7 @@ sub main {
 
     print "\n" . scalar(@failed) . " thing" . ( @failed == 1 ? '' : 's' ) . " to fix first:\n\n";
     foreach my $failure (@failed) {
-        print "  * $failure->{what}\n";
-        print "    $_\n" for split( m/\n/, $failure->{fix} );
-        print "\n";
+        print "  * $failure->{what}\n" . join( q{}, map { "    $_\n" } split( m/\n/, $failure->{fix} ) ) . "\n";
     }
 
     seed_admin_keys();

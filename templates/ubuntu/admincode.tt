@@ -11,9 +11,17 @@ test -e /home/[% admin_user %]/[% basedir %] || sudo -u [% admin_user %] ln -s [
 [% END %]
 cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [% FOR repo in repos_from %]
+[%# The token on stdin rather than in argv, where ps showed it to anyone on the
+    guest for as long as the clones took.  install -m 0600 first, so the file is
+    never briefly world-readable with a token already in it; the redirect is
+    opened by the root shell before sudo drops to the admin, so nothing but
+    root needs to be able to read it. -%]
+install -m 0600 /dev/null [% install_dir %]/[% domain %]/.repos_for.token
+printf '%s' '[% repo.token %]' > [% install_dir %]/[% domain %]/.repos_for.token
 [% FOR entity in repo.repos_for %]
-cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /home/[% admin_user %]/bin/repos_for [% repo.api_url %] '[% repo.token %]' [% entity %]
+cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /home/[% admin_user %]/bin/repos_for [% repo.api_url %] [% entity %] < [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]
+rm -f [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]
 [% packager_invocation | mark_raw %] [% FOR pkg IN extra_pkgs %] [% pkg %][% END %]
 [% IF modules.grep('perl').size() %]

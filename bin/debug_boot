@@ -277,9 +277,7 @@ sub fetch {
 
     my @lines = split m/\n/, $content;
     ## no critic (ProhibitPrintSTDERR)
-    print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines );
-    print {*STDERR} "  $_\n" for @lines[ -8 .. -1 ];
-    print {*STDERR} "\nA hang is the last line before the silence.\n\n";
+    print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines ) . join( q{}, map { "  $_\n" } @lines[ -8 .. -1 ] ) . "\nA hang is the last line before the silence.\n\n";
     ## use critic
 
     print "$into\n";
@@ -335,9 +333,14 @@ sub vnc {
     # It listens on the hypervisor's loopback, which is the right place for it
     # to listen; getting there is a tunnel's job.
     ## no critic (ProhibitPrintSTDERR)
-    print {*STDERR} "$domain has VNC on port $vnc, on the hypervisor's loopback.\n\n";
-    print {*STDERR} "  ssh -N -L $vnc:127.0.0.1:$vnc " . ( $hv->ssh_target // 'localhost' ) . "\n";
-    print {*STDERR} "  then point a VNC client at 127.0.0.1:$vnc\n\n";
+    my $through = $hv->ssh_target // 'localhost';
+    print {*STDERR} <<"TUNNEL";
+$domain has VNC on port $vnc, on the hypervisor's loopback.
+
+  ssh -N -L $vnc:127.0.0.1:$vnc $through
+  then point a VNC client at 127.0.0.1:$vnc
+
+TUNNEL
     ## use critic
 
     print "$vnc\n";

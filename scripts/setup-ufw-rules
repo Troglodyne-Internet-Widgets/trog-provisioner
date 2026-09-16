@@ -1,7 +1,9 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
+
+use 5.014;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 =head1 setup-ufw-rules
 
@@ -28,7 +30,7 @@ my $DRY_RUN = ( grep { $_ eq '--dry-run' } @ARGV ) ? 1 : 0;
 my $list = qx{ufw app list};
 my @apps = split( /\n/, $list );
 shift @apps;
-@apps = map { s/^\s+//; $_ } @apps;
+s/^\s+// for @apps;
 
 # Sane defaults.
 #

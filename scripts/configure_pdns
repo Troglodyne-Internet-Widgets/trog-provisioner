@@ -1,7 +1,9 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
+
+use 5.014;
 
 use strict;
-use warnings;
+use warnings FATAL => 'all';
 
 use File::Copy;
 use Config::Simple;
@@ -19,7 +21,7 @@ Point the PowerDNS unit at the spool directory it chroots into.
 =cut
 
 my $service_file = "/usr/lib/systemd/system/pdns.service";
-die "Can't find service file $service_file" unless -f $service_file;
+die "Can't find service file $service_file" unless -f $service_file;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- asking whether the unit is there, not gating access to it
 
 my $cfg = Config::Simple->new($service_file);
 
