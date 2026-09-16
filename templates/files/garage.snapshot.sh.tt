@@ -5,11 +5,9 @@
 # The objects under [% data_dir %] are ordinary files and are salvaged as they
 # are.  The metadata is not: it is an LMDB database, and LMDB writes
 # db.lmdb/data.mdb and lock.mdb 0600 whatever the mode of the directory holding
-# them, so the group the rest of the tree is given never reaches them and the
-# fetch -- sftp as [% admin_user %] with no sudo -- reads nothing.  Copying them
-# anyway would be worse than not having them: a live LMDB copied out from under
-# a running writer is a database with a torn page in it, and it restores
-# looking fine.
+# them.  Root can read those, so the fetch is no longer what stops us taking the
+# database itself -- this is: a live LMDB copied out from under a running writer
+# is a database with a torn page in it, and it restores looking fine.
 #
 # So garage is asked for a snapshot instead, which is what `meta snapshot` is
 # for, and that is what remote_files names.  It is written under
@@ -36,10 +34,12 @@ if [ ! -d "$SNAPDIR" ]; then
     exit 1
 fi
 
-# Readable by the account the fetch runs as, and by nobody else: the metadata
-# says what every object in the store is and who may read it.
-chown -R garage:[% admin_user %] "$SNAPDIR"
-find "$SNAPDIR" -type d -exec chmod 2750 {} +
+# garage's own, and nobody else's.  The fetch reads the guest as root now (issue
+# #76), so the admin group and the setgid bit that used to buy it a read here
+# widen nothing but the metadata, which says what every object in the store is
+# and who may read it.
+chown -R garage:garage "$SNAPDIR"
+find "$SNAPDIR" -type d -exec chmod 0750 {} +
 find "$SNAPDIR" -type f -exec chmod 0640 {} +
 
 ls -1dt "$SNAPDIR"/*/ 2>/dev/null | tail -n "+$(( KEEP + 1 ))" | xargs -r rm -rf

@@ -66,13 +66,23 @@ ok(!has_content('[% install_dir %]/[% domain %]/deluged/state')
 # Modes per type, not u=rwX: the data target lands a salvage 0750, X preserves
 # an execute bit somebody already has, and the state would come back executable
 # on a rebuild while looking right on a first build.
-my $state = '/var/lib/deluged/config/state';
+#
+# The files are asked what they must not be rather than for one exact mode.
+# deluged writes torrents.state itself once it is running, under its own umask
+# and after the fragment has finished chmodding, so an exact 0640 here passes
+# only on a guest where deluged never got that far.  What a rebuild must not
+# bring back is an execute bit, and what nobody outside the account may have is
+# anything at all; 0660 from the daemon is neither.
+my $state = "/var/lib/deluged/config/state";
 SKIP: {
-    skip 'no state directory yet', 2 unless -d $state;
+    skip "no state directory yet", 3 unless -d $state;
+    my @state_files = grep { -f $_ } glob("$state/*");
     my @wrong_dirs  = grep { ( (stat $_)[2] & 07777 ) != 0750 } grep { -d $_ } glob("$state $state/*");
-    my @wrong_files = grep { ( (stat $_)[2] & 07777 ) != 0640 } grep { -f $_ } glob("$state/*");
-    is_deeply(\@wrong_dirs,  [], 'every directory under the torrent state is 0750');
-    is_deeply(\@wrong_files, [], 'and every file in it is 0640, executable bits and all');
+    my @executable  = grep { (stat $_)[2] & 0111 } @state_files;
+    my @open_to_all = grep { (stat $_)[2] & 0007 } @state_files;
+    is_deeply(\@wrong_dirs,  [], "every directory under the torrent state is 0750");
+    is_deeply(\@executable,  [], "nothing in it came back executable");
+    is_deeply(\@open_to_all, [], "and nothing in it is open outside debian-deluged");
 }
 
 done_testing();
