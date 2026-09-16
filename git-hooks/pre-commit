@@ -139,7 +139,14 @@ done
 # After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in both
 # profiles, so running this first would fail the commit over the one thing the
 # hook had already set out to fix by itself.
-if [ -n "$critic_files$scripts_files" ] && command -v perlcritic >/dev/null 2>&1
+# Three branches rather than two conditions and one else.  Staging nothing that
+# either profile judges -- documentation, or perl somewhere neither covers, as
+# .claude/skills is -- is not the same thing as having no perlcritic to judge it
+# with, and the else said the second whenever the first was true.
+if [ -z "$critic_files$scripts_files" ]
+then
+    echo "Nothing staged that either profile judges."
+elif command -v perlcritic >/dev/null 2>&1
 then
     echo "Running perlcritic..."
 
