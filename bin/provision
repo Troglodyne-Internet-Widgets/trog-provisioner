@@ -195,6 +195,9 @@ here is readable out of the domain directory or out of a backup of it.  This
 resolves them and writes each file, before the makefile that will read them has
 started.
 
+Most guests ask for no secret at all, and F<bin/new_config> writes no manifest
+for one that does not.  There is nothing to place then, and nothing happens.
+
 Dies if the store cannot be reached.  A guest whose signing key or equivalent
 did not arrive is a guest that will make itself a new identity, which is the
 whole thing this exists to stop; better to fail here, where an operator is
@@ -217,7 +220,12 @@ sub place_guest_secrets {
     # The same domain directory bin/destroy purges: whatever hypervisor this run
     # is working with says where it is.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
-    my $wanted   = YAML::XS::Load( File::Slurper::read_binary($manifest) );
+
+    # No manifest is the ordinary case: new_config writes one only for a domain
+    # whose recipes ask for a secret, and --no-config writes none at all.
+    return unless -e $manifest;
+
+    my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
     return unless ref $wanted eq 'HASH' && %$wanted;
 
     my %needed = map { $_ => $wanted->{$_}{ref} } keys %$wanted;

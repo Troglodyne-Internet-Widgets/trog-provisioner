@@ -676,12 +676,28 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     ok( $eject > $ci, 'and never on the strength of a lease alone' );
 };
 
+# --- Placing what a recipe reads but must not generate ------------------------
+subtest 'a domain that asked for no secret has nothing to place' => sub {
+    my $dir    = tempdir( CLEANUP => 1 );
+    my $domain = 'nosecrets.test.test';
+    mkdir "$dir/$domain";
+
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+    ok( !-e "$dir/$domain/guest-secrets.yaml", 'new_config left no manifest, which is the state most guests are in' );
+
+    # undef for the guest on purpose: anything carrying on past the manifest
+    # reaches the store or the guest, and both of those are a method call on it.
+    is( exception { Trog::Bin::Provisioner::place_guest_secrets( undef, $domain ) }, undef, 'so placing secrets does nothing, rather than dying on the way to a guest that wanted none' );
+};
+
 # --- Letting a runner in to a hypervisor --------------------------------------
 #
-# A change to a machine that is not the guest, which is the line --dryrun is
-# drawn on, and the reason this lives here rather than in the recipe that
-# declares the key.  It is done where the key has already come out of the store,
-# because doing it anywhere else means asking for the store password twice.
+# A change to a machine that is not the guest, and the reason this lives here
+# rather than in the recipe that declares the key.  It is done where the key has
+# already come out of the store, because doing it anywhere else means asking for
+# the store password twice.
 subtest 'a runner is authorized on each hypervisor it was configured for' => sub {
     my $dir    = tempdir( CLEANUP => 1 );
     my $domain = 'runner.test.test';
