@@ -63,6 +63,10 @@ is what to call this guest in messages.
 # How long to wait for things a guest does exactly once, on first boot.
 our $BOOT_TIMEOUT = 300;
 
+# Seconds between connection attempts, which is Net::OpenSSH::More's own
+# default.  Named here because wait_for_ssh divides the boot timeout by it.
+our $SSH_RETRY_INTERVAL = 6;
+
 # The whole Makefile runs inside this one, not just the waiting: the first wait
 # is on the at queue, and the job sits there for as long as the build takes.
 # The longest of them is a domain that builds perl from source and installs
@@ -126,8 +130,12 @@ sub wait_for_ssh {
       or die 'SSH port on ' . $self->describe . " never came up after ${timeout}s\n";
 
     # Opening it is the actual test; the port being up only means something is
-    # listening.
-    $self->ssh or die 'Could not establish an SSH connection to ' . $self->describe . "\n";
+    # listening.  Given the same window as the port rather than the library's
+    # own minute: sshd answers long before cloud-init has finished writing
+    # authorized_keys, and ssh-import-id fetches some of those keys from GitHub,
+    # so a minute ran out on guests that were coming up perfectly well.
+    $self->ssh( retry_interval => $SSH_RETRY_INTERVAL, retry_max => int( $timeout / $SSH_RETRY_INTERVAL ) || 1 )
+      or die 'Could not establish an SSH connection to ' . $self->describe . "\n";
     return $self;
 }
 

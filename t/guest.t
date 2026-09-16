@@ -92,6 +92,37 @@ subtest 'wait_for_ssh wants the port open and the connection made' => sub {
     is( quietly( sub { $guest->wait_for_ssh } ), $guest, 'otherwise we get the guest back' );
 };
 
+# Net::OpenSSH::More gives up after ten attempts six seconds apart, and sshd
+# answers long before cloud-init has written authorized_keys -- ssh-import-id
+# fetches some of those keys from GitHub.  Guests that were coming up perfectly
+# well failed the provision on that minute.
+subtest 'the connection is given the same window as the port' => sub {
+    my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
+
+    my $ports   = Test::MockModule->new('Net::EmptyPort');
+    my $machine = Test::MockModule->new('Trog::Machine');
+    $ports->redefine( wait_port => sub { 1 } );
+
+    my %asked;
+    $machine->redefine( ssh => sub { my ( $self, %opts ) = @_; %asked = %opts; return bless {}, 'FakeSSH' } );
+
+    quietly( sub { $guest->wait_for_ssh } );
+
+    # The literal six, not the constant under test: comparing the code with its
+    # own value is an assertion that cannot fail, and six is what the library
+    # would have waited anyway.
+    is( $asked{retry_interval}, 6,  'the interval the library would have used' );
+    is( $asked{retry_max},      50, 'for the whole boot timeout rather than a minute of it' );
+
+    quietly( sub { $guest->wait_for_ssh( timeout => 60 ) } );
+    is( $asked{retry_max}, 10, 'a shorter wait buys proportionally fewer attempts' );
+
+    # A window shorter than one interval rounds to nothing, and nothing would
+    # mean never opening the connection the port wait exists to precede.
+    quietly( sub { $guest->wait_for_ssh( timeout => 1 ) } );
+    is( $asked{retry_max}, 1, 'and one too short for a single interval still tries once' );
+};
+
 subtest 'wait_for_cloud_init re-runs the modules that failed' => sub {
     my $guest = Trog::Guest->new( name => 'vm.example.test', host => '203.0.113.10', user => 'ubuntu' );
 

@@ -212,10 +212,15 @@ sub sshd_port {
 The L<Net::OpenSSH::More> connection, opened on first use and kept, or undef
 when the machine is us and there is nothing to connect to.
 
+C<%opts> is handed to the constructor, so a caller waiting on a machine that is
+still coming up can widen C<retry_interval> and C<retry_max>.  Only the call
+that opens the connection can: every call after it gets the one already made,
+whatever it asks for.
+
 =cut
 
 sub ssh {
-    my ($self) = @_;
+    my ( $self, %opts ) = @_;
     return undef        if $self->is_local;
     return $self->{ssh} if $self->{ssh};
 
@@ -237,6 +242,10 @@ sub ssh {
             # old guest's connection, whose first command died "Broken pipe".
             # This object keeps its own for as long as it lives.
             no_cache => 1,
+
+            # Last, so a caller can widen the retry budget for a machine that is
+            # still coming up.
+            %opts,
         );
     } or die 'Could not ssh to ' . $self->describe . ": $@\n";
 
