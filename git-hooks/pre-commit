@@ -116,30 +116,18 @@ else
     echo "pre-commit: perltidy is not on PATH, skipping the tidy pass."
 fi
 
-# .perlcriticrc judges bin/, lib/ and t/ and nowhere else, because that is the
-# run CLAUDE.md defines and therefore the only tree anybody has ever held to it.
-# The perl under .claude/skills/scripts has not been: teardown answers it with
-# eight findings, every one a print-to-STDERR in a tool whose job is to report
-# progress.  A hook that judged them would refuse every commit touching a file
-# nobody has ever cleaned, which is a worse thing to hand somebody than a gap.
-#
-# scripts/ is not that gap.  It has a profile of its own because what is there
-# runs on a guest's system perl, and it is clean under it, so there is nothing
-# to excuse it from.
-#
-# Tidy still runs over everything; tidiness is harmless.
-critic_files=''
-for file in $perl_files
-do
-    case "$file" in
-        bin/*|lib/*|t/*) critic_files="$critic_files $file" ;;
-    esac
-done
-
 # After the tidy pass and never before: [CodeLayout::RequireTidyCode] is in both
 # profiles, so running this first would fail the commit over the one thing the
 # hook had already set out to fix by itself.
-if [ -n "$critic_files$scripts_files" ] && command -v perlcritic >/dev/null 2>&1
+#
+# Three branches rather than two conditions and one else.  Staging nothing that
+# either profile judges -- a commit of documentation, say -- is not the same
+# thing as having no perlcritic to judge it with, and one else said the second
+# whenever the first was true.
+if [ -z "$perl_files$scripts_files" ]
+then
+    echo "Nothing staged that either profile judges."
+elif command -v perlcritic >/dev/null 2>&1
 then
     echo "Running perlcritic..."
 
@@ -147,9 +135,9 @@ then
     # shows every objection rather than one profile's worth at a time.
     critic_failed=''
 
-    if [ -n "$critic_files" ]
+    if [ -n "$perl_files" ]
     then
-        perlcritic --profile .perlcriticrc $critic_files || critic_failed=1
+        perlcritic --profile .perlcriticrc $perl_files || critic_failed=1
     fi
 
     if [ -n "$scripts_files" ]

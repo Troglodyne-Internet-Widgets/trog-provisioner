@@ -191,6 +191,36 @@ subtest 'a token is required, and comes from stdin' => sub {
     is( $given->{asked}[0][2], 'hunter2', 'what stdin held reaches the api, without its newline' );
 };
 
+# An entity the api answers with nothing is still an entity that was asked.
+# Without that recorded, the guard above never fires for one -- so it is fetched
+# again every run -- and nothing downstream can tell it from an entity that was
+# skipped, which is the whole of what the guest test checks.
+subtest 'an entity the api has nothing for is still recorded as asked' => sub {
+    my $alone = tempdir( CLEANUP => 1 );
+
+    my $empty = repos_for(
+        args  => [ 'https://api.test/', 'frank' ],
+        home  => $alone,
+        repos => { frank => [] },
+    );
+    is( $empty->{rc},              0, 'nothing went wrong' );
+    is( scalar @{ $empty->{ran} }, 0, 'and nothing was cloned' );
+
+    open( my $fh, '<', "$alone/.repos_for.json" ) or BAIL_OUT("no cache was written: $!");
+    my $json = do { local $/; <$fh> };
+    close($fh) or die "Cannot close the cache: $!";
+
+    my $cache = Cpanel::JSON::XS->new->utf8->decode($json);
+    ok( exists $cache->{'https://api.test/'}{frank}, 'the entity is in the cache with nothing under it' );
+
+    my $again = repos_for(
+        args  => [ 'https://api.test/', 'frank' ],
+        home  => $alone,
+        repos => { frank => [] },
+    );
+    is( scalar @{ $again->{asked} }, 0, 'and is not asked for a second time' );
+};
+
 chdir $was or diag "Could not return to $was: $!";
 
 done_testing();

@@ -126,6 +126,12 @@ sub main {
 sub destroy_guest {
     my ( $domain, $uri, $hvconf, $dryrun, $purge_data ) = @_;
 
+    # Progress for whoever is standing here, so STDERR rather than warn: warn
+    # stamps every line with a file and a line number from inside this script,
+    # which is not the part they need.  Nothing parses this one's STDOUT either
+    # -- bin/destroy inherits the terminal below and writes its own.
+    ## no critic (ProhibitPrintSTDERR)
+
     my $destroy = File::Basename::dirname(__FILE__) . '/../../../../bin/destroy';
 
     my @cmd = ( $^X, $destroy, '--purge' );
@@ -161,7 +167,7 @@ sub is_scratch {
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
     return 1 if -f "$cfg/$MARKER";
 
-    print {*STDERR} "$cfg is not a scratch configuration, so the data directory stays.\n" . "A real domain's is where its backups are restored from.\n";
+    print {*STDERR} "$cfg is not a scratch configuration, so the data directory stays.\n" . "A real domain's is where its backups are restored from.\n";    ## no critic (ProhibitPrintSTDERR) -- as in destroy_guest: said to a person, and warn would decorate it with a source location
     return 0;
 }
 
@@ -178,6 +184,10 @@ domain its configuration.
 
 sub remove_config {
     my ( $domain, $dryrun ) = @_;
+
+    # As in destroy_guest: what this says is said to a person, and warn would
+    # decorate each line with a source location they have no use for.
+    ## no critic (ProhibitPrintSTDERR)
 
     my $dir = $ENV{TROG_PROVISIONER_CONFIG};
     unless ( defined $dir && length $dir ) {

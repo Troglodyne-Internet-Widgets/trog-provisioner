@@ -9,6 +9,22 @@ chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/[% basedi
     which takes this target and everything after it down with it. -%]
 test -e /home/[% admin_user %]/[% basedir %] || sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
 [% END %]
+[%# gh from its own archive rather than the distro.  Ubuntu noble ships 2.45.0,
+    which predates GitHub retiring the Projects-classic GraphQL field -- so
+    `gh pr edit` there fails with a deprecation notice about projectCards and
+    edits nothing, on a guest whose whole job is working on repositories. -%]
+curl -fsS https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+chmod 0644 /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+[%# Checked on its own before the general update, so an archive refusing us
+    fails here naming itself rather than as apt noise and a bare error from the
+    install afterwards. -%]
+DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/github-cli.list \
+    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
+  || { echo "admincode: cli.github.com would not serve its repository, so there is no gh to install" >&2; exit 1; }
+DEBIAN_FRONTEND="noninteractive" apt-get update -q
+[% packager_invocation | mark_raw %] gh
 cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [% FOR repo in repos_from %]
 [%# The token on stdin rather than in argv, where ps showed it to anyone on the
