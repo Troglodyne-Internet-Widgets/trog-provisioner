@@ -514,6 +514,51 @@ subtest '--purge-data is asked for, and never implied by --purge' => sub {
     Trog::HV->forget();
 };
 
+subtest 'a guest that will not stop still gives its address back' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    make_path("$dir/tenant.test");
+
+    # The live failure upstream of step five: annihilate_domain dies when a
+    # guest will not stop or will not undefine, and destroy_vm does not catch
+    # it.  Unguarded the run ended there, and the address stayed reserved
+    # against a domain that had just been taken away.
+    Trog::HV->forget();
+    my $machine = Trog::HV->new( domain_dir => $dir );
+
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { return $machine } );
+
+    my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
+    $bin->redefine( destroy_vm => sub { die "Could not undefine tenant.test: still running\n" } );
+    $bin->redefine( $_         => sub { 1 } ) for qw{destroy_disks remove_authorized_key remove_runner_key purge_domain_dir};
+
+    my $released;
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( held_by => sub { '203.0.113.9' } );
+    $pool->redefine( release => sub { $released = $_[0]; 1 } );
+
+    # Caught rather than left to escape: unguarded, main() dies in destroy_vm,
+    # the die goes straight through capture, and the file ends on "No plan
+    # found in TAP output" -- taking the subtests after it down and saying
+    # nothing about the address, which is the thing being asserted.
+    my ( $out, $err, $rc );
+    my $aborted = exception {
+        ( $out, $err, $rc ) = capture { Trog::Bin::Destroy::main( '--domaindir', $dir, 'tenant.test' ) }
+    };
+
+    is( $aborted,  undef,         'the run finishes rather than aborting when the guest will not stop' );
+    is( $released, 'tenant.test', 'and the address goes back even though it would not stop' );
+
+    # The exact status, not merely "not zero": an aborted run leaves this undef,
+    # and undef is already "not zero", so isnt() here would pass in precisely
+    # the case this subtest exists to catch.
+    is( $rc, 1, 'with a failing status rather than a claim of success' );
+    like( $err, qr/Could \s+ not \s+ undefine/, 'having said what went wrong' );
+    unlike( $out, qr/Done[.] \s* \z/, 'and not signing off as though nothing had' );
+
+    Trog::HV->forget();
+};
+
 subtest 'a domain no hypervisor holds still gives its address back' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     make_path("$dir/tenant.test");
