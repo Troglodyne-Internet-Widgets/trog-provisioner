@@ -1,16 +1,14 @@
 # Housekeeping.
 #
-# 2750, grouped to [% admin_user %], before dovecot has ever looked in here:
-# dovecot copies the mode and the group of the nearest existing parent onto
-# every maildir and every message file it creates, so what this line sets is
-# what decides whether the rebuild after the next one still has any mail to
-# salvage.  The fetch is an sftp session as [% admin_user %] with no sudo, and a
-# maildir it cannot enter comes back empty without saying so.
-#
-# Group and not world: everyone with an account here has their mail in this
-# directory.  The admin account can read all of it, which is the price of being
-# able to carry it onto the next guest at all.
-install -d -m 2750 -o dovecot -g [% admin_user %] /mail/[% domain %]
+# 2750, dovecot:dovecot, before dovecot has ever looked in here: dovecot copies
+# the mode and the group of the nearest existing parent onto every maildir and
+# every message file it creates, so what this line sets is what decides whether
+# the rebuild after the next one still has any mail to salvage. This used to be
+# grouped to the admin user instead, from when the fetch was an sftp session as
+# that user with no sudo and a maildir it could not enter came back empty
+# without saying so. The fetch reads the guest as root now (issue #76), so
+# issue #98 took that back out.
+install -d -m 2750 -o dovecot -g dovecot /mail/[% domain %]
 # opendkim
 mkdir -p /etc/opendkim/keys/[% domain %]
 mv TrustedHosts /etc/opendkim
@@ -32,10 +30,13 @@ mv InternalHosts /etc/opendkim
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
 sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
-# Stash a copy in /mail owned by the admin for schlepping.
+# Stash a copy in /mail for the fetch to read.
 #
-# /etc/opendkim belongs to opendkim and the fetch has no sudo, so this copy is
-# the only thing remote_files can actually read the signing key out of.
+# /etc/opendkim belongs to opendkim, and the fetch reads the guest as root now
+# (issue #76) so it could read that directly -- pointing remote_files at
+# /etc/opendkim/keys instead of this staged copy is a bigger change than #98
+# asks for, so the staging stays; only the ownership below, which existed
+# purely for the old unprivileged fetch, goes.
 #
 # The trailing dot matters: `cp -r /etc/opendkim/keys /mail/keys` copies the
 # directory *into* /mail/keys once /mail/keys exists, which is what the second
@@ -44,10 +45,12 @@ sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
 # and published no DKIM record for that domain at all.
 mkdir -p /mail/keys
 cp -r /etc/opendkim/keys/. /mail/keys/
-chown -R [% admin_user %]:[% admin_user %] /mail/keys
-# 0700 and 0600: a private key sitting outside the daemon that owns it, on its
-# way into the provisioner data directory and from there into whatever backs
-# that up.  Readable by the account that fetches it and by nobody else.
+# root:root rather than the admin user -- from when the fetch had no sudo and
+# needed the group to read it; issue #98 took that back out.
+chown -R root:root /mail/keys
+# 0700 and 0600 regardless: a private key sitting outside the daemon that owns
+# it, on its way into the provisioner data directory and from there into
+# whatever backs that up.
 find /mail/keys -type d -exec chmod 0700 {} +
 find /mail/keys -type f -exec chmod 0600 {} +
 mkdir /var/spool/postfix/opendkim
@@ -97,7 +100,7 @@ mv mailpasswd /mail/[% domain %]/passwd
     lookup answered "open(...passwd) failed: Permission denied" right up until
     the chown at the end, which is well past the one thing in this target that
     asks for a lookup. -%]
-chown dovecot:[% admin_user %] /mail/[% domain %]/passwd
+chown dovecot:dovecot /mail/[% domain %]/passwd
 chmod 0640 /mail/[% domain %]/passwd
 [% script_dir %]/queue_postrun_task systemctl restart dovecot
 # amvavisd-new
@@ -186,11 +189,12 @@ doveadm mailbox status -u [% name %]@[% domain %] messages [% box %] > /dev/null
 [% END -%]
 [% END -%]
 # The same thing the housekeeping at the top said, said again now that doveadm
-# has made the mailboxes and the store has grown since.  It used to end
+# has made the mailboxes and the store has grown since.  This used to end
 # `chown -R dovecot:dovecot`, and dovecot keeps its maildirs to itself: the next
 # fetch read nothing, said nothing, and the mail survived one rebuild and not
-# two.
-chown -R dovecot:[% admin_user %] /mail/[% domain %]
+# two -- which is what widened it to the admin group. The fetch reads the guest
+# as root now (issue #76), so issue #98 put dovecot:dovecot back.
+chown -R dovecot:dovecot /mail/[% domain %]
 find /mail/[% domain %] -type d -exec chmod 2750 {} +
 find /mail/[% domain %] -type f -exec chmod 0640 {} +
 # Set up mail cron to run sa-learn etc
