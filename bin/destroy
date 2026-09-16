@@ -165,38 +165,36 @@ sub main {
     # upstream of step five.  Volumes do not: delete_volume warns and returns
     # false, which is why a disk that will not go has never cost an address.
     my $failure;
-    unless (
-        eval {
-            # 1. Stop and undefine the VM
-            #
-            # Only where one is: a domain nothing hosts has no VM and no disks,
-            # and the fallback above is this machine, which is not a hypervisor
-            # at all on a fleet that keeps them elsewhere.
-            if ($hosted) {
-                destroy_vm( $domain, $dryrun );
+    eval {
+        # 1. Stop and undefine the VM
+        #
+        # Only where one is: a domain nothing hosts has no VM and no disks, and
+        # the fallback above is this machine, which is not a hypervisor at all
+        # on a fleet that keeps them elsewhere.
+        if ($hosted) {
+            destroy_vm( $domain, $dryrun );
 
-                # 2. Remove the disks it was using
-                destroy_disks( $domain, $dryrun );
-            }
-
-            # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
-            remove_authorized_key( $domain, $dryrun );
-            remove_runner_key( $domain, $dryrun );
-
-            # 4. Optionally purge the domain directory, and the data directory
-            if ($purge) {
-                purge_domain_dir( $domain, $dryrun );
-            }
-            else {
-                print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
-            }
-            purge_data_dir( $domain, $hosted, $dryrun ) if $purge_data;
-            1;
+            # 2. Remove the disks it was using
+            destroy_disks( $domain, $dryrun );
         }
-    ) {
+
+        # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
+        remove_authorized_key( $domain, $dryrun );
+        remove_runner_key( $domain, $dryrun );
+
+        # 4. Optionally purge the domain directory, and the data directory
+        if ($purge) {
+            purge_domain_dir( $domain, $dryrun );
+        }
+        else {
+            print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
+        }
+        purge_data_dir( $domain, $hosted, $dryrun ) if $purge_data;
+        1;
+    } or do {
         $failure = $@ || "Destroying $domain failed, without saying why.\n";
         warn $failure;
-    }
+    };
 
     # 5. Give the address back to the pool
     release_ip( $domain, $dryrun );
