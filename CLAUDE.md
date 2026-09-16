@@ -95,8 +95,11 @@ Then the mechanical ones:
     podchecker <each changed file>
     prove -lm -j8 t/
 
-`perltidy` runs itself, if the hook is installed: `cp git-hooks/pre-commit
-.git/hooks/`.  Do that once, in any checkout you intend to commit from.
+The hook does the tidy and that perlcritic line for you, over the files you
+staged, once it is installed: `cp git-hooks/pre-commit .git/hooks/`.  Do that
+once, in any checkout you intend to commit from -- a commit the profile objects
+to then does not happen.  `perl -c`, `podchecker` and the suite stay yours to
+run.
 
 ## When something is slow
 
