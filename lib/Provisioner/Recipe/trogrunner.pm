@@ -358,17 +358,16 @@ sub enrich {
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};
 
-    $opts{config}{gateway} = $opts{gateway}
-      unless length( $opts{config}{gateway} // q{} );
+    # ||= rather than //=: the schema defaults both of these to empty rather
+    # than leaving them absent, so "nobody said" reaches here as an empty
+    # string, which //= would keep.
+    $opts{config}{gateway} ||= $opts{gateway};
+    $opts{config}{ip}      ||= $opts{main_ip};
 
     # A list rather than a setting, so what nobody said is an empty list here
-    # instead of the empty string the rest of these test for.
+    # instead of the empty string the two above test for.
     $opts{config}{admin_keys} = $opts{admin_keys}
       unless @{ $opts{config}{admin_keys} // [] };
-
-    # The schema defaults this to empty rather than leaving it absent, so an
-    # empty string is what "nobody said" looks like here.
-    $opts{config}{ip} = $opts{main_ip} unless length( $opts{config}{ip} // q{} );
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !length( $opts{checkout_dir} // q{} ) || $opts{checkout_dir} eq '.' );
