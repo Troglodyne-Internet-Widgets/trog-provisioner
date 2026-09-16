@@ -29,6 +29,12 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use Provisioner::Cookbook();
 
+# These patterns quotemeta a literal on purpose: a fixture string this test
+# wrote itself, full of dots and slashes that would otherwise need escaping one
+# at a time.  The policy is about production code, where a \Q...\E round
+# anything but an interpolated value is usually an accident.
+## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
+
 my $DOMAIN = 'web.test.test';
 
 sub generated {
