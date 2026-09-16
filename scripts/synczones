@@ -145,9 +145,19 @@ sub zonediff {
             $s
         } @$zones_actual;
 
-        # Scan for the zone.
-        for ( 0 .. scalar(@$zones_actual) ) {
+        # Scan for the zone: one pass per record the provider has, each one
+        # rotated to the back when it is not the one being looked for.  0 .. N
+        # is one pass more than there are records, so a zone the provider holds
+        # nothing for shifted an empty list and compared against undef.
+        for ( 1 .. scalar(@$zones_actual) ) {
             my $pmatch = shift @$zones_actual;
+
+            # The provider identifier for this name and type, whether or not the
+            # content still matches.  An update is issued with --identifier, and
+            # the only place that could be learned was the branch below -- which
+            # returns without issuing anything, so every update carried undef.
+            $update_id //= $pmatch->{id}
+              if lc( $pmatch->{name} ) eq lc( $to_sync->owner ) && uc( $pmatch->{type} ) eq uc( $to_sync->type );
 
             # If we find the zone, throw it away, nothing to do.
             if ( any { $_ eq $raw } ( $pmatch->{plain}, $pmatch->{pdot}, $pmatch->{pquot}, $pmatch->{dquot} ) ) {
