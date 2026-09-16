@@ -7,75 +7,154 @@ use 5.014;
 use strict;
 use warnings FATAL => 'all';
 
-use Data::Dumper;
-use Carp::Always;
-use File::pushd qw{pushd};
+use File::pushd  qw{pushd};
+use Getopt::Long qw{GetOptionsFromArray};
+use JSON::PP     ();
 use Pithub;
 
+my $USAGE = "usage: repos_for [--reset] API_URL ENTITY [ENTITY ...] < token_file\n";
+
+# Where the answers from an api_url are kept between runs.  JSON::PP rather than
+# JSON: this runs on a guest's system perl, and the admincode recipe installs
+# libpithub-perl and git and nothing else, while JSON::PP has been core since
+# the 5.014 this declares.
+sub cache_file { return "$ENV{HOME}/.repos_for.json" }
+
 sub main {
+    my @args = @_;
 
-    my ( $API_URL, $API_TOKEN, @entities ) = @ARGV;
+    my $reset;
+    GetOptionsFromArray( \@args, 'reset' => \$reset ) or die $USAGE;
 
-    die "API URL must be first arg"    unless $API_URL;
-    die "API Token must be second arg" unless $API_TOKEN;
+    my ( $api_url, @entities ) = @args;
+    die $USAGE unless defined $api_url && length $api_url && @entities;
 
-    my %cache;
-    my $cfile = "$ENV{HOME}/.repos_for.dump";
+    # On stdin rather than in argv, where ps shows it to anyone on the guest for
+    # as long as the clones take.
+    my $token = <STDIN>;    ## no critic (InputOutput::ProhibitExplicitStdin) -- <> reads the files named in argv, and argv here holds the url and the entities
+    chomp $token if defined $token;
+    die "No API token on stdin.\n" unless defined $token && length $token;
 
-    # Declared before the conditional: "my $x if COND" is undefined behaviour,
-    # and perl keeps such a variable static between calls rather than undef.
-    my $c;
-    $c     = do($cfile) if -f $cfile;          ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a cache to read, and do() on a missing file says nothing useful
-    %cache = %$c        if ref $c eq 'HASH';
+    my $path  = cache_file();
+    my $cache = $reset ? {} : read_cache($path);
 
-    if ( !exists $cache{$API_URL} ) {
-        foreach my $entity (@entities) {
-            my $ph = Pithub->new(
-                user    => $entity,
-                api_uri => $API_URL,
-                token   => $API_TOKEN,
-            );
-
-            my $result = $ph->repos->list();
-            $result->auto_pagination(1);
-            while ( my $row = $result->next ) {
-                my $owning_entity = $row->{owner}->{login};
-                $cache{$API_URL}{$owning_entity}{ $row->{name} } = {
-                    clone_url      => $row->{clone_url},
-                    ssh_url        => $row->{ssh_url},
-                    default_branch => $row->{default_branch},
-                };
-            }
-        }
-
-        # Store the cache
-        open( my $fh, '>', $cfile ) or die "Cannot write $cfile: $!\n";
-        print {$fh} Dumper( \%cache );
-        close($fh) or die "Cannot close $cfile: $!\n";
-    }
-
+    my $fetched = 0;
     foreach my $entity (@entities) {
-        foreach my $repo ( keys( %{ $cache{$API_URL}{$entity} } ) ) {
-            my $robj = $cache{$API_URL}{$entity}{$repo};
 
-            # Clone it unless it's already present.
-            next if -d $repo;
-            print "Cloning $repo...\n";
-            system( qw{git clone}, $robj->{clone_url} );
+        # Keyed by the entity asked for as well as by the url.  Keyed by the url
+        # alone, a second entity was answered out of the first one's entry --
+        # which holds nothing of theirs -- and so cloned nothing at all, while
+        # the recipe's target still succeeded.
+        next if exists $cache->{$api_url}{$entity};
 
-            # If we couldn't clone it, we can try the SSH URI in case the user setup a key in their skel.
-            if ( !-d $repo ) {
-                system( qw{git clone}, $robj->{ssh_url} );
-                next if -d $repo;
-            }
-            next unless -d $repo;
-            my $d = pushd($repo);
-            print "Rewriting origin in $repo...\n";
-            system( qw{git remote set-url origin}, $robj->{ssh_url} );
+        foreach my $row ( repos_of( $api_url, $entity, $token ) ) {
+            $cache->{$api_url}{$entity}{ $row->{name} } = {
+                clone_url      => $row->{clone_url},
+                ssh_url        => $row->{ssh_url},
+                default_branch => $row->{default_branch},
+            };
+        }
+        $fetched++;
+    }
+
+    write_cache( $path, $cache ) if $fetched;
+
+    my $failures = 0;
+    foreach my $entity (@entities) {
+        my $repos = $cache->{$api_url}{$entity} // {};
+        foreach my $repo ( sort keys %$repos ) {
+            $failures += clone( $repo, $repos->{$repo} );
         }
     }
 
-    return 0;
+    return $failures ? 1 : 0;
+}
+
+# What an api_url says an entity has, as rows.  A named sub for the same reason
+# run() is one: it is the other thing here that reaches outside the process, so
+# a test stands in for it rather than for Pithub's own chain of objects.
+sub repos_of {
+    my ( $api_url, $entity, $token ) = @_;
+
+    my $ph = Pithub->new(
+        user    => $entity,
+        api_uri => $api_url,
+        token   => $token,
+    );
+
+    my $result = $ph->repos->list();
+    $result->auto_pagination(1);
+
+    my @rows;
+    while ( my $row = $result->next ) {
+        push @rows, $row;
+    }
+
+    return @rows;
+}
+
+# One repository, into the current directory.  Answers with how many things went
+# wrong rather than dying, so one repository nobody can reach does not take the
+# rest of them down with it.
+sub clone {
+    my ( $repo, $robj ) = @_;
+
+    # The name comes back from the API and is used as a path below, so it has to
+    # be one ordinary directory component and nothing else.
+    unless ( $repo =~ m{\A\w[\w.-]*\z}a ) {
+        warn "Skipping '$repo': not a plain directory name\n";
+        return 1;
+    }
+
+    # Already there is left alone, deliberately: somebody may have work in it.
+    return 0 if -d $repo;
+
+    print "Cloning $repo...\n";
+    if ( run( qw{git clone}, $robj->{clone_url}, $repo ) ) {
+        my $dir = pushd($repo);
+        print "Rewriting origin in $repo...\n";
+        return run( qw{git remote set-url origin}, $robj->{ssh_url} ) ? 0 : 1;
+    }
+
+    # The admin may have a key in their skel where https is refused.  A clone
+    # over ssh already has the origin the rewrite above would give it.
+    print "Retrying $repo over ssh...\n";
+    return run( qw{git clone}, $robj->{ssh_url}, $repo ) ? 0 : 1;
+}
+
+# system(), as something a test can stand in for.  True when it succeeded.
+sub run {
+    my @cmd = @_;
+
+    return system(@cmd) == 0 ? 1 : 0;
+}
+
+sub read_cache {
+    my ($path) = @_;
+
+    return {} unless -f $path;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a cache at all, its absence being the ordinary first run
+
+    open my $fh, '<', $path or die "Cannot read $path: $!\n";
+    my $json = do { local $/; <$fh> };
+    close $fh or die "Cannot close $path: $!\n";
+
+    # A cache that will not parse is a cache we do not have.  It holds answers
+    # from an API, so throwing it away costs a round trip and nothing else.
+    my $cache = eval { JSON::PP->new->utf8->decode($json) };
+
+    return ref $cache eq 'HASH' ? $cache : {};
+}
+
+sub write_cache {
+    my ( $path, $cache ) = @_;
+
+    my $json = JSON::PP->new->utf8->canonical;
+
+    open my $fh, '>', $path or die "Cannot write $path: $!\n";
+    print {$fh} $json->encode($cache);
+    close $fh or die "Cannot close $path: $!\n";
+
+    return;
 }
 
 exit main(@ARGV) unless caller;
