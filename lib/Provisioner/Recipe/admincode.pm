@@ -107,7 +107,8 @@ sub tests {
 =head2 @hosts = $recipe->fetch_hosts(%opts)
 
 Each C<api_url> this domain is configured to ask, since C<repos_from> is where
-the repositories come from.
+the repositories come from, and C<cli.github.com> for the C<gh> signing key,
+which is a plain file fetch.
 
 Not the hosts it then clones from: those come back from that API as
 C<clone_url>, so nothing here can know them before it has asked.  On a guest
@@ -120,7 +121,20 @@ caveat in the DESCRIPTION about the SSH fallback.
 sub fetch_hosts {
     my ( $self, %opts ) = @_;
 
-    return grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] };
+    return ( 'cli.github.com', grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] } );
+}
+
+=head2 @classes = $recipe->cache_classes()
+
+The C<gh> apt repository.  The API this asks for repositories is not here: it
+answers per account and per token, which is not a thing to keep.
+
+=cut
+
+sub cache_classes {
+    my ($self) = @_;
+
+    return $self->apt_repo_classes('cli.github.com');
 }
 
 1;

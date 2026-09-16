@@ -2299,11 +2299,18 @@ subtest 'a recipe whose upstream is configured names the host it will reach' => 
 
     # admincode asks each api_url it is given; the hosts it then clones from come
     # back from that API, so nothing can declare them in advance.
+    #
+    # cli.github.com is there whatever it is configured with, because the target
+    # fetches the gh signing key unconditionally -- an upstream of the recipe
+    # rather than one a configuration named.
     my @asked = Provisioner::Cookbook->load('admincode')->fetch_hosts(
         repos_from => [ { api_url => 'https://gitea.test/api/v1/' }, { api_url => 'https://git.test/api/v1/' } ],
     );
-    is_deeply( [ sort @asked ],                                             [qw{git.test gitea.test}], 'admincode: every api_url it was configured with' );
-    is_deeply( [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ], [],                        'and nothing when it is configured with none' );
+    is_deeply( [ sort @asked ], [qw{cli.github.com git.test gitea.test}], 'admincode: every api_url it was configured with, and the gh archive' );
+    is_deeply(
+        [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ],
+        ['cli.github.com'], 'and the gh archive alone when it is configured with none'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();
