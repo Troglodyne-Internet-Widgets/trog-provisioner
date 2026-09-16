@@ -5,7 +5,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::Machine';
 
 use Socket();
@@ -132,7 +132,7 @@ sub transfer_ips {
 
         # A cidr is a network rather than something to connect to, and the
         # addresses a domain is configured with are written as one.
-        ( my $peer = $towards ) =~ s{/.*\z}{};
+        ( my $peer = $towards ) =~ s{/\N*\z}{};
 
         my $packed = Socket::inet_aton($peer) or next;
 
@@ -141,12 +141,12 @@ sub transfer_ips {
         # The port is arbitrary and never used.  Discard is as good as anything
         # and says plainly that nothing is going anywhere.
         unless ( connect( $sock, Socket::pack_sockaddr_in( 9, $packed ) ) ) {
-            close $sock;
+            close($sock) or die "Could not close the socket towards $peer: $!\n";
             next;
         }
 
         my $me = getsockname($sock);
-        close $sock;
+        close($sock) or die "Could not close the socket towards $peer: $!\n";
         next unless $me;
 
         my ( undef, $address ) = Socket::unpack_sockaddr_in($me);

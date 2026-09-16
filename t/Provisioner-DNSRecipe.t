@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -88,13 +88,13 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     # --pdns-server is LEXICON_POWERDNS_PDNS_SERVER.  Its legacy fallback only
     # strips _AUTH_, so the shorter spelling resolved to nothing and this
     # shortcut asked the default endpoint of a server that has none.
-    like( $out, qr{^export LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );
-    unlike( $out, qr{^export LEXICON_POWERDNS_SERVER=}m, 'and not the one it ignores' );
+    like( $out, qr{^export[ ]LEXICON_POWERDNS_PDNS_SERVER="/var/spool/powerdns/api\.sock"$}m, 'the socket, under the name lexicon resolves' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    unlike( $out, qr{^export[ ]LEXICON_POWERDNS_SERVER=}m, 'and not the one it ignores' );
 
-    like( $out, qr{^export LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$}m, 'the token' );
+    like( $out, qr{^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="an-api-key"$}m, 'the token' );
     unlike( $out, qr{AUTH_USERNAME}, 'and no empty username, since this provider takes none' );
 
-    like( $out, qr{^lexicon --resolve-zone-name powerdns }m, 'invoked with the flag the provider needs' );
+    like( $out, qr{^lexicon[ ]--resolve-zone-name[ ]powerdns[ ]}m, 'invoked with the flag the provider needs' );
 };
 
 subtest 'the operator registrar is left alone, so synczones still has an upstream' => sub {
@@ -157,7 +157,7 @@ subtest 'the interface says which implementation serves a domain' => sub {
 
     like(
         exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $nothing ) },
-        qr/no DNS provider/,
+        qr/no[ ]DNS[ ]provider/,
         'and a public one with nothing configured is refused rather than guessed at'
     );
 
@@ -198,13 +198,13 @@ subtest 'the interface says which implementation serves a domain' => sub {
                 dns_preference => 'pdns',
             );
         },
-        qr/host\.troglodyne\.net is configured with no pdns/,
+        qr/host\.troglodyne\.net[ ]is[ ]configured[ ]with[ ]no[ ]pdns/,
         'and a refusal names the machine it asked about, not the domain on it'
     );
 
     like(
         exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net' ) },
-        qr/was not told what/,
+        qr/was[ ]not[ ]told[ ]what/,
         'asked without a configuration at all, it says so rather than resolving against something else'
     );
 };

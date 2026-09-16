@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::HV';
 
 use Sys::Virt();
@@ -151,7 +151,7 @@ True when the hypervisor is this very machine, i.e. the historical behavior.
 
 =cut
 
-sub uri { return $_[0]->{uri} }
+sub uri ($self) { return $self->{uri} }
 
 sub is_local {
     my ($self) = @_;
@@ -177,7 +177,7 @@ sub ssh_host {
     return undef;
 }
 
-sub describe { return 'the hypervisor at ' . $_[0]->uri }
+sub describe ($self) { return 'the hypervisor at ' . $self->uri }
 
 =head1 PATHS
 
@@ -209,8 +209,8 @@ of them at once.
 
 =cut
 
-sub pool_name { return $_[0]->{pool_name} // 'tf_disks' }
-sub partition { return $_[0]->{partition} }
+sub pool_name ($self) { return $self->{pool_name} // 'tf_disks' }
+sub partition ($self) { return $self->{partition} }
 
 sub pool_path {
     my ($self) = @_;
@@ -236,7 +236,7 @@ sub pool_target {
         $pool->get_xml_description();
     } or return undef;
 
-    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>}s;
+    my ($path) = $xml =~ m{<target>.*?<path>([^<]+)</path>};
     return $path;
 }
 
@@ -290,7 +290,7 @@ sub guest_names {
     return map { $_->get_name } $self->vmm->list_all_domains();
 }
 
-sub domain_exists { return defined $_[0]->_domain( $_[1] ) ? 1 : 0 }
+sub domain_exists ( $self, $name ) { return defined $self->_domain($name) ? 1 : 0 }
 
 =head2 annihilate_domain($name)
 
@@ -306,16 +306,18 @@ sub annihilate_domain {
     my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
 
-    # A domain that is already shut off can't be destroyed, and that's the
-    # normal case here rather than a problem.
-    eval { $domain->destroy() };
+    if ( $domain->is_active() ) {
+        eval { $domain->destroy(); 1 } or die "Could not stop $name: $@";
+    }
     eval {
         $domain->undefine( Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA() );
         1;
     } or do {
 
         # Older libvirt without nvram support for this domain type.
-        eval { $domain->undefine() };
+        eval { $domain->undefine(); 1 } or do {
+            die "Could not undefine $name: $@";
+        };
     };
     return 1;
 }
@@ -361,7 +363,7 @@ sub lease_ips {
     my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
 
     my @ips;
-    foreach my $lease ( sort { ( $b->{expirytime} // 0 ) <=> ( $a->{expirytime} // 0 ) } @leases ) {
+    foreach my $lease ( reverse sort { ( $a->{expirytime} // 0 ) <=> ( $b->{expirytime} // 0 ) } @leases ) {
         next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
         next
           if defined $opts{hostname}
@@ -487,11 +489,17 @@ sub pool {
   <target><path>$path</path></target>
 </pool>
 XML
-        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ) };
+        eval { $pool->build( Sys::Virt::StoragePool::BUILD_NEW() ); 1 } or do {
+            die "Could not build the storage pool $name at $path: $@";
+        };
         $pool->set_autostart(1);
     }
 
-    eval { $pool->create() } unless $pool->is_active();
+    if ( !$pool->is_active() ) {
+        eval { $pool->create(); 1 } or do {
+            die "Could not start the storage pool $name: $@";
+        };
+    }
     return $self->{_pools}{$name} = $pool;
 }
 
@@ -626,7 +634,9 @@ sub delete_volume {
 
 sub refresh_pool {
     my ( $self, $name ) = @_;
-    eval { $self->pool($name)->refresh() };
+    eval { $self->pool($name)->refresh(); 1 } or do {
+        die 'Could not refresh the storage pool ' . ( $name // $self->pool_name ) . ": $@";
+    };
     return 1;
 }
 
@@ -699,8 +709,16 @@ sub define_domain {
     my ( $self, $xml, %opts ) = @_;
 
     my $domain = $self->vmm->define_domain($xml);
-    eval { $domain->set_autostart(1) } if $opts{autostart} // 1;
-    eval { $domain->create() } unless $domain->is_active();
+    if ( $opts{autostart} // 1 ) {
+        eval { $domain->set_autostart(1); 1 } or do {
+            die 'Could not set ' . $domain->get_name() . " to start with the host: $@";
+        };
+    }
+    if ( !$domain->is_active() ) {
+        eval { $domain->create(); 1 } or do {
+            die 'Could not start ' . $domain->get_name() . ": $@";
+        };
+    }
 
     return $domain;
 }
@@ -758,7 +776,7 @@ sub guest_mac {
     $index //= 0;
 
     my $digest = Digest::SHA::sha256_hex("$domain/$index");
-    return join( ':', qw{52 54 00}, $digest =~ m/\A(..)(..)(..)/ );
+    return join( ':', qw{52 54 00}, $digest =~ m/\A(\N\N)(\N\N)(\N\N)/ );
 }
 
 sub nic_slots  { return ( 3, 4 ) }
@@ -1031,7 +1049,7 @@ sub qemu_img_options {
 
     # -o help lists the options for the format and exits; it wants no filename.
     my $help    = $self->capture_cmd('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
-    my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gmx );
+    my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gm );
 
     print "Could not ask qemu-img on " . $self->describe . " which qcow2 options it takes,\n" . "so this disk gets none of the optional ones.\n"
       unless %options;
@@ -1187,7 +1205,7 @@ sub qcow2_tuning {
     my $cluster = $tuning{cluster_size} // $QCOW2_DEFAULT_CLUSTER;
     my $wanted  = int( $capacity / $cluster ) * $entry;
 
-    return %tuning unless $wanted > $QCOW2_METADATA_DEFAULT && $self->supports('metadata_cache');
+    return %tuning if $wanted <= $QCOW2_METADATA_DEFAULT || !$self->supports('metadata_cache');
 
     $tuning{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
     return %tuning;
@@ -1348,7 +1366,7 @@ The guest's own overlay and its seed, those of them there are.
 
 =cut
 
-sub release_seed { return $_[0]->eject_cdrom( $_[1] ) }
+sub release_seed ( $self, $domain ) { return $self->eject_cdrom($domain) }
 
 sub guest_volumes {
     my ( $self, $domain ) = @_;
@@ -1631,7 +1649,7 @@ sub note_pool_quota {
     # it is the filesystem -- the pool is a directory, and libvirt reports what
     # statvfs says about whatever it is mounted on.
     return { ok => 1 }
-      unless defined $bytes && abs( $bytes - ( $info->{capacity} // 0 ) ) < 1_073_741_824;
+      if !defined $bytes || abs( $bytes - ( $info->{capacity} // 0 ) ) >= 1_073_741_824;
 
     return {
         ok   => 0,
@@ -1685,7 +1703,7 @@ sub note_log_destination {
     # distribution's or another recipe's.
     my %known = map       { $_ => 1 } @domains;
     my @stale = sort grep { $known{$_} }
-      map { m/\A10-(.+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
+      map { m/\A10-(\N+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
 
     if (@stale) {
 

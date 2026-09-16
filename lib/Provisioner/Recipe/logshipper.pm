@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -135,7 +135,6 @@ than loud -- the second domain rendered a configuration nothing installed.
 sub is_multi_tenant { return 0 }
 
 sub args {
-    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     return (
         type       => 'object',
         required   => ['host'],

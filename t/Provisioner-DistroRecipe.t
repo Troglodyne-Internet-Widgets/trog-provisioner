@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -56,7 +56,7 @@ subtest 'a distribution that has answered nothing says so, per question' => sub 
     foreach my $question (qw{packager base_image packager_invocation packager_up_invocation packager_remove_invocation}) {
         like(
             exception { $distro->$question() },
-            qr/\bsilentdistro\b.*\bdoes not say what its $question is/,
+            qr/\bsilentdistro\b\N*\bdoes[ ]not[ ]say[ ]what[ ]its[ ]$question[ ]is/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$question dies naming itself and the question"
         );
     }
@@ -128,12 +128,12 @@ subtest 'cache_address: the fetch cache, as the address a guest points names at'
     is( $distro->cache_address( %fleet, cache => '192.168.1.77' ),    '192.168.1.77', 'and an address is itself' );
 
     my ($said) = capture_stdout { is( $distro->cache_address( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' ) };
-    like( $said, qr/guest\.test\.test is the fetch cache/, 'and says so' );
+    like( $said, qr/guest\.test\.test[ ]is[ ]the[ ]fetch[ ]cache/, 'and says so' );
 
     # What a guest does with it is write it into /etc/hosts, so a URL, which
     # would do for a mirror, is no use here.
-    like( exception { $distro->cache_address( %fleet, cache => 'nowhere.test.test' ) },       qr/No address for 'nowhere\.test\.test'/,          'a name nothing assigns an address to dies' );
-    like( exception { $distro->cache_address( %fleet, cache => 'http://cache.test.test/' ) }, qr/No address for 'http:\/\/cache\.test\.test\/'/, 'and so does a URL' );
+    like( exception { $distro->cache_address( %fleet, cache => 'nowhere.test.test' ) },       qr/No[ ]address[ ]for[ ]'nowhere\.test\.test'/,          'a name nothing assigns an address to dies' );
+    like( exception { $distro->cache_address( %fleet, cache => 'http://cache.test.test/' ) }, qr/No[ ]address[ ]for[ ]'http:\/\/cache\.test\.test\/'/, 'and so does a URL' );
 };
 
 Test::NoWarnings::had_no_warnings();

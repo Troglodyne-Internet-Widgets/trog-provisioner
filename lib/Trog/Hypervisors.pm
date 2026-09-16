@@ -5,9 +5,10 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use Config::Simple();
 use File::Slurper();
+use List::Util qw{reduce};
 use Trog::Config();
 use Trog::HV();
 
@@ -137,7 +138,7 @@ sub _block_order {
     return () unless defined $text;
 
     my @order;
-    foreach my $line ( split "\n", $text ) {
+    foreach my $line ( split m/\n/, $text ) {
         my ($block) = $line =~ m/\A\s*\[([^\]]+)\]/ or next;
         push @order, $block;
     }
@@ -200,8 +201,8 @@ The hypervisor names, in the order the file lists them.
 
 =cut
 
-sub configured { return scalar @{ $_[0]->{order} } ? 1 : 0 }
-sub names      { return @{ $_[0]->{order} } }
+sub configured ($self) { return scalar @{ $self->{order} } ? 1 : 0 }
+sub names      ($self) { return @{ $self->{order} } }
 
 =head2 hypervisor($name)
 
@@ -234,13 +235,13 @@ sub hypervisor {
     );
 }
 
-=head2 all
+=head2 hypervisors
 
 Every hypervisor in the fleet, built but not made current.
 
 =cut
 
-sub all {
+sub hypervisors {
     my ($self) = @_;
     return map { $self->hypervisor($_) } $self->names;
 }
@@ -258,7 +259,7 @@ for maintenance is worse than one that says so and carries on.
 sub hosting {
     my ( $self, $domain ) = @_;
 
-    foreach my $hv ( $self->all ) {
+    foreach my $hv ( $self->hypervisors ) {
         my $has = eval { $hv->domain_exists($domain) };
         unless ( defined $has ) {
             warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $@";
@@ -282,7 +283,7 @@ sub place {
     my ( $self, $domain, %needs ) = @_;
 
     my ( @fits, @why_not );
-    foreach my $hv ( $self->all ) {
+    foreach my $hv ( $self->hypervisors ) {
         my @reasons = eval { $hv->shortfalls(%needs) };
         if ($@) {
             push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline($@);
@@ -305,7 +306,8 @@ sub place {
       . join( "\n", @why_not ) . "\n"
       unless @fits;
 
-    my ($best) = map { $_->[0] } sort { $b->[1] <=> $a->[1] } @fits;
+    # The roomiest, and of those equally roomy, the first in the file.
+    my $best = ( reduce { $b->[1] > $a->[1] ? $b : $a } @fits )->[0];
     printf(
         "Placing %s on %s (%s), the roomiest of %d that fit\n",
         $domain, $best->name, $best->uri, scalar @fits
@@ -339,7 +341,7 @@ sub select_for {
         my $hv      = $self->hypervisor($pinned);
         my @reasons = $hv->shortfalls( _needs($config) );
         die "$domain is pinned to $pinned, which cannot take it:\n" . join( '', map { "  $_\n" } @reasons )
-          unless !@reasons;
+          if @reasons;
         return $hv->activate();
     }
 

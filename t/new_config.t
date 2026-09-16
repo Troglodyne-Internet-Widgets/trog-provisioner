@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -18,7 +18,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::MockModule qw{strict};
@@ -85,16 +85,14 @@ _base:
 RECIPES
 
     # Setup fake files/dirs
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     # XXX Config::Simple is not compatible with Test::MockFile due to using bareword filehandles.
     my ( $fh, $ipmap_file ) = File::Temp::tempfile();
-    print $fh $ipmap;
-    close $fh;
+    print {$fh} $ipmap;
+    close($fh) or die "Could not close $ipmap_file: $!";
 
     # However we still have to mock it to prevent explosions in our own code!
     my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
@@ -110,7 +108,7 @@ RECIPES
 
     like(
         $result,
-        qr/No recipe configuration.*testdomain\.test\.local/i,
+        qr/No[ ]recipe[ ]configuration\N*testdomain\.test\.local/i,
         'dies with helpful message when domain is missing from recipe config',
     );
 
@@ -146,16 +144,13 @@ _base:
       - vim
 RECIPES
 
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
-
-    my $td_mock = Test::MockFile->new_dir( $basedir, { mode => 0755 } );
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a directory mode, which is octal
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
     my ( $fh, $ipmap_file ) = File::Temp::tempfile();
-    print $fh $ipmap;
-    close $fh;
+    print {$fh} $ipmap;
+    close($fh) or die "Could not close $ipmap_file: $!";
     my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
 
     my $before = _slurp($ipmap_file);
@@ -169,7 +164,7 @@ RECIPES
         )
     };
 
-    like( $result, qr/No recipe configuration/i, 'it says the recipe is missing' );
+    like( $result, qr/No[ ]recipe[ ]configuration/i, 'it says the recipe is missing' );
     is(
         _slurp($ipmap_file), $before,
         'and ipmap.cfg is untouched, so the typo cost no address'
@@ -184,7 +179,7 @@ sub _slurp {
     open( my $fh, '<', $path ) or die "Could not read $path: $!";
     local $/;
     my $content = <$fh>;
-    close $fh;
+    close($fh) or die "Could not close $path: $!";
     return $content;
 }
 
@@ -249,8 +244,8 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     my $landed = "$salvage_root/landed";
     mkdir $landed                           or die "Could not create $landed: $!";
     open( my $fh, '>', "$landed/dump.rdb" ) or die "Could not write into $landed: $!";
-    print $fh "state\n";
-    close $fh;
+    print {$fh} "state\n";
+    close($fh) or die "Could not close $landed/dump.rdb: $!";
 
     my $empty = "$salvage_root/empty";
     mkdir $empty or die "Could not create $empty: $!";
@@ -265,7 +260,7 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # A destination with state in it is a salvage that worked, on this run or on
     # an earlier one.  newer_only means the second run against an unchanged guest
     # copies nothing at all, and that must not read as a failure.
-    my $quiet = Trog::Provisioner::Config::Generator::_salvage_gap(
+    my $quiet = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         %args,
         guest       => MockGuest->new( rc => 0 ),
         destination => $landed,
@@ -275,17 +270,17 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # Nothing under the path on the guest: either it was never created, or the
     # service has not written into it.  Both are what a first build looks like,
     # and the fetch reads what the service owns now, so neither is unreadable.
-    my $absent = Trog::Provisioner::Config::Generator::_salvage_gap(
+    my $absent = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         %args,
         guest       => MockGuest->new( rc => 1 ),
         destination => $empty,
     );
     ok( $absent,              'a path holding nothing is still reported' );
     ok( !$absent->{alarming}, 'but not as a problem, because that is what a first build looks like' );
-    like( $absent->{message}, qr/nothing to salvage/, 'and it says why there was nothing' );
+    like( $absent->{message}, qr/nothing[ ]to[ ]salvage/, 'and it says why there was nothing' );
 
     # The one that matters: the guest has files there and we came away with none.
-    my $lost = Trog::Provisioner::Config::Generator::_salvage_gap(
+    my $lost = Trog::Provisioner::Config::Generator::_salvage_gap(      ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         %args,
         guest       => MockGuest->new( rc => 0 ),
         destination => $empty,
@@ -298,20 +293,20 @@ subtest 'a salvage that came back with nothing says so, by name' => sub {
     # No longer blamed on permissions.  The fetch runs as root at the far end, so
     # saying the admin user could not read it would send somebody to fix
     # something that is not broken.
-    unlike( $lost->{message}, qr/cannot read|unprivileged|no sudo/, 'and does not blame a permission that is no longer the cause' );
+    unlike( $lost->{message}, qr/cannot[ ]read|unprivileged|no[ ]sudo/, 'and does not blame a permission that is no longer the cause' );
     is( $lost->{recipe}, 'redis', 'the recipe comes back out for the summary at the end of the run' );
 
     # test exits 0 or 1 and nothing else, so anything else is the question not
     # having been asked -- a guest that went away mid-run, or a sudo refused.
     # Filing that as a service which has never run would put the alarm out on
     # state that is still there.
-    my $dropped = Trog::Provisioner::Config::Generator::_salvage_gap(
+    my $dropped = Trog::Provisioner::Config::Generator::_salvage_gap(    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         %args,
         guest       => MockGuest->new( rc => 255 ),
         destination => $empty,
     );
     ok( $dropped->{alarming}, 'a check that could not be run at all stays a problem' );
-    like( $dropped->{message}, qr/could not ask/, 'and says that is what happened, rather than guessing' );
+    like( $dropped->{message}, qr/could[ ]not[ ]ask/, 'and says that is what happened, rather than guessing' );
 };
 
 subtest 'an empty tree of directories is not a salvage' => sub {
@@ -323,20 +318,20 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     mkdir "$dir/slapd.d" or die "Could not create $dir/slapd.d: $!";
 
     ok(
-        !Trog::Provisioner::Config::Generator::_dir_has_files($dir),
+        !Trog::Provisioner::Config::Generator::_dir_has_files($dir),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'directories alone do not count as anything having landed'
     );
 
     open( my $fh, '>', "$dir/slapd.d/olcDatabase.ldif" ) or die "Could not write into $dir/slapd.d: $!";
-    close $fh;
+    close($fh)                                           or die "Could not close $dir/slapd.d/olcDatabase.ldif: $!";
 
     ok(
-        Trog::Provisioner::Config::Generator::_dir_has_files($dir),
+        Trog::Provisioner::Config::Generator::_dir_has_files($dir),     ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'a file anywhere underneath does'
     );
 
     ok(
-        !Trog::Provisioner::Config::Generator::_dir_has_files("$salvage_root/never-made"),
+        !Trog::Provisioner::Config::Generator::_dir_has_files("$salvage_root/never-made"),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'and a destination nothing ever created has nothing in it'
     );
 
@@ -347,7 +342,7 @@ subtest 'an empty tree of directories is not a salvage' => sub {
     symlink( $links, "$links/loop" ) or die "Could not symlink into $links: $!";
 
     ok(
-        Trog::Provisioner::Config::Generator::_dir_has_files($links),
+        Trog::Provisioner::Config::Generator::_dir_has_files($links),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'a symlink is something, and looking at it does not walk into itself'
     );
 };
@@ -359,7 +354,7 @@ subtest 'an empty tree of directories is not a salvage' => sub {
 # installation.
 subtest 'one alias is a list, as two already were' => sub {
     my ( $fh, $file ) = File::Temp::tempfile();
-    print $fh <<'IPMAP';
+    print {$fh} <<'IPMAP';
 [global]
 basedir = /bogus
 
@@ -367,7 +362,7 @@ basedir = /bogus
 one.test.local = solo.test.local
 two.test.local = first.test.local, second.test.local
 IPMAP
-    close $fh;
+    close($fh) or die "Could not close $file: $!";
 
     local $Trog::Provisioner::Config::Generator::cfile = $file;
     my $aliases = ( Trog::Provisioner::Config::Generator::get_config() )[1];
@@ -376,8 +371,8 @@ IPMAP
     is_deeply( $aliases->{'two.test.local'}, [ 'first.test.local', 'second.test.local' ], 'and a pair is left as the list it already was' );
 
     my ( $fh2, $bare ) = File::Temp::tempfile();
-    print $fh2 "[global]\nbasedir = /bogus\n";
-    close $fh2;
+    print {$fh2} "[global]\nbasedir = /bogus\n";
+    close($fh2) or die "Could not close $bare: $!";
 
     local $Trog::Provisioner::Config::Generator::cfile = $bare;
     my $none = ( Trog::Provisioner::Config::Generator::get_config() )[1];

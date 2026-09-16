@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -12,6 +12,7 @@ t/debug_boot.t - bin/debug_boot: the XML it rewrites, and the grub line it edits
 =cut
 
 use Test::More;
+use Test::Fatal      qw{exception};
 use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 
@@ -22,13 +23,13 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 # Loaded so that blessing into it below blesses into something real, and so
 # Test::MockModule in strict mode has methods to find.  The backend rather than
 # Trog::HV, because that is where the libvirt methods these mocks replace live,
 # and Trog::HV requires it lazily.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 
 my $script = "$FindBin::Bin/../bin/debug_boot";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
@@ -91,7 +92,7 @@ subtest '--console points the serial at a file' => sub {
     my $seen = with_domain(
         domain_xml(),
         sub {
-            my ( $seen, $bin ) = @_;
+            my ( undef, $bin ) = @_;
             $bin->redefine( fetch => sub { 0 } );
 
             # Not actually waiting out the boot.
@@ -100,15 +101,15 @@ subtest '--console points the serial at a file' => sub {
         }
     );
 
-    like( $seen->{defined}, qr{<serial type='file'>},                        'the serial is a file now' );
-    like( $seen->{defined}, qr{<source path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
-    unlike( $seen->{defined}, qr{<serial type='pty'>}, 'and is no longer a pty' );
+    like( $seen->{defined}, qr{<serial[ ]type='file'>},                        'the serial is a file now' );
+    like( $seen->{defined}, qr{<source[ ]path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
+    unlike( $seen->{defined}, qr{<serial[ ]type='pty'>}, 'and is no longer a pty' );
     is( $seen->{restarted}, 1, 'restarted, because the boot we want has not happened yet' );
 };
 
 subtest '--console refuses a guest already set up for it' => sub {
     my $xml = domain_xml( file => '/tmp/vm.test-console.log' );
-    eval {
+    my $err = exception {
         with_domain(
             $xml,
             sub {
@@ -116,28 +117,28 @@ subtest '--console refuses a guest already set up for it' => sub {
             }
         );
     };
-    like( $@, qr/already logs its console to a file/, 'says so' );
-    like( $@, qr/--fetch/,                            'and what to use instead' );
+    like( $err, qr/already[ ]logs[ ]its[ ]console[ ]to[ ]a[ ]file/, 'says so' );
+    like( $err, qr/--fetch/,                                        'and what to use instead' );
 };
 
 subtest '--hold adds a boot menu, once' => sub {
     my $seen = with_domain(
         domain_xml(),
         sub {
-            my ( $seen, $bin ) = @_;
+            my ( undef, $bin ) = @_;
             $bin->redefine( vnc => sub { 0 } );
             Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { timeout => 15000 } );
         }
     );
 
-    like( $seen->{defined}, qr{<bootmenu enable='yes' timeout='15000'/>}, 'with the timeout asked for' );
+    like( $seen->{defined}, qr{<bootmenu[ ]enable='yes'[ ]timeout='15000'/>}, 'with the timeout asked for' );
     is( $seen->{restarted}, 1, 'and restarted' );
 
     # Adding a second one would make libvirt reject the whole domain.
     my $again = with_domain(
         domain_xml( bootmenu => 1 ),
         sub {
-            my ( $seen, $bin ) = @_;
+            my ( undef, $bin ) = @_;
             $bin->redefine( vnc => sub { 0 } );
             Trog::Bin::DebugBoot::hold( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { timeout => 15000 } );
         }
@@ -155,7 +156,7 @@ subtest '--restore undoes both, through what libvirt gives back' => sub {
     my $seen = with_domain(
         $xml,
         sub {
-            my ( $seen, $bin ) = @_;
+            my ( undef, $bin ) = @_;
             $bin->redefine( guest_tool => sub { ( q{}, 0 ) } );
             my $hv = Test::MockModule->new('Trog::HV::Libvirt');
             $hv->redefine( vmm => sub { undef } );
@@ -163,7 +164,7 @@ subtest '--restore undoes both, through what libvirt gives back' => sub {
         }
     );
 
-    like( $seen->{defined}, qr{<serial type='pty'>}, 'the serial is a pty again' );
+    like( $seen->{defined}, qr{<serial[ ]type='pty'>}, 'the serial is a pty again' );
     unlike( $seen->{defined}, qr{<bootmenu}, 'and the boot menu is gone' );
 };
 
@@ -178,8 +179,8 @@ subtest 'the kernel command line edit leaves the newline alone' => sub {
     my $add = $line;
     $add =~ s/^([ \t]*linux[ \t]+\S+[^\n]*?)([ \t]+single)?[ \t]*$/$1 single/m;
 
-    like( $add, qr/console=ttyS0 single\n\z/, 'single goes on the end of the line' );
-    like( $add, qr/\n\z/,                     'and the newline is still there' );
+    like( $add, qr/console=ttyS0[ ]single\n\z/, 'single goes on the end of the line' );
+    like( $add, qr/\n\z/,                       'and the newline is still there' );
 
     $add =~ s/^([ \t]*linux[ \t]+\S+[^\n]*?)([ \t]+single)?[ \t]*$/$1 single/m;
     is( count_of( $add, 'single' ), 1, 'running it twice does not say it twice' );
@@ -195,28 +196,28 @@ subtest 'the kernel command line edit leaves the newline alone' => sub {
 {
 
     package FakeVMM;
-    sub new                { my ( $class, %fake ) = @_; return bless {%fake}, $class }
-    sub get_domain_by_name { return $_[0]{dom} }
-    sub new_stream         { return $_[0]{stream} }
+    sub new { my ( $class, %fake ) = @_; return bless {%fake}, $class }
+    sub get_domain_by_name ( $self, $ ) { return $self->{dom} }
+    sub new_stream         ( $self, @ ) { return $self->{stream} }
 
     package FakeDom;
-    sub new                 { my ( $class, %fake ) = @_; return bless {%fake}, $class }
-    sub get_xml_description { return $_[0]{xml} }
-    sub screenshot          { return $_[0]{mime} }
+    sub new { my ( $class, %fake ) = @_; return bless {%fake}, $class }
+    sub get_xml_description ( $self, @ ) { return $self->{xml} }
+    sub screenshot          ( $self, @ ) { return $self->{mime} }
 
     package FakeStream;
     sub new { my ( $class, @chunks ) = @_; return bless { chunks => \@chunks, finished => 0 }, $class }
 
     # Named for what it fakes, Sys::Virt::Stream::recv, which writes into the
     # caller's first argument and returns how much it wrote -- 0 at the end.
-    sub recv {    ## no critic (ProhibitBuiltinHomonyms)
+    sub recv {    ## no critic (ProhibitBuiltinHomonyms, RequireArgUnpacking) -- a signature copies $_[0], and this has to write through it
         my $self  = shift;
         my $chunk = shift @{ $self->{chunks} };
         return 0 unless defined $chunk;
         $_[0] = $chunk;
         return length $chunk;
     }
-    sub finish { $_[0]{finished}++; return 1 }
+    sub finish ($self) { $self->{finished}++; return 1 }
 }
 
 sub with_vmm {
@@ -245,19 +246,20 @@ subtest 'a domain with no running display says so' => sub {
     is( Trog::Bin::DebugBoot::vnc_port(q{<graphics port='5905' type='vnc'>}),                                 5905,  'in whichever order the attributes come' );
 
     my $mock = with_vmm( dom => FakeDom->new( xml => q{<graphics type='vnc' port='-1'>} ) );
-    ok( !eval { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ); 1 }, 'vnc stops rather than printing a port' );
-    like( $@, qr/has no display to connect to/, 'and says why' );
+    my $err  = exception { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
+    ok( $err, 'vnc stops rather than printing a port' );
+    like( $err, qr/has[ ]no[ ]display[ ]to[ ]connect[ ]to/, 'and says why' );
 };
 
 subtest 'a screenshot is streamed straight here, and named for what it is' => sub {
     my $dir    = File::Temp::tempdir( CLEANUP => 1 );
-    my $stream = FakeStream->new( "\x89PNG", 'rest-of-it' );
+    my $stream = FakeStream->new( chr(0x89) . 'PNG', 'rest-of-it' );
     my $mock   = with_vmm( dom => FakeDom->new( mime => 'image/png' ), stream => $stream );
 
     my ($out) = capture_stdout { Trog::Bin::DebugBoot::shot( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { into => "$dir/screen" } ) };
 
-    is( $out,                                      "$dir/screen\n",     'the path printed is the one written' );
-    is( File::Slurper::read_binary("$dir/screen"), "\x89PNGrest-of-it", 'every piece of the stream, in order' );
+    is( $out,                                      "$dir/screen\n",             'the path printed is the one written' );
+    is( File::Slurper::read_binary("$dir/screen"), chr(0x89) . 'PNGrest-of-it', 'every piece of the stream, in order' );
     ok( $stream->{finished}, 'and the stream is finished rather than left open' );
 
     # Measured: qemu on libvirt 10.0.0 sends image/png, which the virsh path

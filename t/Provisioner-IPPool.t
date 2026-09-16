@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -25,15 +25,15 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use_ok('Provisioner::IPPool');
 
 sub write_ipmap {
     my ($content) = @_;
     my ( $fh, $fname ) = tempfile( SUFFIX => '.cfg', UNLINK => 1 );
-    print $fh $content;
-    close $fh;
+    print {$fh} $content;
+    close($fh) or die "Could not close $fname: $!";
     return $fname;
 }
 
@@ -70,7 +70,7 @@ sub fresh_db {
     Trog::SQLite::forget();
 
     # A directory per subtest, so one subtest's assignments are not another's.
-    $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );
+    $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the subtest that called this reads it afterwards, which local would undo
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\ngateway=10.9.9.1\n" );
     return;
 }
@@ -111,12 +111,12 @@ subtest 'assign: dies when the pool is exhausted' => sub {
     my $pool = { addresses => '10.9.9.10' };
 
     Provisioner::IPPool::assign( 'a.test', $pool );
-    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool exhausted/, 'says so' );
+    like( exception { Provisioner::IPPool::assign( 'b.test', $pool ) }, qr/pool[ ]exhausted/, 'says so' );
 };
 
 subtest 'assign: dies when no pool is configured' => sub {
     fresh_db();
-    like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No \[ip_pool\] section/, 'says so' );
+    like( exception { Provisioner::IPPool::assign( 'a.test', {} ) }, qr/No[ ]\[ip_pool\][ ]section/, 'says so' );
 };
 
 subtest 'release: gives it back, and only for a guest' => sub {
@@ -155,9 +155,9 @@ subtest 'assignments: guests only, which is what the zone renders' => sub {
 {
     # A stand-in hypervisor: _live_addresses only asks it two things.
     package FakeHV;
-    sub new           { my ( $class, $said ) = @_; return bless { said => $said }, $class }
-    sub bridge_device { return 'br0' }
-    sub capture_cmd   { return $_[0]->{said} }
+    sub new                      { my ( $class, $said ) = @_; return bless { said => $said }, $class }
+    sub bridge_device            { return 'br0' }
+    sub capture_cmd ( $self, $ ) { return $self->{said} }
 }
 
 subtest 'what is answering on the wire' => sub {
@@ -178,7 +178,7 @@ LIVE 192.168.1.54
 192.168.1.62 lladdr 52:54:00:00:00:01 INCOMPLETE
 SAID
 
-    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.168.1.43'] );
+    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.168.1.43'] );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 
     # .43 answered and is REACHABLE.  .54 answered but has gone STALE, which is
     # exactly the decay the ping result is there to survive.  .55 did not answer
@@ -193,7 +193,7 @@ SAID
 
     # A hypervisor that will not say what bridge it is on cannot be asked what
     # is on it, and that is not a reason to stop seeding.
-    is_deeply( [ Provisioner::IPPool::_live_addresses( FakeHV->new(q{}), [] ) ], [], 'nothing to sweep is nothing to report' );
+    is_deeply( [ Provisioner::IPPool::_live_addresses( FakeHV->new(q{}), [] ) ], [], 'nothing to sweep is nothing to report' );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 };
 
 subtest 'a seed that could not finish is retried, not remembered' => sub {
@@ -237,25 +237,24 @@ subtest 'two runs at once cannot be given the same address' => sub {
         die "fork: $!" unless defined $pid;
 
         if ( !$pid ) {
-            close $read;
+            close($read) or die "Could not close the reading end of the pipe: $!";
 
             # A handle inherited across a fork is the one thing SQLite will not
             # forgive, so each child opens its own.
             Trog::SQLite::forget();
             my $got = eval { Provisioner::IPPool::assign( "d$n.test", $pool ) } // "ERROR: $@";
             print {$write} "$got\n";
-            close $write;
+            close($write) or die "Could not close the writing end of the pipe: $!";
 
-            ## no critic (Subroutines::ProhibitCallsToUnexportedSubs)
             POSIX::_exit(0);
         }
 
         push( @kids, $pid );
     }
 
-    close $write;
+    close($write) or die "Could not close the writing end of the pipe: $!";
     my @said = <$read>;
-    close $read;
+    close($read) or die "Could not close the reading end of the pipe: $!";
     waitpid( $_, 0 ) for @kids;
 
     chomp @said;

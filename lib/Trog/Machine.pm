@@ -5,11 +5,12 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use File::Basename();
 use File::Path();
 use File::Copy();
 use File::Temp();
+use List::Util qw{any};
 use File::Rsync();
 use File::Slurper();
 use IPC::Run3();
@@ -124,10 +125,10 @@ What to call this machine in an error message.
 
 =cut
 
-sub ssh_host { return $_[0]->{host} }
-sub ssh_user { return $_[0]->{user} }
-sub ssh_port { return $_[0]->{port} // 22 }
-sub ssh_key  { return $_[0]->{key_path} }
+sub ssh_host ($self) { return $self->{host} }
+sub ssh_user ($self) { return $self->{user} }
+sub ssh_port ($self) { return $self->{port} // 22 }
+sub ssh_key  ($self) { return $self->{key_path} }
 sub is_local { return 0 }
 
 sub ssh_target {
@@ -137,7 +138,7 @@ sub ssh_target {
     return defined $user ? "$user\@$host" : $host;
 }
 
-sub describe { return $_[0]->ssh_target // 'this machine' }
+sub describe ($self) { return $self->ssh_target // 'this machine' }
 
 =head1 THE MACHINE A GUEST FETCHES FROM
 
@@ -323,12 +324,9 @@ sub sudo_password {
     return $SUDO_PASSWORD{ $self->_sudo_key };
 }
 
-sub _sudo_key { return $_[0]->ssh_target // 'localhost' }
+sub _sudo_key ($self) { return $self->ssh_target // 'localhost' }
 
-sub _remember { return $SUDO_PASSWORD{ $_[0]->_sudo_key } = $_[1] }
-
-# A seam, so the no-terminal path is testable somewhere that has one.
-sub _have_terminal { return -t STDIN ? 1 : 0 }
+sub _remember ( $self, $password ) { return $SUDO_PASSWORD{ $self->_sudo_key } = $password }
 
 =head2 forget_sudo_passwords
 
@@ -342,22 +340,26 @@ sub _ask_for_sudo_password {
     my ($self) = @_;
 
     # Handed to us up front, by whatever is driving a run that has nobody to ask.
-    # Asked for before the terminal test rather than after it, because the whole
-    # point is that there is no terminal.
     return $self->_remember( Trog::Credentials->get('sudo') ) if Trog::Credentials->have('sudo');
 
-    die 'sudo on '
-      . $self->describe
-      . " wants a password, and there is no terminal to ask at.\n"
-      . 'Either run this where it can ask, give '
-      . ( $self->ssh_user // 'the login user' )
-      . " passwordless sudo there:\n" . '    '
-      . ( $self->ssh_user // 'youruser' )
-      . " ALL=(ALL) NOPASSWD: ALL\n"
-      . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n"
-      unless $self->_have_terminal();
-
-    my $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo' );
+    # At the terminal rather than on standard input, which cron and redirected
+    # runs have pointed somewhere nobody is typing.
+    my $password;
+    eval {
+        $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo', terminal => 1 );
+        1;
+    } or do {
+        die 'sudo on '
+          . $self->describe
+          . " wants a password, and it could not be asked for:\n"
+          . $@
+          . 'Either run this where it can ask, give '
+          . ( $self->ssh_user // 'the login user' )
+          . " passwordless sudo there:\n" . '    '
+          . ( $self->ssh_user // 'youruser' )
+          . " ALL=(ALL) NOPASSWD: ALL\n"
+          . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
+    };
 
     die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
 
@@ -365,16 +367,18 @@ sub _ask_for_sudo_password {
 }
 
 # What sudo says when it wants a password it cannot ask for.
+our @WANTS_PASSWORD = ( 'sudo: a password is required', 'sudo: password is required', 'sudo: a terminal is required', 'sudo: no password was provided' );
+
 sub _wants_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo: (?:a )?(?:password is required|a terminal is required|no password was provided)/ ? 1 : 0;
+    return ( any { index( $output, $_ ) >= 0 } @WANTS_PASSWORD ) ? 1 : 0;
 }
 
 sub _wrong_password {
     my ($output) = @_;
     return 0 unless defined $output;
-    return $output =~ m/sudo: \d+ incorrect password attempt|Sorry, try again/ ? 1 : 0;
+    return $output =~ m/sudo:\s\d+\sincorrect\spassword\sattempt|Sorry,\stry\sagain/ ? 1 : 0;
 }
 
 =head2 run_sudo(@argv)
@@ -497,11 +501,7 @@ runs as, is C<scripts/restore_state>'s job and it is told the owner explicitly.
 
 sub file_exists {
     my ( $self, $path ) = @_;
-    if ( $self->is_local ) {
-        open( my $fh, '<', $path ) or return 0;
-        close $fh;
-        return 1;
-    }
+    return -f $path                                  ? 1 : 0 if $self->is_local;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the question test -f asks of a remote machine
     return $self->run_cmd( qw{test -f}, $path ) == 0 ? 1 : 0;
 }
 
@@ -550,7 +550,7 @@ sub list_dir {
     # ls rather than a listing over the connection: sftp is not used here at
     # all, and for the same reason -- see above.
     my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
-    return grep { length } split( "\n", $listing );
+    return grep { length } split( m/\n/, $listing );
 }
 
 sub read_text {
@@ -625,10 +625,10 @@ sub append_line {
 
     if ( $self->is_local ) {
         my $existing = eval { File::Slurper::read_text($path) };
-        return 1 if defined $existing && grep { $_ eq $line } split( "\n", $existing );
+        return 1 if defined $existing && any { $_ eq $line } split( m/\n/, $existing );
         open( my $fh, '>>', $path ) or die "Could not open $path: $!";
         print {$fh} "$line\n";
-        close($fh);
+        close($fh) or die "Could not close $path: $!";
         return 1;
     }
 
@@ -789,7 +789,7 @@ sub _rsync {
         return 0;
     }
 
-    my ($moved) = grep { m/^Total transferred file size/ } @{ $rsync->out || [] };
+    my ($moved) = grep { m/^Total[ ]transferred[ ]file[ ]size/ } @{ $rsync->out || [] };
     print $moved if $moved;
 
     return 1;
@@ -877,7 +877,7 @@ sub _write_local {
 
     my $tmp = File::Temp->new( UNLINK => 1 );
     print {$tmp} $content;
-    close $tmp;
+    close($tmp) or die "Could not close $tmp: $!";
     my $ok = $self->run_sudo( qw{cp}, "$tmp", $path ) == 0;
     $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $path ) if $ok;
     return $ok ? 1 : 0;

@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use File::Temp();
@@ -66,7 +66,7 @@ subtest "the helper scripts ride along in the tarball" => sub {
 
     # A second run must not accumulate what a previous one left behind.
     open( my $fh, '>', "$cfg_dir/scripts/stale" ) or die $!;
-    close $fh;
+    close($fh)                                    or die "Could not close $cfg_dir/scripts/stale: $!";
     my @again = Trog::Provisioner::Config::Generator::pack_scripts( $checkout, $cfg_dir );
     is_deeply( \@again, \@packed, 'a rerun packs the same set' );
     ok( !-e "$cfg_dir/scripts/stale", 'and clears out what it found there' );
@@ -85,7 +85,7 @@ subtest "the Makefile moves the scripts into place" => sub {
         { state_dir => '/etc/provisioner/state/vm', script_dir => '/root/bin' }
     );
 
-    like( $out, qr{^\tmv scripts/\* /root/bin/$}m, 'moves them out of the extracted tarball' );
+    like( $out, qr{^\tmv[ ]scripts/\*[ ]/root/bin/$}m, 'moves them out of the extracted tarball' );
 };
 
 sub _slurp {
@@ -93,7 +93,7 @@ sub _slurp {
     open( my $fh, '<', $path ) or die "Could not read $path: $!";
     local $/;
     my $content = <$fh>;
-    close $fh;
+    close($fh) or die "Could not close $path: $!";
     return $content;
 }
 

@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -20,11 +20,11 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Trog::Credentials();
 
-sub given {
+sub load_block {
     my ($block) = @_;
     Trog::Credentials->forget();
     Trog::Credentials->load( IO::String->new($block) );
@@ -32,7 +32,7 @@ sub given {
 }
 
 subtest 'what a block says' => sub {
-    given ("keepass: correct horse battery staple\nsudo: hunter2\n");
+    load_block("keepass: correct horse battery staple\nsudo: hunter2\n");
 
     is( Trog::Credentials->get('keepass'), 'correct horse battery staple', 'the passphrase' );
     is( Trog::Credentials->get('sudo'),    'hunter2',                      'and the sudo password' );
@@ -40,11 +40,11 @@ subtest 'what a block says' => sub {
 
     # Not given is not the same as given empty, and the difference is whether
     # anybody gets prompted.
-    given ("keepass: only this one\n");
+    load_block("keepass: only this one\n");
     is( Trog::Credentials->have('sudo'), 0,     'a name not given is not there' );
     is( Trog::Credentials->get('sudo'),  undef, 'and reads as nothing' );
 
-    given ("sudo:\n");
+    load_block("sudo:\n");
     is( Trog::Credentials->have('sudo'), 1,  'a name given empty is there' );
     is( Trog::Credentials->get('sudo'),  '', 'and is empty rather than missing' );
 };
@@ -53,16 +53,16 @@ subtest 'what a password is allowed to be' => sub {
 
     # Exactly one space after the colon is the separator; everything after it is
     # the password, whatever it looks like.
-    given ("sudo:  two spaces, so one leading\n");
+    load_block("sudo:  two spaces, so one leading\n");
     is( Trog::Credentials->get('sudo'), ' two spaces, so one leading', 'leading whitespace survives' );
 
-    given ("sudo: trailing space \n");
+    load_block("sudo: trailing space \n");
     is( Trog::Credentials->get('sudo'), 'trailing space ', 'and trailing' );
 
-    given ("sudo: has: a colon: in it\n");
+    load_block("sudo: has: a colon: in it\n");
     is( Trog::Credentials->get('sudo'), 'has: a colon: in it', 'a colon in the password is just a colon' );
 
-    given ("keepass: correct horse\n\nsudo: never read\n");
+    load_block("keepass: correct horse\n\nsudo: never read\n");
     is( Trog::Credentials->have('sudo'), 0, 'a blank line ends the block' );
 };
 
@@ -71,15 +71,15 @@ subtest 'a name it does not know is an error, not a shrug' => sub {
     # The failure this prevents: a misspelling that quietly means "prompt for
     # it", on a run with no terminal, which hangs or dies minutes later.
     like(
-        exception { given ("keypass: mistyped\n") },
-        qr/Unknown credential 'keypass'/,
+        exception { load_block("keypass: mistyped\n") },
+        qr/Unknown[ ]credential[ ]'keypass'/,
         'a misspelled name is refused'
     );
-    like( exception { given ("keypass: mistyped\n") }, qr/keepass, sudo/, 'and it says what the names are' );
+    like( exception { load_block("keypass: mistyped\n") }, qr/keepass,[ ]sudo/, 'and it says what the names are' );
 
     like(
-        exception { given ("just a bare password\n") },
-        qr/Expected 'name: value'/,
+        exception { load_block("just a bare password\n") },
+        qr/Expected[ ]'name:[ ]value'/,
         'and so is a bare line, which is what an older caller would have sent'
     );
 };
@@ -102,7 +102,7 @@ subtest 'who actually asks' => sub {
     my $mock  = Test::MockModule->new('IO::Prompter');
     $mock->redefine( prompt => sub { $asked++; return 'typed at a terminal' } );
 
-    given ("keepass: handed in\n");
+    load_block("keepass: handed in\n");
 
     is( Trog::Credentials->prompt( 'passphrase:', 'keepass' ), 'handed in', 'a named password that was handed in is not asked for' );
     is( $asked,                                                0,           'nobody was prompted' );
@@ -110,7 +110,7 @@ subtest 'who actually asks' => sub {
     is( Trog::Credentials->prompt( 'sudo:', 'sudo' ), 'typed at a terminal', 'one that was not is asked for' );
     is( $asked,                                       1,                     'exactly once' );
 
-    # Something with no name is always asked for, which is the old behaviour and
+    # Something with no name is always asked for, which is the old behavior and
     # what anything without a name in the block should get.
     is( Trog::Credentials->prompt('something else:'), 'typed at a terminal', 'and an unnamed password is always asked for' );
     is( $asked,                                       2,                     'again' );
@@ -124,7 +124,7 @@ subtest 'asking at the terminal, for a caller whose standard input is spoken for
         my ($typed) = @_;
         my $fh = File::Temp->new();
         print {$fh} $typed;
-        close $fh;
+        close($fh) or die 'Could not close ' . $fh->filename . ": $!";
         return $fh;
     };
 
@@ -141,23 +141,23 @@ subtest 'asking at the terminal, for a caller whose standard input is spoken for
     # typed.  That is no answer, and saying so beats a warning about undef.
     $tty = $terminal->(q{});
     local $Trog::Credentials::TERMINAL = $tty->filename;
-    like( exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) }, qr/Nothing was typed for sudo: its input ended/, 'input that ends with no answer is refused' );
+    like( exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) }, qr/Nothing[ ]was[ ]typed[ ]for[ ]sudo:[ ]its[ ]input[ ]ended/, 'input that ends with no answer is refused' );
     is( Trog::Credentials->have('sudo'), 0, 'and nothing is remembered for it' );
 
     local $Trog::Credentials::TERMINAL = '/bogus/tty';
     my $why = exception { Trog::Credentials->prompt( 'sudo:', 'sudo', terminal => 1 ) };
-    like( $why, qr{Cannot ask for sudo at a terminal: /bogus/tty}, 'no terminal to open is refused' );
-    like( $why, qr/already spoken for/,                            'saying why it had to be the terminal' );
+    like( $why, qr{Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal:[ ]/bogus/tty}, 'no terminal to open is refused' );
+    like( $why, qr/already[ ]spoken[ ]for/,                                      'saying why it had to be the terminal' );
 };
 
 subtest 'sudo on a machine nobody is watching' => sub {
     require Trog::HV;
 
     my $machine = Test::MockModule->new('Trog::Machine');
-    $machine->redefine( describe       => sub { 'hv.example.test' } );
-    $machine->redefine( ssh_user       => sub { 'ubuntu' } );
-    $machine->redefine( ssh_target     => sub { 'ubuntu@hv.example.test' } );
-    $machine->redefine( _have_terminal => sub { 0 } );
+    $machine->redefine( describe   => sub { 'hv.example.test' } );
+    $machine->redefine( ssh_user   => sub { 'ubuntu' } );
+    $machine->redefine( ssh_target => sub { 'ubuntu@hv.example.test' } );
+    local $Trog::Credentials::TERMINAL = '/bogus/tty';
 
     Trog::HV->forget();
     my $hv = Trog::HV->new( uri => 'qemu+ssh://ubuntu@hv.example.test/system' );
@@ -165,8 +165,8 @@ subtest 'sudo on a machine nobody is watching' => sub {
 
     # This is the case the whole thing is for: a detached run, sudo on the far
     # side wanting a password, and no terminal in sight.
-    given ("sudo: hunter2\n");
-    Trog::Machine::_ask_for_sudo_password($hv);
+    load_block("sudo: hunter2\n");
+    Trog::Machine::_ask_for_sudo_password($hv);    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
     is( $hv->sudo_password, 'hunter2', 'the password handed in is the one sudo gets' );
 
     # And without it, the same run says what to do rather than hanging.
@@ -174,10 +174,10 @@ subtest 'sudo on a machine nobody is watching' => sub {
     Trog::Credentials->load( IO::String->new('') );
     Trog::Machine::forget_sudo_passwords();
 
-    my $why = exception { Trog::Machine::_ask_for_sudo_password($hv) };
-    like( $why, qr/no terminal to ask at/, 'with nothing handed in it refuses' );
-    like( $why, qr/NOPASSWD/,              'saying how to not need one' );
-    like( $why, qr/Trog::Credentials/,     'and how to hand one in' );
+    my $why = exception { Trog::Machine::_ask_for_sudo_password($hv) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    like( $why, qr/Cannot[ ]ask[ ]for[ ]sudo[ ]at[ ]a[ ]terminal/, 'with nothing handed in and no terminal it refuses' );
+    like( $why, qr/NOPASSWD/,                                      'saying how to not need one' );
+    like( $why, qr/Trog::Credentials/,                             'and how to hand one in' );
 };
 
 subtest 'remember keeps what was typed for the rest of the run' => sub {
@@ -191,8 +191,7 @@ subtest 'remember keeps what was typed for the rest of the run' => sub {
 
     # The allowlist is the whole point of the module: a name nobody can ask for
     # is a name that would sit here being never used.
-    eval { Trog::Credentials->remember( 'keypass', 'a typo' ) };
-    like( $@, qr/Unknown credential/, 'a name that is not one is refused' );
+    like( exception { Trog::Credentials->remember( 'keypass', 'a typo' ) }, qr/Unknown[ ]credential/, 'a name that is not one is refused' );
 
     Trog::Credentials->forget();
     ok( !Trog::Credentials->have('keepass'), 'and forget clears it like any other' );

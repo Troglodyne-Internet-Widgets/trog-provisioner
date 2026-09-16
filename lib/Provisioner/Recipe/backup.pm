@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Provisioner::Utils;
 
@@ -32,7 +32,7 @@ In recipes.yaml:
 
 When you have files on the host which need backing up, but aren't already covered by the provisioning process itself.
 
-Alternatively, if you want to back things up offsite inbetween provisions (almost certain you will) this makes such simple.
+Alternatively, if you want to back things up offsite in between provisions (almost certain you will) this makes such simple.
 
 Pair with a VM using L<Provisioner::Recipe::backupdestination> to fully automate backups.
 
@@ -73,7 +73,7 @@ sub enrich {
 
     my ( %default_targets, %default_skips );
     foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
+        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
         my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
         my @skip     = "Provisioner::Recipe::$module"->remote_skip();
         my @ts       = sort keys(%mtargets);

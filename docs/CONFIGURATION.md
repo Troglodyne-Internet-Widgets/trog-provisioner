@@ -388,7 +388,7 @@ is merged over it, so anything it sets wins.
 Nested objects merge key by key, so a domain saying one thing about a recipe
 keeps everything else `_base` said about it. **Lists concatenate rather than
 replace**: a domain naming a list `_base` also names gets both, in that order.
-That is what `Hash::Merge` does under every behaviour it has, so it is worth
+That is what `Hash::Merge` does under every behavior it has, so it is worth
 knowing before putting a list in `_base` that a domain might want to narrow.
 
 ## `_shared`

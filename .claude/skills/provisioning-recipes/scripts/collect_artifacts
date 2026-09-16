@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -282,12 +282,16 @@ sub fetch {
     # Asked separately from the read, so that "not there" and "there and empty"
     # are told apart.  An empty new-outblocked.log means the firewall stopped
     # nothing; an absent one means the cron that writes it never ran.
+    #
+    # sudo, like the read below: two of these are in root's 0700 home, where an
+    # unprivileged test cannot tell a file that is absent from one it may not
+    # look at, and calls both of them missing.
     return { remote => $remote, ok => 0, why => 'not there' }
-      unless $guest->file_exists($remote);
+      if $guest->run_sudo( qw{test -f}, $remote );
 
     my $content = eval { $guest->capture_cmd("sudo cat '$remote'") } // q{};
 
-    my $name  = $remote =~ s{.*/}{}r;
+    my $name  = $remote =~ s{\N*/}{}r;
     my $local = "$into/$name";
     File::Slurper::Temp::write_text( $local, $content );
 

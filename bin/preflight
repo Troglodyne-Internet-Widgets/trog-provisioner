@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -90,7 +90,7 @@ sub main {
         print "\nNot required, but worth having:\n\n";
         foreach my $note (@notes) {
             print "  * $note->{what}\n";
-            print "    $_\n" for split( "\n", $note->{fix} );
+            print "    $_\n" for split( m/\n/, $note->{fix} );
             print "\n";
         }
     }
@@ -100,7 +100,7 @@ sub main {
     print "\n" . scalar(@failed) . " thing" . ( @failed == 1 ? '' : 's' ) . " to fix first:\n\n";
     foreach my $failure (@failed) {
         print "  * $failure->{what}\n";
-        print "    $_\n" for split( "\n", $failure->{fix} );
+        print "    $_\n" for split( m/\n/, $failure->{fix} );
         print "\n";
     }
     return 1;

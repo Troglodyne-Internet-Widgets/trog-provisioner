@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -70,13 +70,19 @@ sub main {
         # this is being told what to type, and a file and line from inside this
         # script is not the part they need.
         ## no critic (ProhibitPrintSTDERR)
-        print STDERR "No [ip_pool] section found in $cfile\n";
-        print STDERR "Add one like:\n\n";
-        print STDERR "  [ip_pool]\n";
-        print STDERR "  addresses = 192.168.1.10 192.168.1.11 192.168.1.12\n\n";
-        print STDERR "  OR\n\n";
-        print STDERR "  [ip_pool]\n";
-        print STDERR "  cidr = 192.168.1.0/24\n\n";
+        print {*STDERR} <<"GUIDANCE";
+No [ip_pool] section found in $cfile
+Add one like:
+
+  [ip_pool]
+  addresses = 192.168.1.10 192.168.1.11 192.168.1.12
+
+  OR
+
+  [ip_pool]
+  cidr = 192.168.1.0/24
+
+GUIDANCE
         ## use critic
         return 1;
     }
@@ -84,7 +90,7 @@ sub main {
     my @pool_ips = Provisioner::IPPool::pool_ips($pool);
 
     unless (@pool_ips) {
-        print STDERR "ip_pool section found but no IPs could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
+        print {*STDERR} "ip_pool section found but no IPs could be parsed.\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
 

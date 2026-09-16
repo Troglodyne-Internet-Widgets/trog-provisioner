@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -27,7 +27,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
@@ -141,16 +141,15 @@ subtest 'a fleet is read in file order' => sub {
 
 subtest 'a name the file does not have is an error' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
-    eval { $fleet->hypervisor('hv3') };
-    like( $@, qr/No hypervisor named 'hv3'/, 'dies' );
-    like( $@, qr/hv1, hv2/,                  'and says what there is' );
+    my $err   = exception { $fleet->hypervisor('hv3') };
+    like( $err, qr/No[ ]hypervisor[ ]named[ ]'hv3'/, 'dies' );
+    like( $err, qr/hv1,[ ]hv2/,                      'and says what there is' );
 };
 
 subtest 'a file with no blocks is an error' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/hypervisors.conf", "libvirt_uri=qemu:///system\n" );
-    eval { Trog::Hypervisors->load("$dir/hypervisors.conf") };
-    like( $@, qr/names no hypervisors/, 'dies rather than silently finding nothing' );
+    like( exception { Trog::Hypervisors->load("$dir/hypervisors.conf") }, qr/names[ ]no[ ]hypervisors/, 'dies rather than silently finding nothing' );
 };
 
 # --- Finding a guest that already exists -------------------------------------
@@ -185,8 +184,8 @@ subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     };
 
     is( $found && $found->name, 'hv2', 'the reachable one still answers' );
-    like( join( '', @warnings ), qr/hv1/,                'and we said which one we could not ask' );
-    like( join( '', @warnings ), qr/connection refused/, 'including why' );
+    like( join( '', @warnings ), qr/hv1/,                  'and we said which one we could not ask' );
+    like( join( '', @warnings ), qr/connection[ ]refused/, 'including why' );
 };
 
 # --- Placement ----------------------------------------------------------------
@@ -222,19 +221,18 @@ subtest 'nowhere to put it is an error that says why' => sub {
         hv2 => capacity( memory_free => 512, disk_free => 1 * $GB ),
     );
 
-    eval { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 40 * $GB ) };
-    like( $@, qr/Nowhere to put vm\.example\.test/,        'refuses' );
-    like( $@, qr/hv1: needs 8192MB of memory, 512MB free/, 'naming what hv1 was short of' );
-    like( $@, qr/hv1: already has 20 guests/,              'and that it is full' );
-    like( $@, qr/hv2: needs 40GB of disk/,                 'and what hv2 was short of' );
+    my $err = exception { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 40 * $GB ) };
+    like( $err, qr/Nowhere[ ]to[ ]put[ ]vm\.example\.test/,              'refuses' );
+    like( $err, qr/hv1:[ ]needs[ ]8192MB[ ]of[ ]memory,[ ]512MB[ ]free/, 'naming what hv1 was short of' );
+    like( $err, qr/hv1:[ ]already[ ]has[ ]20[ ]guests/,                  'and that it is full' );
+    like( $err, qr/hv2:[ ]needs[ ]40GB[ ]of[ ]disk/,                     'and what hv2 was short of' );
 };
 
 subtest 'an unreachable hypervisor is reported as such, not skipped silently' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
     my $mock  = with_capacity( hv1 => 'libvirt says no', hv2 => capacity( memory_free => 512 ) );
 
-    eval { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 1 * $GB ) };
-    like( $@, qr/hv1: unreachable -- libvirt says no/, 'named, with the reason' );
+    like( exception { $fleet->place( 'vm.example.test', memory_mb => 8192, cpus => 2, disk_bytes => 1 * $GB ) }, qr/hv1:[ ]unreachable[ ]--[ ]libvirt[ ]says[ ]no/, 'named, with the reason' );
 };
 
 # --- select_for ---------------------------------------------------------------
@@ -270,9 +268,9 @@ subtest 'a pin to a hypervisor that cannot take it is an error' => sub {
     $mock->redefine( capacity      => sub { capacity( memory_free => 128 ) } );
 
     my $conf = guest_conf( memory => 4096, cpus => 2, size => 40 * $GB, hypervisor => 'hv2' );
-    eval { $fleet->select_for( 'vm.example.test', $conf ) };
-    like( $@, qr/pinned to hv2, which cannot take it/, 'refuses rather than placing it elsewhere' );
-    like( $@, qr/needs 4096MB of memory/,              'and says what it was short of' );
+    my $err  = exception { $fleet->select_for( 'vm.example.test', $conf ) };
+    like( $err, qr/pinned[ ]to[ ]hv2,[ ]which[ ]cannot[ ]take[ ]it/, 'refuses rather than placing it elsewhere' );
+    like( $err, qr/needs[ ]4096MB[ ]of[ ]memory/,                    'and says what it was short of' );
 };
 
 # --- find ---------------------------------------------------------------------
@@ -302,9 +300,9 @@ subtest 'find' => sub {
 
     $mock->redefine( domain_exists => sub { 0 } );
     Trog::HV->forget();
-    eval { Trog::Hypervisors->find( 'gone.example.test', hvconf => $path ) };
-    like( $@, qr/has a guest called gone\.example\.test/, 'a guest on none of them is an error' );
-    like( $@, qr/Looked on: hv1, hv2/,                    'saying where we looked' );
+    my $err = exception { Trog::Hypervisors->find( 'gone.example.test', hvconf => $path ) };
+    like( $err, qr/has[ ]a[ ]guest[ ]called[ ]gone\.example\.test/, 'a guest on none of them is an error' );
+    like( $err, qr/Looked[ ]on:[ ]hv1,[ ]hv2/,                      'saying where we looked' );
 };
 
 # --- Capacity arithmetic, against a stand-in libvirt --------------------------
@@ -376,9 +374,9 @@ subtest 'shortfalls and headroom' => sub {
 
     package FakeDomain;
 
-    sub new       { my ( $class, %o ) = @_; return bless {%o}, $class }
-    sub get_info  { my ($s) = @_; return { maxMem => $s->{maxMem}, nrVirtCpu => $s->{nrVirtCpu} } }
-    sub is_active { return $_[0]->{active} }
+    sub new               { my ( $class, %o ) = @_; return bless {%o}, $class }
+    sub get_info          { my ($s) = @_; return { maxMem => $s->{maxMem}, nrVirtCpu => $s->{nrVirtCpu} } }
+    sub is_active ($self) { return $self->{active} }
 }
 
 subtest 'file order is the file\'s order, not the alphabet\'s' => sub {
@@ -455,8 +453,8 @@ cloud=openstack
 CONF
 
     my $err = exception { $both->hypervisor('confused') };
-    like $err, qr/\[confused\]/,               'the error names the block';
-    like $err, qr/both libvirt_uri and cloud/, 'and what is wrong with it';
+    like $err, qr/\[confused\]/,                     'the error names the block';
+    like $err, qr/both[ ]libvirt_uri[ ]and[ ]cloud/, 'and what is wrong with it';
 
     my $neither = Trog::Hypervisors->load( fleet_of(<<'CONF') );
 [vague]
@@ -464,8 +462,8 @@ reserve_memory=4096
 CONF
 
     $err = exception { $neither->hypervisor('vague') };
-    like $err, qr/\[vague\]/,                     'likewise by name';
-    like $err, qr/neither libvirt_uri nor cloud/, 'and why';
+    like $err, qr/\[vague\]/,                           'likewise by name';
+    like $err, qr/neither[ ]libvirt_uri[ ]nor[ ]cloud/, 'and why';
 
     # The one that matters: without this check a block naming nothing falls
     # through to libvirt's default connection, which is this machine -- the one

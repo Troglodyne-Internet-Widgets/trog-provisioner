@@ -3,22 +3,23 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
-t/Provisioner-Cookbook.t - the catalogue: what recipes exist, and what a config for one looks like
+t/Provisioner-Cookbook.t - the catalog: what recipes exist, and what a config for one looks like
 
 =cut
 
 use Test::More;
+use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 
 use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use File::Temp();
 use File::Slurper::Temp();
@@ -184,7 +185,7 @@ subtest 'a list in _base is added to rather than replaced' => sub {
         'one.test' => { adminconfig => { pkgs => ['emacs'] } },
     };
 
-    # Every Hash::Merge behaviour concatenates arrays, including the one this
+    # Every Hash::Merge behavior concatenates arrays, including the one this
     # used to have, so fixing the precedence did not change this and no
     # precedence could.  Asserted rather than left to be discovered: it is the
     # one place _base does not behave the way the rest of it now does, and it
@@ -312,9 +313,9 @@ subtest 'has() and load()' => sub {
     is( Provisioner::Cookbook->load('ntp'), 'Provisioner::Recipe::ntp', 'loads and names the class' );
     isa_ok( Provisioner::Cookbook->load('ntp'), 'Provisioner::Recipe' );
 
-    eval { Provisioner::Cookbook->load('nosuchrecipe') };
-    like( $@, qr/No recipe named 'nosuchrecipe'/, 'says which name it did not know' );
-    like( $@, qr/bin\/recipes/,                   'and where to find the ones it does' );
+    my $err = exception { Provisioner::Cookbook->load('nosuchrecipe') };
+    like( $err, qr/No[ ]recipe[ ]named[ ]'nosuchrecipe'/, 'says which name it did not know' );
+    like( $err, qr/bin\/recipes/,                         'and where to find the ones it does' );
 };
 
 subtest 'abstract() reads the file rather than loading it' => sub {
@@ -341,7 +342,7 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
 {
 
     package Provisioner::Recipe::t_scaffold;
-    our @ISA = ('Provisioner::Recipe');
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
 
     sub args {
         return (
@@ -557,7 +558,7 @@ subtest 'a distribution is a directory of recipes, and is found by being one' =>
 
 subtest 'load with a distribution' => sub {
     is( Provisioner::Cookbook->load( 'nginx', distro => 'ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'a recipe with a version for this distribution' );
-    is( Provisioner::Cookbook->load( 'nginx', distro => 'Ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'however it is capitalised' );
+    is( Provisioner::Cookbook->load( 'nginx', distro => 'Ubuntu' ), 'Provisioner::Recipe::Ubuntu::nginx', 'however it is capitalized' );
     is( Provisioner::Cookbook->load( 'nginx', distro => 'nosuch' ), 'Provisioner::Recipe::nginx',         'and the recipe itself where there is no version for it' );
 
     # Absence is the only thing that falls back.  A subclass that does not
@@ -593,7 +594,7 @@ subtest 'fetch_hosts: every host any recipe downloads from, once each' => sub {
     ok( ( grep { $_ eq 'www.cpan.org' } @hosts ), 'CPAN among them, which the perl recipe names' );
 
     # The cache writes each into a regex and a certificate.
-    my @bad = grep { !m/\A(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z\d](?:[a-z\d-]*[a-z\d])?\z/ } @hosts;
+    my @bad = grep { !m/\A(?:[[:lower:]\d](?:[[:lower:]\d-]*[[:lower:]\d])?\.)+[[:lower:]\d](?:[[:lower:]\d-]*[[:lower:]\d])?\z/ } @hosts;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     is_deeply( \@bad, [], 'every one of them a plain, lowercase host name' );
 };
 
@@ -631,6 +632,21 @@ subtest 'configured_fetch_hosts copes with a configuration that is not there' =>
     # against a scratch directory with nothing in it.
     local $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );
     is_deeply( [ Provisioner::Cookbook->configured_fetch_hosts ], [], 'no configuration, no hosts, no exception' );
+};
+
+subtest 'configured_fetch_hosts names a recipe that cannot answer, rather than leaving its hosts out' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/recipes.d";
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml",                  "_base:\n  _global:\n    distro: ubuntu\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.d/somewhere.test.yaml", "somewhere.test:\n  koan:\n    repo_url: \"https://gitea.internal/o/koan.git\"\n" );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    my $koan = Test::MockModule->new('Provisioner::Recipe::koan');
+    $koan->redefine( fetch_hosts => sub { die "no idea\n" } );
+
+    my $err = exception { Provisioner::Cookbook->configured_fetch_hosts };
+    like( $err, qr/The[ ]koan[ ]recipe[ ]could[ ]not[ ]say[ ]which[ ]hosts[ ]somewhere\.test[ ]fetches[ ]from/, 'names the recipe and the domain' );      ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr/no[ ]idea/,                                                                                  'and passes on what the recipe said' );
 };
 
 done_testing();

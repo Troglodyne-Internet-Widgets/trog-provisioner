@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
@@ -40,7 +40,7 @@ Pair with a VM using L<Provisioner::Recipe::backup> to fully automate backups.
 
 Backups are implemented via SSH authorized key read-only restricted execution of rsyncd as root.
 
-Uses a backup and retention script for the configured host(s), backing up every day at midnight and pruning to 6mos every friday noon.
+Uses a backup and retention script for the configured host(s), backing up every day at midnight and pruning to 6mos every Friday noon.
 
 TODO: make retention period configurable, etc
 
@@ -79,7 +79,7 @@ sub enrich {
     @$hosts = map {
         my $host = $_;
         my $port;
-        ( $host, $port ) = split( ':', $host );
+        ( $host, $port ) = split( m/:/, $host );
         $port ||= 22;
         $host_port_map{$host} = $port;
         $host
@@ -88,7 +88,7 @@ sub enrich {
 
     my @default_targets;
     foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");
+        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
         my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
         my @ts       = sort keys(%mtargets);
         foreach my $t ( 1 .. @ts ) {

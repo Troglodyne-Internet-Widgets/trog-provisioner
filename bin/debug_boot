@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -201,7 +201,7 @@ sub console {
     # libvirt writes the guest's serial output straight here, so nothing has to
     # hold a pty open, and the capture starts at the first line of firmware
     # rather than whenever something managed to attach.
-    $xml =~ s{<serial type='pty'>}{<serial type='file'><source path='$log'/>}
+    $xml =~ s{<serial[ ]type='pty'>}{<serial type='file'><source path='$log'/>}
       or die "$domain has no pty serial port to redirect.\n";
 
     redefine( $hv, $domain, $xml );
@@ -218,7 +218,7 @@ sub hold {
 
     my $xml = definition( $hv, $domain );
     $xml =~ s{<os>}{<os><bootmenu enable='yes' timeout='$opt->{timeout}'/>}
-      unless index( $xml, '<bootmenu' ) >= 0;
+      if index( $xml, '<bootmenu' ) < 0;
 
     redefine( $hv, $domain, $xml );
     restart( $hv, $domain );
@@ -236,7 +236,7 @@ sub restore {
     # libvirt reformats what it is given, so the file serial comes back as an
     # element with the source on its own line rather than the one-liner that
     # went in.  Matched on the log path, which is the part that is ours.
-    $xml =~ s{<serial type='file'>\s*<source path='\Q$log\E'\s*/>}{<serial type='pty'>};
+    $xml =~ s{<serial[ ]type='file'>\s*<source[ ]path='\Q$log\E'\s*/>}{<serial type='pty'>};
     $xml =~ s{<bootmenu[^>]*/>}{};
 
     redefine( $hv, $domain, $xml );
@@ -275,7 +275,7 @@ sub fetch {
     )->filename;
     File::Slurper::Temp::write_text( $into, $content );
 
-    my @lines = split "\n", $content;
+    my @lines = split m/\n/, $content;
     ## no critic (ProhibitPrintSTDERR)
     print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines );
     print {*STDERR} "  $_\n" for @lines[ -8 .. -1 ];
@@ -351,7 +351,7 @@ sub vnc_port {
     my ($xml) = @_;
 
     foreach my $graphics ( $xml =~ m{<graphics\b[^>]*>}g ) {
-        next unless index( $graphics, q{type='vnc'} ) >= 0;
+        next if index( $graphics, q{type='vnc'} ) < 0;
         my ($port) = $graphics =~ m{\bport='(-?\d+)'};
         return $port if defined $port && $port > 0;
     }
@@ -477,7 +477,7 @@ sub restart {
     my ( $hv, $domain ) = @_;
 
     my $dom = $hv->vmm->get_domain_by_name($domain);
-    eval { $dom->destroy(); 1 };    # already off is fine
+    $dom->destroy() if $dom->is_active();
     sleep 2;
     $dom = $hv->vmm->get_domain_by_name($domain);
     $dom->create();

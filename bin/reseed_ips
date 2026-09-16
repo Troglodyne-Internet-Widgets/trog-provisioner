@@ -8,7 +8,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
@@ -107,7 +107,7 @@ sub main {
 
     unless ($ok) {
         my $err = $@ || "reseed failed\n";
-        eval { $db->do('ROLLBACK') };
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- the failure worth reporting is $err, not a rollback of it that could not run
         die $err;
     }
 

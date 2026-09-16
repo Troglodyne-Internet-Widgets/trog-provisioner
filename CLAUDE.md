@@ -82,7 +82,7 @@ Before you commit, in this order:
 
 1. **`perl-slop:data-perl`** -- is the data defined, coerced, validated and
    scoped the way perl wants it to be.
-2. **`perl-slop:testing-perl`** -- does every behaviour you added or changed
+2. **`perl-slop:testing-perl`** -- does every behavior you added or changed
    have a test, and is it the right kind.  Then run them.
 3. **`perl-slop:reviewing-perl`** -- read the whole diff back against it.  This
    is the pass that catches the second copy of something the library already
@@ -116,7 +116,7 @@ skill has the ones that have caught us.
 Branch, never commit to `master`.
 
 A commit message here says what was wrong and why this is the fix -- in prose,
-in the imperative, naming the behaviour rather than the diff ("Ask the pool
+in the imperative, naming the behavior rather than the diff ("Ask the pool
 whether it takes O_DIRECT, rather than guessing from its name").  That is not
 decoration: `perl-slop:reading-perl` is somebody arriving at your line in two
 years with `git blame`, and the message is the only thing that will still be

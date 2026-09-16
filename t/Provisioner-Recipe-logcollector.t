@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ use FindBin::libs;
 # should not depend on which machine they run on.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -77,8 +77,8 @@ subtest 'the fleet logs do not also land in this guest own syslog' => sub {
     # The stop has to be inside the listener's own ruleset.  An unscoped one
     # would swallow this guest's local logging as well, and a collector that
     # keeps everybody's logs but not its own is a bad trade.
-    like( $conf, qr/input\(type="imtcp" port="514" ruleset="logcollector"\)/, 'the input has a ruleset of its own' );
-    like( $conf, qr/ruleset\(name="logcollector"\) \{.*\bstop\b.*\}/s,        'which ends in stop' );
+    like( $conf, qr/input\(type="imtcp"[ ]port="514"[ ]ruleset="logcollector"\)/, 'the input has a ruleset of its own' );
+    like( $conf, qr/ruleset\(name="logcollector"\)[ ]\{.*\bstop\b.*\}/,           'which ends in stop' );
 };
 
 subtest 'which transports it opens follows what it was asked for' => sub {
@@ -99,13 +99,13 @@ subtest 'rotation reopens the files it rotated' => sub {
     my ($dir) = generated( retain => 52, rotate => 'daily' );
     my $conf = slurp( $dir, 'logcollector.logrotate' );
 
-    like( $conf, qr/^\s+rotate 52$/m, 'keeping what it was told to keep' );
-    like( $conf, qr/^\s+daily$/m,     'on the schedule it was given' );
+    like( $conf, qr/^\s+rotate[ ]52$/m, 'keeping what it was told to keep' );
+    like( $conf, qr/^\s+daily$/m,       'on the schedule it was given' );
 
     # The configuration this replaced had an empty postrotate/endscript pair, so
     # nothing ever told rsyslog to reopen what had been rotated out from under
     # it and it kept writing to the renamed file forever.
-    like( $conf, qr{postrotate\s+/usr/lib/rsyslog/rsyslog-rotate\s+endscript}s, 'and signalling rsyslog afterwards' );
+    like( $conf, qr{postrotate\s+/usr/lib/rsyslog/rsyslog-rotate\s+endscript}, 'and signalling rsyslog afterwards' );
 };
 
 subtest 'the firewall hole is asked for on the port it actually listens on' => sub {
@@ -135,7 +135,7 @@ subtest 'the directory is writable by the user rsyslog becomes' => sub {
     # opens anything.  A root-owned directory here means it cannot create a
     # single file and says so once, to its own log, as "open error: Permission
     # denied" -- while everything else about the collector looks healthy.
-    like( $fragment, qr{install -d -o syslog -g adm -m 0750 '/var/log/hosts'}, 'created as syslog rather than as root' );
+    like( $fragment, qr{install[ ]-d[ ]-o[ ]syslog[ ]-g[ ]adm[ ]-m[ ]0750[ ]'/var/log/hosts'}, 'created as syslog rather than as root' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 };
 
 subtest 'the profile is one ufw will not silently skip' => sub {

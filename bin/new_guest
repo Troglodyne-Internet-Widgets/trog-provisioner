@@ -8,12 +8,14 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use FindBin::libs;
 
+use Data::Validate::Domain();
 use File::Basename();
 use File::Path qw{make_path};
+use List::Util qw{any};
 use File::Slurper();
 use File::Slurper::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
@@ -134,7 +136,7 @@ sub main {
 
     $hostname //= default_hostname();
     die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
-      unless $hostname =~ m/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\z/i;
+      unless Data::Validate::Domain::is_domain( $hostname, { domain_disable_tld_validation => 1 } );
 
     my ( $config, @todo ) = build(
         $hostname,
@@ -158,7 +160,7 @@ sub main {
     }
 
     $output //= Trog::Config->path("recipes.d/$hostname.yaml");
-    if ( !$force && readable($output) ) {
+    if ( !$force && -e $output ) {
         die "$output is already there.\n" . "Pick another --hostname, or pass --force if you meant to replace it.\n";
     }
 
@@ -178,13 +180,6 @@ sub unique {
     my (@in) = @_;
     my %seen;
     return grep { !$seen{$_}++ } @in;
-}
-
-sub readable {
-    my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close $fh;
-    return 1;
 }
 
 # The _base block of recipes.yaml, which every domain gets merged on top of --
@@ -224,7 +219,7 @@ sub build {
     # new_config requires it, being how the guest gets its payload at all.  If
     # _base configures it, which is the usual arrangement, leave it alone.
     my @wanted = @$recipes;
-    push @wanted, 'data' unless grep { $_ eq 'data' } @wanted or exists $base->{data};
+    push @wanted, 'data' unless any { $_ eq 'data' } @wanted or exists $base->{data};
 
     my %domain = ( _global => \%global );
     my @todo;

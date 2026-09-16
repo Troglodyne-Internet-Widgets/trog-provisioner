@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -22,7 +22,7 @@ use FindBin::libs;
 # Never the installation's real configuration: what this asserts should not
 # depend on which machine it runs on.
 ## no critic (CompileTime) -- setting it at compile time is the point.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::MockModule qw{strict};
@@ -37,7 +37,7 @@ use Trog::Credentials();
 use Trog::Secrets();
 
 require Trog::HV;
-require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
+require Trog::HV::Libvirt;
 
 # The two facts the generator asks a hypervisor for, answered here so this runs
 # on a machine that is not one.
@@ -87,7 +87,7 @@ IPMAP
 
     my ( $ih, $ipmap_file ) = tempfile();
     print {$ih} $ipmap;
-    close $ih;
+    close($ih) or die "Could not close $ipmap_file: $!";
 
     # Inside the configuration directory, because that is where every real run
     # keeps it: bin/provision points TROG_PROVISIONER_CONFIG and --recipes at
@@ -129,7 +129,7 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
     # it from the database into a rendered file, so faking the database out
     # would skip the part that broke.
     my $kdbx = "$tmpdir/secrets.kdbx";
-    Trog::Secrets->write( $kdbx, 'throwaway', 'secret:dns/registrar/password' => 'REAL-PASSWORD' );
+    Trog::Secrets->create( $kdbx, 'throwaway', 'secret:dns/registrar/password' => 'REAL-PASSWORD' );
 
     # Seeded rather than mocked: prompt() hands back a credential this run has
     # already been given, so the generator never reaches for a terminal.
@@ -156,7 +156,7 @@ addresses=$pool
 ns1=ns1.test.test
 ns2=ns2.test.test
 IPMAP
-    close $ih;
+    close($ih) or die "Could not close $ipmap_file: $!";
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     File::Slurper::Temp::write_binary(
@@ -188,7 +188,7 @@ IPMAP
     # resolved -- so the hook exported the reference and authenticated with
     # nothing.
     my $text = File::Slurper::read_text($hook);
-    like( $text, qr/^export LEXICON_EASYDNS_AUTH_TOKEN="REAL-PASSWORD"$/m, 'the hook carries the password the store holds' );
+    like( $text, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN="REAL-PASSWORD"$/m, 'the hook carries the password the store holds' );
     unlike( $text, qr/secret:/, 'and nowhere in it says where the password is instead of what it is' );
 };
 

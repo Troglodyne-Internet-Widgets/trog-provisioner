@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use Clone qw{clone};
 use Cwd();
@@ -92,7 +92,7 @@ sub template_dirs {
     my ( $class, $distro, @libdirs ) = @_;
 
     my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
-    return [ map { ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ } @bases ];
+    return [ map { ( ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ ) } @bases ];
 }
 
 =head2 names
@@ -169,7 +169,9 @@ sub configured_fetch_hosts {
             # A configuration naming a recipe this installation does not have is
             # somebody else's error to report, not a reason to fetch nothing.
             next unless $class->has($recipe);
-            push( @hosts, eval { $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) } );
+            eval { push( @hosts, $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) ); 1 } or do {
+                die "The $recipe recipe could not say which hosts $domain fetches from: $@";
+            };
         }
     }
 
@@ -251,8 +253,8 @@ sub directors {
 The distributions there are recipes for, lowercased -- the C<distro> a domain's
 C<_global> may name.
 
-One per capitalised subdirectory of the recipe directory: C<Recipe/Ubuntu/>
-holds Ubuntu's specialisations, and C<Recipe/ubuntu.pm> is the distro recipe
+One per capitalized subdirectory of the recipe directory: C<Recipe/Ubuntu/>
+holds Ubuntu's specializations, and C<Recipe/ubuntu.pm> is the distro recipe
 itself.  Read off the directory rather than listed, so adding a distribution is
 adding files.
 
@@ -260,7 +262,8 @@ adding files.
 
 sub distros {
     my ($class) = @_;
-    return sort map { lc } Provisioner::Utils::dirs_in( $class->recipe_dir );
+    my @distros = sort map { lc } Provisioner::Utils::dirs_in( $class->recipe_dir );
+    return @distros;
 }
 
 =head2 has($name)
@@ -273,9 +276,8 @@ sub has {
     my ( $class, $name ) = @_;
     return 0 unless defined $name && $name =~ m/\A\w+\z/;
 
-    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return 0;
-    close $fh;
-    return 1;
+    my $path = $class->recipe_dir . "/$name.pm";
+    return -f $path;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one is the whole question; load() opens it for itself
 }
 
 =head2 load($name, %opts)
@@ -284,10 +286,10 @@ Load the recipe and hand back its class name.  Dies naming the recipe, and
 saying what there is instead, because a typo here is the likeliest reason to
 be calling it.
 
-C<distro> asks for that distribution's specialisation of the recipe --
+C<distro> asks for that distribution's specialization of the recipe --
 C<Provisioner::Recipe::Ubuntu::nginx> rather than C<Provisioner::Recipe::nginx>
 -- and is how the package names for a build get chosen.  A recipe with no
-specialisation for that distribution comes back as itself, which is right: most
+specialization for that distribution comes back as itself, which is right: most
 recipes install nothing, and a shared C<deps> is a shared C<deps>.
 
 B<Absence is the only thing that falls back.>  The subclass is looked for on
@@ -338,13 +340,15 @@ and 42 opens instead of 42 module loads.
 sub abstract {
     my ( $class, $name ) = @_;
 
-    open( my $fh, '<', $class->recipe_dir . "/$name.pm" ) or return undef;
+    my $path = $class->recipe_dir . "/$name.pm";
+    open( my $fh, '<', $path ) or return undef;
     while ( my $line = <$fh> ) {
-        next unless $line =~ m/\A\s*#\s*ABSTRACT:\s*(.+?)\s*\z/;
-        close $fh;
-        return $1;
+        next unless $line =~ m/\A\s*[#]\s*ABSTRACT:\s*(\N+?)\s*\z/;
+        my $abstract = $1;
+        close($fh) or die "Could not close $path: $!\n";
+        return $abstract;
     }
-    close $fh;
+    close($fh) or die "Could not close $path: $!\n";
     return undef;
 }
 
@@ -556,7 +560,7 @@ sub placeholders_in {
 # Two merges, wanting opposite things, so two mergers.
 #
 # Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
-# behaviour, so the functional interface means one thing inside that script and
+# behavior, so the functional interface means one thing inside that script and
 # the default anywhere else.
 #
 # _base is a base of defaults and a domain overrides it, so that merge takes the
@@ -676,7 +680,7 @@ A domain overrides what C<_base> says: C<_base> is a base of defaults, and a
 domain naming the same field gets its own value.  Nested objects merge key by
 key, so a domain saying one thing about a recipe keeps everything else C<_base>
 said about it.  B<Lists concatenate rather than replace> -- a domain adding to a
-list C<_base> names gets both, which is what every C<Hash::Merge> behaviour does
+list C<_base> names gets both, which is what every C<Hash::Merge> behavior does
 and is worth knowing before putting a list in C<_base>.
 
 That is a correction.  Until it was made this merge took C<_base>'s side, so a
@@ -734,7 +738,7 @@ sub host_of {
 
     foreach my $host ( keys %{$shared} ) {
         next unless ref $shared->{$host} eq 'ARRAY';
-        return $host if grep { $_ eq $domain } @{ $shared->{$host} };
+        return $host if List::Util::any { $_ eq $domain } @{ $shared->{$host} };
     }
 
     return;

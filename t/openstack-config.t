@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ use FindBin::libs;
 # Never the installation's real /etc/trog-provisioner: what this asserts on
 # should not depend on what is deployed on the machine running it.
 ## no critic (CompileTime) -- it has to be set before anything reads it.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 use Trog::OpenStack::Config();
 
 # Every subtest gets a directory of its own and an environment with none of the
@@ -41,14 +41,14 @@ sub clean_env {
     # $HOME is one of the places clouds.yaml is looked for, so it has to point
     # somewhere empty rather than at the home directory of whoever is running
     # this -- which may well have a real clouds.yaml in it.
-    $ENV{HOME} = tempdir( CLEANUP => 1 );
+    $ENV{HOME} = tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- set for the subtest that called this, after it returns
     return $ENV{HOME};
 }
 
 sub write_clouds {
     my ( $path, $content ) = @_;
 
-    my ($dir) = $path =~ m{^(.*)/[^/]+$};
+    my ($dir) = $path =~ m{^(\N*)/[^/]+$};
     File::Path::make_path($dir);
     File::Slurper::Temp::write_binary( $path, $content );
 
@@ -95,7 +95,7 @@ subtest 'OS_CLIENT_CONFIG_FILE wins over everything else' => sub {
         tempdir( CLEANUP => 1 ) . '/somewhere.yaml',
         $ONE_CLOUD =~ s/keystone\.example\.net/other\.example\.net/r
     );
-    $ENV{OS_CLIENT_CONFIG_FILE} = $elsewhere;
+    local $ENV{OS_CLIENT_CONFIG_FILE} = $elsewhere;
 
     my $cloud = Trog::OpenStack::Config->load();
     is $cloud->{source},   $elsewhere,                          'the file we were pointed at';
@@ -139,14 +139,14 @@ YAML
     );
 
     my $err = exception { Trog::OpenStack::Config->load() };
-    like $err, qr/more than one cloud/, 'picking one at random is not on offer';
-    like $err, qr/prod, staging/,       'and it says what there was to choose from';
-    like $err, qr/OS_CLOUD/,            'and how to choose';
+    like $err, qr/more[ ]than[ ]one[ ]cloud/, 'picking one at random is not on offer';
+    like $err, qr/prod,[ ]staging/,           'and it says what there was to choose from';
+    like $err, qr/OS_CLOUD/,                  'and how to choose';
 
     is Trog::OpenStack::Config->load('staging')->{auth_url}, 'https://staging.example.net:5000/v3',
       'naming one works';
 
-    $ENV{OS_CLOUD} = 'prod';
+    local $ENV{OS_CLOUD} = 'prod';
     is Trog::OpenStack::Config->load()->{name}, 'prod', 'and so does OS_CLOUD';
 };
 
@@ -154,10 +154,10 @@ subtest 'the environment beats the file for the credential' => sub {
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", $ONE_CLOUD );
 
-    $ENV{OS_APPLICATION_CREDENTIAL_ID}     = 'from-env';
-    $ENV{OS_APPLICATION_CREDENTIAL_SECRET} = 'also-from-env';
-    $ENV{OS_AUTH_URL}                      = 'https://env.example.net:5000/v3';
-    $ENV{OS_REGION_NAME}                   = 'RegionTwo';
+    local $ENV{OS_APPLICATION_CREDENTIAL_ID}     = 'from-env';
+    local $ENV{OS_APPLICATION_CREDENTIAL_SECRET} = 'also-from-env';
+    local $ENV{OS_AUTH_URL}                      = 'https://env.example.net:5000/v3';
+    local $ENV{OS_REGION_NAME}                   = 'RegionTwo';
 
     my $cloud = Trog::OpenStack::Config->load();
     is $cloud->{application_credential_id},     'from-env',                        'id';
@@ -172,7 +172,7 @@ subtest 'an empty environment variable is not an override' => sub {
 
     # An exported-but-empty OS_AUTH_URL is what you get from a sourced openrc
     # that did not set it, and it must not blank out a perfectly good file.
-    $ENV{OS_AUTH_URL} = '';
+    local $ENV{OS_AUTH_URL} = '';
 
     is Trog::OpenStack::Config->load()->{auth_url}, 'https://keystone.example.net:5000/v3',
       'the file still wins';
@@ -180,24 +180,24 @@ subtest 'an empty environment variable is not an override' => sub {
 
 subtest 'what the errors say' => sub {
     clean_env();
-    like exception { Trog::OpenStack::Config->load() }, qr/Could not read clouds\.yaml/,
+    like exception { Trog::OpenStack::Config->load() }, qr/Could[ ]not[ ]read[ ]clouds\.yaml/,
       'no file at all';
     like exception { Trog::OpenStack::Config->load() }, qr/\Q$ENV{HOME}\E/,
       'and it lists where it looked';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", "not: a clouds file\n" );
-    like exception { Trog::OpenStack::Config->load() }, qr/no 'clouds' block/,
+    like exception { Trog::OpenStack::Config->load() }, qr/no[ ]'clouds'[ ]block/,
       'a yaml file that is not a clouds.yaml';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", "clouds:\n  openstack:\n    region_name: RegionOne\n" );
-    like exception { Trog::OpenStack::Config->load() }, qr/no auth_url/,
+    like exception { Trog::OpenStack::Config->load() }, qr/no[ ]auth_url/,
       'a cloud with nowhere to authenticate';
 
     clean_env();
     write_clouds( "$ENV{HOME}/clouds.yaml", $ONE_CLOUD );
-    like exception { Trog::OpenStack::Config->load('nope') }, qr/no cloud named 'nope'/,
+    like exception { Trog::OpenStack::Config->load('nope') }, qr/no[ ]cloud[ ]named[ ]'nope'/,
       'a cloud that is not there';
     like exception { Trog::OpenStack::Config->load('nope') }, qr/openstack/,
       'and it says which one there was';

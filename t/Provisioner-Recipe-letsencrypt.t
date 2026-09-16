@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -28,7 +28,7 @@ use FindBin::libs;
 # with, so a fleet that happened to name one of the domains below would change
 # what this file asserts.
 ## no critic (CompileTime) -- setting it at compile time is the point.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 use Provisioner::Recipe::letsencrypt();
@@ -128,7 +128,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # rendered no export, because new_config supplies an empty token before the
     # depsolver has added the pdns this recipe asks for.
     my $hook = $slurp->('domain.hook');
-    like( $hook, qr/^export LEXICON_POWERDNS_AUTH_TOKEN="[0-9a-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
+    like( $hook, qr/^export[ ]LEXICON_POWERDNS_AUTH_TOKEN="[\da-f]{64}"$/m, 'and the hook exports it, rather than omitting an empty one' );
 };
 
 subtest 'a reserved TLD is served locally whatever reached the module list' => sub {
@@ -173,7 +173,7 @@ subtest 'the local DNS path asks lexicon to resolve the zone' => sub {
     # and a reserved TLD is not a public suffix -- so <guest>.test collapsed to
     # the zone "test", and DELEGATED was composed back onto that, asking for
     # zones/<guest>.test.test.  Every challenge 404'd, on every guest.
-    my @calls = grep { m/^\s+lexicon\s/ } split( "\n", $hook );
+    my @calls = grep { m/^\s+lexicon\s/ } split( m/\n/, $hook );
     is( scalar @calls, 2, 'the hook deploys a record and cleans it up' );
     like( $_, qr/--resolve-zone-name/, 'and asks lexicon to find the zone itself' ) for @calls;
 
@@ -229,9 +229,9 @@ subtest 'the fetcher registers before it asks for anything' => sub {
     # was never made.
     # The commands, not the whole file: the comment above them names both flags,
     # so a raw index() finds the prose rather than the line that runs.
-    my @lines      = split( "\n", $fetcher );
-    my ($register) = grep { $lines[$_] =~ m/\Adehydrated\b.*--register/ } 0 .. $#lines;
-    my ($cron)     = grep { $lines[$_] =~ m/\Adehydrated\b.*--cron/ } 0 .. $#lines;
+    my @lines      = split( m/\n/, $fetcher );
+    my ($register) = grep { $lines[$_] =~ m/\Adehydrated\b\N*--register/ } 0 .. $#lines;
+    my ($cron)     = grep { $lines[$_] =~ m/\Adehydrated\b\N*--cron/ } 0 .. $#lines;
 
     ok( defined $register,                  'the fetcher registers' );
     ok( defined $cron && $register < $cron, 'and does it before asking for a certificate' )
@@ -255,7 +255,7 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
     # the zone with for --resolve-zone-name, and that step-ca validates through.
     # On a guest the first passed while systemd's stub knew nothing of the zone,
     # so the wait fell through and every challenge failed on zones/.
-    my @soa = grep { m/\bdig \+short\b/ } split( "\n", $fetcher );
+    my @soa = grep { m/\bdig[ ]\+short\b/ } split( m/\n/, $fetcher );
     is( scalar @soa, 2, 'it waits on the server and on the resolver separately' );
     ok( ( scalar grep { index( $_, '@127.0.0.1' ) >= 0 } @soa ), 'one asks the server directly' );
     ok( ( scalar grep { index( $_, '@' ) < 0 } @soa ),           'and one asks whatever the guest resolves with' );
@@ -359,7 +359,7 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
 
     like(
         exception { _fresh()->enrich( $public->( dns_preference => 'pdns' ) ) },
-        qr/no pdns recipe/,
+        qr/no[ ]pdns[ ]recipe/,
         'asking for a local server where none is configured is refused'
     );
 
@@ -388,7 +388,7 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
 
         like(
             exception { _fresh()->enrich( $public->() ) },
-            qr/no DNS provider/,
+            qr/no[ ]DNS[ ]provider/,
             'a domain with neither is told so, rather than rendering a hook that cannot run'
         );
     }

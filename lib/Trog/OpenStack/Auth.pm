@@ -6,7 +6,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 use parent 'OpenStack::Client::Auth::v3';
 
@@ -62,8 +62,8 @@ a secret, issued by Keystone, scoped to a project when it was made -- so there
 is nothing to give it.
 
 This is that request instead.  Everything after the token is the parent's:
-C<service> resolves a service type against the catalogue and hands back an
-L<OpenStack::Client> pointed at it, and C<services> lists what the catalogue
+C<service> resolves a service type against the catalog and hands back an
+L<OpenStack::Client> pointed at it, and C<services> lists what the catalog
 had.  Only C<token> is overridden, because a token restored from cache never
 had an HTTP response to read it out of.
 
@@ -196,7 +196,7 @@ sub _from_keepass {
     Trog::Secrets->parse($reference);
 
     return sub {
-        my %found = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
+        my %found = Trog::Secrets->lookup( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
         return $found{secret};
     };
 }
@@ -229,9 +229,9 @@ What was passed to the constructor, for callers assembling C<service> options.
 
 =cut
 
-sub token     { return $_[0]->{token} }
-sub region    { return $_[0]->{region} }
-sub interface { return $_[0]->{interface} }
+sub token     ($self) { return $self->{token} }
+sub region    ($self) { return $self->{region} }
+sub interface ($self) { return $self->{interface} }
 
 # The one request this module exists to make.
 sub _authenticate {
@@ -398,7 +398,7 @@ sub _store {
     );
 
     my $ok = eval {
-        my ($dir) = $path =~ m{^(.*)/[^/]+$};
+        my ($dir) = $path =~ m{^(\N*)/[^/]+$};
         File::Path::make_path( $dir, { mode => 0o700 } );
 
         # Atomically, because two provisions running at once would otherwise
@@ -415,7 +415,7 @@ sub _store {
 =head1 REQUIREMENTS
 
 Handing this to L<OpenStack::MetaAPI> needs a version of it whose C<BUILDARGS>
-honours an C<auth> that was passed in.  Releases up to 0.003 rebuild it from
+honors an C<auth> that was passed in.  Releases up to 0.003 rebuild it from
 their arguments unconditionally and throw away the object, which loses the
 credential this module exists to carry.  The check is one line:
 

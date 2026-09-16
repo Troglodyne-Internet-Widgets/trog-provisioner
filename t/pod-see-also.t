@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -28,20 +28,12 @@ my $root = "$FindBin::Bin/..";
 
 my @files;
 File::Find::find( sub { push @files, $File::Find::name if !-d && ( /\.pm\z/ || $File::Find::dir =~ m{/bin\z} ) }, "$root/lib", "$root/bin" );
-ok( scalar( grep { m{/lib/.+\.pm\z} } @files ), "found the modules under $root/lib to read" ) or BAIL_OUT('there is nothing to check');
+ok( scalar( grep { m{/lib/\N+\.pm\z} } @files ), "found the modules under $root/lib to read" ) or BAIL_OUT('there is nothing to check');
 
 foreach my $file ( sort @files ) {
     open( my $fh, '<', $file ) or die "$file: $!";
-    my ( $has, $under, @nested );
-    while ( my $line = <$fh> ) {
-        if ( $line =~ /^=head1\s+(.*)/ ) {
-            $under = $1 =~ /^SEE\s+ALSO/;
-            $has ||= $under;
-            next;
-        }
-        push @nested, "line $.: $line" if $under && $line =~ /^=(?!cut\b|pod\b)\w/;
-    }
-    close $fh;
+    my ( $has, @nested ) = see_also($fh);
+    close($fh) or die "Could not close $file: $!";
     next unless $has;
 
     ( my $name = $file ) =~ s{\A\Q$root\E/}{};
@@ -50,3 +42,18 @@ foreach my $file ( sort @files ) {
 }
 
 done_testing();
+
+# Whether the POD has a SEE ALSO, and every command paragraph nested inside one.
+sub see_also {
+    my ($fh) = @_;
+    my ( $has, $under, @nested );
+    while ( my $line = <$fh> ) {
+        if ( $line =~ /^=head1\s+(\N*)/ ) {
+            $under = $1 =~ /^SEE\s+ALSO/;
+            $has ||= $under;
+            next;
+        }
+        push @nested, "line $.: $line" if $under && $line =~ /^=(?!cut\b|pod\b)\w/;
+    }
+    return ( $has, @nested );
+}

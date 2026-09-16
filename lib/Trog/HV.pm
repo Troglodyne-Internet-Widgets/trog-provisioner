@@ -7,7 +7,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use parent 'Trog::Machine';
 
 use Trog::Config();
@@ -16,6 +16,7 @@ use File::Slurper();
 use YAML::XS();
 
 use File::Which();
+use List::Util qw{uniq};
 
 =head1 NAME
 
@@ -318,7 +319,7 @@ from there.
 
 =cut
 
-sub name { return $_[0]->{name} }
+sub name ($self) { return $self->{name} }
 
 =head2 explicit
 
@@ -329,7 +330,7 @@ though only a connection URI can be defaulted.
 
 =cut
 
-sub explicit { return $_[0]->{explicit} }
+sub explicit ($self) { return $self->{explicit} }
 
 =head1 PATHS
 
@@ -341,7 +342,7 @@ guest, and it means the same thing however that guest gets built.
 
 =cut
 
-sub domain_dir { return $_[0]->{domain_dir} // $_[0]->default_domain_dir }
+sub domain_dir ($self) { return $self->{domain_dir} // $self->default_domain_dir }
 
 =head2 default_domain_dir
 
@@ -415,28 +416,28 @@ sub _abstract {
     die( ( ref($self) || $self ) . " does not implement $method, which every backend has to\n" );
 }
 
-sub build                 { return $_[0]->_abstract('build') }
-sub config_keys           { return $_[0]->_abstract('config_keys') }
-sub domain_exists         { return $_[0]->_abstract('domain_exists') }
-sub annihilate_domain     { return $_[0]->_abstract('annihilate_domain') }
-sub guest_names           { return $_[0]->_abstract('guest_names') }
-sub guest_ssh_ip          { return $_[0]->_abstract('guest_ssh_ip') }
-sub snapshot_names        { return $_[0]->_abstract('snapshot_names') }
-sub snapshot_current_name { return $_[0]->_abstract('snapshot_current_name') }
-sub create_snapshot       { return $_[0]->_abstract('create_snapshot') }
-sub revert_snapshot       { return $_[0]->_abstract('revert_snapshot') }
-sub prepare_host          { return $_[0]->_abstract('prepare_host') }
-sub release_seed          { return $_[0]->_abstract('release_seed') }
-sub guest_volumes         { return $_[0]->_abstract('guest_volumes') }
-sub clear_guest           { return $_[0]->_abstract('clear_guest') }
-sub provision_guest       { return $_[0]->_abstract('provision_guest') }
-sub would_provision       { return $_[0]->_abstract('would_provision') }
+sub build                 ( $self, @ ) { return $self->_abstract('build') }
+sub config_keys           ( $self, @ ) { return $self->_abstract('config_keys') }
+sub domain_exists         ( $self, @ ) { return $self->_abstract('domain_exists') }
+sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_domain') }
+sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
+sub guest_ssh_ip          ( $self, @ ) { return $self->_abstract('guest_ssh_ip') }
+sub snapshot_names        ( $self, @ ) { return $self->_abstract('snapshot_names') }
+sub snapshot_current_name ( $self, @ ) { return $self->_abstract('snapshot_current_name') }
+sub create_snapshot       ( $self, @ ) { return $self->_abstract('create_snapshot') }
+sub revert_snapshot       ( $self, @ ) { return $self->_abstract('revert_snapshot') }
+sub prepare_host          ( $self, @ ) { return $self->_abstract('prepare_host') }
+sub release_seed          ( $self, @ ) { return $self->_abstract('release_seed') }
+sub guest_volumes         ( $self, @ ) { return $self->_abstract('guest_volumes') }
+sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') }
+sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
+sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
 
 =head1 PLACEMENT
 
 Whether one more guest will fit, and which hypervisor it fits on best.
 
-The numbers come from a backend's C<capacity>; the judgement is here, so that
+The numbers come from a backend's C<capacity>; the judgment is here, so that
 every backend is placed on by the same rules rather than each inventing its own.
 
 =head2 reserve_memory, reserve_cpus, reserve_disk, max_guests, cpu_overcommit
@@ -449,11 +450,11 @@ cap, and 4.
 
 =cut
 
-sub reserve_memory { return $_[0]->{reserve_memory} // 2048 }
-sub reserve_cpus   { return $_[0]->{reserve_cpus}   // 1 }
-sub reserve_disk   { return $_[0]->{reserve_disk}   // 10 * 1024 * 1024 * 1024 }
-sub max_guests     { return $_[0]->{max_guests}     // 0 }
-sub cpu_overcommit { return $_[0]->{cpu_overcommit} // 4 }
+sub reserve_memory ($self) { return $self->{reserve_memory} // 2048 }
+sub reserve_cpus   ($self) { return $self->{reserve_cpus}   // 1 }
+sub reserve_disk   ($self) { return $self->{reserve_disk}   // 10 * 1024 * 1024 * 1024 }
+sub max_guests     ($self) { return $self->{max_guests}     // 0 }
+sub cpu_overcommit ($self) { return $self->{cpu_overcommit} // 4 }
 
 =head2 capacity
 
@@ -462,7 +463,7 @@ backend; L</WHAT A BACKEND HAS TO PROVIDE> lists the keys this expects back.
 
 =cut
 
-sub capacity { return $_[0]->_abstract('capacity') }
+sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
 
 =head2 shortfalls(%needs)
 
@@ -500,7 +501,7 @@ sub shortfalls {
     return @reasons;
 }
 
-sub _gb { return int( ( $_[0] // 0 ) / ( 1024 * 1024 * 1024 ) ) }
+sub _gb ($bytes) { return int( ( $bytes // 0 ) / ( 1024 * 1024 * 1024 ) ) }
 
 =head2 headroom(%needs)
 
@@ -538,7 +539,7 @@ What a hypervisor can be asked about itself, before a guest is built on it.
 
 C<bin/preflight> prints these; it does not know them.  Which questions are worth
 asking depends entirely on the backend -- passwordless sudo means nothing to a
-cloud, and a Keystone catalogue means nothing to libvirt -- so each one says
+cloud, and a Keystone catalog means nothing to libvirt -- so each one says
 which it answers and in what order, and the script walks that list.  It used to
 branch on C<builds_by_api> in two places to decide, which is a decision only the
 backend can make correctly.
@@ -557,8 +558,8 @@ The same, for things worth having rather than things required.
 
 =cut
 
-sub preflight_checks { return $_[0]->_abstract('preflight_checks') }
-sub preflight_notes  { return $_[0]->_abstract('preflight_notes') }
+sub preflight_checks ( $self, @ ) { return $self->_abstract('preflight_checks') }
+sub preflight_notes  ( $self, @ ) { return $self->_abstract('preflight_notes') }
 
 =head2 $result = $hv->_verdict($ok, $what, $fix)
 
@@ -575,15 +576,15 @@ sub _verdict {
 
 Declared here and answered by the backend, because both questions are real for
 either kind and neither has a shared answer.  Reaching a machine is an ssh
-login; reaching a cloud is a credential that authenticates and a catalogue with
+login; reaching a cloud is a credential that authenticates and a catalog with
 compute, image and network in it.  Finding the address a guest fetches from
 means asking the routing table about a NAT bridge, or reading it out of
 F<ipmap.cfg> because a cloud has nothing to ask until the guest exists.
 
 =cut
 
-sub check_reachable   { return $_[0]->_abstract('check_reachable') }
-sub check_transfer_ip { return $_[0]->_abstract('check_transfer_ip') }
+sub check_reachable   ( $self, @ ) { return $self->_abstract('check_reachable') }
+sub check_transfer_ip ( $self, @ ) { return $self->_abstract('check_transfer_ip') }
 
 # Both ends, because both ends run one.  A domain's data directory goes up to the
 # hypervisor over rsync and comes off the guest being replaced over rsync, and
@@ -760,7 +761,7 @@ sub note_apt_mirror {
     return { ok => 1 } if $pointed;
 
     if (@mirrors) {
-        my $built = join( ', ', sort keys %{ { map { $_ => 1 } @mirrors } } );
+        my $built = join( ', ', uniq sort @mirrors );
         return { ok => 0, what => "$built mirrors the archive, and nothing points at it", fix => <<"FIX" };
 Every guest still fetches every package over the internet on every build, this
 one included.  Name it in the _global that the fleet shares:
@@ -774,7 +775,7 @@ before it has DNS.  A mirror somewhere else is named as a URL instead.
 FIX
     }
 
-    my ($parent) = map { m/\A[^.]+[.](.+)\z/ ? $1 : () } @domains;
+    my ($parent) = map { m/\A[^.]+[.](\N+)\z/ ? $1 : () } @domains;
     my $suggested = 'aptmirror.' . ( $parent // 'example.com' );
 
     return { ok => 0, what => 'No package mirror is configured', fix => <<"FIX" };
@@ -854,7 +855,7 @@ sub _plaintext_in {
     # fill in -- which new_config refuses to build from, so it is not a secret
     # sitting anywhere.
     return ()      if $node =~ m/\Asecret:/;
-    return ($path) if $node =~ m/-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+    return ($path) if $node =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
     return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
 
     my ($field) = $path =~ m/([^.\[\]]+)\z/;
@@ -871,9 +872,7 @@ sub _plaintext_in {
 
 sub readable {
     my ($path) = @_;
-    open( my $fh, '<', $path ) or return 0;
-    close $fh;
-    return 1;
+    return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether it can be read is the whole question; what reads it opens it for itself
 }
 
 =head1 SEE ALSO

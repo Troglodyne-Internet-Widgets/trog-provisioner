@@ -7,10 +7,11 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 use FindBin::libs;
 use Config::Simple;
 use Getopt::Long qw{GetOptionsFromArray};
+use List::Util   qw{any};
 use Pod::Usage   qw{pod2usage};
 use Trog::Guest();
 use Trog::HV();
@@ -122,7 +123,7 @@ sub main {
     else {
         $snapname = $name;
         die "Snapshot '$snapname' not found for $domain\n"
-          unless grep { $_ eq $snapname } @snaps;
+          unless any { $_ eq $snapname } @snaps;
     }
 
     print "Reverting $domain to snapshot '$snapname'...\n";

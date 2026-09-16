@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -61,7 +61,7 @@ subtest 'every address of ours that reaches the guest, not just the first' => su
 
     like(
         exception { $this_machine->transfer_ips() },
-        qr/has to be given/,
+        qr/has[ ]to[ ]be[ ]given/,
         'asking without saying which addresses is an error rather than a guess'
     );
 
@@ -90,7 +90,7 @@ subtest 'which of our addresses a guest would reach us at' => sub {
 
     like(
         exception { $this_machine->transfer_ip() },
-        qr/has to be given/,
+        qr/has[ ]to[ ]be[ ]given/,
         'asking without saying which addresses is an error rather than a guess'
     );
 

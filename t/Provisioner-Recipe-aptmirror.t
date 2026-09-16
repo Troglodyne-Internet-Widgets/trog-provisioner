@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -25,7 +25,7 @@ use FindBin::libs;
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -61,24 +61,24 @@ subtest 'mirror.list says what to mirror and where to put it' => sub {
     my ( $dir, undef ) = generated( pockets => [ q{}, '-security' ], arches => [qw{amd64 arm64}], components => ['main'] );
     my $conf = slurp( $dir, 'aptmirror.mirror.list' );
 
-    like( $conf, qr{^set base_path\s+/var/spool/apt-mirror$}m, 'the spool is written out rather than left to the packaged default' );
+    like( $conf, qr{^set[ ]base_path\s+/var/spool/apt-mirror$}m, 'the spool is written out rather than left to the packaged default' );
 
     # Every release crossed with every pocket, on every architecture.  A missing
     # -security line is a mirror that quietly lacks security updates, which is
     # the whole class of problem this recipe exists to remove.
     foreach my $suite (qw{noble noble-security}) {
         foreach my $arch (qw{amd64 arm64}) {
-            like( $conf, qr{^deb-\Q$arch\E \S+ \Q$suite\E main$}m, "$suite on $arch" );
+            like( $conf, qr{^deb-\Q$arch\E[ ]\S+[ ]\Q$suite\E[ ]main$}m, "$suite on $arch" );
         }
     }
 
     unlike( $conf, qr/^deb-src/m, 'and no sources, which would roughly double it' );
-    like( $conf, qr/^set run_postmirror 1$/m, 'the post-sync hook is enabled, or clean.sh never runs and the spool only grows' );
+    like( $conf, qr/^set[ ]run_postmirror[ ]1$/m, 'the post-sync hook is enabled, or clean.sh never runs and the spool only grows' );
 };
 
 subtest 'sources are mirrored when asked for' => sub {
     my ( $dir, undef ) = generated( sources => 1, components => ['main'] );
-    like( slurp( $dir, 'aptmirror.mirror.list' ), qr/^deb-src \S+ noble main$/m, 'a deb-src line per suite' );
+    like( slurp( $dir, 'aptmirror.mirror.list' ), qr/^deb-src[ ]\S+[ ]noble[ ]main$/m, 'a deb-src line per suite' );
 };
 
 subtest 'the sync is a unit systemd will not kill' => sub {
@@ -97,12 +97,12 @@ subtest 'the refresh goes through that same unit' => sub {
     my ( $dir, undef ) = generated( refresh => '30 4 * * 6' );
     my $cron = slurp( $dir, 'aptmirror.cron' );
 
-    like( $cron, qr/^30 4 \* \* 6 root systemctl start --no-block apt-mirror\.service$/m, 'on the configured schedule' );
+    like( $cron, qr/^30[ ]4[ ]\*[ ]\*[ ]6[ ]root[ ]systemctl[ ]start[ ]--no-block[ ]apt-mirror\.service$/m, 'on the configured schedule' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # Starting the unit rather than running apt-mirror is what stops a refresh
     # landing mid-sync from running a second one over the same spool: systemd
     # will not run two instances, so it queues.
-    unlike( $cron, qr{^\S+ \S+ \S+ \S+ \S+ root /usr/bin/apt-mirror}m, 'never apt-mirror directly' );
+    unlike( $cron, qr{^\S+[ ]\S+[ ]\S+[ ]\S+[ ]\S+[ ]root[ ]/usr/bin/apt-mirror}m, 'never apt-mirror directly' );
 
     # cron runs jobs under dash, which reads &> as a background & and a
     # redirection -- see templates/files/backupdestination.cron.tt.
@@ -116,17 +116,17 @@ subtest 'the vhost answers for the address, not only the name' => sub {
     # A guest fetching packages reaches this by address: it runs cloud-init
     # before it has a resolver, so the request arrives with a Host that is an IP
     # and would otherwise match no server.
-    like( $vhost, qr/^\s+server_name \Q$DOMAIN\E 192\.168\.1\.9 www\.\Q$DOMAIN\E;$/m, 'the address is a server_name' );
+    like( $vhost, qr/^\s+server_name[ ]\Q$DOMAIN\E[ ]192\.168\.1\.9[ ]www\.\Q$DOMAIN\E;$/m, 'the address is a server_name' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # Claiming default_server would mean deleting the packaged default site
     # first, since two of them is a configuration nginx refuses.
     unlike( $vhost, qr/default_server/, 'without claiming default_server' );
 
-    like( $vhost, qr{^\s+location /ubuntu/ \{$}m,                                             'served at the path the distro tells guests to use' );
-    like( $vhost, qr{^\s+alias /var/spool/apt-mirror/mirror/archive\.ubuntu\.com/ubuntu/;$}m, 'out of where apt-mirror actually puts it' );
-    like( $vhost, qr{^\s+location = /mirror-status \{$}m,                                     'and says when it last finished a sync' );
+    like( $vhost, qr{^\s+location[ ]/ubuntu/[ ]\{$}m,                                           'served at the path the distro tells guests to use' );
+    like( $vhost, qr{^\s+alias[ ]/var/spool/apt-mirror/mirror/archive\.ubuntu\.com/ubuntu/;$}m, 'out of where apt-mirror actually puts it' );            ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr{^\s+location[ ]=[ ]/mirror-status[ ]\{$}m,                                 'and says when it last finished a sync' );
 
-    unlike( $vhost, qr/listen 443|ssl_certificate/, 'no TLS: the guest certificate is self-signed and apt will not fetch through one' );
+    unlike( $vhost, qr/listen[ ]443|ssl_certificate/, 'no TLS: the guest certificate is self-signed and apt will not fetch through one' );
 };
 
 subtest 'where the copy lands follows from the upstream' => sub {
@@ -135,11 +135,11 @@ subtest 'where the copy lands follows from the upstream' => sub {
     # written down -- and the vhost and the fragment have to name the same one.
     my ( $dir, undef, $recipe, $vars ) = generated( upstream => 'http://mirror.example.test/ubuntu-ports', spool => '/srv/mirror' );
 
-    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias /srv/mirror/mirror/mirror\.example\.test/ubuntu-ports/;}, 'the alias follows upstream and spool' );
+    like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias[ ]/srv/mirror/mirror/mirror\.example\.test/ubuntu-ports/;}, 'the alias follows upstream and spool' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     like(
         exception { generated( upstream => 'mirror.example.test' ) },
-        qr/upstream must be a URL/,
+        qr/upstream[ ]must[ ]be[ ]a[ ]URL/,
         'and an upstream that is not a URL is refused, rather than making a nonsense path'
     );
 };

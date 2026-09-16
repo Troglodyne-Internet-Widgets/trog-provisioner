@@ -4,7 +4,7 @@ use 5.041;
 use strict;
 use warnings FATAL => 'all';
 
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -19,7 +19,7 @@ use FindBin::libs;
 # Never the installation's real configuration: what this asserts should not
 # depend on which machine it runs on.
 ## no critic (CompileTime) -- setting it at compile time is the point.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
 use Test::MockModule qw{strict};
@@ -32,7 +32,7 @@ use YAML::XS();
 use Provisioner::Cookbook();
 
 require Trog::HV;
-require Trog::HV::Libvirt;    ## no critic (ProhibitUnusedImports)
+require Trog::HV::Libvirt;
 
 # The two facts the generator asks a hypervisor for, answered here so this runs
 # on a machine that is not one.
@@ -78,7 +78,7 @@ addresses=$pool
 ns1=ns1.test.test
 ns2=ns2.test.test
 IPMAP
-    close $ih;
+    close($ih) or die "Could not close $ipmap_file: $!";
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( { _base => { _global => { data_source => "$tmpdir/data" } }, $DOMAIN => { configd => undef } } ) );
@@ -91,16 +91,16 @@ IPMAP
 
     my $makefile = "$tmpdir/domains/$DOMAIN/Makefile";
     my $text     = -e $makefile ? File::Slurper::read_text($makefile) : q{};
-    my ($target) = $text =~ m{^/etc/provisioner/state/\Q$DOMAIN\E/testdeps:\n((?:\t[^\n]*\n)+)}m;
+    my ($target) = $text =~ m{^/etc/provisioner/state/\Q$DOMAIN\E/testdeps:\n((?:\t[^\n]*\n)+)}m;    ## no critic (RegularExpressions::ProhibitComplexRegexes)
     return $target // q{};
 }
 
 subtest 'module names: whatever the mirror index names' => sub {
-    like( testdeps_target(qw{Test::Deep Test::Differences}), qr/^\tcpanm --mirror-only Test::Deep Test::Differences$/m, 'cpanm is told --mirror-only' );
+    like( testdeps_target(qw{Test::Deep Test::Differences}), qr/^\tcpanm[ ]--mirror-only[ ]Test::Deep[ ]Test::Differences$/m, 'cpanm is told --mirror-only' );
 };
 
 subtest 'a release older than the newest: resolved as before, since the index does not list one' => sub {
-    like( testdeps_target( 'Test::Deep', 'Test::Differences@0.69' ), qr/^\tcpanm Test::Deep Test::Differences\@0\.69$/m, 'cpanm is not told --mirror-only' );
+    like( testdeps_target( 'Test::Deep', 'Test::Differences@0.69' ), qr/^\tcpanm[ ]Test::Deep[ ]Test::Differences\@0\.69$/m, 'cpanm is not told --mirror-only' );
 };
 
 done_testing;

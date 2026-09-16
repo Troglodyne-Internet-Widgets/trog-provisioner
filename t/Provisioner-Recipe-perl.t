@@ -3,7 +3,7 @@ use 5.041;
 
 use strict;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aasx';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ use FindBin::libs;
 # Never the installation's real /etc/trog-provisioner.
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
-BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
 
@@ -58,7 +58,7 @@ sub rendered {
 # The cpan_install lines of a fragment, each as the words it hands over.
 sub installs {
     my ($fragment) = @_;
-    return map { [m/'([^']*)'/g] } grep { m{/cpan_install\b} } split( "\n", $fragment );
+    return map { [m/'([^']*)'/g] } grep { m{/cpan_install\b} } split( m/\n/, $fragment );
 }
 
 subtest 'every step it is handed is installed in its own target, in order, after the perl' => sub {
@@ -82,7 +82,7 @@ subtest 'every step it is handed is installed in its own target, in order, after
         'one cpan_install each, in the order handed over, every word quoted'
     );
     ok( index( $out, 'build_latest_perl.sh' ) < index( $out, 'cpan_install' ), 'after the perl they go into is built' );
-    unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependants queued' );
+    unlike( $out, qr/queue_postrun_task/, 'there and then, rather than queued behind what the dependents queued' );
 
     # cpanm, Module::Build and Dist::Zilla are build_latest_perl.sh's, so a perl
     # nobody hands anything to installs nothing of its own.
@@ -92,23 +92,23 @@ subtest 'every step it is handed is installed in its own target, in order, after
 subtest 'test suites are skipped unless cpan_notest is off' => sub {
     my @steps = ( { install => ['Moo'] } );
 
-    like( rendered( cpan_deps => \@steps ), qr{^/root/bin/cpan_install --notest 'install' 'Moo'$}m, 'skipped when nothing says, which is the default' );
-    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'run when it is off' );
-    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install 'install' 'Moo'$}m, 'whatever the step is' );
+    like( rendered( cpan_deps => \@steps ), qr{^/root/bin/cpan_install[ ]--notest[ ]'install'[ ]'Moo'$}m, 'skipped when nothing says, which is the default' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install[ ]'install'[ ]'Moo'$}m, 'run when it is off' );
+    like( rendered( cpan_deps => \@steps, cpan_notest => 0 ), qr{^/root/bin/cpan_install[ ]'install'[ ]'Moo'$}m, 'whatever the step is' );
 };
 
 subtest 'a step that cannot be one is refused by the schema' => sub {
     foreach my $case (
-        [ { install     => ['Moo'], dzil => '/bogus' }, qr/oneOf rules 0, 2 match/,           'two verbs' ],
-        [ { notest      => 0 },                         qr/Missing property/,                 'none' ],
-        [ { install     => ['Moo'], notest => 0 },      qr/Properties not allowed: notest/,   'a key no step has' ],
-        [ { pin         => { module => 'Sys::Virt' } }, qr{/pin/pkgconfig: Missing property}, 'a pin without the package it pins to' ],
-        [ { install     => [] },                        qr/Not enough items/,                 'an install of nothing' ],
-        [ { install     => ["O'Reilly"] },              qr/does not match/,                   'a quote' ],
-        [ { install     => ['Moo$HOME'] },              qr/does not match/,                   'a dollar, which make would eat' ],
-        [ { installdeps => '/bogus`id`' },              qr/does not match/,                   'a backtick' ],
-        [ { dzil        => "/bogus\n/other" },          qr/does not match/,                   'a newline' ],
-        [ { installdeps => '/bogus\\other' },           qr/does not match/,                   'a backslash' ],
+        [ { install     => ['Moo'], dzil => '/bogus' }, qr/oneOf[ ]rules[ ]0,[ ]2[ ]match/,       'two verbs' ],
+        [ { notest      => 0 },                         qr/Missing[ ]property/,                   'none' ],
+        [ { install     => ['Moo'], notest => 0 },      qr/Properties[ ]not[ ]allowed:[ ]notest/, 'a key no step has' ],
+        [ { pin         => { module => 'Sys::Virt' } }, qr{/pin/pkgconfig:[ ]Missing[ ]property}, 'a pin without the package it pins to' ],
+        [ { install     => [] },                        qr/Not[ ]enough[ ]items/,                 'an install of nothing' ],
+        [ { install     => ["O'Reilly"] },              qr/does[ ]not[ ]match/,                   'a quote' ],
+        [ { install     => ['Moo$HOME'] },              qr/does[ ]not[ ]match/,                   'a dollar, which make would eat' ],
+        [ { installdeps => '/bogus`id`' },              qr/does[ ]not[ ]match/,                   'a backtick' ],
+        [ { dzil        => "/bogus\n/other" },          qr/does[ ]not[ ]match/,                   'a newline' ],
+        [ { installdeps => '/bogus\\other' },           qr/does[ ]not[ ]match/,                   'a backslash' ],
     ) {
         my ( $step, $error, $what ) = @$case;
         like( exception { rendered( cpan_deps => [$step] ) }, qr{/cpan_deps/0[^\n]*$error}, $what );
@@ -123,12 +123,10 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
     my $bin = tempdir( CLEANUP => 1 );
     open( my $c, '>', "$bin/cpan_install" ) or die $!;
     print {$c} qq{#!/bin/bash\nprintf '%s\\n' "\$\@" > $bin/out\n};
-    close $c;
-    ## no critic (Plicease::ProhibitLeadingZeros) -- a file mode, which is octal
+    close($c) or die "Could not close $bin/cpan_install: $!";
     chmod( 0755, "$bin/cpan_install" );
-    ## use critic
 
-    my ($line) = grep { m{/cpan_install\b} } split( "\n", rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
+    my ($line) = grep { m{/cpan_install\b} } split( m/\n/, rendered( script_dir => $bin, cpan_deps => [ { install => [ 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] } ] ) );
 
     # dash, which is what make runs a recipe line under.
     IPC::Run3::run3( [ '/bin/sh', '-c', $line ], \undef, \my $out, \my $err );
@@ -136,6 +134,7 @@ subtest 'the words reach cpan_install intact, through the shell that runs the li
 
     open( my $got, '<', "$bin/out" ) or die $!;
     chomp( my @args = <$got> );
+    close($got) or die "Could not close $bin/out: $!";
     is_deeply( \@args, [ '--notest', 'install', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ], 'one argument per word, the space and the > included' );
 };
 
@@ -146,7 +145,7 @@ subtest 'what each recipe depending on it hands over, it takes, and the merge ke
         is( ref $required{perl}, 'CODE', "$name depends on perl" ) or next;
 
         # As bin/new_config asks: the dependency is handed the guest and the
-        # dependant's configuration, and what comes back is merged in.
+        # dependent's configuration, and what comes back is merged in.
         my %handed = $required{perl}->(%GUEST);
         ok( scalar @{ $handed{cpan_deps} // [] }, "$name hands it something to install" );
         $merged = Hash::Merge::merge( $merged, \%handed );
@@ -174,12 +173,12 @@ subtest 'the guest has what this recipe installs into the perl needs to build' =
     ok( $deps{perlbrew},     'and perlbrew, which builds the perl and brings a compiler with it' );
 };
 
-subtest 'a dependant told no install_dir dies, rather than installing from somewhere else' => sub {
+subtest 'a dependent told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
-    like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined, positive-length/, 'tcms' );
+    like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined,[ ]positive-length/, 'tcms' );
 
     %required = recipe('tpsgi')->required_recipes();
-    like( exception { $required{perl}->( install_dir => $INSTALL ) }, qr/defined, positive-length/, 'tpsgi' );
+    like( exception { $required{perl}->( install_dir => $INSTALL ) }, qr/defined,[ ]positive-length/, 'tpsgi' );
 };
 
 Test::NoWarnings::had_no_warnings();
