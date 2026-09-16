@@ -17,9 +17,6 @@ use OpenStack::MetaAPI();
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
 
-use Config::Simple();
-use Trog::Config();
-
 =head1 NAME
 
 Trog::HV::OpenStack - the OpenStack backend: Nova servers, Neutron addresses and
@@ -875,39 +872,6 @@ on.  A credential scoped to a project without all three cannot build one.
 FIX
 
     return $self->_verdict( 1, 'Authenticated; the catalogue offers ' . scalar(@services) . ' services', q{} );
-}
-
-# The same question check_transfer_ip asks, which a cloud cannot answer the same
-# way.  There, the guest's network is the hypervisor's NAT bridge and is known
-# before any guest exists; here the cloud allocates the address when it creates
-# the server, so there is nothing to ask the routing table about until there is
-# a guest -- and by then the seed naming the address has already been written.
-#
-# So it has to be given, and this is where being told that is cheap.
-sub check_transfer_ip {
-    my ($self) = @_;
-
-    my $ipmap  = Trog::Config->path('ipmap.cfg');
-    my $config = eval { Config::Simple->new($ipmap) };
-    my $named  = $config ? $config->param('global.transfer_ip') : undef;
-    $named = $named->[0] if ref $named eq 'ARRAY';
-
-    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if defined $named && length $named;
-
-    return $self->_verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
-A guest scps its payload and rsyncs its data directory out of this machine, so
-it needs an address here that it can get to.  On a hypervisor that address is
-worked out by asking the routing table about the guest's network -- but
-@{[ $self->describe ]} allocates a guest's address when it creates it, so there is
-nothing to ask about until the guest exists, and the seed naming the address is
-written before that.
-
-Name it in the [global] section of $ipmap:
-
-    transfer_ip = 192.0.2.10
-
-It has to be an address of this machine that a guest on the cloud can reach.
-FIX
 }
 
 # Whether the flavor, image and network hypervisors.conf names are things this

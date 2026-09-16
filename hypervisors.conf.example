@@ -111,3 +111,44 @@ keypair           = buildkey
 ; headroom the cloud will refuse.  max_guests defaults to the instance quota.
 reserve_memory    = 4096
 reserve_cpus      = 2
+
+; ---------------------------------------------------------------------------
+; A SolusVM management node.
+;
+; The other kind of "ask somebody else for the guest".  The node owns the
+; hypervisors and decides which of them a guest lands on, so what is named here
+; is a plan, a location and an OS image version -- never a host.
+;
+; A plan is SolusVM's word for what a cloud calls a flavor: cores, memory and
+; disk together.  What plans exist is the node's to say, and most accounts see
+; them through their project rather than node-wide.
+
+[solus1]
+; The management node's hostname.  The only required key.
+solusvm          = solus.example.test
+
+; The API token, which is the whole credential: a node with an identity provider
+; in front of it has no password to offer instead.  Make one in the panel under
+; Account, put it in the store, and refer to it rather than writing it here --
+; bin/preflight's plaintext check will say so if you don't.
+;
+;     bin/add_secret --group solusvm --title qa -- 'the token'
+solusvm_token    = secret:solusvm/qa/password
+
+; Which project to build in.  Only needed where the account has more than one;
+; where it has exactly one, that is the one.
+solusvm_project  = 34
+
+; What to build guests as.  Either of these may be a name or an id.
+solusvm_plan     = c8.d80.r1024 - Shared LVM
+solusvm_location = 8
+
+; The OS image *version* id.  Debian is an image; Debian 13 is a version, and
+; only the version has an id.  bin/preflight lists what the node has when this
+; is wrong.
+solusvm_os       = 28
+
+; max_guests can lower the account's server limit but not raise it, and the
+; reserves mean nothing here: a plan is sold whole, and holding back a slice of
+; one would only refuse guests the node would have built.
+max_guests       = 10

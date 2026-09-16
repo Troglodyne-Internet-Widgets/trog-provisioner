@@ -18,8 +18,6 @@ use File::Slurper::Temp();
 use OpenStack::Client();
 use Time::Piece();
 
-use Trog::Config();
-use Trog::Credentials();
 use Trog::OpenStack::Config();
 use Trog::Secrets();
 
@@ -123,7 +121,7 @@ sub from_cloud {
       unless $cloud->{auth_type} eq 'v3applicationcredential';
 
     my $secret = $cloud->{application_credential_secret};
-    $secret = _from_keepass($secret) if defined $secret && index( $secret, 'secret:' ) == 0;
+    $secret = Trog::Secrets->reader($secret) if defined $secret && index( $secret, 'secret:' ) == 0;
 
     return $class->new(
         $cloud->{auth_url},
@@ -185,20 +183,6 @@ sub new {
     $self->_store;
 
     return $self;
-}
-
-# A secret: reference, as something to call for the secret when there is no
-# cached token.  Parsed now, so that a malformed one is an error on every run
-# rather than only on the ones whose token has expired.
-sub _from_keepass {
-    my ($reference) = @_;
-
-    Trog::Secrets->parse($reference);
-
-    return sub {
-        my %found = Trog::Secrets->read( Trog::Config->path('secrets.kdbx'), Trog::Credentials->prompt( 'Enter password:', 'keepass' ), secret => $reference );
-        return $found{secret};
-    };
 }
 
 # clouds.yaml files disagree about whether auth_url carries the identity

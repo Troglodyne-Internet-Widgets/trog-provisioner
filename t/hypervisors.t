@@ -455,8 +455,17 @@ cloud=openstack
 CONF
 
     my $err = exception { $both->hypervisor('confused') };
-    like $err, qr/\[confused\]/,               'the error names the block';
-    like $err, qr/both libvirt_uri and cloud/, 'and what is wrong with it';
+    like $err, qr/\[confused\]/,          'the error names the block';
+    like $err, qr/cloud and libvirt_uri/, 'and both of the things it claims to be';
+
+    my $three = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[greedy]
+cloud=openstack
+solusvm=solus.example.test
+CONF
+
+    $err = exception { $three->hypervisor('greedy') };
+    like $err, qr/cloud and solusvm/, 'a third kind is caught against the others, not only against libvirt';
 
     my $neither = Trog::Hypervisors->load( fleet_of(<<'CONF') );
 [vague]
@@ -464,8 +473,8 @@ reserve_memory=4096
 CONF
 
     $err = exception { $neither->hypervisor('vague') };
-    like $err, qr/\[vague\]/,                     'likewise by name';
-    like $err, qr/neither libvirt_uri nor cloud/, 'and why';
+    like $err, qr/\[vague\]/,                           'likewise by name';
+    like $err, qr/none of cloud, libvirt_uri, solusvm/, 'and why, listing every kind it could have been';
 
     # The one that matters: without this check a block naming nothing falls
     # through to libvirt's default connection, which is this machine -- the one

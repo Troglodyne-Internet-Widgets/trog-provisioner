@@ -11,6 +11,7 @@ use re '/aa';
 use parent 'Trog::Machine';
 
 use Trog::Config();
+use Config::Simple();
 use Provisioner::Cookbook();
 use File::Slurper();
 use YAML::XS();
@@ -188,7 +189,7 @@ Every backend class, loaded.
 sub backends {
     my ($class) = @_;
 
-    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack};
+    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack SolusVM};
 
     # Required rather than used at the top of the file: every backend is a
     # subclass of this class, so loading one from here at compile time is a
@@ -201,11 +202,81 @@ sub backends {
     return @backends;
 }
 
+=head2 markers
+
+Which option marks a block as which backend, as a list of option name to backend
+class.  The one place that knows, so that L<Trog::Hypervisors> can say what is
+wrong with a block without having a second opinion about what a block can be.
+
+C<uri> is also the fallback: a block that names none of these is libvirt on this
+machine, which is the behaviour every installation predating a second backend
+has.  That is L</backend_for(%opts)>'s doing rather than a property of this
+list, which is a hash and has no order to read anything into.
+
+=cut
+
+sub markers {
+    my ($class) = @_;
+
+    return (
+        cloud   => __PACKAGE__ . '::OpenStack',
+        solusvm => __PACKAGE__ . '::SolusVM',
+        uri     => __PACKAGE__ . '::Libvirt',
+    );
+}
+
+=head2 marker_keys
+
+The same, as the F<hypervisors.conf> keys somebody actually writes -- so an
+error about a block names C<libvirt_uri> rather than the C<uri> we call it once
+it is an option.
+
+=cut
+
+sub marker_keys {
+    my ($class) = @_;
+
+    # Loaded, because the answer is a method on each of them.
+    $class->backends;
+
+    my %markers = $class->markers;
+    my %file_key;
+
+    foreach my $option ( keys %markers ) {
+        my %keys = $markers{$option}->config_keys;
+        $file_key{$option} = $keys{$option} // $option;
+    }
+
+    return %file_key;
+}
+
+=head2 markers_in_block($block)
+
+Which marker keys this F<hypervisors.conf> block actually has, in the order
+L</markers> lists them.  None, or more than one, is the caller's to complain
+about: it is the block that is wrong, and only the caller knows which block and
+which file.
+
+=cut
+
+sub markers_in_block {
+    my ( $class, $block ) = @_;
+
+    my %markers  = $class->markers;
+    my %file_key = $class->marker_keys;
+
+    return grep { defined $block->{$_} && length $block->{$_} } map { $file_key{$_} } _marker_order( \%markers );
+}
+
+# markers is a hash and hashes have no order, but an error listing what a block
+# names should list it the same way twice running.
+sub _marker_order { return sort keys %{ $_[0] } }
+
 =head2 backend_for(%opts)
 
 Which backend these options are asking for.
 
-The one seam there is.  Everything else about supporting a second kind of
+The one seam there is.  Everything else about supporting another kind of
 hypervisor is a subclass; this is the sentence that decides you get one.
 
 =cut
@@ -213,16 +284,17 @@ hypervisor is a subclass; this is the sentence that decides you get one.
 sub backend_for {
     my ( $class, %opts ) = @_;
 
-    # A cloud is named; a libvirt hypervisor is reached at a URI.  Naming both,
-    # or neither, is a configuration that cannot be satisfied rather than one to
-    # pick a winner from.
-    my $named_cloud = defined $opts{cloud} && length $opts{cloud};
-    my $named_uri   = defined $opts{uri}   && length $opts{uri};
+    # Each kind is named by its own option: a cloud by the entry it
+    # authenticates as, a SolusVM node by its hostname, a libvirt hypervisor by
+    # the URI it is reached at.  Naming two is a configuration that cannot be
+    # satisfied rather than one to pick a winner from.
+    my %markers = $class->markers;
+    my @named   = grep { defined $opts{$_} && length $opts{$_} } _marker_order( \%markers );
 
-    die "A hypervisor is either a libvirt_uri or a cloud, and this has both.\n"
-      if $named_cloud && $named_uri;
+    die 'A hypervisor is one kind of thing, and this names ' . join( ' and ', @named ) . ".\n"
+      if @named > 1;
 
-    my $wanted = __PACKAGE__ . ( $named_cloud ? '::OpenStack' : '::Libvirt' );
+    my $wanted = $markers{ $named[0] // 'uri' };
 
     my ($backend) = grep { $_ eq $wanted } $class->backends;
 
@@ -282,6 +354,8 @@ my %CONFIG_KEY = (
       pool_path pool_name domain_dir bridge_device virbr_device partition
       cloud flavor image network floating_network availability_zone security_group keypair
     },
+    map { $_ => "solusvm_$_" } qw{token project plan location os},
+    solusvm => 'solusvm',
 );
 
 sub from_config {
@@ -582,8 +656,50 @@ F<ipmap.cfg> because a cloud has nothing to ask until the guest exists.
 
 =cut
 
-sub check_reachable   { return $_[0]->_abstract('check_reachable') }
-sub check_transfer_ip { return $_[0]->_abstract('check_transfer_ip') }
+sub check_reachable { return $_[0]->_abstract('check_reachable') }
+
+=head2 check_transfer_ip
+
+Whether we know an address of this machine that a guest can fetch its payload
+from.
+
+The implementation here is the one for a hypervisor that cannot be asked.  On a
+machine the answer comes from the routing table, because the guest's network is
+that machine's bridge and exists before any guest does -- L<Trog::HV::Libvirt>
+overrides this with that.  A backend that builds by API allocates the guest's
+address when it creates the server, so there is nothing to ask about until the
+guest exists, and by then the seed naming the address has already been written.
+
+So it has to be given, in F<ipmap.cfg>, and this is where being told that is
+cheap.
+
+=cut
+
+sub check_transfer_ip {
+    my ($self) = @_;
+
+    my $ipmap  = Trog::Config->path('ipmap.cfg');
+    my $config = eval { Config::Simple->new($ipmap) };
+    my $named  = $config ? $config->param('global.transfer_ip') : undef;
+    $named = $named->[0] if ref $named eq 'ARRAY';
+
+    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if defined $named && length $named;
+
+    return $self->_verdict( 0, 'No transfer_ip, and ' . $self->describe . ' cannot be asked for one', <<"FIX" );
+A guest scps its payload and rsyncs its data directory out of this machine, so
+it needs an address here that it can get to.  On a hypervisor that address is
+worked out by asking the routing table about the guest's network -- but
+@{[ $self->describe ]} allocates a guest's address when it creates it, so there is
+nothing to ask about until the guest exists, and the seed naming the address is
+written before that.
+
+Name it in the [global] section of $ipmap:
+
+    transfer_ip = 192.0.2.10
+
+It has to be an address of this machine that a guest on it can reach.
+FIX
+}
 
 # Both ends, because both ends run one.  A domain's data directory goes up to the
 # hypervisor over rsync and comes off the guest being replaced over rsync, and

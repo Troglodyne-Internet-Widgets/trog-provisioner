@@ -12,6 +12,9 @@ use File::KeePass::KDBX();
 use IO::Prompter();
 use Scalar::Util qw{looks_like_number};
 
+use Trog::Config();
+use Trog::Credentials();
+
 =head1 NAME
 
 Trog::Secrets - the KeePass database: what a configuration asks it for, and what
@@ -138,6 +141,37 @@ sub read {
     $kdbx->lock();
 
     return %values;
+}
+
+=head2 reader($reference)
+
+A code reference that resolves C<$reference> when it is called, prompting for
+the database password then rather than now.
+
+For a credential that is usually not needed: a token already cached, or a
+hypervisor nobody is building on this run.  Opening the store to answer a
+question nobody asked costs the operator a password prompt for nothing, so the
+callers that can defer it do.
+
+The reference itself is parsed here rather than in the closure, so that one
+written wrong is an error on every run and not only on the runs whose cached
+credential has expired.
+
+=cut
+
+sub reader {
+    my ( $class, $reference ) = @_;
+
+    $class->parse($reference);
+
+    return sub {
+        my %found = Trog::Secrets->read(
+            Trog::Config->path('secrets.kdbx'),
+            Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
+            secret => $reference,
+        );
+        return $found{secret};
+    };
 }
 
 =head2 apply($config, %values)

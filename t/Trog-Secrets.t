@@ -12,7 +12,9 @@ t/Trog-Secrets.t - finding the notes a config leaves, and putting the answers ba
 =cut
 
 use Test::More;
-use File::Temp qw{tempdir};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
+use File::Temp       qw{tempdir};
 
 use FindBin::libs;
 
@@ -244,6 +246,39 @@ subtest 'remember makes a secret once and keeps it' => sub {
     };
     like( $@, qr/did not keep/,         'a field the database drops is an error at once' );
     like( $@, qr/password or username/, 'and it says which fields there are' );
+};
+
+subtest 'reader defers the prompt to the run that needs it' => sub {
+
+    # Two callers now have a credential that is usually not needed -- a cloud
+    # with a cached token, a SolusVM node nobody is building on this run -- and
+    # a store opened to answer a question nobody asked costs a password prompt
+    # for nothing.
+    my @opened;
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine(
+        read => sub {
+            my ( $class, $file, $password, %needed ) = @_;
+            push @opened, { password => $password, needed => \%needed };
+            return ( secret => 'the value' );
+        }
+    );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { return 'hunter2' } );
+
+    my $reader = Trog::Secrets->reader('secret:group/entry/password');
+    is( ref $reader,    'CODE', 'it hands back something to call rather than a value' );
+    is( scalar @opened, 0,      'and has not opened anything yet' );
+
+    is( $reader->(), 'the value', 'calling it resolves the reference' );
+    is_deeply( $opened[0]{needed}, { secret => 'secret:group/entry/password' }, 'by the reference it was given' );
+    is( $opened[0]{password}, 'hunter2', 'having asked for the store password only then' );
+
+    # Parsed now rather than in the closure: a reference written wrong would
+    # otherwise be an error only on the runs whose cached credential had
+    # expired, which is the run nobody is watching.
+    like( exception { Trog::Secrets->reader('secret:missing-fields') },  qr/Malformed secret/,        'a malformed reference is an error at once' );
+    like( exception { Trog::Secrets->reader('not a reference at all') }, qr/must start with secret:/, 'and so is something that is not one' );
 };
 
 done_testing();

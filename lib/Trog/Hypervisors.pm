@@ -217,16 +217,20 @@ sub hypervisor {
     my $block = $self->{blocks}{$name}
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
-    # Say which block is wrong, by name.  A block that names neither would
+    # Say which block is wrong, by name.  A block that names none of them would
     # otherwise fall through to libvirt's default connection -- that is, to this
     # machine -- which is the one placement nobody writing a fleet file meant.
-    my $has_uri   = defined $block->{libvirt_uri} && length $block->{libvirt_uri};
-    my $has_cloud = defined $block->{cloud}       && length $block->{cloud};
+    #
+    # Which keys those are is Trog::HV's to know, because it is the same
+    # question backend_for answers, and a second list here is one that would
+    # come to disagree with it the next time a backend is added.
+    my @markers = Trog::HV->markers_in_block($block);
+    my $kinds   = join( ', ', sort values %{ { Trog::HV->marker_keys } } );
 
-    die "[$name] in " . $self->{path} . " has both libvirt_uri and cloud; it can only be one hypervisor.\n"
-      if $has_uri && $has_cloud;
-    die "[$name] in " . $self->{path} . " has neither libvirt_uri nor cloud, so there is nothing to build on.\n"
-      unless $has_uri || $has_cloud;
+    die "[$name] in " . $self->{path} . ' has ' . join( ' and ', @markers ) . "; it can only be one hypervisor.\n"
+      if @markers > 1;
+    die "[$name] in " . $self->{path} . " has none of $kinds, so there is nothing to build on.\n"
+      unless @markers;
 
     return $self->{built}{$name} //= Trog::HV->candidate(
         name => $name,
