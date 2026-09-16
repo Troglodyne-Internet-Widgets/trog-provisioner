@@ -220,6 +220,12 @@ sub build {
     }
     else {
         Provisioner::Utils::write_ssh_keypair( "$dir/scratch_admin_key", Ed25519 => $ED25519_BITS, 'scratch' );
+
+        # It sets no mode of its own, so the umask decides and the private half
+        # lands readable by anyone on this machine.  Setting it is the caller's,
+        # the same way Provisioner::Recipe::ubuntu's guest_keypair does it.
+        chmod 0600, "$dir/scratch_admin_key", "$dir/scratch_admin_key.pub";
+
         copy( "$dir/scratch_admin_key.pub", "$dir/admin_authorized_keys" )
           or die "Could not write a throwaway key into the scratch config: $!\n";
     }

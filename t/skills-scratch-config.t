@@ -87,6 +87,11 @@ subtest 'somebody is authorized on a scratch guest either way' => sub {
     # every guest whatever else is in the list.
     my ( undef, $bare ) = scratch( source => installation() );
     like( File::Slurper::read_text("$bare/admin_authorized_keys"), qr/\Assh-/, 'and a throwaway one is minted when it has none' );
+
+    # write_ssh_keypair sets no mode, so without a chmod of our own the umask
+    # decides and the private half is readable by anyone on this machine.
+    my $mode = ( stat("$bare/scratch_admin_key") )[2] & oct('7777');
+    is( sprintf( '%04o', $mode ), '0600', 'with the private half of it kept to ourselves' );
 };
 
 subtest 'the base is built here rather than taken from the installation' => sub {
