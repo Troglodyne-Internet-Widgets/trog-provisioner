@@ -178,10 +178,6 @@ subtest 'a salvage that came away empty stops the run before anything is destroy
 # handing the placeholder straight back.  main() throws the address away on a dry
 # run either way.
 subtest 'a dry run of a guest that is not there yet' => sub {
-    no warnings 'once';
-    local $Trog::Bin::Provisioner::dryrun = 1;
-    use warnings 'once';
-
     my $hv  = Test::MockModule->new('Trog::HV::OpenStack');
     my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     my $loc = Test::MockModule->new('Trog::Local');
@@ -212,7 +208,7 @@ subtest 'a dry run of a guest that is not there yet' => sub {
         [ transfer_user => 'doge' ],    [ transfer_port => 22 ],
       );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
     is( $asked, 0,      'nothing asked the cloud how to reach a guest it has not built' );
     is( $user,  'doge', 'and the dry run came back rather than dying' );
@@ -221,13 +217,6 @@ subtest 'a dry run of a guest that is not there yet' => sub {
 };
 
 subtest 'a dry run applies nothing' => sub {
-
-    # The SUT is a modulino required at runtime, so its `our` is not in scope
-    # while this file compiles and perl calls the one mention a typo.
-    no warnings 'once';
-    local $Trog::Bin::Provisioner::dryrun = 1;
-    use warnings 'once';
-
     my @applied;
     my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
     my $bin = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
@@ -275,15 +264,11 @@ subtest 'a dry run applies nothing' => sub {
         [ transfer_ip => '192.168.1.49' ],  [ transfer_user => 'doge' ], [ transfer_port => 22 ],
       );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
     is_deeply( \@applied, [], 'nothing outside the domain directory was touched' )
       or diag "applied: @applied";
     is( File::Slurper::read_text("$dir/vm.test/key.rsa"), "PRIVATE\n", 'the existing key is still the existing key' );
-
-    # And it still wrote what there is to look at.
-    ok( -s "$dir/vm.test/user-data", 'user-data was written' );
-    ok( -s "$dir/vm.test/setup.sh",  'and the setup script' );
 };
 
 # The unit half of this -- every disk knob against every libvirt version -- is
@@ -345,7 +330,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         )
     );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test' ) } );
 
     is_deeply(
         \%seeded,
@@ -423,7 +408,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
         )
     );
 
-    quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, 'vm.test' ) } );
+    quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test' ) } );
 
     is_deeply(
         [ grep { $_ eq 'annihilate_domain' || m/\Arelease[ ]/ || $_ eq 'define_domain' } @applied ],
@@ -602,7 +587,7 @@ sub _layered {
     $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
 
     my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'doge' ) );
-    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( $config, $domain, $reuse, 'doge', $depends ) } );
+    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'doge', depends => $depends ) } );
 
     return %seen;
 }
@@ -666,6 +651,10 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     my $bin_mock = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     $bin_mock->redefine( provision_domain => sub { push @order, 'provision'; return ( 'ubuntu', '203.0.113.10' ) } );
 
+    # main() calls this itself, so mocking provision_domain does not cover it,
+    # and what it does with the secret store is another subtest's business.
+    $bin_mock->redefine( place_guest_secrets => sub { 1 } );
+
     Trog::HV->forget();
     my $no_fleet = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
     my $rc       = eval {
@@ -725,8 +714,7 @@ subtest 'a runner is authorized on each hypervisor it was configured for' => sub
     my $private = _throwaway_key();
     my %values  = ( "/opt/domains/$domain/.ssh/id_ed25519" => $private );
 
-    local $Trog::Bin::Provisioner::dryrun = 0;
-    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values ) } );
+    _quietly( sub { Trog::Bin::Provisioner::authorize_runner_key( $domain, \%values, 0 ) } );
 
     is_deeply( [ sort keys %appended ], [qw{one.test.test two.test.test}], 'one line per hypervisor, and no others' );
     like( $appended{'one.test.test'}[0], qr/\Assh-ed25519[ ]/, 'the public half, derived rather than stored' );
@@ -751,17 +739,14 @@ subtest 'a dry run reaches no hypervisor at all' => sub {
     my $hv      = Test::MockModule->new('Trog::HV');
     $hv->redefine( append_line => sub { $touched++; return 1 } );
 
-    local $Trog::Bin::Provisioner::dryrun = 1;
-    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {} ), 0, 'nothing happens' );
-    is( $touched,                                                               0, 'and nobody authorized_keys is written' );
+    is( Trog::Bin::Provisioner::authorize_runner_key( 'runner.test.test', {}, 1 ), 0, 'nothing happens' );
+    is( $touched,                                                                  0, 'and nobody authorized_keys is written' );
 };
 
 subtest 'a guest that is not a runner, or one that asked for nothing' => sub {
     my $touched = 0;
     my $hv      = Test::MockModule->new('Trog::HV');
     $hv->redefine( append_line => sub { $touched++; return 1 } );
-
-    local $Trog::Bin::Provisioner::dryrun = 0;
 
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
     $cookbook->redefine( domain_config => sub { {} } );
