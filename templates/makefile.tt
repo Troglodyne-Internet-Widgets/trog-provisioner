@@ -91,6 +91,16 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
     existence there is nothing to check the split against -- see issue #36. -%]
 [% state_dir %]/sendmail:
 	# Make sure mailing works by forcing send-only lo and enabling starttls
+	# The certificate first.  Debian makes it in sendmailconfig, which its
+	# postinst only reaches by asking a question our noninteractive install
+	# never answers -- so the starttls enabled below had nothing to present.
+	test -x /usr/share/sendmail/update_tls && /usr/share/sendmail/update_tls < /dev/null; /bin/true
+	# The config it just wrote caps emailAddress at 40, and it asks for
+	# admin@`hostname -f` -- so a name over 34 characters is refused and the
+	# complaint discarded.  Widen it and run again: update_tls keeps a config
+	# and a key it already made, so only the certificate is retried.
+	sed -i -e 's/^emailAddress_max.*/emailAddress_max = 255/' /etc/mail/tls/sendmail-server.cfg /etc/mail/tls/sendmail-client.cfg; /bin/true
+	test -x /usr/share/sendmail/update_tls && /usr/share/sendmail/update_tls < /dev/null; /bin/true
 	! grep starttls.m4 /etc/mail/sendmail.mc && printf '%s\n\n' "include(\`/etc/mail/tls/starttls.m4')dnl" >> /etc/mail/sendmail.mc; /bin/true
 	! grep starttls.m4 /etc/mail/submit.mc && printf '%s\n\n' "include(\`/etc/mail/tls/starttls.m4')dnl" >> /etc/mail/submit.mc; /bin/true
 	test -f /etc/mail/sendmail.conf && sed -i -e "s/eth0/lo/gm" /etc/mail/sendmail.conf; /bin/true

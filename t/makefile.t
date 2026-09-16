@@ -121,6 +121,33 @@ subtest 'the makefile names its shell, and writes sendmail config without relyin
     unlike( $sendmail // q{}, qr/\Qecho "include\E/, 'and not with an echo only dash expands' );
 };
 
+# Debian generates /etc/mail/tls/* in sendmailconfig, which its postinst only
+# reaches by asking a question a noninteractive install never answers.  Turning
+# starttls on without it left sendmail presenting a certificate nothing had
+# made, which every guest logged on the restart the postrun queues.
+subtest 'the sendmail target makes a certificate before it turns starttls on' => sub {
+    my ($sendmail) = makefile() =~ m/^\Q$STATE\E\/sendmail:\n((?:\t[^\n]*\n)+)/m;
+
+    like( $sendmail // q{}, qr/update_tls/, 'the certificate is generated' ) or diag $sendmail;
+
+    # Order, not just presence: the include is what asks sendmail for a
+    # certificate, so generating one afterwards would still leave the first
+    # start without.
+    my $made = index( $sendmail // q{}, 'update_tls' );
+    my $used = index( $sendmail // q{}, 'starttls.m4' );
+    ok( $made > -1 && $used > $made, 'before the include that asks it to present one' )
+      or diag "update_tls at $made, starttls.m4 at $used";
+
+    # The config update_tls writes caps emailAddress at 40 and asks for
+    # admin@<fqdn>, so a name over 34 characters is refused -- and openssl's
+    # complaint is discarded, leaving no certificate and nothing said about it.
+    my $widened = index( $sendmail  // q{}, 'emailAddress_max' );
+    my $again   = rindex( $sendmail // q{}, 'update_tls' );
+    ok( $widened > $made,  'the address cap is widened' ) or diag $sendmail;
+    ok( $again > $widened, 'and the certificate retried once it is' )
+      or diag "widened at $widened, last update_tls at $again";
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
