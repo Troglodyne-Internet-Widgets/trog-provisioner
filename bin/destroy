@@ -155,37 +155,56 @@ sub main {
     $announce .= "[DRY RUN] No changes will be made.\n" if $dryrun;
     print $announce;
 
-    # 1. Stop and undefine the VM
+    # Steps 1 to 4, and then the address whatever became of them.  Held rather
+    # than left to abort the run, because the address is the one thing here
+    # whose leaking costs somebody else something later: it stays reserved
+    # against a domain that no longer exists, and nothing can be given it.
     #
-    # Only where one is: a domain nothing hosts has no VM and no disks, and the
-    # fallback above is this machine, which is not a hypervisor at all on a fleet
-    # that keeps them elsewhere.  Asking it anyway fails on the libvirt socket and
-    # takes the run down before step five, which is what gives the address back.
-    if ($hosted) {
-        destroy_vm( $domain, $dryrun );
+    # There is a live way in.  annihilate_domain dies outright when a guest will
+    # not stop or will not undefine, destroy_vm does not catch it, and both sit
+    # upstream of step five.  Volumes do not: delete_volume warns and returns
+    # false, which is why a disk that will not go has never cost an address.
+    my $failure;
+    unless (
+        eval {
+            # 1. Stop and undefine the VM
+            #
+            # Only where one is: a domain nothing hosts has no VM and no disks,
+            # and the fallback above is this machine, which is not a hypervisor
+            # at all on a fleet that keeps them elsewhere.
+            if ($hosted) {
+                destroy_vm( $domain, $dryrun );
 
-        # 2. Remove the disks it was using
-        destroy_disks( $domain, $dryrun );
-    }
+                # 2. Remove the disks it was using
+                destroy_disks( $domain, $dryrun );
+            }
 
-    # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
-    remove_authorized_key( $domain, $dryrun );
-    remove_runner_key( $domain, $dryrun );
+            # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
+            remove_authorized_key( $domain, $dryrun );
+            remove_runner_key( $domain, $dryrun );
 
-    # 4. Optionally purge the domain directory, and the data directory
-    if ($purge) {
-        purge_domain_dir( $domain, $dryrun );
+            # 4. Optionally purge the domain directory, and the data directory
+            if ($purge) {
+                purge_domain_dir( $domain, $dryrun );
+            }
+            else {
+                print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
+            }
+            purge_data_dir( $domain, $hosted, $dryrun ) if $purge_data;
+            1;
+        }
+    ) {
+        $failure = $@ || "Destroying $domain failed, without saying why.\n";
+        warn $failure;
     }
-    else {
-        print "Domain directory $domain_dir/$domain preserved (use --purge to remove it)\n";
-    }
-    purge_data_dir( $domain, $hosted, $dryrun ) if $purge_data;
 
     # 5. Give the address back to the pool
     release_ip( $domain, $dryrun );
 
-    print "Done.\n";
-    return 0;
+    # Said plainly, because the address coming back is not the teardown having
+    # worked, and an operator who reads "Done." will take it as exactly that.
+    print $failure  ? "Done, except for what failed above.\n" : "Done.\n";
+    return $failure ? 1                                       : 0;
 }
 
 =head2 release_ip($domain, $dryrun)
