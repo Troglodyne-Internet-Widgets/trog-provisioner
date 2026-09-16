@@ -33,26 +33,30 @@ my $subject = `openssl x509 -noout -subject -in /etc/ssl/certs/[% domain %].pem 
 like($subject, qr/subject=/, 'the certificate parses') or diag $subject;
 
 # What the next rebuild will be able to salvage.  bin/new_config fetches the
-# certificate store over sftp as [% admin_user %] with no sudo, and dehydrated
-# writes both the private keys and the account key 0600 root -- so what it
-# cannot read comes back empty, silently, and the rebuilt guest issues from
-# scratch against the rate limit.  Losing the account key loses the registration
-# with it.
+# certificate store as root now (issue #76), so none of this needs to be
+# readable by the admin account any more -- issue #98 took that back out.
+# dehydrated writes both the private keys and the account key 0600 root, and
+# nothing here widens that.  A guest rebuilt with certificates it has no keys
+# for still issues from scratch against the rate limit, and loses the
+# registration if the account key went too -- that risk is what the salvage
+# exists to avoid, not who else could read it on the guest.
 #
 # The exit hook runs first, because it is what leaves the tree in the state the
-# nightly renewal leaves it in.  It used to `chmod -R 0660` the lot, execute bit
-# on the directories included, so after one renewal the admin could not enter
-# them at all.
+# nightly renewal leaves it in.
 is(system('/etc/dehydrated/hooks/[% domain %].sh', 'exit_hook'), 0, 'the dehydrated exit hook runs');
 
-foreach my $tree ('/var/lib/dehydrated', '/etc/dehydrated/accounts') {
-    my $gripes = `sudo -u '[% admin_user %]' find '$tree' -print 2>&1 >/dev/null`;
-    is($gripes, '', "the admin user can walk $tree after the hook has run") or diag $gripes;
-}
+# /etc/dehydrated/accounts holds nothing but the account key, so the whole tree
+# is root-only now.  /var/lib/dehydrated/certs still has to be walkable, since
+# the certificates in it stay public.
+my $accounts_gripe = `sudo -u '[% admin_user %]' find '/etc/dehydrated/accounts' -print 2>&1 >/dev/null`;
+isnt($accounts_gripe, '', 'the admin user can no longer walk the accounts tree');
 
-# And every key in there is readable by that account and by nobody else.  A
-# guest that has never reached the CA has none of these, which is the one case
-# where there is nothing to say.
+my $certs_gripe = `sudo -u '[% admin_user %]' find '/var/lib/dehydrated' -print 2>&1 >/dev/null`;
+is($certs_gripe, '', 'but can still walk the certificate tree, since the certificates in it are public');
+
+# And every key in there is root-only: not readable by the admin account, and
+# not by the rest of the guest either.  A guest that has never reached the CA
+# has none of these, which is the one case where there is nothing to say.
 my @keys = grep { -f $_ && !-l $_ } (
     glob('/var/lib/dehydrated/certs/*/priv*.pem'),
     glob('/etc/dehydrated/accounts/*/account_key.pem'),
@@ -60,11 +64,12 @@ my @keys = grep { -f $_ && !-l $_ } (
 SKIP: {
     skip 'dehydrated has issued nothing and registered nothing here', 2 unless @keys;
 
-    my @unreadable = grep { system('sudo', '-u', '[% admin_user %]', 'test', '-r', $_) != 0 } @keys;
-    is(scalar @unreadable, 0, 'every private key can be salvaged') or diag join("\n", @unreadable);
+    my @readable = grep { system('sudo', '-u', '[% admin_user %]', 'test', '-r', $_) == 0 } @keys;
+    is(scalar @readable, 0, 'no private key is readable by the admin account any more')
+        or diag join("\n", @readable);
 
-    my @exposed = grep { (stat $_)[2] & 0007 } @keys;
-    is(scalar @exposed, 0, 'and none of them is readable by the rest of the guest')
+    my @exposed = grep { (stat $_)[2] & 0077 } @keys;
+    is(scalar @exposed, 0, 'and none of them is readable by anyone but root')
         or diag join("\n", @exposed);
 }
 

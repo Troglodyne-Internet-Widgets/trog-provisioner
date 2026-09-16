@@ -27,11 +27,10 @@ mv dehydrated.logrotate /etc/logrotate.d/dehydrated
 # once, here, is the right scope as well as the only workable order.
 # Setup LE
 dehydrated --register --accept-terms; /bin/true
-# And left where the next fetch can read it.  That fetch is sftp as
-# [% admin_user %] with no sudo, and dehydrated writes the account key 0600
-# root, so it came back empty and the rebuilt guest registered afresh.  0640 in
-# a 0750 directory is the least that lets the salvage read it; nobody else on
-# the guest can.
-chown -R root:[% admin_user %] /etc/dehydrated/accounts
-find /etc/dehydrated/accounts -type d -exec chmod 0750 {} +
-find /etc/dehydrated/accounts -type f -exec chmod 0640 {} +
+# And left where the next fetch can read it.  That fetch reads the guest as
+# root now (issue #76), so dehydrated's own 0600 root on the account key is
+# already enough; issue #98 took back the admin group and the wider mode this
+# used to be given when the fetch had neither.
+chown -R root:root /etc/dehydrated/accounts
+find /etc/dehydrated/accounts -type d -exec chmod 0700 {} +
+find /etc/dehydrated/accounts -type f -exec chmod 0600 {} +
