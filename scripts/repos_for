@@ -47,6 +47,12 @@ sub main {
         # the recipe's target still succeeded.
         next if exists $cache->{$api_url}{$entity};
 
+        # Recorded before the rows, so that an entity the api answered with
+        # nothing is still an entity that was asked.  Without it the guard above
+        # never fires for one, and nothing downstream can tell "has no
+        # repositories" from "was never fetched for".
+        $cache->{$api_url}{$entity} //= {};
+
         foreach my $row ( repos_of( $api_url, $entity, $token ) ) {
             $cache->{$api_url}{$entity}{ $row->{name} } = {
                 clone_url      => $row->{clone_url},
