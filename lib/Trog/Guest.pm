@@ -229,10 +229,10 @@ sub wait_for_makefile {
 =head1 THE KEY
 
 The private half of the key a guest is reached with used to sit in the domain
-directory as F<key.rsa>, mode 0600, from one provision until the next.  It is the
-credential for the machine it belongs to, so anything that could read that
-directory -- a process running as the same user, a stolen disk, a backup of
-F</opt/domains> -- had the way in to every guest.
+directory as F<key.rsa>, mode 0600.  It is the credential for the machine it
+belongs to, so anything that could read that directory -- a process running as
+the same user, a stolen disk, a backup of F</opt/domains> -- had the way in to
+every guest.
 
 It lives in the secret store now.  What is here is the two halves of that: the
 provision that makes a key puts it there, and everything that needs to use one
@@ -240,23 +240,14 @@ gets it back out.
 
 =head2 A domain keeps the key it has
 
-L<Provisioner::Recipe::ubuntu/guest_keypair> mints one only for a domain that has
-none.  The key identifies the machine rather than the build, and the store is
-holding it, so a rebuild comes up authorizing the key everything on this side is
-already using.
+A key lasts as long as the domain does.
+L<Provisioner::Recipe::ubuntu/guest_keypair> mints one only for a domain with
+none, and has the reasoning.
 
-It did rotate on every real run once, and that is what #187 was: the salvage pass
-materializes the current key early in a generate, the mint then replaced it, and
-the provision went on to offer a key the rebuilt guest had never been told about.
-Refusing the mint is what fixed it, rather than teaching the cache to notice.
-
-C<seal_key> still overwrites rather than going through L<Trog::Secrets/remember>,
+C<seal_key> overwrites rather than going through L<Trog::Secrets/remember>,
 which keeps the first answer forever.  A key that has not changed re-seals to the
 same bytes; one that has -- a domain rebuilt from nothing, a key replaced by hand
 -- has to land in the store rather than be ignored in favor of the old one.
-
-Which means sealing does not make the key long-lived.  It moves where the current
-one rests, and leaves its lifetime alone.
 
 =head2 A guest built before this still works
 
@@ -284,9 +275,12 @@ sub ref_for_key { my ( undef, $domain ) = @_; return "secret:guests/$domain/pass
 
 Put the private half at C<$path> into the store and take it off the disk.
 
-Overwrites what was there: the key rotates, and the store is holding the current
-one rather than the first one.  The file goes only once the store has it, so a
-failure anywhere in here leaves the key where it was rather than nowhere.
+Overwrites what was there rather than keeping the first answer: a domain rebuilt
+from nothing, or a key replaced by hand, has one the store has not seen, and that
+is the one to hold.  A key that has not changed re-seals to the same bytes.
+
+The file goes only once the store has it, so a failure anywhere in here leaves
+the key where it was rather than nowhere.
 
 =cut
 

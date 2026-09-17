@@ -358,16 +358,14 @@ In perl rather than through C<ssh-keygen>: see
 L<Provisioner::Utils/write_ssh_keypair>, which is where the one thing that is
 not obvious about writing these lives.
 
-A domain that already has a keypair keeps it.  The key is the identity of the
-machine rather than of the build, and the store is holding it, so minting a new
-one buys nothing and costs the rebuild its way back in: the guest comes up
-seeded with the new key while anything that materialized the old one -- the
-salvage pass that runs earlier in the same generate, among others -- goes on
-offering what the guest no longer authorizes.
+A domain that already has a keypair keeps it: the key identifies the machine
+rather than the build, and a guest is rebuilt around the key it is seeded with,
+so replacing one leaves whoever already holds it unable to get back in.
 
-A domain with no key yet gets one, since the user-data is written out of it.
-The caller is what puts a sealed key back beside this one first; without that
-there is nothing here to keep.
+A domain with no pair gets one, since the user-data is written out of it.  Which
+means the caller has to put a sealed key back beside this one before calling:
+C<Trog::Guest::seal_key> takes the private half off the disk, and only the public
+half is left to find.
 
 =cut
 
