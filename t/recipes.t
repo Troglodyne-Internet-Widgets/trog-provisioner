@@ -270,7 +270,6 @@ Provisioner::Utils::write_ssh_keypair( "$ddir/key.rsa", RSA => 2048, 'recipes.t'
 # Build list of known modules with required input data
 my %required_config = (
     aptmirror   => { releases => ['noble'] },
-    data        => { from     => '/opt/data', to => '/opt/domains' },
     imagemagick => { version  => '7.1.1-47' },
     logshipper  => { host     => 'logs.test.test' },
     mariadb     => {
@@ -282,7 +281,6 @@ my %required_config = (
     gogs            => { version         => '0.13.0',        admin_password => 's3cr3t' },
     plexmediaserver => { plex_login_name => 'plexuser',      admin_mail     => 'admin@test.test' },
     openvpnclient   => { server          => 'vpn.test.test', cert_dir       => '/opt/domains/test.test.test/vpn' },
-    tcms            => { tcms_dir        => 'tcms' },
     adminconfig     => { skel            => '/opt/dotfiles' },
     admincode       => {
         repos_from => [],

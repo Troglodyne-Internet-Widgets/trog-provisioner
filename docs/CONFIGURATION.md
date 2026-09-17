@@ -100,9 +100,8 @@ tickle.test.test:
         size: disk_size_in_bytes
         memory: ram_size_in_mb
         cpus:  num_cpus
-    data:
-        from: /opt/client-data
-        to:   /opt/domains
+        data_source: /opt/client-data
+        install_dir: /opt/domains
     adminconfig:
         skel: "/opt/dotfiles/test"
         pkgs: [vim, tig, tmux, plocate]
@@ -123,7 +122,6 @@ tickle.test.test:
     nginxproxy:
         proxy_uri: http://localhost:5000
     pdns:
-        soa: "ns1.test.test"
     registrar:
         type: "cloudflare"
         user: "someGuy"

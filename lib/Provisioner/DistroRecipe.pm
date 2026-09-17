@@ -218,6 +218,23 @@ sub args {
                 type        => 'boolean',
                 description => 'Let apt install from a repository it cannot verify.  Defaults to on when a mirror is configured and off when one is not, which is what every guest has had.  Turn it off against a mirror that carries the archive own signed indices -- one built by the aptmirror recipe does, being a verbatim copy.',
             },
+
+            # What bin/new_config works out for the guest's first boot and hands
+            # this recipe to write into the seed.  readOnly because no operator
+            # answers them: the package list is what every recipe asked for, the
+            # address is what the pool assigned.
+            packages      => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Every package the domain recipes asked for, installed before the makefile runs.' },
+            ips           => { type => 'array', items => { type => 'string' }, readOnly => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
+            contact_email => { type => 'string', nullable => 1, readOnly => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
+            payload_dir   => { type => 'string',  readOnly => 1, description => 'Where on this machine the payload the guest fetches was built.' },
+            dryrun        => { type => 'boolean', readOnly => 1, description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
+
+            # The guest's own interfaces, which its network configuration matches
+            # on rather than on a device name the kernel is free to choose.  The
+            # hypervisor derives both from the domain name; see
+            # Provisioner::Recipe::vm, which names the same pair for the XML.
+            nat_mac    => { type => 'string', readOnly => 1, description => "MAC of the guest's NAT interface." },
+            bridge_mac => { type => 'string', readOnly => 1, description => "MAC of the guest's bridged interface." },
         },
     );
 }

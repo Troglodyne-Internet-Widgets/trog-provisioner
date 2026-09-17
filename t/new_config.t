@@ -229,6 +229,34 @@ subtest 'apply_global_defaults: every recipe sees the distribution defaults' => 
     is( $said{mirror}, 'http://m.test.test/ubuntu', 'what _global said wins over the default' );
 };
 
+# Provisioner::Cookbook::has stats a recipe's .pm to answer whether there is one,
+# and the subtest below asks it about vm.  Allowed the way $salvage_root is
+# below: strict mode has to be told which real trees an assertion needs.
+#
+# By suffix rather than by path, because the stat is against the canonical path
+# perl resolved the require to while FindBin gives $Bin/../lib -- and
+# normalising that would mean statting it.
+Test::MockFile::add_strict_rule_for_filename( [qr{/lib/Provisioner/Recipe/}] => 1 );
+
+# Which of the vm recipe's fields _global may pass through into provision.conf.
+# Read off the schema rather than listed here, so a computed field added to that
+# recipe cannot start being offered without this noticing.
+subtest 'hv_settings offers the machine knobs, not the facts about the machine' => sub {
+    my %settings = map { $_ => 1 } Trog::Provisioner::Config::Generator::hv_settings();
+
+    ok( $settings{disk_cache}, 'a knob an operator may set is passed through' );
+    ok( $settings{cpu_mode},   'and so is the CPU model' );
+
+    my $props    = Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } );
+    my @readonly = sort grep { $props->{$_}{readOnly} } keys %$props;
+    ok( scalar @readonly, 'the vm recipe declares fields it answers for itself' ) or return;
+
+    # Naming one of these in _global would write it into provision.conf and point
+    # the domain XML at a volume, or a MAC, that nobody created.
+    my @offered = grep { $settings{$_} } @readonly;
+    is( "@offered", q{}, 'and none of those can be named in _global' );
+};
+
 # A stand-in for the sftp session, which is the only part of the salvage check
 # that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
 # what the guest said when asked whether the path still holds anything.

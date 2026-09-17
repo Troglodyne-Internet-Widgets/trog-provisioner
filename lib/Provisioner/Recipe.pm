@@ -320,17 +320,16 @@ already owns its one, where C<bin/recipes vm> prints it.  C<cpus> and C<memory>
 are excluded for the same reason, and C<distro>, C<mirror> and C<cache> because
 L<Provisioner::DistroRecipe/args> owns them.
 
-Two more travel in that same hash and are B<not> declared here, for a different
-reason.  C<subdomain> is set to the fully qualified domain and read by nothing.
-C<libdir> is the list of extra library directories an operator names in
-C<_global> so that recipes outside this checkout are found, and it is consumed
-before any recipe exists: C<bin/new_config> pushes it onto C<@INC> and hands it
-to L<Provisioner::Cookbook/template_dirs>.  Declaring either would advertise a
-setting no recipe acts on.
+C<libdir> travels in that same hash and is not declared here either.  It is the
+list of extra library directories an operator names in C<_global> so that
+recipes outside this checkout are found, and it is spent before any recipe
+exists: C<bin/new_config> pushes it onto C<@INC> and hands it to
+L<Provisioner::Cookbook/template_dirs>.
 
-Both nevertheless reach every recipe as an undeclared key, so both have to be
-declared or kept out of what a recipe is handed before C<additionalProperties>
-can be turned on.
+None of them reaches a recipe that does not declare it.  C<takes> hands each
+recipe only what its own C<schema> names, which is what lets that schema refuse
+everything else -- so a setting excluded here is kept out of the hash rather
+than ignored inside it, while one a recipe does own still arrives.
 
 =cut
 
@@ -400,13 +399,18 @@ sub global_args {
 =head3 %schema = $recipe->schema()
 
 What C<validate> checks against: this recipe's C<args()> with C<global_args>
-laid underneath its C<properties>.
+laid underneath its C<properties>, refusing any key neither of them declares.
 
-B<Properties only.>  Every other key in a schema -- C<required>,
-C<additionalProperties>, C<oneOf> -- is the recipe's alone.  Nineteen recipes
-declare a C<required> list, and L<Hash::Merge> concatenates arrays under every
-behavior it has, so a merge that touched C<required> would hand koan a list
-with two C<user>s in it.
+B<Properties are what merges.>  Every other key in a schema -- C<required>,
+C<oneOf> -- is the recipe's alone.  Nineteen recipes declare a C<required>
+list, and L<Hash::Merge> concatenates arrays under every behavior it has, so a
+merge that touched C<required> would hand koan a list with two C<user>s in it.
+
+C<additionalProperties> is set B<here>, and is not a recipe's to answer: it is
+what makes a key nothing declares an error rather than a value silently read by
+nobody.  A recipe therefore has to be handed only what it declares, which is
+C<takes>'s job -- C<bin/new_config> keeps the settings a recipe has no opinion
+about out of the hash it validates, rather than every recipe declaring them.
 
 Deliberately B<not> folded into C<args()>.  L<Provisioner::Cookbook/spec> calls
 C<args()>, and C<bin/recipes>, C<bin/new_guest --scaffold>,
@@ -424,7 +428,35 @@ sub schema {
     my %args   = $self->args();
     my %global = $self->global_args();
 
-    return ( %args, properties => { %{ $global{properties} // {} }, %{ $args{properties} // {} } } );
+    return ( %args, additionalProperties => 0, properties => { %{ $global{properties} // {} }, %{ $args{properties} // {} } } );
+}
+
+=head3 %mine = $recipe->takes(%offered)
+
+Whichever of C<%offered> this recipe's C<schema> declares, and nothing else.
+
+For C<bin/new_config>, which hands every recipe one per-domain hash of settings.
+Some of what travels in it is not a recipe's business at all -- C<libdir> is
+spent on C<@INC> before any recipe exists, C<size> is the hypervisor's -- and
+since C<schema> refuses what it does not declare, handing one of those over is
+a refusal rather than a value nobody reads.
+
+Filtering here rather than declaring them in C<global_args> is what keeps that
+declaration honest: it lists what a recipe B<acts on>, not everything that
+happens to travel beside it.
+
+A recipe's own configuration does B<not> come through here.  An unknown key
+there is the operator's mistake, and refusing it is the point.
+
+=cut
+
+sub takes {
+    my ( $self, %offered ) = @_;
+
+    my %schema = $self->schema();
+    my $props  = $schema{properties} // {};
+
+    return map { exists $offered{$_} ? ( $_ => $offered{$_} ) : () } keys %$props;
 }
 
 =head3 @fmts = $recipe->formatters()

@@ -29,6 +29,7 @@ use Test::More;
 use Test::MockModule qw{strict};
 use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir tempfile};
+use File::Slurper();
 use File::Slurper::Temp();
 use YAML::XS();
 
@@ -126,6 +127,16 @@ subtest 'two domains on one guest generate when the recipe can be shared' => sub
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
     ok( -f "$domains/$HOST/Makefile",   'the host was generated' );
     ok( -f "$domains/$TENANT/Makefile", 'and so was the domain layered onto it' );
+
+    # Neither of these guests has the data recipe in its build: it is required
+    # by a recipe that declares restores, and nosnap declares none.  The target
+    # is makefile.tt's own and is emitted regardless, so what it interpolates
+    # there is an empty fragment rather than an absent one.
+    like(
+        File::Slurper::read_text("$domains/$HOST/Makefile"),
+        qr{^/etc/provisioner/state/\Q$HOST\E/data:$}m,
+        'the data target is written even with no data recipe to fill it'
+    );
 };
 
 subtest 'a recipe that cannot be shared is refused rather than replacing the first domain' => sub {

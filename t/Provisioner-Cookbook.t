@@ -30,9 +30,8 @@ subtest 'configuration() reads recipes.yaml and the recipes.d beside it' => sub 
     my $dir = File::Temp::tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", <<'YAML' );
 _base:
-    data:
-        from: /opt/data
-        to: /opt/domains
+    ntp:
+        pool: base.pool
 _shared:
     one.test:
         - two.test
@@ -45,8 +44,8 @@ YAML
     mkdir "$dir/recipes.d";
     File::Slurper::Temp::write_text( "$dir/recipes.d/two.test.yaml", <<'YAML' );
 _base:
-    data:
-        from: /somewhere/else
+    ntp:
+        pool: somewhere.else
 _shared: {}
 two.test:
     ntp:
@@ -55,7 +54,7 @@ YAML
     Provisioner::Cookbook->forget();
     my $conf = Provisioner::Cookbook->configuration("$dir/recipes.yaml");
 
-    is( $conf->{_base}{data}{from}, '/opt/data', 'the base survives a domain file that also names one' );
+    is( $conf->{_base}{ntp}{pool}, 'base.pool', 'the base survives a domain file that also names one' );
     is_deeply( $conf->{_shared}{'one.test'}, ['two.test'], 'and so does _shared' );
     ok( exists $conf->{'one.test'}, 'the domain in recipes.yaml is there' );
     ok( exists $conf->{'two.test'}, 'and the one in recipes.d' );
@@ -128,9 +127,9 @@ subtest 'remember() seats what a run resolved, so recipes read that' => sub {
 subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
     my $conf = {
         _base => {
-            _global => { user => 'www-data' },
-            data    => { from => '/opt/data', to => '/opt/domains' },
-            ntp     => { pool => 'base.pool' },
+            _global    => { user        => 'www-data' },
+            autoupdate => { autorestart => '/root/no_autorestart' },
+            ntp        => { pool        => 'base.pool' },
         },
         'one.test' => {
             _global => { user   => 'someone-else' },
@@ -144,7 +143,7 @@ subtest 'domain_config folds _base into the domain, the way a provision reads it
     is( $one->{ntp}{pool},   'base.pool', 'what _base configures a recipe with reaches the domain' );
     is( $one->{ntp}{iburst}, 1,           'and what the domain adds is kept' );
     ok( exists $one->{nginx}, 'along with a recipe only the domain asks for' );
-    is( $one->{data}{from}, '/opt/data', 'and the data configuration comes with it' );
+    is( $one->{autoupdate}{autorestart}, '/root/no_autorestart', 'and a _base recipe the domain never mentions comes with it' );
 
     # _global merges the other way round -- the domain's own wins -- so it is
     # not this method's to answer.
@@ -243,27 +242,21 @@ YAML
 
 subtest 'the data source, and a domain inside it' => sub {
     my $conf = {
-        _base       => { data => { from => '/opt/data', to => '/opt/domains' } },
-        'one.test'  => { ntp  => {} },
-        'own.test'  => { data => { to => '/srv' } },
-        'none.test' => { ntp  => {} },
+        _base       => { _global => { data_source => '/opt/data', install_dir => '/opt/domains' } },
+        'one.test'  => { ntp     => {} },
+        'own.test'  => { _global => { install_dir => '/srv' } },
+        'none.test' => { ntp     => {} },
     };
 
-    is_deeply( Provisioner::Cookbook->data_config( undef, $conf ), { from => '/opt/data', to => '/opt/domains' }, 'what every domain gets' );
-    is( Provisioner::Cookbook->data_dir( 'one.test', $conf ), '/opt/data/one.test', 'and the directory one of them owns' );
+    is( Provisioner::Cookbook->data_dir( 'one.test', $conf ), '/opt/data/one.test', 'the directory a domain owns under the source' );
 
-    # Where a domain contradicts _base, domain_config's answer is the one a
-    # provision would use -- and that is now the domain's, _base being a base of
-    # defaults.  Which also makes the two spellings agree: install_dir in
-    # _global has always been the domain's to override, and this is the older
-    # one it falls back to.
-    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{to},   '/srv',      'a domain can put its install dir somewhere else' );
-    is( Provisioner::Cookbook->install_dir( 'own.test', $conf ),         '/srv',      'and install_dir agrees, reading through to it' );
-    is( Provisioner::Cookbook->data_config( 'own.test', $conf )->{from}, '/opt/data', 'without disturbing what _base said about the rest' );
+    # Where a domain contradicts _base, the domain's is the answer a provision
+    # would use, _base being a base of defaults.
+    is( Provisioner::Cookbook->install_dir( 'own.test', $conf ), '/srv',         'a domain can put its install dir somewhere else' );
+    is( Provisioner::Cookbook->install_dir( 'one.test', $conf ), '/opt/domains', 'without disturbing what _base said for the rest' );
 
     is( Provisioner::Cookbook->data_dir( undef,      $conf ), undef, 'no domain, no directory' );
     is( Provisioner::Cookbook->data_dir( 'one.test', {} ),    undef, 'and none when nothing says where the data source is' );
-    is( Provisioner::Cookbook->data_config( 'none.test', {} ), undef, 'which is undef rather than an error' );
 };
 
 subtest 'the shelf has the recipes on it' => sub {
@@ -363,6 +356,10 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
                     },
                 },
                 bag => { type => 'object', additionalProperties => { type => 'string' } },
+
+                # Answered by whatever builds the guest rather than by an
+                # operator: the storage volume it made, the MAC it assigned.
+                computed => { type => 'string', readOnly => 1 },
             },
         );
     }
@@ -405,6 +402,15 @@ subtest 'all => 1 is the full menu' => sub {
     is( $config->{opt_dflt},         'optional default',                 'optional fields appear, with their defaults' );
     is( $config->{optional},         Provisioner::Cookbook->PLACEHOLDER, 'and without' );
     is( $config->{nested}{inner_op}, Provisioner::Cookbook->PLACEHOLDER, 'through nested objects too' );
+};
+
+subtest 'a readOnly field is never offered to fill in' => sub {
+    my ($full) = scaffold_of( all => 1 );
+    ok( !exists $full->{computed}, 'not even on the full menu, whatever builds the guest having answered it already' );
+
+    my ( $config, @todo ) = scaffold_of();
+    ok( !exists $config->{computed},                      'nor in the smallest thing that could work' );
+    ok( !( grep { index( $_, 'computed' ) >= 0 } @todo ), 'and not among the paths that need a human' );
 };
 
 subtest 'provided fields are left alone' => sub {
@@ -558,6 +564,43 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     is( scalar @$modules, scalar keys %at, 'and the list comes back deduplicated, so callers need not' );
 };
 
+# Configuring a dependency explicitly: a block inside a recipe's stanza, named
+# for a recipe it requires.  See docs/CONFIGURATION.md.
+subtest 'a dependency configured inside its requirer is lifted out of the stanza' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my $out  = File::Temp::tempdir( CLEANUP => 1 );
+    my %conf = ( t_requirer => { t_dep => { secret => 'said here' }, t_nonsense => { x => 1 } } );
+
+    Provisioner::Cookbook->resolve_dependencies(
+        modules     => ['t_requirer'],
+        domain_conf => \%conf,
+        distro      => 'ubuntu',
+        provisioner => {
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => $out,
+        },
+        domain => 'd.test',
+    );
+
+    is( $conf{t_dep}{secret}, 'said here', 'what the stanza said reaches the dependency' );
+    ok( !exists $conf{t_requirer}{t_dep}, 'and is gone from the requirer, which declares no such field' );
+
+    # The other half, and what makes that lifting load-bearing: a block named for
+    # a recipe this one does not require is left where it was written, and a
+    # schema that refuses what it does not declare is what says so.  It used to
+    # travel to the templates and configure nothing.
+    ok( exists $conf{t_requirer}{t_nonsense}, 'a block naming a recipe it does not require stays put' );
+    like(
+        exception {
+            'Provisioner::Recipe::t_requirer'->new( template_dirs => ['templates'], output_dir => $out )->validate( %{ $conf{t_requirer} }, domain => 'd.test' );
+        },
+        qr/t_nonsense/,
+        'so the refusal names it, rather than the build ignoring it'
+    );
+};
+
 subtest 'an interface is resolved rather than passed along' => sub {
 
     # Which recipe answers for one is the interface's to say -- this only holds
@@ -702,18 +745,13 @@ subtest 'where a domain lives is _global to say, not the data recipe' => sub {
     is( Provisioner::Cookbook->install_dir( 'own.test',   $conf ), '/elsewhere',   'and a domain may say otherwise' );
     is( Provisioner::Cookbook->data_source( 'plain.test', $conf ), '/srv/data', 'likewise the source' );
 
-    # It used to be read out of data's `to`, so a configuration written before
-    # the move has to go on working.
-    my $legacy = { _base => { data => { from => '/opt/data', to => '/opt/domains' } }, 'a.test' => {} };
-    is( Provisioner::Cookbook->install_dir( 'a.test', $legacy ), '/opt/domains', 'falling back to what data says' );
-    is( Provisioner::Cookbook->data_source( 'a.test', $legacy ), '/opt/data',    'both halves of it' );
-
-    # _global wins where they disagree: that is the point of the move.
-    my $both = {
-        _base    => { _global => { install_dir => '/srv/domains' }, data => { to => '/opt/domains' } },
-        'a.test' => {},
-    };
-    is( Provisioner::Cookbook->install_dir( 'a.test', $both ), '/srv/domains', 'and _global is the one that counts' );
+    # The older spelling is gone rather than deprecated: nothing reads `to` or
+    # `from` under data, so a configuration saying only those gets the default
+    # and nothing respectively.  A path that is not the default, or this would
+    # pass whether the fallback were there or not.
+    my $legacy = { _base => { data => { from => '/opt/data', to => '/somewhere/else' } }, 'a.test' => {} };
+    is( Provisioner::Cookbook->install_dir( 'a.test', $legacy ), '/opt/domains', 'the default, rather than what data says' );
+    is( Provisioner::Cookbook->data_source( 'a.test', $legacy ), undef,          'and nothing at all for the source' );
 
     # A path to render is harmless to guess at.  Where the teardown sweeps is
     # not, so that one says nothing rather than pointing at a directory nobody

@@ -240,13 +240,12 @@ foreach my $key ( 'data', @available ) {
     $recipes_raw{"$key.$tld"} = { $key => $data };
 }
 $recipes_raw{_base} = {
-    _global   => { user => 'test' },
+    _global   => { user => 'test', data_source => "/$tmpdir/data", install_dir => "/$tmpdir/domains" },
     registrar => {
         type => "bogus",
         user => "bogus",
         key  => "bogus",
     },
-    data => { from => "/$tmpdir/data", to => "/$tmpdir/domains" },
 };
 
 my $recipes = YAML::XS::Dump( \%recipes_raw );

@@ -46,9 +46,9 @@ salvaged off the last one.
 It reads C<install_dir> and C<data_source> and has no fields of its own.  They
 used to be this recipe's C<to> and C<from>, which meant every recipe that
 interpolates C<install_dir> -- nearly all of them -- depended on this one for a
-path rather than for anything it does.  A configuration still saying them here
-goes on working: L<Provisioner::Cookbook> reads C<install_dir> out of C<to> and
-C<data_source> out of C<from> when C<_global> is quiet.
+path rather than for anything it does.  Those two spellings are gone rather than
+deprecated: C<_global> is the only place either is read from, and a
+configuration still naming them under C<data> is refused rather than ignored.
 
 What it puts back, and where, comes from the recipes: see C<restores> in
 L<Provisioner::Recipe>.

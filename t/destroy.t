@@ -319,7 +319,7 @@ my $data = tempdir( CLEANUP => 1 );
 sub write_config {
     my (%domains) = @_;
 
-    my $yaml = "_base:\n    data:\n        from: $data\n        to: /opt/domains\n";
+    my $yaml = "_base:\n    _global:\n        data_source: $data\n        install_dir: /opt/domains\n";
     $yaml .= "$_:\n    ntp:\n" for sort keys %domains;
 
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", $yaml );
@@ -440,20 +440,6 @@ subtest 'a sweep with nothing to do says so' => sub {
     my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
     like( $said, qr/belongs[ ]to[ ]a[ ]guest[ ]that[ ]is[ ]gone/, 'says there is nothing' );
     is( $rc, 0, 'and is not a failure' );
-};
-
-subtest 'the sweep finds the data source where _global says it' => sub {
-
-    # Where a configuration says it now.  The sweep read only the data recipe's
-    # from, and on a configuration saying it here it swept nothing at all.
-    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    _global:\n        data_source: $data\nnamed.test:\n    ntp:\n" );
-    Provisioner::Cookbook->forget();
-    make_path("$data/$_") for qw{orphan.test named.test};
-
-    says( sub { Trog::Bin::Destroy::sweep_orphans( undef, undef, 0 ) } );
-    ok( !-e "$data/orphan.test", 'the orphan goes' );
-    ok( -d "$data/named.test",   'and the named one stays' );
-    File::Path::remove_tree("$data/named.test");
 };
 
 subtest 'with no data source, the domain directories are still swept' => sub {
