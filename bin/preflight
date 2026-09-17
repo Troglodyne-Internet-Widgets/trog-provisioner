@@ -121,20 +121,15 @@ sub seed_admin_keys {
 
     return 0 unless Trog::Local->interactive;
 
-    # IO::Prompter reads from *ARGV, which here holds this program's own
-    # arguments and sends it off to open a file named after one.  Flattening it
-    # leaves nothing there to open; see Trog::Credentials, which does the same.
-    local *ARGV = join ' ', @ARGV;
-
     # The two ssh-import-id answers to, as a hash rather than a match: what the
     # answer has to be one of is the thing worth writing down.
     my %offered = map { $_ => 1 } qw{gh lp};
 
-    my $service = IO::Prompter::prompt('Seed it now? Which service [gh, lp, or empty to skip]:');
+    my $service = Trog::Utils::prompt('Seed it now? Which service [gh, lp, or empty to skip]:');
     my $at      = "$service";
     return 0 unless $offered{$at};
 
-    my $who = IO::Prompter::prompt('Whose keys, as that service spells the name:');
+    my $who = Trog::Utils::prompt('Whose keys, as that service spells the name:');
     return 0 unless length "$who";
 
     my @cmd = ( 'ssh-import-id', '-o', $path, "$at:$who" );
