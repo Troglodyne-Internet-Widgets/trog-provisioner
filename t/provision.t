@@ -288,6 +288,10 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
 
     my %seeded;
     $hv->redefine( domain_exists => sub { 0 } );
+
+    # No domain yet, so no uuid to carry: the XML leaves the element out and
+    # libvirt mints one, which is what a first build has always done.
+    $hv->redefine( domain_uuid   => sub { undef } );
     $hv->redefine( delete_volume => sub { 1 } );
     $hv->redefine( pool          => sub { 1 } );
     $hv->redefine( base_image    => sub { '/bogus/pool/baseimage-qcow2' } );
@@ -375,6 +379,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     # guest keeps its MAC and still gets a new address, and dnsmasq keeps the
     # old lease until it expires.
     $hv->redefine( domain_exists        => sub { 1 } );
+    $hv->redefine( domain_uuid          => sub { '35341952-6f2b-457a-a882-80f6c47e2d2c' } );
     $hv->redefine( annihilate_domain    => sub { push( @applied, 'annihilate_domain' ); 1 } );
     $hv->redefine( lease_ips            => sub { qw{192.168.122.97 192.168.122.96} } );
     $hv->redefine( release_dhcp_lease   => sub { push( @applied, "release $_[1]" ); 1 } );
@@ -428,13 +433,32 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
 sub rebuild_answering {
     my (%answers) = @_;
 
-    my %seen = ( snapshots => [], cleared => {}, asked => [] );
+    my %seen = ( snapshots => [], cleared => {}, asked => [], order => [], uuid_asked => 0 );
     my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc  = Test::MockModule->new('Trog::Local');
 
-    $hv->redefine( rollback_possible => sub { my ( undef, undef, %o ) = @_; push @{ $seen{asked} },     $o{capacity}; return $answers{rollback_possible} } );
-    $hv->redefine( create_snapshot   => sub { my ( undef, undef, $n ) = @_; push @{ $seen{snapshots} }, $n;           return 1 } );
-    $hv->redefine( clear_guest       => sub { my ( undef, undef, %o ) = @_; %{ $seen{cleared} } = %o; return 1 } );
+    # The identity the rebuild has to carry forward.  A domain that is kept
+    # rather than undefined keeps its uuid, and libvirt refuses to redefine it
+    # under any other -- so this being asked for, and reaching the XML, is the
+    # difference between a rebuild and "domain already exists with uuid".
+    $hv->redefine(
+        domain_uuid => sub {
+            $seen{uuid_asked}++;
+            return '35341952-6f2b-457a-a882-80f6c47e2d2c';
+        }
+    );
+
+    $hv->redefine( rollback_possible => sub { my ( undef, undef, %o ) = @_; push @{ $seen{asked} }, $o{capacity}; return $answers{rollback_possible} } );
+    $hv->redefine( stop_domain => sub { push @{ $seen{order} }, 'stop_domain'; return 1 } );
+    $hv->redefine(
+        create_snapshot => sub {
+            my ( undef, undef, $n ) = @_;
+            push @{ $seen{snapshots} }, $n;
+            push @{ $seen{order} },     'create_snapshot';
+            return 1;
+        }
+    );
+    $hv->redefine( clear_guest => sub { my ( undef, undef, %o ) = @_; %{ $seen{cleared} } = %o; return 1 } );
 
     $hv->redefine( domain_exists        => sub { 1 } );
     $hv->redefine( define_domain        => sub { 1 } );
@@ -488,6 +512,23 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
     is( $seen->{cleared}{keep_disk}, 1,           'and told to keep the disk the snapshot is inside' );
 
     like( $said, qr{bin/restore [ ] --name [ ] before-reprovision}, 'and the operator is told how to go back' );
+
+    # The order, not merely that both happened.  libvirt refuses an internal
+    # snapshot of a running domain -- error 84, "live snapshot creation is
+    # supported only during full system snapshots" -- so a rollback point taken
+    # before the guest is stopped is not taken at all.  Measured on a
+    # hypervisor, where exactly that happened and the rebuild fell through to
+    # deleting the disk it was meant to keep.
+    is_deeply(
+        $seen->{order}, [qw{stop_domain create_snapshot}],
+        'the guest is stopped before its rollback point is taken, which is the only order libvirt allows'
+    );
+
+    # Keeping the disk means leaving the domain defined, and libvirt binds a
+    # name to a uuid: a rebuild that writes XML without the one it already has
+    # is refused with "domain already exists with uuid", which is where this
+    # came from.  Measured on a hypervisor, twice.
+    ok( $seen->{uuid_asked}, 'and the uuid it is already bound to is asked for, to be carried into the new XML' );
 };
 
 subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by saying nothing' => sub {
@@ -496,6 +537,7 @@ subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by
     # A snapshot here would be taken inside a disk that is about to be deleted,
     # which is worse than not taking one: it reads as a rollback that exists.
     is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted' );
+    is_deeply( $seen->{order},     [], 'and the guest is not stopped for a snapshot that is not coming' );
     is( $seen->{cleared}{keep_disk}, 0, 'and the disk goes, the way it always did' );
     unlike( $said, qr{bin/restore}, 'with no rollback offered that would not be there' );
 };

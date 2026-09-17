@@ -669,6 +669,16 @@ sub provision_domain (%args) {
     # -- rollback_possible is the backend saying which of those this is.
     my $rollback;
     if ( $hv->rollback_possible( $domain, capacity => $settings{size} ) ) {
+
+        # Stopped first, and not as a courtesy.  libvirt refuses an internal
+        # snapshot of a running domain -- error 84, "live snapshot creation is
+        # supported only during full system snapshots" -- and this one is disk
+        # only.  Measured on a hypervisor: the same snapshot of the same guest
+        # was refused running and taken stopped.  Nothing is lost by it, since
+        # the guest is about to be rebuilt either way, and a backend that has no
+        # such rule does nothing here.
+        $hv->stop_domain($domain);
+
         my $snapname = 'before-reprovision-' . time;
 
         # Only a rollback point if it was actually taken: create_snapshot warns

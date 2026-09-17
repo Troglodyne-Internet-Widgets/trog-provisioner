@@ -1001,6 +1001,19 @@ already own.
 
 sub clear_guest { return 1 }
 
+=head2 stop_domain($domain)
+
+Nothing, for the same reason C<clear_guest> is nothing.
+
+What it exists for on libvirt is a disk qemu holds open and a hypervisor that
+will not snapshot a running domain.  Nova takes an image of a server while it
+runs, and the image is Glance's rather than the disk's, so there is nothing
+here that stopping would make possible -- only a guest that was needlessly off.
+
+=cut
+
+sub stop_domain { return 1 }
+
 =head2 rollback_possible($domain, %opts)
 
 Whether a snapshot taken now would still be there afterwards.  Here it is:

@@ -329,6 +329,26 @@ sub stop_domain {
     return 1;
 }
 
+=head2 domain_uuid($name)
+
+The uuid libvirt has for this domain, or undef when it has no such domain.
+
+Wanted by the rebuild that keeps a guest's disk.  That one deliberately does not
+undefine the domain -- undefining discards libvirt's record of its snapshots,
+which is the thing being preserved -- and libvirt binds a name to a uuid and
+refuses to redefine a domain it already has under a different one.  So the XML
+written for the rebuild carries the uuid the domain already has, and a first
+build carries none and lets libvirt mint one.
+
+=cut
+
+sub domain_uuid {
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name) or return undef;
+
+    return eval { $domain->get_uuid_string() };
+}
+
 sub annihilate_domain {
     my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
@@ -895,6 +915,15 @@ sub create_snapshot {
 
     # LIVE only means anything for a running domain, and libvirt rejects it for
     # one that isn't.
+    #
+    # The other half of that rule is not written down anywhere and cost a
+    # rebuild to find: libvirt refuses this outright for a running domain --
+    # error 84, "live snapshot creation is supported only during full system
+    # snapshots" -- because the snapshot here is disk only and carries no
+    # memory.  So a snapshot of a running guest fails however it is asked for,
+    # and the caller that wants one stops the domain first.  bin/provision does;
+    # bin/snapshot does not, and says in its own POD that it takes a live
+    # snapshot, which is a thing this cannot do.
     $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
@@ -1324,8 +1353,14 @@ or undef when qemu-img could not be asked.
 sub disk_layout {
     my ( $self, $name ) = @_;
 
+    # sudo, and -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
+    # an unprivileged qemu-img cannot open it at all; and this is only ever
+    # asked about a guest that is running, whose qemu holds a write lock, so
+    # without -U it cannot open it either.  Both failures came back as an empty
+    # answer, which reads as "no snapshots" and made the whole thing decline to
+    # engage -- twice, silently, because the errors were going to /dev/null.
     my $path = $self->volume_path($name) or return undef;
-    my $json = $self->capture_cmd("qemu-img info --output=json '$path' 2>/dev/null") // q{};
+    my $json = $self->capture_cmd("sudo qemu-img info -U --output=json '$path'") // q{};
     my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
 
     my $format = $info->{'format-specific'}{data} // {};
@@ -1365,6 +1400,13 @@ Put a volume back to one of its own internal snapshots, leaving its others where
 they are.  The domain must not be running: qemu-img writes the file directly,
 and qemu holding it open is how an image gets corrupted rather than reverted.
 
+Deliberately without the C<-U> that C<disk_layout> and C<disk_snapshot_names>
+pass.  That flag forces a share past qemu's write lock, which is safe for
+reading a running guest's disk and is the opposite of safe for writing to one:
+it is the difference between asking an image a question and editing it behind
+the back of the process that has it open.  C<snapshot_disk> is the same, and
+needs no flag for a different reason -- it runs before the domain exists.
+
 Measured on a hypervisor before this was written, because the whole design rests
 on it -- reverting to one snapshot leaves every other one listed, and still
 something the disk can be put back to, and the backing file survives.
@@ -1391,8 +1433,13 @@ Every internal snapshot in a volume, in the order qemu-img lists them.
 sub disk_snapshot_names {
     my ( $self, $name ) = @_;
 
+    # sudo and -U for the reasons disk_layout gives, and they matter most here:
+    # this is what rollback_possible asks, about a guest that is running, and an
+    # empty answer from a disk it could not open is indistinguishable from a
+    # disk with no snapshots in it.  That is the whole feature declining to
+    # engage, for a reason nothing prints.
     my $path = $self->volume_path($name) or return ();
-    my $said = $self->capture_cmd("qemu-img snapshot -l '$path' 2>/dev/null") // q{};
+    my $said = $self->capture_cmd("sudo qemu-img snapshot -l -U '$path'") // q{};
 
     # The header names the columns; every line after it starts with a numeric
     # id and carries the tag second.
@@ -2019,7 +2066,13 @@ sub provision_guest {
     # The disks, the base image and the seed ISO, before the XML that names them
     # by path: there is no rendering it without making them first.
     my %storage = $vm->create_storage( %settings, domain => $domain, seed => $seed );
-    $vm->generate_files( $dir, %settings, %storage, domain => $domain );
+
+    # Read before the XML is written, and only ever found on the rebuild that
+    # kept the disk: that one leaves the domain defined, and libvirt refuses to
+    # redefine a domain it has under a uuid other than the one it gave it.
+    # Undef on a first build, where the template leaves the element out.
+    my $uuid = $self->domain_uuid($domain);
+    $vm->generate_files( $dir, %settings, %storage, domain => $domain, uuid => $uuid );
 
     my $file = "$dir/domain.xml";
     print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain

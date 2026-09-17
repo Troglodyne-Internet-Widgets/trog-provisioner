@@ -8,6 +8,14 @@
     string, and swallows the template as far as the next quote. -%]
 <domain type='kvm'>
   <name>[% domain %]</name>
+[%# The identity of a domain that is already defined, on the rebuild that keeps
+    its disk.  libvirt binds a name to a uuid, and refuses to redefine a domain
+    it has under a different one -- so a rebuild that does not undefine first
+    has to hand back the uuid it was given.  Absent on a first build, where
+    there is no domain yet and libvirt mints one. -%]
+[% IF uuid -%]
+  <uuid>[% uuid %]</uuid>
+[% END -%]
   <memory unit='MiB'>[% memory %]</memory>
   <currentMemory unit='MiB'>[% memory %]</currentMemory>
   <vcpu placement='static'>[% cpus %]</vcpu>

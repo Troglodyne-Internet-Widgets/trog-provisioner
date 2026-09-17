@@ -87,6 +87,11 @@ cloud rebuilds the server it already has, so there is nothing to clear.  Takes
 C<keep_disk>, which says to leave the guest's disk where it is -- see
 C<rollback_possible> for when that is allowed.
 
+=item * C<stop_domain($domain)>, the guest off but still defined, for the
+things that cannot be done to it while it runs.  libvirt has two: qemu holds a
+write lock on the disk, and it refuses an internal snapshot of a running
+domain.  A cloud has neither, and says so by doing nothing.
+
 =item * C<rollback_possible($domain, capacity =E<gt> $bytes)>, whether a
 snapshot taken now would still be there to go back to after the rebuild.
 
@@ -443,6 +448,7 @@ sub release_seed          ( $self, @ ) { return $self->_abstract('release_seed')
 sub guest_volumes         ( $self, @ ) { return $self->_abstract('guest_volumes') }
 sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') }
 sub rollback_possible     ( $self, @ ) { return $self->_abstract('rollback_possible') }
+sub stop_domain           ( $self, @ ) { return $self->_abstract('stop_domain') }
 sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
 sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
 

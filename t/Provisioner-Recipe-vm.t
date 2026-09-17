@@ -52,7 +52,7 @@ use Provisioner::Cookbook();
 # is going to name, then generate the files.  Reads back what was written rather
 # than what was returned, because the file is what libvirt is handed.
 sub domain_xml {
-    my ( $config, $seed ) = @_;
+    my ( $config, $seed, %extra ) = @_;
 
     my $hv       = Trog::HV->new();
     my $domain   = $config->param('domain');
@@ -66,7 +66,7 @@ sub domain_xml {
     );
 
     my %storage = $vm->create_storage( %settings, domain => $domain, seed => $seed );
-    $vm->generate_files( $dir, %settings, %storage, domain => $domain );
+    $vm->generate_files( $dir, %settings, %storage, domain => $domain, %extra );
 
     return File::Slurper::read_text("$dir/domain.xml");
 }
@@ -231,6 +231,53 @@ sub _tuned_output {
 # so does everything that compares one here.  Spelled out because 0.9.8 and
 # 9.8.0 are two very different numbers and only one of them is a real libvirt.
 sub _libvirt { my ( $major, $minor, $release ) = @_; return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + $release }
+
+subtest 'a rebuild that keeps its disk writes the uuid libvirt already gave it' => sub {
+    my $config = Config::Simple->new(
+        _conf(
+            domain => 'vm.example.test', memory => 2048,
+            cpus   => 2, size => 42949672960, image => 'https://example.test/img'
+        )
+    );
+
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv_mock->redefine( bridge_device        => sub { 'br0' } );
+    $hv_mock->redefine( has_tpm              => sub { 0 } );
+    $hv_mock->redefine( pool                 => sub { 1 } );
+    $hv_mock->redefine( base_image           => sub { '/pool/baseimage-qcow2' } );
+    $hv_mock->redefine( create_disk          => sub { '/pool/vm.example.test-qcow2' } );
+    $hv_mock->redefine( cloudinit_iso        => sub { '/pool/seed.iso' } );
+    $hv_mock->redefine( domain_dir           => sub { $_[0]->{domain_dir} } );
+    $hv_mock->redefine( libvirt_version      => sub { 0 } );
+    $hv_mock->redefine( qemu_version         => sub { 0 } );
+    $hv_mock->redefine( pool_fstype          => sub { 'ext2/ext3' } );
+    $hv_mock->redefine( pool_takes_direct_io => sub { 1 } );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    mkdir "$dir/vm.example.test";
+    Trog::HV->forget();
+    Trog::HV->new( uri => 'qemu+ssh://root@hv/system', domain_dir => $dir );
+
+    my %seed = (
+        'user-data'      => "#cloud-config\n",
+        'meta-data'      => "instance-id: vm.example.test\n",
+        'network-config' => "version: 1\n",
+    );
+
+    # The rebuild that keeps a disk does not undefine the domain, because
+    # undefining discards libvirt's record of its snapshots.  libvirt binds a
+    # name to a uuid, so handed XML with a different one it refuses outright --
+    # "domain already exists with uuid" -- which is where this came from.
+    my $kept = quietly( sub { domain_xml( $config, \%seed, uuid => '35341952-6f2b-457a-a882-80f6c47e2d2c' ) } );
+    like( $kept, qr{<uuid>35341952-6f2b-457a-a882-80f6c47e2d2c</uuid>}, 'the uuid it was handed is written into the domain' );
+
+    # Absent on a first build, where there is no domain to take one from and
+    # libvirt mints its own.  An empty element would be worse than none at all.
+    my $fresh = quietly( sub { domain_xml( $config, \%seed ) } );
+    unlike( $fresh, qr/<uuid>/, 'and no uuid element at all when there is none to carry' );
+
+    Trog::HV->forget();
+};
 
 subtest 'a hypervisor from before any of this gets a domain it can still define' => sub {
     my $xml = _tuned_xml( libvirt => _libvirt( 0, 9, 0 ), qemu => _libvirt( 1, 0, 0 ) );

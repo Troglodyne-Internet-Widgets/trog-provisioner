@@ -811,17 +811,30 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
 
     package FakeStoppableDomain;
 
-    sub new       { my ( $class, $active, $stopped ) = @_; return bless { active => $active, stopped => $stopped }, $class }
-    sub is_active { my ($self) = @_; return $self->{active} }
-    sub destroy   { my ($self) = @_; ${ $self->{stopped} }++; return 1 }
+    sub new             { my ( $class, $active, $stopped ) = @_; return bless { active => $active, stopped => $stopped }, $class }
+    sub is_active       { my ($self) = @_; return $self->{active} }
+    sub destroy         { my ($self) = @_; ${ $self->{stopped} }++; return 1 }
+    sub get_uuid_string { return '35341952-6f2b-457a-a882-80f6c47e2d2c' }
 }
 
 subtest 'what a disk was made with is read off the disk rather than remembered' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
+    my $asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
-    $mock->redefine( capture_cmd => sub { '{"cluster-size":65536,"format-specific":{"data":{"extended-l2":true}}}' } );
+    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return '{"cluster-size":65536,"format-specific":{"data":{"extended-l2":true}}}' } );
+
+    $hv->disk_layout('vm.test-qcow2');
+
+    # The command, not just the answer.  Both of these shipped broken because
+    # the mock returned a good answer to a question that could not be asked: the
+    # disk is 0600 libvirt-qemu:kvm, and the guest holding it open means qemu-img
+    # cannot open it without -U.  Either way the sub returned empty, which reads
+    # as "no snapshots" and switches the whole feature off.
+    like( $asked, qr/\b sudo \b/, 'asked as root, the disk not being ours' );
+    like( $asked, qr/-U\b/,       'and forcing a share, the guest having it open' );
+    unlike( $asked, qr{2 > /dev/null}, 'with the errors left where they can be seen' );
 
     is_deeply(
         $hv->disk_layout('vm.test-qcow2'),
@@ -850,9 +863,10 @@ ID        TAG               VM SIZE                DATE     VM CLOCK     ICOUNT
 2         before-reprovision-17    0 B 2026-09-17 00:45:01 00:00:00.000          0
 LIST
 
+    my $asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
-    $mock->redefine( capture_cmd => sub { $listing } );
+    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return $listing } );
 
     is_deeply(
         [ $hv->disk_snapshot_names('vm.test-qcow2') ],
@@ -929,6 +943,22 @@ subtest 'stopping a domain leaves it defined' => sub {
 
     $mock->redefine( _domain => sub { undef } );
     ok !$hv->stop_domain('vm.test'), 'and a domain that is not there says so';
+};
+
+subtest 'a domain that already exists hands back the uuid libvirt gave it' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $ignored = 0;
+    my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 0, \$ignored ) } );
+
+    is( $hv->domain_uuid('vm.test'), '35341952-6f2b-457a-a882-80f6c47e2d2c', 'the uuid it is already bound to' );
+
+    # Undef rather than an error: a first build has no domain to ask, and the
+    # template leaves the element out so libvirt mints one.  The rebuild that
+    # keeps a disk is the only caller that finds anything here.
+    $mock->redefine( _domain => sub { undef } );
+    is( $hv->domain_uuid('vm.test'), undef, 'and nothing at all for a domain that does not exist yet' );
 };
 
 subtest 'a rebuild that keeps the disk stops the guest rather than undefining it' => sub {
