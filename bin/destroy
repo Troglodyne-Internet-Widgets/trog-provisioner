@@ -467,6 +467,11 @@ the ones worth keeping.  What guards this instead is that it looks at nothing
 but the copies, names every one before any of them goes, and does nothing at all
 under C<$dryrun>.
 
+A backend with no way of making such copies has none to report and contributes
+nothing.  One that has a way and cannot use it -- a pool that refuses to be read
+-- throws, and nothing here catches that: an unreadable pool is not an empty one,
+and the only honest thing to do with the difference is stop.
+
 =cut
 
 sub sweep_backups {
@@ -474,17 +479,15 @@ sub sweep_backups {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
-    # A hypervisor that cannot be asked stops the sweep rather than being passed
-    # over, for the reason sweep_orphans does it: a pool we could not read is
-    # not a pool with nothing in it.
+    # Nothing caught.  A backend with no way of copying a disk aside answers with
+    # an empty list and contributes nothing, so the two cases need no telling
+    # apart here: the one that cannot is silent about it, and the one that tried
+    # and failed throws.  There is nothing useful to do with that difference
+    # except stop, and converting it to an exit code is how a pool nobody could
+    # read comes to read as a pool with nothing in it.
     my %found;
     foreach my $hv (@hvs) {
-        my @copies = eval { $hv->backup_volumes };
-        if ($@) {
-            warn 'Could not ask ' . $hv->describe . " what copies it holds, so nothing is swept:\n$@";
-            return 1;
-        }
-        push @{ $found{$_} }, $hv for @copies;
+        push @{ $found{$_} }, $hv for $hv->backup_volumes;
     }
 
     my @copies = sort keys %found;

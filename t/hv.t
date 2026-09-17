@@ -1090,16 +1090,20 @@ subtest 'the disk is copied aside as a volume of its own, with the guest stopped
     $mock->redefine( volume      => sub { undef } );
     is( quietly( sub { $hv->clone_guest_disk('vm.test') } ), undef, 'and a guest with no disk has none to copy' );
 
-    # A refusal has to read as "no copy", since the caller rebuilds over the
-    # disk only when it is told one was made.
-    my @warned;
-    {
-        local $SIG{__WARN__} = sub { push @warned, @_ };
-        $mock->redefine( volume => sub { FakeBuildVolume->new( '/opt/terraform/disks/vm.test-qcow2', 42949672960 ) } );
-        $mock->redefine( pool   => sub { FakeBuildPool->new( [], refuse => 1 ) } );
-        is( quietly( sub { $hv->clone_guest_disk('vm.test') } ), undef, 'a copy libvirt would not make is no copy' );
-    }
-    like( $warned[0], qr/Could[ ]not[ ]copy[ ]vm[.]test/, 'and it says so rather than passing silently' );
+    # A refusal must not read as "there was nothing to copy".  The caller
+    # rebuilds over the disk on the strength of a copy having been made, so a
+    # libvirt that would not make one has to take the run down rather than hand
+    # back the same undef a guest with no disk gets.
+    $mock->redefine( volume => sub { FakeBuildVolume->new( '/opt/terraform/disks/vm.test-qcow2', 42949672960 ) } );
+    $mock->redefine( pool   => sub { FakeBuildPool->new( [], refuse => 1 ) } );
+
+    like(
+        exception {
+            quietly( sub { $hv->clone_guest_disk('vm.test') } )
+        },
+        qr/libvirt[ ]would[ ]not[ ]copy[ ]it/,
+        'a copy libvirt would not make dies, rather than answering undef like a guest with no disk'
+    );
 };
 
 subtest 'a rebuild that cannot keep the disk is one that destroys the guest' => sub {

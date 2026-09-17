@@ -403,13 +403,15 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
     like( $alone, qr/1[ ]disk[ ]copied[ ]aside/, 'and a single copy is counted in the singular' );
     unlike( $alone, qr/1[ ]disks/, 'rather than agreeing with nothing' );
 
-    # A pool that will not answer is not a pool with nothing in it, and the
-    # sweep says so rather than reporting a clean fleet.
+    # A pool that will not answer is not a pool with nothing in it.  It throws,
+    # and nothing catches it: turning that into an exit code is how EPERM comes
+    # to read as "there was nothing here".
     @deleted = ();
     local $Test::Pool::REFUSE = 1;
-    my ( $refused, $rc ) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
-    is( $rc, 1, 'a pool it could not read stops the sweep' );
-    like( $refused, qr/what[ ]copies[ ]it[ ]holds/, 'saying which hypervisor would not say' );
+    my $refused = exception {
+        says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } )
+    };
+    like( $refused, qr/cannot[ ]read[ ]the[ ]pool/, 'a pool it could not read takes the run down with it' );
     is_deeply( \@deleted, [], 'and nothing is removed on the strength of it' );
 
     Trog::HV->forget();

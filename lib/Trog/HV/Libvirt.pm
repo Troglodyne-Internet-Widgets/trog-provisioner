@@ -1429,15 +1429,25 @@ F<bin/destroy> leaves it alone -- deliberately, since it is the copy of a machin
 somebody was about to lose.  One that is already there is kept rather than
 written over, because the older copy is as likely to be the wanted one.
 
-Undef when there was no disk to copy, or when libvirt would not make the copy.
+Undef when there is no disk to copy, which is an answer rather than a failure.
+
+Anything that goes wrong in the copying dies instead of answering undef.  The
+caller rebuilds over the disk on the strength of a copy having been made, so a
+refusal that read as "there was nothing to copy" would destroy exactly what it
+was asked to keep.
 
 =cut
 
 sub clone_guest_disk {
     my ( $self, $domain ) = @_;
 
+    # A guest with no disk has none to copy, which is an answer.  Everything
+    # after it is a failure if it goes wrong, and dies saying so: the caller
+    # rebuilds over the disk on the strength of a copy having been made, so a
+    # failure that read as "nothing to copy" would destroy what it was asked to
+    # keep.
     my $source = $self->volume("$domain-qcow2") or return;
-    my $info   = eval { $source->get_info() }   or return;
+    my $info   = $source->get_info();
     my $name   = "$domain.bak-qcow2";
 
     if ( my $existing = $self->volume_path($name) ) {
@@ -1452,22 +1462,15 @@ sub clone_guest_disk {
     # No backingStore declared, so the copy stands on its own rather than
     # depending on the base image this guest was laid over.  It is a backup: one
     # that stops working when somebody prunes another file is not much of one.
-    my $clone = eval {
-        $self->pool->clone_volume( <<"XML", $source );
+    my $clone = $self->pool->clone_volume( <<"XML", $source );
 <volume>
   <name>@{[ _xml_escape($name) ]}</name>
   <capacity unit='bytes'>$info->{capacity}</capacity>
   <target><format type='qcow2'/></target>
 </volume>
 XML
-    };
 
-    unless ($clone) {
-        warn "Could not copy $domain's disk aside as $name: $@";
-        return;
-    }
-
-    return eval { $clone->get_path() };
+    return $clone->get_path();
 }
 
 =head2 $hv->backup_volumes
@@ -1483,15 +1486,15 @@ the copies are made.
 sub backup_volumes {
     my ($self) = @_;
 
-    # Deliberately not wrapped in an eval.  A pool that will not answer is not a
-    # pool with nothing in it, and a caller told the second reports a clean fleet
-    # and takes nothing away -- so the refusal has to reach it.
+    # Nothing here is caught, the volume names included.  A pool that will not
+    # answer is not a pool with nothing in it, and a volume that will not say its
+    # own name is not a volume that is not there: both are a failure to find out,
+    # and a caller handed the shorter list sweeps fewer copies than exist without
+    # anything saying so.  EPERM on a pool is not a smaller answer, it is none.
     #
     # list_all_volumes rather than list_volumes, which is documented as one RPC
     # call per volume.
-    my @names = sort grep { defined && m/[.]bak-qcow2 \z/ } map {
-        eval { $_->get_name() }
-    } $self->pool->list_all_volumes();
+    my @names = sort grep { m/[.]bak-qcow2 \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
 
     return @names;
 }
