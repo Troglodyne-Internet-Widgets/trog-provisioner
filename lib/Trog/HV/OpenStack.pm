@@ -491,7 +491,7 @@ sub snapshot_current_name {
     return $newest;
 }
 
-=head2 create_snapshot($domain, $name)
+=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
 
 =head2 revert_snapshot($domain, $name)
 
@@ -499,10 +499,16 @@ Take one, and put the guest back on one.  Reverting is a Nova rebuild onto the
 snapshot's image, which keeps the server -- and so its addresses and its
 floating IP -- and replaces what is on its root disk.
 
+C<disk_only> is accepted and ignored.  It is the libvirt backend's distinction,
+where a snapshot carrying memory is the only kind a running domain will give up
+and the disk-only form means stopping the guest first.  Nova images a server
+while it runs and writes no memory either way, so there is nothing here for the
+option to select and nothing to be gained by stopping.
+
 =cut
 
 sub create_snapshot {
-    my ( $self, $domain, $name ) = @_;
+    my ( $self, $domain, $name, %opts ) = @_;
 
     my $server = $self->server($domain)
       or die "There is no guest called '$domain' to snapshot\n";

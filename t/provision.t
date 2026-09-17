@@ -433,7 +433,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
 sub rebuild_answering {
     my (%answers) = @_;
 
-    my %seen = ( snapshots => [], cleared => {}, asked => [], order => [], uuid_asked => 0 );
+    my %seen = ( snapshots => [], cleared => {}, asked => [], uuid_asked => 0 );
     my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc  = Test::MockModule->new('Trog::Local');
 
@@ -449,12 +449,10 @@ sub rebuild_answering {
     );
 
     $hv->redefine( rollback_possible => sub { my ( undef, undef, %o ) = @_; push @{ $seen{asked} }, $o{capacity}; return $answers{rollback_possible} } );
-    $hv->redefine( stop_domain => sub { push @{ $seen{order} }, 'stop_domain'; return 1 } );
     $hv->redefine(
         create_snapshot => sub {
-            my ( undef, undef, $n ) = @_;
-            push @{ $seen{snapshots} }, $n;
-            push @{ $seen{order} },     'create_snapshot';
+            my ( undef, undef, $n, %o ) = @_;
+            push @{ $seen{snapshots} }, { name => $n, disk_only => $o{disk_only} };
             return 1;
         }
     );
@@ -504,7 +502,7 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
     my ( $said, $seen ) = rebuild_answering( rollback_possible => 1 );
 
     is( scalar @{ $seen->{snapshots} }, 1, 'a rollback point was taken' );
-    like( $seen->{snapshots}[0], qr/\A before-reprovision- \d{4}-\d{2}-\d{2}-\d{6} \z/, 'named for what it is and when it was taken' );
+    like( $seen->{snapshots}[0]{name}, qr/\A before-reprovision- \d{4}-\d{2}-\d{2}-\d{6} \z/, 'named for what it is and when it was taken' );
 
     # The size this build is asking for, which is what decides whether the disk
     # the snapshot lives in can be kept at all.
@@ -513,16 +511,10 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
 
     like( $said, qr{bin/restore [ ] --name [ ] before-reprovision}, 'and the operator is told how to go back' );
 
-    # The order, not merely that both happened.  libvirt refuses an internal
-    # snapshot of a running domain -- error 84, "live snapshot creation is
-    # supported only during full system snapshots" -- so a rollback point taken
-    # before the guest is stopped is not taken at all.  Measured on a
-    # hypervisor, where exactly that happened and the rebuild fell through to
-    # deleting the disk it was meant to keep.
-    is_deeply(
-        $seen->{order}, [qw{stop_domain create_snapshot}],
-        'the guest is stopped before its rollback point is taken, which is the only order libvirt allows'
-    );
+    # Disk only, which is what takes a libvirt guest down -- and a snapshot of a
+    # running domain that carries no memory is refused outright, error 84.  The
+    # guest is about to be rebuilt, so there is no memory here worth writing.
+    ok( $seen->{snapshots}[0]{disk_only}, 'the rollback point is asked for disk-only, which is the only kind libvirt takes here' );
 
     # Keeping the disk means leaving the domain defined, and libvirt binds a
     # name to a uuid: a rebuild that writes XML without the one it already has
@@ -536,8 +528,7 @@ subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by
 
     # A snapshot here would be taken inside a disk that is about to be deleted,
     # which is worse than not taking one: it reads as a rollback that exists.
-    is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted' );
-    is_deeply( $seen->{order},     [], 'and the guest is not stopped for a snapshot that is not coming' );
+    is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted, so nothing stopped the guest for one either' );
     is( $seen->{cleared}{keep_disk}, q{}, 'and the disk goes, the way it always did' );
     unlike( $said, qr{bin/restore}, 'with no rollback offered that would not be there' );
 };

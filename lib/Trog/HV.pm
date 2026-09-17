@@ -476,28 +476,15 @@ sub snapshot_before_rebuild {
 
     return unless $self->rollback_possible( $domain, capacity => $opts{capacity} );
 
-    $self->quiesce_for_snapshot($domain);
-
     my $name = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
 
-    return $self->create_snapshot( $domain, $name ) ? $name : undef;
+    # Disk only: the guest is about to be rebuilt, so writing its memory out
+    # would cost time and size for a state nobody will go back to.  Asking for
+    # it is also what takes a libvirt guest down, which is the only state that
+    # backend will snapshot a disk in; a cloud images a running server and has
+    # no such distinction to make.
+    return $self->create_snapshot( $domain, $name, disk_only => 1 ) ? $name : undef;
 }
-
-=head2 $hv->quiesce_for_snapshot($domain)
-
-Whatever has to be done to a guest before a snapshot of it can be taken.
-
-Nothing, here, which is the right answer for a backend whose snapshot is taken
-of a running server and kept somewhere the guest cannot reach.  libvirt is the
-exception and overrides it: the snapshot it takes is disk only, and it refuses
-one of a domain that is still running.
-
-Only called where a snapshot is actually about to be taken, so an override may
-do something the guest would not survive being done to it idly.
-
-=cut
-
-sub quiesce_for_snapshot { return 1 }
 
 =head1 PLACEMENT
 

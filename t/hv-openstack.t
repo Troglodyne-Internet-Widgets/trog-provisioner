@@ -381,9 +381,10 @@ subtest 'a cloud takes its rollback point without stopping the guest' => sub {
     my ($created) = $FAKE->calls_to('create_image');
     is $created->[3], "vm.example.com\@$name", 'and Glance holds it under the guest it was taken of';
 
-    # Which is the whole reason quiesce_for_snapshot is the backend's question
-    # rather than the caller's.  Nova images a server while it runs, so stopping
-    # one here would make nothing possible and cost the guest its uptime.
+    # Which is why disk_only is the backend's to interpret rather than the
+    # caller's.  Nova images a server while it runs and writes no memory either
+    # way, so stopping one here would make nothing possible and cost the guest
+    # its uptime.
     is_deeply [ $FAKE->calls_to('server_action') ], [],
       'the server is never acted on, so it is still up when the rebuild reaches it';
 
