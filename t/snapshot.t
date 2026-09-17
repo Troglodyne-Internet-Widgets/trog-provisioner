@@ -15,6 +15,7 @@ t/snapshot.t - bin/snapshot: taking one, and naming it
 use Test::More;
 use Test::Fatal qw{exception};
 use IPC::Run3();
+use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use Pod::Usage();
@@ -42,9 +43,10 @@ sub main_snapshot (@args) { return Trog::Bin::Snapshot::main( '--hvconf', $NO_FL
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section( "$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS' );
-like( $synopsis, qr/--name/,    'POD documents --name' );
-like( $synopsis, qr/--connect/, 'POD documents --connect' );
-like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
+like( $synopsis, qr/--name/,      'POD documents --name' );
+like( $synopsis, qr/--connect/,   'POD documents --connect' );
+like( $synopsis, qr/--disk-only/, 'POD documents --disk-only' );
+like( $synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument' );
 
 # No domain -> usage, non-zero exit.  This one has to be a real run, since
 # pod2usage exits rather than dying.
@@ -115,6 +117,56 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     main_snapshot(qw{myvm.lan --name mysnap});
     is( $captured[1], 'myvm.lan', 'domain forwarded' );
     is( $captured[2], 'mysnap',   '--name value forwarded' );
+}
+
+# Everything above redefines create_snapshot, which is how bin/snapshot came to
+# advertise a snapshot libvirt would refuse to take: the mock answered a
+# question that could never have been asked of a real hypervisor.  These two go
+# through the real one, and only stand libvirt itself out of the way.
+{
+
+    package FakeSnapDomain;
+
+    sub new       { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
+    sub is_active { my ($self) = @_; return $self->{active} }
+    sub destroy   { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
+    sub create    { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
+
+    sub create_snapshot {
+        my ( $self, $xml, $flags ) = @_;
+        push @{ $self->{seen} }, $xml;
+        return 1;
+    }
+}
+
+{
+    my @seen;
+    my $dom     = FakeSnapDomain->new( \@seen );
+    my $call    = 0;
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'live-snap' } );
+
+    is( exception { main_snapshot('myvm.lan') }, undef, 'a default run snapshots a guest that is up' );
+    like( $seen[0], qr/<memory/, 'asking libvirt for the full system snapshot it will actually give for a running domain' );
+    ok( !( grep { $_ eq 'destroy' } @seen ), 'without stopping it' );
+}
+
+{
+    my @seen;
+    my $dom     = FakeSnapDomain->new( \@seen );
+    my $call    = 0;
+    my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv_mock->redefine( _domain               => sub { $dom } );
+    $hv_mock->redefine( snapshot_current_name => sub { ++$call == 1 ? undef : 'disk-snap' } );
+
+    my $said = capture_stdout { main_snapshot(qw{myvm.lan --disk-only}) };
+
+    is( $seen[0], 'destroy', '--disk-only stops the guest first' );
+    unlike( $seen[1], qr/<memory/, 'and asks for the disk alone' );
+    is( $seen[2], 'create', 'then starts it again, an operator having asked for a snapshot rather than a shutdown' );
+    like( $said, qr/Stopping[ ]myvm[.]lan[ ]for[ ]this/,  'saying beforehand that the guest is going down' );
+    like( $said, qr/back[ ]the[ ]way[ ]it[ ]was[ ]found/, 'and afterwards that it is back' );
 }
 
 sub _run {

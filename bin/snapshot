@@ -15,7 +15,7 @@ use Trog::Hypervisors();
 
 =head1 NAME
 
-snapshot - take a live snapshot of a provisioned VM
+snapshot - take a snapshot of a provisioned VM
 
 =head1 SYNOPSIS
 
@@ -23,6 +23,7 @@ snapshot - take a live snapshot of a provisioned VM
 
     snapshot vm.example.com
     snapshot --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    snapshot --disk-only --name before-upgrade vm.example.com
 
 =head1 OPTIONS
 
@@ -32,6 +33,20 @@ snapshot - take a live snapshot of a provisioned VM
 
 What to call the snapshot.  Left to libvirt, which names it after the current
 time, if you don't say.
+
+=item B<--disk-only>
+
+Snapshot the disk alone, without the guest's memory.
+
+This B<stops the guest> to do it, because a disk-only snapshot is the only kind
+libvirt will take of a domain that is not running -- and it will not take one of
+a domain that is.  The guest is started again once the snapshot is done, if it
+was running when you asked, and it is started again whether libvirt took the
+snapshot or refused it.
+
+Worth the interruption when the memory is what you do not want: a full system
+snapshot writes the whole of the guest's RAM into the image, which is slow and
+large, and reverting to one resumes the guest mid-flight rather than booting it.
 
 =item B<--connect> URI
 
@@ -53,22 +68,29 @@ the one that does is the one we snapshot.
 
 =head1 DESCRIPTION
 
-Takes an atomic live snapshot and then checks that libvirt actually made one, by
+Takes an atomic snapshot and then checks that libvirt actually made one, by
 confirming the domain's current snapshot changed.  Dies if it didn't, since a
 snapshot command that quietly did nothing is worse than one that failed.
+
+A running guest is snapshotted whole, memory and all, so reverting puts it back
+exactly as it was.  C<--disk-only> takes the disk by itself instead, which means
+stopping the guest first and starting it again when the snapshot is done.  A
+guest that is already off has no memory to capture, is snapshotted as it is, and
+is left as it was.
 
 =cut
 
 sub main {
     my @args = @_;
 
-    my ( $name, $uri, $domain_dir, $hvconf );
+    my ( $name, $uri, $domain_dir, $hvconf, $disk_only );
     GetOptionsFromArray(
         \@args,
         'name=s'      => \$name,
         'connect=s'   => \$uri,
         'domaindir=s' => \$domain_dir,
         'hvconf=s'    => \$hvconf,
+        'disk-only'   => \$disk_only,
     );
 
     my $domain = shift @args;
@@ -82,8 +104,13 @@ sub main {
 
     my $before = $hv->snapshot_current_name($domain);
 
-    print "Creating snapshot for $domain...\n";
-    die "Failed to create snapshot for $domain\n" unless $hv->create_snapshot( $domain, $name );
+    # Said before the snapshot rather than after it, because it is the guest
+    # going away that an operator wants warning of, and this can take a while.
+    my $going_down = $disk_only ? "Stopping $domain for this: a disk-only snapshot is not one libvirt will take of a running guest.  It goes back the way it was found afterwards.\n" : q{};
+    print "Creating snapshot for $domain...\n" . $going_down;
+
+    my $took = $hv->create_snapshot( $domain, $name, disk_only => !!$disk_only );
+    die "Failed to create snapshot for $domain\n" unless $took;
 
     my $after = $hv->snapshot_current_name($domain);
     die "No current snapshot found after create\n" unless defined $after && length $after;
@@ -91,7 +118,8 @@ sub main {
     die "Current snapshot unchanged after create (still '$after') -- snapshot may not have been created\n"
       if defined $before && $before eq $after;
 
-    print "Snapshot '$after' created and verified as current.\n";
+    my $put_back = $disk_only ? "$domain is back the way it was found.\n" : q{};
+    print "Snapshot '$after' created and verified as current.\n" . $put_back;
     return 0;
 }
 

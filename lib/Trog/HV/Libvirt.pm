@@ -329,6 +329,22 @@ sub stop_domain {
     return 1;
 }
 
+=head2 start_domain($name)
+
+Start a domain that is defined but not running.  Says whether there was one to
+start; one that is already running is nothing to do.
+
+=cut
+
+sub start_domain {
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name) or return 0;
+
+    return 1 if $domain->is_active();
+    eval { $domain->create(); 1 } or die "Could not start $name: $@";
+    return 1;
+}
+
 =head2 domain_uuid($name)
 
 The uuid libvirt has for this domain, or undef when it has no such domain.
@@ -774,11 +790,12 @@ sub define_domain {
             die 'Could not set ' . $domain->get_name() . " to start with the host: $@";
         };
     }
-    if ( !$domain->is_active() ) {
-        eval { $domain->create(); 1 } or do {
-            die 'Could not start ' . $domain->get_name() . ": $@";
-        };
-    }
+
+    # By name, which means a lookup that can come back empty where the handle
+    # above cannot.  Defining a domain libvirt then cannot find is not something
+    # to hand back as though it had started.
+    $self->start_domain( $domain->get_name() )
+      or die 'Could not start ' . $domain->get_name() . ": libvirt has no such domain, having just defined it\n";
 
     return $domain;
 }
@@ -860,12 +877,27 @@ particular order, so they get sorted by creation time here -- C<restore
 
 The name of the domain's current snapshot, or undef if it has none.
 
-=head2 create_snapshot($domain, $name)
+=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
 
-Take an atomic disk-only snapshot, which means the domain has to be shut down:
-libvirt will take a full system snapshot of a live guest, or a disk-only one of
-a stopped guest, and this is the latter.  C<$name> may be undef, in which case
-libvirt names it after the current time.  Returns true on success.
+Take an atomic snapshot and say whether it took.  C<$name> may be undef, in
+which case libvirt names it after the current time.
+
+A running guest gets a B<full system> snapshot: its memory goes into the qcow2
+beside the disk, so reverting puts it back mid-flight rather than booting it.
+That is the only kind libvirt will take of a domain that is up.
+
+C<disk_only> takes the guest B<down> first and snapshots the disk alone, then
+puts it back the way it was found: running again if it was running, still off if
+it was not, and either way whether the snapshot succeeded or was refused.  No
+memory means a far smaller and faster snapshot, and a revert that boots rather
+than resumes.
+
+C<leave_down> keeps it down afterwards.  That is for the caller which is about
+to take the guest apart anyway, and would otherwise be starting it only to stop
+it again.
+
+A guest that is already off has no memory to capture, so it gets the disk-only
+form whether or not it was asked for.
 
 =head2 revert_snapshot($domain, $name)
 
@@ -904,26 +936,41 @@ sub snapshot_current_name {
 }
 
 sub create_snapshot {
-    my ( $self, $name, $snapname ) = @_;
+    my ( $self, $name, $snapname, %opts ) = @_;
     my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
+
+    # libvirt takes a full system snapshot of a running guest, or a disk-only
+    # one of a stopped guest, and nothing else.  Anything else is error 84,
+    # "live snapshot creation is supported only during full system snapshots".
+    my $live = !$opts{disk_only} && $domain->is_active();
+
+    # Settled before the stop below, because stopping is what changes it: a
+    # guest found running goes back up, and one found off stays off.
+    my $resume = $opts{disk_only} && !$opts{leave_down} && $domain->is_active();
+
+    $self->stop_domain($name) if $opts{disk_only};
 
     my $xml = '<domainsnapshot>';
     $xml .= '<name>' . _xml_escape($snapname) . '</name>' if defined $snapname && length $snapname;
+
+    # This element is what libvirt reads to tell the two apart: without it the
+    # request is a disk-only one.
+    $xml .= "<memory snapshot='internal'/>" if $live;
     $xml .= '</domainsnapshot>';
 
+    # CREATE_LIVE does not mean "snapshot a guest that is running".  It asks
+    # libvirt not to pause one while it writes the memory out, and libvirt will
+    # only agree to that when the memory goes somewhere outside the disk.  This
+    # one keeps it inside, so the flag would make the request invalid.
     my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
-
-    # We can only take full system snapshots of a live guest, and disk-only
-    # snapshots of a shut down one.  This one is disk only -- no memory in the
-    # XML -- so a running domain is refused with error 84 whichever flags it is
-    # asked with, and a caller wanting a snapshot stops the domain first.
-    #
-    # LIVE is set anyway for the running case, since libvirt rejects it for a
-    # domain that is not.
-    $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
     warn "Snapshot of $name failed: $@" unless $ok;
+
+    # Whatever happened above.  A snapshot libvirt refused is not a reason to
+    # leave a guest switched off that was running when we were handed it.
+    $self->start_domain($name) if $resume;
+
     return $ok ? 1 : 0;
 }
 
@@ -1337,22 +1384,6 @@ sub rollback_possible {
     # rebuild -- after the rollback point has been taken and announced, which is
     # the worst moment available to discover it.
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
-}
-
-=head2 $hv->quiesce_for_snapshot($domain)
-
-Stop the guest, leaving it defined.
-
-Not a courtesy: C<create_snapshot> cannot take one of a domain that is still
-running, for the reason given there.  Nothing is lost by stopping, since the
-guest is about to be rebuilt either way.
-
-=cut
-
-sub quiesce_for_snapshot {
-    my ( $self, $domain ) = @_;
-
-    return $self->stop_domain($domain);
 }
 
 =head2 $hv->disk_layout($volume)
