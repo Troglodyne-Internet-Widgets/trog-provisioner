@@ -233,6 +233,18 @@ sub build {
         push @todo, @needed;
     }
 
+    # The recipes above are the ones asked for; the guest is built from those
+    # closed over required_recipes, and a recipe that arrives that way can want
+    # a field of its own that nothing supplies.  Reported here so it is a line
+    # in the list rather than a refusal from new_config ten minutes later.
+    my ( $deps, @dep_todo ) = Provisioner::Cookbook->scaffold_dependencies(
+        \@wanted,
+        all  => $opts->{all},
+        base => $base,
+    );
+    $domain{$_} = $deps->{$_} for sort keys %$deps;
+    push @todo, @dep_todo;
+
     return ( { $hostname => \%domain }, @todo );
 }
 

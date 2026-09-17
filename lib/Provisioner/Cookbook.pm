@@ -528,6 +528,87 @@ sub _scaffold_value {
     return ( $class->PLACEHOLDER, $path );
 }
 
+=head2 scaffold_dependencies(\@named, %opts)
+
+The blocks a domain needs for recipes nobody named, and the paths in them that
+still want a human.
+
+    my ( $blocks, @todo ) = Provisioner::Cookbook->scaffold_dependencies( ['grafanasyslog'] );
+
+C<scaffold> answers for one recipe, and C<bin/new_guest> asks it about each
+recipe on the command line -- which is not the set the guest is built from.
+C<bin/new_config> closes that set over C<required_recipes>, so a recipe nobody
+named arrives with required fields of its own.  Usually the recipe that asked
+for it supplies them.  Where it cannot, somebody has to be told: C<grafana>
+wants an C<admin_password>, and a password is not a thing a depending recipe can
+choose on an operator's behalf, so without this the report says there is nothing
+to fill in and C<bin/new_config> refuses once a guest is already going up.
+
+Only dependencies that still want something come back.  The depsolver adds the
+recipe either way, so a block here is somewhere to put a value rather than a
+request for the recipe.
+
+Two things it will not guess at.  A key naming an interface rather than a recipe
+is resolved by the depsolver against the domain's configuration, which is not
+available here.  And C<bin/new_config> hands a C<required_recipes> sub the
+requiring recipe's own options, so one called without them may die -- C<tcms>
+builds a path out of C<install_dir> and C<domain> -- and a sub that died has
+said nothing about what it supplies.  A placeholder standing in front of a field
+the recipe that asked for it would have filled is worse than no placeholder at
+all, so that dependency is left alone.
+
+=cut
+
+sub scaffold_dependencies {
+    my ( $class, $named, %opts ) = @_;
+
+    my $base = ref $opts{base} eq 'HASH' ? $opts{base} : {};
+
+    my %seen  = map { $_ => 1 } @$named;
+    my @queue = @$named;
+
+    # Only the keys are read: this is working out which required fields nobody
+    # supplies, not what they would be set to, so two requesters naming one
+    # field cannot disagree and none of the merging in bin/new_config is wanted.
+    my ( %supplied, @found );
+
+    while ( my $recipe = shift @queue ) {
+        my $loaded = eval { $class->load($recipe) } or next;
+
+        my %required = eval { $loaded->required_recipes() };
+        next unless %required;
+
+        foreach my $dep ( sort keys %required ) {
+            next if index( $dep, '::' ) >= 0;
+
+            my %given;
+            next unless eval { %given = ( ref $required{$dep} eq 'CODE' ? $required{$dep}->() : () ); 1 };
+
+            $supplied{$dep}{$_} = 1 for keys %given;
+
+            next if $seen{$dep}++;
+            push @queue, $dep;
+            push @found, $dep;
+        }
+    }
+
+    my ( %blocks, @todo );
+    foreach my $dep (@found) {
+        my ( $config, @needed ) = $class->scaffold(
+            $dep,
+            all        => $opts{all},
+            output_dir => $opts{output_dir},
+            provided   => { %{ $supplied{$dep} // {} }, %{ $base->{$dep} // {} } },
+        );
+        next unless @needed;
+
+        $blocks{$dep} = $config;
+        push @todo, @needed;
+    }
+
+    return ( \%blocks, @todo );
+}
+
 =head2 placeholders_in($config, $path)
 
 Every place in a configuration that is still a placeholder, as dotted paths.

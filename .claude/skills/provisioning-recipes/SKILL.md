@@ -124,20 +124,24 @@ If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
 left in place stops `new_config` by design.
 
-**"Nothing to fill in" is not a promise.** `new_guest` scaffolds only the
-recipes you named on the command line: it asks `Provisioner::Cookbook->scaffold`
-for each of them, and Cookbook knows nothing about `required_recipes` -- the
-depsolver that expands those lives in `bin/new_config` and runs later. So a
-recipe dragged in as a dependency can have a required field with no default and
-nothing will mention it. You are told there is nothing to do, and the build
-refuses well after you have stopped watching:
+**A dependency's required fields are in that list too**, and were not always.
+`new_guest` scaffolds the recipes you named and then closes that set over
+`required_recipes`, so a recipe nobody asked for gets a block and a `CHANGEME`
+of its own where it wants something the recipe that pulled it in cannot supply.
+`grafanasyslog` drags in `grafana`, whose `admin_password` has no default --
+a password not being something a depending recipe can choose on an operator's
+behalf -- and the report names `grafana.admin_password`.
+
+Two things still escape it, both on purpose: a dependency named through an
+interface, which the depsolver resolves against a configuration `new_guest` does
+not have, and one whose `required_recipes` sub cannot be called without the
+options `bin/new_config` hands it. So if a build refuses like this for a recipe
+you never named:
 
     The grafana recipe's configuration for <domain> is not valid:
       /admin_password: Missing property.
 
-Which is right: a password is not something a depending recipe can choose on an
-operator's behalf, so `grafanasyslog` does not supply one. For a scratch guest
-that means you supply it. Add a block for the dependency to the domain's file in
+that is the shape of it.  Add a block for the dependency to the domain's file in
 the scratch configuration, with a value that is visibly throwaway, and say in
 your report that you did:
 

@@ -427,6 +427,115 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
     is_deeply( \@todo, [], 'and nothing to do' );
 };
 
+# A dependency graph made up here too, so that editing a real recipe cannot
+# quietly change what these assert.  t_requirer wants three things: one nothing
+# supplies, one it supplies itself, and an interface the depsolver resolves.
+{
+
+    package Provisioner::Recipe::t_requirer;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA) -- a class declared in the test, with no file behind it
+
+    sub required_recipes {
+        return (
+            t_dep                    => sub { () },
+            t_satisfied              => sub { ( needed => 'from the requirer' ) },
+            'Provisioner::TestIface' => sub { () },
+        );
+    }
+}
+
+{
+
+    package Provisioner::Recipe::t_dep;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub required_recipes {
+        return ( t_deep => sub { () } );
+    }
+    sub args { return ( type => 'object', required => [qw{secret}], properties => { secret => { type => 'string' } } ) }
+}
+
+{
+
+    package Provisioner::Recipe::t_satisfied;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub args { return ( type => 'object', required => [qw{needed}], properties => { needed => { type => 'string' } } ) }
+}
+
+{
+
+    package Provisioner::Recipe::t_deep;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    sub args { return ( type => 'object', required => [qw{buried}], properties => { buried => { type => 'string' } } ) }
+}
+
+{
+
+    package Provisioner::Recipe::t_thrower;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    # What tcms does: builds a path out of options bin/new_config passes to the
+    # sub and this walk has none of.
+    sub required_recipes {
+        return ( t_dep => sub { die "no install_dir to build a path from\n" } );
+    }
+}
+
+sub dependencies_of {
+    my ( $named, %opts ) = @_;
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+
+    # By name, because this fixture has several recipes in it rather than one.
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+    return Provisioner::Cookbook->scaffold_dependencies( $named, %opts );
+}
+
+subtest 'a dependency nobody named still says what it wants' => sub {
+    my ( $blocks, @todo ) = dependencies_of( ['t_requirer'] );
+
+    is_deeply( $blocks->{t_dep}, { secret => Provisioner::Cookbook->PLACEHOLDER }, 'a block to hold the value' );
+    ok( ( grep { $_ eq 't_dep.secret' } @todo ), 'and the path comes back to be printed' ) or diag "todo: @todo";
+};
+
+subtest 'what the requirer supplies is not asked for twice' => sub {
+    my ( $blocks, @todo ) = dependencies_of( ['t_requirer'] );
+
+    ok( !exists $blocks->{t_satisfied}, 'no block for a dependency its requirer covered' );
+    is_deeply( [ grep { m/\At_satisfied/ } @todo ], [], 'and nothing to fill in for it' );
+};
+
+subtest 'the walk reaches a dependency of a dependency' => sub {
+    my ( $blocks, @todo ) = dependencies_of( ['t_requirer'] );
+
+    is_deeply( $blocks->{t_deep}, { buried => Provisioner::Cookbook->PLACEHOLDER }, 'reached through t_dep' );
+    ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
+};
+
+subtest 'an interface is the depsolver to resolve against a configuration' => sub {
+    my ($blocks) = dependencies_of( ['t_requirer'] );
+
+    is_deeply( [ grep { m/::/ } sort keys %$blocks ], [], 'so nothing is scaffolded for one here' );
+};
+
+subtest 'a recipe the caller already named is left to the caller' => sub {
+    my ($blocks) = dependencies_of( [qw{t_requirer t_dep}] );
+
+    ok( !exists $blocks->{t_dep}, 'no second block for a recipe already scaffolded' );
+    ok( exists $blocks->{t_deep}, 'though what that one requires is still followed' );
+};
+
+subtest 'a requirer that cannot be asked is not guessed at' => sub {
+    my ( $blocks, @todo ) = dependencies_of( ['t_thrower'] );
+
+    # The sub died, so it has said nothing about what it supplies.  A placeholder
+    # here would stand in front of a field the requirer may well fill itself,
+    # and the operator would set a value that collides in reconcile.
+    is_deeply( $blocks, {}, 'no block out of a required_recipes sub that died' );
+    is_deeply( \@todo,  [], 'and nothing to fill in' );
+};
+
 subtest 'defaults are copied, not shared' => sub {
     my ($one) = scaffold_of();
     my ($two) = scaffold_of();

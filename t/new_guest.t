@@ -112,6 +112,28 @@ subtest 'recipes that need something say so' => sub {
     );
 };
 
+subtest 'a dependency that needs something says so as well' => sub {
+
+    # What is scaffolded above is the recipes on the command line.  What the
+    # guest is built from is that set closed over required_recipes, and grafana
+    # arrives that way wanting an admin_password nothing hands it -- a password
+    # not being something a depending recipe can choose for an operator.  Before
+    # this, the report said there was nothing to fill in and new_config refused
+    # once a guest was already going up.
+    my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', ['grafanasyslog'], \%BASE_HAS_DATA );
+
+    is( $config->{'vm.test'}{grafana}{admin_password}, 'CHANGEME', 'the dependency gets a block to hold the value' );
+    ok( ( grep { $_ eq 'grafana.admin_password' } @todo ), 'and the path is printed with the rest' )
+      or diag "todo was: @todo";
+
+    # Restraint is the other half.  nginxproxy and logcollector are pulled in by
+    # the same expansion and both are satisfied by whoever asked for them, so
+    # neither is written here: the depsolver adds the recipe, and a block exists
+    # only to hold a value somebody has to supply.
+    ok( !exists $config->{'vm.test'}{nginxproxy},   'a dependency that wants nothing is left to the depsolver' );
+    ok( !exists $config->{'vm.test'}{logcollector}, 'as is one whose requirer supplied what it needed' );
+};
+
 subtest 'every domain gets a data recipe, because new_config requires one' => sub {
     my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
     ok( exists $config->{'vm.test'}{data}, 'added even though it was not asked for' );
