@@ -92,7 +92,9 @@ subtest 'the domain block asks the hypervisor for enough to build with' => sub {
     );
 };
 
-my %BASE_HAS_DATA = ( base => { data => { from => '/opt/data', to => '/opt/domains' } } );
+# A bare key, which is how a configuration names a recipe that takes nothing:
+# what matters to new_guest is that _base mentions data at all.
+my %BASE_HAS_DATA = ( base => { data => undef } );
 
 subtest 'recipes that need nothing are a bare key' => sub {
     my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', [qw{ntp ufw}], \%BASE_HAS_DATA );
@@ -141,10 +143,7 @@ subtest 'every domain gets a data recipe, because new_config requires one' => su
     # But not when _base already configures it: there is nothing to fill in, and
     # a generated file that pins what the fleet supplies is a file that stops
     # following it.
-    ($config) = Trog::Bin::NewGuest::build(
-        'vm.test', ['ntp'],
-        { base => { data => { from => '/opt/data', to => '/opt/domains' } } }
-    );
+    ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], { base => { data => undef } } );
     ok( !exists $config->{'vm.test'}{data}, 'left to _base when _base has it' );
 };
 
@@ -157,8 +156,8 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nnot a hash of what we want\n" );
     is_deeply( Trog::Bin::NewGuest::base_config(), {}, 'nor is one with no _base' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  data:\n    from: /opt/data\n" );
-    is_deeply( Trog::Bin::NewGuest::base_config(), { data => { from => '/opt/data' } }, 'and it reads' );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  ntp:\n    pool: base.pool\n" );
+    is_deeply( Trog::Bin::NewGuest::base_config(), { ntp => { pool => 'base.pool' } }, 'and it reads' );
 };
 
 # --- End to end --------------------------------------------------------------

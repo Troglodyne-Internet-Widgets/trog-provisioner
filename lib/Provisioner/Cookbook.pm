@@ -1097,8 +1097,7 @@ of C<data>'s C<to> field, which meant every recipe interpolating C<install_dir>
 depended on the data recipe for the path rather than for anything data does --
 and that is what kept data from being an ordinary recipe.
 
-Falls back to that field for a configuration written before the move, and to
-F</opt/domains> for one that says neither.
+Falls back to F</opt/domains> for a configuration that says nothing.
 
 =cut
 
@@ -1108,9 +1107,6 @@ sub install_dir {
     my $said = $class->global_config( $domain, $conf )->{install_dir};
     return $said if defined $said && length $said;
 
-    my $legacy = ( $class->data_config( $domain, $conf ) // {} )->{to};
-    return $legacy if defined $legacy && length $legacy;
-
     return '/opt/domains';
 }
 
@@ -1118,8 +1114,7 @@ sub install_dir {
 
 Where the hypervisor keeps what gets shipped to the guest.
 
-The other half of the same move: C<_global>'s to say, falling back to C<data>'s
-C<from>.
+The other half of the same move: C<_global>'s to say.
 
 B<No default.>  Unlike C<install_dir>, which is a path to render into a
 configuration and harmless to guess at, this one is what the teardown sweeps --
@@ -1135,25 +1130,7 @@ sub data_source {
     my $said = $class->global_config( $domain, $conf )->{data_source};
     return $said if defined $said && length $said;
 
-    my $legacy = ( $class->data_config( $domain, $conf ) // {} )->{from};
-    return $legacy if defined $legacy && length $legacy;
-
     return undef;
-}
-
-=head2 data_config($domain, $conf)
-
-What the C<data> recipe is configured with for a domain: C<from>, the directory
-on the machine doing the provisioning, and C<to>, where it lands on the guest.
-
-Undef when the configuration does not say, which is fatal to a provision and
-merely nothing to do for anything cleaning up after one.
-
-=cut
-
-sub data_config {
-    my ( $class, $domain, $conf ) = @_;
-    return $class->domain_config( $domain, $conf )->{data};
 }
 
 =head2 data_dir($domain, $conf)
@@ -1171,8 +1148,6 @@ sub data_dir {
     my ( $class, $domain, $conf ) = @_;
     return undef unless defined $domain && length $domain;
 
-    # Through data_source, so that a domain saying where its data lives in
-    # _global gets the same answer as one that still says it under data.
     my $from = $class->data_source( $domain, $conf );
     return undef unless defined $from && length $from;
 

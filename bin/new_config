@@ -550,11 +550,6 @@ sub handle_domain {
     # from being handed anything by the recipes that depend on it.  It stays in,
     # takes part in the loop like everything else, and is only lifted back out at
     # the makefile render, where its target has a fixed slot ahead of the others.
-    # Optional now.  It was required because install_dir was read out of it, so a
-    # domain without one had nowhere to put anything.  That comes from _global,
-    # so a guest with nothing to ship and no state to restore simply gets no
-    # data target.
-    my $data_config = $rconf->{$domain}{data} // {};
 
     # Where this domain's files live, and where what gets shipped to it comes
     # from.  _global's to say, not the data recipe's: every recipe interpolates
@@ -566,7 +561,7 @@ sub handle_domain {
     # Here rather than further down, so that everything after it -- the tests
     # data renders, what each recipe is asked to salvage -- is asked with the
     # same answer.
-    die "Nothing says where $fqdn's data comes from: set data_source in _global, or from under data.\n"
+    die "Nothing says where $fqdn's data comes from: set data_source in _global.\n"
       unless defined $global_config->{data_source} && length $global_config->{data_source};
 
     my $data_dir = "$global_config->{data_source}/$fqdn";

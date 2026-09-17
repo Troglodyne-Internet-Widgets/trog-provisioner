@@ -46,9 +46,9 @@ salvaged off the last one.
 It reads C<install_dir> and C<data_source> and has no fields of its own.  They
 used to be this recipe's C<to> and C<from>, which meant every recipe that
 interpolates C<install_dir> -- nearly all of them -- depended on this one for a
-path rather than for anything it does.  A configuration still saying them here
-goes on working: L<Provisioner::Cookbook> reads C<install_dir> out of C<to> and
-C<data_source> out of C<from> when C<_global> is quiet.
+path rather than for anything it does.  Those two spellings are gone rather than
+deprecated: C<_global> is the only place either is read from, and a
+configuration still naming them under C<data> is refused rather than ignored.
 
 What it puts back, and where, comes from the recipes: see C<restores> in
 L<Provisioner::Recipe>.
@@ -59,13 +59,6 @@ sub args {
     return (
         type       => "object",
         properties => {
-
-            # The older spelling of the two paths, kept because configurations
-            # written before they moved still say it: Provisioner::Cookbook
-            # reads install_dir out of `to` and data_source out of `from` when
-            # _global names neither.  See this recipe's DESCRIPTION.
-            from => { type => 'string', description => "Where this domain's data is fetched from, as a path on the machine running the provisioner.  Superseded by data_source in _global." },
-            to   => { type => 'string', description => 'Where the payload lands on the guest.  Superseded by install_dir in _global.' },
 
             # Where each recipe's salvaged state goes back, keyed on the
             # destination.  Nobody writes this by hand: it is what every recipe
