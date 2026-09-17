@@ -8,8 +8,6 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use List::Util qw{any};
-
 use parent qw{Provisioner::Recipe};
 
 =head1 NAME
@@ -50,11 +48,10 @@ That is worth knowing before adding it to an arbitrary guest: it would make that
 guest a collector, listening for the fleet.  This is a recipe for the machine
 that already is one.
 
-C<enrich> refuses a domain with no C<logcollector> in its modules.  With the
-requirement above in place the depsolver will have just added it, so that is a
-guard on an invariant rather than the mechanism -- it earns its three lines by
-failing a configuration assembled some other way with a sentence naming the
-problem, instead of producing a dashboard with nothing behind it.
+Nothing here asserts that the collector arrived.  Naming it in
+C<required_recipes> is what puts it there, so a guard against its absence is a
+guard that cannot fire -- see L<Provisioner::Recipe/required_recipes> and the
+dependency section of F<docs/APPROACH.md>.
 
 =head2 Over a port, not out of the files
 
@@ -114,22 +111,6 @@ sub required_recipes {
         grafana      => sub { () },
         logcollector => sub { ( forward => ["127.0.0.1:$port"] ) },
     );
-}
-
-=head2 %opts = $recipe->enrich(%opts)
-
-Refuses a domain whose modules have no C<logcollector>.  See
-L</It belongs on the collector itself>.
-
-=cut
-
-sub enrich {
-    my ( $self, %opts ) = @_;
-
-    die "The grafanasyslog recipe draws what logcollector receives, and " . ( $opts{domain} // 'this domain' ) . " has no logcollector to receive anything.\n"
-      unless any { $_ eq 'logcollector' } @{ $opts{modules} // [] };
-
-    return %opts;
 }
 
 =head2 $bool = $recipe->is_multi_tenant()

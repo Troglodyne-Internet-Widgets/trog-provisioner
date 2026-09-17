@@ -124,7 +124,7 @@ If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
 left in place stops `new_config` by design.
 
-**A dependency's required fields are in that list too**, and were not always.
+**A dependency's required fields are in that list too.**
 `new_guest` scaffolds the recipes you named and then closes that set over
 `required_recipes`, so a recipe nobody asked for gets a block and a `CHANGEME`
 of its own where it wants something the recipe that pulled it in cannot supply.
@@ -132,17 +132,13 @@ of its own where it wants something the recipe that pulled it in cannot supply.
 a password not being something a depending recipe can choose on an operator's
 behalf -- and the report names `grafana.admin_password`.
 
-Two things still escape it, both on purpose: a dependency named through an
-interface, which the depsolver resolves against a configuration `new_guest` does
-not have, and one whose `required_recipes` sub cannot be called without the
-options `bin/new_config` hands it. So if a build refuses like this for a recipe
-you never named:
+It is the same walk `bin/new_config` does, so what it reports is what the build
+will require -- and where a recipe cannot say what it wants because a global it
+reads is missing, both of them refuse and name it rather than skipping the
+dependency quietly. The globals come from `_global` in `recipes.yaml`; a
+scratch configuration that has not got one has a file to fix.
 
-    The grafana recipe's configuration for <domain> is not valid:
-      /admin_password: Missing property.
-
-that is the shape of it.  Add a block for the dependency to the domain's file in
-the scratch configuration, with a value that is visibly throwaway, and say in
+So fill in what it lists, with values that are visibly throwaway, and say in
 your report that you did:
 
     grafana:

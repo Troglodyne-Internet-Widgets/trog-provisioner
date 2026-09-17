@@ -300,11 +300,8 @@ my %required_config = (
     pdns        => { api_key        => 'test-api-key' },
     grafana     => { admin_password => 's3cr3t' },
 
-    # modules, because grafanasyslog refuses to render without the collector it
-    # reads from -- and %G hands every recipe an empty one.
-    grafanasyslog => { modules => [qw{grafana logcollector}] },
-    registrar     => { type    => 'easydns', user => 'somebody', key => 'a-token' },
-    matrix        => {
+    registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
+    matrix    => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',

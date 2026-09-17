@@ -62,8 +62,12 @@ Nothing here is in C<remote_files>, and that is deliberate for the dashboards:
 they are provisioned from files in F</etc/grafana/provisioning>, so a rebuilt
 guest draws the same ones without anything having been carried over.  What a
 rebuild does lose is the measurements themselves and anything an operator made
-by hand in the UI.  A guest where either matters wants C<remote_files>, which
-this recipe does not yet have.
+by hand in the UI.
+
+Keeping those is for the recipe that depends on this one.  It is what knows what
+it put in the database and whether losing it matters, so it names what it wants
+carried over in its own C<remote_files> rather than this recipe salvaging a
+database on everybody's behalf.
 
 =cut
 

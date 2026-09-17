@@ -16,10 +16,6 @@ Provisioner::Recipe::Ubuntu::grafana - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else grafana does is in the recipe this
-inherits from.
-
 Only two of the three services are here.  C<grafana> and C<telegraf> are in no
 Ubuntu component, and C<deps> is what cloud-init installs at first boot -- before
 the fragment has added either vendor archive -- so both are installed by the

@@ -437,9 +437,8 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
 
     sub required_recipes {
         return (
-            t_dep                    => sub { () },
-            t_satisfied              => sub { ( needed => 'from the requirer' ) },
-            'Provisioner::TestIface' => sub { () },
+            t_dep       => sub { () },
+            t_satisfied => sub { ( needed => 'from the requirer' ) },
         );
     }
 }
@@ -513,10 +512,57 @@ subtest 'the walk reaches a dependency of a dependency' => sub {
     ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
 };
 
-subtest 'an interface is the depsolver to resolve against a configuration' => sub {
-    my ($blocks) = dependencies_of( ['t_requirer'] );
+subtest 'resolve_dependencies closes the list over what its recipes require' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
 
-    is_deeply( [ grep { m/::/ } sort keys %$blocks ], [], 'so nothing is scaffolded for one here' );
+    my %conf = ( t_requirer => {} );
+    my ( $modules, $builders ) = Provisioner::Cookbook->resolve_dependencies(
+        modules     => ['t_requirer'],
+        domain_conf => \%conf,
+        distro      => 'ubuntu',
+        provisioner => {
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+        },
+        domain => 'd.test',
+    );
+
+    ok( ( grep { $_ eq 't_dep' } @$modules ),  'what a recipe requires is added to the list' );
+    ok( ( grep { $_ eq 't_deep' } @$modules ), 'and what that one requires in turn' );
+
+    # The point of doing this once rather than twice: the dependency ends up
+    # configured out of what asked for it, not merely present.
+    is( $conf{t_satisfied}{needed}, 'from the requirer', 'and is configured out of what asked for it' );
+
+    # Returned rather than rebuilt: bin/new_config uses these same objects for
+    # the is_module filter, the tenancy check and the render loop.
+    ok( $builders->{t_dep}, 'the builders come back for the caller to reuse' );
+};
+
+subtest 'an interface is resolved rather than passed along' => sub {
+
+    # Which recipe answers for one is the interface's to say -- this only holds
+    # it to being a recipe that exists and implements what was asked for.
+    my $chosen = Provisioner::Cookbook->resolve_substitutable_dependency(
+        interface      => 'Provisioner::DNSRecipe',
+        domain_conf    => {},
+        requiring_conf => {},
+        domain         => 'd.test',
+    );
+
+    my @known = Provisioner::Cookbook->implementations('Provisioner::DNSRecipe');
+    ok( ( grep { $_ eq $chosen } @known ), "resolved to $chosen, which implements it" );
+
+    my $err = exception {
+        Provisioner::Cookbook->resolve_substitutable_dependency(
+            interface      => 'Provisioner::NoSuchInterface',
+            domain_conf    => {},
+            requiring_conf => {},
+            domain         => 'd.test',
+        );
+    };
+    like( $err, qr/will[ ]not[ ]load/, 'and an interface that is not one says so' );
 };
 
 subtest 'a recipe the caller already named is left to the caller' => sub {
@@ -526,14 +572,27 @@ subtest 'a recipe the caller already named is left to the caller' => sub {
     ok( exists $blocks->{t_deep}, 'though what that one requires is still followed' );
 };
 
-subtest 'a requirer that cannot be asked is not guessed at' => sub {
-    my ( $blocks, @todo ) = dependencies_of( ['t_thrower'] );
+subtest 'a recipe that cannot say what it wants is named, not skipped' => sub {
+    my $err = exception { dependencies_of( ['t_thrower'] ) };
 
-    # The sub died, so it has said nothing about what it supplies.  A placeholder
-    # here would stand in front of a field the requirer may well fill itself,
-    # and the operator would set a value that collides in reconcile.
-    is_deeply( $blocks, {}, 'no block out of a required_recipes sub that died' );
-    is_deeply( \@todo,  [], 'and nothing to fill in' );
+    # Its sub reads a global it was not handed.  Skipping the dependency would
+    # leave a build that refuses later for a reason nothing here mentioned, so
+    # both this and bin/new_config stop and say which recipe could not answer.
+    ok( $err, 'the walk refuses rather than carrying on without it' );
+
+    # First, that the refusal is the one this wrote.  warnings FATAL => 'all'
+    # makes an uninitialized value in the message itself the exception, so a
+    # missing domain replaced the whole sentence with a complaint about the line
+    # building it -- and the three assertions below merely said "doesn't match",
+    # never that there was no message to match against.
+    unlike( $err, qr/uninitialized/, 'and the refusal is a sentence, not a warning from building one' );
+
+    like( $err, qr/t_thrower/,              'naming the recipe that could not answer' );
+    like( $err, qr/t_dep/,                  'and what it was asked about' );
+    like( $err, qr/_global[ ]in[ ]recipes/, 'and where the configuration it wanted comes from' );
+
+    # A caller that named no domain still gets a sentence rather than an undef.
+    like( $err, qr/this[ ]domain/, 'and reads as English when nobody named a domain' );
 };
 
 subtest 'defaults are copied, not shared' => sub {
