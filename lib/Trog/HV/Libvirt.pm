@@ -1470,6 +1470,32 @@ XML
     return eval { $clone->get_path() };
 }
 
+=head2 $hv->backup_volumes
+
+Every disk in the pool that C<clone_guest_disk> put there, by name.
+
+The suffix is this backend's to know.  A caller sweeping them up asks for the
+list rather than matching on C<.bak-qcow2> itself, so the convention lives where
+the copies are made.
+
+=cut
+
+sub backup_volumes {
+    my ($self) = @_;
+
+    # Deliberately not wrapped in an eval.  A pool that will not answer is not a
+    # pool with nothing in it, and a caller told the second reports a clean fleet
+    # and takes nothing away -- so the refusal has to reach it.
+    #
+    # list_all_volumes rather than list_volumes, which is documented as one RPC
+    # call per volume.
+    my @names = sort grep { defined && m/[.]bak-qcow2 \z/ } map {
+        eval { $_->get_name() }
+    } $self->pool->list_all_volumes();
+
+    return @names;
+}
+
 =head2 $hv->disk_layout($volume)
 
 The cluster size and subcluster allocation of an existing qcow2, as a hashref,

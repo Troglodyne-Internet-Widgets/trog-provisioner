@@ -88,6 +88,24 @@ directory looks, a name the configuration carries is one somebody means to build
 again, and a hypervisor that will not say what it has stops the sweep rather than
 being counted as holding nothing.
 
+=item B<--backups>
+
+Sweep rather than destroy one domain: every disk that
+C<bin/provision --clone-on-nonreusable> copied aside, on each hypervisor in the
+fleet.  Takes no domain.  Pair it with C<--dryrun> first; it names every copy and
+says which machine holds it.
+
+A copy is a volume rather than a domain -- nothing is defined for one, and
+nothing starts it -- so this is the only thing in the toolkit that will ever
+remove them.  Destroying the guest a copy came from leaves it standing, which is
+what makes it a backup and also why they pile up.
+
+Its safety is not C<--orphans>' safety.  That sweep spares anything a hypervisor
+still has a guest for; this one cannot, because a copy whose guest is gone is
+exactly the case where the copy is all that is left.  What it has instead is a
+narrow eye and a loud mouth: it looks at nothing but the copies, names every one
+of them before any of them goes, and removes nothing under C<--dryrun>.
+
 =item B<--dryrun>
 
 Say what would be removed without removing any of it.
@@ -107,19 +125,21 @@ sub main {
 
     umask 0022;
 
-    my ( $purge, $purge_data, $orphans, $dryrun, $uri, $domain_dir, $hvconf );
+    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $uri, $domain_dir, $hvconf );
     GetOptionsFromArray(
         \@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
         'purge-data'  => \$purge_data,
         'orphans'     => \$orphans,
+        'backups'     => \$backups,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'hvconf=s'    => \$hvconf,
     );
 
     return sweep_orphans( $uri, $hvconf, $dryrun ) if $orphans;
+    return sweep_backups( $uri, $hvconf, $dryrun ) if $backups;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
@@ -430,6 +450,70 @@ and on each of them.  Non-zero when a hypervisor could not be asked, or there wa
 nowhere to look.
 
 =cut
+
+=head2 sweep_backups($uri, $hvconf, $dryrun)
+
+Take away the disks C<bin/provision --clone-on-nonreusable> copied aside.
+
+Nothing else ever will: a copy is deliberately not one of the volumes
+C<guest_volumes> names, so destroying the guest it came from leaves it standing.
+That is what makes it a backup, and it is also why they accumulate until
+somebody says to sweep them.
+
+Every one of them, rather than the ones whose guest has gone.  The exclusion
+C<sweep_orphans> leans on cannot be borrowed here: a copy outliving its guest is
+the case where it is the only thing left, so sparing those would spare exactly
+the ones worth keeping.  What guards this instead is that it looks at nothing
+but the copies, names every one before any of them goes, and does nothing at all
+under C<$dryrun>.
+
+=cut
+
+sub sweep_backups {
+    my ( $uri, $hvconf, $dryrun ) = @_;
+
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
+
+    # A hypervisor that cannot be asked stops the sweep rather than being passed
+    # over, for the reason sweep_orphans does it: a pool we could not read is
+    # not a pool with nothing in it.
+    my %found;
+    foreach my $hv (@hvs) {
+        my @copies = eval { $hv->backup_volumes };
+        if ($@) {
+            warn 'Could not ask ' . $hv->describe . " what copies it holds, so nothing is swept:\n$@";
+            return 1;
+        }
+        push @{ $found{$_} }, $hv for @copies;
+    }
+
+    my @copies = sort keys %found;
+    unless (@copies) {
+        print "No disks have been copied aside anywhere in the fleet.\n";
+        return 0;
+    }
+
+    print scalar(@copies) . " disks were copied aside and nothing has taken them away:\n";
+    foreach my $name (@copies) {
+        print "  $name (" . join( ', ', map { $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] None of it removed.\n";
+        return 0;
+    }
+
+    # Counted by what went rather than by what was asked to go: delete_volume
+    # warns and answers false for one it could not take, and saying a copy was
+    # removed when it is still there is the one thing this must not do.
+    my $removed = 0;
+    foreach my $name (@copies) {
+        $removed++ for grep { $_ } map { $_->delete_volume($name) } @{ $found{$name} };
+    }
+
+    print "Removed $removed of " . scalar(@copies) . " copies.\n";
+    return $removed == scalar(@copies) ? 0 : 1;
+}
 
 sub sweep_orphans {
     my ( $uri, $hvconf, $dryrun ) = @_;

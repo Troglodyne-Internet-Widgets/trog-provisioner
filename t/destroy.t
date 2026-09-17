@@ -294,6 +294,7 @@ subtest 'the POD documents the interface' => sub {
     like( $text, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
     like( $text, qr/--purge-data/, 'POD documents --purge-data' );
     like( $text, qr/--orphans/,    'POD documents --orphans' );
+    like( $text, qr/--backups/,    'POD documents --backups' );
 };
 
 # --- the data directory, and the sweep for what runs left behind ---
@@ -309,6 +310,23 @@ subtest 'the POD documents the interface' => sub {
     }
 
     package Test::Libvirt::Domain;
+    sub get_name ($self) { return $self->{name} }
+}
+
+# The pool a backup sweep reads, kept apart from the domain fake above because
+# the two sweeps ask different questions of a hypervisor.
+{
+
+    package Test::Pool;
+    our @VOLUMES;
+    our $REFUSE = 0;
+
+    sub list_all_volumes {
+        die "cannot read the pool\n" if $REFUSE;
+        return map { bless { name => $_ }, 'Test::Pool::Volume' } @VOLUMES;
+    }
+
+    package Test::Pool::Volume;
     sub get_name ($self) { return $self->{name} }
 }
 
@@ -355,6 +373,37 @@ subtest 'purge_data_dir takes the domain data directory, and dryrun does not' =>
     like( $said, qr/says[ ]where[ ]the[ ]data[ ]source[ ]is/, 'with no data source it says there is nothing to remove' );
     ok( -d "$data/kept.test", 'rather than guessing where one is' );
     File::Path::remove_tree("$data/kept.test");
+};
+
+subtest 'the backup sweep takes the copies, which nothing else ever will' => sub {
+    Trog::HV->forget();
+
+    my @deleted;
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( pool => sub { bless {}, 'Test::Pool' } );
+    $hv->redefine( delete_volume => sub { push @deleted, $_[1]; return 1 } );
+
+    local @Test::Pool::VOLUMES = qw{live.test-qcow2 live.test-cloudinit.iso gone.test.bak-qcow2 live.test.bak-qcow2};
+
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    like( $said, qr/gone\.test\.bak-qcow2/, 'the dry run names a copy' );
+    like( $said, qr/live\.test\.bak-qcow2/, 'and the copy of a guest that is still here, since both are copies' );
+    unlike( $said, qr/live\.test-qcow2/, 'and not the disk a guest is running on' );
+    is_deeply( \@deleted, [], 'removing none of it' );
+
+    says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
+    is_deeply( \@deleted, [qw{gone.test.bak-qcow2 live.test.bak-qcow2}], 'and the sweep takes the copies, and only the copies' );
+
+    # A pool that will not answer is not a pool with nothing in it, and the
+    # sweep says so rather than reporting a clean fleet.
+    @deleted = ();
+    local $Test::Pool::REFUSE = 1;
+    my ( $refused, $rc ) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
+    is( $rc, 1, 'a pool it could not read stops the sweep' );
+    like( $refused, qr/what[ ]copies[ ]it[ ]holds/, 'saying which hypervisor would not say' );
+    is_deeply( \@deleted, [], 'and nothing is removed on the strength of it' );
+
+    Trog::HV->forget();
 };
 
 subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
