@@ -67,6 +67,49 @@ subtest 'a task that reads stdin does not eat the queue' => sub {
       or diag "out: $r->{out}\nerr: $r->{err}";
 };
 
+# The queue is appended to and was never emptied, so a second makefile run on a
+# guest replayed every earlier run's deferred work.  Moving it aside is what
+# ends that, and it has to happen after the loop: the loop reads the file it is
+# renaming.
+subtest 'the queue is moved aside once it has run' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $ran = "$dir/ran";
+    File::Slurper::Temp::write_text( "$dir/queue", "echo one >> $ran\necho two >> $ran\n" );
+
+    local $ENV{POST_INSTALL_QUEUE} = "$dir/queue";
+    IPC::Run3::run3( [$script], \undef, \my $out, \my $err );
+    is( $? >> 8, 0, 'it ran clean' ) or diag $err;
+
+    ok( !-e "$dir/queue", 'the queue is gone from where the next run would look' );
+
+    my ($aside) = glob "$dir/queue.ran_at_*";
+    ok( $aside, 'and is beside it under a name saying when it ran' );
+    is( File::Slurper::read_text($aside), "echo one >> $ran\necho two >> $ran\n", 'holding what it ran' ) if $aside;
+
+    # Which is the whole point: the tasks do not happen twice.
+    IPC::Run3::run3( [$script], \undef, \my $again_out, \my $again_err );
+    is( $? >> 8,                        0,            'a second run over the same path is clean' );
+    is( File::Slurper::read_text($ran), "one\ntwo\n", 'and ran nothing again' );
+};
+
+subtest 'a queue whose task failed is moved aside too' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $ran = "$dir/ran";
+    File::Slurper::Temp::write_text( "$dir/queue", "echo one >> $ran\nfalse\n" );
+
+    local $ENV{POST_INSTALL_QUEUE} = "$dir/queue";
+    IPC::Run3::run3( [$script], \undef, \my $out, \my $err );
+    is( $? >> 8, 1, 'the failure is still the exit code' );
+
+    # Left where it was, the next run would replay the lot -- which is the bug,
+    # not a retry.  The failed line is still in the copy, and .postrun_failed in
+    # the makefile is what carries the failure forward.
+    ok( !-e "$dir/queue", 'the queue is still moved aside' );
+    my ($aside) = glob "$dir/queue.ran_at_*";
+    ok( $aside,                                                            'under the same kind of name' );
+    ok( $aside && index( File::Slurper::read_text($aside), 'false' ) >= 0, 'with the task that failed still in it' );
+};
+
 subtest 'an empty queue is nothing to do' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$dir/queue", q{} );

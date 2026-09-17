@@ -239,13 +239,18 @@ Prints a directory holding whichever of these it found:
 | `$DOMAIN.setup.log` | the Makefile: every target, in order, and which one failed |
 | `cloud-init.log`, `cloud-init-output.log` | everything before the Makefile — seed, packages, users, network |
 | `new-outblocked.log` | egress the firewall stopped, as `SPT=`/`DPT=` pairs |
-| `post_install.sh` | what was queued to run after the Makefile |
+| `post_install.sh` | deferred work still waiting — there only if the build stopped before `post_install` ran |
+| `post_install.ran.sh` | the deferred work as it actually ran, from the copy `post_install` moves aside |
 
 **Which ones are absent is itself the finding.** No `setup.log` means the guest
 never got as far as running a Makefile — read `cloud-init-output.log` instead,
 the answer is in there. "not there" means the file genuinely is not there: the
 collector proves the connection before it reads anything, and dies rather than
 reporting a guest it could not reach as a guest with no logs.
+
+`post_install.sh` is the one to read backwards. It is absent on a build that got
+through its deferred work, and present when something stopped before that —
+holding exactly what did not happen.
 
 **Then ask whether the build finished, before you read anything else into what
 the guest looks like.** The guest records what make exited with in
