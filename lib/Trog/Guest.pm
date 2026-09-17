@@ -134,8 +134,17 @@ sub wait_for_ssh {
     # own minute: sshd answers long before cloud-init has finished writing
     # authorized_keys, and ssh-import-id fetches some of those keys from GitHub,
     # so a minute ran out on guests that were coming up perfectly well.
-    $self->ssh( retry_interval => $SSH_RETRY_INTERVAL, retry_max => int( $timeout / $SSH_RETRY_INTERVAL ) || 1 )
-      or die 'Could not establish an SSH connection to ' . $self->describe . "\n";
+    # That window is spent being refused, which is the one failure the library
+    # will not retry on its own: a guest still writing authorized_keys answers
+    # "Permission denied", and giving up on the first refusal is the right
+    # default everywhere else, since retrying one offers every key in the agent
+    # again and a host counting failed logins will ban you for it.  Here the
+    # refusal is the expected state of a machine that is still being built.
+    $self->ssh(
+        retry_interval        => $SSH_RETRY_INTERVAL,
+        retry_max             => int( $timeout / $SSH_RETRY_INTERVAL ) || 1,
+        retry_on_auth_failure => 1,
+    ) or die 'Could not establish an SSH connection to ' . $self->describe . "\n";
     return $self;
 }
 
