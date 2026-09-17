@@ -594,13 +594,12 @@ sub scaffold_dependencies {
         domain        => $opts{domain},
     );
 
-    # Named by the caller, who has scaffolded them already.  The list comes back
-    # with duplicates, which this also takes care of.
-    my %seen = map { $_ => 1 } @$named;
+    # Named by the caller, who has scaffolded them already.
+    my %named = map { $_ => 1 } @$named;
 
     my ( %blocks, @todo );
     foreach my $dep (@$modules) {
-        next if $seen{$dep}++;
+        next if $named{$dep};
         next unless $builders->{$dep}->is_module;
 
         my ( $config, @needed ) = $class->scaffold(
@@ -679,10 +678,9 @@ sub resolve_substitutable_dependency {
     my ( $class, %args ) = @_;
     my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
 
-    # For the same reason resolve_dependencies names it: all three refusals
-    # below open with it, and an undef there is a fatal warning rather than a
-    # sentence.
-    $domain //= 'this domain';
+    # For the same reason resolve_dependencies requires it: all three refusals
+    # below open with it, and one that cannot name the domain is not worth much.
+    die "resolve_substitutable_dependency needs the domain asking; pass one.\n" unless $domain;
 
     # It arrives as text out of required_recipes, so nothing has loaded it and
     # every method call below would be "perhaps you forgot to load".
@@ -729,15 +727,20 @@ Each dependency is added, configured out of whatever the recipes depending on it
 asked for, and C<reconcile>d where two of them wanted different things.
 
 What comes back is the expanded list and the builders instantiated along the
-way, which the caller reuses rather than loading every recipe a second time.
-C<domain_conf> is written into: a dependency's configuration ends up the merge
-of what the domain wrote and what each dependent handed it.
+way, which reusing is the caller's responsibility rather than loading every
+recipe a second time.  C<domain_conf> is written into: a dependency's
+configuration ends up the merge of what the domain wrote and what each dependent
+handed it.
 
-Ordering the result is the caller's, and is not optional.  A dependency is
-pushed again every time something names it, so the list comes back with
-duplicates; C<Provisioner::Utils::lastuniq> over it is what puts each one after
-the last thing that dragged it in.  Which entries are modules at all is
-L<Provisioner::Recipe/is_module>.
+The list comes back in the order the build wants it.  A dependency is named
+again every time something requires it, and the last of those is the one that
+counts -- it has to run after everything that dragged it in -- so the list is
+C<lastuniq>'d before it is returned.  Which entries are modules at all is
+L<Provisioner::Recipe/is_module>, and that is the caller's to filter.
+
+C<domain> is required.  Getting this far without knowing which domain is being
+provisioned is not a thing to paper over with a default: a caller with no real
+one has a bogus one to supply and a reason to think about why.
 
 =head3 Two sources, on purpose
 
@@ -768,12 +771,10 @@ sub resolve_dependencies {
     my $distro        = $args{distro};
     my $provisioner   = $args{provisioner} // {};
 
-    # Named, because every refusal below begins with it and the messages are the
-    # whole point of them.  Left undef it interpolates as one, which under
-    # warnings FATAL => 'all' is itself the exception -- so the sentence saying
-    # which recipe could not answer was replaced by a warning about the line
-    # that was building it.
-    my $domain = $args{domain} // 'this domain';
+    # Required.  Every refusal below opens with it, and depsolving without
+    # knowing which domain is being provisioned is not a state to carry on from.
+    my $domain = $args{domain}
+      or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
 
     my $depmod_conf = {};
     my %builders;
@@ -782,12 +783,13 @@ sub resolve_dependencies {
     # visit.  A recipe other recipes depend on is visited once for each of
     # them, and what they handed it has to be merged into what the domain
     # wrote each time -- merged into the last visit's result instead, a list
-    # they handed it came out once per visit.  perl's cpan_deps did, three
-    # times over, on a guest with tcms, tpsgi and trogrunner.
+    # they handed it came out once per visit.
     my %as_written;
 
-    # C-style, because the list grows as it is walked: what a recipe requires
-    # may require something itself, and the extents have to be recomputed.
+    # A C-style loop is the only one that recomputes the array's extents every
+    # iteration, and so the only way to iterate recursively in perl: what a
+    # recipe requires may require something itself, and lands on this list while
+    # it is being walked.
     for ( my $i = 0; $i < scalar(@modules); $i++ ) {
         my $module  = $modules[$i];
         my $builder = $builders{$module} //= $class->load( $module, distro => $distro )->new(%$provisioner);
@@ -833,14 +835,9 @@ sub resolve_dependencies {
             }
             my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
 
-            # Every time something names it, duplicates and all: lastuniq in the
-            # caller is what then puts it after the last thing that wanted it.
-            #
-            # This carried a guard -- `unless any { $required eq $_ }` -- which
-            # was handed no list and so never excluded anything.  Written out as
-            # what it did, because a guard that starts working would move a
-            # dependency back to the first recipe that named it, which is the
-            # ordering rule inverted.
+            # Every time something names it.  The duplicates are the point: the
+            # last mention is the one lastuniq keeps, which is what puts a
+            # dependency after everything that dragged it in.
             push( @modules, $required );
             $depmod_conf = $class->_dep_merger->merge( $depmod_conf, \%cur_args );
 
@@ -861,7 +858,7 @@ sub resolve_dependencies {
         }
     }
 
-    return ( \@modules, \%builders );
+    return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders );
 }
 
 # Two merges, wanting opposite things, so two mergers.

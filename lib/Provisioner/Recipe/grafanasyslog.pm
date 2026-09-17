@@ -48,11 +48,6 @@ That is worth knowing before adding it to an arbitrary guest: it would make that
 guest a collector, listening for the fleet.  This is a recipe for the machine
 that already is one.
 
-Nothing here asserts that the collector arrived.  Naming it in
-C<required_recipes> is what puts it there, so a guard against its absence is a
-guard that cannot fire -- see L<Provisioner::Recipe/required_recipes> and the
-dependency section of F<docs/APPROACH.md>.
-
 =head2 Over a port, not out of the files
 
 The collector already writes every sender's messages to a file, so reading those

@@ -755,10 +755,6 @@ sub handle_domain {
     @modules  = @$solved;
     %builders = %$built;
 
-    # Deps should be processed after the last thing that dragged them in, and not before.
-    # This is sometimes the case when we have multiple recipes depending on the same thing!
-    @modules = Provisioner::Utils::lastuniq(@modules);
-
     # And out come the two that direct the build rather than running in it --
     # the distro recipe and the vm recipe it depends on.  Dropped here rather
     # than never added, because they had to go through the depsolve above to be

@@ -488,7 +488,10 @@ sub dependencies_of {
 
     # By name, because this fixture has several recipes in it rather than one.
     $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
-    return Provisioner::Cookbook->scaffold_dependencies( $named, %opts );
+
+    # A domain is required rather than defaulted, so a caller with no real one
+    # says which bogus one it means.
+    return Provisioner::Cookbook->scaffold_dependencies( $named, domain => 'd.test', %opts );
 }
 
 subtest 'a dependency nobody named still says what it wants' => sub {
@@ -538,6 +541,21 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     # Returned rather than rebuilt: bin/new_config uses these same objects for
     # the is_module filter, the tenancy check and the render loop.
     ok( $builders->{t_dep}, 'the builders come back for the caller to reuse' );
+
+    # The order is the build's, and it is the whole reason a dependency is named
+    # again every time something requires it: lastuniq keeps the last mention,
+    # which puts it after everything that dragged it in.  A fragment may not
+    # assume its dependency has already run, and grafanasyslog creates its paths
+    # root-owned because of it -- so an inversion here breaks a guest rather
+    # than a test.
+    my %at;
+    my $i = 0;
+    $at{$_} = $i++ for @$modules;
+
+    cmp_ok( $at{t_requirer}, '<', $at{t_dep},  'a dependency comes after the recipe that required it' );
+    cmp_ok( $at{t_dep},      '<', $at{t_deep}, 'and one reached through it comes after that' );
+
+    is( scalar @$modules, scalar keys %at, 'and the list comes back deduplicated, so callers need not' );
 };
 
 subtest 'an interface is resolved rather than passed along' => sub {
@@ -591,8 +609,13 @@ subtest 'a recipe that cannot say what it wants is named, not skipped' => sub {
     like( $err, qr/t_dep/,                  'and what it was asked about' );
     like( $err, qr/_global[ ]in[ ]recipes/, 'and where the configuration it wanted comes from' );
 
-    # A caller that named no domain still gets a sentence rather than an undef.
-    like( $err, qr/this[ ]domain/, 'and reads as English when nobody named a domain' );
+    # And a caller that named no domain at all is refused rather than defaulted
+    # into.  Depsolving without knowing what is being provisioned is not a state
+    # to carry on from, and a plausible-looking stand-in would hide it.
+    my $nameless = exception {
+        Provisioner::Cookbook->resolve_dependencies( modules => ['t_requirer'], domain_conf => {} );
+    };
+    like( $nameless, qr/needs[ ]the[ ]domain/, 'a walk with no domain is refused outright' );
 };
 
 subtest 'defaults are copied, not shared' => sub {
