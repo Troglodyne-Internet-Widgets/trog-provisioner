@@ -1339,6 +1339,25 @@ sub rollback_possible {
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
 }
 
+=head2 $hv->quiesce_for_snapshot($domain)
+
+Stop the guest, leaving it defined.
+
+Not a courtesy.  The snapshot taken before a rebuild is disk only and carries no
+memory, and libvirt refuses one of a running domain outright -- error 84, "live
+snapshot creation is supported only during full system snapshots".  Measured on
+a hypervisor: the same snapshot of the same guest was refused running and taken
+stopped.  Nothing is lost by stopping, since the guest is about to be rebuilt
+either way.
+
+=cut
+
+sub quiesce_for_snapshot {
+    my ( $self, $domain ) = @_;
+
+    return $self->stop_domain($domain);
+}
+
 =head2 $hv->disk_layout($volume)
 
 The cluster size and subcluster allocation of an existing qcow2, as a hashref,

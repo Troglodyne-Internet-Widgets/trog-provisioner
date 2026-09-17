@@ -24,7 +24,6 @@ use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
-use Time::Piece();
 use Provisioner::IPPool();
 use YAML::XS();
 use List::Util   qw{uniq};
@@ -666,35 +665,11 @@ sub provision_domain (%args) {
 
     # Before the plunge, where there is anything to go back to.  A first build
     # has no guest to snapshot and nothing to lose, and a rebuild that cannot
-    # keep this guest's disk would be snapshotting a file it is about to delete
-    # -- rollback_possible is the backend saying which of those this is.
-    my $rollback;
-    if ( $hv->rollback_possible( $domain, capacity => $settings{size} ) ) {
-
-        # Stopped first, and not as a courtesy.  libvirt refuses an internal
-        # snapshot of a running domain -- error 84, "live snapshot creation is
-        # supported only during full system snapshots" -- and this one is disk
-        # only.  Measured on a hypervisor: the same snapshot of the same guest
-        # was refused running and taken stopped.  Nothing is lost by it, since
-        # the guest is about to be rebuilt either way, and a backend that has no
-        # such rule does nothing here.
-        $hv->stop_domain($domain);
-
-        # Dated rather than an epoch second, since this is what an operator
-        # reads back out of virsh and types at bin/restore.  No colons: the name
-        # goes into the snapshot XML and onto a command line.  Sorting the same
-        # way it reads is free, and snapshot_names orders by creationTime
-        # regardless.
-        my $snapname = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
-
-        # Only a rollback point if it was actually taken: create_snapshot warns
-        # and returns false rather than dying, and a name printed for a snapshot
-        # that is not there is worse than saying nothing.
-        if ( $hv->create_snapshot( $domain, $snapname ) ) {
-            $rollback = $snapname;
-            print "Snapshotted $domain as $rollback before rebuilding it.\n" . "If this goes badly: bin/restore --name $rollback $domain\n";
-        }
-    }
+    # keep this guest's disk would be snapshotting a file it is about to delete.
+    # Which of those this is, and whatever the backend has to do to its guest to
+    # take a snapshot at all, are the backend's own business.
+    my $rollback = $hv->snapshot_before_rebuild( $domain, capacity => $settings{size} );
+    print "Snapshotted $domain as $rollback before rebuilding it.\n" . "If this goes badly: bin/restore --name $rollback $domain\n" if $rollback;
 
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This

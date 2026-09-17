@@ -945,6 +945,35 @@ subtest 'stopping a domain leaves it defined' => sub {
     ok !$hv->stop_domain('vm.test'), 'and a domain that is not there says so';
 };
 
+subtest 'the rollback point is taken with the guest stopped, or not taken at all' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my @did;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( rollback_possible => sub { 1 } );
+    $mock->redefine( stop_domain       => sub { push @did, 'stop_domain';    return 1 } );
+    $mock->redefine( create_snapshot   => sub { push @did, "snapshot $_[2]"; return 1 } );
+
+    my $name = $hv->snapshot_before_rebuild( 'vm.test', capacity => 42949672960 );
+
+    like( $name, qr/\A before-reprovision- \d{4}-\d{2}-\d{2}-\d{6} \z/, 'the name is the day and second an operator reads back and types at bin/restore' );
+
+    # The order, not merely that both happened.  The snapshot taken here is disk
+    # only and carries no memory, and libvirt refuses one of a running domain.
+    is_deeply( \@did, [ 'stop_domain', "snapshot $name" ], 'the guest is stopped first, which is the only order libvirt allows' );
+
+    # create_snapshot warns and returns false rather than dying, and the name is
+    # what the caller offers an operator as the way home.
+    @did = ();
+    $mock->redefine( create_snapshot => sub { return 0 } );
+    is( $hv->snapshot_before_rebuild( 'vm.test', capacity => 1 ), undef, 'a snapshot that would not take is no rollback point' );
+
+    @did = ();
+    $mock->redefine( rollback_possible => sub { 0 } );
+    is( $hv->snapshot_before_rebuild( 'vm.test', capacity => 1 ), undef, 'and nothing worth going back to is not snapshotted at all' );
+    is_deeply( \@did, [], 'nor is the guest stopped for a snapshot that is not coming' );
+};
+
 subtest 'a domain that already exists hands back the uuid libvirt gave it' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
