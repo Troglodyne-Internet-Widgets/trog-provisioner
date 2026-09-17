@@ -506,6 +506,19 @@ ahead -- and F<bin/provision> owns that rather than this.
 
 sub rebuild_destroys_guest { return 0 }
 
+=head2 $hv->clone_guest_disk($domain)
+
+Copy a guest's disk aside before a rebuild destroys it, and say where the copy
+landed.
+
+Undef here, and nothing asks: only a backend which answers yes to
+C<rebuild_destroys_guest> has a guest to copy aside, and one that replaces a
+server's root disk in place never does.
+
+=cut
+
+sub clone_guest_disk { return }
+
 =head1 PLACEMENT
 
 Whether one more guest will fit, and which hypervisor it fits on best.

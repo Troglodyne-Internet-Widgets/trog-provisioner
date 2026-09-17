@@ -60,6 +60,7 @@ subtest 'the POD documents the interface' => sub {
     like( $synopsis, qr/--existing/,               'POD documents --existing' );
     like( $synopsis, qr/--dryrun/,                 'POD documents --dryrun' );
     like( $synopsis, qr/--no-config/,              'POD documents --no-config' );
+    like( $synopsis, qr/--clone-on-nonreusable/,   'POD documents --clone-on-nonreusable' );
     like( $synopsis, qr/--destroy-on-nonreusable/, 'POD documents --destroy-on-nonreusable' );
     like( $synopsis, qr/--die-on-nonreusable/,     'POD documents --die-on-nonreusable' );
     like( $synopsis, qr/DOMAIN/,                   'POD documents the DOMAIN argument' );
@@ -81,13 +82,13 @@ subtest 'no domain exits with the usage' => sub {
 # A real run, since pod2usage exits rather than dying.  Safe to run for real:
 # the refusal is the first thing after the options are read, before a credential
 # is asked for or a domain is taken off the arguments.
-subtest 'the two nonreusable options say opposite things' => sub {
+subtest 'the nonreusable options say different things, so only one is taken' => sub {
     my $out = q{};
-    IPC::Run3::run3( [ $^X, $script, qw{--destroy-on-nonreusable --die-on-nonreusable vm.test} ], \undef, \$out, \$out );
+    IPC::Run3::run3( [ $^X, $script, qw{--clone-on-nonreusable --destroy-on-nonreusable --die-on-nonreusable vm.test} ], \undef, \$out, \$out );
 
-    isnt( $?, 0, 'passing both exits non-zero' );
-    like( $out, qr/say[ ]opposite[ ]things/, 'saying why' );
-    like( $out, qr/Usage:/,                  'and printing the usage out of the POD' );
+    isnt( $?, 0, 'passing more than one exits non-zero' );
+    like( $out, qr/say[ ]different[ ]things/, 'saying why' );
+    like( $out, qr/Usage:/,                   'and printing the usage out of the POD' );
 };
 
 subtest 'main() resolves the hypervisor before it touches anything' => sub {

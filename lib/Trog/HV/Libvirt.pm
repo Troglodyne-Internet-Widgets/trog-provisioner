@@ -1411,6 +1411,65 @@ sub rebuild_destroys_guest {
     return $self->disk_reusable( $domain, $opts{capacity} ) ? 0 : 1;
 }
 
+=head2 $hv->clone_guest_disk($domain)
+
+Copy this guest's disk aside as C<$domain.bak-qcow2>, and say where it landed.
+
+Taken with the guest stopped.  A qcow2 copied while qemu is writing into it is a
+copy of a moment that never existed, and the caller asking for this is about to
+destroy the guest anyway, so stopping costs it nothing.
+
+A disk and nothing else: no domain is defined for the copy, it takes no address
+out of the pool, and nothing starts it.  What it is for is the data that was on
+the guest, and a copy that booted would be a second machine answering to the
+first one's name.
+
+Nothing removes it afterwards.  C<guest_volumes> does not name it, so
+F<bin/destroy> leaves it alone -- deliberately, since it is the copy of a machine
+somebody was about to lose.  One that is already there is kept rather than
+written over, because the older copy is as likely to be the wanted one.
+
+Undef when there was no disk to copy, or when libvirt would not make the copy.
+
+=cut
+
+sub clone_guest_disk {
+    my ( $self, $domain ) = @_;
+
+    my $source = $self->volume("$domain-qcow2") or return;
+    my $info   = eval { $source->get_info() }   or return;
+    my $name   = "$domain.bak-qcow2";
+
+    if ( my $existing = $self->volume_path($name) ) {
+        print "$name is in the pool already; keeping that rather than writing over it.\n";
+        return $existing;
+    }
+
+    $self->stop_domain($domain);
+
+    print "Copying $domain's disk aside as $name\n";
+
+    # No backingStore declared, so the copy stands on its own rather than
+    # depending on the base image this guest was laid over.  It is a backup: one
+    # that stops working when somebody prunes another file is not much of one.
+    my $clone = eval {
+        $self->pool->clone_volume( <<"XML", $source );
+<volume>
+  <name>@{[ _xml_escape($name) ]}</name>
+  <capacity unit='bytes'>$info->{capacity}</capacity>
+  <target><format type='qcow2'/></target>
+</volume>
+XML
+    };
+
+    unless ($clone) {
+        warn "Could not copy $domain's disk aside as $name: $@";
+        return;
+    }
+
+    return eval { $clone->get_path() };
+}
+
 =head2 $hv->disk_layout($volume)
 
 The cluster size and subcluster allocation of an existing qcow2, as a hashref,
