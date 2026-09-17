@@ -329,6 +329,22 @@ sub stop_domain {
     return 1;
 }
 
+=head2 start_domain($name)
+
+Start a domain that is defined but not running.  Says whether there was one to
+start; one that is already running is nothing to do.
+
+=cut
+
+sub start_domain {
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name) or return 0;
+
+    return 1 if $domain->is_active();
+    eval { $domain->create(); 1 } or die "Could not start $name: $@";
+    return 1;
+}
+
 =head2 domain_uuid($name)
 
 The uuid libvirt has for this domain, or undef when it has no such domain.
@@ -774,11 +790,7 @@ sub define_domain {
             die 'Could not set ' . $domain->get_name() . " to start with the host: $@";
         };
     }
-    if ( !$domain->is_active() ) {
-        eval { $domain->create(); 1 } or do {
-            die 'Could not start ' . $domain->get_name() . ": $@";
-        };
-    }
+    $self->start_domain( $domain->get_name() );
 
     return $domain;
 }
@@ -869,10 +881,15 @@ A running guest gets a B<full system> snapshot: its memory goes into the qcow2
 beside the disk, so reverting puts it back mid-flight rather than booting it.
 That is the only kind libvirt will take of a domain that is up.
 
-C<disk_only> takes the guest B<down> first and snapshots the disk alone, and
-leaves it down.  No memory means a far smaller and faster snapshot, and a revert
-that boots rather than resumes -- which is what a caller about to rebuild the
-guest wants, since that guest's memory is worth nothing.
+C<disk_only> takes the guest B<down> first and snapshots the disk alone, then
+puts it back the way it was found: running again if it was running, still off if
+it was not, and either way whether the snapshot succeeded or was refused.  No
+memory means a far smaller and faster snapshot, and a revert that boots rather
+than resumes.
+
+C<leave_down> keeps it down afterwards.  That is for the caller which is about
+to take the guest apart anyway, and would otherwise be starting it only to stop
+it again.
 
 A guest that is already off has no memory to capture, so it gets the disk-only
 form whether or not it was asked for.
@@ -917,10 +934,14 @@ sub create_snapshot {
     my ( $self, $name, $snapname, %opts ) = @_;
     my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
 
-    # Down first, and it stays down.  We can take a full system snapshot of a
-    # live guest or a disk-only one of a stopped guest, and nothing else: a
-    # disk-only snapshot of a running domain is refused with error 84, "live
-    # snapshot creation is supported only during full system snapshots".
+    # Decided before anything is taken down, because taking it down is what
+    # destroys the evidence.  A guest that was already off is put back off.
+    my $resume = $opts{disk_only} && !$opts{leave_down} && $domain->is_active();
+
+    # Down first.  We can take a full system snapshot of a live guest or a
+    # disk-only one of a stopped guest, and nothing else: a disk-only snapshot
+    # of a running domain is refused with error 84, "live snapshot creation is
+    # supported only during full system snapshots".
     $self->stop_domain($name) if $opts{disk_only};
 
     # Asked after the stop, because the stop is what changes the answer.  A
@@ -946,6 +967,11 @@ sub create_snapshot {
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
     warn "Snapshot of $name failed: $@" unless $ok;
+
+    # Whatever happened above.  A snapshot libvirt refused is not a reason to
+    # leave a guest switched off that was running when we were handed it.
+    $self->start_domain($name) if $resume;
+
     return $ok ? 1 : 0;
 }
 

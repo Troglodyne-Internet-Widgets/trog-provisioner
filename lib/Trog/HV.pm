@@ -483,7 +483,9 @@ sub snapshot_before_rebuild {
     # it is also what takes a libvirt guest down, which is the only state that
     # backend will snapshot a disk in; a cloud images a running server and has
     # no such distinction to make.
-    return $self->create_snapshot( $domain, $name, disk_only => 1 ) ? $name : undef;
+    # leave_down because the rebuild takes the guest apart next: starting it
+    # here would only be to stop it again a moment later.
+    return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
 =head1 PLACEMENT

@@ -951,7 +951,7 @@ subtest 'the rollback point is a disk-only snapshot, or is not taken at all' => 
     my @asked;
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( rollback_possible => sub { 1 } );
-    $mock->redefine( create_snapshot   => sub { my ( undef, undef, $snapname, %o ) = @_; push @asked, [ $snapname, $o{disk_only} ]; return 1 } );
+    $mock->redefine( create_snapshot   => sub { my ( undef, undef, $snapname, %o ) = @_; push @asked, [ $snapname, $o{disk_only}, $o{leave_down} ]; return 1 } );
 
     my $name = $hv->snapshot_before_rebuild( 'vm.test', capacity => 42949672960 );
 
@@ -960,8 +960,9 @@ subtest 'the rollback point is a disk-only snapshot, or is not taken at all' => 
     # Disk only, and not merely as an economy.  The guest is about to be
     # rebuilt, so its memory is worth nothing -- and on libvirt asking for
     # disk_only is what takes the domain down, which is the only state that
-    # backend will snapshot a disk in.
-    is_deeply( \@asked, [ [ $name, 1 ] ], 'taken disk-only, which is what stops a libvirt guest and keeps the snapshot small' );
+    # backend will snapshot a disk in.  Left down for the same reason: the
+    # rebuild takes it apart next, so starting it here would be to stop it again.
+    is_deeply( \@asked, [ [ $name, 1, 1 ] ], 'taken disk-only and left down, which is what the rebuild wants of both backends' );
 
     # create_snapshot warns and returns false rather than dying, and the name is
     # what the caller offers an operator as the way home.
@@ -978,13 +979,15 @@ subtest 'the rollback point is a disk-only snapshot, or is not taken at all' => 
 
     package FakeSnapshotDomain;
 
-    sub new       { my ( $class, $active, $seen ) = @_; return bless { active => $active, seen => $seen }, $class }
+    sub new       { my ( $class, $active, $seen, $refuse ) = @_; return bless { active => $active, seen => $seen, refuse => $refuse }, $class }
     sub is_active { my ($self) = @_; return $self->{active} }
     sub destroy   { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
+    sub create    { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
 
     sub create_snapshot {
         my ( $self, $xml, $flags ) = @_;
         push @{ $self->{seen} }, { xml => $xml, flags => $flags };
+        die "libvirt would not take it\n" if $self->{refuse};
         return 1;
     }
 }
@@ -1013,6 +1016,32 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     is( $seen[0], 'destroy', 'having taken the guest down first, which is the only state libvirt snapshots a disk in' );
     unlike( $seen[1]{xml}, qr/<memory/, 'no memory in the XML' );
     ok( !( $seen[1]{flags} & Sys::Virt::DomainSnapshot::CREATE_LIVE() ), 'and no LIVE here either, which nothing this takes is ever allowed to carry' );
+    is( $seen[2], 'create', 'and the guest goes back up, an operator having asked for a snapshot rather than a shutdown' );
+
+    # The rebuild path, which is about to take the guest apart: starting it here
+    # would only be to stop it again a moment later.
+    @seen = ();
+    my $doomed = FakeSnapshotDomain->new( 1, \@seen );
+    $mock->redefine( _domain => sub { $doomed } );
+
+    ok( $hv->create_snapshot( 'vm.test', 'doomed', disk_only => 1, leave_down => 1 ), 'leave_down snapshots as well' );
+    is( $seen[0], 'destroy', 'stopping the guest' );
+    ok( !( grep { ref $_ eq q{} && $_ eq 'create' } @seen ), 'and leaving it down, which is what that caller asked for' );
+
+    # A guest that was running when we were handed it goes back up even when
+    # libvirt would not take the snapshot.  Leaving it off because the snapshot
+    # failed is the surprise this whole option exists to avoid.
+    @seen = ();
+    my $refused = FakeSnapshotDomain->new( 1, \@seen, 'refuse' );
+    $mock->redefine( _domain => sub { $refused } );
+
+    my @warned;
+    {
+        local $SIG{__WARN__} = sub { push @warned, @_ };
+        ok( !$hv->create_snapshot( 'vm.test', 'nope', disk_only => 1 ), 'a snapshot libvirt will not take says so' );
+    }
+    like( $warned[0], qr/Snapshot[ ]of[ ]vm[.]test[ ]failed/, 'and says why' );
+    is( $seen[-1], 'create', 'and the guest still goes back up, a refusal being no reason to leave it off' );
 
     # The case an operator hits without asking for anything: a guest that is
     # already off has no memory to capture, so there is only one snapshot to

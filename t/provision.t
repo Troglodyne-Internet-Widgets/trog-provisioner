@@ -452,7 +452,7 @@ sub rebuild_answering {
     $hv->redefine(
         create_snapshot => sub {
             my ( undef, undef, $n, %o ) = @_;
-            push @{ $seen{snapshots} }, { name => $n, disk_only => $o{disk_only} };
+            push @{ $seen{snapshots} }, { name => $n, disk_only => $o{disk_only}, leave_down => $o{leave_down} };
             return 1;
         }
     );
@@ -514,7 +514,8 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
     # Disk only, which is what takes a libvirt guest down -- and a snapshot of a
     # running domain that carries no memory is refused outright, error 84.  The
     # guest is about to be rebuilt, so there is no memory here worth writing.
-    ok( $seen->{snapshots}[0]{disk_only}, 'the rollback point is asked for disk-only, which is the only kind libvirt takes here' );
+    ok( $seen->{snapshots}[0]{disk_only},  'the rollback point is asked for disk-only, which is the only kind libvirt takes here' );
+    ok( $seen->{snapshots}[0]{leave_down}, 'and asked to leave the guest down, the rebuild being about to take it apart anyway' );
 
     # Keeping the disk means leaving the domain defined, and libvirt binds a
     # name to a uuid: a rebuild that writes XML without the one it already has

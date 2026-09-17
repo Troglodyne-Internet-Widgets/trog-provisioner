@@ -38,10 +38,11 @@ time, if you don't say.
 
 Snapshot the disk alone, without the guest's memory.
 
-This B<stops the guest, and leaves it stopped>, because a disk-only snapshot is
-the only kind libvirt will take of a domain that is not running -- and it will
-not take one of a domain that is.  Start it again yourself when the snapshot is
-done.
+This B<stops the guest> to do it, because a disk-only snapshot is the only kind
+libvirt will take of a domain that is not running -- and it will not take one of
+a domain that is.  The guest is started again once the snapshot is done, if it
+was running when you asked, and it is started again whether libvirt took the
+snapshot or refused it.
 
 Worth the interruption when the memory is what you do not want: a full system
 snapshot writes the whole of the guest's RAM into the image, which is slow and
@@ -73,8 +74,9 @@ snapshot command that quietly did nothing is worse than one that failed.
 
 A running guest is snapshotted whole, memory and all, so reverting puts it back
 exactly as it was.  C<--disk-only> takes the disk by itself instead, which means
-stopping the guest first and leaving it stopped.  A guest that is already off
-has no memory to capture and is snapshotted as it is.
+stopping the guest first and starting it again when the snapshot is done.  A
+guest that is already off has no memory to capture, is snapshotted as it is, and
+is left as it was.
 
 =cut
 
@@ -104,7 +106,7 @@ sub main {
 
     # Said before the snapshot rather than after it, because it is the guest
     # going away that an operator wants warning of, and this can take a while.
-    my $going_down = $disk_only ? "Stopping $domain first, and leaving it stopped: a disk-only snapshot is not something libvirt will take of a running guest.\n" : q{};
+    my $going_down = $disk_only ? "Stopping $domain for this: a disk-only snapshot is not one libvirt will take of a running guest.  It goes back the way it was found afterwards.\n" : q{};
     print "Creating snapshot for $domain...\n" . $going_down;
 
     my $took = $hv->create_snapshot( $domain, $name, disk_only => !!$disk_only );
@@ -116,8 +118,8 @@ sub main {
     die "Current snapshot unchanged after create (still '$after') -- snapshot may not have been created\n"
       if defined $before && $before eq $after;
 
-    my $still_down = $disk_only ? "$domain is still shut down; start it when you are ready.\n" : q{};
-    print "Snapshot '$after' created and verified as current.\n" . $still_down;
+    my $put_back = $disk_only ? "$domain is back the way it was found.\n" : q{};
+    print "Snapshot '$after' created and verified as current.\n" . $put_back;
     return 0;
 }
 

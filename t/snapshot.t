@@ -43,9 +43,10 @@ sub main_snapshot (@args) { return Trog::Bin::Snapshot::main( '--hvconf', $NO_FL
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section( "$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS' );
-like( $synopsis, qr/--name/,    'POD documents --name' );
-like( $synopsis, qr/--connect/, 'POD documents --connect' );
-like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
+like( $synopsis, qr/--name/,      'POD documents --name' );
+like( $synopsis, qr/--connect/,   'POD documents --connect' );
+like( $synopsis, qr/--disk-only/, 'POD documents --disk-only' );
+like( $synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument' );
 
 # No domain -> usage, non-zero exit.  This one has to be a real run, since
 # pod2usage exits rather than dying.
@@ -129,6 +130,7 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
     sub new       { my ( $class, $seen ) = @_; return bless { active => 1, seen => $seen }, $class }
     sub is_active { my ($self) = @_; return $self->{active} }
     sub destroy   { my ($self) = @_; $self->{active} = 0; push @{ $self->{seen} }, 'destroy'; return 1 }
+    sub create    { my ($self) = @_; $self->{active} = 1; push @{ $self->{seen} }, 'create';  return 1 }
 
     sub create_snapshot {
         my ( $self, $xml, $flags ) = @_;
@@ -162,8 +164,9 @@ like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 
     is( $seen[0], 'destroy', '--disk-only stops the guest first' );
     unlike( $seen[1], qr/<memory/, 'and asks for the disk alone' );
-    like( $said, qr/leaving[ ]it[ ]stopped/, 'saying that it is going down' );
-    like( $said, qr/still[ ]shut[ ]down/,    'and that it has been left that way' );
+    is( $seen[2], 'create', 'then starts it again, an operator having asked for a snapshot rather than a shutdown' );
+    like( $said, qr/Stopping[ ]myvm[.]lan[ ]for[ ]this/,  'saying beforehand that the guest is going down' );
+    like( $said, qr/back[ ]the[ ]way[ ]it[ ]was[ ]found/, 'and afterwards that it is back' );
 }
 
 sub _run {
