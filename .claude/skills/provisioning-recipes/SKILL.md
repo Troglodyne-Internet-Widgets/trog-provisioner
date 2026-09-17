@@ -124,6 +124,33 @@ If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
 left in place stops `new_config` by design.
 
+**"Nothing to fill in" is not a promise.** `new_guest` scaffolds only the
+recipes you named on the command line: it asks `Provisioner::Cookbook->scaffold`
+for each of them, and Cookbook knows nothing about `required_recipes` -- the
+depsolver that expands those lives in `bin/new_config` and runs later. So a
+recipe dragged in as a dependency can have a required field with no default and
+nothing will mention it. You are told there is nothing to do, and the build
+refuses well after you have stopped watching:
+
+    The grafana recipe's configuration for <domain> is not valid:
+      /admin_password: Missing property.
+
+Which is right: a password is not something a depending recipe can choose on an
+operator's behalf, so `grafanasyslog` does not supply one. For a scratch guest
+that means you supply it. Add a block for the dependency to the domain's file in
+the scratch configuration, with a value that is visibly throwaway, and say in
+your report that you did:
+
+    grafana:
+        admin_password: scratch-only-throwaway
+
+**Ask `new_config` before you ask `provision`.** It is the same configuration
+step `provision` starts with, it takes a second or two, and it is where a
+refusal like that one comes from -- so it costs nothing to find out now rather
+than ten minutes into a build that was never going to finish:
+
+    echo "$TROG_SCRATCH_PASS" | bin/new_config "$DOMAIN"
+
 Then:
 
 ```
