@@ -282,7 +282,6 @@ my %required_config = (
     gogs            => { version         => '0.13.0',        admin_password => 's3cr3t' },
     plexmediaserver => { plex_login_name => 'plexuser',      admin_mail     => 'admin@test.test' },
     openvpnclient   => { server          => 'vpn.test.test', cert_dir       => '/opt/domains/test.test.test/vpn' },
-    tcms            => { tcms_dir        => 'tcms' },
     adminconfig     => { skel            => '/opt/dotfiles' },
     admincode       => {
         repos_from => [],

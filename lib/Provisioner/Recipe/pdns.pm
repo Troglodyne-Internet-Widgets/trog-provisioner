@@ -70,6 +70,19 @@ sub args {
             },
             extra_records => { type => 'string' },
 
+            # Whoever holds the public zone this guest syncs up to, as the
+            # registrar recipe's own three fields.  The operator's to set: this
+            # guest's own credentials go under lexicon, and putting them here
+            # would have it name itself as its own upstream.
+            registrar => {
+                type       => 'object',
+                properties => {
+                    type => { type => 'string', description => 'The lexicon provider holding the zone, spelled as the registrar recipe spells it.' },
+                    user => { type => 'string', description => 'The username that provider authenticates with.' },
+                    key  => { type => 'string', description => 'The token or password for it.' },
+                },
+            },
+
             # Which repo.powerdns.com train to install from.  This asked for
             # auth-master, which is the development branch: guests came up with
             # 5.1.0~alpha1+master.380 on them.  A release train, so an upgrade

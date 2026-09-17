@@ -363,6 +363,10 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
                     },
                 },
                 bag => { type => 'object', additionalProperties => { type => 'string' } },
+
+                # Answered by whatever builds the guest rather than by an
+                # operator: the storage volume it made, the MAC it assigned.
+                computed => { type => 'string', readOnly => 1 },
             },
         );
     }
@@ -405,6 +409,15 @@ subtest 'all => 1 is the full menu' => sub {
     is( $config->{opt_dflt},         'optional default',                 'optional fields appear, with their defaults' );
     is( $config->{optional},         Provisioner::Cookbook->PLACEHOLDER, 'and without' );
     is( $config->{nested}{inner_op}, Provisioner::Cookbook->PLACEHOLDER, 'through nested objects too' );
+};
+
+subtest 'a readOnly field is never offered to fill in' => sub {
+    my ($full) = scaffold_of( all => 1 );
+    ok( !exists $full->{computed}, 'not even on the full menu, whatever builds the guest having answered it already' );
+
+    my ( $config, @todo ) = scaffold_of();
+    ok( !exists $config->{computed},                      'nor in the smallest thing that could work' );
+    ok( !( grep { index( $_, 'computed' ) >= 0 } @todo ), 'and not among the paths that need a human' );
 };
 
 subtest 'provided fields are left alone' => sub {

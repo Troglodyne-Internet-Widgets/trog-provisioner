@@ -216,7 +216,10 @@ sub cpan_steps {
         distro        => 'ubuntu',
     );
 
-    my @lines = grep { m{/cpan_install\b} } split( m/\n/, $perl->render( %$vars, %handed ) );
+    # Only what perl declares, out of the runner's configuration: bin/new_config
+    # hands each recipe its own stanza and the settings it declares, never
+    # another recipe's fields.
+    my @lines = grep { m{/cpan_install\b} } split( m/\n/, $perl->render( $perl->takes(%$vars), %handed ) );
     return map { [m/'([^']*)'/g] } @lines;
 }
 

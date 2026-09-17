@@ -108,6 +108,25 @@ sub args {
         type       => 'object',
         required   => ['image'],
         properties => {
+
+            # What the hypervisor made, or was already holding, which the domain
+            # XML then names.  Declared because the template reads them, and
+            # readOnly because create_storage is what answers them: hv_settings
+            # skips these, so _global cannot point a guest at a volume or a MAC
+            # nobody created.
+            #
+            # Ahead of the iotune map below rather than after it: map takes its
+            # list to the end of the enclosing one, so anything following that
+            # map is an argument to it rather than a property.
+            pool_name      => { type => 'string',  readOnly => 1, description => 'Storage pool this disk was made in, as libvirt names it.' },
+            disk_volume    => { type => 'string',  readOnly => 1, description => 'Volume holding the guest disk, inside pool_name.' },
+            cloudinit      => { type => 'string',  readOnly => 1, description => 'The cloud-init seed ISO built for this guest, as a path on the hypervisor.' },
+            bridge_device  => { type => 'string',  readOnly => 1, description => "Host bridge the guest's bridged interface is attached to." },
+            nat_mac        => { type => 'string',  readOnly => 1, description => "MAC of the guest's NAT interface.  Derived from the domain name, so a rebuild keeps the lease it had." },
+            bridge_mac     => { type => 'string',  readOnly => 1, description => "MAC of the guest's bridged interface, derived the same way." },
+            metadata_cache => { type => 'integer', readOnly => 1, description => 'qcow2 metadata cache for this disk, in bytes.  A function of how large the image is, so the hypervisor sizes it rather than the schema defaulting it.' },
+            uuid           => { type => 'string',  readOnly => 1, description => 'The uuid libvirt already gave this domain, so a rebuild that kept the disk is redefined under it.  Absent on a first build, where the template leaves the element out.' },
+
             image => {
                 type        => 'string',
                 description => 'Cloud image the guest disk is layered over, as a URL.  Supplied by the distro recipe; see Provisioner::DistroRecipe.',
@@ -222,13 +241,16 @@ sub create_storage {
     my %qcow2 = $hv->qcow2_tuning( $opts{size} );
 
     return (
-        pool_name      => $hv->pool_name,
-        disk_volume    => $volume,
-        cloudinit      => $hv->cloudinit_iso( $domain, %{ $opts{seed} } ),
-        bridge_device  => $hv->bridge_device,
-        nat_mac        => $hv->guest_mac( $domain, 0 ),
-        bridge_mac     => $hv->guest_mac( $domain, 1 ),
-        metadata_cache => $qcow2{metadata_cache},
+        pool_name     => $hv->pool_name,
+        disk_volume   => $volume,
+        cloudinit     => $hv->cloudinit_iso( $domain, %{ $opts{seed} } ),
+        bridge_device => $hv->bridge_device,
+        nat_mac       => $hv->guest_mac( $domain, 0 ),
+        bridge_mac    => $hv->guest_mac( $domain, 1 ),
+
+        # Absent rather than undef: qcow2_tuning sizes one only for a disk big
+        # enough to want it, and the schema declares an integer.
+        ( defined $qcow2{metadata_cache} ? ( metadata_cache => $qcow2{metadata_cache} ) : () ),
     );
 }
 

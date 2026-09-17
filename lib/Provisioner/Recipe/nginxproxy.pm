@@ -124,6 +124,14 @@ sub args {
                     },
                 },
             },
+
+            # The flat interface, which enrich turns into the pair of vhosts the
+            # SYNOPSIS describes.  Declared here as well as inside vhosts
+            # because a domain says one or the other, and a key the schema does
+            # not name is one bin/recipes cannot print.
+            proxy_uri  => { type => 'string', description => 'Where to send what this domain does not serve from disk: a socket path under the install directory, or an http:// URI.  Generates a port 80 vhost redirecting to HTTPS and a 443 vhost proxying here, so it is the whole configuration for the usual arrangement.  Use vhosts instead to say anything more.' },
+            static_dir => { type => 'string', description => 'Files served straight from disk, as a path under the install directory.  Goes into the generated 443 vhost alongside proxy_uri; see that field for when to use vhosts instead.' },
+
             ipv6 => { type => 'boolean', default => 1 },
 
             # Declared here as well as in the nginx recipe, because each recipe

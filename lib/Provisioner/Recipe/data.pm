@@ -60,6 +60,13 @@ sub args {
         type       => "object",
         properties => {
 
+            # The older spelling of the two paths, kept because configurations
+            # written before they moved still say it: Provisioner::Cookbook
+            # reads install_dir out of `to` and data_source out of `from` when
+            # _global names neither.  See this recipe's DESCRIPTION.
+            from => { type => 'string', description => "Where this domain's data is fetched from, as a path on the machine running the provisioner.  Superseded by data_source in _global." },
+            to   => { type => 'string', description => 'Where the payload lands on the guest.  Superseded by install_dir in _global.' },
+
             # Where each recipe's salvaged state goes back, keyed on the
             # destination.  Nobody writes this by hand: it is what every recipe
             # depending on this one handed over through its restores(), the way

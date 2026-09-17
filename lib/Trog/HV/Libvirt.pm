@@ -2164,7 +2164,11 @@ sub provision_guest {
     # redefine a domain it has under a uuid other than the one it gave it.
     # Undef on a first build, where the template leaves the element out.
     my $uuid = $self->domain_uuid($domain);
-    $vm->generate_files( $dir, %settings, %storage, domain => $domain, uuid => $uuid );
+
+    # Only what vm declares, out of everything provision.conf says: the rest of
+    # that file is for bin/provision and the guest's first boot, and the recipe
+    # refuses a key it has no use for.
+    $vm->generate_files( $dir, $vm->takes(%settings), %storage, domain => $domain, ( defined $uuid ? ( uuid => $uuid ) : () ) );
 
     my $file = "$dir/domain.xml";
     print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain

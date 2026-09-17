@@ -152,6 +152,10 @@ sub args {
         properties => {
             server_name => { type => 'string' },
 
+            # Read by homeserver.yaml, which leaves the cache stanza out
+            # entirely when nothing is set here.
+            redis_password => { type => 'string', description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
+
             # Listed on the guest's index page.  The template used it before
             # anything declared it, and its loop said chan while its body said
             # channel, so every suggestion came out as #@domain.

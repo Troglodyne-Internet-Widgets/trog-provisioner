@@ -51,7 +51,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
 
     # Create the global template file
     open my $fh, '>', "$tdir/widget.global.tt" or die $!;
-    print {$fh} "global_setup=[% global_flag %]\n";
+    print {$fh} "global_setup=[% admin_user %]\n";
     close($fh) or die "Could not close $tdir/widget.global.tt: $!";
 
     ok( $with_global->has_global_template(),     'has_global_template true after file created' );
@@ -95,7 +95,7 @@ subtest "Ensure global/doman specific templates are rendered correctly" => sub {
           'Provisioner::Recipe';
     };
 
-    my $global_out = $widget->()->render_global( global_flag => 'yes' );
+    my $global_out = $widget->()->render_global( admin_user => 'yes' );
     like( $global_out, qr/global_setup=yes/, 'render_global renders global template' );
 
     my $domain_out = $widget->()->render( domain => 'example.test' );
@@ -159,6 +159,69 @@ subtest 'and none of them is offered as a field of a recipe' => sub {
 
     my @leaked = grep { exists $props->{$_} } sort keys %$global;
     is_deeply( \@leaked, [], 'bin/recipes nginx still says what nginx takes and nothing else' );
+};
+
+# A field nothing declares reached a template that never read it, so a
+# misspelled key configured nothing and the build went green: the mistake
+# surfaced whenever somebody noticed the thing they had configured was not
+# configured.  pdns.soa and mail.to each sat in the live configuration doing
+# exactly that.
+subtest 'a key no schema declares is refused' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $ntp = Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $dir,
+        distro        => 'ubuntu',
+    );
+
+    is( { $ntp->schema() }->{additionalProperties}, 0, 'schema() says so for every recipe, rather than each one deciding' );
+
+    my $err = exception { $ntp->validate( domain => 'x.test.test', admin_user => 'doge', makstep => '1.0 3' ) };
+    like( $err, qr/makstep/,           'the refusal names the key nothing declares' );
+    like( $err, qr/bin.recipes[ ]ntp/, 'and points at what would have told them what it takes' );
+
+    is(
+        exception { $ntp->validate( domain => 'x.test.test', admin_user => 'doge', makestep => '1.0 3' ) },
+        undef, 'while the field it was a misspelling of is taken'
+    );
+};
+
+# bin/new_config hands every recipe one hash of settings, and some of what
+# travels in it is nobody's configuration: libdir is spent on @INC before a
+# recipe exists, size and cpus belong to the machine.  Filtering per recipe is
+# what lets global_args stay a list of what a recipe acts on rather than a list
+# of everything that travels beside it.
+subtest 'takes() hands a recipe only what it declares' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my %prov = (
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => $dir,
+        distro        => 'ubuntu',
+    );
+    my $ntp = Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new(%prov);
+
+    my %offered = (
+        domain     => 'x.test.test',
+        admin_user => 'doge',
+        libdir     => ['/opt/vendor'],
+        size       => '50%',
+        cpus       => 2,
+    );
+
+    my %kept = $ntp->takes(%offered);
+    is_deeply( [ sort keys %kept ], [qw{admin_user domain}], 'the settings it declares survive' );
+    is( $kept{domain}, 'x.test.test', 'with the values they came with' );
+
+    # The two halves compose: strictness is only survivable because a recipe is
+    # handed what it declares, and filtering is only worth doing because the
+    # schema refuses the rest.
+    is( exception { $ntp->validate(%kept) }, undef, 'so what a recipe is handed validates' );
+    ok( exception { $ntp->validate(%offered) }, 'where the hash it was filtered out of would not' );
+
+    # Per recipe, not one list of exemptions: tmpfs means its own thing by size
+    # and is handed it.
+    my %tmpfs_kept = Provisioner::Cookbook->load( 'tmpfs', distro => 'ubuntu' )->new(%prov)->takes(%offered);
+    is( $tmpfs_kept{size}, '50%', 'a recipe that declares one of them gets it' );
 };
 
 subtest 'schema defaults are filled in' => sub {
@@ -371,6 +434,12 @@ subtest 'render_raw renders without going back through validate' => sub {
         # A package variable rather than a closed-over lexical: a named sub does
         # not close over one declared in an enclosing block at runtime.
         our $CALLS = 0;
+
+        # Declared because the render below passes it: a recipe refuses a field
+        # no schema of its own names.
+        sub args {
+            return ( type => 'object', properties => { thing => { type => 'string' } } );
+        }
 
         sub enrich {
             my ( $self, %opts ) = @_;

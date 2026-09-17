@@ -28,6 +28,23 @@ Optionally autorestart when this updates the kernel, unless the specified touchf
 
 =cut
 
+sub args {
+    return (
+        type       => 'object',
+        properties => {
+
+            # A path rather than a boolean, because the guest asks whether it is
+            # a good moment: reboot_if_needed takes this as the touchfile that
+            # says not now.  Unset installs no reboot cron at all, which is what
+            # a guest that should never reboot itself wants.
+            autorestart => {
+                type        => 'string',
+                description => 'Reboot after an update that asks for one, unless this path exists on the guest.  Unset installs no reboot cron, so the guest never restarts itself.',
+            },
+        },
+    );
+}
+
 sub template_files {
     return (
         'autoupdate.cron.tt'  => 'autoupdate_cron',

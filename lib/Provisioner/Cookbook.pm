@@ -486,6 +486,11 @@ sub _scaffold_object {
 
         next if exists $provided->{$key};
 
+        # Nothing an operator writes: a readOnly field is answered by whatever
+        # builds the guest, so offering one to fill in would be asking for a
+        # value that gets overwritten.
+        next if $prop->{readOnly};
+
         my $wanted = $required{$key} || $opts->{all};
         next unless $wanted;
 

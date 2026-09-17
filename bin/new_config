@@ -314,7 +314,12 @@ sub apply_global_defaults {
 # what each one did, and neither knew about the other -- so a knob added to one
 # was a knob missing from the other.  bin/recipes vm prints the answer now.
 sub hv_settings {
-    my @settings = sort keys %{ Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } ) };
+    my $props = Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } );
+
+    # Not the readOnly ones.  Those are what the hypervisor works out for itself
+    # -- the volume it made, the MAC it gave the guest -- so passing one through
+    # from _global would point the domain XML at a device nobody created.
+    my @settings = sort grep { !$props->{$_}{readOnly} } keys %$props;
     return @settings;
 }
 
@@ -673,7 +678,6 @@ sub handle_domain {
     $global_config->{gateway}       = $gateway;
     $global_config->{domain}        = $fqdn;
     $global_config->{ipmap}         = $ip_conf;
-    $global_config->{subdomain}     = $domain;
     $global_config->{aliases}       = $alias_conf;
     $global_config->{nameservers}   = $ns_conf;
     $global_config->{main_ip}       = $static_ip;
@@ -730,6 +734,11 @@ sub handle_domain {
     # by the same merge every other recipe is.  Neither ends up a module; they
     # are partitioned back out below.
     my @modules = ( $distro_name, sort { ( $rconf->{$domain}{$a}{order} // 'ZZZ' ) cmp ( $rconf->{$domain}{$b}{order} // 'ZZZ' ) } sort keys( %{ $rconf->{$domain} } ) );
+
+    # Out of the stanzas, now the sort above has had it.  When a recipe's target
+    # runs is this script's business rather than anything the recipe acts on, so
+    # no schema declares it -- and a recipe refuses what none of them does.
+    delete $rconf->{$domain}{$_}{order} foreach grep { ref $rconf->{$domain}{$_} eq 'HASH' } keys %{ $rconf->{$domain} };
 
     my %mf_vars;
     my @testdeps;
@@ -796,7 +805,7 @@ sub handle_domain {
         my $full_aliases = [@$aliases];
         if ( $builder->has_global_template() ) {
             $global_fragments{$module} = $builder->render_global(
-                %$global_config,
+                $builder->takes(%$global_config),
                 %$pconf,
                 full_aliases => $full_aliases,
                 modules      => \@modules,
@@ -805,7 +814,7 @@ sub handle_domain {
         }
         if ( $builder->has_template() ) {
             $fragments{$module} = $builder->render(
-                %$global_config,
+                $builder->takes(%$global_config),
                 %$pconf,
                 full_aliases => $full_aliases,
                 modules      => \@modules,
@@ -900,14 +909,14 @@ sub handle_domain {
 
         # Now build the various templates for the recipes.  These go in the
         # payload, which is what separates them from the director's files below.
-        push( @generated, $builder->generate_files( $cfg_dir, %$global_config, %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
+        push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
 
         # Write tests if any exist
         my @tests = $builder->tests();
         foreach my $test (@tests) {
             my $tname = $test;
             $tname =~ s/tt$/t/;
-            my $rendered = $builder->render_file( "tests/$test", %$global_config, %$pconf, full_aliases => $full_aliases, modules => \@modules );
+            my $rendered = $builder->render_file( "tests/$test", $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules );
             print "Writing $test as $tname\n";
             File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
         }
@@ -942,7 +951,10 @@ sub handle_domain {
     #
     # Compared exactly rather than matched, so a domain called 'data' does not
     # lose its own target.
-    my $data_fragment = delete $fragments{data};
+    # Empty rather than undef: makefile.tt emits the data target for every guest
+    # and pipes this through a formatter that substitutes on it, while the data
+    # recipe is in the build only when something declared restores.
+    my $data_fragment = delete $fragments{data} // q{};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/data" } @modules_ordered;
 
     # ufw comes out for the opposite reason: it has to run after every other
@@ -1046,15 +1058,15 @@ sub handle_domain {
     print "Writing what $fqdn first boots from, out of the $distro_name recipe\n";
     $builders{$distro_name}->generate_files(
         $cfg_dir,
-        %$global_config,
+        $builders{$distro_name}->takes(%$global_config),
         %{ $rconf->{$domain}{$distro_name} // {} },
         packages      => \@pkgs,
         ips           => [ grep { defined } $static_ip ],
         gateway       => $gateway,
         contact_email => $admin_email,
         payload_dir   => $basedir,
-        dryrun        => $dryrun,
-        modules       => \@modules,
+        ( defined $dryrun ? ( dryrun => $dryrun ) : () ),
+        modules => \@modules,
     );
 
     # And the private half goes into the store rather than staying in the domain
