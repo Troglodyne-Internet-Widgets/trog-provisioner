@@ -18,6 +18,8 @@ use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
 use File::Slurper();
+use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin;
 use FindBin::libs;
@@ -76,6 +78,41 @@ subtest 'a file inside the home directory of root comes back, rather than being 
     # is also what a build that queued no deferred work looks like, so the
     # collector reported one as the other and said nothing was wrong.
     is_deeply( $guest->{asked}[0], [qw{test -f /root/post_install.sh}], 'having asked as root, like the read that follows it' );
+};
+
+# post_install moves its queue aside to post_install.sh.ran_at_<when> once it has
+# run, so the deferred work of a finished build is only readable from that copy.
+# fetch takes a literal path and cannot resolve a name with a timestamp in it,
+# which is why this one is asked rather than read.
+#
+# The command itself is run, rather than matched against: the first version of it
+# chose with `ls -1t`, which sorts by mtime, and picked the older copy the moment
+# a salvaged or rsynced /root had timestamps that no longer agreed with the names.
+subtest 'the deferred work comes back from the copy post_install left' => sub {
+    my ($probe) = grep { $_->[1] eq 'post_install.ran.sh' } Trog::Skill::CollectArtifacts::probes();
+    ok( $probe, 'the collector asks for it at all' ) or return;
+
+    my $dir = tempdir( CLEANUP => 1 );
+    ( my $here = $probe->[0] ) =~ s{/root}{$dir}g;
+
+    my $ask = sub {
+        IPC::Run3::run3( [ 'bash', '-c', $here ], \undef, \my $out, \my $err );
+        return $out // q{};
+    };
+
+    is( $ask->(), "no deferred work has run here\n", 'a guest that never ran any says so, rather than coming back empty' );
+
+    File::Slurper::Temp::write_text( "$dir/post_install.sh.ran_at_20260917-120000", "systemctl restart chrony\n" );
+    File::Slurper::Temp::write_text( "$dir/post_install.sh.ran_at_20260101-000000", "an older run\n" );
+
+    # Mtimes set the other way round from the names, on purpose: choosing by
+    # mtime picks the older copy the moment a salvaged or rsynced /root
+    # disagrees with its own filenames.
+    my $now = time;
+    utime( $now - 100, $now - 100, "$dir/post_install.sh.ran_at_20260917-120000" );
+    utime( $now,       $now,       "$dir/post_install.sh.ran_at_20260101-000000" );
+
+    is( $ask->(), "systemctl restart chrony\n", 'and the newest is the one by name, not the one touched last' );
 };
 
 subtest 'a file that is genuinely not there is still reported missing' => sub {

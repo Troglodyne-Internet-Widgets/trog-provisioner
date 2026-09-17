@@ -83,8 +83,15 @@ was collected.
 
 =item F</root/post_install.sh>
 
-What was queued to run after the Makefile finished.  Recipes append to this,
-so it is the record of the deferred half of the work.
+What is still queued to run after the Makefile.  Recipes append to this, and
+C<post_install> moves it aside once it has run -- so a build that finished has
+nothing here, and a file that is present is work that never ran.
+
+=item F<post_install.ran.sh>
+
+The deferred half of the work as it was actually run, read back from the
+C<ran_at_> copy C<post_install> leaves behind.  This is the one to read on a
+build that completed.
 
 =back
 
@@ -200,6 +207,22 @@ sub probes {
         [
             'command -v nginx >/dev/null && nginx -t 2>&1 || echo "no nginx here"',
             'nginx-t.log'
+        ],
+
+        # The deferred work, after post_install has moved the queue aside.
+        #
+        # Asked rather than read: post_install renames the queue to
+        # post_install.sh.ran_at_<when> once it has run, so the canonical path
+        # holds something only on a build that never got that far -- and fetch()
+        # takes a literal path, which cannot resolve a name with a timestamp in
+        # it.  The newest is the run just finished.
+        # By name rather than by mtime: the name carries %Y%m%d-%H%M%S, which
+        # sorts chronologically as text, and a /root that has been salvaged or
+        # rsynced can have timestamps that no longer agree with it.  `ls -1t`
+        # here picked the older copy the moment the two disagreed.
+        [
+            q{f=$(ls -1 /root/post_install.sh.ran_at_* 2>/dev/null | tail -n1); } . q{[ -n "$f" ] && cat "$f" || echo "no deferred work has run here"},
+            'post_install.ran.sh'
         ],
     );
 }
