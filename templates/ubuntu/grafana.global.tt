@@ -1,0 +1,68 @@
+[%# One grafana, one influxd and one telegraf on the machine, so all of this is
+    the global half and runs once however many domains the guest holds.
+
+    grafana and telegraf are in no Ubuntu component -- apt-cache policy reports
+    no candidate for either -- so each comes from its vendor archive.  influxdb
+    is the only one of the three in deps, because deps is what cloud-init
+    installs at first boot, before any of this has run. -%]
+install -d -m 0755 /usr/share/keyrings
+[%# pipefail on both key fetches.  A pipeline reports the exit status of its last
+    command, so without it a key that failed to download still leaves gpg
+    succeeding on empty input -- an empty keyring, a line that passed, and the
+    failure surfacing further down as the archive refusing to verify, which names
+    the wrong thing.  Make runs these under bash, which has it. -%]
+set -o pipefail; curl -fsS https://apt.grafana.com/gpg.key | gpg --dearmor -o /usr/share/keyrings/grafana.gpg
+chmod 0644 /usr/share/keyrings/grafana.gpg
+echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
+[%# influxdata-archive.key, not influxdata-archive_compat.key, which much of the
+    published guidance still names and which expired in January 2026.  Verified
+    against this archive InRelease before it went in here. -%]
+set -o pipefail; curl -fsS https://repos.influxdata.com/influxdata-archive.key | gpg --dearmor -o /usr/share/keyrings/influxdata.gpg
+chmod 0644 /usr/share/keyrings/influxdata.gpg
+echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/influxdata.gpg] https://repos.influxdata.com/debian stable main" > /etc/apt/sources.list.d/influxdata.list
+[%# Each checked on its own before the general update, so an archive refusing us
+    fails here naming itself rather than as apt noise and a bare error from the
+    install afterwards. -%]
+DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/grafana.list \
+    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
+  || { echo "grafana: apt.grafana.com would not serve its repository, so there is no grafana to install" >&2; exit 1; }
+DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+    -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/influxdata.list \
+    -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
+  || { echo "grafana: repos.influxdata.com would not serve its repository, so there is no telegraf to install" >&2; exit 1; }
+DEBIAN_FRONTEND="noninteractive" apt-get update -q
+[% packager_invocation | mark_raw %] grafana telegraf
+[%# After the packages, which is what makes the grafana and telegraf accounts
+    these files are given to. -%]
+install -o root -g grafana -m 0640 grafana.ini /etc/grafana/grafana.ini
+install -d -o root -g grafana -m 0750 /etc/grafana/provisioning/datasources
+install -d -o root -g grafana -m 0750 /etc/grafana/provisioning/dashboards
+install -o root -g grafana -m 0640 grafana_datasource.yaml /etc/grafana/provisioning/datasources/influxdb.yaml
+install -o root -g grafana -m 0640 grafana_dashboards.yaml /etc/grafana/provisioning/dashboards/provisioner.yaml
+[%# Where the dashboards provider reads from.  Owned by grafana rather than
+    root: a recipe adding a dashboard writes it here, and grafana rescans. -%]
+install -d -o grafana -g grafana -m 0755 /var/lib/grafana/dashboards
+[%# influxdb.service carries EnvironmentFile=-/etc/default/influxdb and the
+    package ships no such file, so this one is ours.  It is what keeps influxd
+    off every interface. -%]
+install -o root -g root -m 0644 grafana_influxdb.env /etc/default/influxdb
+install -o root -g telegraf -m 0640 grafana_telegraf.conf /etc/telegraf/telegraf.d/50-provisioner.conf
+install -m 0755 grafana_influx_setup.sh [% script_dir %]/grafana_influx_setup.sh
+[%# influxd restarted here rather than only in postrun: it was started by
+    cloud-init when the package went on, so it is listening on every interface
+    until it rereads /etc/default/influxdb. -%]
+systemctl restart influxdb
+[% script_dir %]/queue_postrun_task systemctl daemon-reload
+[% script_dir %]/queue_postrun_task systemctl enable influxdb
+[% script_dir %]/queue_postrun_task systemctl restart influxdb
+[%# Before telegraf is restarted, so the database it writes to already exists
+    with a retention on it.  Installing telegraf started it, so it may have made
+    one already -- which is why the script alters as well as creates. -%]
+[% script_dir %]/queue_postrun_task [% script_dir %]/grafana_influx_setup.sh
+[% script_dir %]/queue_postrun_task systemctl enable telegraf
+[% script_dir %]/queue_postrun_task systemctl restart telegraf
+[% script_dir %]/queue_postrun_task systemctl enable grafana-server
+[% script_dir %]/queue_postrun_task systemctl restart grafana-server
+[% script_dir %]/queue_postrun_task systemctl reload nginx
+echo 'grafana: [% domain %] answers through nginx, over influxdb keeping [% retention %] of measurements.'

@@ -1,0 +1,18 @@
+[%# Provisioned rather than clicked: grafana reads this at startup, so a rebuilt
+    guest has the datasource without anybody logging in.
+
+    The name is load-bearing.  A downloaded dashboard refers to its datasource by
+    the name it was exported with, so grafanasyslog substitutes this exact string
+    into the dashboard JSON -- see Provisioner::Recipe::grafanasyslog. -%]
+apiVersion: 1
+
+datasources:
+  - name: [% datasource_name %]
+    type: influxdb
+    access: proxy
+    url: http://127.0.0.1:8086
+    database: [% influx_database %]
+    isDefault: true
+[%# Not editable in the UI, because this file is the source of truth and an edit
+    made through the browser is silently replaced the next time grafana starts. -%]
+    editable: false

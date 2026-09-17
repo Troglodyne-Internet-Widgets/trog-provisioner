@@ -8,6 +8,8 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use List::Util qw{uniq};
+
 use parent qw{Provisioner::Recipe};
 
 =head1 NAME
@@ -32,14 +34,33 @@ Opens a syslog listener, writes what arrives to one file per sending host, and
 rotates them.  The other half is L<Provisioner::Recipe::logshipper>, which is
 configured separately.
 
-=head2 Nothing depends on this
+=head2 No sender depends on this
 
-No recipe puts C<logcollector> in its C<required_recipes>, and none should.  The
-relationship runs one way and through configuration: a guest names a destination,
-and the destination does not know who its senders are.
+No recipe puts C<logcollector> in its C<required_recipes> in order to ship to it,
+and none should.  That relationship runs one way and through configuration: a
+guest names a destination, and the destination does not know who its senders are.
 
 That is not only tidiness -- it is what makes the arrangement work at all.  See
 L</It cannot know its senders, so it does not try>.
+
+A consumer sitting on the collector itself is a different relationship, and one
+this recipe does serve.  See L</Forwarding a copy, for something on this guest>.
+
+=head2 Forwarding a copy, for something on this guest
+
+C<forward> adds one C<omfwd> action per destination to the collector ruleset,
+above the C<stop>.  Above is load-bearing: C<stop> ends processing for the
+message, so an action written below it never runs at all.
+
+The copy goes out as RFC5424 with octet-counted framing, because that is what a
+telegraf C<[[inputs.syslog]]> parses -- rsyslog sends RFC3164 by default, which
+it rejects.  L<Provisioner::Recipe::grafanasyslog> is what this exists for: it
+requires this recipe and asks for the stream on a loopback port, so the fleet's
+logs reach a dashboard without a second listener on the wire.
+
+Nothing here opens a firewall port for a destination.  A consumer on this guest
+is reached over loopback, and one off it would be a second collector, which is
+not what this is for.
 
 =head2 It cannot know its senders, so it does not try
 
@@ -103,6 +124,9 @@ recursively on every provision, and this is a directory that only ever grows.
 does not filter by source and whatever reaches the port is accepted, which is
 then only as narrow as the firewall.
 
+=item * C<forward> -- C<host:port> destinations each received message is copied
+to before it is filed.  See L</Forwarding a copy, for something on this guest>.
+
 =back
 
 =cut
@@ -163,8 +187,39 @@ sub args {
                 default     => [],
                 description => 'CIDRs allowed to log here, as rsyslog AllowedSender entries.  Empty accepts whatever the firewall let through.',
             },
+            forward => {
+                type => 'array',
+
+                # Validated here rather than checked in enrich, so that a
+                # malformed destination names itself and the field it is in.
+                items       => { type => 'string', pattern => '^[^:\s]+:[0-9]+$' },
+                default     => [],
+                description => 'host:port destinations each received message is copied to, above the ruleset stop.  For a consumer on this guest, such as the telegraf grafanasyslog configures.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
+            },
         },
     );
+}
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Drops repeated C<forward> destinations.
+
+More than one party can ask the collector to forward to the same place -- an
+operator naming it, and L<Provisioner::Recipe::grafanasyslog> asking for it as a
+dependent -- and those contributions are concatenated rather than settled
+between: C<reconcile> handles fields that are scalars on both sides and leaves
+arrays to L<Hash::Merge>, which joins them literally.  So the identical
+destination arrives twice, and without this the ruleset gets the same C<omfwd>
+twice and sends every message to that port twice.
+
+=cut
+
+sub enrich {
+    my ( $self, %opts ) = @_;
+
+    $opts{forward} = [ uniq @{ $opts{forward} } ] if ref $opts{forward} eq 'ARRAY';
+
+    return %opts;
 }
 
 =head2 %limits = $recipe->rate_limits(%opts)

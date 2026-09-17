@@ -149,7 +149,7 @@ subtest 'the profile is one ufw will not silently skip' => sub {
     like( $profile, qr{^ports=5514/tcp$}m,   'on the port this guest configured' );
 };
 
-subtest 'it salvages nothing, and nothing depends on it' => sub {
+subtest 'it salvages nothing, and nothing acquires it by shipping to it' => sub {
     my ( undef, $recipe ) = generated();
 
     # A collector holds the whole fleet's log history.  Salvage lands in the
@@ -159,13 +159,63 @@ subtest 'it salvages nothing, and nothing depends on it' => sub {
     is_deeply( [ $recipe->restores() ],                              [], 'nor put back onto a rebuilt one' );
     is_deeply( [ $recipe->datadirs() ],                              [], 'and it owns nothing under install_dir, which the data target walks recursively' );
 
-    # The relationship runs one way and through configuration: a guest names a
-    # destination, and the destination never learns who its senders are.
+    # Nothing acquires a collector by shipping to one.  That relationship runs
+    # one way and through configuration -- a guest names a destination, and the
+    # destination never learns who its senders are -- and requiring it would
+    # stand a listener for the whole fleet up on whatever guest merely wanted
+    # its own logs kept somewhere.
+    #
+    # Reading the stream is the other direction, and a recipe that does it is
+    # allowed to say so.  grafanasyslog draws what the collector receives and is
+    # put on a guest that is already one, so it names it and configures the
+    # forward rather than leaving that to be wired up by hand at the far end.
+    my %consumers = ( grafanasyslog => 1 );
+
     foreach my $name ( Provisioner::Cookbook->names() ) {
+        next if $consumers{$name};
         my $class  = Provisioner::Cookbook->load($name);
         my %theirs = eval { $class->required_recipes() };
         ok( !exists $theirs{logcollector}, "$name does not drag a log sink into its dependency graph" );
     }
+
+    # The exemption is held to being the thing it claims, so it cannot quietly
+    # become cover for a recipe that stopped consuming the stream.
+    foreach my $name ( sort keys %consumers ) {
+        my %theirs = Provisioner::Cookbook->load($name)->required_recipes();
+        ok( exists $theirs{logcollector}, "$name names the collector it reads, which is what exempts it above" );
+    }
+};
+
+subtest 'a forwarded copy is written where the ruleset will still reach it' => sub {
+    my ($dir) = generated( forward => [qw{127.0.0.1:6514 10.0.0.9:514}] );
+    my $conf = slurp( $dir, 'logcollector.conf' );
+
+    my ($ruleset) = $conf =~ m/ruleset\(name="logcollector"\)\s*\{(.*?)\n\}/s;
+    ok( $ruleset, 'the collector ruleset is there' ) or return;
+
+    # Above the stop, which ends processing for the message.  Written below it
+    # the action is never run, and nothing about the file looks wrong.
+    my $stop = index( $ruleset, 'stop' );
+    foreach my $host (qw{127.0.0.1 10.0.0.9}) {
+        my $at = index( $ruleset, qq{target="$host"} );
+        cmp_ok( $at, '>=', 0,     "the copy to $host is an action in the ruleset" );
+        cmp_ok( $at, '<',  $stop, "and is above the stop that would otherwise drop it" );
+    }
+
+    # RFC5424 with octet-counted framing, which is what a telegraf syslog input
+    # parses.  The rsyslog default is RFC3164, which it rejects.
+    like( $ruleset, qr/template="RSYSLOG_SyslogProtocol23Format"/, 'forwarded as RFC5424' );
+    like( $ruleset, qr/TCP_Framing="octet-counted"/,               'and framed the way the reader expects' );
+};
+
+subtest 'the same destination asked for twice is forwarded to once' => sub {
+    my ( undef, $recipe ) = generated();
+
+    # Two dependents naming one destination are concatenated rather than
+    # reconciled, arrays being left to Hash::Merge -- so without enrich the
+    # ruleset gets the identical omfwd twice and doubles every message.
+    my %opts = $recipe->enrich( forward => [qw{127.0.0.1:6514 10.0.0.9:514 127.0.0.1:6514}] );
+    is_deeply( $opts{forward}, [qw{127.0.0.1:6514 10.0.0.9:514}], 'the repeat is dropped and the order kept' );
 };
 
 Test::NoWarnings::had_no_warnings();

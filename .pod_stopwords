@@ -41,6 +41,7 @@ GDM
 GECOS
 GiB
 Gogs
+Grafana
 HTTPS
 HV
 IMAP
@@ -48,6 +49,8 @@ INI
 IPs
 IPv
 ImageMagick
+InfluxDB
+InfluxQL
 JSON
 KDBX
 KeePass
@@ -150,6 +153,7 @@ adminconfig
 amavis
 amd
 api
+appname
 aptmirror
 arg
 args
@@ -162,6 +166,7 @@ authorized
 autoconfiguration
 autocreate
 autodetected
+autogen
 autoindex
 autorestart
 autoupdate
@@ -208,6 +213,7 @@ csplit
 datadir
 datadirs
 datagram
+datasource
 decrypt
 dep
 deps
@@ -230,6 +236,7 @@ fastresume
 fetchable
 fetchcache
 filesystem
+firehose
 flavor
 formatter
 formatters
@@ -242,6 +249,8 @@ gh
 github
 gitignored
 gogs
+grafana
+grafanasyslog
 greppable
 hardcoded
 hardcoding
@@ -256,6 +265,8 @@ https
 hvconf
 imagemagick
 img
+influxd
+influxdb
 ingester
 init
 iothreads
@@ -401,6 +412,7 @@ subdirectory
 subnet
 substitutable
 substring
+subtest
 sudo
 symlink
 sysctl
@@ -411,6 +423,7 @@ tPSGI
 tcms
 tcp
 teardown
+telegraf
 templated
 terraform
 testdeps
