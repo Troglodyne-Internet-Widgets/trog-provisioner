@@ -504,7 +504,7 @@ subtest 'a rebuild that can be rolled back is snapshotted before it happens' => 
     my ( $said, $seen ) = rebuild_answering( rollback_possible => 1 );
 
     is( scalar @{ $seen->{snapshots} }, 1, 'a rollback point was taken' );
-    like( $seen->{snapshots}[0], qr/\A before-reprovision- \d+ \z/, 'named for what it is and when it was taken' );
+    like( $seen->{snapshots}[0], qr/\A before-reprovision- \d{4}-\d{2}-\d{2}-\d{6} \z/, 'named for what it is and when it was taken' );
 
     # The size this build is asking for, which is what decides whether the disk
     # the snapshot lives in can be kept at all.
@@ -538,7 +538,7 @@ subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by
     # which is worse than not taking one: it reads as a rollback that exists.
     is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted' );
     is_deeply( $seen->{order},     [], 'and the guest is not stopped for a snapshot that is not coming' );
-    is( $seen->{cleared}{keep_disk}, 0, 'and the disk goes, the way it always did' );
+    is( $seen->{cleared}{keep_disk}, q{}, 'and the disk goes, the way it always did' );
     unlike( $said, qr{bin/restore}, 'with no rollback offered that would not be there' );
 };
 

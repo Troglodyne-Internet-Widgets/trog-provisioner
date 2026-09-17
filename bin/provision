@@ -24,6 +24,7 @@ use File::Basename();
 use File::Slurper();
 use File::Slurper::Temp();
 use File::Temp();
+use Time::Piece();
 use Provisioner::IPPool();
 use YAML::XS();
 use List::Util   qw{uniq};
@@ -679,7 +680,12 @@ sub provision_domain (%args) {
         # such rule does nothing here.
         $hv->stop_domain($domain);
 
-        my $snapname = 'before-reprovision-' . time;
+        # Dated rather than an epoch second, since this is what an operator
+        # reads back out of virsh and types at bin/restore.  No colons: the name
+        # goes into the snapshot XML and onto a command line.  Sorting the same
+        # way it reads is free, and snapshot_names orders by creationTime
+        # regardless.
+        my $snapname = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
 
         # Only a rollback point if it was actually taken: create_snapshot warns
         # and returns false rather than dying, and a name printed for a snapshot
@@ -697,7 +703,7 @@ sub provision_domain (%args) {
     # keep_disk where there is a rollback point, because on libvirt that point is
     # inside the disk: deleting it would throw away the snapshot taken three
     # lines ago along with the guest it was taken of.
-    $hv->clear_guest( $domain, keep_disk => $rollback ? 1 : 0 );
+    $hv->clear_guest( $domain, keep_disk => !!$rollback );
 
     my $address = $hv->provision_guest( $config, \%seed, settings => \%settings, reuse => $reuse );
 

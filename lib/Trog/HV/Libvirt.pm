@@ -665,10 +665,8 @@ XML
     # rollback_possible looks for it and says no, so nothing downstream promises
     # a rollback that is not there.
     #
-    # The eval catches a die; leaving the `; 1` off catches a false return.  Both
-    # are needed, and the second is the one that matters: qemu-img refusing the
-    # disk is a non-zero exit rather than an exception, so the form ending in
-    # `; 1` was silent on the only failure that has ever actually happened.
+    # No `; 1` inside the eval: qemu-img refusing the disk is a false return
+    # rather than an exception, so the block has to catch both.
     eval { $self->snapshot_disk( $name, $PRISTINE_SNAPSHOT ) } or do {
         warn "Could not take the $PRISTINE_SNAPSHOT snapshot of $name on " . $self->describe . ": " . ( $@ || "qemu-img would not take it.\n" ) . "This guest rebuilds by deleting its disk, and cannot be rolled back.\n";
     };
@@ -864,8 +862,10 @@ The name of the domain's current snapshot, or undef if it has none.
 
 =head2 create_snapshot($domain, $name)
 
-Take a live atomic snapshot.  C<$name> may be undef, in which case libvirt names
-it after the current time.  Returns true on success.
+Take an atomic disk-only snapshot, which means the domain has to be shut down:
+libvirt will take a full system snapshot of a live guest, or a disk-only one of
+a stopped guest, and this is the latter.  C<$name> may be undef, in which case
+libvirt names it after the current time.  Returns true on success.
 
 =head2 revert_snapshot($domain, $name)
 
@@ -913,17 +913,13 @@ sub create_snapshot {
 
     my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
 
-    # LIVE only means anything for a running domain, and libvirt rejects it for
-    # one that isn't.
+    # We can only take full system snapshots of a live guest, and disk-only
+    # snapshots of a shut down one.  This one is disk only -- no memory in the
+    # XML -- so a running domain is refused with error 84 whichever flags it is
+    # asked with, and a caller wanting a snapshot stops the domain first.
     #
-    # The other half of that rule is not written down anywhere and cost a
-    # rebuild to find: libvirt refuses this outright for a running domain --
-    # error 84, "live snapshot creation is supported only during full system
-    # snapshots" -- because the snapshot here is disk only and carries no
-    # memory.  So a snapshot of a running guest fails however it is asked for,
-    # and the caller that wants one stops the domain first.  bin/provision does;
-    # bin/snapshot does not, and says in its own POD that it takes a live
-    # snapshot, which is a thing this cannot do.
+    # LIVE is set anyway for the running case, since libvirt rejects it for a
+    # domain that is not.
     $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
