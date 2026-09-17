@@ -1055,6 +1055,25 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     ok( !( $seen[0]{flags} & Sys::Virt::DomainSnapshot::CREATE_LIVE() ), 'and no LIVE, there being neither a guest to leave running nor memory to write' );
 };
 
+subtest 'a rebuild that cannot keep the disk is one that destroys the guest' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { 1 } );
+    $mock->redefine( disk_reusable => sub { 0 } );
+
+    ok( $hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'a guest whose disk cannot be kept is one the rebuild takes apart' );
+
+    $mock->redefine( disk_reusable => sub { 1 } );
+    ok( !$hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'and one whose disk can be kept is built over instead' );
+
+    # A first build has nothing to lose, and stopping to ask about one would
+    # stop every new domain there is.
+    $mock->redefine( domain_exists => sub { 0 } );
+    $mock->redefine( disk_reusable => sub { 0 } );
+    ok( !$hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'and a domain that is not there yet has nothing to destroy' );
+};
+
 subtest 'starting a domain leaves it running' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 

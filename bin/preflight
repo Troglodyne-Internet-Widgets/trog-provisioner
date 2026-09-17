@@ -119,7 +119,7 @@ sub seed_admin_keys {
     my $path = Trog::Config->path('admin_authorized_keys');
     return 0 if -e $path;
 
-    return 0 unless interactive();
+    return 0 unless Trog::Local->interactive;
 
     # IO::Prompter reads from *ARGV, which here holds this program's own
     # arguments and sends it off to open a file named after one.  Flattening it
@@ -144,14 +144,6 @@ sub seed_admin_keys {
     # how everything else here runs a command, and it is the half of this a test
     # can stand in for.
     return Trog::Local->new()->run_cmd(@cmd) == 0 ? 1 : 0;
-}
-
-# Whether there is anybody there to answer a question.  Its own sub because a
-# filetest on a real handle is not something a test can stand in for, and both
-# answers are worth covering.
-sub interactive {
-    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether there is anybody to ask is exactly what this decides
-    return ( -t *STDIN && -t *STDOUT ) ? 1 : 0;
 }
 
 sub hypervisor {

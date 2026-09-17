@@ -485,6 +485,27 @@ sub snapshot_before_rebuild {
     return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
+=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+
+Whether rebuilding this domain would take the existing guest apart, rather than
+building over it.
+
+False here, and that is the right answer for a backend that rebuilds a server in
+place: the root disk is replaced from an image, the server keeps its identity and
+its addresses, and there is nothing to lose that the rebuild was not asked to
+replace.  C<clear_guest> on such a backend has nothing to clear.
+
+libvirt overrides it, because there a rebuild that cannot keep the disk deletes
+the disk and undefines the domain.  C<capacity> is the size being asked for, and
+is what decides whether the disk it has can be kept.
+
+What a caller does with a true answer is a policy question -- ask, refuse, or go
+ahead -- and F<bin/provision> owns that rather than this.
+
+=cut
+
+sub rebuild_destroys_guest { return 0 }
+
 =head1 PLACEMENT
 
 Whether one more guest will fit, and which hypervisor it fits on best.

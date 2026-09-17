@@ -369,6 +369,20 @@ subtest 'a rollback is possible wherever there is a server to snapshot' => sub {
     ok $hv->rollback_possible( 'vm.example.com', capacity => 1 ), 'the size being asked for changes nothing';
 };
 
+subtest 'a cloud rebuild never takes the guest apart' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
+
+    # Nova replaces what is on the root disk and keeps the server, its addresses
+    # and its floating IP, so there is nothing for a rebuild to destroy.  That is
+    # why the question bin/provision stops to ask an operator cannot arise on a
+    # cloud, and why what cloning one aside would mean never has to be answered.
+    ok !$hv->rebuild_destroys_guest( 'vm.example.com', capacity => 42949672960 ),
+      'a server that is there is rebuilt in place rather than taken apart';
+    ok !$hv->rebuild_destroys_guest( 'nope.example.com', capacity => 42949672960 ),
+      'and one that is not there has nothing to lose either';
+};
+
 subtest 'a cloud takes its rollback point without stopping the guest' => sub {
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );

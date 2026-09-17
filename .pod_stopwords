@@ -236,6 +236,7 @@ fastresume
 fetchable
 fetchcache
 filesystem
+filetest
 firehose
 flavor
 formatter
@@ -321,6 +322,7 @@ nginxdirindex
 nginxproxy
 nodejs
 noeviction
+nonreusable
 ntp
 nvm
 nvram

@@ -29,6 +29,7 @@ use YAML::XS();
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
+use IO::Prompter();
 
 use Carp::Always;
 
@@ -83,6 +84,29 @@ it, because the whole point is that somebody read what it is about to lose.
 
 A directory the guest has never written does not trip this, and neither does a
 domain that has no guest yet, so a new machine never needs it.
+
+=item B<--destroy-on-nonreusable>
+
+Rebuild the guest even though rebuilding it destroys it.
+
+A rebuild normally keeps the guest's disk, and takes a rollback point inside it
+first.  When the size or layout this build asks for is not what the disk was
+built with, the disk cannot be kept: the domain is undefined, the disk is
+deleted, and everything on the guest goes with them.
+
+Without this, that stops and asks -- or refuses outright where there is no
+terminal, since a prompt nothing can answer hangs a run rather than failing it.
+
+Mutually exclusive with C<--die-on-nonreusable>.
+
+=item B<--die-on-nonreusable>
+
+Refuse such a rebuild rather than asking about it.
+
+What happens anyway when nobody is there to ask; pass it to say so on purpose,
+and to be certain of it somewhere a terminal might exist.
+
+Mutually exclusive with C<--destroy-on-nonreusable>.
 
 =item B<--recipes> FILE
 
@@ -352,25 +376,47 @@ sub _public_half {
     return "$pubkey trog-provisioner runner $domain";
 }
 
+# What to do about a rebuild that would destroy the guest, as the
+# --*-on-nonreusable options set it.  The numbering is the one #189 specifies,
+# and 1 is deliberately a gap: cloning the guest aside first is not implemented,
+# and it can land later without renumbering what is here.
+our %NONREUSABLE = (
+    ask     => 0,
+    destroy => 2,
+    stop    => 3,
+);
+
 sub main {
     my @args = @_;
 
     umask 0022;
 
     my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $destroy_on_nonreusable, $die_on_nonreusable );
     GetOptionsFromArray(
         \@args,
-        'existing=s'      => \$reuse,
-        'domaindir=s'     => \$domain_dir,
-        'dryrun'          => \$dryrun,
-        'connect=s'       => \$uri,
-        'hvconf=s'        => \$hvconf,
-        'no-config'       => \$no_config,
-        'recipes=s'       => \$recipes,
-        'ipmap=s'         => \$ipmap,
-        'credentials'     => \$credentials,
-        'salvage-gaps-ok' => \$salvage_gaps_ok,
+        'existing=s'             => \$reuse,
+        'domaindir=s'            => \$domain_dir,
+        'dryrun'                 => \$dryrun,
+        'connect=s'              => \$uri,
+        'hvconf=s'               => \$hvconf,
+        'no-config'              => \$no_config,
+        'recipes=s'              => \$recipes,
+        'ipmap=s'                => \$ipmap,
+        'credentials'            => \$credentials,
+        'salvage-gaps-ok'        => \$salvage_gaps_ok,
+        'destroy-on-nonreusable' => \$destroy_on_nonreusable,
+        'die-on-nonreusable'     => \$die_on_nonreusable,
     );
+
+    pod2usage(
+        -exitval => 2, -verbose => 1, -input => __FILE__,
+        -message => '--destroy-on-nonreusable and --die-on-nonreusable say opposite things; pass one'
+    ) if $destroy_on_nonreusable && $die_on_nonreusable;
+
+    my $nonreusable = $NONREUSABLE{ask};
+    $nonreusable = $NONREUSABLE{destroy} if $destroy_on_nonreusable;
+    $nonreusable = $NONREUSABLE{stop}    if $die_on_nonreusable;
 
     # Before anything that could want one, and only when asked: see
     # Trog::Credentials, which will not read a handle nobody offered it.
@@ -461,7 +507,7 @@ sub main {
 
         #XXX should probably die here if the admin_users differ!
 
-        ( $reuser, $reuse ) = provision_domain( config => $dconfig, domain => $depends, reuse => $reuse, reuser => $reuser, dryrun => $dryrun );
+        ( $reuser, $reuse ) = provision_domain( config => $dconfig, domain => $depends, reuse => $reuse, reuser => $reuser, dryrun => $dryrun, nonreusable => $nonreusable );
 
         # After, not before: provision_domain is what mints this key and puts it
         # in the store, so asking any earlier is asking about the guest that was.
@@ -478,7 +524,7 @@ sub main {
     }
 
     #TODO need to figure out how to apply the cloud-init for the second domain if deps are active
-    my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun );
+    my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
     return 0 if $dryrun;
 
     # Same reason as above: the key this needs is the one provision_domain just
@@ -632,8 +678,25 @@ sub choose_hypervisor {
     return $hv;
 }
 
+# Asked only where somebody is there to answer.  IO::Prompter reads from *ARGV,
+# and this program has arguments -- the domain is one -- so without flattening it
+# the prompt goes off to open a file named after one of them.
+# Trog::Credentials::prompt has the whole of that argument.
+sub ask_about_nonreusable {
+    my ($domain) = @_;
+
+    print "$domain is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding destroys the guest and everything on it.\n";
+
+    local *ARGV = join ' ', @ARGV;
+    my $answer = IO::Prompter::prompt('Destroy it and rebuild, or stop? [destroy/stop]:');
+
+    # Anything that is not the word goes the safe way, an empty answer included:
+    # this is the question where a slip costs somebody their guest.
+    return ( lc "$answer" ) eq 'destroy' ? $NONREUSABLE{destroy} : $NONREUSABLE{stop};
+}
+
 sub provision_domain (%args) {
-    my ( $config, $domain, $reuse, $reuser, $depends, $dryrun ) = @args{qw{config domain reuse reuser depends dryrun}};
+    my ( $config, $domain, $reuse, $reuser, $depends, $dryrun, $nonreusable ) = @args{qw{config domain reuse reuser depends dryrun nonreusable}};
 
     my $hv = Trog::HV->new();
 
@@ -662,6 +725,25 @@ sub provision_domain (%args) {
     authorize_guest_key($config);
 
     my %settings = _settings($config);
+
+    # Whether this rebuild takes the guest apart rather than building over it.
+    # On libvirt that is a disk which cannot be kept at the size being asked
+    # for; a backend that replaces a server's root disk in place never says yes,
+    # so this never stops a cloud build.
+    if ( $hv->rebuild_destroys_guest( $domain, capacity => $settings{size} ) ) {
+        my $behavior = $nonreusable // $NONREUSABLE{ask};
+
+        # With nobody there, refusing beats asking.  A prompt that cannot be
+        # answered does not fail the run, it hangs it until something else gives
+        # up -- and this one is run from make and from agents.
+        $behavior = Trog::Local->interactive ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
+          if $behavior == $NONREUSABLE{ask};
+
+        die "Refusing to rebuild $domain: it is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding would destroy the guest and everything on it.\n" . "Pass --destroy-on-nonreusable to do it anyway.\n"
+          if $behavior == $NONREUSABLE{stop};
+
+        print "Rebuilding $domain destroys it: its disk cannot be kept at the size this build asks for.\n";
+    }
 
     # Before the plunge, where there is anything to go back to.  A first build
     # has no guest to snapshot and nothing to lose, and a rebuild that cannot

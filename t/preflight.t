@@ -380,9 +380,9 @@ subtest 'the missing keys can be seeded, but only at a terminal' => sub {
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
     my $path = "$dir/admin_authorized_keys";
 
-    my $preflight_mock = Test::MockModule->new( 'Trog::Bin::Preflight', no_auto => 1 );
-    my $prompt         = Test::MockModule->new('IO::Prompter');
-    my $machine        = Test::MockModule->new('Trog::Machine');
+    my $local_mock = Test::MockModule->new('Trog::Local');
+    my $prompt     = Test::MockModule->new('IO::Prompter');
+    my $machine    = Test::MockModule->new('Trog::Machine');
 
     my ( @ran, @answers );
     $machine->redefine( run_cmd => sub { my ( $self, @argv ) = @_; push @ran, join( ' ', @argv ); return 0 } );
@@ -391,13 +391,13 @@ subtest 'the missing keys can be seeded, but only at a terminal' => sub {
     # The unattended run the provisioning workflow makes.  A question there has
     # nowhere to be answered from, so it would block rather than fail -- which is
     # worse than the check simply reporting the file is missing.
-    $preflight_mock->redefine( interactive => sub { 0 } );
+    $local_mock->redefine( interactive => sub { 0 } );
     @answers = qw{gh somebody};
     my ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
     is( $rc, 0, 'with nobody there it does not ask' );
     is_deeply( \@ran, [], 'and runs nothing' );
 
-    $preflight_mock->redefine( interactive => sub { 1 } );
+    $local_mock->redefine( interactive => sub { 1 } );
     @answers = qw{gh somebody};
     ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
     is( $rc, 1, 'asked and answered, it seeds' );

@@ -1386,6 +1386,31 @@ sub rollback_possible {
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
 }
 
+=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+
+Whether rebuilding this domain would take the guest apart.
+
+True when there is a guest and its disk cannot be kept: C<clear_guest> then
+undefines the domain and deletes the disk, and everything on it goes with them.
+A first build has no guest to lose and answers false, as does a rebuild that can
+keep the disk it has.
+
+Narrower than the negation of C<rollback_possible>, deliberately.  That one is
+also false for a guest whose disk is perfectly reusable but which has no
+C<trog-pristine> snapshot to go back to -- built before there was one.  Such a
+rebuild destroys the guest as well, but it is the state every guest built before
+this existed is in, and treating it as a thing to stop for would mean stopping
+for nearly all of them.
+
+=cut
+
+sub rebuild_destroys_guest {
+    my ( $self, $domain, %opts ) = @_;
+
+    return 0 unless $self->domain_exists($domain);
+    return $self->disk_reusable( $domain, $opts{capacity} ) ? 0 : 1;
+}
+
 =head2 $hv->disk_layout($volume)
 
 The cluster size and subcluster allocation of an existing qcow2, as a hashref,

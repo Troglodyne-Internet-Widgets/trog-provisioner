@@ -76,6 +76,25 @@ What to call us in an error message.
 sub is_local { return 1 }
 sub describe { return 'this machine' }
 
+=head2 interactive
+
+Whether there is anybody there to answer a question.
+
+A fact about the process rather than about a guest, which is why it lives on the
+machine running this rather than on a hypervisor.  Callers use it to decide
+whether asking is possible at all: a prompt with nothing to answer it does not
+fail, it hangs until something else kills the run.
+
+Its own method because a filetest on a real handle is not something a test can
+stand in for, and both answers are worth covering.
+
+=cut
+
+sub interactive {
+    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether there is anybody to ask is exactly what this decides
+    return ( -t *STDIN && -t *STDOUT ) ? 1 : 0;
+}
+
 =head1 REACHABILITY
 
 =head2 transfer_ips(@towards)
