@@ -687,8 +687,7 @@ sub ask_about_nonreusable {
 
     print "$domain is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding destroys the guest and everything on it.\n";
 
-    local *ARGV = join ' ', @ARGV;
-    my $answer = IO::Prompter::prompt('Destroy it and rebuild, or stop? [destroy/stop]:');
+    my $answer = Trog::Utils::prompt('Destroy it and rebuild, or stop? [destroy/stop]:');
 
     # Anything that is not the word goes the safe way, an empty answer included:
     # this is the question where a slip costs somebody their guest.

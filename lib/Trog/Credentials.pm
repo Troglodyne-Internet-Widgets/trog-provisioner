@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-use IO::Prompter();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -122,16 +122,9 @@ sub prompt {
 
     my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
 
-    # IO::Prompter reads from *ARGV, so a program that has arguments -- which
-    # bin/new_config and bin/provision both do, the domain being one -- sends it
-    # off to open a file named after one of them:
-    #
-    #     prompt(): Can't open *ARGV: No such file or directory
-    #
-    # Flattening @ARGV to a single string leaves nothing there to open, and it
-    # falls back to the terminal or to standard input as intended.
-    local *ARGV = join ' ', @ARGV;
-    my $answer = IO::Prompter::prompt( $message, -echo => '*', @at );
+    # Through Trog::Utils, which is where the reason IO::Prompter cannot simply
+    # be called lives.  -echo masks what is typed, this being a password.
+    my $answer = Trog::Utils::prompt( $message, -echo => '*', @at );
 
     # False in boolean context only when no line arrived at all; an empty line
     # is true.
