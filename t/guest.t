@@ -114,6 +114,11 @@ subtest 'the connection is given the same window as the port' => sub {
     is( $asked{retry_interval}, 6,  'the interval the library would have used' );
     is( $asked{retry_max},      50, 'for the whole boot timeout rather than a minute of it' );
 
+    # Without this the budget above buys one attempt: the library stops at the
+    # first refusal, and a guest that has not finished writing authorized_keys
+    # refuses.  Trog::Machine::ssh hands what it is given to the constructor.
+    ok( $asked{retry_on_auth_failure}, 'and asks for the refusals to be retried rather than fatal' );
+
     quietly( sub { $guest->wait_for_ssh( timeout => 60 ) } );
     is( $asked{retry_max}, 10, 'a shorter wait buys proportionally fewer attempts' );
 

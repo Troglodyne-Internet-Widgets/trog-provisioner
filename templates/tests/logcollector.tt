@@ -94,4 +94,25 @@ subtest 'the fleet logs do not also land in this guest own syslog' => sub {
     like( $conf, qr/secpath-replace/,        'and a sender cannot choose the path it is written to' );
 };
 
+# Ordering is the whole of this one.  The per-host file action and the forwards
+# share a ruleset that ends in stop, and stop ends processing for the message --
+# so a forward emitted below it is silently never run, and the consumer on this
+# guest receives nothing while every other check here still passes.
+subtest 'each forwarded copy is sent before the ruleset stops' => sub {
+    my @expect = ( [% FOR dest IN forward %]'[% dest %]', [% END %] );
+    plan skip_all => 'nothing on this guest asked for a copy of the stream' unless @expect;
+
+    my $conf = do { open( my $fh, '<', '/etc/rsyslog.d/09-logcollector.conf' ) or die $!; local $/; <$fh> };
+    my ($ruleset) = $conf =~ m/ruleset\(name="logcollector"\)\s*\{(.*?)\n\}/s;
+    ok( $ruleset, 'the collector ruleset is there to look in' ) or return;
+
+    my $stop = index( $ruleset, 'stop' );
+    foreach my $dest (@expect) {
+        my ($host) = split( m/:/, $dest );
+        my $at = index( $ruleset, qq{target="$host"} );
+        cmp_ok( $at, '>=', 0,     "the copy to $dest is an action in the ruleset" );
+        cmp_ok( $at, '<',  $stop, "and it is above the stop, which would otherwise drop it" );
+    }
+};
+
 done_testing();

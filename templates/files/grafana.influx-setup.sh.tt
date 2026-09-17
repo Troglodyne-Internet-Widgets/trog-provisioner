@@ -1,0 +1,42 @@
+#!/bin/bash
+# Creates the metrics database and holds it to a retention.
+#
+# Telegraf creates a database it does not find, and the one it creates never
+# expires anything -- so on a collector taking the whole fleet syslog stream the
+# disk fills and nothing says why.  Provisioner::Recipe::grafana has the account.
+#
+# Run from post_install rather than the makefile: influxd is started by the same
+# build and this has to wait for it.
+
+set -euo pipefail
+
+db='[% influx_database %]'
+retention='[% retention %]'
+influx='http://127.0.0.1:8086'
+
+# Polled rather than slept at: the wait is over when influxd answers, which on a
+# guest that has just installed it is a few seconds and on a loaded one is not.
+ready=''
+for _attempt in $(seq 1 120); do
+    if curl -fsS "$influx/ping" >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+
+if [ -z "$ready" ]; then
+    echo "grafana: influxd never answered on $influx, so $db was not created" >&2
+    exit 1
+fi
+
+# Two statements rather than CREATE DATABASE ... WITH DURATION, which errors on a
+# database that already exists with a different policy.  This pair is the same on
+# a fresh guest and on a rebuilt one.
+curl -fsS -XPOST "$influx/query" \
+    --data-urlencode "q=CREATE DATABASE \"$db\"" >/dev/null
+
+curl -fsS -XPOST "$influx/query" \
+    --data-urlencode "q=ALTER RETENTION POLICY autogen ON \"$db\" DURATION $retention" >/dev/null
+
+echo "grafana: $db keeps measurements for $retention."

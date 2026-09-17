@@ -36,7 +36,6 @@ use Trog::Guest();
 use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Local();
-use Hash::Merge();
 use File::Copy qw{copy};
 use File::Find();
 
@@ -52,17 +51,6 @@ use Carp::Always;
 # For mirror_only, so the makefile's testdeps line asks cpanm for a release the
 # way scripts/cpan_install does.  Requiring it runs nothing.
 require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_install' ) );
-
-# For the two merges below that accumulate what several recipes asked of a
-# shared dependency -- not for _base against a domain, which Provisioner::Cookbook
-# does with a merger of its own and the opposite precedence.
-#
-# The left is kept here on purpose: these build up a dependency's options one
-# requester at a time, and where two of them genuinely disagree it is reconcile
-# that settles it, having been shown both sides.  A second set_behavior naming
-# the other precedence used to sit under this line and silently undo it, which
-# is what inverted _base for everything.
-Hash::Merge::set_behavior('STORAGE_PRECEDENT');
 
 =head1 USAGE
 
@@ -140,15 +128,17 @@ This is to prevent hard to diagnose issues with configuration merging.
 
 =head2 DRY RUNS
 
-C<--dryrun> here means one thing and only one: an existing F<key.rsa> is kept
-rather than replaced.  Everything else this program writes it still writes.
+C<--dryrun> here means one thing and only one: the key is left on the disk it
+was found on, rather than being sealed into the store and taken off.  Everything
+else this program writes it still writes.
 
 That is narrower than F<bin/provision>'s flag of the same name, which is the one
 an operator passes, and it is narrow on purpose.  This program writes
 configuration and destroys nothing, so there is little for a dry run to protect
--- except that key, whose public half is on a guest that is currently up.
-Replacing the private half here would be losing the way in to a machine nobody
-asked us to touch.  F<bin/provision> passes it through for exactly that.
+-- except the way in to a guest that is currently up.
+
+A domain keeps the key it has either way.  A dry run differs only in leaving the
+private half on the disk rather than sealing it into the store.
 
 =head2 IP POOL
 
@@ -307,62 +297,6 @@ sub main {
 # reaches every recipe unvalidated, so a default applied only when the distro
 # recipe is validated would reach no other recipe at all -- see
 # Provisioner::DistroRecipe/global_defaults.
-
-=head2 resolve_substitutable_dependency(%args)
-
-Which recipe satisfies a substitutable dependency: one naming an interface that
-any of several recipes could answer for, rather than naming a recipe outright.
-
-The interface decides -- this asks it, rather than working it out again.  Two
-answers to one question is how the gates this replaced came to disagree, so the
-rules live in one place and both callers, here and the recipe rendering its own
-templates, put the same question to it.
-
-What this adds is the part the interface cannot know: that the answer has to be
-a recipe this installation actually has, and one that implements what was asked
-for.  A configuration naming something else is a typo, and saying so beats
-loading it and finding out three targets later.
-
-C<interface> is the interface that was named, and C<domain> the domain naming it.
-
-C<domain_conf> is what the domain itself is configured with.  C<host_conf> is
-what the machine it is layered onto is, and C<host> names that machine so a
-refusal can say which guest it looked at -- both of those undef for a domain
-with a guest of its own.
-
-C<requiring_conf> is the configuration of the recipe that declared the
-dependency: the interface names the key holding a preference and reads it from
-there, so a domain settles a tie where it already writes it.
-
-=cut
-
-sub resolve_substitutable_dependency (%args) {
-    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
-
-    # It arrives as text out of required_recipes, so nothing has loaded it and
-    # every method call below would be "perhaps you forgot to load".
-    my $path = $interface =~ s{::}{/}gr;
-    eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
-
-    my @known = Provisioner::Cookbook->implementations($interface);
-    die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
-
-    # The configuration this run was pointed at, not the installation's: they
-    # are the same thing for a fleet provision and different for every scratch
-    # one, and the resolver has no way to tell which it is being asked about.
-    my $chosen = $interface->implementation_for(
-        %{ $requiring_conf // {} },
-        domain          => $domain,
-        configured      => $domain_conf // {},
-        host            => $host,
-        host_configured => $host_conf,
-    );
-
-    die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
-      unless any { $_ eq $chosen } @known;
-
-    return $chosen;
-}
 
 sub apply_global_defaults {
     my ( $distro, $global_config ) = @_;
@@ -802,98 +736,26 @@ sub handle_domain {
     my @empty_salvage;
     my @conflicts;
     my @modules_ordered;
-    my $depmod_conf = {};
 
     #Memoize
     my %builders;
 
-    # Each recipe's configuration as the domain wrote it, taken on its first
-    # visit.  A recipe other recipes depend on is visited once for each of
-    # them, and what they handed it has to be merged into what the domain
-    # wrote each time -- merged into the last visit's result instead, a list
-    # they handed it came out once per visit.  perl's cpan_deps did, three
-    # times over, on a guest with tcms, tpsgi and trogrunner.
-    my %as_written;
-
-    # First, run thru the modules and depsolve.
-    for ( my $i = 0; $i < scalar(@modules); $i++ ) {
-        my $module  = $modules[$i];
-        my $builder = $builders{$module} //= Provisioner::Cookbook->load( $module, distro => $distro_name )->new(%provisioner_opts);
-
-        my $pconf = $rconf->{$domain}{$module} // {};
-
-        # Check and see if this particular provisioner requires another recipe to work.
-        #
-        # The base's own answer first, then the recipe's.  What the base decides
-        # every recipe owes -- ufw its rate limits, data its restores -- is not
-        # something an override should be able to drop by forgetting to chain to
-        # SUPER, and six of them do exactly that.  Asking it here means a recipe
-        # only has to say what is true of itself.
-        my %dep_recipes = (
-            Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
-            $builder->required_recipes( %$global_config, %$pconf ),
-        );
-        foreach my $required ( keys(%dep_recipes) ) {
-
-            # A dependency may be substitutable -- naming an interface several
-            # recipes could answer for -- and this is where it becomes one of
-            # them: Provisioner::Cookbook::has takes \w+ and nothing else, so the
-            # name has to be resolved before anything below tries to load it or
-            # put it in the module list.
-            #
-            # Which implementation is the interface's to say, not this loop's.
-            # It names the configuration key holding a preference, and that is
-            # read out of the configuration of whichever recipe asked -- so a
-            # domain saying `letsencrypt: dns_preference: pdns` settles it for
-            # the recipe that wanted a DNS provider, and nothing here has to
-            # know what DNS is.
-            if ( index( $required, '::' ) >= 0 ) {
-                my $host_conf = defined $depends_on ? $rconf->{$depends_on} : undef;
-                my $chosen    = resolve_substitutable_dependency(
-                    interface      => $required,
-                    domain_conf    => $rconf->{$domain},
-                    host_conf      => $host_conf,
-                    requiring_conf => $pconf,
-                    domain         => $domain,
-                    host           => $depends_on,
-                );
-                $dep_recipes{$chosen} //= $dep_recipes{$required};
-                delete $dep_recipes{$required};
-                $required = $chosen;
-            }
-
-            my $manual_args = delete $pconf->{$required} // {};
-
-            # See about autocomputing the options if possible.
-            my %depargs;
-            %depargs = $dep_recipes{$required}->( %$global_config, %$pconf ) if ref $dep_recipes{$required} eq 'CODE';
-            my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
-
-            # The big problem here is simple. Dep recipes can be rendered only once, but sometimes accomodate data from multiple requestors.
-            # As such we have to make sure they get rendered last, and progressively add to their data depth-first.
-            push( @modules, $required ) unless any { $required eq $_ };
-            $depmod_conf = Hash::Merge::merge( $depmod_conf, \%cur_args );
-
-            # Hash::Merge picks a side where two dependents disagree.  The recipe
-            # being depended on is the only thing that knows whether either side
-            # is right, so it gets asked -- and dies if it does not know.
-            Provisioner::Cookbook->load( $required, distro => $distro_name )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
-        }
-
-        # Merge the configuration provided by all things depending on this.
-        $as_written{$module} //= clone($pconf);
-        if ( $depmod_conf->{$module} ) {
-            $rconf->{$domain}{$module} = Hash::Merge::merge( $depmod_conf->{$module}, $as_written{$module} );
-
-            # Same on this side of it: what an operator wrote for this recipe is
-            # held against what the recipes depending on it asked for.
-            $builder->reconcile( $rconf->{$domain}{$module}, $_ ) for ( $depmod_conf->{$module}, $as_written{$module} );
-        }
-    }
-
-    # Deps should be processed after the last thing that dragged them in, and not before.
-    # This is sometimes the case when we have multiple recipes depending on the same thing!
-    @modules = Provisioner::Utils::lastuniq(@modules);
+    # What each recipe requires, what that requires in turn, and the
+    # configuration every dependent handed it.  In Provisioner::Cookbook so that
+    # bin/new_guest can ask the same question rather than walking it again --
+    # which it did, and drifted: its walk never saw the base class's half.
+    my ( $solved, $built ) = Provisioner::Cookbook->resolve_dependencies(
+        modules       => \@modules,
+        domain_conf   => $rconf->{$domain},
+        global_config => $global_config,
+        distro        => $distro_name,
+        provisioner   => \%provisioner_opts,
+        domain        => $domain,
+        host          => $depends_on,
+        host_conf     => defined $depends_on ? $rconf->{$depends_on} : undef,
+    );
+    @modules  = @$solved;
+    %builders = %$built;
 
     # And out come the two that direct the build rather than running in it --
     # the distro recipe and the vm recipe it depends on.  Dropped here rather
@@ -1169,6 +1031,18 @@ sub handle_domain {
     # whose one file names a storage volume, a base image and a seed ISO by
     # paths that do not exist until a hypervisor has made them -- so that one is
     # generated by bin/provision, which is the program that has one in hand.
+
+    # Put the sealed key back beside the recipe before it looks: seal_key takes
+    # the private half off the disk, leaving only the public half here, and a
+    # recipe that cannot find a pair mints a new one.  The salvage pass above
+    # has already fetched this same key to reach the guest that is up.
+    my $sealed = Trog::Guest->key_path( $fqdn, "$cfg_dir/key.rsa" );
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether it is already the file we want
+    if ( defined $sealed && $sealed ne "$cfg_dir/key.rsa" && !-f "$cfg_dir/key.rsa" ) {
+        File::Slurper::Temp::write_binary( "$cfg_dir/key.rsa", File::Slurper::read_binary($sealed) );
+        chmod 0600, "$cfg_dir/key.rsa";
+    }
+
     print "Writing what $fqdn first boots from, out of the $distro_name recipe\n";
     $builders{$distro_name}->generate_files(
         $cfg_dir,
@@ -1183,11 +1057,14 @@ sub handle_domain {
         modules       => \@modules,
     );
 
-    # And the private half of the key it just made goes into the store rather
-    # than staying in the domain directory.  After generate_files, because that
-    # is what mints it -- and not on a dry run, where guest_keypair deliberately
-    # leaves the existing key alone and taking it off the disk would be losing
-    # the way into a guest nobody asked us to touch.
+    # And the private half goes into the store rather than staying in the domain
+    # directory.  After generate_files, which is what mints one for a domain that
+    # had none -- for every other domain this re-seals the key it was already
+    # holding, which costs a write and answers the same bytes.
+    #
+    # Not on a dry run: that leaves the key on the disk it was found on, and
+    # taking it off would be losing the way into a guest nobody asked us to
+    # touch.
     Trog::Guest->seal_key( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
 
     # Build a provision.conf
@@ -1632,10 +1509,10 @@ sub _get_sftp {
     $static_ip =~ s|/\N*$||;
     my $target_is_up = 0;
 
-    # The old guest's key, which is the one that gets us in to the guest that is
-    # up -- this runs before generate_files rotates it.  Out of the store unless
-    # a domain provisioned before sealing still has one on disk.  The domain is
-    # the last component of the config directory, which is what it is made from.
+    # The key that gets us in to the guest that is up, fetched before
+    # generate_files has written anything.  Out of the store, unless a domain
+    # provisioned before sealing still has one on disk.  The domain is the last
+    # component of the config directory, which is what it is made from.
     my $key2use = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     my $ssh = Net::SFTP::Foreign->new(

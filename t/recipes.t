@@ -297,9 +297,11 @@ my %required_config = (
         },
     },
     letsencrypt => {},
-    pdns        => { api_key => 'test-api-key' },
-    registrar   => { type    => 'easydns', user => 'somebody', key => 'a-token' },
-    matrix      => {
+    pdns        => { api_key        => 'test-api-key' },
+    grafana     => { admin_password => 's3cr3t' },
+
+    registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
+    matrix    => {
         server_name    => 'test.test.test',
         admin_password => 's3cr3t',
         smtp_host      => 'mail.test.test',
@@ -447,6 +449,24 @@ subtest 'ntp rejects non-array servers' => sub {
     my $r   = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => 'not-an-array' ) };
     ok( $res, 'ntp dies when servers is not an ARRAY' );
+};
+
+# The forward destinations are split into an rsyslog target and port by the
+# template, which cannot refuse anything -- a destination with no port renders
+# port="" and rsyslog then declines the whole configuration at startup, on the
+# guest, long after anyone was watching.  The schema is what catches it, and
+# this is what says the schema still does.
+subtest 'logcollector rejects a forward that is not host:port' => sub {
+    my $r = 'Provisioner::Recipe::logcollector'->new(%PROV);
+
+    foreach my $bad (qw{nowhere 127.0.0.1: host:port [::1]:6514}) {
+        my $res = exception { $r->render_global( %G, forward => [$bad] ) };
+        ok( $res, "logcollector refuses '$bad'" );
+        like( $res, qr{\bforward\b}, "and names forward when refusing '$bad'" );
+    }
+
+    my $ok = exception { $r->render_global( %G, forward => ['127.0.0.1:6514'] ) };
+    is( $ok, undef, 'and takes a destination that is host:port' );
 };
 
 # ----------------------------------------------------------------
@@ -1957,7 +1977,7 @@ subtest 'the services that cannot be told about a second domain are named here' 
     # marked without cause.  bin/new_config refuses these for a domain being
     # layered onto another; everything else writes per domain, or goes through
     # configd, and does not care how many domains the guest holds.
-    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs koan ldap logcollector logshipper matrix openvpn trogrunner};
+    my %cannot = map { $_ => 1 } qw{aptmirror deluged garage gogs grafana grafanasyslog koan ldap logcollector logshipper matrix openvpn trogrunner};
 
     foreach my $name ( sort Provisioner::Cookbook->names() ) {
         my $recipe = eval { Provisioner::Cookbook->load( $name, distro => $DISTRO ) } or next;
@@ -2226,6 +2246,18 @@ subtest 'the two halves of the log path agree about the port' => sub {
 
     is( $ship{port},     $collect{port},     'logshipper sends where logcollector listens' );
     is( $ship{protocol}, $collect{protocol}, 'over the transport it is accepting' );
+};
+
+subtest 'the two halves of the dashboard agree about the datasource' => sub {
+
+    # A dashboard refers to its datasource by name, and grafana substitutes
+    # nothing when it loads one from a file -- so this is one string written in
+    # two recipes.  Where they disagree the dashboard still installs, grafana
+    # still starts, and every panel on it draws "Datasource not found".
+    my %stack  = Provisioner::Cookbook->defaults('grafana');
+    my %syslog = Provisioner::Cookbook->defaults('grafanasyslog');
+
+    is( $syslog{datasource}, $stack{datasource_name}, 'grafanasyslog reads the datasource grafana provisions' );
 };
 
 subtest 'every host a template fetches from is declared in fetch_hosts' => sub {

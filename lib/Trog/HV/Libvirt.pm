@@ -1645,7 +1645,7 @@ What C<bin/preflight> asks of this backend, in order.
 
 =cut
 
-sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_fetch_sources check_libvirt check_sys_virt_in_step check_config} }
+sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_fetch_sources check_libvirt check_sys_virt_in_step check_pool_writable check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
 
 sub check_reachable {
@@ -1757,6 +1757,56 @@ a provision does is the libvirt API -- which wants group membership, not root
 That leaves bin/nuke_pool needing root it does not have, and needs
 /usr/libexec/virtiofs-better already in place -- bin/provision installs it on
 first use, which is the one step that wants the wider grant.
+FIX
+}
+
+=head2 $result = $hv->check_pool_writable()
+
+Whether the storage pool directory takes a write from the account a run drives
+the hypervisor as.
+
+After C<check_libvirt>, because C<pool_path> may have to ask libvirt where the
+pool is before there is anything to write to.
+
+This is a question every other check can answer yes to while the hypervisor
+still cannot build a thing.  The base image is fetched with a plain C<curl> into
+this directory and deliberately not with sudo -- see C<base_image> -- so a pool
+the run cannot write to fails minutes into a provision, on a download, naming
+the URL rather than the permissions.  C<pool_takes_direct_io> puts its own probe
+here for the same reason, and answers the wrong question when the write itself
+is what is refused.
+
+=cut
+
+sub check_pool_writable {
+    my ($self) = @_;
+
+    my $path = eval { $self->pool_path };
+    return $self->_verdict( 0, 'Could not work out where the storage pool is', <<'FIX' ) unless $path;
+libvirt looks a pool up by name, so pool_name in hypervisors.conf has to name one
+this hypervisor has, or pool_path has to say outright where it is:
+
+    virsh pool-list --all
+FIX
+
+    # The same probe-and-remove as pool_takes_direct_io, without the O_DIRECT:
+    # this asks only whether a file can be made here at all.
+    my $probe = "$path/.writable-probe.$$";
+    return $self->_verdict( 1, "Storage pool $path takes a write", q{} )
+      if $self->run_cmd( 'sh', '-c', 'touch "$1" 2>/dev/null && rm -f "$1"', 'sh', $probe ) == 0;
+
+    return $self->_verdict( 0, "Storage pool $path is not writable on " . $self->describe, <<"FIX" );
+The base image is downloaded into the pool with a plain curl, on purpose: a pool
+directory this run cannot write to is one no guest could ever have been built
+from, so sudo here would paper over the misconfiguration rather than fix it.
+
+    sudo chown \$USER:adm $path
+    sudo chmod 0775 $path
+
+A pool built by libvirt takes its ownership from the pool definition rather than
+from the filesystem, so set it there too or the next pool-build puts it back:
+
+    virsh pool-dumpxml <pool>    # the <permissions> under <target>
 FIX
 }
 

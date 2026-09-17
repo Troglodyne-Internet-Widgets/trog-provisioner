@@ -381,7 +381,7 @@ subtest 'a guest with addresses and no gateway is refused' => sub {
     );
 };
 
-subtest 'the key is rotated on a real run and kept on a dry one' => sub {
+subtest 'the key a domain already has is kept, on a real run and a dry one' => sub {
 
     # virbr_ip is the only thing here that would talk to libvirt.  The object
     # itself is handed over rather than intercepted: redefining new() worked
@@ -418,7 +418,11 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
     # The guest that is up has the public half of this, so a run that is meant
     # to change nothing must not replace the private half.
     is( $build->( dryrun => 1 ), $first, 'a dry run leaves the one a live guest is using alone' );
-    isnt( $build->(), $first, 'and a real run rotates it, the guest being rebuilt around the new one' );
+
+    # Nor does a real one: a guest is rebuilt around the key it is seeded with,
+    # so replacing one here leaves whoever already holds it unable to get back
+    # in -- and the store is holding this one.
+    is( $build->(), $first, 'and a real run keeps it, since the store is holding that key' );
 };
 
 subtest 'which release is current is read, not inferred' => sub {

@@ -1,0 +1,98 @@
+use strict;
+use warnings;
+
+use Test::More;
+
+my $port      = '[% port %]';
+my $database  = '[% influx_database %]';
+my $ds_name   = '[% datasource_name %]';
+my $retention = '[% retention %]';
+my $influx    = 'http://127.0.0.1:8086';
+
+subtest 'all three services are running' => sub {
+
+    # grafana-server is the unit name the deb installs, which is not the package
+    # name -- asking systemctl about `grafana` reports inactive on a guest where
+    # everything is fine.
+    foreach my $unit (qw{influxdb telegraf grafana-server}) {
+        chomp( my $active = `systemctl is-active $unit 2>/dev/null` );
+        is( $active, 'active', "$unit is running" )
+          or diag `systemctl status $unit --no-pager -n 15 2>&1`;
+    }
+};
+
+subtest 'the metrics store is on loopback and nowhere else' => sub {
+
+    # influxd defaults to ":8086", every interface, with no authentication on it
+    # at all.  What keeps it off the wire is /etc/default/influxdb, and a guest
+    # where that file did not land looks identical until something scans it.
+    #
+    # ss -lntu rather than -lnt, and the u is load-bearing: asked for tcp alone
+    # ss prints no Netid column, every row begins LISTEN, and a pattern anchored
+    # on tcp matches nothing.  That made the like below fail on a guest that was
+    # correct and, worse, made the unlike beneath it pass without testing.
+    my $listening = `ss -lntu 2>/dev/null`;
+    like( $listening, qr/^tcp\s+LISTEN\s+\S+\s+\S+\s+127\.0\.0\.1:8086\b/m, 'influxd is bound to loopback' )
+      or diag $listening;
+    unlike( $listening, qr/^tcp\s+LISTEN\s+\S+\s+\S+\s+(?:0\.0\.0\.0|\*|\[::\]):8086\b/m, 'and not to every interface' )
+      or diag $listening;
+};
+
+subtest 'grafana answers, on loopback, behind the proxy' => sub {
+
+    # Polled, because grafana is restarted from a postrun task and takes a few
+    # seconds to bind after systemd calls it active.  A single look raced a
+    # guest that was coming up perfectly well: this file saw nothing on the port
+    # while the next one, seconds later, listed it.
+    my ( $listening, $health ) = ( q{}, q{} );
+    foreach ( 1 .. 30 ) {
+        $listening = `ss -lntu 2>/dev/null`;
+
+        # Its own health endpoint, which needs no credentials and reports the
+        # database grafana keeps its own state in as well as the version.
+        $health = `curl -fsS --max-time 5 http://127.0.0.1:$port/api/health 2>&1`;
+        last if $listening =~ m/^tcp\s+LISTEN\s+\S+\s+\S+\s+127\.0\.0\.1:$port\b/m && $health =~ m/"database"/;
+        sleep 2;
+    }
+
+    like( $listening, qr/^tcp\s+LISTEN\s+\S+\s+\S+\s+127\.0\.0\.1:$port\b/m, "grafana is bound to 127.0.0.1:$port" )
+      or diag $listening;
+    like( $health, qr/"database":\s*"ok"/, 'and reports itself healthy' ) or diag $health;
+};
+
+subtest 'the database exists and expires what it holds' => sub {
+
+    # The whole point of creating it ahead of telegraf.  Left to make its own,
+    # telegraf makes one with duration 0s -- never expire -- and on a collector
+    # taking the fleet syslog stream that is a disk that fills silently.
+    my $out = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW RETENTION POLICIES ON "$database"' 2>&1`;
+    like( $out, qr/\bautogen\b/, "$database exists and has its default policy" ) or diag $out;
+    unlike( $out, qr/"autogen","0s"/, "and $database expires measurements rather than keeping them forever" )
+      or diag "retention is 0s, which is never: $out";
+};
+
+subtest 'telegraf is actually writing to it' => sub {
+
+    # Telegraf flushes every ten seconds, so a bare check races a guest that has
+    # just been built and is working perfectly well.
+    my $out = q{};
+    foreach ( 1 .. 12 ) {
+        $out = `curl -fsS -G $influx/query --data-urlencode 'db=$database' --data-urlencode 'q=SHOW MEASUREMENTS' 2>&1`;
+        last if $out =~ m/\bcpu\b/;
+        sleep 5;
+    }
+    like( $out, qr/\bcpu\b/, 'the host metrics telegraf collects are arriving in influxdb' )
+      or diag "after 60s, SHOW MEASUREMENTS said: $out\n" . `journalctl -u telegraf --no-pager -n 15 2>&1`;
+};
+
+subtest 'grafana loaded the datasource it was provisioned with' => sub {
+
+    # Asking grafana rather than reading the file back: a provisioning file with
+    # a syntax error is skipped at startup, logged once, and leaves a grafana
+    # that is up and healthy with no datasource behind any dashboard.
+    my $out = `curl -fsS -u '[% grafana_admin %]:[% admin_password %]' http://127.0.0.1:$port/api/datasources 2>&1`;
+    like( $out, qr/"name":"\Q$ds_name\E"/,     "the $ds_name datasource is there" ) or diag $out;
+    like( $out, qr/"database":"\Q$database\E"/, "pointed at $database" )            or diag $out;
+};
+
+done_testing();
