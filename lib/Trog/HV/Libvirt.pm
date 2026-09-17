@@ -645,11 +645,12 @@ XML
     # rollback_possible looks for it and says no, so nothing downstream promises
     # a rollback that is not there.
     #
-    # In an eval rather than on the return value, because snapshot_disk dies
-    # when there is no volume to snapshot -- so a plain `or warn` catches the
-    # one thing that cannot happen here and none of the things that can.
-    eval { $self->snapshot_disk( $name, $PRISTINE_SNAPSHOT ); 1 } or do {
-        warn "Could not take the $PRISTINE_SNAPSHOT snapshot of $name on " . $self->describe . ": $@" . "This guest rebuilds by deleting its disk, and cannot be rolled back.\n";
+    # The eval catches a die; leaving the `; 1` off catches a false return.  Both
+    # are needed, and the second is the one that matters: qemu-img refusing the
+    # disk is a non-zero exit rather than an exception, so the form ending in
+    # `; 1` was silent on the only failure that has ever actually happened.
+    eval { $self->snapshot_disk( $name, $PRISTINE_SNAPSHOT ) } or do {
+        warn "Could not take the $PRISTINE_SNAPSHOT snapshot of $name on " . $self->describe . ": " . ( $@ || "qemu-img would not take it.\n" ) . "This guest rebuilds by deleting its disk, and cannot be rolled back.\n";
     };
 
     return $volume->get_path();
@@ -1350,7 +1351,12 @@ sub snapshot_disk {
     my ( $self, $name, $snapname ) = @_;
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to snapshot\n";
-    return $self->run_cmd( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
+
+    # As root, because the disk is not ours: libvirt makes it 0600
+    # libvirt-qemu:kvm, and qemu-img without sudo answers "Permission denied"
+    # and a non-zero exit.  Measured on a hypervisor, where run_cmd meant the
+    # snapshot was never taken and nothing said so.
+    return $self->run_sudo( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->revert_disk($volume, $name)
@@ -1369,7 +1375,11 @@ sub revert_disk {
     my ( $self, $name, $snapname ) = @_;
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to revert\n";
-    return $self->run_cmd( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
+
+    # As root, for the reason snapshot_disk is: the disk belongs to
+    # libvirt-qemu.  It matters more here, where a revert that quietly did
+    # nothing would leave the new guest booting the old guest's filesystem.
+    return $self->run_sudo( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->disk_snapshot_names($volume)

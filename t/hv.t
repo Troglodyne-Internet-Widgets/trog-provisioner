@@ -991,6 +991,21 @@ subtest 'a disk is snapshotted the moment it is made, while it is still empty' =
         'taken against the disk just created, because there is no later moment when it is empty'
     );
 
+    # The failure that actually happens, rather than the one that is easy to
+    # imagine: qemu-img refusing a disk it may not open exits non-zero, which is
+    # a false return and not an exception.  Measured on a hypervisor, where the
+    # pristine snapshot was silently never taken and the build said nothing.
+    {
+        @snapped = ();
+        my @refused;
+        local $SIG{__WARN__} = sub { push @refused, @_ };
+        $mock->redefine( snapshot_disk => sub { return 0 } );
+
+        my $still = quietly( sub { $hv->create_disk( 'vm.test-qcow2', backing => '/base', capacity => 42949672960 ) } );
+        is( $still, '/opt/terraform/disks/vm.test-qcow2', 'a disk qemu-img would not snapshot is still built' );
+        like( $refused[0], qr/cannot [ ] be [ ] rolled [ ] back/, 'and the rollback it will not have is said out loud' );
+    }
+
     # Best effort: a disk that could not be snapshotted is still built, and
     # rollback_possible is what notices afterwards that there is nowhere to go
     # back to.  A build that stopped here would be a worse trade.
