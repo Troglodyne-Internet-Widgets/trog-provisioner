@@ -353,6 +353,22 @@ subtest 'snapshots live in glance, so the guest is in the name' => sub {
       'and a snapshot that does not exist says so';
 };
 
+subtest 'a rollback is possible wherever there is a server to snapshot' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
+
+    # A Glance image is not inside the server the way a libvirt snapshot is
+    # inside the disk it was taken of, so a rebuild cannot take the snapshot
+    # away with it.  That leaves one question: is there a guest to snapshot.
+    ok $hv->rollback_possible('vm.example.com'),    'a guest that is there can be put back afterwards';
+    ok !$hv->rollback_possible('nope.example.com'), 'and one that is not, cannot';
+
+    # capacity is the libvirt backend's question, where the snapshot lives in
+    # the disk and a disk of another size is a different file.  Here the root
+    # disk is replaced from the image on every rebuild whatever its size.
+    ok $hv->rollback_possible( 'vm.example.com', capacity => 1 ), 'the size being asked for changes nothing';
+};
+
 subtest 'building a guest' => sub {
     my $hv = cloud(
         flavor           => 'm1.medium',

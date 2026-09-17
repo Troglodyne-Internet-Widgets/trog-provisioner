@@ -797,6 +797,214 @@ subtest 'the disk is created with the tuning that was decided for it' => sub {
     is( scalar @created, 1, 'and nothing new was created' );
 };
 
+# --- Keeping a guest's disk across a rebuild ----------------------------------
+
+{
+
+    package FakeVolume;
+
+    sub new { my ( $class, %info ) = @_; return bless {%info}, $class }
+    sub get_info { my ($self) = @_; return { capacity => $self->{capacity} } }
+}
+
+{
+
+    package FakeStoppableDomain;
+
+    sub new       { my ( $class, $active, $stopped ) = @_; return bless { active => $active, stopped => $stopped }, $class }
+    sub is_active { my ($self) = @_; return $self->{active} }
+    sub destroy   { my ($self) = @_; ${ $self->{stopped} }++; return 1 }
+}
+
+subtest 'what a disk was made with is read off the disk rather than remembered' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
+    $mock->redefine( capture_cmd => sub { '{"cluster-size":65536,"format-specific":{"data":{"extended-l2":true}}}' } );
+
+    is_deeply(
+        $hv->disk_layout('vm.test-qcow2'),
+        { cluster_size => 65536, extended_l2 => 1 },
+        'the cluster size it was made with, and whether it has subclusters'
+    );
+
+    # Undef rather than a guess, because disk_reusable reads a guess as
+    # "reusable" -- and keeping a disk laid out the wrong way pins the guest to
+    # that layout for as long as it lives.
+    $mock->redefine( capture_cmd => sub { 'qemu-img: command not found' } );
+    is( $hv->disk_layout('vm.test-qcow2'), undef, 'anything that is not JSON is undef' );
+
+    $mock->redefine( volume_path => sub { undef } );
+    is( $hv->disk_layout('vm.test-qcow2'), undef, 'and so is a volume that is not there' );
+};
+
+subtest 'the snapshots in a disk are read out of the table qemu-img prints' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    # As qemu-img 8.2 prints it, header and all.
+    my $listing = <<'LIST';
+Snapshot list:
+ID        TAG               VM SIZE                DATE     VM CLOCK     ICOUNT
+1         trog-pristine         0 B 2026-09-17 00:44:03 00:00:00.000          0
+2         before-reprovision-17    0 B 2026-09-17 00:45:01 00:00:00.000          0
+LIST
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test-qcow2' } );
+    $mock->redefine( capture_cmd => sub { $listing } );
+
+    is_deeply(
+        [ $hv->disk_snapshot_names('vm.test-qcow2') ],
+        [qw{trog-pristine before-reprovision-17}],
+        'the tags, and not the header sitting above them'
+    );
+
+    $mock->redefine( capture_cmd => sub { q{} } );
+    is_deeply( [ $hv->disk_snapshot_names('vm.test-qcow2') ], [], 'a disk with none says none' );
+};
+
+subtest 'a disk can be kept only when it is the disk that would be made now' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume       => sub { FakeVolume->new( capacity => 42949672960 ) } );
+    $mock->redefine( qcow2_tuning => sub { ( extended_l2  => 1 ) } );
+    $mock->redefine( disk_layout  => sub { { cluster_size => 65536, extended_l2 => 1 } } );
+
+    ok $hv->disk_reusable( 'vm.test',  42949672960 ), 'the same size, laid out the same way';
+    ok !$hv->disk_reusable( 'vm.test', 85899345920 ), 'a different size is a different disk';
+
+    # Neither of these can be retrofitted onto an image that exists, so a
+    # hypervisor that would lay one out differently now cannot keep this one.
+    $mock->redefine( disk_layout => sub { { cluster_size => 1048576, extended_l2 => 1 } } );
+    ok !$hv->disk_reusable( 'vm.test', 42949672960 ), 'and neither is a different cluster size';
+
+    $mock->redefine( disk_layout => sub { { cluster_size => 65536, extended_l2 => 0 } } );
+    ok !$hv->disk_reusable( 'vm.test', 42949672960 ), 'nor subcluster allocation it does not have';
+
+    $mock->redefine( disk_layout => sub { { cluster_size => 65536, extended_l2 => 1 } } );
+    $mock->redefine( volume      => sub { undef } );
+    ok !$hv->disk_reusable( 'vm.test', 42949672960 ), 'and a guest with no disk yet has none to keep';
+};
+
+subtest 'a rollback needs a disk that can be kept and something to put it back to' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists       => sub { 1 } );
+    $mock->redefine( disk_reusable       => sub { 1 } );
+    $mock->redefine( disk_snapshot_names => sub { return qw{trog-pristine} } );
+
+    ok $hv->rollback_possible( 'vm.test', capacity => 42949672960 ), 'a disk that can be kept, with a pristine snapshot in it';
+
+    # The case that would otherwise fail in the middle of the rebuild, after the
+    # rollback point had been taken and announced: a guest built before any of
+    # this has a perfectly reusable disk and nothing in it to revert to.
+    $mock->redefine( disk_snapshot_names => sub { return qw{before-reprovision-17} } );
+    ok !$hv->rollback_possible( 'vm.test', capacity => 42949672960 ), 'a disk with no pristine snapshot cannot be put back';
+
+    $mock->redefine( disk_snapshot_names => sub { return qw{trog-pristine} } );
+    $mock->redefine( disk_reusable       => sub { 0 } );
+    ok !$hv->rollback_possible( 'vm.test', capacity => 42949672960 ), 'nor can a disk that is about to be deleted';
+
+    $mock->redefine( disk_reusable => sub { 1 } );
+    $mock->redefine( domain_exists => sub { 0 } );
+    ok !$hv->rollback_possible( 'vm.test', capacity => 42949672960 ), 'and a first build has nothing to go back to';
+};
+
+subtest 'stopping a domain leaves it defined' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $stopped = 0;
+    my $mock    = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 1, \$stopped ) } );
+
+    ok $hv->stop_domain('vm.test'), 'a running domain stops';
+    is( $stopped, 1, 'by being destroyed, which is libvirt for switched off' );
+
+    $mock->redefine( _domain => sub { FakeStoppableDomain->new( 0, \$stopped ) } );
+    ok $hv->stop_domain('vm.test'), 'one that is already off is nothing to do';
+    is( $stopped, 1, 'and is not asked twice' );
+
+    $mock->redefine( _domain => sub { undef } );
+    ok !$hv->stop_domain('vm.test'), 'and a domain that is not there says so';
+};
+
+subtest 'a rebuild that keeps the disk stops the guest rather than undefining it' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my ( @did, @deleted );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( stop_domain        => sub { push @did,     'stop_domain';       return 1 } );
+    $mock->redefine( annihilate_domain  => sub { push @did,     'annihilate_domain'; return 1 } );
+    $mock->redefine( revert_disk        => sub { push @did,     "revert $_[2]";      return 1 } );
+    $mock->redefine( delete_volume      => sub { push @deleted, $_[1];               return 1 } );
+    $mock->redefine( release_dhcp_lease => sub { push @did,     'release';           return 1 } );
+    $mock->redefine( domain_exists      => sub { 1 } );
+    $mock->redefine( guest_mac          => sub { '52:54:00:aa:bb:cc' } );
+    $mock->redefine( lease_ips          => sub { return ('192.168.122.9') } );
+
+    quietly( sub { $hv->clear_guest( 'vm.test', keep_disk => 1 ) } );
+
+    ok( ( grep { $_ eq 'stop_domain' } @did ),          'the guest is stopped' );
+    ok( !( grep { $_ eq 'annihilate_domain' } @did ),   'and not undefined, which would take the record libvirt keeps of its snapshots' );
+    ok( ( grep { $_ eq 'revert trog-pristine' } @did ), 'the disk goes back to the state it was made in' );
+    is_deeply( \@deleted, ['vm.test-cloudinit.iso'], 'the seed goes and the disk stays' );
+    ok( ( grep { $_ eq 'release' } @did ), 'and the leases are released, which has nothing to do with the disk' );
+};
+
+subtest 'a rebuild that cannot keep the disk clears all of it, the way it always did' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my ( @did, @deleted );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( stop_domain        => sub { push @did,     'stop_domain';       return 1 } );
+    $mock->redefine( annihilate_domain  => sub { push @did,     'annihilate_domain'; return 1 } );
+    $mock->redefine( revert_disk        => sub { push @did,     'revert';            return 1 } );
+    $mock->redefine( delete_volume      => sub { push @deleted, $_[1];               return 1 } );
+    $mock->redefine( release_dhcp_lease => sub { return 1 } );
+    $mock->redefine( domain_exists      => sub { 1 } );
+    $mock->redefine( guest_mac          => sub { '52:54:00:aa:bb:cc' } );
+    $mock->redefine( lease_ips          => sub { return ('192.168.122.9') } );
+
+    quietly( sub { $hv->clear_guest('vm.test') } );
+
+    is_deeply( \@deleted, [ 'vm.test-qcow2', 'vm.test-cloudinit.iso' ], 'both volumes go' );
+    ok( ( grep { $_ eq 'annihilate_domain' } @did ), 'the domain is undefined' );
+    ok( !( grep { $_ eq 'revert' } @did ),           'and nothing is reverted, there being nothing kept to revert' );
+};
+
+subtest 'a disk is snapshotted the moment it is made, while it is still empty' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my ( @created, @snapped );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume_path   => sub { undef } );
+    $mock->redefine( pool          => sub { FakeBuildPool->new( \@created ) } );
+    $mock->redefine( snapshot_disk => sub { push @snapped, [ $_[1], $_[2] ]; return 1 } );
+
+    quietly( sub { $hv->create_disk( 'vm.test-qcow2', backing => '/base', capacity => 42949672960 ) } );
+
+    is_deeply(
+        \@snapped, [ [ 'vm.test-qcow2', 'trog-pristine' ] ],
+        'taken against the disk just created, because there is no later moment when it is empty'
+    );
+
+    # Best effort: a disk that could not be snapshotted is still built, and
+    # rollback_possible is what notices afterwards that there is nowhere to go
+    # back to.  A build that stopped here would be a worse trade.
+    @snapped = ();
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+    $mock->redefine( snapshot_disk => sub { die "no qemu-img on this hypervisor\n" } );
+
+    my $path = quietly( sub { $hv->create_disk( 'vm.test-qcow2', backing => '/base', capacity => 42949672960 ) } );
+
+    is( $path, '/opt/terraform/disks/vm.test-qcow2', 'the disk is built regardless' );
+    like( $warned[0], qr/cannot [ ] be [ ] rolled [ ] back/, 'and the rollback it will not have is said out loud' );
+};
+
 subtest 'the cloud-init seed is an ISO labelled cidata' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 

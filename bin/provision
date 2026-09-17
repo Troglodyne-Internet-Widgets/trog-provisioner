@@ -661,12 +661,35 @@ sub provision_domain (%args) {
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
+    my %settings = _settings($config);
+
+    # Before the plunge, where there is anything to go back to.  A first build
+    # has no guest to snapshot and nothing to lose, and a rebuild that cannot
+    # keep this guest's disk would be snapshotting a file it is about to delete
+    # -- rollback_possible is the backend saying which of those this is.
+    my $rollback;
+    if ( $hv->rollback_possible( $domain, capacity => $settings{size} ) ) {
+        my $snapname = 'before-reprovision-' . time;
+
+        # Only a rollback point if it was actually taken: create_snapshot warns
+        # and returns false rather than dying, and a name printed for a snapshot
+        # that is not there is worse than saying nothing.
+        if ( $hv->create_snapshot( $domain, $snapname ) ) {
+            $rollback = $snapname;
+            print "Snapshotted $domain as $rollback before rebuilding it.\n" . "If this goes badly: bin/restore --name $rollback $domain\n";
+        }
+    }
+
     # Which of these a hypervisor does is its own business: libvirt annihilates a
     # domain and its disks, a cloud rebuilds the server it already has.  This
     # says what happens, in order, and asks the backend to do each part.
-    $hv->clear_guest($domain);
+    #
+    # keep_disk where there is a rollback point, because on libvirt that point is
+    # inside the disk: deleting it would throw away the snapshot taken three
+    # lines ago along with the guest it was taken of.
+    $hv->clear_guest( $domain, keep_disk => $rollback ? 1 : 0 );
 
-    my $address = $hv->provision_guest( $config, \%seed, settings => { _settings($config) }, reuse => $reuse );
+    my $address = $hv->provision_guest( $config, \%seed, settings => \%settings, reuse => $reuse );
 
     return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $address ) );
 }

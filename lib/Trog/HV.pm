@@ -83,7 +83,19 @@ that a directory belongs to something still running.
 
 =item * C<clear_guest>, whatever has to go before a guest of that name can be
 made.  For libvirt that is the domain, its disks and the addresses it held; a
-cloud rebuilds the server it already has, so there is nothing to clear.
+cloud rebuilds the server it already has, so there is nothing to clear.  Takes
+C<keep_disk>, which says to leave the guest's disk where it is -- see
+C<rollback_possible> for when that is allowed.
+
+=item * C<rollback_possible($domain, capacity =E<gt> $bytes)>, whether a
+snapshot taken now would still be there to go back to after the rebuild.
+
+The two backends answer it for opposite reasons.  A cloud's snapshot is an image
+that lives outside the server, so it survives whatever happens to the guest, and
+the answer is yes whenever there is a server.  libvirt's snapshot lives inside
+the guest's qcow2, so it survives only if that file does -- which it does only
+when the disk can be kept, and it can be kept only when nothing about the disk
+being asked for has changed.
 
 =item * C<provision_guest>, the guest itself, from the seed C<bin/provision>
 has written.  Returns the address it came up at, which C<guest_ssh_ip> is then
@@ -430,6 +442,7 @@ sub prepare_host          ( $self, @ ) { return $self->_abstract('prepare_host')
 sub release_seed          ( $self, @ ) { return $self->_abstract('release_seed') }
 sub guest_volumes         ( $self, @ ) { return $self->_abstract('guest_volumes') }
 sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') }
+sub rollback_possible     ( $self, @ ) { return $self->_abstract('rollback_possible') }
 sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
 sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
 

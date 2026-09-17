@@ -423,6 +423,83 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     ) or diag "applied: @applied";
 };
 
+# Everything a provision_domain needs to reach the end, so the two subtests
+# below differ in one thing: the answer the backend gives about rolling back.
+sub rebuild_answering {
+    my (%answers) = @_;
+
+    my %seen = ( snapshots => [], cleared => {}, asked => [] );
+    my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
+    my $loc  = Test::MockModule->new('Trog::Local');
+
+    $hv->redefine( rollback_possible => sub { my ( undef, undef, %o ) = @_; push @{ $seen{asked} },     $o{capacity}; return $answers{rollback_possible} } );
+    $hv->redefine( create_snapshot   => sub { my ( undef, undef, $n ) = @_; push @{ $seen{snapshots} }, $n;           return 1 } );
+    $hv->redefine( clear_guest       => sub { my ( undef, undef, %o ) = @_; %{ $seen{cleared} } = %o; return 1 } );
+
+    $hv->redefine( domain_exists        => sub { 1 } );
+    $hv->redefine( define_domain        => sub { 1 } );
+    $hv->redefine( pool                 => sub { 1 } );
+    $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
+    $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
+    $hv->redefine( cloudinit_iso        => sub { '/bogus/pool/seed.iso' } );
+    $hv->redefine( bridge_device        => sub { 'br0' } );
+    $hv->redefine( has_tpm              => sub { 0 } );
+    $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip             => sub { '192.168.122.50' } );
+    $hv->redefine( is_local             => sub { 1 } );
+    $hv->redefine( describe             => sub { 'the hypervisor' } );
+    $hv->redefine( virbr_ip             => sub { '192.168.122.1' } );
+    $hv->redefine( libvirt_version      => sub { 10_000_000 } );
+    $hv->redefine( qemu_version         => sub { 9_000_000 } );
+    $hv->redefine( pool_takes_direct_io => sub { 1 } );
+    $hv->redefine( pool_fstype          => sub { 'ext4' } );
+    $hv->redefine( write_text           => sub { 1 } );
+    $hv->redefine( put_file             => sub { 1 } );
+    $hv->redefine( run_sudo             => sub { 0 } );
+    $loc->redefine( append_line => sub { 1 } );
+
+    my $dir = tempdir( CLEANUP => 1 );
+    $hv->redefine( domain_dir => sub { $dir } );
+    mkdir "$dir/vm.test";
+    File::Slurper::Temp::write_text( "$dir/vm.test/$_->[0]", $_->[1] )
+      for [ 'user-data', "#cloud-config\n" ], [ 'meta-data', "instance-id: vm.test\n" ], [ 'network-config', "network:\n  version: 1\n" ], [ 'key.rsa.pub', "ssh-rsa AAAA nobody\n" ];
+
+    my $config = Config::Simple->new(
+        _conf(
+            domain     => 'vm.test',   memory => 2048, cpus => 2,
+            size       => 42949672960, image  => 'https://example.test/img',
+            admin_user => 'doge',      distro => 'ubuntu',
+        )
+    );
+
+    my $said = capture_stdout { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test' ) };
+    return ( $said, \%seen );
+}
+
+subtest 'a rebuild that can be rolled back is snapshotted before it happens' => sub {
+    my ( $said, $seen ) = rebuild_answering( rollback_possible => 1 );
+
+    is( scalar @{ $seen->{snapshots} }, 1, 'a rollback point was taken' );
+    like( $seen->{snapshots}[0], qr/\A before-reprovision- \d+ \z/, 'named for what it is and when it was taken' );
+
+    # The size this build is asking for, which is what decides whether the disk
+    # the snapshot lives in can be kept at all.
+    is( $seen->{asked}[0],           42949672960, 'the backend was asked about the size being built' );
+    is( $seen->{cleared}{keep_disk}, 1,           'and told to keep the disk the snapshot is inside' );
+
+    like( $said, qr{bin/restore [ ] --name [ ] before-reprovision}, 'and the operator is told how to go back' );
+};
+
+subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by saying nothing' => sub {
+    my ( $said, $seen ) = rebuild_answering( rollback_possible => 0 );
+
+    # A snapshot here would be taken inside a disk that is about to be deleted,
+    # which is worse than not taking one: it reads as a rollback that exists.
+    is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted' );
+    is( $seen->{cleared}{keep_disk}, 0, 'and the disk goes, the way it always did' );
+    unlike( $said, qr{bin/restore}, 'with no rollback offered that would not be there' );
+};
+
 subtest 'a domain directory with no recipes is built as it stands' => sub {
     my $dir = tempdir( CLEANUP => 1 );
 
