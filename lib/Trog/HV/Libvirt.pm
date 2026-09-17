@@ -17,7 +17,14 @@ use URI::Split();
 
 use Trog::Local();
 use File::Slurper();
+use Cpanel::JSON::XS();
 use Provisioner::Cookbook();
+
+# The snapshot a rebuild puts a kept disk back to: the empty overlay it was the
+# moment it was made.  Declared up here because the two ends of that are far
+# apart -- create_disk takes it, clear_guest reverts to it -- and a file-scoped
+# my is invisible to anything above the line it is written on.
+my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
 =head1 NAME
 
@@ -302,13 +309,51 @@ Returns true if there was something there to remove.
 
 =cut
 
+=head2 stop_domain($name)
+
+Stop a domain, leaving it defined.  Says whether there was one to stop.
+
+Separate from C<annihilate_domain> because keeping a guest's disk across a
+rebuild means stopping the guest without undefining it: qemu-img writes the
+image directly, and qemu holding it open is how one gets corrupted rather than
+reverted.
+
+=cut
+
+sub stop_domain {
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name) or return 0;
+
+    return 1 unless $domain->is_active();
+    eval { $domain->destroy(); 1 } or die "Could not stop $name: $@";
+    return 1;
+}
+
+=head2 domain_uuid($name)
+
+The uuid libvirt has for this domain, or undef when it has no such domain.
+
+Wanted by the rebuild that keeps a guest's disk.  That one deliberately does not
+undefine the domain -- undefining discards libvirt's record of its snapshots,
+which is the thing being preserved -- and libvirt binds a name to a uuid and
+refuses to redefine a domain it already has under a different one.  So the XML
+written for the rebuild carries the uuid the domain already has, and a first
+build carries none and lets libvirt mint one.
+
+=cut
+
+sub domain_uuid {
+    my ( $self, $name ) = @_;
+    my $domain = $self->_domain($name) or return undef;
+
+    return eval { $domain->get_uuid_string() };
+}
+
 sub annihilate_domain {
     my ( $self, $name ) = @_;
     my $domain = $self->_domain($name) or return 0;
 
-    if ( $domain->is_active() ) {
-        eval { $domain->destroy(); 1 } or die "Could not stop $name: $@";
-    }
+    $self->stop_domain($name);
     eval {
         $domain->undefine( Sys::Virt::Domain::UNDEFINE_NVRAM() | Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA() );
         1;
@@ -611,6 +656,21 @@ sub create_disk {
 </volume>
 XML
 
+    # The state a rebuild puts this disk back to, taken while it is still the
+    # empty overlay it was just made as.  There is no later moment when the disk
+    # is in that state to be snapshotted.
+    #
+    # A warning rather than a failure: a disk without one is a disk that rebuilds
+    # the old way, by being deleted, which is what every guest did before this.
+    # rollback_possible looks for it and says no, so nothing downstream promises
+    # a rollback that is not there.
+    #
+    # No `; 1` inside the eval: qemu-img refusing the disk is a false return
+    # rather than an exception, so the block has to catch both.
+    eval { $self->snapshot_disk( $name, $PRISTINE_SNAPSHOT ) } or do {
+        warn "Could not take the $PRISTINE_SNAPSHOT snapshot of $name on " . $self->describe . ": " . ( $@ || "qemu-img would not take it.\n" ) . "This guest rebuilds by deleting its disk, and cannot be rolled back.\n";
+    };
+
     return $volume->get_path();
 }
 
@@ -802,8 +862,10 @@ The name of the domain's current snapshot, or undef if it has none.
 
 =head2 create_snapshot($domain, $name)
 
-Take a live atomic snapshot.  C<$name> may be undef, in which case libvirt names
-it after the current time.  Returns true on success.
+Take an atomic disk-only snapshot, which means the domain has to be shut down:
+libvirt will take a full system snapshot of a live guest, or a disk-only one of
+a stopped guest, and this is the latter.  C<$name> may be undef, in which case
+libvirt names it after the current time.  Returns true on success.
 
 =head2 revert_snapshot($domain, $name)
 
@@ -851,8 +913,13 @@ sub create_snapshot {
 
     my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
 
-    # LIVE only means anything for a running domain, and libvirt rejects it for
-    # one that isn't.
+    # We can only take full system snapshots of a live guest, and disk-only
+    # snapshots of a shut down one.  This one is disk only -- no memory in the
+    # XML -- so a running domain is refused with error 84 whichever flags it is
+    # asked with, and a caller wanting a snapshot stops the domain first.
+    #
+    # LIVE is set anyway for the running case, since libvirt rejects it for a
+    # domain that is not.
     $flags |= Sys::Virt::DomainSnapshot::CREATE_LIVE() if $domain->is_active();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
@@ -1209,6 +1276,185 @@ sub qcow2_tuning {
 
     $tuning{metadata_cache} = $wanted < $QCOW2_METADATA_CAP ? $wanted : $QCOW2_METADATA_CAP;
     return %tuning;
+}
+
+=head2 $hv->disk_reusable($domain, $capacity)
+
+Whether this guest's disk can be kept across a rebuild rather than thrown away
+and made again.  True only when there is one, it is already the size being asked
+for, and it was laid out the way C<qcow2_tuning> would lay one out now.
+
+The size is the obvious half.  The layout is the half that bites quietly:
+C<create_disk> says that cluster size and subcluster allocation are properties
+of the image as created and cannot be retrofitted, and C<qcow2_tuning> decides
+both from the capacity B<and> from what this hypervisor supports.  So a
+hypervisor whose qemu grew C<extended_l2> between two builds would want a layout
+the existing image does not have, and keeping that image would pin the guest to
+the old one for as long as it lives, without saying so.
+
+=cut
+
+sub disk_reusable {
+    my ( $self, $domain, $capacity ) = @_;
+
+    return 0 unless $capacity;
+    my $volume = $self->volume("$domain-qcow2") or return 0;
+    my $info   = eval { $volume->get_info() }   or return 0;
+    return 0 unless ( $info->{capacity} // 0 ) == $capacity;
+
+    # What it was made with, against what it would be made with now.  Asked of
+    # the image rather than remembered, because nothing here writes down how a
+    # disk was laid out and the image is the only thing that knows.
+    my %wanted = $self->qcow2_tuning($capacity);
+    my $has    = $self->disk_layout("$domain-qcow2") or return 0;
+
+    return 0 unless ( $has->{cluster_size} // 0 ) == ( $wanted{cluster_size} // $QCOW2_DEFAULT_CLUSTER );
+    return 0 unless ( $has->{extended_l2} ? 1 : 0 ) == ( $wanted{extended_l2} ? 1 : 0 );
+    return 1;
+}
+
+=head2 $hv->rollback_possible($domain, capacity =E<gt> $bytes)
+
+Whether a snapshot taken now would still be there after the rebuild.
+
+Here that is the same question as whether the disk can be kept, because a
+libvirt snapshot lives inside the qcow2 it was taken of: keep the file and the
+snapshot keeps; delete it and the snapshot goes with it, however recently it was
+taken.  A guest with no disk yet -- a first build -- answers no, which is right
+for a different reason: there is nothing to go back to.
+
+=cut
+
+sub rollback_possible {
+    my ( $self, $domain, %opts ) = @_;
+
+    return 0 unless $self->domain_exists($domain);
+    return 0 unless $self->disk_reusable( $domain, $opts{capacity} );
+
+    # And that there is something to put the disk back to.  A guest built before
+    # any of this has a perfectly reusable disk with no pristine snapshot in it,
+    # and reverting to a snapshot that is not there fails in the middle of the
+    # rebuild -- after the rollback point has been taken and announced, which is
+    # the worst moment available to discover it.
+    return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
+}
+
+=head2 $hv->quiesce_for_snapshot($domain)
+
+Stop the guest, leaving it defined.
+
+Not a courtesy: C<create_snapshot> cannot take one of a domain that is still
+running, for the reason given there.  Nothing is lost by stopping, since the
+guest is about to be rebuilt either way.
+
+=cut
+
+sub quiesce_for_snapshot {
+    my ( $self, $domain ) = @_;
+
+    return $self->stop_domain($domain);
+}
+
+=head2 $hv->disk_layout($volume)
+
+The cluster size and subcluster allocation of an existing qcow2, as a hashref,
+or undef when qemu-img could not be asked.
+
+=cut
+
+sub disk_layout {
+    my ( $self, $name ) = @_;
+
+    # sudo, and -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
+    # an unprivileged qemu-img cannot open it at all; and this is only ever
+    # asked about a guest that is running, whose qemu holds a write lock, so
+    # without -U it cannot open it either.  Either failure returns empty, which
+    # a caller reads as "no snapshots" rather than as an error -- which is why
+    # the errors are left where they can be seen.
+    my $path = $self->volume_path($name) or return undef;
+    my $json = $self->capture_cmd("sudo qemu-img info -U --output=json '$path'") // q{};
+    my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
+
+    my $format = $info->{'format-specific'}{data} // {};
+    return {
+        cluster_size => $info->{'cluster-size'} // 0,
+        extended_l2  => $format->{'extended-l2'} ? 1 : 0,
+    };
+}
+
+=head2 $hv->snapshot_disk($volume, $name)
+
+Take an internal qcow2 snapshot of a volume with no domain involved, and say
+whether it took.
+
+C<create_snapshot> is libvirt asking a domain to snapshot itself; this is
+qemu-img asking the file.  The difference is what makes a snapshot possible
+before the guest exists at all, which is where C<pristine> has to be taken --
+there is no domain to ask until the disk it boots from is already there.
+
+=cut
+
+sub snapshot_disk {
+    my ( $self, $name, $snapname ) = @_;
+
+    my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to snapshot\n";
+
+    # As root, because the disk is not ours: libvirt makes it 0600
+    # libvirt-qemu:kvm, and qemu-img without sudo answers "Permission denied"
+    # and a non-zero exit -- which is a snapshot not taken, and nothing said.
+    return $self->run_sudo( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
+}
+
+=head2 $hv->revert_disk($volume, $name)
+
+Put a volume back to one of its own internal snapshots, leaving its others where
+they are.  The domain must not be running: qemu-img writes the file directly,
+and qemu holding it open is how an image gets corrupted rather than reverted.
+
+Deliberately without the C<-U> that C<disk_layout> and C<disk_snapshot_names>
+pass.  That flag forces a share past qemu's write lock, which is safe for
+reading a running guest's disk and is the opposite of safe for writing to one:
+it is the difference between asking an image a question and editing it behind
+the back of the process that has it open.  C<snapshot_disk> is the same, and
+needs no flag for a different reason -- it runs before the domain exists.
+
+The whole design rests on what a revert leaves behind: every other snapshot is
+still listed, still something the disk can be put back to, and the backing file
+survives.
+
+=cut
+
+sub revert_disk {
+    my ( $self, $name, $snapname ) = @_;
+
+    my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to revert\n";
+
+    # As root, for the reason snapshot_disk is: the disk belongs to
+    # libvirt-qemu.  It matters more here, where a revert that quietly did
+    # nothing would leave the new guest booting the old guest's filesystem.
+    return $self->run_sudo( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
+}
+
+=head2 $hv->disk_snapshot_names($volume)
+
+Every internal snapshot in a volume, in the order qemu-img lists them.
+
+=cut
+
+sub disk_snapshot_names {
+    my ( $self, $name ) = @_;
+
+    # sudo and -U for the reasons disk_layout gives, and they matter most here:
+    # this is what rollback_possible asks, about a guest that is running, and an
+    # empty answer from a disk it could not open is indistinguishable from a
+    # disk with no snapshots in it.  That is the whole feature declining to
+    # engage, for a reason nothing prints.
+    my $path = $self->volume_path($name) or return ();
+    my $said = $self->capture_cmd("sudo qemu-img snapshot -l -U '$path'") // q{};
+
+    # The header names the columns; every line after it starts with a numeric
+    # id and carries the tag second.
+    return map { ( split q{ }, $_ )[1] } grep { m/\A \s* \d+ \s+ \S/ } split m/\n/, $said;
 }
 
 sub bridge_device {
@@ -1821,14 +2067,30 @@ new guest has asked for anything.
 =cut
 
 sub clear_guest {
-    my ( $self, $domain ) = @_;
+    my ( $self, $domain, %opts ) = @_;
 
-    if ( $self->domain_exists($domain) ) {
-        print "Terminating the existing VM $domain\n";
-        $self->annihilate_domain($domain);
+    if ( $opts{keep_disk} ) {
+
+        # Stopped rather than undefined: undefining takes libvirt's snapshot
+        # metadata with it (annihilate_domain asks for exactly that), and then
+        # the snapshot taken a moment ago is still in the file but invisible to
+        # anything that asks the domain about it -- bin/restore included.
+        print "Keeping the disk for $domain, and putting it back to $PRISTINE_SNAPSHOT\n";
+        $self->stop_domain($domain);
+        $self->revert_disk( "$domain-qcow2", $PRISTINE_SNAPSHOT )
+          or die "Could not put $domain-qcow2 back to $PRISTINE_SNAPSHOT on " . $self->describe . "\n";
+    }
+    else {
+        if ( $self->domain_exists($domain) ) {
+            print "Terminating the existing VM $domain\n";
+            $self->annihilate_domain($domain);
+        }
+
+        $self->delete_volume("$domain-qcow2");
     }
 
-    $self->delete_volume("$domain-qcow2");
+    # The seed goes either way.  It is rewritten every provision, and a guest
+    # that booted from the last one is a guest configured for the last one.
     $self->delete_volume("$domain-cloudinit.iso");
 
     $self->release_dhcp_lease($_) for $self->lease_ips( 'default', mac => $self->guest_mac( $domain, 0 ) );
@@ -1865,7 +2127,13 @@ sub provision_guest {
     # The disks, the base image and the seed ISO, before the XML that names them
     # by path: there is no rendering it without making them first.
     my %storage = $vm->create_storage( %settings, domain => $domain, seed => $seed );
-    $vm->generate_files( $dir, %settings, %storage, domain => $domain );
+
+    # Read before the XML is written, and only ever found on the rebuild that
+    # kept the disk: that one leaves the domain defined, and libvirt refuses to
+    # redefine a domain it has under a uuid other than the one it gave it.
+    # Undef on a first build, where the template leaves the element out.
+    my $uuid = $self->domain_uuid($domain);
+    $vm->generate_files( $dir, %settings, %storage, domain => $domain, uuid => $uuid );
 
     my $file = "$dir/domain.xml";
     print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain

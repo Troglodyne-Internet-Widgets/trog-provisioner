@@ -353,6 +353,45 @@ subtest 'snapshots live in glance, so the guest is in the name' => sub {
       'and a snapshot that does not exist says so';
 };
 
+subtest 'a rollback is possible wherever there is a server to snapshot' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
+
+    # A Glance image is not inside the server the way a libvirt snapshot is
+    # inside the disk it was taken of, so a rebuild cannot take the snapshot
+    # away with it.  That leaves one question: is there a guest to snapshot.
+    ok $hv->rollback_possible('vm.example.com'),    'a guest that is there can be put back afterwards';
+    ok !$hv->rollback_possible('nope.example.com'), 'and one that is not, cannot';
+
+    # capacity is the libvirt backend's question, where the snapshot lives in
+    # the disk and a disk of another size is a different file.  Here the root
+    # disk is replaced from the image on every rebuild whatever its size.
+    ok $hv->rollback_possible( 'vm.example.com', capacity => 1 ), 'the size being asked for changes nothing';
+};
+
+subtest 'a cloud takes its rollback point without stopping the guest' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
+
+    my $name = $hv->snapshot_before_rebuild('vm.example.com');
+
+    like $name, qr/\A before-reprovision- \d{4}-\d{2}-\d{2}-\d{6} \z/,
+      'named the way every backend names one, since an operator types it at bin/restore';
+
+    my ($created) = $FAKE->calls_to('create_image');
+    is $created->[3], "vm.example.com\@$name", 'and Glance holds it under the guest it was taken of';
+
+    # Which is the whole reason quiesce_for_snapshot is the backend's question
+    # rather than the caller's.  Nova images a server while it runs, so stopping
+    # one here would make nothing possible and cost the guest its uptime.
+    is_deeply [ $FAKE->calls_to('server_action') ], [],
+      'the server is never acted on, so it is still up when the rebuild reaches it';
+
+    $FAKE = Test::FakeCloud->new;
+    is $hv->snapshot_before_rebuild('nope.example.com'), undef,
+      'and a guest that is not there has nothing to go back to';
+};
+
 subtest 'building a guest' => sub {
     my $hv = cloud(
         flavor           => 'm1.medium',

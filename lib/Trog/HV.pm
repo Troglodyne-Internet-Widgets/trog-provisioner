@@ -16,6 +16,7 @@ use File::Slurper();
 use YAML::XS();
 
 use File::Which();
+use Time::Piece();
 use List::Util qw{uniq};
 
 =head1 NAME
@@ -83,7 +84,24 @@ that a directory belongs to something still running.
 
 =item * C<clear_guest>, whatever has to go before a guest of that name can be
 made.  For libvirt that is the domain, its disks and the addresses it held; a
-cloud rebuilds the server it already has, so there is nothing to clear.
+cloud rebuilds the server it already has, so there is nothing to clear.  Takes
+C<keep_disk>, which says to leave the guest's disk where it is -- see
+C<rollback_possible> for when that is allowed.
+
+=item * C<snapshot_before_rebuild($domain, capacity =E<gt> $bytes)>, the
+rollback point taken immediately before a rebuild, or undef when there is none
+to take.  Whatever a backend has to do to the guest to make that snapshot
+possible happens in there rather than in the caller -- see below.
+
+=item * C<rollback_possible($domain, capacity =E<gt> $bytes)>, whether a
+snapshot taken now would still be there to go back to after the rebuild.
+
+The two backends answer it for opposite reasons.  A cloud's snapshot is an image
+that lives outside the server, so it survives whatever happens to the guest, and
+the answer is yes whenever there is a server.  libvirt's snapshot lives inside
+the guest's qcow2, so it survives only if that file does -- which it does only
+when the disk can be kept, and it can be kept only when nothing about the disk
+being asked for has changed.
 
 =item * C<provision_guest>, the guest itself, from the seed C<bin/provision>
 has written.  Returns the address it came up at, which C<guest_ssh_ip> is then
@@ -430,8 +448,56 @@ sub prepare_host          ( $self, @ ) { return $self->_abstract('prepare_host')
 sub release_seed          ( $self, @ ) { return $self->_abstract('release_seed') }
 sub guest_volumes         ( $self, @ ) { return $self->_abstract('guest_volumes') }
 sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') }
+sub rollback_possible     ( $self, @ ) { return $self->_abstract('rollback_possible') }
 sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
 sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
+
+=head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
+
+The rollback point taken immediately before a rebuild, or undef when there is
+none to take.  C<capacity> is the size the rebuild is asking for, which is what
+C<rollback_possible> weighs.
+
+Undef rather than a name whenever the snapshot did not happen -- the backend
+said there was nothing worth going back to, or C<create_snapshot> warned and
+returned false.  What the caller does with a name is offer it to an operator as
+the way home, so one handed back for a snapshot that is not there is worse than
+saying nothing.
+
+The name is the day and second it was taken, because that is what an operator
+reads back out of the backend and types at C<bin/restore>.  No colons in it: it
+reaches a command line, and on libvirt the snapshot XML as well.  Nothing sorts
+on it -- C<snapshot_names> orders by creation time -- so this is for the reader.
+
+=cut
+
+sub snapshot_before_rebuild {
+    my ( $self, $domain, %opts ) = @_;
+
+    return unless $self->rollback_possible( $domain, capacity => $opts{capacity} );
+
+    $self->quiesce_for_snapshot($domain);
+
+    my $name = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
+
+    return $self->create_snapshot( $domain, $name ) ? $name : undef;
+}
+
+=head2 $hv->quiesce_for_snapshot($domain)
+
+Whatever has to be done to a guest before a snapshot of it can be taken.
+
+Nothing, here, which is the right answer for a backend whose snapshot is taken
+of a running server and kept somewhere the guest cannot reach.  libvirt is the
+exception and overrides it: the snapshot it takes is disk only, and it refuses
+one of a domain that is still running.
+
+Only called where a snapshot is actually about to be taken, so an override may
+do something the guest would not survive being done to it idly.
+
+=cut
+
+sub quiesce_for_snapshot { return 1 }
 
 =head1 PLACEMENT
 

@@ -1001,6 +1001,26 @@ already own.
 
 sub clear_guest { return 1 }
 
+=head2 rollback_possible($domain, %opts)
+
+Whether a snapshot taken now would still be there afterwards.  Here it is:
+C<create_snapshot> asks Glance for an image, and an image outlives the server it
+was taken of -- a rebuild replaces what is on the root disk and leaves the image
+alone.  So the only question is whether there is a server to snapshot.
+
+C<capacity> is accepted and ignored.  It is the libvirt backend's question,
+where the snapshot lives in the disk and a disk of a different size is a new
+file: nothing here is laid over a base image, and a flavor that changed would
+be a different server rather than the same one with a bigger disk.
+
+=cut
+
+sub rollback_possible {
+    my ( $self, $domain, %opts ) = @_;
+
+    return eval { $self->server($domain) } ? 1 : 0;
+}
+
 =head2 $address = $hv->provision_guest($config, $seed, %opts)
 
 Ask the cloud for the guest and hand back the address it turned up at.
