@@ -1006,7 +1006,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     ok( $hv->create_snapshot( 'vm.test', 'whole' ), 'a running guest is snapshotted' );
     like( $seen[0]{xml}, qr{<memory[ ]snapshot='internal'/>}, 'with its memory in the XML, which is what makes it a full system snapshot' );
     ok( !( $seen[0]{flags} & Sys::Virt::DomainSnapshot::CREATE_LIVE() ), 'and without LIVE, which asks not to pause the guest and is only allowed when the memory goes outside the disk' );
-    ok( !( grep { ref $_ eq q{} && $_ eq 'destroy' } @seen ),            'and the guest is left running, which is the point of a live snapshot' );
+    ok( !( grep { $_ eq 'destroy' } @seen ),                             'and the guest is left running, which is the point of a live snapshot' );
 
     @seen = ();
     my $stoppable = FakeSnapshotDomain->new( 1, \@seen );
@@ -1026,7 +1026,7 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
 
     ok( $hv->create_snapshot( 'vm.test', 'doomed', disk_only => 1, leave_down => 1 ), 'leave_down snapshots as well' );
     is( $seen[0], 'destroy', 'stopping the guest' );
-    ok( !( grep { ref $_ eq q{} && $_ eq 'create' } @seen ), 'and leaving it down, which is what that caller asked for' );
+    ok( !( grep { $_ eq 'create' } @seen ), 'and leaving it down, which is what that caller asked for' );
 
     # A guest that was running when we were handed it goes back up even when
     # libvirt would not take the snapshot.  Leaving it off because the snapshot
@@ -1053,6 +1053,28 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     ok( $hv->create_snapshot( 'vm.test', 'cold' ), 'a guest that is already off is snapshotted without disk_only being asked for' );
     unlike( $seen[0]{xml}, qr/<memory/, 'with no memory element, there being no memory' );
     ok( !( $seen[0]{flags} & Sys::Virt::DomainSnapshot::CREATE_LIVE() ), 'and no LIVE, there being neither a guest to leave running nor memory to write' );
+};
+
+subtest 'starting a domain leaves it running' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my @seen;
+    my $off  = FakeSnapshotDomain->new( 0, \@seen );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( _domain => sub { $off } );
+
+    ok( $hv->start_domain('vm.test'), 'a domain that is off starts' );
+    is_deeply( \@seen, ['create'], 'by being created, which is libvirt for switched on' );
+
+    @seen = ();
+    my $on = FakeSnapshotDomain->new( 1, \@seen );
+    $mock->redefine( _domain => sub { $on } );
+
+    ok( $hv->start_domain('vm.test'), 'one that is already running is nothing to do' );
+    is_deeply( \@seen, [], 'and is not asked twice' );
+
+    $mock->redefine( _domain => sub { undef } );
+    ok( !$hv->start_domain('vm.test'), 'and a domain that is not there says so' );
 };
 
 subtest 'a domain that already exists hands back the uuid libvirt gave it' => sub {

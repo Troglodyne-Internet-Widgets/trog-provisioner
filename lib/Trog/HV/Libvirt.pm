@@ -790,7 +790,12 @@ sub define_domain {
             die 'Could not set ' . $domain->get_name() . " to start with the host: $@";
         };
     }
-    $self->start_domain( $domain->get_name() );
+
+    # By name, which means a lookup that can come back empty where the handle
+    # above cannot.  Defining a domain libvirt then cannot find is not something
+    # to hand back as though it had started.
+    $self->start_domain( $domain->get_name() )
+      or die 'Could not start ' . $domain->get_name() . ": libvirt has no such domain, having just defined it\n";
 
     return $domain;
 }
@@ -934,35 +939,29 @@ sub create_snapshot {
     my ( $self, $name, $snapname, %opts ) = @_;
     my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
 
-    # Decided before anything is taken down, because taking it down is what
-    # destroys the evidence.  A guest that was already off is put back off.
+    # libvirt takes a full system snapshot of a running guest, or a disk-only
+    # one of a stopped guest, and nothing else.  Anything else is error 84,
+    # "live snapshot creation is supported only during full system snapshots".
+    my $live = !$opts{disk_only} && $domain->is_active();
+
+    # Settled before the stop below, because stopping is what changes it: a
+    # guest found running goes back up, and one found off stays off.
     my $resume = $opts{disk_only} && !$opts{leave_down} && $domain->is_active();
 
-    # Down first.  We can take a full system snapshot of a live guest or a
-    # disk-only one of a stopped guest, and nothing else: a disk-only snapshot
-    # of a running domain is refused with error 84, "live snapshot creation is
-    # supported only during full system snapshots".
     $self->stop_domain($name) if $opts{disk_only};
-
-    # Asked after the stop, because the stop is what changes the answer.  A
-    # guest that was already off has no memory to put anywhere either.
-    my $live = !$opts{disk_only} && $domain->is_active();
 
     my $xml = '<domainsnapshot>';
     $xml .= '<name>' . _xml_escape($snapname) . '</name>' if defined $snapname && length $snapname;
 
-    # This element is the whole of what makes the difference.  libvirt reads its
-    # absence as "disk only", and that is the combination it refuses for a
-    # domain that is running.
+    # This element is what libvirt reads to tell the two apart: without it the
+    # request is a disk-only one.
     $xml .= "<memory snapshot='internal'/>" if $live;
     $xml .= '</domainsnapshot>';
 
-    # ATOMIC, and nothing else.  CREATE_LIVE does not mean "snapshot a guest
-    # that is running": it asks libvirt not to pause one while it writes the
-    # memory out, and libvirt will only agree to that when the memory goes
-    # somewhere outside the disk.  This one keeps it inside, so the flag makes
-    # the request invalid and earns the same error 84 that a disk-only snapshot
-    # of a running domain does.
+    # CREATE_LIVE does not mean "snapshot a guest that is running".  It asks
+    # libvirt not to pause one while it writes the memory out, and libvirt will
+    # only agree to that when the memory goes somewhere outside the disk.  This
+    # one keeps it inside, so the flag would make the request invalid.
     my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };

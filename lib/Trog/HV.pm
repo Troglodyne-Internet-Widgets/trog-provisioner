@@ -478,13 +478,10 @@ sub snapshot_before_rebuild {
 
     my $name = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
 
-    # Disk only: the guest is about to be rebuilt, so writing its memory out
-    # would cost time and size for a state nobody will go back to.  Asking for
-    # it is also what takes a libvirt guest down, which is the only state that
-    # backend will snapshot a disk in; a cloud images a running server and has
-    # no such distinction to make.
-    # leave_down because the rebuild takes the guest apart next: starting it
-    # here would only be to stop it again a moment later.
+    # Disk only, and left down.  The guest is about to be rebuilt, so writing
+    # its memory out would cost time and size for a state nobody will go back
+    # to, and starting it again afterwards would only be to stop it a moment
+    # later.  A cloud has neither distinction to make and ignores both.
     return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
