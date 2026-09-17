@@ -418,7 +418,11 @@ subtest 'the key is rotated on a real run and kept on a dry one' => sub {
     # The guest that is up has the public half of this, so a run that is meant
     # to change nothing must not replace the private half.
     is( $build->( dryrun => 1 ), $first, 'a dry run leaves the one a live guest is using alone' );
-    isnt( $build->(), $first, 'and a real run rotates it, the guest being rebuilt around the new one' );
+
+    # Nor does a real one.  Rotating here handed the rebuilt guest a key nobody
+    # kept: the salvage pass earlier in the same generate has already
+    # materialised the old one, and that is what the provision goes on to offer.
+    is( $build->(), $first, 'and a real run keeps it, since the store is holding that key' );
 };
 
 subtest 'which release is current is read, not inferred' => sub {

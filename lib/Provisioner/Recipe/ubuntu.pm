@@ -358,11 +358,16 @@ In perl rather than through C<ssh-keygen>: see
 L<Provisioner::Utils/write_ssh_keypair>, which is where the one thing that is
 not obvious about writing these lives.
 
-A real run rotates the key, which is fine: the guest is rebuilt around whatever
-is written here.  A dry run does not, because the guest that is up has the
-public half of the existing one, so replacing the private half here would be
-losing the way in to a machine nobody asked us to touch.  A domain with no key
-yet gets one either way, since the user-data is written out of it.
+A domain that already has a keypair keeps it.  The key is the identity of the
+machine rather than of the build, and the store is holding it, so minting a new
+one buys nothing and costs the rebuild its way back in: the guest comes up
+seeded with the new key while anything that materialized the old one -- the
+salvage pass that runs earlier in the same generate, among others -- goes on
+offering what the guest no longer authorizes.
+
+A domain with no key yet gets one, since the user-data is written out of it.
+The caller is what puts a sealed key back beside this one first; without that
+there is nothing here to keep.
 
 =cut
 
@@ -372,7 +377,7 @@ sub guest_keypair {
     my $path = "$self->{output_dir}/key.rsa";
 
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    unless ( $opts{dryrun} && -f $path && -f "$path.pub" ) {
+    unless ( -f $path && -f "$path.pub" ) {
         unlink $path, "$path.pub";
         Provisioner::Utils::write_ssh_keypair( $path, RSA => $RSA_BITS, $opts{domain} );
     }

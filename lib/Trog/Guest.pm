@@ -238,14 +238,22 @@ It lives in the secret store now.  What is here is the two halves of that: the
 provision that makes a key puts it there, and everything that needs to use one
 gets it back out.
 
-=head2 It is still rotated every provision
+=head2 A domain keeps the key it has
 
-The store is otherwise for secrets that are made once and answered from there
-forever, and this is not one of them.  L<Provisioner::Recipe::ubuntu/guest_keypair>
-mints a fresh key on every real run, deliberately -- the guest is rebuilt around
-whatever cloud-init is written with -- so a key is only ever the way into the
-guest that is up now.  C<seal_key> therefore overwrites, where L<Trog::Secrets/remember>
-would keep the first answer forever.
+L<Provisioner::Recipe::ubuntu/guest_keypair> mints one only for a domain that has
+none.  The key identifies the machine rather than the build, and the store is
+holding it, so a rebuild comes up authorizing the key everything on this side is
+already using.
+
+It did rotate on every real run once, and that is what #187 was: the salvage pass
+materializes the current key early in a generate, the mint then replaced it, and
+the provision went on to offer a key the rebuilt guest had never been told about.
+Refusing the mint is what fixed it, rather than teaching the cache to notice.
+
+C<seal_key> still overwrites rather than going through L<Trog::Secrets/remember>,
+which keeps the first answer forever.  A key that has not changed re-seals to the
+same bytes; one that has -- a domain rebuilt from nothing, a key replaced by hand
+-- has to land in the store rather than be ignored in favor of the old one.
 
 Which means sealing does not make the key long-lived.  It moves where the current
 one rests, and leaves its lifetime alone.
