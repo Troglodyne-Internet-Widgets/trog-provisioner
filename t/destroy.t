@@ -387,12 +387,22 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
 
     my ($said) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
     like( $said, qr/gone\.test\.bak-qcow2/, 'the dry run names a copy' );
+    like( $said, qr/2[ ]disks[ ]were/,      'and counts them in a sentence that agrees with itself' );
     like( $said, qr/live\.test\.bak-qcow2/, 'and the copy of a guest that is still here, since both are copies' );
     unlike( $said, qr/live\.test-qcow2/, 'and not the disk a guest is running on' );
     is_deeply( \@deleted, [], 'removing none of it' );
 
     says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
     is_deeply( \@deleted, [qw{gone.test.bak-qcow2 live.test.bak-qcow2}], 'and the sweep takes the copies, and only the copies' );
+
+    # The other half of that sentence.  One of the two forms went out reading
+    # "1 disks were copied aside", which is the sort of thing that makes an
+    # operator distrust the rest of what a destructive command says.
+    @deleted = ();
+    local @Test::Pool::VOLUMES = qw{only.test.bak-qcow2};
+    my ($alone) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    like( $alone, qr/One[ ]disk[ ]was/, 'and a single copy is counted in the singular' );
+    unlike( $alone, qr/1[ ]disks/, 'rather than agreeing with nothing' );
 
     # A pool that will not answer is not a pool with nothing in it, and the
     # sweep says so rather than reporting a clean fleet.

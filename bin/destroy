@@ -493,7 +493,14 @@ sub sweep_backups {
         return 0;
     }
 
-    print scalar(@copies) . " disks were copied aside and nothing has taken them away:\n";
+    # Spelled both ways rather than counted at: this prints on a real fleet, and
+    # "1 disks were" is the sort of thing that makes an operator distrust the
+    # rest of what a destructive command is telling them.
+    my $found =
+      scalar @copies == 1
+      ? 'One disk was copied aside and nothing has taken it away'
+      : scalar(@copies) . ' disks were copied aside and nothing has taken them away';
+    print "$found:\n";
     foreach my $name (@copies) {
         print "  $name (" . join( ', ', map { $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
     }
