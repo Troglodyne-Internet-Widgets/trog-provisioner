@@ -215,11 +215,12 @@ sub probes {
         # post_install.sh.ran_at_<when> once it has run, so the canonical path
         # holds something only on a build that never got that far -- and fetch()
         # takes a literal path, which cannot resolve a name with a timestamp in
-        # it.  The newest is the run just finished.
-        # By name rather than by mtime: the name carries %Y%m%d-%H%M%S, which
-        # sorts chronologically as text, and a /root that has been salvaged or
-        # rsynced can have timestamps that no longer agree with it.  `ls -1t`
-        # here picked the older copy the moment the two disagreed.
+        # it.
+        #
+        # Newest by name rather than by mtime: the name carries %Y%m%d-%H%M%S,
+        # which sorts chronologically as text, where a /root that has been
+        # salvaged or rsynced can have timestamps that no longer agree with the
+        # names they sit on.
         [
             q{f=$(ls -1 /root/post_install.sh.ran_at_* 2>/dev/null | tail -n1); } . q{[ -n "$f" ] && cat "$f" || echo "no deferred work has run here"},
             'post_install.ran.sh'

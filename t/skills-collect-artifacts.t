@@ -85,9 +85,9 @@ subtest 'a file inside the home directory of root comes back, rather than being 
 # fetch takes a literal path and cannot resolve a name with a timestamp in it,
 # which is why this one is asked rather than read.
 #
-# The command itself is run, rather than matched against: the first version of it
-# chose with `ls -1t`, which sorts by mtime, and picked the older copy the moment
-# a salvaged or rsynced /root had timestamps that no longer agreed with the names.
+# The command itself is run rather than matched against, because what is worth
+# pinning is which copy it chooses when mtime and name disagree -- a /root that
+# has been salvaged or rsynced is one where they do.
 subtest 'the deferred work comes back from the copy post_install left' => sub {
     my ($probe) = grep { $_->[1] eq 'post_install.ran.sh' } Trog::Skill::CollectArtifacts::probes();
     ok( $probe, 'the collector asks for it at all' ) or return;

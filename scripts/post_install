@@ -31,20 +31,16 @@ done < "$QUEUE"
 
 [ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
 
-# Moved aside now that it has run, rather than left for the next run to replay.
-# queue_postrun_task appends, and nothing emptied this, so a makefile run on a
-# guest that had already had one ran every earlier run's deferred work again --
-# service starts, CPAN installs, snapshots.  Most are idempotent; some are not,
-# and all of them cost time.
+# Moved aside, because queue_postrun_task appends: a queue left here is one the
+# next makefile run works through again, on top of its own.
 #
-# After the loop, never before: the loop reads the queue with `done < "$QUEUE"`
+# After the loop, never before.  The loop reads the queue with `done < "$QUEUE"`
 # and the descriptor stays open across the rename, so what is running now runs
 # to the end of what it was given.
 #
-# Whatever the tasks did, including when one of them failed.  A failed run that
-# left the queue where it was would replay the whole of it next time, which is
-# the thing being fixed; the lines are still in the copy, and the exit code
-# below is what carries the failure on.
+# Whatever the tasks did.  Leaving it in place on a failure would replay all of
+# it next time rather than retrying the part that failed; those lines are still
+# in the copy, and the exit code below is what carries the failure on.
 mv -- "$QUEUE" "$QUEUE.ran_at_$(date +%Y%m%d-%H%M%S)"
 
 exit "$rc"
