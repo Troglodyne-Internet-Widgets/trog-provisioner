@@ -676,8 +676,8 @@ sub provision_domain (%args) {
     # says what happens, in order, and asks the backend to do each part.
     #
     # keep_disk where there is a rollback point, because on libvirt that point is
-    # inside the disk: deleting it would throw away the snapshot taken three
-    # lines ago along with the guest it was taken of.
+    # inside the disk: deleting it would throw away the snapshot just taken,
+    # along with the guest it was taken of.
     $hv->clear_guest( $domain, keep_disk => !!$rollback );
 
     my $address = $hv->provision_guest( $config, \%seed, settings => \%settings, reuse => $reuse );

@@ -1343,12 +1343,9 @@ sub rollback_possible {
 
 Stop the guest, leaving it defined.
 
-Not a courtesy.  The snapshot taken before a rebuild is disk only and carries no
-memory, and libvirt refuses one of a running domain outright -- error 84, "live
-snapshot creation is supported only during full system snapshots".  Measured on
-a hypervisor: the same snapshot of the same guest was refused running and taken
-stopped.  Nothing is lost by stopping, since the guest is about to be rebuilt
-either way.
+Not a courtesy: C<create_snapshot> cannot take one of a domain that is still
+running, for the reason given there.  Nothing is lost by stopping, since the
+guest is about to be rebuilt either way.
 
 =cut
 
@@ -1371,9 +1368,9 @@ sub disk_layout {
     # sudo, and -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
     # an unprivileged qemu-img cannot open it at all; and this is only ever
     # asked about a guest that is running, whose qemu holds a write lock, so
-    # without -U it cannot open it either.  Both failures came back as an empty
-    # answer, which reads as "no snapshots" and made the whole thing decline to
-    # engage -- twice, silently, because the errors were going to /dev/null.
+    # without -U it cannot open it either.  Either failure returns empty, which
+    # a caller reads as "no snapshots" rather than as an error -- which is why
+    # the errors are left where they can be seen.
     my $path = $self->volume_path($name) or return undef;
     my $json = $self->capture_cmd("sudo qemu-img info -U --output=json '$path'") // q{};
     my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
@@ -1404,8 +1401,7 @@ sub snapshot_disk {
 
     # As root, because the disk is not ours: libvirt makes it 0600
     # libvirt-qemu:kvm, and qemu-img without sudo answers "Permission denied"
-    # and a non-zero exit.  Measured on a hypervisor, where run_cmd meant the
-    # snapshot was never taken and nothing said so.
+    # and a non-zero exit -- which is a snapshot not taken, and nothing said.
     return $self->run_sudo( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
@@ -1422,9 +1418,9 @@ it is the difference between asking an image a question and editing it behind
 the back of the process that has it open.  C<snapshot_disk> is the same, and
 needs no flag for a different reason -- it runs before the domain exists.
 
-Measured on a hypervisor before this was written, because the whole design rests
-on it -- reverting to one snapshot leaves every other one listed, and still
-something the disk can be put back to, and the backing file survives.
+The whole design rests on what a revert leaves behind: every other snapshot is
+still listed, still something the disk can be put back to, and the backing file
+survives.
 
 =cut
 

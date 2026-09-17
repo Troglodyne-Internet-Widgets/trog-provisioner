@@ -967,6 +967,7 @@ subtest 'the rollback point is taken with the guest stopped, or not taken at all
     @did = ();
     $mock->redefine( create_snapshot => sub { return 0 } );
     is( $hv->snapshot_before_rebuild( 'vm.test', capacity => 1 ), undef, 'a snapshot that would not take is no rollback point' );
+    is_deeply( \@did, ['stop_domain'], 'though the guest was stopped for the attempt, the rollback having looked possible' );
 
     @did = ();
     $mock->redefine( rollback_possible => sub { 0 } );
