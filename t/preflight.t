@@ -243,6 +243,43 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     ok( $result->{ok}, 'and a local hypervisor is answered for by this machine' );
 };
 
+# Every other check can pass while this one cannot, and then the run dies
+# minutes in on a curl, naming the image URL rather than the permissions that
+# refused it.  That is how a hypervisor whose pool had just been moved onto a
+# fresh dataset reported itself ready and then could not build anything.
+subtest 'a storage pool nothing can write to is a hypervisor nothing can be built on' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+
+    $hv->redefine( pool_path => sub { '/bogus/pool' } );
+    $hv->redefine( describe  => sub { 'doge@hv.test' } );
+
+    $hv->redefine( run_cmd => sub { 0 } );
+    my ($result) = quietly( sub { Trog::HV->new()->check_pool_writable } );
+    ok( $result->{ok}, 'a pool that takes a write passes' );
+    like( $result->{what}, qr{/bogus/pool}, 'naming the pool it wrote into' );
+
+    $hv->redefine( run_cmd => sub { 1 } );
+    ($result) = quietly( sub { Trog::HV->new()->check_pool_writable } );
+    ok( !$result->{ok}, 'and one that refuses the write does not' );
+    like( $result->{what}, qr/doge\@hv[.]test/, 'naming the hypervisor it asked' );
+    like( $result->{fix},  qr/chown/,           'the guidance is the ownership' );
+
+    # Both halves of the fix, because the filesystem one alone does not survive:
+    # libvirt takes a built pool's ownership from the pool definition.
+    like( $result->{fix}, qr/pool-dumpxml/, 'and says the pool definition has to agree' );
+
+    # And why it is not simply sudo'd, which is the obvious wrong fix: base_image
+    # deliberately does not either.
+    like( $result->{fix}, qr/sudo[ ]here[ ]would/, 'and why sudo is not the answer' );
+
+    # Not being able to find the pool at all is a different answer to not being
+    # able to write to it, and wants different guidance.
+    $hv->redefine( pool_path => sub { undef } );
+    ($result) = quietly( sub { Trog::HV->new()->check_pool_writable } );
+    ok( !$result->{ok}, 'a pool that cannot be located fails too' );
+    like( $result->{fix}, qr/pool-list/, 'and says how to find what pools there are' );
+};
+
 subtest 'a guest has to have an address of ours to fetch from' => sub {
     my $hv    = Test::MockModule->new('Trog::HV::Libvirt');
     my $local = Test::MockModule->new('Trog::Local');
@@ -405,7 +442,7 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/ISO[ ]builder/,                 'and the ISO builder' );
     like( $out, qr/libvirt/,                       'and libvirt' );
     like( $out, qr/Missing[ ]or[ ]empty[ ]in/,     'and the configuration' );
-    like( $out, qr/6[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
+    like( $out, qr/7[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
 };
 
 subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {

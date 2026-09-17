@@ -124,11 +124,54 @@ If it reports anything to fill in, the recipe requires a field it has no default
 for. Fill it with something plausible and say so in your report; a `CHANGEME`
 left in place stops `new_config` by design.
 
-Then:
+**A dependency's required fields are in that list too.**
+`new_guest` scaffolds the recipes you named and then closes that set over
+`required_recipes`, so a recipe nobody asked for gets a block and a `CHANGEME`
+of its own where it wants something the recipe that pulled it in cannot supply.
+`grafanasyslog` drags in `grafana`, whose `admin_password` has no default --
+a password not being something a depending recipe can choose on an operator's
+behalf -- and the report names `grafana.admin_password`.
+
+It is the same walk `bin/new_config` does, so what it reports is what the build
+will require -- and where a recipe cannot say what it wants because a global it
+reads is missing, both of them refuse and name it rather than skipping the
+dependency quietly. The globals come from `_global` in `recipes.yaml`; a
+scratch configuration that has not got one has a file to fix.
+
+So fill in what it lists, with values that are visibly throwaway, and say in
+your report that you did:
+
+    grafana:
+        admin_password: scratch-only-throwaway
+
+**Ask `new_config --dryrun` before you ask `provision`.** It is the same
+configuration step `provision` starts with, it takes a second or two, and it is
+where a refusal like that one comes from -- so it costs nothing to find out now
+rather than ten minutes into a build that was never going to finish:
+
+    printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | bin/new_config --credentials --dryrun "$DOMAIN"
+
+**The `--dryrun` is not optional, and neither is doing it only once.**
+`bin/provision` runs the generator itself, in process, before it waits for ssh.
+The generator mints a fresh guest keypair every run and *overwrites* the store's
+copy, so a plain `new_config` beforehand seals key one, `provision`'s own
+generate seals key two, and the guest -- built from the first -- is then
+unreachable with the second.  `--dryrun` is exactly the flag for this: in the
+generator it means one thing only, that an existing key is kept rather than
+replaced.
+
+Then, and note the credentials block rather than a bare password:
 
 ```
-echo "$TROG_SCRATCH_PASS" | bin/provision "$DOMAIN"
+printf 'keepass: %s\n\n' "$TROG_SCRATCH_PASS" | bin/provision --credentials "$DOMAIN"
 ```
+
+**A bare password is not a slower `--credentials`.** Piping one answers
+whichever prompt happens to come first; anything that wants the store later --
+`key_path` fetching the guest key once `seal_key` has removed it from disk --
+reads from an exhausted stdin and gets nothing.  The block is named, read once
+up front, and satisfies every prompt in the run.  `Trog::Credentials` has the
+whole of it.
 
 This takes minutes. It is finished when it says so or when it dies; if it dies,
 **go straight to collecting artifacts** — a failed run is when they matter most.

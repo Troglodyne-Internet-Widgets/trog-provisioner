@@ -27,5 +27,19 @@ template(name="logcollector-perhost" type="string" string="[% log_dir %]/%HOSTNA
 
 ruleset(name="logcollector") {
     action(type="omfile" dynaFile="logcollector-perhost" dirCreateMode="0755" fileCreateMode="0640")
+[%# Above the stop, and that is not a matter of taste: stop ends processing for
+    the message, so a forward written below it is one that never runs.
+
+    RFC5424 with octet-counted framing because that is what the telegraf syslog
+    input parses; the default rsyslog format is RFC3164, which it rejects.
+    These go to a consumer on this guest rather than to another collector --
+    Provisioner::Recipe::logcollector has the account. -%]
+[% FOR dest IN forward -%]
+[% parts = dest.split(':') -%]
+    action(type="omfwd" target="[% parts.0 %]" port="[% parts.1 %]" protocol="tcp"
+           template="RSYSLOG_SyslogProtocol23Format" TCP_Framing="octet-counted"
+           action.resumeRetryCount="-1"
+           queue.type="linkedList" queue.size="10000")
+[% END -%]
     stop
 }

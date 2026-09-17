@@ -1,0 +1,34 @@
+[%# grafana.ini is an override file layered over the package defaults.ini, so
+    only what differs belongs here and everything left out keeps the packaged
+    value.  Provisioner::Recipe::grafana has the reasoning for the loopback
+    listener. -%]
+[paths]
+[%# Named rather than inherited: the dashboards and the datasource are written
+    under here by this recipe, and a package that moved its default would leave
+    them somewhere grafana never reads. -%]
+provisioning = /etc/grafana/provisioning
+
+[server]
+protocol = http
+[%# Loopback only.  nginx is in front, and binding anywhere else would put an
+    unauthenticated grafana on the wire before the vhost exists. -%]
+http_addr = 127.0.0.1
+http_port = [% port %]
+domain = [% domain %]
+[%# What grafana builds links and redirects from.  Without it every one of them
+    names 127.0.0.1 and the browser follows them off the site. -%]
+root_url = https://[% domain %]/
+
+[security]
+admin_user = [% grafana_admin %]
+admin_password = [% admin_password %]
+[%# nginx terminates TLS, so the session cookie may be marked secure. -%]
+cookie_secure = true
+
+[users]
+[%# A dashboard host on a public vhost: nobody signs themselves up. -%]
+allow_sign_up = false
+
+[analytics]
+reporting_enabled = false
+check_for_updates = false

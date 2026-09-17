@@ -12,7 +12,7 @@ use Clone qw{clone};
 use Cwd();
 use File::Basename();
 use File::Find();
-use List::Util();
+use List::Util qw{any};
 use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
@@ -528,6 +528,95 @@ sub _scaffold_value {
     return ( $class->PLACEHOLDER, $path );
 }
 
+=head2 scaffold_dependencies(\@named, %opts)
+
+The blocks a domain needs for recipes nobody named, and the paths in them that
+still want a human.
+
+    my ( $blocks, @todo ) = Provisioner::Cookbook->scaffold_dependencies( ['grafanasyslog'] );
+
+C<scaffold> answers for one recipe, and C<bin/new_guest> asks it about each
+recipe on the command line -- which is not the set the guest is built from.
+C<bin/new_config> closes that set over C<required_recipes>, so a recipe nobody
+named arrives with required fields of its own.  Usually the recipe that asked
+for it supplies them.  Where it cannot, somebody has to be told: C<grafana>
+wants an C<admin_password>, and a password is not a thing a depending recipe can
+choose on an operator's behalf, so without this the report says there is nothing
+to fill in and C<bin/new_config> refuses once a guest is already going up.
+
+Only dependencies that still want something come back.  The depsolver adds the
+recipe either way, so a block here is somewhere to put a value rather than a
+request for the recipe.
+
+Two things it will not guess at.  A key naming an interface rather than a recipe
+is resolved by the depsolver against the domain's configuration, which is not
+available here.  And C<bin/new_config> hands a C<required_recipes> sub the
+requiring recipe's own options, so one called without them may die -- C<tcms>
+builds a path out of C<install_dir> and C<domain> -- and a sub that died has
+said nothing about what it supplies.  A placeholder standing in front of a field
+the recipe that asked for it would have filled is worse than no placeholder at
+all, so that dependency is left alone.
+
+=cut
+
+sub scaffold_dependencies {
+    my ( $class, $named, %opts ) = @_;
+
+    my $base   = ref $opts{base} eq 'HASH'          ? $opts{base}          : {};
+    my $global = ref $opts{global_config} eq 'HASH' ? $opts{global_config} : {};
+    my $distro = $global->{distro} // 'ubuntu';
+
+    # What a recipe is built with, worked out here rather than asked of the
+    # caller: bin/new_guest has no business knowing which packager a
+    # distribution uses, and a caller that guessed would be a second answer to a
+    # question this module already has one for.
+    # One for the process, the way spec() takes one: a recipe is instantiated
+    # with somewhere to write, nothing here writes, and a directory per call
+    # would be a directory per call left behind.
+    state $scratch;
+    my %provisioner = (
+        distro          => $distro,
+        target_packager => $class->load($distro)->packager,
+        template_dirs   => $class->template_dirs($distro),
+        output_dir      => $opts{output_dir} // ( $scratch //= File::Temp::tempdir( CLEANUP => 1 ) ),
+    );
+
+    # One entry per named recipe, which is what the walk merges each
+    # dependency's contributions into.
+    my %domain_conf = map { $_ => clone( $base->{$_} // {} ) } @$named;
+
+    my ( $modules, $builders ) = $class->resolve_dependencies(
+        modules       => [@$named],
+        domain_conf   => \%domain_conf,
+        global_config => $global,
+        distro        => $distro,
+        provisioner   => \%provisioner,
+        domain        => $opts{domain},
+    );
+
+    # Named by the caller, who has scaffolded them already.
+    my %named = map { $_ => 1 } @$named;
+
+    my ( %blocks, @todo );
+    foreach my $dep (@$modules) {
+        next if $named{$dep};
+        next unless $builders->{$dep}->is_module;
+
+        my ( $config, @needed ) = $class->scaffold(
+            $dep,
+            all        => $opts{all},
+            output_dir => $opts{output_dir},
+            provided   => { %{ $domain_conf{$dep} // {} }, %{ $base->{$dep} // {} } },
+        );
+        next unless @needed;
+
+        $blocks{$dep} = $config;
+        push @todo, @needed;
+    }
+
+    return ( \%blocks, @todo );
+}
+
 =head2 placeholders_in($config, $path)
 
 Every place in a configuration that is still a placeholder, as dotted paths.
@@ -557,6 +646,221 @@ sub placeholders_in {
     return ();
 }
 
+=head2 resolve_substitutable_dependency(%args)
+
+Which recipe satisfies a substitutable dependency: one naming an interface that
+any of several recipes could answer for, rather than naming a recipe outright.
+
+The interface decides -- this asks it, rather than working it out again.  Two
+answers to one question is how the gates this replaced came to disagree, so the
+rules live in one place and both callers, here and the recipe rendering its own
+templates, put the same question to it.
+
+What this adds is the part the interface cannot know: that the answer has to be
+a recipe this installation actually has, and one that implements what was asked
+for.  A configuration naming something else is a typo, and saying so beats
+loading it and finding out three targets later.
+
+C<interface> is the interface that was named, and C<domain> the domain naming it.
+
+C<domain_conf> is what the domain itself is configured with.  C<host_conf> is
+what the machine it is layered onto is, and C<host> names that machine so a
+refusal can say which guest it looked at -- both of those undef for a domain
+with a guest of its own.
+
+C<requiring_conf> is the configuration of the recipe that declared the
+dependency: the interface names the key holding a preference and reads it from
+there, so a domain settles a tie where it already writes it.
+
+=cut
+
+sub resolve_substitutable_dependency {
+    my ( $class, %args ) = @_;
+    my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
+
+    # For the same reason resolve_dependencies requires it: all three refusals
+    # below open with it, and one that cannot name the domain is not worth much.
+    die "resolve_substitutable_dependency needs the domain asking; pass one.\n" unless $domain;
+
+    # It arrives as text out of required_recipes, so nothing has loaded it and
+    # every method call below would be "perhaps you forgot to load".
+    my $path = $interface =~ s{::}{/}gr;
+    eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
+
+    my @known = $class->implementations($interface);
+    die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
+
+    # The configuration this run was pointed at, not the installation's: they
+    # are the same thing for a fleet provision and different for every scratch
+    # one, and the resolver has no way to tell which it is being asked about.
+    my $chosen = $interface->implementation_for(
+        %{ $requiring_conf // {} },
+        domain          => $domain,
+        configured      => $domain_conf // {},
+        host            => $host,
+        host_configured => $host_conf,
+    );
+
+    die "$domain resolves $interface to '$chosen', which is not one of the recipes that implement it (" . join( ', ', @known ) . ").\n"
+      unless List::Util::any { $_ eq $chosen } @known;
+
+    return $chosen;
+}
+
+=head2 resolve_dependencies(%args)
+
+Close a domain's module list over what its recipes require, and configure what
+that drags in.
+
+    my ( $modules, $builders ) = Provisioner::Cookbook->resolve_dependencies(
+        modules       => [ $distro_name, sort keys %{ $conf->{$domain} } ],
+        domain_conf   => $conf->{$domain},
+        global_config => \%global,
+        distro        => $distro_name,
+        provisioner   => \%provisioner_opts,
+        domain        => $domain,
+    );
+
+A recipe says what it needs in C<required_recipes>, and what it needs may need
+something in turn, so the list is walked as it grows rather than iterated once.
+Each dependency is added, configured out of whatever the recipes depending on it
+asked for, and C<reconcile>d where two of them wanted different things.
+
+What comes back is the expanded list and the builders instantiated along the
+way, which reusing is the caller's responsibility rather than loading every
+recipe a second time.  C<domain_conf> is written into: a dependency's
+configuration ends up the merge of what the domain wrote and what each dependent
+handed it.
+
+The list comes back in the order the build wants it.  A dependency is named
+again every time something requires it, and the last of those is the one that
+counts -- it has to run after everything that dragged it in -- so the list is
+C<lastuniq>'d before it is returned.  Which entries are modules at all is
+L<Provisioner::Recipe/is_module>, and that is the caller's to filter.
+
+C<domain> is required.  Getting this far without knowing which domain is being
+provisioned is not a thing to paper over with a default: a caller with no real
+one has a bogus one to supply and a reason to think about why.
+
+=head3 Two sources, on purpose
+
+Dependencies are composed from the base class's C<required_recipes> as well as
+the recipe's own, and the base class's is called explicitly rather than through
+the recipe.  What the base class decides every recipe owes -- C<ufw> its rate
+limits, C<data> its restores -- is not something an override should be able to
+drop by forgetting to chain to C<SUPER>, and six of them do exactly that.
+
+=head3 When a recipe cannot say what it wants
+
+A C<required_recipes> sub is handed the global configuration and the requiring
+recipe's own, and reaches into both: C<tcms> builds a path out of C<install_dir>
+and C<domain>.  Called without them it dies, and what it says on the way out is
+about a path rather than about a configuration.  So this names the recipe that
+could not answer and what it was asked about.  That configuration comes from C<_global>
+in F<recipes.yaml>, and a caller that has not got them has a file to fix rather
+than a dependency to skip.
+
+=cut
+
+sub resolve_dependencies {
+    my ( $class, %args ) = @_;
+
+    my @modules       = @{ $args{modules} // [] };
+    my $domain_conf   = $args{domain_conf}   // {};
+    my $global_config = $args{global_config} // {};
+    my $distro        = $args{distro};
+    my $provisioner   = $args{provisioner} // {};
+
+    # Required.  Every refusal below opens with it, and depsolving without
+    # knowing which domain is being provisioned is not a state to carry on from.
+    my $domain = $args{domain}
+      or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
+
+    my $depmod_conf = {};
+    my %builders;
+
+    # Each recipe's configuration as the domain wrote it, taken on its first
+    # visit.  A recipe other recipes depend on is visited once for each of
+    # them, and what they handed it has to be merged into what the domain
+    # wrote each time -- merged into the last visit's result instead, a list
+    # they handed it came out once per visit.
+    my %as_written;
+
+    # A C-style loop is the only one that recomputes the array's extents every
+    # iteration, and so the only way to iterate recursively in perl: what a
+    # recipe requires may require something itself, and lands on this list while
+    # it is being walked.
+    for ( my $i = 0; $i < scalar(@modules); $i++ ) {
+        my $module  = $modules[$i];
+        my $builder = $builders{$module} //= $class->load( $module, distro => $distro )->new(%$provisioner);
+
+        my $pconf = $domain_conf->{$module} // {};
+
+        # The base's own answer first, then the recipe's.  See L</Two sources, on purpose>.
+        my %dep_recipes = (
+            Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
+            $builder->required_recipes( %$global_config, %$pconf ),
+        );
+        foreach my $required ( keys(%dep_recipes) ) {
+
+            # A dependency may be substitutable -- naming an interface several
+            # recipes could answer for -- and this is where it becomes one of
+            # them: has() takes \w+ and nothing else, so the name has to be
+            # resolved before anything below tries to load it or put it in the
+            # module list.
+            if ( index( $required, '::' ) >= 0 ) {
+                my $chosen = $class->resolve_substitutable_dependency(
+                    interface      => $required,
+                    domain_conf    => $domain_conf,
+                    host_conf      => $args{host_conf},
+                    requiring_conf => $pconf,
+                    domain         => $domain,
+                    host           => $args{host},
+                );
+                $dep_recipes{$chosen} //= $dep_recipes{$required};
+                delete $dep_recipes{$required};
+                $required = $chosen;
+            }
+
+            my $manual_args = delete $pconf->{$required} // {};
+
+            # See about autocomputing the options if possible.
+            my %depargs;
+            if ( ref $dep_recipes{$required} eq 'CODE' ) {
+                my $said;
+                my $answered = eval { %depargs = $dep_recipes{$required}->( %$global_config, %$pconf ); 1 };
+                $said = $@ unless $answered;
+                die "$domain: the $module recipe could not say what it wants from $required.\n" . "It said: $said" . "A required_recipes sub reads the global configuration it is handed, so this is usually one of those missing.  Those come from _global in recipes.yaml.\n"
+                  unless $answered;
+            }
+            my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
+
+            # Every time something names it.  The duplicates are the point: the
+            # last mention is the one lastuniq keeps, which is what puts a
+            # dependency after everything that dragged it in.
+            push( @modules, $required );
+            $depmod_conf = $class->_dep_merger->merge( $depmod_conf, \%cur_args );
+
+            # Hash::Merge picks a side where two dependents disagree.  The recipe
+            # being depended on is the only thing that knows whether either side
+            # is right, so it gets asked -- and dies if it does not know.
+            $class->load( $required, distro => $distro )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
+        }
+
+        # Merge the configuration provided by all things depending on this.
+        $as_written{$module} //= clone($pconf);
+        if ( $depmod_conf->{$module} ) {
+            $domain_conf->{$module} = $class->_dep_merger->merge( $depmod_conf->{$module}, $as_written{$module} );
+
+            # Same on this side of it: what an operator wrote for this recipe is
+            # held against what the recipes depending on it asked for.
+            $builder->reconcile( $domain_conf->{$module}, $_ ) for ( $depmod_conf->{$module}, $as_written{$module} );
+        }
+    }
+
+    return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders );
+}
+
 # Two merges, wanting opposite things, so two mergers.
 #
 # Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
@@ -571,6 +875,20 @@ sub placeholders_in {
 # adds to what recipes.yaml says rather than overruling it.  See configuration().
 sub _base_merger { state $merger = Hash::Merge->new('RIGHT_PRECEDENT');   return $merger }
 sub _file_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
+
+# The depsolver's, for the two merges that accumulate what several recipes asked
+# of a shared dependency.
+#
+# The left is kept on purpose: these build up a dependency's options one
+# requester at a time, and where two of them genuinely disagree it is reconcile
+# that settles it, having been shown both sides.
+#
+# An object rather than the process-wide behavior.  bin/new_config set that
+# globally and called Hash::Merge::merge, which worked only because it was the
+# only caller -- and a second set_behavior naming the other precedence once sat
+# under that line and silently undid it, which is what inverted _base for
+# everything.  Nothing can undo this one from a distance.
+sub _dep_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
 =head2 configuration($path)
 
