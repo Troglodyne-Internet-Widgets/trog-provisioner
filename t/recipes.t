@@ -1435,6 +1435,21 @@ subtest 'the resolver is live before anything reads a zone back through it' => s
     unlike( $out, qr{queue_postrun_task\s+systemctl[ ]restart[ ]systemd-resolved}, 'rather than deferred behind its dependents' );
 };
 
+# A guest serving its own zone is the only thing that answers for it, and the
+# stub in front of it does not -- measured on a scratch guest, the zone walk
+# fell to the root and pdns was asked for zones/. letsencrypt asks for the same
+# recipe when this server answers its challenge; asking here too is what covers
+# a guest serving a zone without one.
+subtest 'a guest running its own DNS gets a resolver that can see the zone' => sub {
+    my %required = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->required_recipes(%G);
+    ok( $required{nostubresolver}, 'pdns asks for nostubresolver' );
+
+    # Chained rather than replaced: pdns declares rate_limits and restores, and
+    # the base is what turns those into ufw and data.
+    ok( $required{ufw},  'without dropping the firewall its rate limits need' );
+    ok( $required{data}, 'or the recipe its salvaged zone database goes back through' );
+};
+
 subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
 
     # The setup script unpacks the payload and runs make from inside it.  With
@@ -2082,7 +2097,7 @@ subtest 'a recipe that says where its state goes back depends on the thing that 
 
         # Asked of the base, which is what bin/new_config asks: it merges the
         # base's answer alongside the recipe's own, so a recipe that overrides
-        # required_recipes without chaining to SUPER -- six of them do -- still
+        # required_recipes without chaining to SUPER -- many do -- still
         # owes data what the base says it owes.  Asking the recipe here instead
         # would be testing whether it happened to chain, which is not the thing
         # that has to be true.

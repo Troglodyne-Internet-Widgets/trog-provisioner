@@ -92,7 +92,6 @@ In the main recipes.yaml, most of what you will want will be in the _base sectio
             to: "/opt/domains"
         nosnap:
         nostubresolver:
-            order: 0
         auditd:
         ufw:
         fail2ban:
@@ -728,12 +727,7 @@ sub handle_domain {
     # else -- it is what pulls the vm recipe in, and both of them are configured
     # by the same merge every other recipe is.  Neither ends up a module; they
     # are partitioned back out below.
-    my @modules = ( $distro_name, sort { ( $rconf->{$domain}{$a}{order} // 'ZZZ' ) cmp ( $rconf->{$domain}{$b}{order} // 'ZZZ' ) } sort keys( %{ $rconf->{$domain} } ) );
-
-    # Out of the stanzas, now the sort above has had it.  When a recipe's target
-    # runs is this script's business rather than anything the recipe acts on, so
-    # no schema declares it -- and a recipe refuses what none of them does.
-    delete $rconf->{$domain}{$_}{order} foreach grep { ref $rconf->{$domain}{$_} eq 'HASH' } keys %{ $rconf->{$domain} };
+    my @modules = ( $distro_name, sort keys( %{ $rconf->{$domain} } ) );
 
     my %mf_vars;
     my @testdeps;

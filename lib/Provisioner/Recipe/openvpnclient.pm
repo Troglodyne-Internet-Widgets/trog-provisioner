@@ -20,7 +20,6 @@ In recipes.yaml:
 
     somedomain:
         openvpnclient:
-            order: A
             server: vpn.example.test
             cert_dir: /opt/vpn-certs/somedomain
             port: 1194
@@ -38,11 +37,14 @@ the C<transfer_user>, by address -- the same way the data recipe fetches a
 domain's payload, and for the same reason: this runs before the guest's DNS is
 any use.
 
-Because the VPN tunnel is brought up during provisioning (not deferred to
-postrun), any recipe that needs connectivity through the tunnel must run after
-this one.  Recipe execution order is determined by the C<order:> key  set
-this recipe's order to a value that sorts before any recipe depending on the
-tunnel (e.g. C<order: A>).
+The tunnel comes up during provisioning rather than in the postrun, so it is
+there for anything that runs after this recipe's target.
+
+Which is not something a recipe can ask for: there is no way to name a position
+in the build, and requiring this one places it B<after> the recipe that asked.
+A recipe that cannot tolerate the tunnel being absent should wait for the
+interface in its own fragment, the way C<ssl.get_cert> waits for the server that
+answers its challenge.
 
 =head3 Several tunnels on one guest
 
