@@ -3,7 +3,7 @@ server {
 [% IF ipv6 %]    listen [::]:443 ssl[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+    server_name [% domain %] [% full_aliases.join(' ') %];
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
     ssl_certificate_key /etc/ssl/private/[% domain %].pem;
@@ -25,7 +25,7 @@ server {
 [% IF ipv6 %]    listen [::]:80[% IF backlog %] backlog=[% backlog %][% END %];
 [% END -%]
 
-    server_name [% domain %] www.[% domain %] [% full_aliases.join(', ') %];
+    server_name [% domain %] [% full_aliases.join(' ') %];
 
     root [% install_dir %]/[% domain %];
 
