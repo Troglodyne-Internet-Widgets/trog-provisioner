@@ -85,13 +85,18 @@ and F<tests/>.
 Each vendor F<libdir> comes after the checkout, in the same pattern.  A vendor
 recipe adds to what ships here and does not override it.
 
+The distribution's directory is the one its recipe names in C<template_subdir>.
+That recipe looks up its own generated files there as well, so the two cannot
+name different directories.  C<$distro> has to name a distro recipe.
+
 =cut
 
 sub template_dirs {
     my ( $class, $distro, @libdirs ) = @_;
 
-    my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
-    return [ map { ( ( $distro ? "$_/$distro" : () ), $_ ) } @bases ];
+    my $subdir = $distro ? $class->load($distro)->template_subdir : undef;
+    my @bases  = ( $class->template_dir, map { "$_/templates" } @libdirs );
+    return [ map { ( ( $subdir ? "$_/$subdir" : () ), $_ ) } @bases ];
 }
 
 =head2 names

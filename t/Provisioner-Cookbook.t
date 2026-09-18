@@ -124,6 +124,18 @@ subtest 'remember() seats what a run resolved, so recipes read that' => sub {
     is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'and forget() puts it back to what is on disk' );
 };
 
+subtest 'template_dirs puts the directory the distro recipe names first' => sub {
+    my $base = Provisioner::Cookbook->template_dir;
+    is_deeply( Provisioner::Cookbook->template_dirs('ubuntu'), [ "$base/ubuntu", $base ], 'the distro directory, then the generic one' );
+    is_deeply( Provisioner::Cookbook->template_dirs(undef),    [$base],                   'and only the generic one with no distro' );
+
+    # The recipe reads its generated files out of template_subdir, so the
+    # search path has to name that directory and not the recipe name.
+    my $ubuntu = Test::MockModule->new( Provisioner::Cookbook->load('ubuntu') );
+    $ubuntu->redefine( template_subdir => sub { return 't_elsewhere' } );
+    is( Provisioner::Cookbook->template_dirs('ubuntu')->[0], "$base/t_elsewhere", 'the distro directory is the one template_subdir names' );
+};
+
 subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
     my $conf = {
         _base => {
