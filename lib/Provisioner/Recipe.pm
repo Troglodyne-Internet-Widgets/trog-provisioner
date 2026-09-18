@@ -695,11 +695,9 @@ sub required_recipes {
 
     # Likewise for state: a recipe that says where its salvage goes back
     # depends on data, which walks what every dependent gave it.
-    # Only where there is a domain to restore into.  Provisioner::Cookbook asks
-    # this at scaffold time with no domain, and a restores() that interpolates
-    # one, as letsencrypt and pdns do, dies on the undef.  A salvage goes back
-    # into a domain, so without one there is nothing to declare.
-    my %restores = defined $opts{domain} ? $self->restores(%opts) : ();
+    # Provisioner::Cookbook always passes the domain, which letsencrypt and pdns
+    # interpolate into the paths they restore.
+    my %restores = $self->restores(%opts);
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
 
     return @required;
