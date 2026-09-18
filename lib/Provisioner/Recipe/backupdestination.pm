@@ -12,6 +12,8 @@ use parent qw{Provisioner::Recipe};
 
 use List::Util qw{uniq};
 
+use Provisioner::Recipe::backup();
+
 =head1 Provisioner::Recipe::backupdestination
 
 =head2 SYNOPSIS
@@ -99,16 +101,7 @@ sub enrich {
     } @$hosts;
     $opts{host_port_map} = \%host_port_map;
 
-    my @default_targets;
-    foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
-        my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
-        my @ts       = sort keys(%mtargets);
-        foreach my $t ( 1 .. @ts ) {
-            push( @default_targets, "$module$t" );
-        }
-    }
-
+    my @default_targets = map { $_->{name} } Provisioner::Recipe::backup::->default_targets(%opts);
     $opts{targets} = [ uniq( @default_targets, @{ $opts{targets} } ) ];
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";

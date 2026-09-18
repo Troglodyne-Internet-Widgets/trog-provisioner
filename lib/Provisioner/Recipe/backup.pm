@@ -75,32 +75,60 @@ sub args {
     );
 }
 
+=head2 @targets = Provisioner::Recipe::backup->default_targets(%opts)
+
+The targets that the recipes in C<$opts{modules}> ask to have backed up, in the
+order of those recipes.  Each one is a hashref:
+
+=over 4
+
+=item * C<name> -- the recipe name and a number, as in C<mysql1>.
+
+=item * C<path> -- a path on the guest, out of the recipe's C<remote_files>.
+
+=item * C<skip> -- the recipe's C<remote_skip> patterns, space separated, or
+the empty string.
+
+=back
+
+C<install_dir> and C<domain> go to each C<remote_files>.  Both this recipe and
+L<Provisioner::Recipe::backupdestination> name their targets from this list, so
+the rsync modules one side serves are the ones the other side asks for.
+
+=cut
+
+sub default_targets {
+    my ( $class, %opts ) = @_;
+
+    my @targets;
+    foreach my $module ( @{ $opts{modules} } ) {
+        require "Provisioner/Recipe/$module.pm";    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
+        my $recipe = "Provisioner::Recipe::$module";
+        my %files  = $recipe->remote_files( $opts{install_dir}, $opts{domain} );
+        my $skip   = join( ' ', $recipe->remote_skip() );
+        my @paths  = sort keys %files;
+        push( @targets, map { { name => $module . ( $_ + 1 ), path => $paths[$_], skip => $skip } } 0 .. $#paths );
+    }
+
+    return @targets;
+}
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my ( %default_targets, %default_skips );
-    foreach my $module ( @{ $opts{modules} } ) {
-        require "Provisioner/Recipe/$module.pm" unless Provisioner::Utils::already_required("Provisioner/Recipe/$module.pm");    ## no critic (Modules::RequireBarewordIncludes) -- the recipe is named by configuration
-        my %mtargets = "Provisioner::Recipe::$module"->remote_files( $opts{install_dir}, $opts{domain} );
-        my @skip     = "Provisioner::Recipe::$module"->remote_skip();
-        my @ts       = sort keys(%mtargets);
-        foreach my $t ( 1 .. @ts ) {
-            $default_targets{"$module$t"} = $ts[ $t - 1 ];
-            $default_skips{"$module$t"}   = join( ' ', @skip ) if @skip;
-        }
-    }
+    my @defaults      = $self->default_targets(%opts);
+    my %default_skips = map { $_->{skip} ? ( $_->{name} => $_->{skip} ) : () } @defaults;
 
     my $targets = $opts{targets};
-    %$targets = ( %default_targets, %$targets );
+    %$targets = ( ( map { $_->{name} => $_->{path} } @defaults ), %$targets );
 
     # remote_skip adds to the excludes of the operator and is never replaced
     # by them.  See DESCRIPTION.
-    my $excludes = $opts{excludes} // {};
+    my $excludes = $opts{excludes};
     foreach my $target ( sort keys %default_skips ) {
         my @both = grep { $_ } ( $default_skips{$target}, $excludes->{$target} );
-        $excludes->{$target} = join( ' ', @both ) if @both;
+        $excludes->{$target} = join( ' ', @both );
     }
-    $opts{excludes} = $excludes;
 
     my $kf = "$opts{data_source}/$opts{domain}/$opts{key_file}";
 
