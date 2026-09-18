@@ -114,6 +114,11 @@ subtest 'who actually asks' => sub {
     # what anything without a name in the block should get.
     is( Trog::Credentials->prompt('something else:'), 'typed at a terminal', 'and an unnamed password is always asked for' );
     is( $asked,                                       2,                     'again' );
+
+    # A name nobody can hand in is refused before the question, not after
+    # somebody has typed the answer.
+    like( exception { Trog::Credentials->prompt( 'passphrase:', 'keypass' ) }, qr/Unknown[ ]credential[ ]'keypass'/, 'a name that is not one is refused' );
+    is( $asked, 2, 'without asking first' );
 };
 
 subtest 'asking at the terminal, for a caller whose standard input is spoken for' => sub {
