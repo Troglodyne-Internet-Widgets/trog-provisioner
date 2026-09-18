@@ -525,11 +525,13 @@ sub _scaffold_value {
 
     if ( $type eq 'object' ) {
 
-        # An object with only additionalProperties has nothing to scaffold, so
-        # it is left out.
+        # An object with only additionalProperties has nothing to scaffold.  It
+        # is left out, unless it must have a property, and then a person must
+        # choose one.
         my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
-        return ( undef, () ) unless %$sub;
-        return ( $sub,  @todo );
+        return ( $sub,                @todo ) if %$sub;
+        return ( $class->PLACEHOLDER, $path ) if ( $prop->{minProperties} // 0 ) > 0;
+        return ( undef,               () );
     }
 
     if ( $type eq 'array' ) {
