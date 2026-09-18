@@ -53,7 +53,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -69,6 +69,10 @@ The files describe your installation, not this software, so they are not in the
 checkout.  To use a different set, set C<TROG_PROVISIONER_CONFIG> to the
 directory that holds them.  To name one file at a time, use the --recipes and
 --ipmap options.  See L<Trog::Config>.
+
+The --hvconf option names the fleet definition that chooses the hypervisor of a
+new guest.  The default is F</etc/trog-provisioner/hypervisors.conf>.  See
+L<Trog::Hypervisors>.
 
 Most of what you put in the main recipes.yaml goes in the _base section:
 
@@ -198,7 +202,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $cfile, $sfile, $pfile, $skip_ssh, $dryrun );
+our ( $cfile, $sfile, $pfile, $hvconf, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
@@ -255,9 +259,10 @@ sub salvage_gaps { return %SALVAGE_GAPS }
 sub main {
     my @args = @_;
 
-    # Clear the gaps of the last run, because a process can call main() more
-    # than once.
+    # Clear the gaps and the fleet of the last run, because a process can call
+    # main() more than once.
     %SALVAGE_GAPS = ();
+    undef $hvconf;
 
     my $credentials;
     GetOptionsFromArray(
@@ -265,6 +270,7 @@ sub main {
         'ipmap=s'     => \$cfile,
         'secrets=s'   => \$sfile,
         'recipes=s'   => \$pfile,
+        'hvconf=s'    => \$hvconf,
         'skip_ssh'    => \$skip_ssh,
         'credentials' => \$credentials,
         'dryrun'      => \$dryrun,
@@ -335,7 +341,7 @@ sub choose_hypervisor {
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
     return $chosen unless $fleet->configured;
 
     return $fleet->select_for( $domain, $requirements );
