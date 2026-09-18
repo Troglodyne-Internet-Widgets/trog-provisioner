@@ -40,7 +40,7 @@ The default is F<ipmap.cfg> in the configuration directory.  See L<Trog::Config>
 
 =item B<--recipes> DIR
 
-The default is F<recipes.d> in the current directory.
+The default is F<recipes.d> in the configuration directory.
 
 =item B<--dryrun>
 
@@ -98,7 +98,7 @@ sub main {
     ) unless $tld;
 
     $ipmap   //= Trog::Config->path('ipmap.cfg');
-    $recipes //= 'recipes.d';
+    $recipes //= Trog::Config->path('recipes.d');
 
     qualify_ipmap( $ipmap, $tld, $dryrun );
     qualify_recipes( $recipes, $tld, $dryrun );
