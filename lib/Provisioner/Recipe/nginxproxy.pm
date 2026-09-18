@@ -225,7 +225,7 @@ sub enrich {
             pop @parts;
             my $path = '';
             foreach my $part (@parts) {
-                $path = length $path ? "$path/$part" : $part;
+                $path = $path ? "$path/$part" : $part;
                 $traverse{$path} = 1;
             }
         }

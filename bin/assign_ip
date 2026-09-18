@@ -60,7 +60,7 @@ sub main {
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
-      unless defined $domain && length $domain;
+      unless $domain;
 
     my $c = Config::Simple->new($cfile);
     die "$Config::Simple::errstr\n" unless $c;

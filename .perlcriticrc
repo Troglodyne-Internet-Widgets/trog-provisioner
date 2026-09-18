@@ -76,6 +76,7 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 allow_subs = check_reachable check_transfer_ip check_rsync check_fetch_sources check_config check_passwordless_sudo check_iso_builder check_libvirt check_sys_virt_in_step check_pool_writable check_cloud_resources check_cloud_quota note_stale_image note_apt_mirror note_libguestfs note_swtpm note_pool_quota note_log_destination note_plaintext_secrets Trog::OpenStack::Auth::token Trog::OpenStack::Auth::region Trog::OpenStack::Auth::interface forget forget_sudo_passwords
 [ProhibitPrintSTDERR]
 [InputOutput::ProhibitRepeatedPrints]
+[ValuesAndExpressions::ProhibitDefinedBeforeLength]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 ;

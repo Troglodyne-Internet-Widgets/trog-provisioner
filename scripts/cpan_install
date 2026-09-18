@@ -115,7 +115,7 @@ sub main {
                 print {*STDERR} "cpan_install: dzil $which --missing exited $failed in $dir, so what it needs is not known\n";
                 return $failed;
             }
-            my @missing = grep { length } map { s/\s+\z//r } @said;
+            my @missing = grep { $_ } map { s/\s+\z//r } @said;
             next unless @missing;
             $rc = run_in( undef, @cpanm, mirror_only(@missing), @missing ) and last;
         }
@@ -124,7 +124,7 @@ sub main {
         my ( $package, $module ) = @rest;
         my ( $failed,  @said )   = capture_in( undef, 'pkg-config', '--modversion', $package );
         my ($version) = map { s/\s+\z//r } @said;
-        if ( $failed || !defined $version || !length $version ) {
+        if ( $failed || !$version ) {
             print {*STDERR} "cpan_install: pkg-config knows no $package, so there is no $module version to pin\n";
             return 1;
         }

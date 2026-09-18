@@ -1691,8 +1691,8 @@ subtest 'the installer configures the server before anything uses it' => sub {
     # Including on the run that skips securing, since the file holds root_pw
     # whether or not anything reads it.
     my ($trap) = $script =~ m/\A(.*?)trap[ ]'rm[ ]-f[ ]"\$SECURE_SQL"'[ ]EXIT/;
-    ok( defined $trap,                            'the secure-installation sql is removed on the way out' );
-    ok( defined $trap && length($trap) < $secure, 'from before the run that would use it, not inside it' );
+    ok( defined $trap,           'the secure-installation sql is removed on the way out' ) or return;
+    ok( length($trap) < $secure, 'from before the run that would use it, not inside it' );
 };
 
 subtest 'install_mariadb.sh keeps the version it was handed' => sub {

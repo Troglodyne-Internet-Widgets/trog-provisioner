@@ -275,16 +275,16 @@ sub enrich {
     # The second follows from the first and so cannot be a schema default; see
     # Provisioner::DistroRecipe.
     $opts{mirror_uri} = $self->mirror_uri(%opts);
-    $opts{mirror_insecure} //= length $opts{mirror_uri} ? 1 : 0;
+    $opts{mirror_insecure} //= $opts{mirror_uri} ? 1 : 0;
 
     $opts{ips}       = Provisioner::Utils::coerce_arrayref( $opts{ips} );
     $opts{resolvers} = Provisioner::Utils::coerce_arrayref( $opts{resolvers} );
 
     die "MUST SET gateway in provision.conf when ips are set\n"
-      if @{ $opts{ips} } && !( defined $opts{gateway} && length $opts{gateway} );
+      if @{ $opts{ips} } && !$opts{gateway};
 
     die "MUST SET contact_email in provision.conf for $opts{domain}\n"
-      unless defined $opts{contact_email} && length $opts{contact_email};
+      unless $opts{contact_email};
 
     $opts{guest_key} = $self->guest_keypair(%opts);
     $opts{users}     = $self->_users(%opts);

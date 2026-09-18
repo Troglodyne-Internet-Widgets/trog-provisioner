@@ -297,7 +297,7 @@ sub remove_authorized_key {
     # their own machine by getting it wrong.  Refuse on anything unexpected.
     my $contents = $this_machine->read_text($ak);
     die "Could not read $ak on " . $this_machine->describe . "; refusing to rewrite it blind\n"
-      unless defined $contents && length $contents;
+      unless $contents;
 
     unless ( $contents =~ m/\Q$pubkey\E/ ) {
         print "Domain SSH key not found in $ak, skipping.\n";
@@ -366,7 +366,7 @@ sub remove_runner_key {
 
         my $contents = $machine->read_text($ak);
         die "Could not read $ak on $name; refusing to rewrite it blind\n"
-          unless defined $contents && length $contents;
+          unless $contents;
 
         my @before = split( m/\n/, $contents );
         my @after  = grep { index( $_, $material ) < 0 } @before;
@@ -581,7 +581,7 @@ sub sweep_roots {
     warn 'Nothing in ' . Trog::Config->path('recipes.yaml') . " says where the data source is\n" . "(_global: data_source), so only the domain directories are swept.\n"
       unless $data;
 
-    my @roots = uniq( grep { defined && length } $data, map { $_->domain_dir } @hvs );
+    my @roots = uniq( grep { $_ } $data, map { $_->domain_dir } @hvs );
     warn "And there is no fleet to ask for a domain directory either, so there is nothing to sweep.\n" unless @roots;
 
     return @roots;

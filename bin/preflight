@@ -130,7 +130,7 @@ sub seed_admin_keys {
     return 0 unless $offered{$at};
 
     my $who = Trog::Utils::prompt('Whose keys, as that service spells the name:');
-    return 0 unless length "$who";
+    return 0 unless "$who";
 
     my @cmd = ( 'ssh-import-id', '-o', $path, "$at:$who" );
     print 'Running ' . join( ' ', @cmd ) . "\n";

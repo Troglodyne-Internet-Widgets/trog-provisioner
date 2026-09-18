@@ -192,7 +192,7 @@ sub enrich {
 
     $opts{constrain_to} //= Provisioner::Utils::tld_of( $opts{domain} );
     die "acmeca could not tell what top-level domain to constrain itself to from '" . ( $opts{domain} // q{} ) . "'; set constrain_to for this domain\n"
-      unless defined $opts{constrain_to} && length $opts{constrain_to};
+      unless $opts{constrain_to};
 
     return %opts;
 }

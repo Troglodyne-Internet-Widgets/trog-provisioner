@@ -221,8 +221,8 @@ sub hypervisor {
     # Say which block is wrong, by name.  A block that names neither would
     # otherwise fall through to libvirt's default connection -- that is, to this
     # machine -- which is the one placement nobody writing a fleet file meant.
-    my $has_uri   = defined $block->{libvirt_uri} && length $block->{libvirt_uri};
-    my $has_cloud = defined $block->{cloud}       && length $block->{cloud};
+    my $has_uri   = length $block->{libvirt_uri};
+    my $has_cloud = length $block->{cloud};
 
     die "[$name] in " . $self->{path} . " has both libvirt_uri and cloud; it can only be one hypervisor.\n"
       if $has_uri && $has_cloud;
@@ -366,7 +366,7 @@ sub _param {
 
     my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
     $value = $value->[0] if ref $value eq 'ARRAY';
-    return ( defined $value && length $value ) ? $value : undef;
+    return ( length $value ) ? $value : undef;
 }
 
 sub _oneline {

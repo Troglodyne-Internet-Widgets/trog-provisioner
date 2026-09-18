@@ -358,7 +358,7 @@ sub handle_domain {
     # From a file, not from GitHub at first boot, so that a provision does not
     # wait on GitHub.  A file also takes a raw public key.
     my $keyfile    = Trog::Config->path('admin_authorized_keys');
-    my @admin_keys = grep { length && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
+    my @admin_keys = grep { $_ && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
     die "No administrator keys in $keyfile.\nbin/preflight will offer to seed it with ssh-import-id.\n" unless @admin_keys;
 
     my $admin_gecos = $global_conf->{admin_gecos};
@@ -384,7 +384,7 @@ sub handle_domain {
     my $fqdn = $domain;
     my ( undef, $tld ) = split( quotemeta('.'), $domain, 2 );
     die "'$domain' is not a fully qualified domain name.\n" . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n" . "  new_config $domain.example.com\n"
-      unless length $tld;
+      unless $tld;
 
     my $rconf = clone( get_recipe_config() );
 
@@ -461,7 +461,7 @@ sub handle_domain {
     # the guest must accept each one.  The routing table decides, and
     # transfer_ip overrides it where a machine has several routes.  The fetch
     # uses the first address.
-    my @towards = grep { length } ( $static_ip, $tld_ip );
+    my @towards = grep { $_ } ( $static_ip, $tld_ip );
 
     my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
     my $transfer_ip  = $transfer_ips[0];
@@ -499,7 +499,7 @@ sub handle_domain {
     my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
     die "Nothing says where $fqdn's data comes from: set data_source in _global.\n"
-      unless length $global_config->{data_source};
+      unless $global_config->{data_source};
 
     my $data_dir = "$global_config->{data_source}/$fqdn";
 
@@ -630,7 +630,7 @@ sub handle_domain {
     # A guest without an address yet is not built, so it has nothing to
     # salvage.
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir )
-      if !$skip_ssh && length $static_ip;
+      if !$skip_ssh && $static_ip;
 
     # The distro recipe goes in, so that the depsolver configures it and pulls
     # in the vm recipe.  Both come out again below.
@@ -922,7 +922,7 @@ sub handle_domain {
     # is absent too, because Config::Simple reads a bare `key=` as an empty
     # string.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
-    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && length $global_config->{$_} } hv_settings() );
+    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
@@ -1086,7 +1086,7 @@ sub _salvage_mtimes {
     my %mtime;
     foreach my $line ( split m/\n/, $said ) {
         my ( $path, $stamp ) = split m/\t/, $line, 2;
-        next unless length $path;
+        next unless $path;
         $mtime{$path} = defined $stamp ? $stamp : q{};
     }
 

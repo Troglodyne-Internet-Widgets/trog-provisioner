@@ -63,7 +63,7 @@ sub enrich {
     my @resolvers =
       ref $opts{resolvers} eq 'ARRAY'
       ? @{ $opts{resolvers} }
-      : grep { length } split( m/[,\s]+/, $opts{resolvers} // q{} );
+      : grep { $_ } split( m/[,\s]+/, $opts{resolvers} // q{} );
 
     unshift( @resolvers, '127.0.0.1' )
       if ( any { $_ eq 'pdns' } @{ $opts{modules} // [] } )

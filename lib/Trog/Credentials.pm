@@ -216,7 +216,7 @@ sub load {
 
     while ( my $line = <$fh> ) {
         chomp $line;
-        last unless length $line;
+        last unless $line;
 
         my ( $name, $value ) = $line =~ m/^(\w+):[ ]?(\N*)$/;
         die "Could not read the credentials given on standard input.\n" . "Expected 'name: value', got: $line\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
