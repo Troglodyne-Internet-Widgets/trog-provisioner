@@ -64,6 +64,11 @@ sub args {
                         options    => { type => 'string' },
                         mountpoint => { type => 'string' },
                         device     => { type => 'string' },
+
+                        # enrich overrides pool for a device that is a directory or a
+                        # block device on the hypervisor, and partition for a directory.
+                        partition => { type => 'integer', minimum => 1,          default     => 1 },
+                        pool      => { type => 'string',  default => 'tf_disks', description => 'The storage pool on the hypervisor that device is a volume in.' },
                     },
                 },
             },
@@ -93,14 +98,13 @@ sub enrich {
             $disk->{servicename} =~ s|/|_|g;
             $disk->{pool} = 'raw' if -b $disk->{device};
             $disk->{pool} = 'dir' if -d $disk->{device};
-            $disk->{pool} //= 'tf_disks';
 
             if ( -d $disk->{device} ) {
                 $disk->{type}      = 'virtiofs';
                 $disk->{partition} = 'NONE';
 
                 # nofail, because a boot that succeeds matters more than this mount.
-                $disk->{options} = 'default,nofail';
+                $disk->{options} = 'defaults,nofail';
             }
         }
     }
