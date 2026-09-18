@@ -20,29 +20,32 @@ use Net::IP;
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
+use Provisioner::IPPool();
 use File::Slurper::Temp;
 
-=head1 ipmap2zones
+=head1 NAME
 
-=head2 SYNOPSIS
+ipmap2zones - write a zone file for each guest that has an address
+
+=head1 SYNOPSIS
 
     ipmap2zones [--ipmap=file] [--output-dir=dir] [domain ...]
 
-=head2 DESCRIPTION
+=head1 DESCRIPTION
 
-Generate BIND-style zone files from ipmap.cfg, one file per domain.
+Generates BIND-style zone files, one file for each domain.  The addresses come from
+the address database of L<Provisioner::IPPool>.  The administrator's email,
+the aliases and the name servers come from ipmap.cfg.
 
-With no domain arguments, it generates a zone file for each domain in the [ips]
-section of ipmap.cfg.  It writes each file as C<domain.zone> in the current
+With no domain arguments, it generates a zone file for each domain that has an
+address in the database.  It writes each file as C<domain.zone> in the current
 directory, or in the directory that --output-dir names.
 
 It renders C<templates/files/pdns.zone.tt>, the template that the pdns recipe
-installs.  The output is not always the same as what the recipe installs.  The
-addresses come from the [ips] section of ipmap.cfg, not from the address pool
-that C<new_config> reads.  There are no extra records and no records for other
-recipes, such as matrix.
+installs.  The output is not always the same as what the recipe installs, because
+it has no extra records and no records for other recipes, such as matrix.
 
-=head2 OPTIONS
+=head1 OPTIONS
 
 =over 4
 
@@ -60,11 +63,10 @@ directory must already exist.
 
 =cut
 
-my ( $cfile, $output_dir );
-
 sub main {
     my @args = @_;
 
+    my ( $cfile, $output_dir );
     GetOptionsFromArray(
         \@args,
         'ipmap=s'      => \$cfile,
@@ -79,7 +81,7 @@ sub main {
     my $c = Config::Simple->new($cfile);
     die "$Config::Simple::errstr\n" unless $c;
     my $global_conf = $c->param( -block => 'global' );
-    my $ip_conf     = $c->param( -block => 'ips' );
+    my $ip_conf     = Provisioner::IPPool::assignments();
     my $alias_conf  = $c->param( -block => 'aliases' )     // {};
     my $ns_conf     = $c->param( -block => 'nameservers' ) // {};
 
@@ -87,7 +89,7 @@ sub main {
       unless $global_conf->{admin_email};
 
     my @domains = @args ? @args : sort keys(%$ip_conf);
-    die "No domains defined in [ips] section of $cfile\n" unless @domains;
+    die "No domain has an address in " . Provisioner::IPPool::db_path() . "\n" unless @domains;
 
     my $template_dir = "$FindBin::Bin/../templates";
     my $tt           = Text::Xslate->new(
@@ -100,7 +102,7 @@ sub main {
     );
 
     foreach my $domain (@domains) {
-        die "No IP defined for '$domain' in [ips] section of $cfile\n"
+        die "No address for '$domain' in " . Provisioner::IPPool::db_path() . "\n"
           unless $ip_conf->{$domain};
 
         my $aliases = _coerce_arrayref( $alias_conf->{$domain} );
@@ -151,4 +153,4 @@ sub _coerce_arrayref {
     return ref $input eq 'ARRAY' ? $input : [$input];
 }
 
-main(@ARGV) unless caller;
+exit main(@ARGV) unless caller;
