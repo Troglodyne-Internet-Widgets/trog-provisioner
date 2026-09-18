@@ -210,8 +210,6 @@ sub get_config {
     my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
     $alias_conf->{$_} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$_} ) for keys %$alias_conf;
 
-    # No addresses here: they are in ips.db, which handle_domain opens only
-    # after it knows that the domain has a recipe.
     return ( $global_conf, $alias_conf, $ns_conf, $pool_conf );
 }
 
@@ -289,9 +287,15 @@ sub main {
     return 0;
 }
 
-# Put the defaults of the distribution under what _global says, because _global
-# reaches every recipe without validation.  See
-# Provisioner::DistroRecipe/global_defaults.
+=head2 apply_global_defaults($distro, $global_config)
+
+Puts the defaults of the distribution under what C<$global_config> says, in
+place, and returns C<$global_config>.  This is done here, because _global
+reaches every recipe without validation.  See
+L<Provisioner::DistroRecipe/global_defaults>.
+
+=cut
+
 sub apply_global_defaults {
     my ( $distro, $global_config ) = @_;
 
@@ -300,9 +304,14 @@ sub apply_global_defaults {
     return $global_config;
 }
 
-# The keys that tell the hypervisor how to build the guest, which go in
-# provision.conf and not in a template.  They come from the schema of the vm
-# recipe, which `bin/recipes vm` prints.
+=head2 @keys = hv_settings()
+
+Returns the sorted keys that tell the hypervisor how to build the guest.  They
+go in provision.conf, not in a template.  They come from the schema of the
+C<vm> recipe, which C<bin/recipes vm> prints.
+
+=cut
+
 sub hv_settings {
     my $props = Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } );
 
@@ -312,12 +321,17 @@ sub hv_settings {
     return @settings;
 }
 
-# The hypervisor that already has the guest, else one with room, else this
-# machine when no fleet is configured.
+=head2 $hv = choose_hypervisor($domain, $requirements)
+
+Returns the L<Trog::HV> for the guest: the one that C<--connect> named, else the
+hypervisor that already has the guest, else one with room for
+C<$requirements>.  With no fleet configured, it returns this machine.
+
+=cut
+
 sub choose_hypervisor {
     my ( $domain, $requirements ) = @_;
 
-    # An operator who gave --connect chose already.
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
@@ -367,20 +381,17 @@ sub handle_domain {
     die "resolvers in the global section of $cfile names @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
       if @loopback;
 
-    # Every domain is fully qualified, here and in recipes.d, because this
-    # program does not append a tld.
     my $fqdn = $domain;
     my ( undef, $tld ) = split( quotemeta('.'), $domain, 2 );
     die "'$domain' is not a fully qualified domain name.\n" . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n" . "  new_config $domain.example.com\n"
-      unless defined $tld && length $tld;
+      unless length $tld;
 
     my $rconf = clone( get_recipe_config() );
 
     die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
       unless exists $rconf->{$domain};
 
-    # Only now, so that nobody gets a password prompt for a domain with no
-    # recipe.  A recipe holds a reference to each password, not the password.
+    # Only prompt if we have to
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;
     if (%to_replace) {
@@ -439,7 +450,8 @@ sub handle_domain {
     # The guest fetches its payload from this machine, not from the hypervisor.
     my $this_machine = Trog::Local->new();
 
-    # The NAT bridge of the hypervisor, which a cloud does not have.
+    # The NAT bridge, on a hypervisor that does not give its guests their
+    # addresses.
     my $tld_ip        = $hv->manages_addresses ? undef : $hv->virbr_ip;
     my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
     my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
@@ -449,7 +461,7 @@ sub handle_domain {
     # the guest must accept each one.  The routing table decides, and
     # transfer_ip overrides it where a machine has several routes.  The fetch
     # uses the first address.
-    my @towards = grep { defined $_ && length $_ } ( $static_ip, $tld_ip );
+    my @towards = grep { length } ( $static_ip, $tld_ip );
 
     my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
     my $transfer_ip  = $transfer_ips[0];
@@ -487,7 +499,7 @@ sub handle_domain {
     my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
     die "Nothing says where $fqdn's data comes from: set data_source in _global.\n"
-      unless defined $global_config->{data_source} && length $global_config->{data_source};
+      unless length $global_config->{data_source};
 
     my $data_dir = "$global_config->{data_source}/$fqdn";
 
@@ -618,7 +630,7 @@ sub handle_domain {
     # A guest without an address yet is not built, so it has nothing to
     # salvage.
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir )
-      if !$skip_ssh && defined $static_ip && length $static_ip;
+      if !$skip_ssh && length $static_ip;
 
     # The distro recipe goes in, so that the depsolver configures it and pulls
     # in the vm recipe.  Both come out again below.
@@ -707,8 +719,7 @@ sub handle_domain {
             my %tg   = $builder->remote_files( $global_config->{install_dir}, $fqdn );
             my @skip = $builder->remote_skip();
 
-            # Before the fetch, so that it gets the state of now and not of the
-            # last cron run.
+            # Before the fetch, so that it gets the current state.
             refresh_salvage(
                 static_ip  => $static_ip,
                 admin_user => $admin_user,
@@ -733,9 +744,8 @@ sub handle_domain {
                     # A copy on the guest that is older than ours is not fetched.
                     update => 1,
 
-                    # As root, because only the service can open its state
-                    # directory: redis is 0750 redis:redis, slapd.d is 0700
-                    # openldap, and a PKI is 0600 root.
+                    # As root, because every other practical option is more
+                    # complex and has no benefit to security.
                     sudo => 1,
                 );
 
@@ -783,7 +793,7 @@ sub handle_domain {
 
     my $extra_packages = join( ', ', @pkgs );
 
-    # makefile.tt puts the data target first by hand, so that each recipe finds
+    # makefile.tt puts the data target first, so that each recipe finds
     # its state already restored.  So data comes out of %fragments, where it
     # makes a second state/data: target, and out of the ordered list, where it
     # runs last.
@@ -912,7 +922,7 @@ sub handle_domain {
     # is absent too, because Config::Simple reads a bare `key=` as an empty
     # string.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
-    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && defined $global_config->{$_} && length $global_config->{$_} } hv_settings() );
+    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && length $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
@@ -970,7 +980,14 @@ sub handle_domain {
     return 0;
 }
 
-# The guest that is about to be rebuilt, as the admin user.
+=head2 $guest = _salvage_guest($static_ip, $admin_user, $cfg_dir)
+
+Returns a L<Trog::Guest> for the guest that is about to be rebuilt, as
+C<$admin_user>.  It returns the same object for the same three arguments, for
+the life of the process.
+
+=cut
+
 sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
@@ -1045,9 +1062,15 @@ sub refresh_salvage (%args) {
     return 1;
 }
 
-# The newest mtime anywhere under each path, because the mtime of a directory
-# misses a dump that is written again in place.  A path that is absent or
-# unreadable gives an empty value.
+=head2 %mtime = _salvage_mtimes($guest, $watched)
+
+Returns the newest mtime anywhere under each path in C<$watched>, keyed by
+path.  It looks under the path, because the mtime of a directory misses a dump
+that is written again in place.  A path that is absent or unreadable gives an
+empty value.
+
+=cut
+
 sub _salvage_mtimes {
     my ( $guest, $watched ) = @_;
     return () unless @$watched;
@@ -1063,7 +1086,7 @@ sub _salvage_mtimes {
     my %mtime;
     foreach my $line ( split m/\n/, $said ) {
         my ( $path, $stamp ) = split m/\t/, $line, 2;
-        next unless defined $path && length $path;
+        next unless length $path;
         $mtime{$path} = defined $stamp ? $stamp : q{};
     }
 
@@ -1114,8 +1137,15 @@ sub write_guest_secrets {
     return \%held;
 }
 
-# Copy the helper scripts, with their modes, into the directory of the domain.
-# File::Copy does not promise to keep the executable bit.
+=head2 @packed = pack_scripts($checkout, $cfg_dir)
+
+Copies the helper scripts from F<scripts/> in C<$checkout> into
+C<$cfg_dir/scripts>, with their modes, and returns their paths relative to
+C<$cfg_dir>.  The modes are copied, because File::Copy does not promise to keep
+the executable bit.  Dies if there is no F<scripts/>.
+
+=cut
+
 sub pack_scripts {
     my ( $checkout, $cfg_dir ) = @_;
 
@@ -1144,14 +1174,21 @@ sub pack_scripts {
     return @packed;
 }
 
-# Whether a salvage that got nothing is a problem.  The destination is asked,
-# not the transfer, because a second run moves nothing from a guest that did
-# not change.
-#
-# An empty destination has three causes.  The path is not on the guest, or it
-# is empty, or it holds files that did not come down.  Only the last one is
-# alarming.  The guest is asked as root, because only the service can open the
-# path.
+=head2 $gap = _salvage_gap(%args)
+
+Returns nothing if C<destination> holds a file.  Otherwise returns a hash
+reference with C<recipe>, C<remote>, C<message>, and C<alarming>, which is true
+when the salvage lost state.  The other arguments are C<guest>, C<recipe>,
+C<host>, C<user> and C<remote>.
+
+It examines the destination, not the transfer, because a second run moves
+nothing from a guest that did not change.  An empty destination has three
+causes.  The path is not on the guest, or it is empty, or it holds files that
+did not come down.  Only the last one is alarming.  The guest is asked as root,
+because only the service can open the path.
+
+=cut
+
 sub _salvage_gap {
     my (%args) = @_;
 
@@ -1187,10 +1224,15 @@ sub _salvage_gap {
     };
 }
 
-# Whether a salvage put any file under its destination.  Files, not entries,
-# because a fetch that cannot read makes the directories anyway.  It stops at
-# the first file.  A symlink counts, and is not followed, because it can point
-# anywhere.
+=head2 $bool = _dir_has_files($dir)
+
+Returns 1 if any file is under C<$dir>, and 0 if there is none or C<$dir> is not
+a directory.  It counts files, not entries, because a fetch that cannot read
+makes the directories anyway.  It stops at the first file.  A symlink counts,
+and is not followed, because it can point anywhere.
+
+=cut
+
 sub _dir_has_files {
     my ($dir) = @_;
     return 0 unless -d $dir;
