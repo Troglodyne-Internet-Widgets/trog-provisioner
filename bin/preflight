@@ -19,7 +19,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Config();
 use Trog::Hypervisors();
-use IO::Prompter();
+use Trog::Utils();
 
 =head1 NAME
 
