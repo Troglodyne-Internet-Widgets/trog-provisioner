@@ -133,7 +133,7 @@ subtest 'where the copy lands follows from the upstream' => sub {
 
     # apt-mirror lays a spool out under the upstream host, so this cannot be
     # written down -- and the vhost and the fragment have to name the same one.
-    my ( $dir, undef, $recipe, $vars ) = generated( upstream => 'http://mirror.example.test/ubuntu-ports', spool => '/srv/mirror' );
+    my ($dir) = generated( upstream => 'http://mirror.example.test/ubuntu-ports', spool => '/srv/mirror' );
 
     like( slurp( $dir, 'aptmirror.nginx.conf' ), qr{alias[ ]/srv/mirror/mirror/mirror\.example\.test/ubuntu-ports/;}, 'the alias follows upstream and spool' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 

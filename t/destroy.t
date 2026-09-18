@@ -258,7 +258,9 @@ subtest 'purge_domain_dir dryrun leaves directory intact' => sub {
 # pod2usage exits, so this has to be a real run.
 subtest 'a cloud keeps its own volumes' => sub {
     Trog::HV->forget();
-    my $cloud = Trog::HV->new( cloud => 'testcloud' );
+
+    # Called for what it leaves behind: the instance that the code under test gets.
+    Trog::HV->new( cloud => 'testcloud' );
 
     # volume and delete_volume are libvirt nouns the cloud backend refuses to
     # pretend to; the volumes a cloud guest had went with the server, which is

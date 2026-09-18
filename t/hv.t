@@ -1553,7 +1553,7 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
     package FakeRefusingVMM;
 
     sub new                      ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
-    sub get_storage_pool_by_name ( $self, $ )        { die "no such pool\n" }
+    sub get_storage_pool_by_name ( $, $ )            { die "no such pool\n" }
     sub define_storage_pool      ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
     sub define_domain            ( $self, $ )        { return FakeRefusing->new( $self->{refuse} ) }
 }
@@ -1564,15 +1564,15 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
 
     # A pool or a domain, refusing whatever the test has named, and running only
     # when it names that too.
-    sub new           ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
-    sub get_name      ($self)             { return 'vm.test' }
-    sub is_active     ($self)             { return $self->{refuse}{running} ? 1 : 0 }
-    sub set_autostart ( $self, $ )        { return $self->_or_refuse('set_autostart') }
-    sub create        ($self)             { return $self->_or_refuse('create') }
-    sub build         ( $self, $ )        { return $self->_or_refuse('build') }
-    sub refresh       ($self)             { return $self->_or_refuse('refresh') }
-    sub destroy       ($self)             { return $self->_or_refuse('destroy') }
-    sub undefine      ( $self, @ )        { return $self->_or_refuse('undefine') }
+    sub new ( $class, $refuse ) { return bless { refuse => $refuse }, $class }
+    sub get_name ($)            { return 'vm.test' }
+    sub is_active     ($self)      { return $self->{refuse}{running} ? 1 : 0 }
+    sub set_autostart ( $self, $ ) { return $self->_or_refuse('set_autostart') }
+    sub create        ($self)      { return $self->_or_refuse('create') }
+    sub build         ( $self, $ ) { return $self->_or_refuse('build') }
+    sub refresh       ($self)      { return $self->_or_refuse('refresh') }
+    sub destroy       ($self)      { return $self->_or_refuse('destroy') }
+    sub undefine      ( $self, @ ) { return $self->_or_refuse('undefine') }
 
     sub _or_refuse ( $self, $what ) {
         die "$what refused\n" if $self->{refuse}{$what};

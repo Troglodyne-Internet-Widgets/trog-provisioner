@@ -226,7 +226,7 @@ subtest 'the document goes to stdout and the commentary to stderr' => sub {
 
 # --- bin/recipes -------------------------------------------------------------
 subtest 'bin/recipes lists them' => sub {
-    my ( $out, $err, $rc ) = run_bin('recipes');
+    my ( $out, undef, $rc ) = run_bin('recipes');
     is( $rc, 0, 'exits clean' );
 
     my @lines = split( m/\n/, $out );
@@ -235,7 +235,7 @@ subtest 'bin/recipes lists them' => sub {
 };
 
 subtest 'bin/recipes --json is machine readable' => sub {
-    my ( $out, $err, $rc ) = run_bin( 'recipes', '--json' );
+    my ( $out, undef, $rc ) = run_bin( 'recipes', '--json' );
     is( $rc, 0, 'exits clean' );
 
     my $listing = eval { Cpanel::JSON::XS->new->decode($out) };
@@ -244,7 +244,7 @@ subtest 'bin/recipes --json is machine readable' => sub {
 };
 
 subtest 'bin/recipes NAME dumps the schema' => sub {
-    my ( $out, $err, $rc ) = run_bin( 'recipes', 'mariadb' );
+    my ( $out, undef, $rc ) = run_bin( 'recipes', 'mariadb' );
     is( $rc, 0, 'exits clean' );
 
     my $spec = eval { Cpanel::JSON::XS->new->decode($out) };
@@ -269,14 +269,14 @@ subtest 'bin/recipes NAME says what it downloads from' => sub {
 };
 
 subtest 'bin/recipes on a name that is not one' => sub {
-    my ( $out, $err, $rc ) = run_bin( 'recipes', 'nosuchrecipe' );
+    my ( undef, $err, $rc ) = run_bin( 'recipes', 'nosuchrecipe' );
     isnt( $rc, 0, 'fails' );
     like( $err, qr/No[ ]recipe[ ]named[ ]'nosuchrecipe'/, 'saying so' );
     like( $err, qr/bin\/recipes/,                         'and where to look' );
 };
 
 subtest 'bin/recipes --scaffold shows what new_guest would write' => sub {
-    my ( $out, $err, $rc ) = run_bin(qw{recipes --scaffold mariadb});
+    my ( $out, undef, $rc ) = run_bin(qw{recipes --scaffold mariadb});
     is( $rc, 0, 'exits clean' );
 
     my $got = eval { Cpanel::JSON::XS->new->decode($out) };

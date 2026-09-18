@@ -306,7 +306,7 @@ subtest 'validated() memoizes for the life of the recipe object' => sub {
     my $one = bless {}, 'Test::Recipe::Memo';
     local $Test::Recipe::Memo::enriched = 0;
 
-    my %first = $one->validated( domain => 'a.test', flavour => 'first' );
+    $one->validated( domain => 'a.test', flavour => 'first' );
     my %again = $one->validated( domain => 'a.test', flavour => 'first' );
     is( $Test::Recipe::Memo::enriched, 1,       'one object enriches once, however often it is rendered' );
     is( $again{seen},                  'first', 'and every render after the first gets that answer' );

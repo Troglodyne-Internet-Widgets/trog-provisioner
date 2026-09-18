@@ -699,7 +699,7 @@ subtest 'every real recipe can be loaded and scaffolded' => sub {
     my @broken;
     foreach my $name ( Provisioner::Cookbook->names() ) {
         eval {
-            my ( $config, @todo ) = Provisioner::Cookbook->scaffold($name);
+            Provisioner::Cookbook->scaffold($name);
             Provisioner::Cookbook->spec($name);
             1;
         } or push @broken, "$name: $@";

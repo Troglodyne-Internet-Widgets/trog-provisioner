@@ -80,7 +80,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
 }
 
 {
-    my ( $out, $rc ) = _run( "$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan} );
+    my ( undef, $rc ) = _run( "$FindBin::Bin/../bin/restore", qw{--latest --oldest myvm.lan} );
     isnt( $rc, 0, 'two modes at once exits non-zero' );
 }
 
