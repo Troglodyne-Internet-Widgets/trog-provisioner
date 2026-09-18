@@ -1,0 +1,10 @@
+[%# Queued rather than run here: the provider is reached over the network, and
+    the shortcut this reads the credential out of is installed by the lexicon
+    recipe, which make -j gives no ordering against.  The postrun runs after
+    every target, so both are settled by the time this goes.
+
+    Empty where the guest serves its own zone, or where the hypervisor allocates
+    the address and there is none to publish yet -- see the recipe. -%]
+[% IF publish_records %]
+[% script_dir %]/queue_postrun_task [% script_dir %]/publish_dns_records [% domain %] [% main_ip %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
+[% END -%]

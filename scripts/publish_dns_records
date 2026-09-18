@@ -1,0 +1,167 @@
+#!/usr/bin/perl
+
+package Trog::PublishDNSRecords;
+
+use 5.014;
+
+use strict;
+use warnings FATAL => 'all';
+
+use JSON::PP     ();
+use Getopt::Long qw{GetOptionsFromArray};
+
+my $USAGE = "usage: publish_dns_records [--dryrun] DOMAIN ADDRESS [ALIAS ...]\n";
+
+# The shortcut Provisioner::Recipe::lexicon installs for this domain, which
+# already carries the provider holding the zone and the credential for it.
+# Asking it rather than assembling a lexicon invocation here is what keeps the
+# credential in one place: this runs the same file an operator runs by hand.
+sub shortcut_for {
+    my ($domain) = @_;
+
+    return "/opt/lexicon/$domain";
+}
+
+# One argument, safe to hand a shell.  Everything below is interpolated into a
+# command line, and an alias or an address is the sort of thing that arrives
+# from a configuration file rather than from this program.
+sub quoted {
+    my ($value) = @_;
+
+    $value =~ s/'/'\\''/g;
+
+    return "'$value'";
+}
+
+# Every command this runs, as the one thing a test stands in for.  Answers the
+# output and whether it succeeded, rather than letting each caller read $?.
+sub run {
+    my ($command) = @_;
+
+    my $output = qx{$command 2>&1};
+
+    return ( $output, $? == 0 ? 1 : 0 );
+}
+
+# What the provider already holds of this type, as a list of rows.
+#
+# An empty list is an answer -- a zone with no records of the type -- and a
+# command that failed is not, so the two are told apart before anything is
+# published over the difference.
+sub existing {
+    my ( $shortcut, $type ) = @_;
+
+    my ( $output, $ok ) = run( join ' ', quoted($shortcut), 'list', $type, '--output=JSON' );
+    die "Could not ask the provider what $type records it has:\n$output" unless $ok;
+
+    my $rows = eval { JSON::PP->new->decode($output) };
+    die "The provider answered with something that is not JSON:\n$output" unless ref $rows eq 'ARRAY';
+
+    return @{$rows};
+}
+
+# Whichever of those rows is this name, if the provider has one.
+sub held_for {
+    my ( $rows, $name ) = @_;
+
+    my ($held) = grep { lc( $_->{name} // q{} ) eq lc($name) } @{$rows};
+
+    return $held;
+}
+
+# One record, put where the provider can serve it, without taking anything away.
+#
+# Absent, it is created.  Present with different content, it is updated through
+# the identifier the provider gave it.  Present and already right, nothing is
+# sent: a run that changes nothing is the ordinary case on a guest rebuilt from
+# the same configuration.
+#
+# Named arguments because all but one of them is a bare string, and a row of
+# those at a call site says nothing about which is the name and which the thing
+# it should answer with.
+sub publish {
+    my (%opts) = @_;
+
+    my ( $held, $type, $name, $content ) = @opts{qw{held type name content}};
+
+    if ( $held && ( $held->{content} // q{} ) eq $content ) {
+        print "$type $name is already $content\n";
+        return 0;
+    }
+
+    my @command = ( quoted( $opts{shortcut} ) );
+    push @command, $held ? 'update' : 'create';
+    push @command, $type;
+    push @command, '--name=' . quoted($name);
+    push @command, '--content=' . quoted($content);
+    push @command, '--identifier=' . quoted( $held->{id} ) if $held && defined $held->{id};
+
+    my $command = join ' ', @command;
+
+    if ( $opts{dryrun} ) {
+        print "[DRY RUN] $command\n";
+        return 0;
+    }
+
+    print +( $held ? 'Updating' : 'Creating' ) . " $type $name -> $content\n";
+    my ( $output, $ok ) = run($command);
+
+    # Warned rather than fatal, and counted: one record the provider refused
+    # should not stop the rest of them going up, and the caller wants to know
+    # that something did not.
+    warn "Could not publish $type $name:\n$output" unless $ok;
+
+    return $ok ? 0 : 1;
+}
+
+sub main {
+    my @args = @_;
+
+    my $dryrun;
+    GetOptionsFromArray( \@args, 'dryrun' => \$dryrun ) or die $USAGE;
+
+    my ( $domain, $address, @aliases ) = @args;
+    die $USAGE unless $domain && $address;
+
+    my $shortcut = shortcut_for($domain);
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether the shortcut is there to run is the thing being decided, and saying so beats a shell error
+    die "No lexicon shortcut at $shortcut.\n" . "Provisioner::Recipe::lexicon installs it, and this needs the credential in it.\n"
+      unless -x $shortcut;
+
+    # Once per type rather than once per record.  Every one of these is a round
+    # trip to whoever holds the zone, and asking again between two aliases also
+    # means deciding about them against two different answers.
+    my @a_records = existing( $shortcut, 'A' );
+
+    # The address, and then one alias pointing at the name that holds it.  No
+    # ns1: the pdns recipe publishes one because a guest serving its own zone is
+    # its own nameserver, and a zone somebody else holds has nameservers of
+    # theirs that this is in no position to contradict.
+    my $failures = publish(
+        shortcut => $shortcut,
+        held     => held_for( \@a_records, $domain ),
+        type     => 'A',
+        name     => $domain,
+        content  => $address,
+        dryrun   => $dryrun,
+    );
+
+    return $failures ? 1 : 0 unless @aliases;
+
+    my @cnames = existing( $shortcut, 'CNAME' );
+    foreach my $alias ( sort @aliases ) {
+        $failures += publish(
+            shortcut => $shortcut,
+            held     => held_for( \@cnames, $alias ),
+            type     => 'CNAME',
+            name     => $alias,
+            content  => $domain,
+            dryrun   => $dryrun,
+        );
+    }
+
+    return $failures ? 1 : 0;
+}
+
+exit main(@ARGV) unless caller;
