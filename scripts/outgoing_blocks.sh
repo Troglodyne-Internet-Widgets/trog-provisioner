@@ -3,25 +3,31 @@
 # Print a warning, which cron mails to you, when ufw blocks an outgoing port
 # that it did not block before.
 
-IS_RPM=$(which rpm)
-
-if [ ! -z $IS_RPM ]
-then
-    SYSLOG=/var/log/messages
-else
-    SYSLOG=/var/log/syslog
+# Only the test sets these, to point the script at files of its own.
+STATE_DIR=${STATE_DIR:-/root}
+if [ -z "$SYSLOG" ]; then
+    if [ -n "$(which rpm)" ]; then
+        SYSLOG=/var/log/messages
+    else
+        SYSLOG=/var/log/syslog
+    fi
 fi
 
-touch /root/outblocked.log
-touch /root/new-outblocked.log
-mv /root/new-outblocked.log /root/outblocked.log
-FSZ=$(stat --printf "%s" /root/outblocked.log)
-grep 'UFW BLOCK' /var/log/syslog | grep -P 'OUT=\S+' | grep -Po '(SPT=\d+|DPT=\d+)' >> /root/new-outblocked.log
-echo "$(sort < /root/new-outblocked.log | uniq)" > /root/new-outblocked.log
-NEWSZ=$(stat --printf "%s" /root/new-outblocked.log)
+SEEN="$STATE_DIR/outblocked.log"
+NOW="$STATE_DIR/new-outblocked.log"
 
-if [ $FSZ != $NEWSZ ]
+touch "$NOW"
+mv "$NOW" "$SEEN"
+
+# -a, because a crash can leave NUL bytes in the log, and grep then stops
+# printing lines for what it takes to be a binary file.
+grep -a 'UFW BLOCK' "$SYSLOG" | grep -P 'OUT=\S+' | grep -Po '(SPT=\d+|DPT=\d+)' | sort -u > "$NOW"
+
+# A port in this run's list that the last run did not have.  A size
+# comparison misses a new port when rotation takes an old one out of the log.
+NEW_BLOCKS=$(comm -13 "$SEEN" "$NOW")
+if [ -n "$NEW_BLOCKS" ]
 then
 	echo "DANGER: New Outgoing port block detected, investigate $SYSLOG!"
-	diff /root/outblocked.log /root/new-outblocked.log
+	echo "$NEW_BLOCKS"
 fi
