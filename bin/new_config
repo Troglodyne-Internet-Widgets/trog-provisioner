@@ -1168,7 +1168,9 @@ sub write_guest_secrets {
 Copies the helper scripts from F<scripts/> in C<$checkout> into
 C<$cfg_dir/scripts>, with their modes, and returns their paths relative to
 C<$cfg_dir>.  The modes are copied, because File::Copy does not promise to keep
-the executable bit.  Dies if there is no F<scripts/>.
+the executable bit.  A name that starts with a dot is not a script, and is not
+copied.  F<scripts/.perlcriticrc> is one: it is for the tools that lint the
+scripts.  Dies if there is no F<scripts/>.
 
 =cut
 
@@ -1183,7 +1185,7 @@ sub pack_scripts {
     make_path($to) or die "Could not create $to: $!\n";
 
     my @packed;
-    foreach my $script ( Provisioner::Utils::files_in($from) ) {
+    foreach my $script ( grep { !m/\A[.]/ } Provisioner::Utils::files_in($from) ) {
 
         # From the handle, so that the file and its mode come from the same
         # file.
