@@ -192,10 +192,9 @@ sub sshd_port {
     my ($self) = @_;
     return $self->{sshd_port} if defined $self->{sshd_port};
 
-    # Read sshd_config.d as well as sshd_config.  A modern Ubuntu includes that
-    # directory at the top of the main file, so a value in there is the one
-    # sshd uses.  The last match wins for the same reason: the Include comes
-    # first, and sshd takes the first value that it reads.
+    # Read sshd_config.d as well as sshd_config, because a modern Ubuntu
+    # includes that directory from the main file.  Any match will do, because
+    # sshd listens on every Port line that it reads, not only the first.
     my $port = $self->capture_cmd(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
     chomp $port if defined $port;
 
