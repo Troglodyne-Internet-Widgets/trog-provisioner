@@ -325,6 +325,12 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     my $overridden = Trog::HV->from_config( $config, uri => 'qemu+ssh://cli/system' );
     is( $overridden->uri, 'qemu+ssh://cli/system', '--connect beats config' );
 
+    # An empty option is one nobody gave, as new() reads it, so the file still
+    # answers.
+    my $unset = Trog::HV->from_config( $config, uri => q{}, domain_dir => q{} );
+    is( $unset->uri,        'qemu+ssh://confuser@confhv/system', 'an empty --connect does not hide libvirt_uri' );
+    is( $unset->domain_dir, '/srv/domains',                      'nor an empty domain_dir the one in the file' );
+
     Trog::HV->forget();
     ok( Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor' );
 };
