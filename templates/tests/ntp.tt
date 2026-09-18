@@ -31,9 +31,8 @@ foreach my $dir (qw{/etc/chrony/conf.d /etc/chrony/sources.d}) {
     ok(-d $dir, "$dir exists");
 }
 
-my $chrony_conf = do { local (@ARGV, $/) = '/etc/chrony/chrony.conf'; <> } // '';
-like($chrony_conf, qr/^confdir \/etc\/chrony\/conf\.d$/m,   'chrony.conf reads its conf.d');
-like($chrony_conf, qr/^sourcedir \/etc\/chrony\/sources\.d$/m, 'and its sources.d');
+like($conf, qr/^confdir \/etc\/chrony\/conf\.d$/m,   'chrony.conf reads its conf.d');
+like($conf, qr/^sourcedir \/etc\/chrony\/sources\.d$/m, 'and its sources.d');
 
 # chrony must accept the result, or the guest has no clock.
 my $parsed = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
