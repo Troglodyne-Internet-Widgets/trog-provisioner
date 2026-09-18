@@ -1,5 +1,10 @@
 # Install the PerlNavigator LSP server globally with npm
 npm install -g perlnavigator-server
+[%# Ahead of the perlnavigator that npm installs, so that each perlcritic run
+    gets the profile of its file.  Provisioner::Recipe::perllsp says how. -%]
+install -d -m 0755 /usr/local/lib/perlnavigator-shim
+install -m 0755 perllsp.perl-shim /usr/local/lib/perlnavigator-shim/perl
+install -m 0755 perllsp.perlnavigator /usr/local/sbin/perlnavigator
 
 # Install the vim-lsp plugins into the vim pack directory of the admin user.
 # Vim 8 and later loads packages from ~/.vim/pack/*/start/ without a plugin manager.

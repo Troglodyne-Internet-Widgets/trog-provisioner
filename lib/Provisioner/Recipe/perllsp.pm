@@ -38,6 +38,21 @@ to a commit, and the recipe fetches the tarball of that commit.  Nothing here
 uses the history of a plugin.  The pin makes two guests built a month apart
 the same guest.
 
+=head3 The profile that each file gets
+
+PerlNavigator chooses one C<perlcritic> profile for its whole process.  A client
+that sends no settings, such as the PerlNavigator plugin of Claude Code that
+L<Provisioner::Recipe::claude> installs, gets F<~/.perlcriticrc> or the default
+of PerlNavigator for every file, whatever repository the file is in.
+
+So this recipe installs a wrapper as F</usr/local/sbin/perlnavigator>, ahead of
+the F</usr/local/bin/perlnavigator> that C<npm> installs.  The wrapper puts a
+C<perl> shim from F</usr/local/lib/perlnavigator-shim> first on the C<PATH> of
+the server.  For each C<perlcritic> run, the shim finds the F<.perlcriticrc>
+of the linted file: the first one in its directory or above, up to the root of
+its checkout.  It gives that file as C<PERLCRITIC>.  A profile that the client
+names, such as F</etc/perlcriticrc> in the vim configuration, still wins.
+
 =head3 deps
 
 System packages: C<nodejs>, C<npm>, C<vim>.
@@ -70,7 +85,8 @@ a time.  So a new name adds a plugin, and the name of a default moves its pin.
 =head3 template_files
 
 Renders C<perllsp.vimrc.tt> into C<perllsp.vim>, a vimrc snippet.  The fragment
-installs it in the C<~/.vim/> directory of the admin user.
+installs it in the C<~/.vim/> directory of the admin user.  Also copies the
+wrapper and the shim that L</The profile that each file gets> describes.
 
 =cut
 
@@ -128,7 +144,9 @@ sub enrich {
 
 sub template_files {
     return (
-        'perllsp.vimrc.tt' => 'perllsp.vim',
+        'perllsp.vimrc.tt'      => 'perllsp.vim',
+        'perllsp.perlnavigator' => 'perllsp.perlnavigator',
+        'perllsp.perl-shim'     => 'perllsp.perl-shim',
     );
 }
 

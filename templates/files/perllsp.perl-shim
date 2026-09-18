@@ -1,0 +1,45 @@
+#!/bin/sh
+# perl, as perlnavigator starts it, with the perlcritic profile of the linted file.
+#
+# perlnavigator chooses one perlcritic profile for its whole process, not one
+# for each file.  When this is a run of its criticWrapper.pl, find the
+# .perlcriticrc of the file named by --file: the first one in its directory or
+# above, up to the root of its checkout.  Give it as PERLCRITIC, which
+# criticWrapper.pl reads after --profile and before every other place it
+# looks.  Every other perl run passes through unchanged.
+
+shim_dir=$(dirname "$(readlink -f "$0")")
+
+# Remove this directory from PATH, so that the perl found next is the real one.
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$shim_dir" | paste -sd: -)
+export PATH
+
+is_critic=0
+file=
+has_profile=0
+prev=
+for arg in "$@"; do
+    case "$arg" in
+        */criticWrapper.pl) is_critic=1 ;;
+        --profile) has_profile=1 ;;
+    esac
+    [ "$prev" = --file ] && file=$arg
+    prev=$arg
+done
+
+if [ "$is_critic" = 1 ] && [ "$has_profile" = 0 ] && [ -z "$PERLCRITIC" ] && [ -n "$file" ]; then
+    dir=$(dirname "$(readlink -f "$file")")
+    while :; do
+        if [ -f "$dir/.perlcriticrc" ]; then
+            PERLCRITIC="$dir/.perlcriticrc"
+            export PERLCRITIC
+            break
+        fi
+        # A worktree has a .git file, not a directory.
+        [ -e "$dir/.git" ] && break
+        [ "$dir" = / ] && break
+        dir=$(dirname "$dir")
+    done
+fi
+
+exec perl "$@"
