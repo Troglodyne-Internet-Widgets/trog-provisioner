@@ -14,6 +14,21 @@ is($status, 'active', 'tpsgi service is running');
 my $sock = '[% install_dir %]/[% domain %]/run/tpsgi.sock';
 ok(-S $sock, 'the application socket is there') or diag "no socket at $sock";
 
+# git checks the checkout out as root.  The service reads it as [% user %], and
+# nginx reads www and run through the www-data group.
+my %owner = (
+    '.git'       => '[% user %]:[% admin_user %]',
+    'bin'        => '[% user %]:[% admin_user %]',
+    '.tpsgi.ini' => '[% user %]:[% admin_user %]',
+    'www'        => '[% user %]:www-data',
+    'run'        => '[% user %]:www-data',
+);
+foreach my $name (sort keys %owner) {
+    my @st = stat "[% install_dir %]/[% domain %]/$name";
+    my $got = join ':', scalar getpwuid($st[4] // -1) // '', scalar getgrgid($st[5] // -1) // '';
+    is($got, $owner{$name}, "$name is owned by $owner{$name}");
+}
+
 my $vhost = do { local (@ARGV, $/) = '/etc/nginx/sites-enabled/[% domain %].conf'; <> } // '';
 like($vhost, qr{\Qserver unix:$sock\E}, 'and nginx has an upstream for it') or diag $vhost;
 

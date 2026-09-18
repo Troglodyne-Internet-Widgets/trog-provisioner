@@ -6,5 +6,9 @@ mv nginxdirindex.domain.conf /etc/nginx/sites-enabled/[% domain %].conf
 [% script_dir %]/queue_postrun_task systemctl restart nginx
 # Make the root directory, and let nginx browse it.
 mkdir -p [% install_dir %]/[% domain %]; /bin/true
-chown root:www-data [% install_dir %]/[% domain %]
-chmod 0755 [% install_dir %]/[% domain %]
+[%# Read access, and not a new owner.  The domain directory belongs to
+    user:admin_user, as data and service_user set it, and www-data is neither.
+    The dot entries keep their mode, because the domain directory is also the
+    home of the service user, and its .ssh is in it. -%]
+find [% install_dir %]/[% domain %] -mindepth 1 -name '.*' -prune -o -exec chmod o+rX {} +
+chmod o+rx [% install_dir %]/[% domain %]

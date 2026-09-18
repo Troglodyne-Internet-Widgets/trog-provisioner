@@ -137,9 +137,12 @@ fi
 [% END %]
 [% END %]
 
-# Give everything to the service user.  Then .env and config.yaml become
-# 0640 root:[% user %], so the bot can read them but not change them.
-chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]'
+# Give the checkout, the virtualenv and the git configuration to the service
+# user.  Not the whole domain directory, because data owns that, and admincode
+# owns its basedir.  Then .env and config.yaml become 0640 root:[% user %], so
+# the bot can read them but not change them.
+chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/koan' '[% install_dir %]/[% domain %]/.venv'
+chown '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/.gitconfig'
 chown root:'[% user %]' '[% install_dir %]/[% domain %]/koan/.env' '[% install_dir %]/[% domain %]/koan/instance/config.yaml'
 chmod 0640 '[% install_dir %]/[% domain %]/koan/.env' '[% install_dir %]/[% domain %]/koan/instance/config.yaml'
 find '[% install_dir %]/[% domain %]/.venv' -type d -exec chmod 0750 {} +

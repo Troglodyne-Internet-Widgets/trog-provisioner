@@ -401,6 +401,28 @@ subtest 'every rsync of a payload names the machine holding it' => sub {
     ok( scalar keys %seen, 'and there were rsyncing recipes to check' );
 };
 
+# Every recipe shares the domain directory, and the last chown to run wins, so
+# only one recipe may set its owner.  docs/APPROACH.md says who owns what.
+subtest 'only data sets the owner of the domain directory' => sub {
+    my $domain_dir = "$G{install_dir}/$G{domain}";
+    my %chowners;
+    foreach my $recipe (@available) {
+        next unless fragment_for($recipe);
+        my $out;
+        next if exception {
+            $out = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV)->render( %G, %{ $required_config{$recipe} // {} } );
+        };
+
+        # The words after chown, so that a cd into the directory on the same
+        # line is not taken for a chown of it.
+        foreach my $args ( map { /\bchown\b(.*)/ } split /\n/, $out ) {
+            $chowners{$recipe} = "chown$args" if any { s/\A['"]|['"]\z//gr eq $domain_dir } split ' ', $args;
+        }
+    }
+    is_deeply( [ sort keys %chowners ], ['data'], "data chowns $domain_dir, and no other recipe does" )
+      or diag explain \%chowners;
+};
+
 # ----------------------------------------------------------------
 # Validate: required fields cause die
 # ----------------------------------------------------------------

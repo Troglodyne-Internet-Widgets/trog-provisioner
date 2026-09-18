@@ -4,10 +4,17 @@ cd '[% install_dir %]/[% domain %]' && git clone --no-checkout https://github.co
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]'
 cd '[% install_dir %]/[% domain %]' && HOME='[% install_dir %]/[% domain %]' git reset --hard HEAD
 mv tpsgi.ini '[% install_dir %]/[% domain %]/.tpsgi.ini'
-chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]'
+[%# The checkout is in the domain directory itself, beside what data and the
+    other recipes put there.  So chown what git checked out, and not the
+    domain directory: data owns that, and admincode owns its basedir.  www-data
+    reaches www and run because nginxproxy sets o+x on the domain directory.
+    pipefail, so that a git that refuses stops the target, and does not leave
+    xargs with nothing to chown. -%]
+set -o pipefail; cd '[% install_dir %]/[% domain %]' && HOME='[% install_dir %]/[% domain %]' git ls-tree --name-only -z HEAD | xargs -0 -r chown -R [% user %]:[% admin_user %] --
+chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/.git' '[% install_dir %]/[% domain %]/.tpsgi.ini'
+chown [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/.gitconfig'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/www'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/run'
-chmod -R 0755 '[% install_dir %]/[% domain %]'
 ln -s [% install_dir %]/[% domain %]/service/tpsgi.service /usr/lib/systemd/system/[% domain %].service
 [%# PATH gets the perl that the perl recipe built, for starman, and the
     checkout, for build_service.  The task finds that perl when it runs,

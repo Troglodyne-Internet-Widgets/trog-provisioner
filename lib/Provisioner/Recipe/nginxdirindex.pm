@@ -26,6 +26,11 @@ from C<install_dir/domain>.
 Use it for public file distribution, download mirrors, or static media, where
 you want directory browsing and no application behind a proxy.
 
+The recipe does not change the owner of the directory.  It gives other users
+read access to the directory and to everything in it, so nginx can serve it as
+www-data.  Entries whose names start with a dot keep their mode, and nginx
+cannot read them.
+
 It requires L<Provisioner::Recipe::nginx>, which does the global tuning of the
 kernel and nginx (sysctl backlog, worker_connections,
 server_names_hash_bucket_size).

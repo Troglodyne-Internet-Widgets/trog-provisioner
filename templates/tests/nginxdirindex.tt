@@ -10,6 +10,25 @@ is($status, 'active', 'nginx is running');
 ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginx domain config exists');
 ok(-d '[% install_dir %]/[% domain %]', 'document root directory exists');
 
+# nginx reads as www-data, and the domain directory is not its own.  Ask as
+# www-data, because a test that runs as root can read everything.
+my $root = '[% install_dir %]/[% domain %]';
+ok(system('runuser', '-u', 'www-data', '--', 'test', '-r', $root, '-a', '-x', $root) == 0,
+    'www-data can list the document root');
+opendir(my $dh, $root) or die "Cannot open $root: $!";
+my @unreadable = grep { system('runuser', '-u', 'www-data', '--', 'test', '-r', "$root/$_") != 0 }
+    grep { !/^\./ } readdir $dh;
+closedir $dh;
+is("@unreadable", '', 'and read everything in it') or diag "not readable by www-data: @unreadable";
+
+[% IF user -%]
+# The directory belongs to the service user, as service_user and data set it,
+# and this recipe leaves it so.
+my @st = stat $root;
+is(scalar getpwuid($st[4] // -1), '[% user %]',       'the document root is still owned by [% user %]');
+is(scalar getgrgid($st[5] // -1), '[% admin_user %]', 'and group [% admin_user %]');
+[% END -%]
+
 # nginx keeps serving the last configuration it accepted, so `is-active` says
 # nothing about the file that this recipe wrote.
 my $check = `nginx -t 2>&1`;
