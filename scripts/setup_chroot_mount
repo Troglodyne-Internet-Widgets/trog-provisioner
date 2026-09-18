@@ -1,14 +1,24 @@
 #!/bin/bash
+# Bind-mount a directory inside a chroot, and add the mount to fstab.
+set -eu
 
-TARGET=$1
-LINK_NAME=$2
+TARGET=${1:?usage: setup_chroot_mount <directory> <mountpoint>}
+LINK_NAME=${2:?usage: setup_chroot_mount <directory> <mountpoint>}
 
-# Add a bind mount of TARGET at LINK_NAME to /etc/fstab, and mount it.
-mkdir -p $LINK_NAME
-cp /etc/fstab /tmp/fstab.new
-echo "$TARGET $LINK_NAME none defaults,bind 0 0" >> /tmp/fstab.new
-sort < /tmp/fstab.new | uniq | grep -o '^[^#]*' > /tmp/fstab.newer
-chown root:root /tmp/fstab.newer
-mv /etc/fstab /etc/fstab.bak
-mv /tmp/fstab.newer /etc/fstab
-mount $TARGET
+# Only the test sets this, to point the script at a file of its own.
+FSTAB=${FSTAB:-/etc/fstab}
+
+mkdir -p "$LINK_NAME"
+
+LINE="$TARGET $LINK_NAME none defaults,bind 0 0"
+
+# Append the line only when fstab does not have it, so that the rest of fstab
+# keeps its order and its comments.  add_to_fstab does the same for a device.
+if ! grep -qxF "$LINE" "$FSTAB"; then
+    cp "$FSTAB" "$FSTAB.bak"
+    printf '%s\n' "$LINE" >> "$FSTAB"
+fi
+
+if ! mountpoint -q "$LINK_NAME"; then
+    mount "$LINK_NAME"
+fi
