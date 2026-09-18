@@ -17,6 +17,7 @@ use Config::Simple;
 
 use Trog::Config();
 use Trog::SQLite();
+use Trog::Hypervisors();
 
 =head1 NAME
 
@@ -339,10 +340,6 @@ an address outside the pool, so a row for one is noise.
 
 sub seed {
     my ($pool) = @_;
-
-    # Not loaded at the top: it loads Sys::Virt and an SSH stack.  A database
-    # that is already seeded, and the tests, do not need them.
-    require Trog::Hypervisors;
 
     my $recorded = 0;
     my %in_pool  = map { $_ => 1 } pool_ips($pool);
