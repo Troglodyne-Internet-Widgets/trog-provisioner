@@ -221,6 +221,46 @@ subtest 'an entity the api has nothing for is still recorded as asked' => sub {
     is( scalar @{ $again->{asked} }, 0, 'and is not asked for a second time' );
 };
 
+subtest 'an api that refuses the token stops the run and names the status' => sub {
+    my $refusal = bless { code => 401 }, 'FakeResult';
+    my $mock    = Test::MockModule->new('Pithub::Repos');
+    $mock->redefine( list => sub { return $refusal } );
+
+    my $died = do {
+        local $@;
+        eval { Trog::repogetter::repos_of(qw{https://api.test/ gina sekrit}); 1 } ? q{} : $@;
+    };
+    like( $died, qr{https://api\.test/ .* gina .* 401 [ ] Unauthorized}x, 'repos_of dies, naming the api, the entity and the status' );
+
+    $refusal->{code} = 200;
+    my @rows = Trog::repogetter::repos_of(qw{https://api.test/ gina sekrit});
+    is( scalar @rows, 1, 'and an answer that succeeds gives its rows' );
+};
+
 chdir $was or diag "Could not return to $was: $!";
 
 done_testing();
+
+# What Pithub::Repos::list gives back, as far as repos_of reads it: a status,
+# and one row when that status is a success.
+package FakeResult;
+
+use HTTP::Response ();
+
+sub success {
+    my ($self) = @_;
+    return $self->{code} == 200;
+}
+
+sub response {
+    my ($self) = @_;
+    return HTTP::Response->new( $self->{code} );
+}
+
+sub auto_pagination { return 1 }
+
+## no critic (Subroutines::ProhibitBuiltinHomonyms) -- Pithub::Result calls it next
+sub next {
+    my ($self) = @_;
+    return $self->{given}++ ? undef : { name => 'hotel' };
+}
