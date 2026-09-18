@@ -24,6 +24,7 @@ nuke_pool - tear down a hypervisor's storage pool and everything in it
 
     nuke_pool
     nuke_pool --connect qemu+ssh://root@hv1.example.net/system
+    nuke_pool --hypervisor hv1
 
 =head1 OPTIONS
 
@@ -56,6 +57,10 @@ is the C<pool_path> in the configuration of the hypervisor.  If there is none,
 it is the directory that libvirt gives for the pool.  If libvirt gives none, it
 is F</opt/terraform/disks>.
 
+=item B<--help>
+
+Print this and exit.
+
 =back
 
 =head1 DESCRIPTION
@@ -69,7 +74,7 @@ directory, so this deletes the disks of all the guests.
 sub main {
     my @args = @_;
 
-    my ( $uri, $pool, $pool_path, $name, $hvconf, $domain_dir );
+    my ( $uri, $pool, $pool_path, $name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
         'connect=s'    => \$uri,
@@ -77,8 +82,9 @@ sub main {
         'poolpath=s'   => \$pool_path,
         'hypervisor=s' => \$name,
         'hvconf=s'     => \$hvconf,
-        'domaindir=s'  => \$domain_dir,
+        'help'         => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 1, -input => __FILE__ ) if $help;
 
     pod2usage(
         -exitval => 2, -verbose => 1, -input => __FILE__,
