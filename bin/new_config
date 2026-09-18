@@ -134,15 +134,13 @@ prevents configuration merges that are hard to diagnose.
 With C<--dryrun>, this program changes one thing only.  It leaves the private
 key of the guest on the disk where it found it, and does not seal the key.  To
 seal a key is to move its private half into the secret store and remove it from
-the disk.  The program still writes all its other files.
+the disk.  The program still writes all its other files, and the domain keeps
+the same key.
 
 This flag is narrower than the C<--dryrun> of F<bin/provision>, which is the
 flag that an operator passes.  The difference is intentional.  This program
 writes configuration and does not destroy anything.  So a dry run has little to
 protect, except the key that opens a guest that is up now.
-
-A domain keeps the same key with or without C<--dryrun>.  The only difference is
-where the private half stays: on the disk, or in the store.
 
 =head2 IP POOL
 
@@ -212,10 +210,8 @@ sub get_config {
     my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
     $alias_conf->{$_} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$_} ) for keys %$alias_conf;
 
-    # The [ips] section is not read.  The addresses are in ips.db, where two
-    # runs that assign at the same time cannot take the same address.  They are
-    # read later, after the domain is known to have a recipe.  This program must
-    # not touch the database for a domain that it will refuse.
+    # No addresses here: they are in ips.db, which handle_domain opens only
+    # after it knows that the domain has a recipe.
     return ( $global_conf, $alias_conf, $ns_conf, $pool_conf );
 }
 
@@ -232,43 +228,37 @@ sub expand_dependent_domains {
     return ( $host, $d );
 }
 
-=head2 %gaps = salvage_gaps()
-
-The state that the last C<main> did not get from the guests it salvaged, keyed
-by domain.  To salvage is to copy the state of a service from a guest before the
-rebuild.  The hash is empty when there is nothing to report.
-
-This is not a return value, because this program intentionally exits 0 in this
-case.  It writes configuration and does not destroy anything.  A failure here
-keeps back the configuration that somebody needs to fix the permissions.  It
-also runs from cron to take backups.  There, a stop for one directory that it
-cannot read abandons every domain after it.
-F<bin/provision> destroys the guest, so it is the program that must refuse, and
-it gets its answer here.
-
-The hash holds only the alarming gaps.  A path that is not on the guest has
-nothing to salvage.  Every first build of a guest looks like that.  See
-C<_salvage_gap>.
-
-=cut
-
 our %SALVAGE_GAPS;
 
-# The recipes that each domain runs, keyed by domain.  When a domain goes onto
-# the guest of another domain, it is compared with what that host already runs.
-# A guest with several domains has one of each service for all of them.
-# expand_dependent_domains puts the host before the domains on it.  So when a
-# tenant is generated, its host is already in this hash.
+# The recipes that each domain runs, so that a tenant can be compared with its
+# host.  expand_dependent_domains puts the host first, so the host is here
+# before its tenants are generated.
 our %MACHINE_MODULES;
+
+=head2 %gaps = salvage_gaps()
+
+Returns the salvages of the last C<main> that got nothing from a guest that
+still has state.  To salvage is to copy the state of a service off a guest
+before it is rebuilt.  The hash is keyed by domain, and each value is an array
+reference of the alarming gaps that C<_salvage_gap> returned.  The hash is empty when there is nothing
+to report.
+
+C<main> gives a warning and exits 0 in this case.  F<bin/provision> calls this
+before it destroys the guest, and refuses: see C<refuse_on_salvage_gaps> there
+for why the refusal is its job.
+
+A path that is not on the guest at all is not a gap.  Every first build of a
+recipe looks like that.
+
+=cut
 
 sub salvage_gaps { return %SALVAGE_GAPS }
 
 sub main {
     my @args = @_;
 
-    # Clear the gaps of the last run.  The tests call main() more than once in
-    # one process, and so will any other caller that generates two
-    # configurations.
+    # Clear the gaps of the last run, because a process can call main() more
+    # than once.
     %SALVAGE_GAPS = ();
 
     my $credentials;
@@ -282,15 +272,14 @@ sub main {
         'dryrun'      => \$dryrun,
     );
 
-    # This loads the password of the secrets database, for a run that has no
-    # terminal to ask on.  It loads only when you ask.  See Trog::Credentials.
+    # The password of the secrets database, for a run with no terminal.  See
+    # Trog::Credentials.
     Trog::Credentials->load() if $credentials;
     $skip_ssh //= 0;
     $cfile    //= Trog::Config->path('ipmap.cfg');
     $sfile    //= Trog::Config->path('secrets.kdbx');
     $pfile    //= Trog::Config->path('recipes.yaml');
 
-    # Add to the list each host that a domain goes onto.
     @args = uniq map { expand_dependent_domains($_) } @args;
 
     foreach my $d (@args) {
@@ -300,11 +289,9 @@ sub main {
     return 0;
 }
 
-# Put the defaults of the distribution under the values that _global gives.
-# _global goes to every recipe without validation.  So a default that applies
-# only when the distro recipe is validated gets to no other recipe.  See
+# Put the defaults of the distribution under what _global says, because _global
+# reaches every recipe without validation.  See
 # Provisioner::DistroRecipe/global_defaults.
-
 sub apply_global_defaults {
     my ( $distro, $global_config ) = @_;
 
@@ -313,31 +300,24 @@ sub apply_global_defaults {
     return $global_config;
 }
 
-# The configuration keys that tell the hypervisor how to build the guest, not
-# what goes on it.  So they go in provision.conf, not in a template.
-#
-# The vm recipe uses them, so this sub gets them from its schema.  In the past,
-# this file had a hardcoded list, and example.test/provision.conf had comments
-# about each key.  The two did not know about each other.  So a key added to one
-# was missing from the other.  Now, bin/recipes vm prints the list.
+# The keys that tell the hypervisor how to build the guest, which go in
+# provision.conf and not in a template.  They come from the schema of the vm
+# recipe, which `bin/recipes vm` prints.
 sub hv_settings {
     my $props = Provisioner::Cookbook->properties( { Provisioner::Cookbook->spec('vm') } );
 
-    # Leave out the readOnly keys.  The hypervisor sets those itself, for
-    # example the volume that it made and the MAC that it gave the guest.  A
-    # key of that kind from _global points the domain XML at a device that does
-    # not exist.
+    # Not the readOnly keys, such as the volume and the MAC, because the
+    # hypervisor sets those itself.
     my @settings = sort grep { !$props->{$_}{readOnly} } keys %$props;
     return @settings;
 }
 
-# Choose the hypervisor for this guest.  The first choice is the hypervisor
-# that already has the guest.  The second is one that has room.  If no fleet is
-# configured, the guest goes on this machine.
+# The hypervisor that already has the guest, else one with room, else this
+# machine when no fleet is configured.
 sub choose_hypervisor {
     my ( $domain, $requirements ) = @_;
 
-    # If the operator gave --connect, they chose the hypervisor.  Use it.
+    # An operator who gave --connect chose already.
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
@@ -361,11 +341,8 @@ sub handle_domain {
     my $admin_user = $global_conf->{admin_user};
     die "Must set admin_user in global section of $cfile" unless $admin_user;
 
-    # The keys of the administrator are in a file beside the rest of the
-    # configuration.  In the past, cloud-init got them at first boot from a gh:
-    # identity.  That fetch went to GitHub while the guest started.  A slow
-    # answer delayed every provision, and an outage stopped the provision.  Also,
-    # a raw public key had no place to go.
+    # From a file, not from GitHub at first boot, so that a provision does not
+    # wait on GitHub.  A file also takes a raw public key.
     my $keyfile    = Trog::Config->path('admin_authorized_keys');
     my @admin_keys = grep { length && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
     die "No administrator keys in $keyfile.\nbin/preflight will offer to seed it with ssh-import-id.\n" unless @admin_keys;
@@ -379,49 +356,31 @@ sub handle_domain {
     my $gateway = $global_conf->{gateway};
     die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
 
-    # Coerce the value to a list here, one time.  All the code below reads it as
-    # a list, but Config::Simple gives a plain string for a key with one value.
-    # In the past, the coercion was further down, into the global
-    # configuration, and this copy stayed a scalar.  So an installation with
-    # exactly one resolver got "Can't use string as an ARRAY ref" from the
-    # provision.conf line, and no guest.
+    # Once, here, because Config::Simple gives a plain string for a key with one
+    # value and all the code below reads a list.
     my $resolvers = Provisioner::Utils::coerce_arrayref( $global_conf->{resolvers} );
     die "Must set resolvers in global section of $cfile" unless @$resolvers;
 
-    # A loopback address answers only on a guest that runs its own DNS server.
-    # For that guest, the recipe that turns off the stub listener puts loopback
-    # first.  See Provisioner::Recipe::nostubresolver.  If ipmap.cfg names it
-    # here, it goes to every guest, and most of them have nothing that listens
-    # on it.  nginx in the fetch cache uses the addresses in this list in turn.
-    # So every few lookups got a refused connection, and
-    # Provisioner::Recipe::fetchcache removes loopback from the list again.
+    # A loopback resolver answers only on a guest that runs its own DNS server,
+    # and Provisioner::Recipe::nostubresolver adds it for that guest.
     my @loopback = grep { m/\A127[.]/ || $_ eq '::1' } @$resolvers;
     die "resolvers in the global section of $cfile names @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
       if @loopback;
 
-    # Every domain is fully qualified, here and in recipes.d.  This program does
-    # not append a tld, and an addon is not a different kind of domain.  A
-    # domain that is not under your usual parent is a domain like the others,
-    # written in full.
+    # Every domain is fully qualified, here and in recipes.d, because this
+    # program does not append a tld.
     my $fqdn = $domain;
     my ( undef, $tld ) = split( quotemeta('.'), $domain, 2 );
     die "'$domain' is not a fully qualified domain name.\n" . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n" . "  new_config $domain.example.com\n"
       unless defined $tld && length $tld;
 
-    # Read the recipe configuration.
     my $rconf = clone( get_recipe_config() );
 
     die "No recipe configuration found for '$domain'. Add a '$domain' key to your recipes.yaml (or recipes.d/) configuration.\n"
       unless exists $rconf->{$domain};
 
-    # Ask for the password of the secret store only now, when the domain is
-    # known to have a recipe.  Do not prompt a person for a domain that has no
-    # recipe.  An address from the pool is the other thing that this program
-    # cannot take back.  It comes later, because it needs the hypervisor.  The
-    # hypervisor decides if there is an address of ours to give at all.
-    #
-    # A recipe holds a reference to the location of a password, not the
-    # password.
+    # Only now, so that nobody gets a password prompt for a domain with no
+    # recipe.  A recipe holds a reference to each password, not the password.
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;
     if (%to_replace) {
@@ -430,156 +389,103 @@ sub handle_domain {
         Trog::Secrets->apply( $rconf, %secrets );
         %secrets = ();
 
-        # Give this copy to Provisioner::Cookbook, because a recipe asks
-        # Cookbook about the other recipes on the guest.  The references became
-        # passwords in the clone above, not in the copy that Cookbook kept.  In
-        # the past, a recipe that read the credential of another recipe got the
-        # reference.  It wrote the reference into the file that was to
-        # authenticate with the password.
+        # Give Cookbook the resolved copy, because a recipe that reads the
+        # credential of another recipe asks Cookbook for it.
         Provisioner::Cookbook->remember( $pfile, $rconf );
     }
 
-    # Read the _global values of the _base set of recipes, but do not remove
-    # _base.  Provisioner::Cookbook does the merge below, and it needs the full
-    # configuration.
+    # Copied, not removed, because the merge below needs _base.
     my $base_globals = clone( $rconf->{_base}{_global} // {} );
 
     # This run does not need to know yet if the domain goes onto another host.
     delete $rconf->{_shared};
 
+    # The host, if this domain goes onto the guest of another domain.
     my ($dep_dom) = expand_dependent_domains($domain);
 
     my $depends_on;
     $depends_on = $dep_dom if $dep_dom ne $domain;
 
-    # Every domain has some global configuration, and all the recipes must get
-    # it.
     my $global_config = delete $rconf->{$domain}{_global} // {};
     $global_config = { %$base_globals, %$global_config };
 
-    # _global names the distribution of the guest.  The distribution decides
-    # the base image, the packager and its commands, and which templates are
-    # searched first.  It also decides which version of each recipe gives the
-    # package names.
-    #
-    # Make sure that the name is correct here, not at the require further down.
-    # A typing error such as `distro: unbuntu` must not fall back to the generic
-    # recipes without a warning.  If it does, the guest gets no packages.
+    # Refused here, because a typing error such as `distro: unbuntu` that falls
+    # back to the generic recipes builds a guest with no packages.
     my $distro_name = $global_config->{distro} // 'ubuntu';
     die "There is no '$distro_name' distro recipe, which $domain asks for as its distro.\n" . 'There is: ' . join( ', ', Provisioner::Cookbook->distros() ) . "\n"
       unless any { $_ eq $distro_name } Provisioner::Cookbook->distros();
 
-    # Choose the hypervisor for the guest.
-    #
-    # The recipe gives the memory, disk and CPU that the guest needs.  That is
-    # all the data that placement needs.  So the choice is made here, not after
-    # provision.conf is written, and provision.conf does not have to hold it.
+    # Chosen here, because _global already gives the memory, disk and CPU that
+    # placement needs.
     $hv //= choose_hypervisor( $domain, $global_config );
 
-    # If the hypervisor gives its guests their addresses, do not use the pool.
-    # There is no address of ours to give.  An address taken from the pool
-    # stays reserved for a guest that never answers at it.
+    # No pool when the hypervisor gives its guests their addresses, because an
+    # address from the pool stays reserved for a guest that never uses it.
     my ( $static_ip, $ip_conf ) = ( undef, {} );
     if ( !$hv->manages_addresses ) {
         Provisioner::IPPool::ensure_seeded($pool_conf);
 
-        # One transaction, so that many provisions at the same time cannot give
-        # two guests the same address.  It is idempotent (safe to run again).
-        # So a domain that you provision again keeps its address.
+        # One transaction, so that two provisions cannot get the same address.
+        # A domain that you provision again keeps its address.
         $static_ip = Provisioner::IPPool::assign( $domain, $pool_conf );
         $ip_conf   = Provisioner::IPPool::assignments();
 
-        # Every domain is written in full.  A single label is left from the time
-        # when this program appended a tld.  Refuse it, so that it does not go
-        # into a zone file without a warning.
+        # A single label must not go into a zone file without a warning.
         my @unqualified = grep { index( $_, q{.} ) < 0 } sort keys %$ip_conf;
         die "These domains in " . Provisioner::IPPool::db_path() . " are not fully qualified:\n" . join( '', map { "  $_\n" } @unqualified ) . "There is no tld to append any more.  Spell them out, as recipes.d already does.\n"
           if @unqualified;
     }
 
-    # The guest gets its payload from this machine.  This machine supplies the
-    # address, the user and the port.  Nothing is copied to the hypervisor for
-    # the guest to get.  The guest comes to this machine for it.
+    # The guest fetches its payload from this machine, not from the hypervisor.
     my $this_machine = Trog::Local->new();
 
-    # The NAT bridge of the hypervisor.  It is one of the networks that this
-    # machine can share with the guest.  A cloud has no such bridge, and no
-    # address of its own through which a guest is reached.
+    # The NAT bridge of the hypervisor, which a cloud does not have.
     my $tld_ip        = $hv->manages_addresses ? undef : $hv->virbr_ip;
     my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
     my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
     die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
 
-    # Which of our addresses to use depends on how this machine connects to the
-    # networks of the guest.  So the routing table is asked, not assumed.  You
-    # can override the answer.  If a machine has several routes to the same
-    # place, the kernel cannot choose between them for us.
-    #
-    # Try the address of the guest first, then the NAT bridge of the
-    # hypervisor.  This machine can share either network with the guest.  A
-    # workstation that is not a guest itself shares the static subnet.
-    #
-    # Collect every address of ours that gets to the guest, not only the one
-    # that the guest fetches from.  The address that we connect from depends on
-    # the hypervisor.  A remote one is administered over the static address of
-    # the guest, and a local one over its NAT lease.  So the firewall of the
-    # guest must accept all of them.  The fetch uses the first address, because
-    # the rsync in the template names one address.
+    # Every address of ours that routes to the guest, because the firewall of
+    # the guest must accept each one.  The routing table decides, and
+    # transfer_ip overrides it where a machine has several routes.  The fetch
+    # uses the first address.
     my @towards = grep { defined $_ && length $_ } ( $static_ip, $tld_ip );
 
     my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
     my $transfer_ip  = $transfer_ips[0];
 
-    # No address of the guest is a different problem from no route to it.  A
-    # cloud gives the guest its address when it creates the guest.  So at this
-    # point, there is no address to ask the routing table about.  You must give
-    # the answer in the configuration, because this program cannot find it.
+    # No address to route to is a different problem from no route.
     die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "[global] section of ipmap.cfg.\n"
       if !$transfer_ip && !@towards;
 
     die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
       unless $transfer_ip;
 
-    # Where the files of this domain go on the guest, and where the files that
-    # are sent to it come from.  Ask before _base is removed, because a fleet
-    # usually sets them one time in _base for every domain.
-    #
-    # _global sets these values, not the data recipe.  Every recipe
-    # interpolates install_dir.  In the past, it came from the `to` field of
-    # data.  So every recipe depended on data for a path, not for what data
-    # does.  That kept data from being an ordinary recipe.
+    # Before _base is removed, because a fleet usually sets these in _base.
+    # Provisioner::Cookbook/install_dir says why they belong to _global.
     $global_config->{install_dir} //= Provisioner::Cookbook->install_dir( $domain, $rconf );
     $global_config->{data_source} //= Provisioner::Cookbook->data_source( $domain, $rconf );
 
-    # This is the same merge that every other caller uses to get the
-    # configuration of a domain.  It works on this copy, not on the file, so
-    # the secrets resolved above stay in it.
+    # Merged from this copy, not from the file, so that the resolved secrets
+    # stay in it.
     $rconf->{$domain} = Provisioner::Cookbook->domain_config( $domain, $rconf );
     delete $rconf->{_base};
 
-    # bin/new_guest writes CHANGEME for each value that a recipe requires and
-    # has no default for.  A placeholder is a valid string, so no code further
-    # down refuses it.  Validation passes, the guest builds, and the database
-    # gets a root password of CHANGEME.  So refuse placeholders here.  Do it
-    # after the merge, because _base can supply the real value.
+    # Validation accepts the CHANGEME that bin/new_guest writes, so refuse it
+    # here, after the merge, because _base can supply the real value.
     my @unfilled = Provisioner::Cookbook->placeholders_in( $rconf->{$domain} );
     die "Still unfilled in the configuration for $domain:\n" . join( '', map { "  $_\n" } @unfilled ) . "Each of these is a " . Provisioner::Cookbook->PLACEHOLDER . " that new_guest left for you.\n" if @unfilled;
 
-    # Add the recipes of this site to the search path.
     my $libdirs = $global_config->{libdir} // [];
     foreach my $libdir (@$libdirs) {
         print "Including vendor libs from $libdir/lib\n";
         push( @INC, "$libdir/lib" );
     }
 
-    # The directory of the distribution comes first.  So templates/ubuntu/nginx.tt
-    # is found before templates/nginx.tt, and is used.  That order is the full
-    # mechanism, and no code has to know about it.
+    # The directory of the distribution comes first, so that
+    # templates/ubuntu/nginx.tt is used before templates/nginx.tt.
     my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
-    # Refuse a domain with no data_source here, not further down.  Then all the
-    # code after this point gets the same answer.  That includes the tests that
-    # data renders and the state that each recipe salvages.
     die "Nothing says where $fqdn's data comes from: set data_source in _global.\n"
       unless defined $global_config->{data_source} && length $global_config->{data_source};
 
@@ -593,8 +499,7 @@ sub handle_domain {
         @data_users = @{ $data_users_yaml->{users} };
     }
 
-    # Make a users.yaml from ipmap.cfg and from a users.yaml in the data
-    # directory, if one is there.
+    # The administrator from ipmap.cfg, then the users of the data directory.
     my $user_conf = {
         users => [
             {
@@ -643,10 +548,8 @@ sub handle_domain {
         }
     ) || die "Could not initialize template dir";
 
-    # Load the class, not an instance.  Each question asked of it here is about
-    # the distribution, not about this guest.  The depsolver below builds the
-    # object that renders its files, as it does for every other recipe.  Two
-    # objects for one recipe give two chances to generate the key of the guest.
+    # The class, not an instance, because the depsolver builds the one object.
+    # A second object is a second chance to generate the key of the guest.
     my $distro = Provisioner::Cookbook->load($distro_name);
 
     my %provisioner_opts = (
@@ -656,41 +559,27 @@ sub handle_domain {
         output_dir      => $cfg_dir,
         template_dirs   => \@paths,
 
-        # The hypervisor chosen above.  Every builder gets it here, and does not
-        # find one for itself.  vm and the distro recipe both ask a hypervisor
-        # what it accepts.  A recipe that calls Trog::HV->new() itself asks
-        # again a question that placement already answered.
+        # Given to every builder, so that none calls Trog::HV->new() and gets a
+        # hypervisor other than the one that placement chose.
         hv => $hv,
     );
 
-    # Every web host gets its own www and mail CNAMEs.  In the past, there were
-    # two forms: a bare one for an addon, and a prefixed one for other domains.
-    # This program appended a tld to one of them and not to the other.  Both
-    # gave www.<fqdn>.  Now that every domain is written in full, there is one
-    # form.  $each_domain is not the $subdomain above.  It is each domain in the
-    # map, not the domain that this run builds.
+    # Every web host in the map gets www and mail CNAMEs, not only this domain.
     foreach my $each_domain ( keys(%$ip_conf) ) {
         $alias_conf->{$each_domain} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$each_domain} );
         push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
         $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
     }
 
-    # The guest gets its payload with rsync before its DNS works.  So this value
-    # must be an address, not a name.
+    # An address, not a name, because the guest fetches before its DNS works.
     $global_config->{transfer_ip}  = $transfer_ip;
     $global_config->{transfer_ips} = \@transfer_ips;
     $global_config->{tld}          = $tld;
     $global_config->{admin_user}   = $admin_user;
     $global_config->{admin_email}  = $admin_email;
 
-    # The rest of the data about who administers a guest and where it is on the
-    # network.  The gateway comes from the same [global] block as the two values
-    # above.  It was the one value in that block that a recipe did not get.
-    # That was an oversight, not a decision.  Provisioner::Recipe::trogrunner
-    # found it, because it writes an ipmap.cfg of its own and had no way to read
-    # this one.  The keys are here for the same reason.  A runner must authorize
-    # a person on the guests that it builds, and the keys are no longer a
-    # configuration value that it can copy.
+    # The gateway and the keys, for a recipe that writes an ipmap.cfg of its
+    # own, such as Provisioner::Recipe::trogrunner.
     $global_config->{admin_keys}    = [@admin_keys];
     $global_config->{gateway}       = $gateway;
     $global_config->{domain}        = $fqdn;
@@ -704,54 +593,35 @@ sub handle_domain {
 
     apply_global_defaults( $distro, $global_config );
 
-    # The cache address is found one time, here, not by each recipe.  See
-    # Provisioner::DistroRecipe/cache_address.  The resolvers were for the
-    # distro recipe only, and now go to every recipe.  A recipe that runs a
-    # resolver of its own must know where to send queries.  An example is nginx
-    # in the fetch cache.
+    # Once, here, not by each recipe: see Provisioner::DistroRecipe/cache_address.
+    # The resolvers go to every recipe, because the fetch cache runs one.
     $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
     $global_config->{resolvers} = $resolvers;
 
-    # The directory for the tests of every recipe, data included.  data is a
-    # module now.  So the loop below renders its tests from its final
-    # configuration, not from its first one.
     mkdir "$cfg_dir/t";
 
     $global_config->{script_dir} = $root_scripts;
 
     my ( @pkgs, @generated );
 
-    # This can run on a system that exists already, so install the packages of
-    # the distribution in all cases.
+    # Always, because the guest can be a system that exists already.
     push( @pkgs, $distro->deps() );
 
     $global_config->{packager_invocation}        = $distro->packager_invocation;
     $global_config->{packager_up_invocation}     = $distro->packager_up_invocation;
     $global_config->{packager_remove_invocation} = $distro->packager_remove_invocation;
 
-    # Find out if the remote host is up.
-    #
-    # This uses sftp, because to open the connection is the probe.  That is the
-    # only use of this handle now.  In the past, it also answered the question
-    # of _salvage_gap: was a directory that salvaged nothing missing, or only
-    # unreadable?  Here, that was one status code.  Now the fetch reads the
-    # files that the service owns.  So the question is if the path holds
-    # anything.  sftp cannot answer that without the privileges that the fetch
-    # uses.  Nothing is fetched over this handle.  _salvage_guest does that.
+    # Whether the guest is up.  The connection is only the probe: the fetch
+    # goes through _salvage_guest.
     my ( $ssh, $target_is_up );
 
-    # Do this only if there is an address to try.  If the hypervisor gives the
-    # guest its address, the guest has none until it is built.  A guest that
-    # does not exist yet has nothing to salvage.
+    # A guest without an address yet is not built, so it has nothing to
+    # salvage.
     ( $ssh, $target_is_up ) = _get_sftp( $static_ip, $admin_user, $cfg_dir )
       if !$skip_ssh && defined $static_ip && length $static_ip;
 
-    # Make a makefile from the configured recipes.
-    #
-    # The distro recipe goes in the list, so that the depsolver resolves it like
-    # the other recipes.  The depsolver finds the dependencies of each recipe.
-    # The distro recipe pulls in the vm recipe, and the same merge configures
-    # both of them.  Neither one stays a module.  The code below removes them.
+    # The distro recipe goes in, so that the depsolver configures it and pulls
+    # in the vm recipe.  Both come out again below.
     my @modules = ( $distro_name, sort keys( %{ $rconf->{$domain} } ) );
 
     my %mf_vars;
@@ -760,14 +630,9 @@ sub handle_domain {
     my @conflicts;
     my @modules_ordered;
 
-    # One builder for each recipe, keyed by name.
     my %builders;
 
-    # Find what each recipe requires, and what those recipes require in turn.
-    # Also find the configuration that each dependent recipe gave it.  This is in
-    # Provisioner::Cookbook, so that bin/new_guest can ask the same question.
-    # In the past, bin/new_guest did its own walk, and the two became different.
-    # Its walk did not see the half of the dependencies from the base class.
+    # In Provisioner::Cookbook, so that bin/new_guest gets the same answer.
     my ( $solved, $built ) = Provisioner::Cookbook->resolve_dependencies(
         modules       => \@modules,
         domain_conf   => $rconf->{$domain},
@@ -781,24 +646,13 @@ sub handle_domain {
     @modules  = @$solved;
     %builders = %$built;
 
-    # Remove the two recipes that direct the build and do not run in it.  They
-    # are the distro recipe and the vm recipe that it depends on.  They are
-    # removed here, after they were added, because the depsolver above had to
-    # configure them and pull in each other.
-    #
-    # The makefile skips a recipe with no fragment, so it does not need this.
-    # But every template and every recipe gets `modules` as the list of what is
-    # on this guest.  Neither of these two recipes is on the guest.
+    # Not the distro and vm recipes, which direct the build, because every
+    # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
 
-    # A guest has one of each service.  Some recipes cannot serve a second
-    # domain.  Such a recipe does not add this domain.  It replaces the first
-    # one.  So refuse here, where an operator reads the output.  Otherwise the
-    # first domain stops without a warning on the guest, an hour later.
-    #
-    # This compares with the host only.  expand_dependent_domains puts a host
-    # and one of the domains on it in the same run, never two of those domains.
-    # So this does not find two tenants that conflict with each other.
+    # A recipe that cannot serve a second domain replaces the first, so refuse
+    # it here.  This compares a tenant with its host only, not with the other
+    # tenants.
     $MACHINE_MODULES{$domain} = [@modules];
     if ($depends_on) {
         my %on_host = map  { $_ => 1 } @{ $MACHINE_MODULES{$depends_on} // [] };
@@ -810,12 +664,10 @@ sub handle_domain {
 
     my %guest_secrets;
 
-    # The dependencies are resolved.  Now process the modules.
     foreach my $module (@modules) {
         my $builder = $builders{$module};
         my $pconf   = $rconf->{$domain}{$module};
 
-        # Aliases in ipmap.cfg are also fully qualified.  Nothing is appended.
         my $aliases      = $alias_conf->{$domain} // [];
         my $full_aliases = [@$aliases];
         if ( $builder->has_global_template() ) {
@@ -839,29 +691,24 @@ sub handle_domain {
         push( @pkgs,      ( $builder->deps(%$pconf) ) );
         push( @conflicts, ( $builder->dep_conflicts(%$pconf) ) );
 
-        # Get the makefile variables for the target of this recipe.
         my %t_vars = $builder->makefile_vars();
         %mf_vars = ( %mf_vars, %t_vars ) if %t_vars;
 
-        # Files that the guest must have, but that must not go in the payload.
-        # The store holds them, and bin/provision puts them on the guest.  They
-        # are collected here and resolved together below.  So a run asks for the
-        # password of the store one time.
+        # Collected for one lookup below, so that a run asks for the password of
+        # the store one time.  They go through the store, not the payload.
         %guest_secrets = ( %guest_secrets, $builder->guest_secrets( $global_config->{install_dir}, $fqdn, %$pconf ) );
 
-        # Make the directories that the recipe needs in the data directory.
         foreach my $d ( $builder->datadirs() ) {
             make_path("$data_dir/$d") unless -d "$data_dir/$d";
         }
 
-        # Copy the state from the guest that exists now.
         if ($target_is_up) {
             print "Backing up $module files from $fqdn\n";
             my %tg   = $builder->remote_files( $global_config->{install_dir}, $fqdn );
             my @skip = $builder->remote_skip();
 
-            # Do this before any file comes down.  Then the files show the guest
-            # as it is now, not as it was at the last run of its cron job.
+            # Before the fetch, so that it gets the state of now and not of the
+            # last cron run.
             refresh_salvage(
                 static_ip  => $static_ip,
                 admin_user => $admin_user,
@@ -873,34 +720,22 @@ sub handle_domain {
             foreach my $to_fetch ( sort keys(%tg) ) {
                 print "Fetching $to_fetch into $data_dir/$tg{$to_fetch}\n";
 
-                # The return value is not examined, intentionally.  If the
-                # salvage got nothing, _salvage_gap below reports it.  Its
-                # message tells more about the cause than a return value.  If
-                # the salvage got part of the state, the domain is still better
-                # off than if the rest were abandoned.
+                # The result is ignored, because _salvage_gap below tells more,
+                # and part of the state is better than none.
                 _salvage_guest( $static_ip, $admin_user, $cfg_dir )->get_dir(
                     $to_fetch,
                     "$data_dir/$tg{$to_fetch}",
 
-                    # These are directories.  A recipe can keep files in one
-                    # that must stay on the machine that made them.  See
-                    # remote_skip in Provisioner::Recipe.  Those files are not
-                    # fetched and then deleted.  They stay, because this runs
-                    # against a live guest that still needs them.
+                    # Left on the live guest, not fetched and then deleted: see
+                    # remote_skip in Provisioner::Recipe.
                     exclude => \@skip,
 
-                    # The sftp fetch called this newer_only.  If the copy on the
-                    # guest is older than ours, it stays where it is.
+                    # A copy on the guest that is older than ours is not fetched.
                     update => 1,
 
-                    # Run as root on the guest.  A recipe salvages the state
-                    # directory of a service.  The service owns it, and no other
-                    # user can open it.  For example, redis is 0750
-                    # redis:redis, slapd.d is 0700 openldap, and a PKI is 0600
-                    # root.  Without privileges, the fetch made the local
-                    # directories, copied nothing into them, and reported
-                    # success.  That looks the same as a guest that never ran
-                    # the service.
+                    # As root, because only the service can open its state
+                    # directory: redis is 0750 redis:redis, slapd.d is 0700
+                    # openldap, and a PKI is 0600 root.
                     sudo => 1,
                 );
 
@@ -914,22 +749,16 @@ sub handle_domain {
                 );
                 next unless $gap;
 
-                # Use warn, not print.  The rest of a run is many lines of
-                # progress on STDOUT.  The line that says the state of a service
-                # did not come down must stay visible after it scrolls past.
-                # warn also goes through the warn handler.  So a caller can send
-                # these messages to a place other than the terminal.
+                # warn, not print, so that it stands out from the progress on
+                # STDOUT and a caller can catch it with a warn handler.
                 warn $gap->{message} . "\n";
                 push( @empty_salvage, $gap ) if $gap->{alarming};
             }
         }
 
-        # Render the templates of the recipe.  These files go in the payload.
-        # That is the difference between them and the files of the director
-        # below.
+        # These go in the payload, unlike the files of the distro recipe below.
         push( @generated, $builder->generate_files( $cfg_dir, $builder->takes(%$global_config), %$pconf, full_aliases => $full_aliases, modules => \@modules ) );
 
-        # Write the tests of the recipe, if it has any.
         my @tests = $builder->tests();
         foreach my $test (@tests) {
             my $tname = $test;
@@ -939,7 +768,6 @@ sub handle_domain {
             File::Slurper::Temp::write_binary( "$cfg_dir/t/$tname", $rendered );
         }
 
-        # Collect the dependencies of the tests.
         push( @testdeps, ( $builder->testdeps(@modules) ) );
     }
     @testdeps = uniq @testdeps;
@@ -948,7 +776,6 @@ sub handle_domain {
     @pkgs      = sort { $a cmp $b } uniq @pkgs;
     @conflicts = uniq @conflicts;
 
-    # Remove each package that a recipe names as a conflict.
     @pkgs = grep {
         my $pkg = $_;
         !any { $_ eq $pkg } @conflicts;
@@ -956,47 +783,28 @@ sub handle_domain {
 
     my $extra_packages = join( ', ', @pkgs );
 
-    # Take data out of the module machinery, here and nowhere else.  data went
-    # through the loop like every other recipe.  That is how the other recipes
-    # gave it their restores.  But its target is not one of the ordered ones.
-    # makefile.tt puts it first, by hand, because each recipe must find its
-    # state already restored.
+    # makefile.tt puts the data target first by hand, so that each recipe finds
+    # its state already restored.  So data comes out of %fragments, where it
+    # makes a second state/data: target, and out of the ordered list, where it
+    # runs last.
     #
-    # Both lines are necessary.  The first supplies the data_fragment that the
-    # template expects.  If data stays in %fragments, the makefile gets a
-    # second state/data: target, and make uses it instead of the first.  The
-    # second line keeps data off the prerequisite list of all:.  On that list,
-    # it runs last.
-    #
-    # The path is compared exactly, not matched.  So a domain called 'data'
-    # keeps its own target.
-    #
-    # The fragment is empty, not undef.  makefile.tt writes the data target for
-    # every guest, and sends this value through a formatter that substitutes on
-    # it.  But the data recipe is in the build only when a recipe declares
-    # restores.
+    # Empty, not undef, because makefile.tt writes the data target for every
+    # guest.  The data recipe is in the build only when a recipe declares
+    # restores.  The path is compared exactly, so that a domain called 'data'
+    # keeps its target.
     my $data_fragment = delete $fragments{data} // q{};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/data" } @modules_ordered;
 
-    # ufw comes out for the opposite reason.  It must run after every other
-    # recipe, not before them.  templates/makefile.tt tells why.  The template
-    # sets its position, so alphabetical order does not decide it.
+    # ufw comes out because it must run last: templates/makefile.tt says why.
     my $ufw_fragment = delete $fragments{ufw};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
 
-    # The hosts that the recipes of this guest download from.  While the guest
-    # provisions, these names point at the fetch cache.  The guest also gets
-    # the authority that signs the certificate of the cache, and trusts it
-    # during that time.  See Provisioner::Recipe/fetch_hosts and
-    # scripts/fetch_via_cache.  Only the certificate goes to the guest.  Its
-    # key stays on this machine.
+    # The hosts that the guest downloads from through the fetch cache, and the
+    # certificate of the authority that the guest trusts meanwhile.  See
+    # Provisioner::Recipe/fetch_hosts and scripts/fetch_via_cache.
     #
-    # Each module is asked with its own configuration.  A recipe can have a
-    # configured upstream, for example a repo_url or an api_url that is not the
-    # default.  Then it names the host that it really connects to.  The cache
-    # makes its certificate from Cookbook::fetch_hosts.  That is asked of the
-    # class, and cannot see the configuration.  A cache that serves a
-    # configured upstream needs that host in its own upstreams.
+    # Asked with the configuration of each module, so that a configured
+    # repo_url or api_url names the host that the recipe really uses.
     my @fetch_hosts =
       $global_config->{cache_ip}
       ? uniq( sort map { $builders{$_}->fetch_hosts( %$global_config, %{ $rconf->{$domain}{$_} // {} } ) } @modules )
@@ -1005,8 +813,7 @@ sub handle_domain {
         copy( Provisioner::Cookbook->load('fetchcache')->authority()->{cert}, "$cfg_dir/fetchcache-ca.crt" )
           or die "Could not give $fqdn the fetch cache's authority: $!\n";
 
-        # Put it in the tarball with the files that the recipes generated.  No
-        # other file in $cfg_dir gets to the guest.
+        # Only files in @generated go into the tarball.
         push( @generated, 'fetchcache-ca.crt' );
     }
 
@@ -1039,39 +846,8 @@ sub handle_domain {
 
     my $r_text = join( ', ', @$resolvers );
 
-    # Write the files that a guest boots from the first time.  They are its
-    # network configuration, its cloud-init, the setup script that fetches the
-    # payload, and the destination of its logs.  They are ordinary
-    # template_files of the distro recipe.  They are rendered in the same way as
-    # the generated files of every other recipe.
-    #
-    # They are rendered after the loop, not in it.  The user-data lists the
-    # packages that are passed in below.  @pkgs is not final until the loop has
-    # collected the dependencies of every recipe and removed the conflicts.
-    #
-    # The last position inside the loop also solves that problem.  That is how a
-    # dependency usually gets its turn: lastuniq puts a recipe after the last
-    # recipe that pulled it in.  But that works only while every recipe on the
-    # guest pulls in the distro recipe.  Every recipe in the namespace of the
-    # distribution must then declare the dependency.  Also, no recipe from
-    # outside that namespace can sort after them, for example a vendor recipe or
-    # a later required_recipes.  A separate pass does not depend on any of that.
-    #
-    # The separate pass also keeps these files out of the payload, and they must
-    # stay out of it.  user-data holds the private half of the key of the guest.
-    # setup.sh gets to the guest inside cloud-init, not in the tarball that it
-    # fetches.  In the loop, that is a special case.
-    #
-    # Only the distro recipe does this.  The other director is the vm recipe.
-    # Its one file names a storage volume, a base image and a seed ISO.  Their
-    # paths do not exist until a hypervisor makes them.  So bin/provision
-    # generates that file, because bin/provision has a hypervisor.
-
-    # Put the sealed key back beside the recipe before the recipe looks for it.
-    # seal_key removes the private half from the disk, and leaves only the
-    # public half here.  A recipe that cannot find a pair makes a new one.  The
-    # salvage pass above already got this same key to connect to the guest
-    # that is up.
+    # Put the sealed key back beside the recipe, because seal_key took the
+    # private half off the disk.  A recipe that finds no pair makes a new one.
     my $sealed = Trog::Guest->key_path( $fqdn, "$cfg_dir/key.rsa" );
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether it is already the file we want
     if ( defined $sealed && $sealed ne "$cfg_dir/key.rsa" && !-f "$cfg_dir/key.rsa" ) {
@@ -1079,6 +855,13 @@ sub handle_domain {
         chmod 0600, "$cfg_dir/key.rsa";
     }
 
+    # The files that the guest first boots from: network configuration,
+    # cloud-init, setup.sh and the destination of its logs.  After the loop,
+    # because the user-data lists @pkgs, which is final only now.  And outside
+    # the payload, because user-data holds the private key of the guest.
+    #
+    # The vm recipe is the other director, and bin/provision generates its file,
+    # because its paths exist only after a hypervisor makes them.
     print "Writing what $fqdn first boots from, out of the $distro_name recipe\n";
     $builders{$distro_name}->generate_files(
         $cfg_dir,
@@ -1093,21 +876,12 @@ sub handle_domain {
         modules => \@modules,
     );
 
-    # Then put the private half into the store, not in the domain directory.
-    # Do this after generate_files, which makes a key for a domain that had
-    # none.  For every other domain, this seals again the key that it already
-    # had.  That costs one write, and the bytes do not change.
-    #
-    # Do not do this on a dry run.  A dry run leaves the key on the disk where
-    # it was.  If this step removes the key, we lose the way into a guest that
-    # nobody asked us to touch.
+    # After generate_files, which makes a key for a domain that had none.  Not
+    # on a dry run: see DRY RUNS.
     Trog::Guest->seal_key( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
 
-    # Write provision.conf.
-
-    # The distribution names the image.  The vm recipe sets the size of the
-    # guest.  bin/new_guest writes a domain block from the same schema, and
-    # `bin/recipes vm` prints it.
+    # The size of the guest defaults from the schema of the vm recipe, which
+    # `bin/recipes vm` prints.
     my $image = $distro->base_image;
     my %vm    = Provisioner::Cookbook->defaults('vm');
     my $size  = $global_config->{size}   // $vm{size};
@@ -1133,38 +907,28 @@ sub handle_domain {
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
 
-    # The optional configuration for the hypervisor part of the build.  Each
-    # key comes from _global, if _global has it.  None of them gets a default
-    # here.  bin/provision finds what the libvirt and qemu of this hypervisor
-    # accept.  A key that is absent means that bin/provision decides.
-    #
-    # An empty key is left out, not written.  Config::Simple gives an empty
-    # string for a bare `key=`, and an empty string is not the same as no
-    # answer.  A key that is already written above is also left out, because
-    # a second copy is a duplicate.
+    # Only the keys that _global sets and that are not written above, with no
+    # default, because an absent key lets bin/provision decide.  An empty value
+    # is absent too, because Config::Simple reads a bare `key=` as an empty
+    # string.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
     $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && defined $global_config->{$_} && length $global_config->{$_} } hv_settings() );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 
-    # openssl.conf and scripts/ are in the checkout of this script, not in the
-    # directory that it runs from.  Because their paths start at the checkout,
-    # the generator can run from any directory.  It does that now, because it
-    # does not run on the hypervisor any more.
+    # From the checkout, not the working directory, so that this program runs
+    # from any directory.
     my $checkout = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/..' );
 
-    # Copy openssl.conf, which the self-signed certificate needs.
+    # For the self-signed certificate.
     print "Copying openssl.conf to $cfg_dir/openssl.conf\n";
     copy( "$checkout/openssl.conf", "$cfg_dir/openssl.conf" )
       or die "Could not copy openssl.conf into $cfg_dir: $!\n";
 
-    # In the past, the guest got these scripts from the hypervisor with rsync.
-    # That worked only while the hypervisor had a checkout at the same path as
-    # this one.  It does not have one now.  So the scripts go in the tarball,
-    # and the Makefile moves them into place.
+    # In the tarball, because the hypervisor has no checkout for the guest to
+    # get them from.
     my @scripts = pack_scripts( $checkout, $cfg_dir );
 
-    # Put the Makefile and the generated configuration in a gzipped tarball.
     print "Tarring up Makefile and generated configuration\n";
     unlink "$cfg_dir/data.tar.gz";
 
@@ -1181,8 +945,7 @@ sub handle_domain {
     my $tar = Archive::Tar->new();
     $tar->add_files( map { "$cfg_dir/$_" } @members ) or die "Could not add files to $cfg_dir/data.tar.gz: " . Archive::Tar->error();
 
-    # add_files stores each path as it is given.  So make each stored name
-    # relative to $cfg_dir.
+    # Relative to $cfg_dir, because add_files stores each path as it is given.
     foreach my $member ( $tar->get_files() ) {
         my $stored = $member->full_path();
         $stored =~ s{^\Q$cfg_dir\E/}{};
@@ -1191,29 +954,15 @@ sub handle_domain {
 
     $tar->write( "$cfg_dir/data.tar.gz", Archive::Tar::COMPRESS_GZIP() ) or die "Could not write $cfg_dir/data.tar.gz: " . Archive::Tar->error();
 
-    # The data directory must exist, also when it is empty.  A new domain has
-    # no data of its own yet.  If the source directory is not there, the rsync
-    # on the guest fails.  Then the data target fails, and the rest of the
-    # Makefile stops before any other recipe runs.
+    # Also when it is empty, because the rsync of the data target fails on a
+    # source that is not there, and stops the Makefile.
     make_path($data_dir) unless -d $data_dir;
 
-    # In a run this long, nobody remembers one line in the middle.  So report
-    # the empty salvages again at the end of the run, where the operator looks.
-    #
-    # The report is loud, but it does not stop the program.  This program
-    # writes configuration and does not destroy anything.  A stop here does not
-    # protect the state that it did not read.  It only keeps back the
-    # configuration that somebody needs to fix the permissions and try again.
-    # Cron also runs this program to take backups.  There, a stop for one
-    # directory that it cannot read abandons every domain after it, also the
-    # good ones.  bin/provision rebuilds the guest and loses the data.  This
-    # report tells you not to run it yet.
+    # Again at the end, where the operator looks.  A warning, not a stop: see
+    # salvage_gaps.
     if (@empty_salvage) {
         warn "\n" . scalar(@empty_salvage) . " salvage(s) on $fqdn came back with nothing:\n" . join( q{}, map { "    $_->{recipe} read nothing out of $_->{remote}\n" } @empty_salvage ) . "None of that state is in $data_dir.  Rebuilding $fqdn now loses it.\n";
 
-        # Keep the gaps for the program that acts on them.  This program can
-        # only report them.  bin/provision must refuse to destroy the guest,
-        # and it reads the gaps from here.
         $SALVAGE_GAPS{$fqdn} = [@empty_salvage];
     }
 
@@ -1221,62 +970,20 @@ sub handle_domain {
     return 0;
 }
 
-=head2 refresh_salvage(%args)
-
-Ask the guest to update the state that is about to be salvaged.
-
-C<static_ip>, C<admin_user> and C<cfg_dir> tell which guest to ask and how to
-connect to it.  C<module> names the recipe that asks.  C<commands> is the list
-that its C<remote_prepare> gave.
-
-A dump that is written each night and fetched at noon is twelve hours old.  The
-difference is all the changes in those hours, and a rebuild must not lose them.
-A recipe tells how to update its own state in C<remote_prepare>.  This sub runs
-those commands as root on the guest that is salvaged.
-
-Usually, a failure gives only a warning.  The guest can be without the script
-yet, and the dump from last night is better than no dump.  A stop here leaves
-no dump at all.
-
-If the command changed files before it failed, this sub stops the program.
-C<watched> is the list of paths that are about to come down.  Before and after
-each command, this sub gets the newest mtime under each path.  If a command
-failed and changed none of them, the dump from last night is as it was.  The
-warning is for that case.  If a command failed and changed them, the dump is
-partial, not old.  Examples are a mysqldump that stopped halfway, or a snapshot
-that is half written.  A fetch of it brings home a corrupt copy as the state of
-the guest.  So in that case, this sub stops the program before it fetches
-anything.
-
-=cut
-
-# The guest that a salvage connects to.  It is the guest that is about to be
-# rebuilt.  The connection uses the admin user, and the key that this run
-# already wrote into the configuration directory.
+# The guest that is about to be rebuilt, as the admin user.
 sub _salvage_guest {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
-    # The address can have a CIDR suffix.  Remove it, because a CIDR is not a
-    # host to connect to.
+    # Without a CIDR suffix.
     ( my $host = $static_ip ) =~ s{/\N*\z}{};
 
-    # Make one connection for each guest, not one for each recipe.  Both callers
-    # ask for it inside the loop over the modules.  refresh_salvage asks one
-    # time for each module.  The fetch asks one time for each path that the
-    # module salvages.  If each caller keeps its own connection, every call
-    # makes an ssh handshake with a machine that is about to be discarded.
-    #
-    # The key holds all the data that identifies the machine and how to
-    # connect to it.  One run configures several domains, and each domain is a
-    # different guest.  The cache is for the full process, because there is no
-    # object here to keep it on.
+    # One connection for each guest, not one for each call, because both
+    # callers ask inside the loop over the modules.
     state %guest;
     my $id = join( "\0", $host, $admin_user // q{}, $cfg_dir // q{} );
     return $guest{$id} if $guest{$id};
 
-    # The key can be absent at this time.  If it is, do not name a key file
-    # that is not there.  ssh has an agent and a configuration of its own.
-    # Either one is better than an -i that points at nothing.
+    # When there is no key yet, ssh uses its agent and its own configuration.
     my $key = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     return $guest{$id} = Trog::Guest->new(
@@ -1286,6 +993,23 @@ sub _salvage_guest {
         ( $key ? ( key_path => $key ) : () ),
     );
 }
+
+=head2 refresh_salvage(%args)
+
+Runs the C<commands> from the C<remote_prepare> of a recipe as root on the
+guest.  Then the state is up to date when it is salvaged.  Returns 1.
+
+C<static_ip>, C<admin_user> and C<cfg_dir> tell which guest to connect to.
+C<module> names the recipe.  C<watched> lists the paths that are about to come
+down.
+
+A command that fails gives a warning, because an old dump is better than none.
+
+Dies if a command fails after it changed a file under C<watched>, because the
+dump is then partial, for example a mysqldump that stopped halfway.  Nothing is
+fetched.
+
+=cut
 
 sub refresh_salvage (%args) {
     my ( $static_ip, $admin_user, $cfg_dir, $module, $commands, $watched ) = @args{qw{static_ip admin_user cfg_dir module commands watched}};
@@ -1301,14 +1025,11 @@ sub refresh_salvage (%args) {
     foreach my $command (@$commands) {
         print "Asking $host to run '$command' before salvaging $module\n";
 
-        # Run it through a shell.  A recipe gives a command line, not an argv.
-        # For example, a script with its arguments, or a pipeline.
+        # Through a shell, because a recipe gives a command line, not an argv.
         my $failed = $guest->run_sudo( '/bin/sh', '-c', $command );
 
-        # Get the mtimes again, if the command worked or not.  A command that
-        # succeeded is expected to change files.  If the next command is
-        # compared with the mtimes from before this one, the changes of this
-        # command look like changes of the next.
+        # Again after every command, so that the next one is not blamed for
+        # the changes of this one.
         my %now     = _salvage_mtimes( $guest, $watched );
         my @touched = grep { ( $seen{$_} // q{} ) ne ( $now{$_} // q{} ) } sort keys %now;
         %seen = %now;
@@ -1324,14 +1045,9 @@ sub refresh_salvage (%args) {
     return 1;
 }
 
-# The newest mtime anywhere under each path, one number for each path.  The
-# mtime of a directory changes only when an entry is added or removed.  So an
-# mtime of the directories alone misses a dump that is written again in place.
-# That is the usual case that this looks for.
-#
-# A path that is absent, or that the probe cannot read, gives an empty value.
-# Two empty values are equal.  So a path that does not exist before or after a
-# command is not a change.
+# The newest mtime anywhere under each path, because the mtime of a directory
+# misses a dump that is written again in place.  A path that is absent or
+# unreadable gives an empty value.
 sub _salvage_mtimes {
     my ( $guest, $watched ) = @_;
     return () unless @$watched;
@@ -1356,14 +1072,16 @@ sub _salvage_mtimes {
 
 =head2 write_guest_secrets($cfg_dir, $fqdn, $wanted, $store, $keepass)
 
-Make sure that the secret store holds a value for each file that the recipes
-want on the guest.  Then write a manifest that tells where each file goes.
+Makes sure that the secret store at C<$store> holds a value for each file in
+C<$wanted>, and generates the values that are missing.  Then writes
+F<guest-secrets.yaml> in C<$cfg_dir>, which tells where each file goes on the
+guest.  Asks for the password when C<$keepass> is undef.  Returns a reference to
+the values that the store holds.  When C<$wanted> is empty, it removes an old
+manifest and returns nothing.
 
-The manifest holds the reference, never the value.  It is beside the domain, not
-in the payload.  So these values do not go where the state from
-C<remote_files> goes: into the data directory, into the tarball, and into every
-backup of it.  C<bin/provision> reads the manifest and resolves the references.
-Then it puts the files on the guest before the makefile runs.
+The manifest holds references, never values, and is not in the payload, so that
+no secret goes into the tarball or its backups.  C<bin/provision> reads it and
+puts the files on the guest.
 
 =cut
 
@@ -1374,8 +1092,7 @@ sub write_guest_secrets {
     unlink $manifest;
     return unless %$wanted;
 
-    # Ask for the password here, not at the top.  If the recipes of a run want
-    # no files on the guest, the run must not ask for a password.
+    # Only now, so that a run with nothing to place asks for no password.
     $keepass //= Trog::Credentials->prompt( 'Enter password:', 'keepass' );
 
     my %generator = map { $wanted->{$_}{ref} => $wanted->{$_}{generate} } keys %$wanted;
@@ -1397,11 +1114,8 @@ sub write_guest_secrets {
     return \%held;
 }
 
-# Copy the helper scripts into the directory of the domain, so that they go into
-# the tarball with the other files.
-#
-# The modes are copied intentionally.  The guest executes every one of these
-# scripts, and File::Copy does not promise to keep the executable bit.
+# Copy the helper scripts, with their modes, into the directory of the domain.
+# File::Copy does not promise to keep the executable bit.
 sub pack_scripts {
     my ( $checkout, $cfg_dir ) = @_;
 
@@ -1415,9 +1129,8 @@ sub pack_scripts {
     my @packed;
     foreach my $script ( Provisioner::Utils::files_in($from) ) {
 
-        # Copy the file and its mode from the open handle.  Then both come from
-        # the file that was opened, not from what the path holds at a later
-        # time.  files_in already left out the directories.
+        # From the handle, so that the file and its mode come from the same
+        # file.
         open( my $in, '<', "$from/$script" ) or next;
         copy( $in, "$to/$script" )           or die "Could not copy $script into $to: $!\n";
         ## no critic (ProhibitLeadingZeros) -- the policy exempts a
@@ -1431,41 +1144,21 @@ sub pack_scripts {
     return @packed;
 }
 
-# Tell if a salvage that got nothing is a problem, and what kind of problem.
+# Whether a salvage that got nothing is a problem.  The destination is asked,
+# not the transfer, because a second run moves nothing from a guest that did
+# not change.
 #
-# Examine the destination, not the transfer.  A transfer reports what it moved
-# on this pass.  A second run against a guest that did not change moves nothing,
-# because the first run took all of it.  So what moved does not tell if the
-# salvage has anything in it.
-#
-# An empty destination has one of three causes, and only the guest can tell
-# which.  The path is not there at all.  Every first build of a recipe looks like
-# that.  Or the path is there and holds nothing, because the service started
-# and did not write anything yet.  Or the path holds files that did not come
-# down.  Only that last cause is a reason to stop a rebuild.
-#
-# Ask the guest as root, for the same reason as the fetch.  The paths that a
-# recipe salvages belong to the service, and no other user can open them.
-# Without privileges, a look inside one cannot tell "empty" from "not mine to
-# read".  Then every path looks alarming.
-#
-# In the past, there were two causes, not three.  The fetch had no privileges,
-# so an unreadable path was the likely case.  A directory that was really empty
-# got a warning about permissions.  The warning was for an unreadable
-# directory.  Now the fetch can read them, so the only alarming case left is a
-# fetch that failed.
+# An empty destination has three causes.  The path is not on the guest, or it
+# is empty, or it holds files that did not come down.  Only the last one is
+# alarming.  The guest is asked as root, because only the service can open the
+# path.
 sub _salvage_gap {
     my (%args) = @_;
 
     return () if _dir_has_files( $args{destination} );
 
-    # Give the path as an argument, not interpolated into the command.  This is
-    # a shell, and run_sudo escapes each element for us.
-    #
-    # find -print -quit stops at the first file.  It does not walk all of a
-    # state directory, which can be very large.  For a path that is not there,
-    # it prints nothing.  So one question covers the two quiet cases: a path
-    # that was never made, and a path that the service did not write into.
+    # The path as an argument, because run_sudo escapes each one.  find prints
+    # nothing for an absent path, so one question covers both quiet causes.
     my $rc = $args{guest}->run_sudo(
         'sh',          '-c', 'test -n "$(find "$1" -type f -print -quit 2>/dev/null)"',
         'salvage-gap', $args{remote},
@@ -1473,11 +1166,8 @@ sub _salvage_gap {
 
     my %gap = ( recipe => $args{recipe}, remote => $args{remote} );
 
-    # test exits 0 or 1 and nothing else.  Any other code means that the
-    # question did not run.  For example, the guest went away during the run,
-    # or sudo refused.  Do not report that as a service that never ran.  That
-    # report hides the alarm for state that is still on the guest.  This sub
-    # exists to prevent that failure.
+    # Any code other than 0 or 1 means that the question did not run, so it
+    # is alarming, not a service that never ran.
     return {
         %gap,
         alarming => 1,
@@ -1497,25 +1187,16 @@ sub _salvage_gap {
     };
 }
 
-# Tell if a salvage put any file under its destination.
-#
-# Count files, not entries.  rget makes the local directories on the way down,
-# if it can read their contents or not.  So a tree of empty directories is
-# exactly what an unreadable fetch leaves.
-#
-# It stops at the first file, and does not walk the full tree.  One file
-# answers the question, and some salvaged state is very large.  A symlink counts
-# as a file and is not followed.  A symlink from a guest can point anywhere,
-# also back up the tree that holds it.
+# Whether a salvage put any file under its destination.  Files, not entries,
+# because a fetch that cannot read makes the directories anyway.  It stops at
+# the first file.  A symlink counts, and is not followed, because it can point
+# anywhere.
 sub _dir_has_files {
     my ($dir) = @_;
     return 0 unless -d $dir;
 
-    # die is how you leave File::Find early.  So the find is in an eval, and
-    # the value that it throws is the answer.  The value is a reference, not a
-    # string, and is compared by identity below.  File::Find appends its own
-    # context to a die from wanted.  So a message changes on the way out, and
-    # cannot be told from a real error.
+    # die is how you leave File::Find early.  A reference, not a string,
+    # because File::Find appends its own context to a message.
     my $found = \'found';
 
     my $ok = eval {
@@ -1540,15 +1221,12 @@ sub _dir_has_files {
 sub _get_sftp {
     my ( $static_ip, $admin_user, $cfg_dir ) = @_;
 
-    # The address can have a CIDR suffix.  Remove it.
+    # Without a CIDR suffix.
     $static_ip =~ s|/\N*$||;
     my $target_is_up = 0;
 
-    # The key that opens the guest that is up.  It is found before
-    # generate_files writes anything.  It comes from the store, unless a domain
-    # that was provisioned before sealing still has one on disk.  The domain is
-    # the last part of the path of the configuration directory, because that
-    # path is made from the domain.
+    # From the store, or from the disk for a domain that was never sealed.  The
+    # domain is the last part of $cfg_dir.
     my $key2use = Trog::Guest->key_path( File::Basename::basename($cfg_dir), "$cfg_dir/key.rsa" );
 
     my $ssh = Net::SFTP::Foreign->new(
