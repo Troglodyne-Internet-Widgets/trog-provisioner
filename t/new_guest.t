@@ -136,6 +136,21 @@ subtest 'a dependency that needs something says so as well' => sub {
     ok( !exists $config->{'vm.test'}{logcollector}, 'as is one whose requirer supplied what it needed' );
 };
 
+subtest 'a recipe that salvages something can still be scaffolded' => sub {
+
+    # Provisioner::Recipe::required_recipes asks restores() what goes back, and
+    # Provisioner::Cookbook asks that at scaffold time with the global
+    # configuration and no domain.  letsencrypt and pdns both interpolate the
+    # domain into the paths they restore, so the undef was fatal under
+    # `warnings FATAL => 'all'` and bin/new_guest died before writing anything --
+    # "Use of uninitialized value $domain", naming a recipe nobody had asked
+    # about.  None of the recipes scaffolded above declares a restores(), which
+    # is why nothing here caught it.
+    my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['letsencrypt'], \%BASE_HAS_DATA );
+
+    ok( exists $config->{'vm.test'}{letsencrypt}, 'the recipe is scaffolded rather than taking the run down' );
+};
+
 subtest 'every domain gets a data recipe, because new_config requires one' => sub {
     my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
     ok( exists $config->{'vm.test'}{data}, 'added even though it was not asked for' );
