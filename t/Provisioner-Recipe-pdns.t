@@ -1,0 +1,105 @@
+#!/usr/bin/env perl
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aasx';
+
+=head1 NAME
+
+t/Provisioner-Recipe-pdns.t - the zone this recipe builds: which names in it are
+absolute, and which are deliberately not
+
+=cut
+
+use Test::More;
+use Test::NoWarnings;
+use File::Temp qw{tempdir};
+
+use FindBin::libs;
+
+# Never the installation's real /etc/trog-provisioner: what these assert on
+# should not depend on which machine they run on.
+## no critic (CompileTime) -- setting it at compile time is the point:
+## anything that reads it must be loaded after, not before.
+BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
+
+use Provisioner::Cookbook();
+
+# These patterns quotemeta a literal on purpose: a fixture domain full of dots
+# that would otherwise need escaping one at a time.
+## no critic (RegularExpressions::PreventUselessMetacharacterEscapes)
+
+my $DOMAIN = 'zone.test';
+
+# What bin/new_config hands the zone template.  Aliases arrive fully qualified:
+# new_config appends www and mail to the domain itself, and whatever ipmap.cfg
+# names is spelled out in full as well.
+my %VARS = (
+    domain      => $DOMAIN,
+    admin_email => 'doge@zone.test',
+    ipmap       => { $DOMAIN => '192.168.1.50' },
+    aliases     => { $DOMAIN => [ "www.$DOMAIN", "mail.$DOMAIN" ] },
+    nameservers => {},
+    modules     => [],
+    install_dir => '/opt/domains',
+    admin_user  => 'doge',
+);
+
+sub zone {
+    my $recipe = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+
+    return $recipe->render_file( 'files/pdns.zone.tt', %VARS, api_key => 'a-key' );
+}
+
+subtest 'a name given in full is emitted absolute' => sub {
+    my $zone = zone();
+
+    # The zonefile opens with $ORIGIN <domain>., so a name without a trailing
+    # dot has the origin put on it again.  An alias is already the whole name,
+    # so relative made www.zone.test answer as www.zone.test.zone.test -- and
+    # nothing resolved www.zone.test at all.  Measured on a guest.
+    like( $zone, qr/^\Qwww.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m,  'an alias CNAME ends in a dot' );
+    like( $zone, qr/^\Qmail.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m, 'each of them' );
+
+    # The MX target had the same fault, while every SRV target beside it was
+    # already absolute.
+    like( $zone, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./, 'the MX target ends in a dot' );
+
+    # One assertion for the whole class, so a third instance is caught without
+    # anybody having to think of it: nothing in the zone carries the origin
+    # twice.
+    unlike( $zone, qr/\Q$DOMAIN.$DOMAIN\E/, 'and no name in the zone has the origin on it twice' )
+      or diag $zone;
+};
+
+subtest 'a label that belongs to the zone stays relative' => sub {
+    my $zone = zone();
+
+    # The opposite mistake.  These are labels rather than names, so a trailing
+    # dot would make each of them a name at the root instead.
+    like( $zone, qr/^ns1\s+IN\s+A\s/m,            'ns1 is a label' );
+    like( $zone, qr/^autodiscover\s+IN\s+CNAME/m, 'as is autodiscover' );
+    like( $zone, qr/^autoconfig\s+IN\s+CNAME/m,   'and autoconfig' );
+
+    # Absolute already, and the pattern the MX record above should have
+    # followed.
+    like( $zone, qr/^_imaps\._tcp\s+IN\s+SRV\s+0\s+0\s+993\s+\Qmail.$DOMAIN\E\./m, 'an SRV target is absolute' );
+};
+
+subtest 'the apex is the origin, not a name of its own' => sub {
+    my $zone = zone();
+
+    like( $zone, qr/^\$ORIGIN\s+\Q$DOMAIN\E\./m,               'the zone declares its origin' );
+    like( $zone, qr/^\@\s+IN\s+A\s+192\.168\.1\.50/m,          'and the address is on the apex' );
+    like( $zone, qr/^\@\s+300\s+IN\s+NS\s+\Qns1.$DOMAIN\E\./m, 'with an absolute nameserver' );
+};
+
+Test::NoWarnings::had_no_warnings();
+
+done_testing();

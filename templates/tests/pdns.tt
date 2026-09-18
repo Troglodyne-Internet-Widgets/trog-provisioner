@@ -198,6 +198,32 @@ like($ports, qr/127\.0\.0\.1:2500/, 'pdns is on the port the recipe puts it on')
 # DNSSEC by default -- so without a negative trust anchor it answers SERVFAIL
 # for the one zone this guest exists to serve, while resolving everything else.
 # Nothing noticed until an ACME challenge could not be seen.
+# The zonefile as pdns loaded it.  $ORIGIN is this domain, so a name written
+# without a trailing dot has the origin put on it again -- and an alias is
+# already the whole name.  That made www.[% domain %] answer only as
+# www.[% domain %].[% domain %], on every guest, with nothing noticing: the
+# letsencrypt test asserts the certificate SAN rather than resolution.
+#
+# Asserted against the zonefile rather than against what resolves, because the
+# dnsrecords recipe publishes the same names through lexicon -- so a resolution
+# test would pass on its work rather than on this zone being right.
+my $zonefile = do { local (@ARGV, $/) = '/var/spool/powerdns/[% domain %]/bind.zone'; <> } // '';
+ok(length $zonefile, 'the zonefile pdns loaded its zone from is still on the guest');
+unlike($zonefile, qr/\Q[% domain %].[% domain %]\E/, 'no name in it carries the origin twice')
+    or diag $zonefile;
+
+# And nothing in the zone the server actually answers from, whoever put it there.
+my $served = `/opt/lexicon/[% domain %] list CNAME --output=JSON 2>&1`;
+unlike($served, qr/\Q[% domain %].[% domain %]\E/, 'nor in the zone the server answers from')
+    or diag $served;
+
+# Each alias resolving, which is the thing the doubling actually cost.
+my @aliases = qw([% FOREACH alias IN full_aliases.sort() %][% alias %] [% END %]);
+foreach my $alias (@aliases) {
+    my $answer = `dig \@127.0.0.1 -p 53 +short '$alias' 2>&1`;
+    like($answer, qr/\S/, "$alias resolves to something") or diag $answer;
+}
+
 my $status = `dig \@127.0.0.1 -p 53 '[% domain %]' SOA 2>&1`;
 like($status, qr/status: NOERROR/, 'the recursor answers for our own zone, rather than failing to validate it')
     or diag $status;
