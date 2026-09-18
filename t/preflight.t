@@ -411,6 +411,16 @@ subtest 'the missing keys can be seeded, but only at a terminal' => sub {
     is( $rc, 0, 'an answer it cannot import from is a decline, not an error' );
     is_deeply( \@ran, [], 'running nothing' );
 
+    # check_config fails an empty file as it fails a missing one, so the offer
+    # has to be made for both.
+    @ran = ();
+    open( my $empty, '>', $path ) or die "Could not write $path: $!";
+    close($empty)                 or die "Could not close $path: $!";
+    @answers = qw{gh somebody};
+    ($rc) = quietly( sub { Trog::Bin::Preflight::seed_admin_keys() } );
+    is( $rc, 1, 'an empty file is offered a seed' );
+    is_deeply( \@ran, ["ssh-import-id -o $path gh:somebody"], 'into that file' );
+
     @ran = ();
     open( my $fh, '>', $path )                                                or die "Could not write $path: $!";
     print {$fh} "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAsomebodyskey somebody\n" or die "Could not write $path: $!";
