@@ -19,7 +19,7 @@ use File::Basename();
 use File::Path();
 use File::Slurper();
 use Getopt::Long qw{GetOptionsFromArray};
-use List::Util   qw{uniq};
+use List::Util   qw{uniq sum};
 use Pod::Usage   qw{pod2usage};
 
 =head1 NAME
@@ -492,7 +492,8 @@ sub sweep_backups {
         return 0;
     }
 
-    my $count = scalar @copies;
+    # A copy is a volume on one machine, so a name two machines hold is two.
+    my $count = sum( map { scalar @{ $found{$_} } } @copies );
     print "$count " . ( $count == 1 ? 'disk' : 'disks' ) . " copied aside, and nothing has taken them away:\n";
     foreach my $name (@copies) {
         print "  $name (" . join( ', ', map { $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
@@ -510,8 +511,8 @@ sub sweep_backups {
         $removed++ for grep { $_ } map { $_->delete_volume($name) } @{ $found{$name} };
     }
 
-    print "Removed $removed of " . scalar(@copies) . " copies.\n";
-    return $removed == scalar(@copies) ? 0 : 1;
+    print "Removed $removed of $count copies.\n";
+    return $removed == $count ? 0 : 1;
 }
 
 =head2 sweep_orphans($uri, $hvconf, $dryrun)

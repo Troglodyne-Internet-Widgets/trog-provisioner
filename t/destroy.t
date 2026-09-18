@@ -414,6 +414,32 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
     Trog::HV->forget();
 };
 
+# A copy is one volume on one machine.  Two hypervisors can each hold a copy of
+# the same name, and each is a disk to count.
+subtest 'the backup sweep counts a copy on each machine that holds it' => sub {
+    Trog::HV->forget();
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/hypervisors.conf", "[hv1]\nlibvirt_uri=qemu+ssh://root\@hv1.test.test/system\n\n[hv2]\nlibvirt_uri=qemu+ssh://root\@hv2.test.test/system\n" );
+
+    my %refuses;
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( pool          => sub { bless {}, 'Test::Pool' } );
+    $hv->redefine( delete_volume => sub { return $refuses{ $_[0]->name } ? 0 : 1 } );
+    local @Test::Pool::VOLUMES = qw{both.test.bak-qcow2};
+
+    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_backups( undef, "$dir/hypervisors.conf", 0 ) } );
+    like( $said, qr/2[ ]disks[ ]copied[ ]aside/,    'two copies, one on each machine' );
+    like( $said, qr/Removed[ ]2[ ]of[ ]2[ ]copies/, 'and both removed, out of two' );
+    is( $rc, 0, 'which is success' );
+
+    %refuses = ( hv1 => 1 );
+    ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_backups( undef, "$dir/hypervisors.conf", 0 ) } );
+    like( $said, qr/Removed[ ]1[ ]of[ ]2[ ]copies/, 'a copy one machine kept is counted as kept' );
+    is( $rc, 1, 'and the sweep fails for it' );
+
+    Trog::HV->forget();
+};
+
 subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
     write_config( 'named.test' => 1 );
 
