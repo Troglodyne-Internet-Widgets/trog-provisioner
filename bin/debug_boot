@@ -407,7 +407,7 @@ sub guest_tool {
     my $out = $hv->capture_cmd( join ' ', 'sudo', $tool, map { _shq($_) } @args );
     my $rc  = $? >> 8;
 
-    die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install guestfs-tools\n" if $rc == 127;
+    die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;
 
     return ( $out, $rc );
 }

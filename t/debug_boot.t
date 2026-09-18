@@ -268,4 +268,19 @@ subtest 'a screenshot is streamed straight here, and named for what it is' => su
     is( Trog::Bin::DebugBoot::screen_file( 'vm.test', 'image/x-portable-pixmap' ), '/tmp/vm.test-screen.ppm', 'and a PPM .ppm' );
 };
 
+# bin/preflight and this both tell an operator what to install when the tools
+# are missing.  Two package names for one fix is one too many.
+subtest 'a missing disk tool names the package preflight names' => sub {
+    my $mock = with_vmm();
+    $mock->redefine( capture_cmd => sub { $? = 127 << 8; return q{} } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
+    $mock->redefine( run_cmd     => sub { return 1 } );
+
+    my $hv  = bless( {}, 'Trog::HV::Libvirt' );
+    my $err = exception { Trog::Bin::DebugBoot::guest_tool( $hv, qw{virt-cat -d vm.test /etc/hostname} ) };
+
+    my ($package) = $hv->note_libguestfs->{fix} =~ m/apt[ ]install[ ](\S+)/;
+    ok( $package, 'preflight names a package' );
+    like( $err, qr/apt[ ]install[ ]\Q$package\E\n/, 'and the same one is named here' );
+};
+
 done_testing();
