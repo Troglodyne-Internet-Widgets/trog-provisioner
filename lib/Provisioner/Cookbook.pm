@@ -1119,8 +1119,8 @@ Returns the directory of the domain under the data source.  Returns undef if
 C<$domain> is empty or if nothing names the data source.
 
 C<bin/new_config> makes the data directories of the recipes in it, and writes
-into it what it fetched from the last guest.  Then it ships the directory to
-the hypervisor, and the guest pulls its payload from it.
+into it what it fetched from the last guest.  The guest fetches its payload
+from this machine, not from the hypervisor.
 C<bin/destroy --purge-data> removes it.
 
 =cut
