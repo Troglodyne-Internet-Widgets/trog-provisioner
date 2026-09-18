@@ -764,8 +764,8 @@ A guest rsyncs these out of this machine, and the recipe that wants one fails
 when it is not there:
 
 $detail
-They used to be read off the hypervisor, so on an installation that predates
-that change they are still over there.  Bring them here:
+An older installation keeps them on the hypervisor.  If yours does, bring them
+here:
 
     rsync -a @{[ $self->ssh_host // 'the-hypervisor' ]}:<path>/ <path>/
 FIX
