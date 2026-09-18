@@ -92,25 +92,18 @@ not applying it.  The hook sees the first, and the review is still yours.
 Then the mechanical ones:
 
     perl -c <each changed .pm or bin/ script>
-    perlcritic --profile .perlcriticrc         bin/ lib/ t/
-    perlcritic --profile .perlcriticrc.scripts scripts/
     podchecker <each changed file>
     prove -lm -j8 t/
 
-Two profiles, and the path decides which.  What is under `scripts/` ships to a
-guest and runs on that guest's system perl, so it declares `use 5.014` where
-everything else here declares `use 5.041` -- and `.perlcriticrc` leaves seven
-policies out on the stated grounds that 5.041 makes them unnecessary, which is
-not true one directory over.  `.perlcriticrc.scripts` names those seven and
-drops what does not fit a script whose job is to drive ufw, iptables or cpanm.
-`scripts/.perlcriticrc` is a link to it, so that a tool that looks for a
-profile beside the file it lints, the editor included, finds the right one.
+Do not run `perltidy` or `perlcritic` yourself.  The pre-commit hook tidies
+the Perl you staged, and then runs perlcritic over it with the right profile
+for its path.  If a profile objects, the commit does not happen, and the hook
+prints why.  Install the hook once in each checkout that you commit from:
 
-The hook does the tidy and both perlcritic lines for you, over the files you
-staged, once it is installed: `cp git-hooks/pre-commit .git/hooks/`.  Do that
-once, in any checkout you intend to commit from -- a commit a profile objects
-to then does not happen.  `perl -c`, `podchecker` and the suite stay yours to
-run.
+    cp git-hooks/pre-commit .git/hooks/
+
+`git-hooks/pre-commit` says which profile judges which path, and why
+`scripts/` has a profile of its own.
 
 ## When something is slow
 

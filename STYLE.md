@@ -1,10 +1,9 @@
 # Perl Style
 
-Use `perltidy` on your perl code when done editing, we have a .perltidyrc
-
-There is a git hook which does it for you on the way in, and which then runs
-perlcritic over what you staged and refuses the commit if the profile objects.
-Install it once:
+The perl here is tidied with `perltidy` and the `.perltidyrc` beside this file.
+You do not run it yourself.  The git pre-commit hook tidies what you staged, and
+then runs perlcritic over it.  If the profile objects, the hook refuses the
+commit.  Install it once:
 
     cp git-hooks/pre-commit .git/hooks/
 
