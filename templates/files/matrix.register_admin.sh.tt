@@ -5,18 +5,38 @@
 # a recipe in its own shell.
 
 # Wait up to a minute for synapse to answer.
+READY=
 for i in $(seq 1 30); do
     if curl -s http://127.0.0.1:8008/_matrix/client/versions > /dev/null 2>&1; then
         echo "Matrix Synapse is ready"
+        READY=1
         break
     fi
     echo "Waiting for Matrix Synapse to start... ($i/30)"
     sleep 2
 done
+if [ -z "$READY" ]; then
+    echo "Matrix Synapse did not answer, so the admin user was not registered" >&2
+    exit 1
+fi
+
+# From a file, so that the password is not on a command line that ps shows.
+PASSWORD_FILE=$(mktemp) || exit 1
+trap 'rm -f "$PASSWORD_FILE"' EXIT
+cat > "$PASSWORD_FILE" <<'PASSWORD'
+[% admin_password %]
+PASSWORD
+chown matrix-synapse "$PASSWORD_FILE" || exit 1
 
 # Register the admin user, unless it already exists.
-if ! su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] -p [% admin_password %] --admin 2>&1" | grep -q "User ID already taken"; then
+OUTPUT=$(su - matrix-synapse -s /bin/bash -c "register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml -u [% admin_user %] --password-file $PASSWORD_FILE --admin" 2>&1)
+STATUS=$?
+if [ "$STATUS" -eq 0 ]; then
     echo "Admin user registered successfully"
-else
+elif echo "$OUTPUT" | grep -q "User ID already taken"; then
     echo "Admin user already exists"
+else
+    echo "Could not register the admin user:" >&2
+    echo "$OUTPUT" >&2
+    exit "$STATUS"
 fi
