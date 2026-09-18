@@ -5,6 +5,9 @@
 # Nothing else on this guest can make the directory again.  An MDB database is
 # tied to the slapd that wrote it, but any version of OpenLDAP reads LDIF.
 # Provisioner::Recipe::ldap, under SURVIVING A REBUILD, has the full account.
+#
+# Only the admin user can read the export, because it holds every password hash
+# in the directory.
 
 set -euo pipefail
 
