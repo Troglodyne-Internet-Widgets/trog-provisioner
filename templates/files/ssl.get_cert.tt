@@ -13,7 +13,7 @@
 # step-ca validates dns-01 through it.  If that resolver cannot see the zone,
 # lexicon asks pdns for zones/. and every challenge fails.
 for _ in $(seq 1 60); do
-    [ -S /var/spool/powerdns/api.sock ] \
+    [ -S [% lexicon_socket %] ] \
       && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . \
       && dig +short [% domain %] SOA 2>/dev/null | grep -q . \
       && break

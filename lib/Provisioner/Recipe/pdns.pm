@@ -196,6 +196,8 @@ sub enrich {
 
     $opts{serial} = time;
 
+    $opts{api_socket} = $API_SOCKET;
+
     return %opts;
 }
 

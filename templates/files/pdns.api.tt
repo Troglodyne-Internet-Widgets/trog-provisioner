@@ -1,6 +1,6 @@
 api=yes
 api-key=[% api_key %]
-# A path inside the chroot, so /var/spool/powerdns/api.sock on the host.
-# synczones and the patched lexicon use that path.
+# A path inside the chroot, so [% api_socket %] on the host.  synczones and the
+# patched lexicon use that path.
 webserver-address=/api.sock
 webserver-hash-plaintext-credentials=yes
