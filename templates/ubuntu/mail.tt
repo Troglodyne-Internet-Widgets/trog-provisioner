@@ -16,13 +16,13 @@ mv InternalHosts /etc/opendkim
 [ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
-sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
+chmod 0600 /etc/opendkim/keys/[% domain %]/*
 # Put a copy in /mail for the fetch to read.  remote_files names this copy,
 # not /etc/opendkim/keys.  Provisioner::Recipe::mail says why.
 #
 # The trailing dot is necessary.  If /mail/keys exists, `cp -r
 # /etc/opendkim/keys /mail/keys` copies the directory into /mail/keys/keys.
-# install_dkim_records looks for /mail/keys/<domain>/default.private.
+# restores() takes the key back from /mail/keys/<domain>.
 mkdir -p /mail/keys
 cp -r /etc/opendkim/keys/. /mail/keys/
 chown -R root:root /mail/keys
@@ -47,7 +47,7 @@ chown opendmarc:postfix /var/spool/postfix/opendmarc
 chmod 0770 /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
 # Update the DNS records, if this guest runs a DNS server.
-[% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %] /mail/[% domain %]/default.private
+[% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %]
 # dovecot
 # First, move the packaged conf.d out of the way.
 mv /etc/dovecot/conf.d /etc/dovecot/conf-available
