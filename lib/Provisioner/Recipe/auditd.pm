@@ -31,7 +31,7 @@ places:
     * /etc and /var
     * The install_dir of each domain
 
-TODO: send these logs to an intrusion detection system.
+TODO: send these logs to grafana (#219).
 
 =cut
 

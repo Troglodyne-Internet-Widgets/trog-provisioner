@@ -25,7 +25,7 @@ foreach my $REPO_DIR (@subdirs) {
 
     next unless -d "$repo_dirname/";
 
-    # TODO: install the dependencies of dzil and Module::Build distributions.
+    # TODO: install the dependencies of dzil and Module::Build distributions (#225).
     next unless -f "$repo_dirname/Makefile.PL";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- which build system the repo has, not an access check
     system( @INSTALLDEPS, "$repo_dirname/" );
     my $rc = $? >> 8;

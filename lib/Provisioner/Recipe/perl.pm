@@ -41,7 +41,7 @@ F<scripts/build_latest_perl.sh> says why.  cpan_install installs the release
 that the index of the mirror names, not the one that cpanmetadb names.  A
 version pin that needs an older release is the exception.
 
-TODO: let the configuration choose the version of perl.
+TODO: let the configuration choose the version of perl (#222).
 
 =head2 What other recipes install into it
 

@@ -37,7 +37,7 @@ state.  It is the site that somebody runs, so this recipe does not reset,
 update or reconcile it.  C<config/> is partly tracked, so a write into the
 working tree replaces a live configuration with what master says today.
 
-TODO: let the configuration name a SHA to check out.
+TODO: let the configuration name a commit to check out (#223).
 
 tCMS requires C<Sys::Virt>, so this recipe installs it before the other modules
 that the checkout needs.  It pins the version that pkg-config reports for the

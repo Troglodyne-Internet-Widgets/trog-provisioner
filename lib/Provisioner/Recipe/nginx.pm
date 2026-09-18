@@ -55,7 +55,7 @@ sub template_files {
         'nginx.global.conf.tt' => 'nginx.global.conf',
         'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
 
-        #XXX TODO: openssl.conf belongs in the MAIN target, not in this recipe.
+        #XXX TODO: remove this, because bin/new_config copies openssl.conf over it (#221).
         'openssl.tt' => 'openssl.conf',
     );
 }
