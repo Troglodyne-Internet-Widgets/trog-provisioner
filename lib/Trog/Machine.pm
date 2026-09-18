@@ -6,8 +6,8 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
-use File::Basename();
 use File::Path();
+use Path::Tiny();
 use File::Copy();
 use File::Temp();
 use List::Util qw{any};
@@ -566,10 +566,14 @@ sub remove_tree {
 
 sub list_dir {
     my ( $self, $path ) = @_;
-    return map { File::Basename::basename($_) } glob "$path/*" if $self->is_local;
+    if ( $self->is_local ) {
+        return () unless -d $path;
+        my @names = sort map { $_->basename } Path::Tiny::path($path)->children(qr/\A[^.]/);
+        return @names;
+    }
 
     # ls, not sftp.  See "Why none of this uses sftp".
-    my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
+    my $listing = $self->capture_cmd( 'ls -1 ' . _shq($path) . ' 2>/dev/null' ) // '';
     return grep { $_ } split( m/\n/, $listing );
 }
 
@@ -717,8 +721,9 @@ sub _sudo_append {
 
 =head2 _shq($string)
 
-Returns C<$string> quoted for a POSIX shell.  Only C<_sudo_append> uses it,
-because C<<< >> >>> has no argv form.
+Returns C<$string> quoted for a POSIX shell, for a command that has to be one
+string.  C<_sudo_append> uses it because C<<< >> >>> has no argv form, and
+C<list_dir> uses it for the path it lists.
 
 =cut
 

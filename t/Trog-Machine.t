@@ -24,6 +24,7 @@ use File::Temp       qw{tempdir};
 use File::Path();
 use File::Slurper();
 use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -255,6 +256,22 @@ subtest 'a file read off a remote machine comes back whole' => sub {
         return $self->{content};
     }
 }
+
+subtest 'list_dir takes a path with a space in it' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$dir/two words/inside");
+
+    my ( $machine, $mock ) = here();
+    is_deeply( [ $machine->list_dir("$dir/two words") ], ['inside'], 'on this machine' );
+    undef $mock;
+
+    # The command goes to a shell here rather than over ssh, which is what the
+    # far side does with it too.
+    my $remote = Test::MockModule->new('Trog::Machine');
+    $remote->redefine( capture_cmd => sub { IPC::Run3::run3( $_[1], \undef, \my $out, \undef ); return $out } );
+    is_deeply( [ remote()->list_dir("$dir/two words") ],         ['inside'], 'and on another' );
+    is_deeply( [ remote()->list_dir("$dir/none; echo leaked") ], [],         'where a semicolon is part of the name, not the end of a command' );
+};
 
 subtest 'what sudo says when it wants a password it cannot ask for' => sub {
     my $wants = sub { Trog::Machine::_wants_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
