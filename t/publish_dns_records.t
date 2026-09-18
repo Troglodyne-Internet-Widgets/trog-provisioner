@@ -111,6 +111,12 @@ subtest 'a record the provider does not hold is created' => sub {
             unlike( $create, qr/--identifier/, 'and no identifier, there being no record of theirs to amend' );
 
             is( scalar sent( $ran, 'delete' ), 0, 'nothing is deleted, the zone being somebody else to keep' );
+
+            # A type with nothing wanted of it is not asked about at all: a
+            # domain with no aliases has no CNAME to publish, and the list that
+            # would have found that out is a round trip for an empty answer.
+            my @lists = grep { index( $_, ' list ' ) >= 0 } @{$ran};
+            is( scalar @lists, 1, 'and with no aliases the provider is asked for A alone' );
         }
     );
 };

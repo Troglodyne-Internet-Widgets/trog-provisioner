@@ -129,36 +129,34 @@ sub main {
     die "No lexicon shortcut at $shortcut.\n" . "Provisioner::Recipe::lexicon installs it, and this needs the credential in it.\n"
       unless -x $shortcut;
 
-    # Once per type rather than once per record.  Every one of these is a round
-    # trip to whoever holds the zone, and asking again between two aliases also
-    # means deciding about them against two different answers.
-    my @a_records = existing( $shortcut, 'A' );
-
     # The address, and then one alias pointing at the name that holds it.  No
     # ns1: the pdns recipe publishes one because a guest serving its own zone is
     # its own nameserver, and a zone somebody else holds has nameservers of
     # theirs that this is in no position to contradict.
-    my $failures = publish(
-        shortcut => $shortcut,
-        held     => held_for( \@a_records, $domain ),
-        type     => 'A',
-        name     => $domain,
-        content  => $address,
-        dryrun   => $dryrun,
+    my %wanted = (
+        A     => { $domain => $address },
+        CNAME => { map { $_ => $domain } @aliases },
     );
 
-    return $failures ? 1 : 0 unless @aliases;
+    my $failures = 0;
+    foreach my $type ( sort keys %wanted ) {
+        next unless %{ $wanted{$type} };
 
-    my @cnames = existing( $shortcut, 'CNAME' );
-    foreach my $alias ( sort @aliases ) {
-        $failures += publish(
-            shortcut => $shortcut,
-            held     => held_for( \@cnames, $alias ),
-            type     => 'CNAME',
-            name     => $alias,
-            content  => $domain,
-            dryrun   => $dryrun,
-        );
+        # Once per type rather than once per record.  Every list is a round trip
+        # to whoever holds the zone, and asking again between two aliases would
+        # decide about them against two different answers.
+        my @held = existing( $shortcut, $type );
+
+        foreach my $name ( sort keys %{ $wanted{$type} } ) {
+            $failures += publish(
+                shortcut => $shortcut,
+                held     => held_for( \@held, $name ),
+                type     => $type,
+                name     => $name,
+                content  => $wanted{$type}{$name},
+                dryrun   => $dryrun,
+            );
+        }
     }
 
     return $failures ? 1 : 0;

@@ -71,13 +71,10 @@ empty wherever the provider holding the zone is the local one.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # eval, because a domain configured with no provider at all is a fault this
-    # recipe is not the right one to report: letsencrypt and lexicon both say so
-    # in terms, and a third message racing them helps nobody.
-    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
-    my $address  = $opts{main_ip}                                       // q{};
+    my $provider = Provisioner::DNSRecipe->provider_for(%opts);
+    my $address  = $opts{main_ip} // q{};
 
-    $opts{publish_records} = ( $provider && $provider ne Provisioner::DNSRecipe->local_implementation() && $address ) ? 1 : 0;
+    $opts{publish_records} = ( $provider ne Provisioner::DNSRecipe->local_implementation() && $address ) ? 1 : 0;
 
     return %opts;
 }
