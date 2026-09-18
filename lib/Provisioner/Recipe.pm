@@ -658,8 +658,9 @@ the configuration leaves out.  In some cases, you can then leave the dependency
 out of the configuration entirely.
 
 The base class requires C<ufw> when C<rate_limits> returns limits, and C<data>
-when C<restores> returns something.  An override that wants those edges must
-add what C<SUPER::required_recipes> returns.
+when C<restores> returns something.  An override does not need to call
+C<SUPER::required_recipes> for those, because C<bin/new_config> asks the base
+class itself.  See L<Provisioner::Cookbook/Two sources, on purpose>.
 
 =head3 Substitutable dependencies
 
