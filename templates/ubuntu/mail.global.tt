@@ -1,7 +1,7 @@
-mkdir -p /mail/scripts
-cp [% script_dir %]/dovecot_overquota /mail/scripts
-chown -R dovecot:dovecot /mail
-chmod -R 0775 /mail
+# Not recursive, because the target of each domain keeps its own mail store and
+# its staged DKIM key under /mail closed.
+install -d -m 0775 -o dovecot -g dovecot /mail /mail/scripts
+install -m 0775 -o dovecot -g dovecot [% script_dir %]/dovecot_overquota /mail/scripts/
 # The half of the mail configuration that is about this guest, not about a
 # domain.  It goes into the fragment directories that configd makes the files
 # of postfix and opendkim from.  It is said once, here, because configd joins
