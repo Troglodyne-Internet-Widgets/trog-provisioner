@@ -439,7 +439,8 @@ command over the connection when it is not.  The C<sudo> option on the writers
 is for destinations that the login user does not own, such as anything under
 C</etc>, C</usr> or C</root>.  With C<sudo>, C<mode> sets the permissions of the
 result, and the default is 0644.  The chmod is necessary because a staging file
-from C<mktemp> is 0600.
+from C<mktemp> is 0600, and a local copy through sudo gets the umask of root.  A
+write without C<sudo> leaves the mode to the writer.
 
 =over 4
 
@@ -611,9 +612,10 @@ sub put_file {
     if ( $self->is_local ) {
 
         # Copy it ourselves if we can, and use sudo only if that fails.
-        return 1                                                       if File::Copy::copy( $local, $remote );
-        return $self->run_sudo( qw{cp}, $local, $remote ) == 0 ? 1 : 0 if $opts{sudo};
-        return 0;
+        return 1 if File::Copy::copy( $local, $remote );
+        return 0 unless $opts{sudo};
+        return 0 if $self->run_sudo( qw{cp}, $local, $remote );
+        return $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $remote ) == 0 ? 1 : 0;
     }
 
     return $self->_pour( { stdin_file => $local }, $remote, %opts );
