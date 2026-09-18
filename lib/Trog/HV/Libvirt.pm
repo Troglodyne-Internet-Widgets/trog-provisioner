@@ -1411,6 +1411,94 @@ sub rebuild_destroys_guest {
     return $self->disk_reusable( $domain, $opts{capacity} ) ? 0 : 1;
 }
 
+=head2 $hv->clone_guest_disk($domain)
+
+Copy this guest's disk aside as C<$domain.bak-qcow2>, and say where it landed.
+
+Taken with the guest stopped.  A qcow2 copied while qemu is writing into it is a
+copy of a moment that never existed, and the caller asking for this is about to
+destroy the guest anyway, so stopping costs it nothing.
+
+A disk and nothing else: no domain is defined for the copy, it takes no address
+out of the pool, and nothing starts it.  What it is for is the data that was on
+the guest, and a copy that booted would be a second machine answering to the
+first one's name.
+
+Nothing removes it afterwards.  C<guest_volumes> does not name it, so
+F<bin/destroy> leaves it alone -- deliberately, since it is the copy of a machine
+somebody was about to lose.  One that is already there is kept rather than
+written over, because the older copy is as likely to be the wanted one.
+
+Undef when there is no disk to copy, which is an answer rather than a failure.
+
+Anything that goes wrong in the copying dies instead of answering undef.  The
+caller rebuilds over the disk on the strength of a copy having been made, so a
+refusal that read as "there was nothing to copy" would destroy exactly what it
+was asked to keep.
+
+=cut
+
+sub clone_guest_disk {
+    my ( $self, $domain ) = @_;
+
+    # A guest with no disk has none to copy, which is an answer.  Everything
+    # after it is a failure if it goes wrong, and dies saying so: the caller
+    # rebuilds over the disk on the strength of a copy having been made, so a
+    # failure that read as "nothing to copy" would destroy what it was asked to
+    # keep.
+    my $source = $self->volume("$domain-qcow2") or return;
+    my $info   = $source->get_info();
+    my $name   = "$domain.bak-qcow2";
+
+    if ( my $existing = $self->volume_path($name) ) {
+        print "$name is in the pool already; keeping that rather than writing over it.\n";
+        return $existing;
+    }
+
+    $self->stop_domain($domain);
+
+    print "Copying $domain's disk aside as $name\n";
+
+    # No backingStore declared, so the copy stands on its own rather than
+    # depending on the base image this guest was laid over.  It is a backup: one
+    # that stops working when somebody prunes another file is not much of one.
+    my $clone = $self->pool->clone_volume( <<"XML", $source );
+<volume>
+  <name>@{[ _xml_escape($name) ]}</name>
+  <capacity unit='bytes'>$info->{capacity}</capacity>
+  <target><format type='qcow2'/></target>
+</volume>
+XML
+
+    return $clone->get_path();
+}
+
+=head2 $hv->backup_volumes
+
+Every disk in the pool that C<clone_guest_disk> put there, by name.
+
+The suffix is this backend's to know.  A caller sweeping them up asks for the
+list rather than matching on C<.bak-qcow2> itself, so the convention lives where
+the copies are made.
+
+=cut
+
+sub backup_volumes {
+    my ($self) = @_;
+
+    # Nothing here is caught, the volume names included.  A pool that will not
+    # answer is not a pool with nothing in it, and a volume that will not say its
+    # own name is not a volume that is not there: both are a failure to find out,
+    # and a caller handed the shorter list sweeps fewer copies than exist without
+    # anything saying so.  EPERM on a pool is not a smaller answer, it is none.
+    #
+    # list_all_volumes rather than list_volumes, which is documented as one RPC
+    # call per volume.
+    my @names = sort grep { m/[.]bak-qcow2 \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
+
+    return @names;
+}
+
 =head2 $hv->disk_layout($volume)
 
 The cluster size and subcluster allocation of an existing qcow2, as a hashref,

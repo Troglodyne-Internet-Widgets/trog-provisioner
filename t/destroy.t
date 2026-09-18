@@ -294,6 +294,7 @@ subtest 'the POD documents the interface' => sub {
     like( $text, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
     like( $text, qr/--purge-data/, 'POD documents --purge-data' );
     like( $text, qr/--orphans/,    'POD documents --orphans' );
+    like( $text, qr/--backups/,    'POD documents --backups' );
 };
 
 # --- the data directory, and the sweep for what runs left behind ---
@@ -309,6 +310,23 @@ subtest 'the POD documents the interface' => sub {
     }
 
     package Test::Libvirt::Domain;
+    sub get_name ($self) { return $self->{name} }
+}
+
+# The pool a backup sweep reads, kept apart from the domain fake above because
+# the two sweeps ask different questions of a hypervisor.
+{
+
+    package Test::Pool;
+    our @VOLUMES;
+    our $REFUSE = 0;
+
+    sub list_all_volumes {
+        die "cannot read the pool\n" if $REFUSE;
+        return map { bless { name => $_ }, 'Test::Pool::Volume' } @VOLUMES;
+    }
+
+    package Test::Pool::Volume;
     sub get_name ($self) { return $self->{name} }
 }
 
@@ -355,6 +373,48 @@ subtest 'purge_data_dir takes the domain data directory, and dryrun does not' =>
     like( $said, qr/says[ ]where[ ]the[ ]data[ ]source[ ]is/, 'with no data source it says there is nothing to remove' );
     ok( -d "$data/kept.test", 'rather than guessing where one is' );
     File::Path::remove_tree("$data/kept.test");
+};
+
+subtest 'the backup sweep takes the copies, which nothing else ever will' => sub {
+    Trog::HV->forget();
+
+    my @deleted;
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( pool => sub { bless {}, 'Test::Pool' } );
+    $hv->redefine( delete_volume => sub { push @deleted, $_[1]; return 1 } );
+
+    local @Test::Pool::VOLUMES = qw{live.test-qcow2 live.test-cloudinit.iso gone.test.bak-qcow2 live.test.bak-qcow2};
+
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    like( $said, qr/gone\.test\.bak-qcow2/,      'the dry run names a copy' );
+    like( $said, qr/2[ ]disks[ ]copied[ ]aside/, 'and counts them in a sentence that agrees with itself' );
+    like( $said, qr/live\.test\.bak-qcow2/,      'and the copy of a guest that is still here, since both are copies' );
+    unlike( $said, qr/live\.test-qcow2/, 'and not the disk a guest is running on' );
+    is_deeply( \@deleted, [], 'removing none of it' );
+
+    says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
+    is_deeply( \@deleted, [qw{gone.test.bak-qcow2 live.test.bak-qcow2}], 'and the sweep takes the copies, and only the copies' );
+
+    # The noun still agrees with the count, which is all that is left to get
+    # wrong now that the verb carries its own tense.
+    @deleted = ();
+    local @Test::Pool::VOLUMES = qw{only.test.bak-qcow2};
+    my ($alone) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    like( $alone, qr/1[ ]disk[ ]copied[ ]aside/, 'and a single copy is counted in the singular' );
+    unlike( $alone, qr/1[ ]disks/, 'rather than agreeing with nothing' );
+
+    # A pool that will not answer is not a pool with nothing in it.  It throws,
+    # and nothing catches it: turning that into an exit code is how EPERM comes
+    # to read as "there was nothing here".
+    @deleted = ();
+    local $Test::Pool::REFUSE = 1;
+    my $refused = exception {
+        says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } )
+    };
+    like( $refused, qr/cannot[ ]read[ ]the[ ]pool/, 'a pool it could not read takes the run down with it' );
+    is_deeply( \@deleted, [], 'and nothing is removed on the strength of it' );
+
+    Trog::HV->forget();
 };
 
 subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
@@ -414,7 +474,7 @@ subtest 'the sweep covers the domain directory as well as the data source' => su
     File::Path::remove_tree("$data/live.test");
 };
 
-subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
+subtest 'a hypervisor that will not say what it has takes the run down' => sub {
     write_config();
     make_path("$data/orphan.test");
 
@@ -423,9 +483,13 @@ subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
     $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
     $hv->redefine( vmm        => sub { die "connection refused\n" } );
 
-    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
-    is( $rc, 1, 'the sweep fails rather than carrying on' );
-    like( $said, qr/nothing[ ]is[ ]swept/, 'and says so' );
+    # libvirt's own words rather than ours.  Nothing catches this to reword it,
+    # which is the whole point: a hypervisor that cannot be asked what it holds
+    # is not one anything here could work against.
+    my $refused = exception {
+        says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } )
+    };
+    like( $refused, qr/connection[ ]refused/, 'the sweep dies rather than carrying on' );
 
     # The guests it holds are exactly the ones that would look like orphans.
     ok( -d "$data/orphan.test", 'nothing was removed on the strength of a list it could not get' );

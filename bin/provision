@@ -29,7 +29,7 @@ use YAML::XS();
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
-use IO::Prompter();
+use Trog::Utils();
 
 use Carp::Always;
 
@@ -84,6 +84,24 @@ it, because the whole point is that somebody read what it is about to lose.
 
 A directory the guest has never written does not trip this, and neither does a
 domain that has no guest yet, so a new machine never needs it.
+
+=item B<--clone-on-nonreusable>
+
+Copy the guest's disk aside as C<DOMAIN.bak-qcow2> before the rebuild destroys
+it, and then rebuild.
+
+A disk and nothing else: no domain is defined for the copy, it takes no address
+out of the pool, and nothing starts it.  It is there so that what was on the
+guest is still somewhere, and a copy that booted would be a second machine
+answering to the first one's name.
+
+Nothing removes it afterwards, F<bin/destroy> included.  That is deliberate --
+it is the copy of a machine somebody was about to lose -- so deleting it when you
+no longer want it is yours to do.
+
+A rebuild that cannot make the copy does not go ahead.
+
+Mutually exclusive with the other two.
 
 =item B<--destroy-on-nonreusable>
 
@@ -382,6 +400,7 @@ sub _public_half {
 # and it can land later without renumbering what is here.
 our %NONREUSABLE = (
     ask     => 0,
+    clone   => 1,
     destroy => 2,
     stop    => 3,
 );
@@ -392,7 +411,7 @@ sub main {
     umask 0022;
 
     my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
-    my ( $destroy_on_nonreusable, $die_on_nonreusable );
+    my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     GetOptionsFromArray(
         \@args,
         'existing=s'             => \$reuse,
@@ -405,16 +424,19 @@ sub main {
         'ipmap=s'                => \$ipmap,
         'credentials'            => \$credentials,
         'salvage-gaps-ok'        => \$salvage_gaps_ok,
+        'clone-on-nonreusable'   => \$clone_on_nonreusable,
         'destroy-on-nonreusable' => \$destroy_on_nonreusable,
         'die-on-nonreusable'     => \$die_on_nonreusable,
     );
 
+    my @said = grep { $_ } ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     pod2usage(
         -exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => '--destroy-on-nonreusable and --die-on-nonreusable say opposite things; pass one'
-    ) if $destroy_on_nonreusable && $die_on_nonreusable;
+        -message => 'the --*-on-nonreusable options say different things; pass one'
+    ) if scalar @said > 1;
 
     my $nonreusable = $NONREUSABLE{ask};
+    $nonreusable = $NONREUSABLE{clone}   if $clone_on_nonreusable;
     $nonreusable = $NONREUSABLE{destroy} if $destroy_on_nonreusable;
     $nonreusable = $NONREUSABLE{stop}    if $die_on_nonreusable;
 
@@ -678,20 +700,20 @@ sub choose_hypervisor {
     return $hv;
 }
 
-# Asked only where somebody is there to answer.  IO::Prompter reads from *ARGV,
-# and this program has arguments -- the domain is one -- so without flattening it
-# the prompt goes off to open a file named after one of them.
-# Trog::Credentials::prompt has the whole of that argument.
+# Asked only where somebody is there to answer.  Through Trog::Utils, which is
+# where the reason IO::Prompter cannot simply be called is written down.
 sub ask_about_nonreusable {
     my ($domain) = @_;
 
     print "$domain is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding destroys the guest and everything on it.\n";
 
-    my $answer = Trog::Utils::prompt('Destroy it and rebuild, or stop? [destroy/stop]:');
+    my $answer = Trog::Utils::prompt('Copy the disk aside first, destroy it and rebuild, or stop? [copy/destroy/stop]:');
 
-    # Anything that is not the word goes the safe way, an empty answer included:
-    # this is the question where a slip costs somebody their guest.
-    return ( lc "$answer" ) eq 'destroy' ? $NONREUSABLE{destroy} : $NONREUSABLE{stop};
+    # Anything that is not one of the words goes the safe way, an empty answer
+    # included: this is the question where a slip costs somebody their guest.
+    return $NONREUSABLE{clone}   if ( lc "$answer" ) eq 'copy';
+    return $NONREUSABLE{destroy} if ( lc "$answer" ) eq 'destroy';
+    return $NONREUSABLE{stop};
 }
 
 sub provision_domain (%args) {
@@ -738,8 +760,16 @@ sub provision_domain (%args) {
         $behavior = Trog::Local->interactive ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
           if $behavior == $NONREUSABLE{ask};
 
-        die "Refusing to rebuild $domain: it is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding would destroy the guest and everything on it.\n" . "Pass --destroy-on-nonreusable to do it anyway.\n"
+        die "Refusing to rebuild $domain: it is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding would destroy the guest and everything on it.\n" . "Pass --clone-on-nonreusable to copy the disk aside first, or --destroy-on-nonreusable to do it anyway.\n"
           if $behavior == $NONREUSABLE{stop};
+
+        # A copy that was asked for and did not happen is not a thing to rebuild
+        # over: the whole point of asking was to still have the disk afterwards.
+        if ( $behavior == $NONREUSABLE{clone} ) {
+            my $copy = $hv->clone_guest_disk($domain)
+              or die "Could not copy $domain's disk aside, so nothing here will rebuild over it.\n";
+            print "Copied $domain's disk aside as $copy; nothing removes that, including bin/destroy.\n";
+        }
 
         print "Rebuilding $domain destroys it: its disk cannot be kept at the size this build asks for.\n";
     }
