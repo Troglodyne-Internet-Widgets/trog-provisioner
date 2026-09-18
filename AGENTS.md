@@ -31,8 +31,7 @@ cpanm --installdeps .
 # Run perl syntax check, should say OK
 perl -c lib/Provisioner/Recipe/yourmodule.pm
 
-# Run it thru perlcritic, should get no output
-perlcritic lib/Provisioner/Recipe/yourmodule.pm
+# perltidy and perlcritic run in the pre-commit hook.  See STYLE.md.
 
 # Check POD documentation has no POD errors
 perldoc lib/Provisioner/Recipe/yourmodule.pm
