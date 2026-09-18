@@ -57,7 +57,7 @@ mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
 # The accounts come from the recipe, so keep the salvaged passwd file as
 # passwd.old.  The data target restored the mailboxes before this target ran.
 # TODO make the old one take precedence via configuration
-test -f [% install_dir %]/[% domain %]/mailnames/passwd && mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
+test -f /mail/[% domain %]/passwd && mv /mail/[% domain %]/passwd /mail/[% domain %]/passwd.old; /bin/true
 sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd
 [%# Give the file to dovecot here, not only in the sweep at the end of this
