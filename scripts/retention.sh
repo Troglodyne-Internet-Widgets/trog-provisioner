@@ -10,14 +10,18 @@ declare DIRS=("$BASE_DIR/$BACKUP_HOST");
 for dir in "${DIRS[@]}"
 do
     logger --stderr "Pruning $dir..."
-    for subdir in $dir/*
+    for subdir in "$dir"/*
     do
-        CUR_DATE=$(basename $subdir)
-        CUR_TIME=$(date -d"$CUR_DATE" +%s)
-        if [ $CUR_TIME -lt $CUTOFF ]
+        # An empty directory leaves the glob unexpanded.
+        [ -e "$subdir" ] || continue
+
+        # backup.sh names each backup by its date.  Anything else is not ours
+        # to prune.
+        CUR_TIME=$(date -d"$(basename "$subdir")" +%s 2>/dev/null) || continue
+        if [ "$CUR_TIME" -lt "$CUTOFF" ]
         then
             logger --stderr "Deleting $subdir"
-            rm -rf $subdir
+            rm -rf -- "$subdir"
         fi
     done
 done
