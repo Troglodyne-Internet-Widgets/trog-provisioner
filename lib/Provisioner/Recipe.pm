@@ -595,6 +595,14 @@ GitHub changes it.
 
 =cut
 
+sub github_release_classes {
+    return (
+        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },
+        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },
+    );
+}
+
 =head3 @classes = $recipe->apt_repo_classes($host)
 
 The C<cache_classes> entries for a third-party apt repository on C<$host>.  The
@@ -618,14 +626,6 @@ sub apt_repo_classes {
     return (
         { class => 'aptindex',  pattern => "$h/(?:[^/]+/)*dists/(?!.*/by-hash/)" },
         { class => 'immutable', pattern => "$h/(?:[^/]+/)*(?:pool|by-hash)/" },
-    );
-}
-
-sub github_release_classes {
-    return (
-        { class => 'index',     pattern => '[^/]+/[^/]+/[^/]+/releases/latest(?:/|$)' },
-        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/releases/download/' },
-        { class => 'immutable', pattern => '[^/]+/[^/]+/[^/]+/archive/(?:[0-9a-f]{40}|refs/tags/)' },
     );
 }
 
