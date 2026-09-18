@@ -97,6 +97,9 @@ Returns the repositories that C<$api_url> lists for C<$entity>, as the rows
 that Pithub gives back, from every page.  It is a named sub for the same reason
 as C<run>: a test replaces it and does not have to mock Pithub.
 
+Dies, naming the status, if the API does not answer with success.  A refused
+token is the usual cause.
+
 =cut
 
 sub repos_of {
@@ -109,6 +112,10 @@ sub repos_of {
     );
 
     my $result = $ph->repos->list();
+
+    # Pithub hands back the error body of a refusal as a row, with no name.
+    die "repos_for: $api_url would not list the repositories of $entity: " . $result->response->status_line . "\n"
+      unless $result->success;
     $result->auto_pagination(1);
 
     my @rows;

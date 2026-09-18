@@ -17,7 +17,7 @@ Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Rec
 =cut
 
 sub deps {
-    return qw{libpithub-perl git};
+    return qw{libpithub-perl libfile-pushd-perl git};
 }
 
 1;
