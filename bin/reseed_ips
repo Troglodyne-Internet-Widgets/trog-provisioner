@@ -61,6 +61,9 @@ that do not exist now.  This occurs when a person destroys a guest without
 C<bin/destroy>.  C<bin/destroy> is the only command that releases an address
 by itself.
 
+It needs F<hypervisors.conf>, and refuses to run without it, because with no
+fleet nothing can say which guests run.
+
 A domain that has a configuration but no build also has no hypervisor that
 runs it.  This command cannot tell the two apart.  If you assigned addresses
 before you provisioned, C<--prune> removes those assignments.
@@ -102,7 +105,7 @@ sub main {
         Provisioner::IPPool::forget_seeding();
         Provisioner::IPPool::clear_reservations();
         Provisioner::IPPool::ensure_seeded($pool);
-        prune_absent( $pool, \%before ) if $prune;
+        prune_absent( \%before ) if $prune;
         1;
     };
 
@@ -121,25 +124,29 @@ sub main {
     return 0;
 }
 
-=head2 prune_absent($pool, $before)
+=head2 prune_absent($before)
 
 Releases the address of each domain in C<$before> that no hypervisor runs.
 C<$before> is the hashref that C<Provisioner::IPPool::taken> returns.  It skips
 the C<hv:>, C<gateway:> and C<insitu:> reservations.  Returns how many it
 released.
 
+Dies when no hypervisors are configured, because then nothing can say which
+guests run, and every assignment would go.
+
 =cut
 
 sub prune_absent {
-    my ( $pool, $before ) = @_;
+    my ($before) = @_;
 
     require Trog::Hypervisors;
     my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    die "--prune needs hypervisors.conf: with no fleet, nothing can say which guests are running, and every assignment would be released.\n"
+      unless $fleet->configured;
 
     my %running;
-    foreach my $name ( $fleet->configured ? $fleet->names : () ) {
-        my $hv = $fleet->hypervisor($name);
-        $running{ $_->get_name() } = 1 for $hv->vmm->list_all_domains();
+    foreach my $name ( $fleet->names ) {
+        $running{$_} = 1 for $fleet->hypervisor($name)->guest_names;
     }
 
     my $gone = 0;
