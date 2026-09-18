@@ -63,7 +63,11 @@ sub generate {
     mkdir "$tmpdir/data";
     mkdir "$tmpdir/data/$domain";
 
-    my $pool  = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+
+    # One resolver on purpose.  Config::Simple hands back a bare string for a
+    # single-valued key, and bin/new_config dereferenced that raw when it wrote
+    # provision.conf -- so generating from this is what catches it coming back.
     my $ipmap = <<"IPMAP";
 [global]
 ip=192.168.1.50
@@ -73,7 +77,7 @@ admin_user=doge
 admin_email=bogus\@test.test
 admin_gecos=Test Test
 gateway=192.168.1.254
-resolvers=127.0.0.1, 192.168.1.254
+resolvers=192.168.1.254
 bridge_devname=ens4
 dhcp_devname=ens3
 [ip_pool]
@@ -149,7 +153,7 @@ admin_user=doge
 admin_email=bogus\@test.test
 admin_gecos=Test Test
 gateway=192.168.1.254
-resolvers=127.0.0.1, 192.168.1.254
+resolvers=192.168.1.254
 bridge_devname=ens4
 dhcp_devname=ens3
 [ip_pool]

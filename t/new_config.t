@@ -119,6 +119,61 @@ RECIPES
 
 };
 
+# Loopback answers on a guest running its own DNS and nowhere else.  Named for
+# the installation it reaches every guest, most of which have nothing listening
+# there -- which is what had the fetch cache stripping it back out of the list
+# it hands nginx, and every few lookups was a refused connection.
+#
+# The same fixture as above: this refusal comes before the one about a domain
+# with no recipe configuration, so the domain here never gets that far.
+subtest 'an installation that names loopback as a resolver is refused' => sub {
+    my $ipmap = <<"IPMAP";
+[global]
+basedir     = $basedir
+admin_user  = tester
+admin_gecos = Test User
+admin_email = test\@test.test
+gateway = 192.168.1.254
+resolvers = 127.0.0.1, 192.168.1.254
+transfer_user = provision
+
+[ips]
+testdomain.test.local = 192.168.1.10
+IPMAP
+
+    my $recipe = <<'RECIPES';
+---
+_base:
+  adminconfig:
+    pkgs:
+      - vim
+RECIPES
+
+    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
+    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
+    my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
+
+    my ( $fh, $ipmap_file ) = File::Temp::tempfile();
+    print {$fh} $ipmap;
+    close($fh) or die "Could not close $ipmap_file: $!";
+    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
+
+    my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
+
+    my $result = exception {
+        Trog::Provisioner::Config::Generator::main(
+            '--ipmap',   $ipmap_file,
+            '--recipes', "$basedir/recipes.yaml",
+            '--skip_ssh',
+            'testdomain.test.local',
+        )
+    };
+
+    like( $result, qr/127[.]0[.]0[.]1/,                 'the refusal names the address' );
+    like( $result, qr/runs[ ]its[ ]own[ ]DNS[ ]server/, 'and says where it would answer' );
+    like( $result, qr/nostubresolver/,                  'and which recipe puts it in front for such a guest' );
+};
+
 subtest "a domain with no recipe costs nothing" => sub {
 
     # auto_assign writes to ipmap.cfg and takes an address out of the pool for

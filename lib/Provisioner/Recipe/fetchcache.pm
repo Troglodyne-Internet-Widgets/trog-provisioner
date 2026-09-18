@@ -400,10 +400,17 @@ cache that fetches nothing.
 
 C<resolvers> are the fleet's, less any loopback or IPv6 address, and it dies if
 none are left: nginx looks an upstream up when it fetches, and has to be given
-servers it can reach.  The fleet's list can lead with C<127.0.0.1>, which is
-right on a guest running the pdns recursor and on this one is nothing -- nginx
-rotates through the list, so every few lookups was a refused connection.  Not
-systemd-resolved's stub instead, which would fail over properly: the
+servers it can reach.
+
+Loopback is right on a guest running the pdns recursor and is nothing on this
+one -- nginx rotates through the list, so every few lookups was a refused
+connection.  C<bin/new_config> refuses an installation that names it, and
+C<nostubresolver> puts it in front for the guest it belongs to, so this strips
+what reaches a cache built from an C<ipmap.cfg> written elsewhere: a runner
+writes its own, and C<Provisioner::Recipe::trogrunner> defaults that to
+C<1.1.1.1, 8.8.8.8>.
+
+Not systemd-resolved's stub instead, which would fail over properly: the
 C<nostubresolver> recipe turns it off on these guests.  And IPv6 because nginx
 is told C<ipv6=off>, as apt is told to use IPv4.
 
