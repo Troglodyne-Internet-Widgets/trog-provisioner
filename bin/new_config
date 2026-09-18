@@ -604,13 +604,6 @@ sub handle_domain {
         hv => $hv,
     );
 
-    # Every web host in the map gets www and mail CNAMEs, not only this domain.
-    foreach my $each_domain ( keys(%$ip_conf) ) {
-        $alias_conf->{$each_domain} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$each_domain} );
-        push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
-        $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
-    }
-
     # An address, not a name, because the guest fetches before its DNS works.
     $global_config->{transfer_ip}  = $transfer_ip;
     $global_config->{transfer_ips} = \@transfer_ips;
@@ -689,6 +682,26 @@ sub handle_domain {
     # Not the distro and vm recipes, which direct the build, because every
     # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
+
+    # The names the recipes on this guest serve, added to whatever ipmap.cfg
+    # already gives the domain.  Every domain in the map used to be handed www
+    # and mail here whatever it ran, while the zone template and ssl.domains.tt
+    # each grew their own rule for matrix -- so a domain serving neither got
+    # names nothing answered on, and roundcube's webmail resolved nowhere.
+    #
+    # Asked of the depsolved list rather than of what recipes.d names, so a name
+    # belonging to a recipe that arrived as a dependency is added as well:
+    # roundcube brings nginx, and www is nginx's to declare.
+    #
+    # Here rather than where the map is read, because that is before the
+    # depsolver has run.  $global_config->{aliases} holds this same hash, so
+    # everything rendered below sees what this adds.
+    $alias_conf->{$domain} = [
+        uniq(
+            @{ $alias_conf->{$domain} // [] },
+            map { "$_.$domain" } sort map { $builders{$_}->subdomains } @modules
+        )
+    ];
 
     # A recipe that cannot serve a second domain replaces the first, so refuse
     # it here.  This compares a tenant with its host only, not with the other

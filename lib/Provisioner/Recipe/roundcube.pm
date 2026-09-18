@@ -57,6 +57,20 @@ sub required_recipes {
     return ( nginx => sub { () } );
 }
 
+=head2 @names = $recipe->subdomains()
+
+C<webmail>, which is the only name this is served at:
+F<roundcube.nginx.tt> answers for C<webmail.$domain> and nothing else.
+
+It was never among the aliases a domain was given, so the name resolved nowhere
+and no certificate covered it -- the vhost was there and unreachable.
+
+=cut
+
+sub subdomains {
+    return qw{webmail};
+}
+
 sub template_files {
     my ( $class, @modules ) = @_;
     return (

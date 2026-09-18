@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-#ABSTRACT: generate a zonefile for the configured guests
+#ABSTRACT: generate a zonefile for a configured guest
 
 package Trog::Provisioner::IPMap2Zones;
 
@@ -19,31 +19,39 @@ use Text::Xslate::Bridge::TT2;
 use Net::IP;
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
+use Provisioner::Cookbook();
 use Trog::Config();
 use Provisioner::IPPool();
 use File::Slurper::Temp;
 
 =head1 NAME
 
-ipmap2zones - write a zone file for each guest that has an address
+ipmap2zones - write a zone file for each guest you name
 
 =head1 SYNOPSIS
 
-    ipmap2zones [--ipmap=file] [--output-dir=dir] [domain ...]
+    ipmap2zones [--ipmap=file] [--output-dir=dir] DOMAIN [DOMAIN ...]
 
 =head1 DESCRIPTION
 
-Generates BIND-style zone files, one file for each domain.  The addresses come from
-the address database of L<Provisioner::IPPool>.  The administrator's email,
-the aliases and the name servers come from ipmap.cfg.
+Generates BIND-style zone files, one file for each domain that you name.  The
+addresses come from the address database of L<Provisioner::IPPool>.  The
+administrator's email, the aliases and the name servers come from ipmap.cfg.
 
-With no domain arguments, it generates a zone file for each domain that has an
-address in the database.  It writes each file as C<domain.zone> in the current
-directory, or in the directory that --output-dir names.
+It writes each file as C<domain.zone> in the current directory, or in the
+directory that --output-dir names.
 
 It renders C<templates/files/pdns.zone.tt>, the template that the pdns recipe
-installs.  The output is not always the same as what the recipe installs, because
-it has no extra records and no records for other recipes, such as matrix.
+installs.  The output is not always the same as what the recipe installs,
+because it has no extra records.
+
+=head2 A domain is required
+
+It used to generate for every domain that had an address when given none.  That
+was answerable while every zone carried the same C<www> and C<mail> regardless
+of what the domain ran.  It is not any more: the names a zone carries are the
+ones its recipes declare -- see L<Provisioner::Recipe/subdomains> -- so the
+answer is per domain.  Name the one you want.
 
 =head1 OPTIONS
 
@@ -63,6 +71,8 @@ directory must already exist.
 
 =cut
 
+my $USAGE = "usage: ipmap2zones [--ipmap=file] [--output-dir=dir] DOMAIN [DOMAIN ...]\n";
+
 sub main {
     my @args = @_;
 
@@ -71,7 +81,7 @@ sub main {
         \@args,
         'ipmap=s'      => \$cfile,
         'output-dir=s' => \$output_dir,
-    );
+    ) or die $USAGE;
 
     $cfile      //= Trog::Config->path('ipmap.cfg');
     $output_dir //= '.';
@@ -88,8 +98,8 @@ sub main {
     die "Must set admin_email in global section of $cfile\n"
       unless $global_conf->{admin_email};
 
-    my @domains = @args ? @args : sort keys(%$ip_conf);
-    die "No domain has an address in " . Provisioner::IPPool::db_path() . "\n" unless @domains;
+    my @domains = @args;
+    die "Name at least one domain to generate a zone for.\n" . $USAGE unless @domains;
 
     my $template_dir = "$FindBin::Bin/../templates";
     my $tt           = Text::Xslate->new(
@@ -105,9 +115,10 @@ sub main {
         die "No address for '$domain' in " . Provisioner::IPPool::db_path() . "\n"
           unless $ip_conf->{$domain};
 
+        my @recipes = recipes_for($domain);
+
         my $aliases = _coerce_arrayref( $alias_conf->{$domain} );
-        push( @$aliases, "www.$domain", "mail.$domain" );
-        $alias_conf->{$domain} = [ uniq @$aliases ];
+        $alias_conf->{$domain} = [ uniq( @$aliases, map { "$_.$domain" } subdomains_for(@recipes) ) ];
 
         my %vars = (
             domain        => $domain,
@@ -117,7 +128,11 @@ sub main {
             admin_email   => $global_conf->{admin_email},
             serial        => time(),
             extra_records => '',
-            modules       => [],
+
+            # What the domain runs, which the zone needs for more than the
+            # names: the mail records point at mail.<domain>, so they are
+            # written only where something answers there.
+            modules => \@recipes,
         );
 
         my $zone    = $tt->render( 'files/pdns.zone.tt', \%vars );
@@ -127,6 +142,35 @@ sub main {
     }
 
     return 0;
+}
+
+# What this domain is configured to run, as recipe names.
+#
+# What recipes.d says out loud, rather than a depsolved list: there is no
+# depsolver here.  bin/new_config asks the recipes it settled on, so a name
+# belonging to a dependency is in the zone it writes and not necessarily in this
+# one.
+#
+# A configuration naming a recipe this installation does not have is somebody
+# else's error to report rather than a reason to write no zone at all.
+sub recipes_for {
+    my ($domain) = @_;
+
+    my $configured = Provisioner::Cookbook->domain_config($domain);
+
+    my @recipes = grep { Provisioner::Cookbook->has($_) } sort keys %$configured;
+
+    return @recipes;
+}
+
+# The names those recipes serve, sorted and once each.
+sub subdomains_for {
+    my (@recipes) = @_;
+
+    my @names;
+    push( @names, Provisioner::Cookbook->load($_)->subdomains ) for @recipes;
+
+    return uniq( sort @names );
 }
 
 sub _formatters {

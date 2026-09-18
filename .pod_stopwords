@@ -67,6 +67,7 @@ MAILFROM
 MAILTO
 MDB
 MUA
+MX
 MachineIdentifier
 Makefile
 Memoised
@@ -109,6 +110,7 @@ SHA
 SIGALRM
 SIGILLs
 SMTP
+SRV
 SSDP
 SSL
 SSSD
@@ -166,6 +168,7 @@ authorized
 autoconfiguration
 autocreate
 autodetected
+autodiscover
 autogen
 autoindex
 autorestart
@@ -472,6 +475,7 @@ vnc
 webmail
 websocket
 whitespace
+www
 yaml
 zonediff
 zonefile

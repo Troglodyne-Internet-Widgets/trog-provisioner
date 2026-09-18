@@ -81,6 +81,21 @@ guest does not join this homeserver.  It replaces it.
 
 sub is_multi_tenant { return 0 }
 
+=head2 @names = $recipe->subdomains()
+
+C<matrix>, which synapse is reached at, and C<admin.matrix>, which its admin
+vhost answers for.
+
+Both were decided twice before this, by an C<IF modules.grep('matrix')> in
+F<pdns.zone.tt> and a second one in F<ssl.domains.tt> -- two copies of one rule,
+either of which could be changed without the other.
+
+=cut
+
+sub subdomains {
+    return qw{matrix admin.matrix};
+}
+
 =head2 %args = $recipe->args()
 
 The configuration that this recipe takes.  C<bin/recipes> lists it.

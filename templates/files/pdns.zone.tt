@@ -35,12 +35,21 @@ ns1     IN A    [% ipmap.$subdo %]
 [% END -%]
 [% END -%]
 
+[%# Only where the guest serves mail.  Every one of these names mail.<domain> or
+    autoconfig.<domain>, and those are the mail recipe to declare -- so on a
+    domain that runs no mail they are an MX and five SRVs pointing at a host
+    with no record at all.  They resolved before only because every domain in
+    the map was given a mail. CNAME whether it served any or not.
+
+    This is a rule about which service records the zone carries, not about which
+    names exist: the names are declared, and bin/new_config puts them in the
+    aliases above.  A record that points at one still has to know whether the
+    thing it points at is there. -%]
+[% IF modules.grep('mail').size() %]
 ; Mail
 [%# Absolute, as the SRV targets below are.  Written relative it resolves to
     mail.<domain>.<domain>, which is nowhere. -%]
 @       IN MX 10 mail.[% domain %].
-autodiscover IN CNAME @
-autoconfig   IN CNAME @
 
 ; Autodiscover TXT record
 @ IN TXT "mailconf=https://autoconfig.[% domain %]/autoconfig/autoconfig.xml"
@@ -57,11 +66,6 @@ _pop3s._tcp        IN SRV 0 0 995 mail.[% domain %].
 _smtps._tcp        IN SRV 0 0 465 mail.[% domain %].
 _submission._tcp   IN SRV 0 0 587 mail.[% domain %].
 _autodiscover._tcp IN SRV 0 0 80  mail.[% domain %].
-
-[% IF modules.grep('matrix').size() %]
-; Matrix subdomains
-matrix       IN CNAME @
-admin.matrix IN CNAME @
 [% END -%]
 
 ; The extra_records from the configuration follow, for example a DKIM key,
