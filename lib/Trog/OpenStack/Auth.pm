@@ -155,15 +155,15 @@ hostname verification for a connection we are about to send a token over.
 sub new {
     my ( $class, $endpoint, %args ) = @_;
 
-    die "No Keystone endpoint provided\n" unless defined $endpoint && length $endpoint;
+    die "No Keystone endpoint provided\n" unless length $endpoint;
 
     my $id     = $args{application_credential_id};
     my $secret = $args{application_credential_secret};
 
     die "No application credential id provided in \"application_credential_id\"\n"
-      unless defined $id && length $id;
+      unless length $id;
     die "No application credential secret provided in \"application_credential_secret\"\n"
-      unless ref $secret eq 'CODE' || ( defined $secret && length $secret );
+      unless ref $secret eq 'CODE' || length $secret;
 
     my $self = bless {
         package_ua       => $args{package_ua} // 'Trog::OpenStack::UserAgent',
@@ -275,7 +275,7 @@ sub _authenticate {
 
     my $token = $response->header('X-Subject-Token');
     die "Authenticating against $self->{endpoint} returned no token\n"
-      unless defined $token && length $token;
+      unless length $token;
 
     my $catalog = $body->{token}{catalog};
     die "Authenticating against $self->{endpoint} returned no service catalog\n"
@@ -303,7 +303,7 @@ sub cache_path {
     my ($self) = @_;
 
     my $dir = $self->{cache_dir} // _default_cache_dir();
-    return unless defined $dir && length $dir;
+    return unless length $dir;
 
     # Neither the endpoint nor the credential id belongs in a filename -- one
     # has slashes in it and the other is a credential -- and both have to be in

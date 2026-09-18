@@ -113,7 +113,7 @@ sub main {
     die "Failed to create snapshot for $domain\n" unless $took;
 
     my $after = $hv->snapshot_current_name($domain);
-    die "No current snapshot found after create\n" unless defined $after && length $after;
+    die "No current snapshot found after create\n" unless length $after;
 
     die "Current snapshot unchanged after create (still '$after') -- snapshot may not have been created\n"
       if defined $before && $before eq $after;

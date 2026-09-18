@@ -124,7 +124,7 @@ sub main {
         my ( $package, $module ) = @rest;
         my ( $failed,  @said )   = capture_in( undef, 'pkg-config', '--modversion', $package );
         my ($version) = map { s/\s+\z//r } @said;
-        if ( $failed || !defined $version || !length $version ) {
+        if ( $failed || !length $version ) {
             print {*STDERR} "cpan_install: pkg-config knows no $package, so there is no $module version to pin\n";
             return 1;
         }

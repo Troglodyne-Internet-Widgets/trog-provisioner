@@ -90,9 +90,9 @@ sub main {
     foreach my $arg (@args) {
         my ( $subnet, $iface ) = split( /=/, $arg, 2 );
         die "Bad arg '$arg' (expected SUBNET/MASK or SUBNET/MASK=INTERFACE)\n"
-          unless defined $subnet && length $subnet;
+          unless length $subnet;
 
-        $iface = _default_iface() unless defined $iface && length $iface;
+        $iface = _default_iface() unless length $iface;
 
         push( @subnets, $subnet );
         push( @nat,     "-A $NAT_CHAIN -s $subnet -o $iface -j MASQUERADE" );

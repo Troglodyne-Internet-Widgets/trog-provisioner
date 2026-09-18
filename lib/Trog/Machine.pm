@@ -183,7 +183,7 @@ sub authorized_keys {
     my $home = $self->capture_cmd('echo $HOME');
     chomp $home if defined $home;
     die 'Could not determine the home directory of the transfer user on ' . $self->describe . "\n"
-      unless defined $home && length $home;
+      unless length $home;
     return "$home/.ssh/authorized_keys";
 }
 
@@ -370,7 +370,7 @@ sub _ask_for_sudo_password {
           . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
     };
 
-    die 'No password given for ' . $self->describe . "\n" unless defined $password && length $password;
+    die 'No password given for ' . $self->describe . "\n" unless length $password;
 
     return $self->_remember($password);
 }
@@ -706,7 +706,7 @@ sub _staging_path {
 
     my $path = $self->capture_cmd('mktemp');
     chomp $path  if defined $path;
-    return $path if defined $path && length $path && $path =~ m{\A/};
+    return $path if length $path && $path =~ m{\A/};
 
     warn 'Could not make a staging file on ' . $self->describe . "\n";
     return undef;

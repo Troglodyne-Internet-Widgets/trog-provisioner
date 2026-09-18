@@ -1326,7 +1326,7 @@ sub validate {
     my @errors = $validator->validate( \%opts, \%args );
     if (@errors) {
         my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
-        my $where = ( defined $opts{domain} && length $opts{domain} ) ? " for $opts{domain}" : q{};
+        my $where = ( length $opts{domain} ) ? " for $opts{domain}" : q{};
 
         die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
     }

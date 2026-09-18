@@ -432,13 +432,13 @@ sub _restore_refs {
 # understand -- the same trick, and for the same reason, as Trog::HV::_parse_uri.
 sub _ssh_parts {
     my ($uri) = @_;
-    return undef unless defined $uri && length $uri;
+    return undef unless length $uri;
 
     my ( $scheme, $authority ) = URI::Split::uri_split($uri);
-    return undef unless defined $scheme && length $scheme;
+    return undef unless length $scheme;
 
     my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
-    my $server = ( defined $authority && length $authority ) ? URI->new("ssh://$authority") : undef;
+    my $server = ( length $authority ) ? URI->new("ssh://$authority") : undef;
 
     return {
         ssh  => ( defined $transport && $transport eq 'ssh' ) ? 1             : 0,

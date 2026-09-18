@@ -264,7 +264,7 @@ sub fetch {
 
     # Root's, because libvirt wrote it.
     my $content = $hv->capture_cmd("sudo cat '$log'");
-    unless ( defined $content && length $content ) {
+    unless ( length $content ) {
         print {*STDERR} "Nothing at $log on the hypervisor.\n" . "Was this started with --console?\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }

@@ -202,7 +202,7 @@ sub implementation_for {
     my $registrar = _configures( 'registrar', @where );
 
     my $stated = $opts{ $class->tiebreaker_key };
-    if ( defined $stated && length $stated ) {
+    if ( length $stated ) {
         die "$domain is under .$reserved, which RFC 2606 and RFC 6761 reserve, so no public registrar can hold a zone for it -- dns_preference: registrar names a provider that could never answer its challenge.  The guest serves this name itself; drop the preference.\n"
           if $stated eq 'registrar' && $reserved;
 

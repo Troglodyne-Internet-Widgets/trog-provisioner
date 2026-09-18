@@ -462,8 +462,8 @@ sub _guest_addresses {
     my ( @found, %seen );
     foreach my $line ( split m/\n/, $said ) {
         my ( $domain, $ip ) = split m/\t/, $line, 2;
-        next unless defined $domain && length $domain;
-        next unless defined $ip     && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
+        next unless length $domain;
+        next unless defined $ip && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
 
         # A domain answers on the NAT bridge as well, so it turns up more than
         # once.  Which of its addresses belongs to the pool is decided by the

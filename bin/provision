@@ -268,7 +268,7 @@ sub place_guest_secrets {
     foreach my $path ( sort keys %$wanted ) {
         my $value = $values{$path};
         die "The secret store had nothing for $wanted->{$path}{ref}, which $domain needs at $path\n"
-          unless defined $value && length $value;
+          unless length $value;
 
         # The directory the recipe will later make: this runs first, so it is not
         # there yet and a write into it would fail.
@@ -378,7 +378,7 @@ sub _public_half {
 
     my $pubkey = eval { Provisioner::Utils::ssh_pubkey_from_private( $tmp->filename ) };
     die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
-      unless defined $pubkey && length $pubkey;
+      unless length $pubkey;
 
     # Named, because what comes back is the key and nothing else -- so without
     # this, what lands in somebody's authorized_keys is an anonymous line that

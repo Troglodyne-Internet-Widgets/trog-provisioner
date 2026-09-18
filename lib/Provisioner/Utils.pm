@@ -117,7 +117,7 @@ C<key=> is the empty string -- and nothing that asks this cares.
 
 sub coerce_arrayref {
     my ($value) = @_;
-    return [] unless defined $value && length $value;
+    return [] unless length $value;
     return $value if ref $value eq 'ARRAY';
     return [$value];
 }
@@ -193,9 +193,9 @@ Returns STRING, or C<$value> unchanged when there is nothing to qualify it with.
 sub qualify_address {
     my ( $value, $domain ) = @_;
 
-    return $value unless defined $value && length $value;
+    return $value unless length $value;
     return $value if Data::Validate::Email::is_email($value);
-    return $value unless defined $domain && length $domain;
+    return $value unless length $domain;
     return "$value\@$domain";
 }
 
@@ -236,7 +236,7 @@ C<fetch_hosts> and pointed at the fetch cache.
 sub host_of {
     my ($url) = @_;
 
-    return unless defined $url && length $url;
+    return unless length $url;
 
     # Matched here rather than handed to URI, because prepending a scheme does
     # not turn an scp address into a URL: a colon after the host opens a port in
@@ -254,7 +254,7 @@ sub host_of {
 sub fleet_address {
     my ( $name, %opts ) = @_;
 
-    return ( none => q{} ) unless defined $name && length $name;
+    return ( none => q{} ) unless length $name;
 
     # The scheme, rather than counting dots: aptmirror.example.test and
     # mirror.example.test are both dotted, and only one of them says how to get
@@ -264,7 +264,7 @@ sub fleet_address {
     return ( self => q{} ) if $name eq ( $opts{domain} // q{} );
 
     my $address = ( $opts{ipmap} // {} )->{$name};
-    return ( address => $address ) if defined $address && length $address;
+    return ( address => $address ) if length $address;
 
     return ( unknown => $name );
 }
@@ -284,7 +284,7 @@ other to agree.
 sub tld_of {
     my ($domain) = @_;
 
-    return unless defined $domain && length $domain;
+    return unless length $domain;
     my ($tld) = $domain =~ m/[.]([^.]+)\z/;
 
     return $tld;

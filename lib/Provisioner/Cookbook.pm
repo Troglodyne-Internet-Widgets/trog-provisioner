@@ -92,7 +92,7 @@ sub template_dirs {
     my ( $class, $distro, @libdirs ) = @_;
 
     my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
-    return [ map { ( ( ( defined $distro && length $distro ) ? "$_/$distro" : () ), $_ ) } @bases ];
+    return [ map { ( ( ( length $distro ) ? "$_/$distro" : () ), $_ ) } @bases ];
 }
 
 =head2 names
@@ -175,7 +175,7 @@ sub configured_fetch_hosts {
         }
     }
 
-    return List::Util::uniq( sort grep { defined && length } @hosts );
+    return List::Util::uniq( sort grep { length } @hosts );
 }
 
 =head2 cache_classes
@@ -1105,7 +1105,7 @@ sub install_dir {
     my ( $class, $domain, $conf ) = @_;
 
     my $said = $class->global_config( $domain, $conf )->{install_dir};
-    return $said if defined $said && length $said;
+    return $said if length $said;
 
     return '/opt/domains';
 }
@@ -1128,7 +1128,7 @@ sub data_source {
     my ( $class, $domain, $conf ) = @_;
 
     my $said = $class->global_config( $domain, $conf )->{data_source};
-    return $said if defined $said && length $said;
+    return $said if length $said;
 
     return undef;
 }
@@ -1146,10 +1146,10 @@ Undef when nothing says where the data source is.
 
 sub data_dir {
     my ( $class, $domain, $conf ) = @_;
-    return undef unless defined $domain && length $domain;
+    return undef unless length $domain;
 
     my $from = $class->data_source( $domain, $conf );
-    return undef unless defined $from && length $from;
+    return undef unless length $from;
 
     return "$from/$domain";
 }

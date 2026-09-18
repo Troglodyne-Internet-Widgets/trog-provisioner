@@ -55,11 +55,11 @@ that matters to nobody calling this, so it is flattened away.
 # Horizon gave you.  The system-wide file last.
 sub _candidates {
     my @home =
-      defined $ENV{HOME} && length $ENV{HOME}
+      length $ENV{HOME}
       ? ( "$ENV{HOME}/clouds.yaml", "$ENV{HOME}/.config/openstack/clouds.yaml" )
       : ();
 
-    return grep { defined $_ && length $_ } (
+    return grep { length $_ } (
         $ENV{OS_CLIENT_CONFIG_FILE},
         Trog::Config->path('clouds.yaml'),
         @home,
@@ -125,7 +125,7 @@ sub load {
     die "$path defines no clouds\n" unless @names;
 
     $name //= $ENV{OS_CLOUD};
-    if ( !defined $name || !length $name ) {
+    if ( !length $name ) {
         die "$path defines more than one cloud (" . join( ', ', @names ) . ").\n" . "Say which one, or set OS_CLOUD.\n"
           if @names > 1;
         $name = $names[0];
@@ -165,11 +165,11 @@ sub _flatten {
     );
     foreach my $key ( sort keys %from_env ) {
         my $var = $from_env{$key};
-        $out{$key} = $ENV{$var} if defined $ENV{$var} && length $ENV{$var};
+        $out{$key} = $ENV{$var} if length $ENV{$var};
     }
 
     die "Cloud '$name' in $path has no auth_url\n"
-      unless defined $out{auth_url} && length $out{auth_url};
+      unless length $out{auth_url};
 
     return \%out;
 }

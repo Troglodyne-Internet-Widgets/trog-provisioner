@@ -126,19 +126,19 @@ sub _parse_uri {
     my ($uri) = @_;
 
     my ( $scheme, $authority, $path ) = URI::Split::uri_split($uri);
-    return undef unless defined $scheme && length $scheme;
+    return undef unless length $scheme;
 
     my ( $driver, $transport ) = split( quotemeta('+'), $scheme, 2 );
-    return undef unless defined $driver && length $driver;
+    return undef unless length $driver;
 
-    my $server = ( defined $authority && length $authority ) ? URI->new("ssh://$authority") : undef;
+    my $server = ( length $authority ) ? URI->new("ssh://$authority") : undef;
 
     return {
         driver    => $driver,
         transport => $transport,
-        user      => $server                                                      ? $server->user : undef,
-        host      => ( $server && defined $server->host && length $server->host ) ? $server->host : undef,
-        port      => $server                                                      ? $server->port : undef,
+        user      => $server                             ? $server->user : undef,
+        host      => ( $server && length $server->host ) ? $server->host : undef,
+        port      => $server                             ? $server->port : undef,
         path      => $path,
     };
 }
@@ -428,7 +428,7 @@ sub lease_ips {
 
     my @ips;
     foreach my $lease ( reverse sort { ( $a->{expirytime} // 0 ) <=> ( $b->{expirytime} // 0 ) } @leases ) {
-        next unless defined $lease->{ipaddr} && length $lease->{ipaddr};
+        next unless length $lease->{ipaddr};
         next
           if defined $opts{hostname}
           && !( defined $lease->{hostname} && $lease->{hostname} =~ m/\Q$opts{hostname}\E/ );
@@ -451,7 +451,7 @@ helper on the hypervisor.
 
 sub release_dhcp_lease {
     my ( $self, $ip, $bridge ) = @_;
-    return 0 unless defined $ip && length $ip;
+    return 0 unless length $ip;
     $bridge //= $self->virbr_device;
 
     my ($helper) = grep { $self->file_exists($_) } qw{/usr/lib/libvirt/libvirt_leaseshelper /usr/libexec/libvirt_leaseshelper};
@@ -607,7 +607,7 @@ sub base_image {
     return $path if $path;
 
     die "No image URL configured, and no $name in the pool to fall back on\n"
-      unless defined $url && length $url;
+      unless length $url;
 
     $path = $self->pool_path . "/$name";
     print "Fetching the base image from $url\n";
@@ -919,7 +919,7 @@ sub snapshot_names {
     my @dated = map { { name => $_->get_name(), created => _snapshot_created($_) } } @snaps;
     return map { $_->{name} }
       sort { $a->{created} <=> $b->{created} or $a->{name} cmp $b->{name} }
-      grep { defined $_->{name} && length $_->{name} } @dated;
+      grep { length $_->{name} } @dated;
 }
 
 # <creationTime> is seconds since the epoch.  A snapshot without one sorts to
@@ -954,7 +954,7 @@ sub create_snapshot {
     $self->stop_domain($name) if $opts{disk_only};
 
     my $xml = '<domainsnapshot>';
-    $xml .= '<name>' . _xml_escape($snapname) . '</name>' if defined $snapname && length $snapname;
+    $xml .= '<name>' . _xml_escape($snapname) . '</name>' if length $snapname;
 
     # This element is what libvirt reads to tell the two apart: without it the
     # request is a disk-only one.
@@ -1752,7 +1752,7 @@ sub guest_ssh_ip {
     my ( $self, $config, $lease_ip ) = @_;
     return $lease_ip if $self->is_local;
 
-    my ($ip) = grep { defined $_ && length $_ } $config->param('ips');
+    my ($ip) = grep { length $_ } $config->param('ips');
     die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is only\nreachable from the hypervisor itself.\n"
       unless $ip;
     return $ip;
@@ -1776,7 +1776,7 @@ sub check_reachable {
     chomp $whoami if defined $whoami;
 
     return $self->_verdict( 1, "Reached " . $self->ssh_target . " as $whoami", q{} )
-      if defined $whoami && length $whoami;
+      if length $whoami;
 
     return $self->_verdict( 0, 'Cannot reach ' . $self->describe, <<"FIX" );
 ssh -v @{[ $self->ssh_target ]} and see what it says.  This wants an agent or a

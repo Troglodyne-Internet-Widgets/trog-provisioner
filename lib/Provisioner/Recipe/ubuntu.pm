@@ -281,10 +281,10 @@ sub enrich {
     $opts{resolvers} = Provisioner::Utils::coerce_arrayref( $opts{resolvers} );
 
     die "MUST SET gateway in provision.conf when ips are set\n"
-      if @{ $opts{ips} } && !( defined $opts{gateway} && length $opts{gateway} );
+      if @{ $opts{ips} } && !length $opts{gateway};
 
     die "MUST SET contact_email in provision.conf for $opts{domain}\n"
-      unless defined $opts{contact_email} && length $opts{contact_email};
+      unless length $opts{contact_email};
 
     $opts{guest_key} = $self->guest_keypair(%opts);
     $opts{users}     = $self->_users(%opts);

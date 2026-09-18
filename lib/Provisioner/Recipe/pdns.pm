@@ -177,7 +177,7 @@ sub api_key_for {
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
 
     my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
-    return $configured if defined $configured && length $configured;
+    return $configured if length $configured;
 
     state %made;
     return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
