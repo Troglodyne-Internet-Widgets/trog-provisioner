@@ -50,124 +50,137 @@ provision - build a VM from a domain directory
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor to build on.  Bypasses
-F<hypervisors.conf> entirely: no placement, no capacity check, build it there.
-A remote hypervisor has to be named with an ssh transport
-(C<qemu+ssh://user@host/system>), since we need its filesystem as well as its
-libvirt.
+The libvirt connection string of the hypervisor to build on.  With this option,
+provision does not read F<hypervisors.conf>.  It does not choose a hypervisor
+and does not look at capacity.  It builds the guest on this one.  A remote
+hypervisor must use an ssh transport (C<qemu+ssh://user@host/system>), because
+provision needs its filesystem as well as its libvirt.
 
 =item B<--credentials>
 
-Read the passwords this run needs from standard input before anything starts,
-rather than asking for them.  For a run with no terminal to ask at: tCMS's
-reprovision button, a cron.  See L<Trog::Credentials> for the format.
+Reads the passwords that the run needs from standard input before the run
+starts, and does not ask for them.  Use it for a run with no terminal, for
+example the reprovision button of tCMS, or cron.  See L<Trog::Credentials> for
+the format.
 
 =item B<--no-config>
 
-Skip generating the domain's configuration, and build from whatever is already
-in its directory.  Normally F<bin/new_config> is run first, which is what
-writes F<provision.conf> and packs F<data.tar.gz>; pass this when you want to
-build exactly what is on disk.
+Does not generate the configuration of the domain, and builds from the files
+that are already in its directory.  Without this option, provision runs
+F<bin/new_config> first.  That program writes F<provision.conf> and packs
+F<data.tar.gz>.  Use this option to build exactly what is on disk.
 
 =item B<--salvage-gaps-ok>
 
-Rebuild the guest even though state that is on it did not come off it.
+Rebuilds the guest even when state that is on the guest did not come off it.
 
-Without this, a salvage that found a directory on the guest and came away with
-nothing stops the run before anything is destroyed -- that is what an
-unreadable directory looks like, and rebuilding would lose the only copy.  Pass
-this when the state really is gone, or you do not want it, and the guest should
-be rebuilt regardless.
+Before a rebuild, the salvage copies the state of each service off the guest.
+If the salvage finds a directory on the guest and gets nothing from it, the run
+stops before it destroys anything.  That is what a directory that cannot be read
+looks like, and a rebuild loses the only copy.  Use this option when the state
+is really gone, or when you do not want it, and the guest must be rebuilt
+anyway.
 
-Only ever typed.  There is no environment variable and no configuration key for
-it, because the whole point is that somebody read what it is about to lose.
+This option exists only on the command line.  No environment variable and no
+configuration key sets it, because the operator must read what the run is
+about to lose.
 
-A directory the guest has never written does not trip this, and neither does a
-domain that has no guest yet, so a new machine never needs it.
+A directory that the guest never wrote does not stop the run.  Neither does a
+domain that has no guest yet.  So a new machine never needs this option.
 
 =item B<--clone-on-nonreusable>
 
-Copy the guest's disk aside as C<DOMAIN.bak-qcow2> before the rebuild destroys
-it, and then rebuild.
+Copies the disk of the guest to C<DOMAIN.bak-qcow2> before the rebuild destroys
+it, and then rebuilds.
 
-A disk and nothing else: no domain is defined for the copy, it takes no address,
-and nothing starts it.  Nothing removes it afterwards either, F<bin/destroy>
-included -- C<bin/destroy --backups> sweeps them when you want them gone.
+The copy is a disk and nothing else.  No domain is defined for it, it gets no
+address, and nothing starts it.  Nothing removes it later, and that includes
+F<bin/destroy>.  To remove these copies, run C<bin/destroy --backups>.
 
-A rebuild that cannot make the copy does not go ahead.
+If provision cannot make the copy, it does not rebuild.
 
-Mutually exclusive with the other two.
+You can pass only one of the three C<--*-on-nonreusable> options.
 
 =item B<--destroy-on-nonreusable>
 
-Rebuild the guest even though rebuilding it destroys it.
+Rebuilds the guest even though the rebuild destroys it.
 
-A rebuild normally keeps the guest's disk.  Where the size or layout this build
-asks for is not what the disk was built with it cannot be kept: the domain is
-undefined and the disk deleted.  Without this, that stops and asks -- or refuses
-outright where there is no terminal to ask at.
+A rebuild usually keeps the disk of the guest.  If this build asks for a size
+or layout that is different from the disk, the disk cannot be kept.  Then the
+domain is undefined and the disk is deleted.  Without this option, provision
+stops and asks first.  If there is no terminal to ask at, it refuses.
 
-Mutually exclusive with the other two.
+You can pass only one of the three C<--*-on-nonreusable> options.
 
 =item B<--die-on-nonreusable>
 
-Refuse such a rebuild rather than asking about it.
+Refuses such a rebuild, and does not ask.
 
-What happens anyway when nobody is there to ask; pass it to say so on purpose,
-and to be certain of it somewhere a terminal might exist.
+provision does this anyway when nobody is there to ask.  Pass this option to
+say so on purpose, and to be sure of it where a terminal can exist.
 
-Mutually exclusive with the other two.
+You can pass only one of the three C<--*-on-nonreusable> options.
 
 =item B<--recipes> FILE
 
-Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/recipes.yaml>.
+Passed to F<bin/new_config>.  The default is
+F</etc/trog-provisioner/recipes.yaml>.
 
 =item B<--ipmap> FILE
 
-Handed to F<bin/new_config>.  Defaults to F</etc/trog-provisioner/ipmap.cfg>.
+Passed to F<bin/new_config>.  The default is F</etc/trog-provisioner/ipmap.cfg>.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
-When it exists, the hypervisor is chosen from it -- see L<Trog::Hypervisors>.
-When it doesn't, the hypervisor is whatever F<provision.conf> and C<--connect>
-say, which for most people is still this machine.
+The fleet definition, which is the file that lists the hypervisors.  The
+default is F</etc/trog-provisioner/hypervisors.conf>.  If the file exists,
+provision chooses the hypervisor from it.  See L<Trog::Hypervisors>.  If it
+does not exist, F<provision.conf> and C<--connect> give the hypervisor.  For
+most people, that is still this machine.
 
 =item B<--domaindir> DIR
 
-Where the per-domain directories live.  Defaults to F</opt/domains>.
+The directory that holds the directory of each domain.  Without this option,
+the hypervisor gives the directory, and the default is F</opt/domains>.
 
 =item B<--existing> IP
 
-Layer this domain's configuration onto an already running VM rather than
-building a new one.
+Adds the configuration of this domain to a VM that already runs at IP, and does
+not build a new one.
 
 =item B<--dryrun>
 
-Write the domain's configuration out and change nothing anywhere else.
+Writes the configuration of the domain, and changes nothing in any other place.
 
-F<network-config>, F<user-data>, F<meta-data> and F<setup.sh> land in the domain
-directory as they always would, and everything that reaches past it is described
-instead of done: no disk or cloud-init seed is made, the domain is neither
-destroyed nor defined, and this machine's C<authorized_keys> is left alone.
+F<network-config>, F<user-data>, F<meta-data> and F<setup.sh> go into the
+domain directory as usual.  provision describes each step outside that
+directory, and does not do it.  It makes no disk and no cloud-init seed.  It
+does not destroy or define the domain.  It does not change the
+C<authorized_keys> of this machine.
 
 A domain that already has a key keeps it.  The guest that is up has the public
-half, so replacing the private one here would be losing the way in to a machine
-this was not going to touch.  A domain with no key yet gets one, since
-F<user-data> is written out of it.
+half.  If provision replaces the private half here, it loses the way in to a
+machine that the dry run does not touch.  A domain with no key gets one,
+because F<user-data> is written from it.
 
-F<domain.xml> is the one thing a dry run does not produce.  It is built out of
-the paths to the storage pool, the base image, the guest's disk and its seed --
-so writing it means making all four, which is the opposite of the point.
+A dry run does not make F<domain.xml>.  That file names the storage pool, the
+base image, the disk of the guest and its seed.  To write the file, provision
+must make all four, and a dry run must not make them.
 
 =back
 
 =head1 DESCRIPTION
 
-Reads F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> out of the domain
-directory, renders the libvirt XML and cloud-init configuration for the domain,
-and defines it on the hypervisor.  See L<Trog::HV> for what "the
-hypervisor" means when it isn't this machine.
+provision builds the guest for DOMAIN and runs its makefile.  First it runs
+F<bin/new_config> to generate the configuration of the domain, unless you pass
+C<--no-config>.  Then it reads F<DOMAIN/provision.conf> and
+F<DOMAIN/users.yaml> in the domain directory, chooses the hypervisor, and asks
+the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
+and waits for cloud-init and the makefile to finish.
+
+If F<provision.conf> names another domain in C<depends_on>, provision builds
+the guest of that domain first, and adds DOMAIN to it.  See L<Trog::HV> for what
+"the hypervisor" means when it is not this machine.
 
 =cut
 
@@ -175,21 +188,26 @@ sub _coerce_array (@values) {
     return \@values;
 }
 
-# Which of these are lists.  Config::Simple hands back a bare string for a file
-# that names one of them and an arrayref for one that names two, and what every
-# recipe validates against says array -- so a guest with a single resolver would
-# be refused for saying what provision.conf has always meant by it.
+# The settings that are lists.  Config::Simple returns a string when the file
+# names one value, and an array reference when it names two.  Every recipe
+# expects an array, so without this a guest with one resolver is refused.
 my %LIST_SETTING = map { $_ => 1 } qw{resolvers ips packages transfer_ips};
 
-# Everything provision.conf says, as a plain hash, for handing to a recipe.
-#
-# Config::Simple prefixes every key with the block it came from, and
-# provision.conf has no blocks -- so a key arrives as 'default.image' and a
-# recipe asked for 'image' would see none of them.
-#
-# Stripped rather than asked for by block: param(-block => 'default') is refused
-# outright unless Config::Simple decided the file was ini syntax, which it
-# decides by looking for a [header] this file does not have.
+=head2 %settings = _settings($config)
+
+Returns all that F<provision.conf> says, as a plain hash, to give to a recipe.
+$config is the Config::Simple object of the file.  Each setting in
+C<%LIST_SETTING> is an array reference.
+
+Config::Simple puts the name of its block in front of each key.
+F<provision.conf> has no blocks, so a key comes back as C<default.image>, and a
+recipe that asks for C<image> does not find it.  This sub removes the prefix.
+It does not ask for the block by name.  C<< param(-block => 'default') >> works
+only on a file that Config::Simple reads as INI syntax.  It decides that from a
+[header] line, and F<provision.conf> has none.
+
+=cut
+
 sub _settings {
     my ($config) = @_;
 
@@ -202,61 +220,70 @@ sub _settings {
     return %settings;
 }
 
-#TODO: cpu/gpu passthru accel via techniques such as the following:
+#TODO: CPU and GPU passthrough acceleration, with techniques such as this one:
 # https://github.com/HarbourHeading/KVM-GPU-Passthrough
 
-# Open a file, or die saying which one and why.
-#
-# A -f test is a promise about a moment that has already passed by the time
-# anything acts on it, and it cannot tell "not there" from "there but not ours
-# to read" -- which is the failure this tool actually hits, running as a user
-# that may not own the domain directory.  Opening it answers both questions at
-# once, and the answer is still true when the handle is used.
+=head2 $fh = _must_read($path, $what)
+
+Opens $path for reading and returns the handle.  If the open fails, it dies
+with C<$what: $path> and the reason.
+
+The open is the test.  A C<-f> test is true or false at a moment that is over
+when the code acts on it.  It also cannot tell a missing file from a file that
+this user cannot read.  This tool meets the second case, because it can run as
+a user that does not own the domain directory.  An open answers both
+questions, and the answer stays true while the handle is in use.
+
+=cut
+
 sub _must_read {
     my ( $path, $what ) = @_;
     open( my $fh, '<', $path ) or die "$what: $path ($!)\n";
     return $fh;
 }
 
+# Each domain gets its secrets once in a run.  On the reuse path,
+# reprovision_guest places them and schedules the makefile, and then main
+# places them again.  A second write replaces a key that the recipe already
+# gave to the service that reads it.
+my %PLACED;
+
 =head2 place_guest_secrets($guest, $domain)
 
-Put the files a recipe reads but must never generate onto the guest, out of the
-secret store.
+Copies the files that a recipe reads, but must never generate, from the secret
+store onto the guest.  It does this before the makefile that reads them
+starts.
 
-C<bin/new_config> leaves a manifest beside the domain saying where each one goes
-and which reference holds it -- the reference, never the value, so that nothing
-here is readable out of the domain directory or out of a backup of it.  This
-resolves them and writes each file, before the makefile that will read them has
-started.
+F<bin/new_config> writes a manifest, F<guest-secrets.yaml>, in the domain
+directory.  For each file, the manifest gives the path on the guest and the
+reference in the store that holds the value.  It holds the reference and never
+the value.  So nobody can read a secret from the domain directory or from a
+backup of it.
 
-Most guests ask for no secret at all, and F<bin/new_config> writes no manifest
-for one that does not.  There is nothing to place then, and nothing happens.
+Most guests ask for no secret, and F<bin/new_config> writes no manifest for
+them.  C<--no-config> writes no manifest at all.  With no manifest, this sub
+does nothing and returns an empty list.  It also returns an empty list on a
+second call for the same domain.  It returns 1 after it places the files and
+calls C<authorize_runner_key>.
 
-Dies if the store cannot be reached.  A guest whose signing key or equivalent
-did not arrive is a guest that will make itself a new identity, which is the
-whole thing this exists to stop; better to fail here, where an operator is
-watching, than three minutes later on the guest.
+It asks for the password of the store through L<Trog::Credentials>.  It dies if
+it cannot open the store, if the store has no value for a reference, or if it
+cannot write a file to the guest.  A guest that does not get its signing key, or
+a similar secret, makes a new identity for itself.  This sub exists to stop
+that.  So it fails here, where an operator watches, and not three minutes later
+on the guest.
 
 =cut
-
-# Once per run, whichever path reached it first.  A guest being re-provisioned
-# goes through the reuse branch, which places these and then schedules the
-# makefile itself; main places them too, for the guest that was just built.  On
-# the reuse path both fire, and the second would rewrite a key the recipe had
-# already handed to the service now reading it.
-my %PLACED;
 
 sub place_guest_secrets {
     my ( $guest, $domain ) = @_;
 
     return if $PLACED{$domain}++;
 
-    # The same domain directory bin/destroy purges: whatever hypervisor this run
-    # is working with says where it is.
+    # The domain directory of the hypervisor of this run, which is the
+    # directory that bin/destroy purges.
     my $manifest = Trog::HV->new()->domain_dir . "/$domain/guest-secrets.yaml";
 
-    # No manifest is the ordinary case: new_config writes one only for a domain
-    # whose recipes ask for a secret, and --no-config writes none at all.
     return unless -e $manifest;
 
     my $wanted = YAML::XS::Load( File::Slurper::read_binary($manifest) );
@@ -270,20 +297,18 @@ sub place_guest_secrets {
         die "The secret store had nothing for $wanted->{$path}{ref}, which $domain needs at $path\n"
           unless length $value;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
-        # The directory the recipe will later make: this runs first, so it is not
-        # there yet and a write into it would fail.
+        # The recipe makes this directory later.  This runs first, so the
+        # directory is not there yet, and a write into it fails.
         my $dir = File::Basename::dirname($path);
         die "Could not make $dir on $domain\n" if $guest->run_sudo( 'mkdir', '-p', $dir );
 
         $guest->write_text( $path, "$value\n", sudo => 1, mode => $wanted->{$path}{mode} // '0600' )
           or die "Could not place $path on $domain\n";
 
-        # Attempted rather than required: this runs before the makefile, so the
-        # account that will own the file usually belongs to a package that is
-        # not installed yet.  The mode above is what keeps the secret to itself
-        # in the meantime, and the recipe chowns it once the service exists --
-        # which is why guest_secrets says the owner is what it ends up as
-        # rather than what it lands as.
+        # Try the owner, but do not require it.  The account is usually from a
+        # package that the makefile has not installed yet.  Until the recipe
+        # changes the owner, the mode above keeps the secret private.  That is
+        # why guest_secrets gives the final owner, not the first one.
         my $owner = $wanted->{$path}{owner} // 'root:root';
         warn "$path is root's for now: no $owner on $domain yet, so the recipe has to give it away\n"
           if $guest->run_sudo( 'chown', $owner, $path );
@@ -297,25 +322,31 @@ sub place_guest_secrets {
 
 =head2 authorize_runner_key($domain, $values)
 
-Let a runner's key in to each hypervisor it was configured to build guests on.
+Adds the key of a runner to the F<authorized_keys> of each hypervisor that the
+runner builds guests on.  A runner is a guest that runs the C<trogrunner>
+recipe.  $values is the hash reference, from path to value, that
+C<place_guest_secrets> got from the store.
 
-The same kind of change as C<authorize_guest_key> and here for the same reason:
-it is a change to a machine that is not the guest, so it belongs in the tool
-rather than in the recipe.  It is here rather than beside that one because this
-is where the key has already been resolved out of the store -- doing it
-anywhere else means asking for the store password twice.
+The change is to a machine that is not the guest, so the tool makes it and not
+the recipe.  C<authorize_guest_key> is here for the same reason.  This sub is
+not next to that one, because the key comes out of the store here.  In any
+other place, the operator must type the password of the store a second time.
 
-A dry run never reaches this.  C<provision_domain> returns before anything that
-places a secret, and that is the only place the decision is made.
+L<Provisioner::Cookbook> tells which hypervisors get the key.  This sub does
+nothing and returns 0 for a domain that does not run C<trogrunner>, or that
+keeps the default C<hypervisor_access> of C<none>.  It gives a warning and
+returns 0 for a domain that asks for access and names no hypervisor.  It
+returns 1 when it added the key.
 
-Which hypervisors, and whether at all, is a configuration question, so
-L<Provisioner::Cookbook> is what answers it.  Nothing happens for a domain that
-does not run the C<trogrunner> recipe, or that runs it with the default
-C<hypervisor_access> of C<none>.
+It writes the public half beside the domain as F<hypervisor-key.pub>.  The file
+is public, and F<bin/destroy> reads it to remove the key without the password
+of the store.
 
-The public half is written beside the domain as F<hypervisor-key.pub>: it is
-public, and it is what C<bin/destroy> reads to take the grant away again
-without needing the store password.
+It dies if the store has no private key for the domain, if the value is not a
+key, if a hypervisor has no C<libvirt_uri>, or if it cannot add the key.
+
+A dry run never gets here, because C<provision_domain> returns before it
+places any secret.
 
 =cut
 
@@ -340,9 +371,9 @@ sub authorize_runner_key {
     my $pubkey = _public_half( $domain, $values->{$private} );
     File::Slurper::Temp::write_binary( "$domain_dir/$domain/hypervisor-key.pub", "$pubkey\n" );
 
-    # from="<address>" when the domain holds one.  It costs nothing and it is
-    # stable, because re-provisioning keeps whatever address the domain has --
-    # see bin/destroy, which is the only thing that gives one back.
+    # from="<address>" when the domain holds one.  The address is stable,
+    # because a new provision keeps the address of the domain.  Only
+    # bin/destroy gives it back.
     my $line = $pubkey;
     if ( $grant{restrict} ) {
         my $ip = eval { Provisioner::IPPool::held_by($domain) };
@@ -364,10 +395,17 @@ sub authorize_runner_key {
     return 1;
 }
 
-# Provisioner::Utils::ssh_pubkey_from_private, which already does this and did
-# before any of this was written: CryptX rather than a process, for RSA, Ed25519
-# and ECDSA alike.  It takes a path and what is in hand here is the value out of
-# the store, so the only thing left to do is put it where it can be read from.
+=head2 $pubkey = _public_half($domain, $private)
+
+Returns the public half of the private key $private, followed by the comment
+C<trog-provisioner runner $domain>.  It dies if
+C<Provisioner::Utils::ssh_pubkey_from_private> cannot read $private as a key.
+
+That function reads a key from a file, so this sub first writes $private to a
+temporary file with mode 0600.
+
+=cut
+
 sub _public_half {
     my ( $domain, $private ) = @_;
 
@@ -380,15 +418,14 @@ sub _public_half {
     die "Could not read the public half of $domain's hypervisor key; the store may be holding something that is not one.\n$@"
       unless $pubkey;
 
-    # Named, because what comes back is the key and nothing else -- so without
-    # this, what lands in somebody's authorized_keys is an anonymous line that
-    # nobody reading that file can attribute or safely remove by hand.
+    # The comment names the line, so that a reader of authorized_keys can tell
+    # whose it is and remove it by hand.
     return "$pubkey trog-provisioner runner $domain";
 }
 
-# What to do about a rebuild that would destroy the guest, as the
-# --*-on-nonreusable options set it.  `ask` is the absence of an answer rather
-# than a fourth thing to do.
+# What to do about a rebuild that destroys the guest, as the
+# --*-on-nonreusable options set it.  `ask` means that no option gave an
+# answer.  It is not a fourth action.
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,
@@ -431,29 +468,28 @@ sub main {
     $nonreusable = $NONREUSABLE{destroy} if $destroy_on_nonreusable;
     $nonreusable = $NONREUSABLE{stop}    if $die_on_nonreusable;
 
-    # Before anything that could want one, and only when asked: see
-    # Trog::Credentials, which will not read a handle nobody offered it.
+    # Before anything asks for a password, and only with --credentials.  See
+    # Trog::Credentials, which reads no handle that it was not given.
     Trog::Credentials->load() if $credentials;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    # Everything the hypervisor knows about itself comes off provision.conf, so
-    # we have to find that the hard way first -- and asking Trog::HV for one here
-    # would pin the singleton before generate_config has chosen it.  The class
-    # answers without being built, so the default is spelled in one place.
+    # The choice of hypervisor reads provision.conf, so find that file first.
+    # Do not ask Trog::HV for an object here, because that fixes the singleton
+    # before generate_config chooses the hypervisor.  The class gives the
+    # default without an object, so the default is in one place.
     #
-    # Kept, because the default below makes "given" and "defaulted"
-    # indistinguishable afterwards, and only one of them should beat what the
-    # hypervisor says.
+    # Keep the value from the command line.  After the default, a given value
+    # and a default look the same, and only a given value beats the hypervisor.
     my $domain_dir_from_cli = $domain_dir;
     $domain_dir //= Trog::HV->default_domain_dir;
     $domain =~ s/\///g;
 
-    # Build the domain's configuration first.  It is what writes provision.conf
-    # and packs data.tar.gz, and it needs the hypervisor to write either -- so
-    # it picks the hypervisor too, and everything after this shares it.
+    # Generate the configuration of the domain first.  It writes provision.conf
+    # and packs data.tar.gz, and it needs the hypervisor to write them.  So it
+    # also chooses the hypervisor, and all the code after it uses that choice.
     generate_config(
         $domain,
         {
@@ -464,18 +500,13 @@ sub main {
             uri        => $uri,
             dryrun     => $dryrun,
 
-            # Typed, every time, by somebody who has read what it is about to
-            # lose.  No environment variable and no config key: this is the
-            # difference between rebuilding a guest and destroying the only copy
-            # of what was on it.
+            # Only from the command line: see --salvage-gaps-ok in the POD.
             salvage_gaps_ok => $salvage_gaps_ok,
         }
     ) unless $no_config;
 
-    # generate_config picked the hypervisor, and where a domain's directory is
-    # can come from its block in hypervisors.conf -- so ask it.  Reading the
-    # default here instead was right only while every hypervisor used
-    # /opt/domains.
+    # Ask the hypervisor that generate_config chose, because its block in
+    # hypervisors.conf can set the domain directory.
     $domain_dir = Trog::HV->new()->domain_dir
       unless $no_config || defined $domain_dir_from_cli;
 
@@ -488,8 +519,8 @@ sub main {
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
 
-    # Figure out which hypervisor we're talking to before we touch anything.
-    # Every other sub picks this same object back up with Trog::HV->new().
+    # Choose the hypervisor before anything changes.  Every other sub gets the
+    # same object back from Trog::HV->new().
     my $hv = choose_hypervisor(
         $config, $domain,
         {
@@ -504,12 +535,12 @@ sub main {
     my $data = "$domain_dir/$domain/data.tar.gz";
     close( _must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
 
-    # Its storage pool, and a fix for a sillyness in virtiofs -- or nothing, on a
-    # hypervisor that has neither.
+    # Its storage pool and the virtiofs shim, or nothing on a hypervisor that
+    # has neither.
     $hv->prepare_host("$FindBin::Bin/../virtiofs-better");
 
-    # Now, let's figure out if this has a VM which needs to be built first.
-    # In the event reuse is passed, we are just layering configs really.
+    # If this domain depends on another, build that guest first.  With
+    # --existing, this only adds configuration to a guest that is up.
     my $skey;
     my $depends = $config->param('depends_on');
     if ($depends) {
@@ -518,12 +549,12 @@ sub main {
         close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
         my $dconfig = Config::Simple->new($dcfile);
 
-        #XXX should probably die here if the admin_users differ!
+        #XXX Perhaps die here if the admin_user settings differ.
 
         ( $reuser, $reuse ) = provision_domain( config => $dconfig, domain => $depends, reuse => $reuse, reuser => $reuser, dryrun => $dryrun, nonreusable => $nonreusable );
 
-        # After, not before: provision_domain is what mints this key and puts it
-        # in the store, so asking any earlier is asking about the guest that was.
+        # After provision_domain, because it makes this key and puts it in the
+        # store.  Before it, this gets the key of the old guest.
         $skey = Trog::Guest->key_path( $depends, "$domain_dir/$depends/key.rsa" );
         if ( !$dryrun ) {
             my $guest = Trog::Guest->new( name => $depends, host => $reuse, user => $reuser, key_path => $skey );
@@ -536,17 +567,17 @@ sub main {
 
     }
 
-    #TODO need to figure out how to apply the cloud-init for the second domain if deps are active
+    #TODO: Find how to apply the cloud-init of the second domain when it has a dependency.
     my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
     return 0 if $dryrun;
 
-    # Same reason as above: the key this needs is the one provision_domain just
-    # made.  A domain with a dependency uses that one, which is already in hand.
+    # After provision_domain, for the reason above.  A domain with a dependency
+    # already has the key of that guest.
     $skey //= Trog::Guest->key_path( $domain, "$domain_dir/$domain/key.rsa" );
 
-    # --out rather than a $(...): the key is in the store, and what bin/guest_key
-    # writes without --out is a temporary file it unlinks on the way out -- so a
-    # substitution hands ssh a path that stopped existing before ssh started.
+    # --out, not a $(...) substitution.  Without --out, bin/guest_key writes a
+    # temporary file and removes it when it exits.  So ssh gets a path that is
+    # already gone.
     print "bin/guest_key --out $domain.key $domain && ssh -i $domain.key $user\@$ip\n";
     my $guest = Trog::Guest->new( name => $domain, host => $ip, user => $user, key_path => $skey );
     $guest->wait_for_ssh();
@@ -558,16 +589,15 @@ sub main {
           or die "could not sync devices map!";
     }
 
-    # Before cloud-init has finished, and so well before the makefile it
-    # schedules starts: these are what a recipe reads rather than generates.
+    # Before cloud-init finishes, so before the makefile that it schedules
+    # starts.  A recipe reads these files and does not generate them.
     place_guest_secrets( $guest, $domain );
 
     $guest->wait_for_cloud_init($domain);
 
-    # Only now.  The seed ISO has to stay in the drive for as long as cloud-init
-    # might want to read it, which is until it says it is finished; pulling it
-    # out any earlier leaves the guest with no user, no keys and no netplan, and
-    # the pulling-out is only to stop the guest booting off it next time.
+    # Only now.  cloud-init reads the seed ISO until it finishes, and without
+    # the ISO the guest gets no user, no keys and no netplan.  The ISO comes
+    # out only so that the guest does not boot from it next time.
     $hv->release_seed($domain);
 
     $guest->wait_for_makefile($domain)
@@ -576,15 +606,27 @@ sub main {
     return 0;
 }
 
-# Run the config generator for this domain, if there is anything for it to
-# work from.
-#
-# The two used to be separate repositories and separate runs: you generated a
-# domain's configuration, then provisioned it.  That worked while the generator
-# could assume it was running on the hypervisor it was writing about -- it read
-# the internal IP and the sshd port off the local machine.  Once the hypervisor
-# became a choice, the two halves had to agree on which one, and the only
-# honest way for them to agree is to be one program.
+=head2 generate_config($domain, $opts)
+
+Runs F<bin/new_config> for $domain, in this process, when there are recipes
+for it to read.  $opts is a hash reference.  This sub reads its keys
+C<domain_dir>, C<recipes>, C<ipmap>, C<uri>, C<dryrun> and C<salvage_gaps_ok>.
+C<recipes> and C<ipmap> default to the files that L<Trog::Config> names.
+
+It returns 0 and does nothing when there is no F<recipes.yaml> and no
+F<recipes.d> beside it.  Then somebody provisions from a domain directory that
+they wrote by hand, which is supported.  It returns 1 after it generates the
+configuration.
+
+With C<uri>, this sub sets the hypervisor before the generator runs, and the
+generator uses it.  Without C<uri>, the generator chooses the hypervisor.  In
+both cases, the rest of this program uses the same one.
+
+It dies if the generator fails, and through C<refuse_on_salvage_gaps> if the
+salvage left a gap.
+
+=cut
+
 sub generate_config {
     my ( $domain, $opts ) = @_;
 
@@ -592,8 +634,6 @@ sub generate_config {
     my $recipes = $opts->{recipes} // Trog::Config->path('recipes.yaml');
     my $ipmap   = $opts->{ipmap}   // Trog::Config->path('ipmap.cfg');
 
-    # No site data, nothing to generate: somebody is provisioning from a domain
-    # directory they wrote by hand, which is a supported thing to do.
     my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
     unless ( -f $recipes || -d $recipe_dir ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is site data at all; the generator opens what there is
         print "No recipes at $recipes, building from what is already in $dir/$domain\n";
@@ -602,8 +642,7 @@ sub generate_config {
 
     print "Generating the configuration for $domain...\n";
 
-    # An explicit --connect settles the hypervisor before the generator gets to
-    # choose one; it picks the singleton up from there.
+    # The generator takes this singleton, and does not choose a hypervisor.
     Trog::HV->new( uri => $opts->{uri}, domain_dir => $dir ) if $opts->{uri};
 
     push @INC, '.';
@@ -611,8 +650,8 @@ sub generate_config {
     require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
 
-    # Which here means only that a guest that is up keeps the key it is up with;
-    # see the generator's own POD.
+    # For the generator, this only keeps the key of a guest that is up.  See
+    # DRY RUNS in bin/new_config.
     push( @flags, '--dryrun' ) if $opts->{dryrun};
 
     my $result = Trog::Provisioner::Config::Generator::main( @flags, $domain );
@@ -625,19 +664,22 @@ sub generate_config {
 
 =head2 refuse_on_salvage_gaps($allowed)
 
-Stop before anything is destroyed when the salvage came away without state the
-guest still has.
+Stops the run before anything is destroyed when the salvage did not get state
+that is still on the guest.  To salvage is to copy the state of a service off
+the guest before the rebuild.
 
-The generator says so and carries on, which is right for what it is -- it
-writes configuration, and it runs from cron to take backups where quitting over
-one unreadable directory would abandon every domain after it.  This program is
-the one that asks a hypervisor to C<clear_guest>, so this is where the warning
-has to turn into a refusal.
+It returns 1 when there is no gap.  With a true $allowed, it gives a warning
+that lists the gaps and returns 1.  Otherwise it dies with the list.
 
-Only the gaps where the guest still holds files that did not come off it.  A
-path with nothing under it has nothing to salvage, which is what every first
-build of a recipe looks like, and a domain with no guest yet is never salvaged at
-all -- so a new machine cannot trip this.
+The generator only gives a warning, and that is correct for it.  It writes
+configuration, and it runs from cron to take backups.  There, a stop for one
+directory that it cannot read abandons every domain after it.  This program
+asks a hypervisor to C<clear_guest>, so here the warning becomes a refusal.
+
+It counts only a gap where the guest still has files that did not come off it.
+A path with nothing under it has nothing to salvage, and every first build of a
+recipe looks like that.  A domain with no guest is not salvaged.  So a new
+machine never stops here.
 
 =cut
 
@@ -655,7 +697,6 @@ sub refuse_on_salvage_gaps {
         } sort keys %gaps
     );
 
-    # Loud, and then carry on, because somebody said to.
     if ($allowed) {
         warn "Continuing past " . scalar( keys %gaps ) . " domain(s) whose state could not be read, because --salvage-gaps-ok says to:\n" . $detail;
         return 1;
@@ -665,12 +706,19 @@ sub refuse_on_salvage_gaps {
       . "\nThe guest was asked, and it still has files under each of those -- so this is\na fetch that did not bring them, not a service that has nothing.  Rebuilding now\ndestroys the only copy.\n\nThe salvage reads them as root over sudo, so the usual cause is sudo being\nrefused on the guest or the fetch failing partway.  Look at what it said above,\nfix it and run again, or pass --salvage-gaps-ok if that state is gone for good\nand you want the guest rebuilt without it.\n";
 }
 
-# Which hypervisor does this guest belong on?
-#
-# --connect is the manual override and skips every question below.  Otherwise,
-# if there is a hypervisors.conf, it decides: the guest goes where it already
-# lives, or where it fits.  With no fleet configured we are back to the old
-# behavior, where provision.conf carried the connection details itself.
+=head2 $hv = choose_hypervisor($config, $domain, $opts)
+
+Returns the hypervisor that the guest of $domain belongs on.  $config is the
+Config::Simple object of F<provision.conf>.  $opts is a hash reference with the
+keys C<uri>, C<domain_dir> and C<hvconf>.
+
+With C<uri>, from C<--connect>, it returns that hypervisor and asks nothing
+else.  Otherwise, a configured F<hypervisors.conf> decides.  The guest goes
+where it is now, or where it fits.  See L<Trog::Hypervisors>.  With no fleet,
+F<provision.conf> holds the connection details.
+
+=cut
+
 sub choose_hypervisor {
     my ( $config, $domain, $opts ) = @_;
 
@@ -686,12 +734,22 @@ sub choose_hypervisor {
 
     my $hv = $fleet->select_for( $domain, $config );
 
-    # The command line still outranks the fleet on where *our* files go.
+    # The command line beats the fleet on where our files go.
     $hv->{domain_dir} = $opts->{domain_dir} if defined $opts->{domain_dir};
     return $hv;
 }
 
-# Asked only where somebody is there to answer.
+=head2 $behavior = ask_about_nonreusable($domain)
+
+Asks the operator what to do about a rebuild that destroys the guest of
+$domain.  Call it only when a person is there to answer.
+
+It returns C<$NONREUSABLE{clone}> for the answer C<copy>, and
+C<$NONREUSABLE{destroy}> for C<destroy>.  For any other answer, an empty one
+too, it returns C<$NONREUSABLE{stop}>.
+
+=cut
+
 sub ask_about_nonreusable {
     my ($domain) = @_;
 
@@ -699,7 +757,6 @@ sub ask_about_nonreusable {
 
     my $answer = Trog::Utils::prompt('Copy the disk aside first, destroy it and rebuild, or stop? [copy/destroy/stop]:');
 
-    # Anything but the two words goes the safe way, empty included.
     return $NONREUSABLE{clone}   if ( lc "$answer" ) eq 'copy';
     return $NONREUSABLE{destroy} if ( lc "$answer" ) eq 'destroy';
     return $NONREUSABLE{stop};
@@ -710,16 +767,15 @@ sub provision_domain (%args) {
 
     my $hv = Trog::HV->new();
 
-    # Set this to simplify calling conventions
+    # read_seed and authorize_guest_key read the domain from $config.
     $config->param( 'domain', $domain );
 
-    # A dry run stops here: there is no ISO to build the seed into and no machine
-    # to tell about it, so nothing below reads it or lets a key in anywhere.
-    # would_provision says what it would do and hands back where the guest is, or
-    # would be.  Not passed through guest_ssh_ip: main() throws this address away
-    # on a dry run, and asking a backend how to reach a guest that does not exist
-    # yet is a question with no answer -- a cloud looks it up by name and dies,
-    # where libvirt happens to hand the placeholder straight back.
+    # A dry run stops here.  It has no ISO for the seed and no machine to tell
+    # about it, so no code below reads the seed or adds a key anywhere.
+    # would_provision describes the build and returns where the guest is, or
+    # where it is going to be.  This does not ask guest_ssh_ip, because main()
+    # discards the address on a dry run.  For a guest that does not exist, a
+    # cloud looks up the name and dies, and libvirt returns the placeholder.
     if ($dryrun) {
         return ( $reuser,                      $reuse ) if $reuse;
         return ( $config->param('admin_user'), $hv->would_provision( $config, reuse => $reuse ) );
@@ -727,10 +783,7 @@ sub provision_domain (%args) {
 
     return reprovision_guest( hv => $hv, config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends ) if $reuse;
 
-    # What bin/new_config wrote beside the domain, and the change to this machine
-    # that goes with it: the guest fetches its payload from here, so its key has
-    # to be let in.  The hypervisor's half is install_log_collector, further
-    # down, because what it installs is one of the vm recipe's generated files.
+    # The guest fetches its payload from this machine, so let its key in.
     my %seed = read_seed($config);
     authorize_guest_key($config);
 
@@ -739,8 +792,8 @@ sub provision_domain (%args) {
     if ( $hv->rebuild_destroys_guest( $domain, capacity => $settings{size} ) ) {
         my $behavior = $nonreusable // $NONREUSABLE{ask};
 
-        # A prompt nobody can answer hangs the run rather than failing it, and
-        # this is run from make and from agents.
+        # With no terminal, stop.  A prompt that nobody answers hangs the run,
+        # and make and agents run this.
         $behavior = Trog::Local->interactive ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
           if $behavior == $NONREUSABLE{ask};
 
@@ -756,21 +809,19 @@ sub provision_domain (%args) {
         print "Rebuilding $domain destroys it: its disk cannot be kept at the size this build asks for.\n";
     }
 
-    # Before the plunge, where there is anything to go back to.  A first build
-    # has no guest to snapshot and nothing to lose, and a rebuild that cannot
-    # keep this guest's disk would be snapshotting a file it is about to delete.
-    # Which of those this is, and whatever the backend has to do to its guest to
-    # take a snapshot at all, are the backend's own business.
+    # Take a snapshot before the rebuild, when there is a guest to go back to.
+    # A first build has no guest and nothing to lose.  A rebuild that cannot
+    # keep the disk deletes it, so a snapshot in it has no use.  The backend
+    # decides which case this is, and what a snapshot needs.
     my $rollback = $hv->snapshot_before_rebuild( $domain, capacity => $settings{size} );
     print "Snapshotted $domain as $rollback before rebuilding it.\n" . "If this goes badly: bin/restore --name $rollback $domain\n" if $rollback;
 
-    # Which of these a hypervisor does is its own business: libvirt annihilates a
-    # domain and its disks, a cloud rebuilds the server it already has.  This
-    # says what happens, in order, and asks the backend to do each part.
+    # The backend decides what each step does.  libvirt removes a domain and
+    # its disks, and a cloud rebuilds the server that it has.  This sub gives
+    # the order, and asks the backend to do each step.
     #
-    # keep_disk where there is a rollback point, because on libvirt that point is
-    # inside the disk: deleting it would throw away the snapshot just taken,
-    # along with the guest it was taken of.
+    # keep_disk when there is a rollback point, because on libvirt that point
+    # is in the disk.  If the disk goes, the snapshot goes with it.
     $hv->clear_guest( $domain, keep_disk => !!$rollback );
 
     my $address = $hv->provision_guest( $config, \%seed, settings => \%settings, reuse => $reuse );
@@ -778,28 +829,37 @@ sub provision_domain (%args) {
     return ( $config->param('admin_user'), $hv->guest_ssh_ip( $config, $address ) );
 }
 
-# Layering a domain onto a guest that is already up, rather than building one.
-#
-# The machine is $reuse: where --existing pointed, or where provisioning the
-# dependency ended up.  That is what makes a shared host -- bar.test is added to
-# the guest built for foo.test rather than getting one of its own.  Only two
-# things here are the hypervisor's: what MAC the guest's second interface has,
-# and clearing anything left standing under this domain's own name.
+=head2 ($user, $host) = reprovision_guest(%args)
+
+Adds a domain to a guest that is up, and does not build a guest.  It takes the
+keys C<hv>, C<config>, C<domain>, C<reuse>, C<reuser> and C<depends>.  It
+returns C<reuser> and C<reuse>, the user and the address to connect with.
+
+The machine is C<reuse>.  That is the address from C<--existing>, or the guest
+that was built for the dependency.  This is how a shared host works: bar.test
+goes onto the guest of foo.test, and does not get its own.  Only two things
+here come from the hypervisor.  One is the MAC of the second interface of the
+guest.  The other is the removal of a guest that has the name of this domain.
+
+It ships F<user-data>, the addresses, F<setup.sh> and the secrets, and
+schedules F<setup.sh> with C<at>.  It dies if it cannot ship a file.
+
+=cut
+
 sub reprovision_guest (%args) {
     my ( $hv, $config, $domain, $reuse, $reuser, $depends ) = @args{qw{hv config domain reuse reuser depends}};
 
-    # Whose machine this is.  With --depends it is the domain that was built, and
-    # that domain's key is the one which opens it; otherwise this domain is the
-    # guest.  Failing the key there is the agent, and $reuser is root when nobody
-    # named an admin user -- which will not do if the box has been locked down.
+    # The machine belongs to $built_for.  With a dependency, that is the
+    # domain that was built, and its key opens the machine.  Without one, this
+    # domain is the guest.  With no key, ssh uses the agent.  $reuser is root
+    # when no admin user is named, and a locked-down machine can refuse root.
     my $built_for  = $depends // $domain;
     my $domain_dir = $hv->domain_dir;
     my $key        = Trog::Guest->key_path( $built_for, "$domain_dir/$built_for/key.rsa" );
 
-    # Any VM still standing under this domain's own name, which is the guest it
-    # had to itself before being moved onto this one.  Only with --depends: there
-    # the two are different machines, and without one that name *is* the machine
-    # being connected to below.
+    # With a dependency, remove any guest that still has the name of this
+    # domain.  That is the guest this domain had before it moved to the shared
+    # one.  Without a dependency, that name is the machine this connects to.
     $hv->clear_guest($domain) if $depends;
 
     print "Attempting to access Machine\n";
@@ -819,9 +879,18 @@ sub reprovision_guest (%args) {
     return ( $reuser, $reuse );
 }
 
-# cloud-init runs once and remembers that it did.  Asking for a module by name
-# runs it again regardless, which is what applies the config we have just
-# shipped to a guest that booted from an older one.
+=head2 refresh_cloud_init($guest, $domain_dir, $domain)
+
+Ships the F<user-data> of $domain to the guest, and runs the cloud-init modules
+C<cc_package_update_upgrade_install> and C<cc_users_groups> again.  It returns
+1, and dies if it cannot ship the file.
+
+cloud-init runs once and remembers that it ran.  A module that you name runs
+again anyway.  That applies the new configuration to a guest that booted from
+an older one.
+
+=cut
+
 sub refresh_cloud_init {
     my ( $guest, $domain_dir, $domain ) = @_;
 
@@ -836,12 +905,24 @@ sub refresh_cloud_init {
     return 1;
 }
 
-# The addresses provision.conf names, added to whatever the guest already has.
-# Only written back when that changes something: netplan apply on an unchanged
-# file is a needless bounce of the guest's network.
-#
-# The interface belongs to $built_for, the domain the machine was built for,
-# while the addresses belong to $domain -- two different names on a shared host.
+=head2 merge_guest_addresses(%args)
+
+Adds the addresses in the C<ips> setting of F<provision.conf> to the netplan of
+the guest, and applies it.  It takes the keys C<guest>, C<hv>, C<config>,
+C<domain_dir>, C<domain> and C<built_for>.  It returns 1.
+
+It writes netplan only when the addresses change, because C<netplan apply> on
+the same file restarts the network of the guest for no reason.
+
+The interface belongs to C<built_for>, the domain that the machine was built
+for.  The addresses belong to C<domain>.  On a shared host, these are two
+different names.
+
+It dies if it cannot install the new netplan file, and through
+C<primary_adapter>.
+
+=cut
+
 sub merge_guest_addresses (%args) {
     my ( $guest, $hv, $config, $domain_dir, $domain, $built_for ) = @args{qw{guest hv config domain_dir domain built_for}};
 
@@ -860,8 +941,6 @@ sub merge_guest_addresses (%args) {
     File::Slurper::Temp::write_text( $new_config, YAML::XS::Dump($parsed) );
     print "Setting up IP for $domain...\n";
 
-    # Straight to where it belongs, as root, rather than landing in the home
-    # directory and being moved and chmodded afterwards.
     $guest->put_file( $new_config, '/etc/netplan/50-cloud-init.yaml', sudo => 1, mode => '0600' )
       or die "Could not install the netplan config on $domain";
 
@@ -872,13 +951,23 @@ sub merge_guest_addresses (%args) {
     return 1;
 }
 
-# Which entry in the guest's netplan is the outbound interface?
-#
-# By MAC, because that is the one thing about an interface we decide and the
-# guest cannot disagree with.  cloud-init writes the MAC it matched on into
-# netplan, so the entry we want identifies itself; the name it ended up with is
-# a consequence and not a handle.  Falling back to the name covers a guest
-# built before any of this, whose netplan has no match stanza at all.
+=head2 $name = primary_adapter($netplan, $config, $mac)
+
+Returns the name of the outbound interface in $netplan, the parsed netplan of
+the guest.  It finds the entry whose C<match> stanza has the MAC address $mac.
+
+We choose the MAC, and the guest cannot change it.  cloud-init writes the MAC
+that it matched into netplan, so the entry identifies itself.  The name of the
+interface is only a result of the match.
+
+For a guest whose netplan has no C<match> stanza, it uses the name.  That is
+C<bridge_devname> from $config, or the bridge name from the hypervisor.
+
+It dies if netplan has no C<ethernets> section, or if no entry has the MAC or
+the name.
+
+=cut
+
 sub primary_adapter {
     my ( $netplan, $config, $mac ) = @_;
 
@@ -900,16 +989,17 @@ sub primary_adapter {
 
 =head2 %seed = read_seed($config)
 
-The three NoCloud files the guest's seed ISO is built from, read out of the
-domain directory.
+Returns the three NoCloud files that the seed ISO of the guest is made from,
+keyed by name: C<user-data>, C<meta-data> and C<network-config>.  It reads them
+from the domain directory.
 
-They are the distro recipe's C<template_files>, written by F<bin/new_config>
-along with everything else a domain is configured with.  Dies naming the file if
-one of them cannot be read: a guest cannot be built without its seed, so there
-is nothing to carry on to.
+F<bin/new_config> writes them with the rest of the configuration of the domain.
+They are the C<template_files> of the distro recipe.  It dies with the name of
+the file if it cannot read one.  A guest cannot be built without its seed, so
+there is no reason to continue.
 
-A dry run does not call this, having no ISO to build and no guest to give one
-to.
+A dry run does not call this, because it has no ISO to make and no guest to
+give it to.
 
 =cut
 
@@ -925,15 +1015,16 @@ sub read_seed {
 
 =head2 authorize_guest_key($config)
 
-Let the guest's key in to this machine, which is the one holding its payload.
+Adds the public key of the guest to the F<authorized_keys> of this machine,
+which holds the payload of the guest.  It returns 1.  It dies if it cannot read
+F<key.rsa.pub> in the domain directory, or if it cannot add the line.
 
-A change to this machine rather than to the domain directory, and the reason
-this is here rather than in the recipe that makes the key.  F<bin/destroy> is
-what takes it back out again, and it would know nothing about one left behind by
-a configuration run that never became a guest.
+The change is to this machine and not to the domain directory.  That is why it
+is here and not in the recipe that makes the key.  F<bin/destroy> removes the
+key again.  It knows nothing about a key from a configuration run that never
+became a guest.
 
-A dry run never reaches this, for the same reason C<authorize_runner_key> does
-not: C<provision_domain> returns first.
+A dry run never gets here, for the same reason as C<authorize_runner_key>.
 
 =cut
 

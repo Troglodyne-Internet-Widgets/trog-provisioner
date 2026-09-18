@@ -1,11 +1,10 @@
 # Refresh the mirror.
 #
-# This starts the unit rather than running apt-mirror, so that a refresh landing
-# during a long sync is queued by systemd instead of running a second one over
-# the same spool -- and so the makefile, this, and an operator all mean the same
-# thing by "sync".
+# This starts the unit and does not run apt-mirror directly.  If a refresh
+# starts during a long sync, systemd queues it.  The makefile, this file and an
+# operator all start the same unit.
 #
-# Failures go to the journal rather than to cron's mail: journalctl -u apt-mirror.
+# Failures go to the journal, not to cron mail: journalctl -u apt-mirror.
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 

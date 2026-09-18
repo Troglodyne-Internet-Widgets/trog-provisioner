@@ -1,27 +1,23 @@
-# Sync client certificates from hypervisor
-[%# One directory and one unit for each domain, both named after it.  A guest
-    can hold two domains connecting to two different VPNs, and openvpn runs a
-    tunnel per instance of openvpn-client@ -- so the certificates cannot share
-    a directory and the configurations cannot share a name. -%]
+# Fetch the client certificates with rsync
+[%# The directory and the unit are named for the domain, so two tunnels on one
+    guest do not collide.  Provisioner::Recipe::openvpnclient has the whole
+    account. -%]
 mkdir -p /etc/openvpn/client/[% domain %]
 rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]:[% cert_dir %]/ /etc/openvpn/client/[% domain %]/
 chmod 0600 /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/[% domain %]/ta.key
 chown root:root /etc/openvpn/client/[% domain %]/client.key /etc/openvpn/client/[% domain %]/ta.key
-[%# openvpn-client@NAME reads /etc/openvpn/client/NAME.conf, so the instance is
-    named for the domain and this is where the configuration has to land. -%]
+[%# openvpn-client@NAME reads /etc/openvpn/client/NAME.conf, so the
+    configuration must land here. -%]
 # Deploy client configuration
 cp client.conf /etc/openvpn/client/[% domain %].conf
 chown root:root /etc/openvpn/client/[% domain %].conf
 chmod 0640 /etc/openvpn/client/[% domain %].conf
-[%# Nothing is salvaged off this guest.  cert_dir on the hypervisor is where
-    these come from and it is rsynced over them every provision, so a copy
-    taken off the guest would be a second copy of material the hypervisor
-    already holds -- and it would sit in the domain directory and in every
-    backup of it, which a private key has no business doing. -%]
-# Enable and start the tunnel immediately so dependent recipes can use it
+[%# Nothing is salvaged off this guest.  Provisioner::Recipe::openvpnclient
+    says why. -%]
+# Start the tunnel now, so it is up for the targets that run after this one
 systemctl daemon-reload
 systemctl enable openvpn-client@[% domain %]
 systemctl start openvpn-client@[% domain %]
-# Wait for the tunnel interface to come up (up to 30s)
+# Wait at most 30 seconds for the tunnel interface to come up
 [% script_dir %]/wait_for_iface [% device %] 30
 touch $@

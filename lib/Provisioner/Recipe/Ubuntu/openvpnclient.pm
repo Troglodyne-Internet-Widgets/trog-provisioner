@@ -16,16 +16,15 @@ Provisioner::Recipe::Ubuntu::openvpnclient - Ubuntu's C<deps> for L<Provisioner:
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else openvpnclient does is in the recipe this
-inherits from.
+A package name is a fact about a distribution, not about the software, so it
+lives here.  The rest of openvpnclient is in the recipe that this class inherits
+from.
 
 =cut
 
 sub deps {
 
-    # It fetches its certificates over rsync, so it needs what does the
-    # fetching as much as it needs openvpn.
+    # The certificates arrive by rsync over ssh, so it needs both as well as openvpn.
     return qw{openvpn openssh-client rsync};
 }
 

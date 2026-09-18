@@ -27,8 +27,6 @@ sub deps {
 }
 
 sub dep_conflicts {
-
-    # Remove anything that conflicts with chrony
     return qw{ntp ntpdate systemd-timesyncd};
 }
 

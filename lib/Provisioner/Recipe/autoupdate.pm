@@ -22,9 +22,11 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-Automatically install updates from the package manager.
+Installs the updates from the package manager every night at midnight.
 
-Optionally autorestart when this updates the kernel, unless the specified touchfile is present.
+If you set C<autorestart> to a path, the guest also reboots after an update that asks for a reboot.
+It does not reboot while a file exists at that path.
+If you do not set C<autorestart>, the guest never reboots itself.
 
 =cut
 
@@ -33,10 +35,8 @@ sub args {
         type       => 'object',
         properties => {
 
-            # A path rather than a boolean, because the guest asks whether it is
-            # a good moment: reboot_if_needed takes this as the touchfile that
-            # says not now.  Unset installs no reboot cron at all, which is what
-            # a guest that should never reboot itself wants.
+            # A path, not a boolean: reboot_if_needed reads it as a touchfile
+            # that says "not now".
             autorestart => {
                 type        => 'string',
                 description => 'Reboot after an update that asks for one, unless this path exists on the guest.  Unset installs no reboot cron, so the guest never restarts itself.',

@@ -30,23 +30,23 @@ use Path::Tiny();
 
 =head2 DESCRIPTION
 
-Sets up TPSGI inside of the install_dir, so it can run your application schlepped over by the data recipe.
+Sets up TPSGI in the directory of the domain under C<install_dir>.  TPSGI then
+runs the application that the data recipe copies there.
 
-Optionally specify extra ENV vars to inject into the systemd service.
+It requires the C<perl> recipe, which installs Starman and the dependencies of
+the checkout.  It also requires the C<nginxproxy> recipe.  With no overrides,
+C<nginxproxy> sets up the vhost on ports 80 and 443.
 
-Requires the nginxproxy recipe, and with no overrides, will set up the vhost on 80/443.
-
-TODO: allow specification of specific SHA to check out.
+The checkout is the head of the default branch of tPSGI.  You cannot choose a
+commit.
 
 =cut
 
 sub required_recipes {
     return (
-        # Starman, which build_service starts the application with, and what
-        # the checkout says it needs -- both installed into the perl that
-        # recipe builds, in its own target, which runs after this fragment has
-        # made the checkout and before the postrun starts the service.  See
-        # Provisioner::Recipe::perl on cpan_deps.
+        # build_service starts the application with Starman.  The perl target
+        # runs after this fragment makes the checkout, and before the postrun
+        # starts the service.  See cpan_deps in Provisioner::Recipe::perl.
         perl => sub {
             my (%opts) = @_;
             return (
@@ -98,7 +98,7 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-GitHub, which serves the tPSGI checkout this recipe clones.
+Returns C<github.com>, which serves the tPSGI checkout that this recipe clones.
 
 =cut
 

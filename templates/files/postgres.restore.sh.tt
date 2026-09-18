@@ -1,40 +1,27 @@
 #!/bin/bash
 
-# Put a salvaged PostgreSQL dump into a cluster that has just been built, and
-# fall back to the seed dumps the recipe was configured with when there is
-# nothing to put back.
+# Put a salvaged PostgreSQL dump into a cluster that was just built.  If there is
+# nothing to put back, load the seed dumps that the recipe was configured with.
 #
 #     postgres-restore.sh <salvaged dump directory> [seed dump ...]
 #
-# The directory is what remote_files brought back: /var/backups/postgres off the
-# guest this one replaces, laid out by postgres-backup.sh as <timestamp>/ holding
-# globals.sql.gz and a directory-format dump per database.  It came down, it went
-# back up into the domain directory, and nothing imported it -- the fragment
-# loaded the configured dumps instead, so a rebuilt guest came up holding a
-# snapshot an operator had once written and none of what had happened since.
+# The directory is what remote_files fetched: /var/backups/postgres from the
+# guest that this one replaces.  postgres-backup.sh lays it out as <timestamp>/,
+# with globals.sql.gz and a directory-format dump for each database.
 #
-# Which is what the two halves here are for.  The salvage is what this guest
-# actually had; the seeds are what to do for a domain that has never had a
-# database at all.  The salvage wins, and neither of them is loaded over
-# something that is already there.
-#
-# That last part is scripts/restore_state's rule, one level down.  It declines
-# when the destination already has state in it, because re-provisioning a running
-# guest fetches that guest's own state minutes earlier and writing a short fetch
-# back over the original would replace the real thing with the half of it we
-# could read.  So this restores a database that is not there and never writes
-# into one that is: a rebuilt cluster has none of them and gets all of it, a live
-# one has all of them and gets nothing.
+# The salvage is what this guest actually had.  The seeds are for a domain that
+# never had a database.  The salvage wins, and neither goes over a database that
+# is already there.  So a rebuilt cluster gets all of it, and a live cluster gets
+# nothing.  Provisioner::Recipe::postgres has the whole account.
 set -euo pipefail
 shopt -s nullglob
 
 SALVAGED="${1:?usage: postgres-restore.sh <salvaged dump directory> [seed dump ...]}"
 shift
 
-# Everything that talks to the cluster is the postgres user: the socket is peer
-# authenticated, and root is not postgres.  Which is also why the dumps below are
-# read by this script and piped in, rather than named to psql -- the domain
-# directory is 0750 to the admin user's group, and postgres is not in it.
+# Everything that talks to the cluster runs as postgres, because the socket uses
+# peer authentication.  This script reads the dumps and pipes them in, because
+# the domain directory is 0750 to the admin group, and postgres is not in it.
 psql_super() { sudo -u postgres psql --quiet --no-psqlrc "$@"; }
 
 database_exists() {
@@ -45,13 +32,11 @@ user_databases() {
     psql_super -tAc "SELECT datname FROM pg_database WHERE datistemplate=false AND datname<>'postgres'"
 }
 
-# The last thing postgres-backup.sh writes is `complete`, so a directory without
-# one is a backup that was interrupted -- or one taken before the backup learned
-# to say, which is the same amount of knowledge about it.  Restoring half a
-# cluster is worse than restoring none: it leaves the cluster holding databases,
-# and holding databases is exactly what stops the next provision from trying
-# again.  An operator who knows an older dump is whole says so by touching the
-# file.
+# The last thing postgres-backup.sh writes is `complete`.  A directory without it
+# is a backup that stopped before the end, so it is skipped.  A database restored
+# from half a dump is never written over later.  If you know that a dump is whole,
+# touch the file.  The glob sorts the timestamps oldest first, so the loop walks
+# back from the end.
 newest_finished_dump() {
     local dumps=( "$SALVAGED"/*/ )
     local i
@@ -78,10 +63,9 @@ if DUMP="$(newest_finished_dump)"; then
 
     if [ "${#pending[@]}" -gt 0 ]; then
 
-        # Roles before the databases that are owned by them and the grants that
-        # name them.  Errors are expected rather than fatal: initdb made this
-        # cluster its own postgres role, and pg_dumpall says CREATE ROLE for that
-        # one too.
+        # Roles come first, because the databases and grants name them.  Errors
+        # are not fatal: initdb made the postgres role, and the dump creates it
+        # again.
         if [ -f "$DUMP/globals.sql.gz" ]; then
             echo "postgres-restore.sh: restoring roles from $DUMP/globals.sql.gz"
             pigz -dc "$DUMP/globals.sql.gz" | psql_super -d postgres || true
@@ -90,10 +74,9 @@ if DUMP="$(newest_finished_dump)"; then
         for db in "${pending[@]}"; do
             echo "postgres-restore.sh: restoring $db from $DUMP"
 
-            # --file=- turns the dump back into SQL on stdout, which is how a
-            # directory-format dump gets into a cluster this script cannot
-            # connect to as itself.  --create means the script carries the
-            # CREATE DATABASE and the \connect that follows it.
+            # --file=- writes the dump as SQL on stdout, because this script
+            # cannot connect to the cluster as itself.  --create puts the
+            # CREATE DATABASE and its \connect into that SQL.
             pg_restore --create --file=- "$DUMP/$db" \
                 | psql_super --set ON_ERROR_STOP=1 -d postgres
             restored=$(( restored + 1 ))

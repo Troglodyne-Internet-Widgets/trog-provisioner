@@ -1,15 +1,15 @@
-[%# The store lives outside install_dir on purpose, for the reason the aptmirror
-    spool does; see perldoc Provisioner::Recipe::fetchcache.  nginx writes it as
-    www-data, which is who its workers run as. -%]
+[%# The store is outside install_dir on purpose, for the same reason as the
+    aptmirror spool, see perldoc Provisioner::Recipe::aptmirror.  The workers of
+    nginx run as www-data, so www-data owns it. -%]
 mkdir -p '[% store %]'
 chown www-data:www-data '[% store %]'
-[%# The certificate the recipe signed for the hosts it fetches from, the
-    authority after it, and its key. -%]
+[%# The certificate that the recipe signed for its hosts, followed by the
+    certificate of the authority, then its key. -%]
 install -o root -g root -m 0644 fetchcache.crt /etc/ssl/certs/fetchcache.pem
 install -o root -g root -m 0600 fetchcache.key /etc/ssl/private/fetchcache.pem
 install -o root -g root -m 0644 fetchcache.nginx.conf /etc/nginx/sites-enabled/[% domain %]-fetchcache.conf
-[%# Deferred for the reason aptmirror defers it: the global configuration nginx
-    writes is not in place until the postrun. -%]
+[%# Deferred, as in aptmirror, because the global configuration of nginx is
+    not in place until the postrun. -%]
 [% script_dir %]/queue_postrun_task systemctl restart nginx
 echo 'fetchcache: point the fleet at this with "cache: [% domain %]" in _global,'
 echo 'fetchcache: and watch it with "tail -f /var/log/nginx/fetchcache.log" here.'

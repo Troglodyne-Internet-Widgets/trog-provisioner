@@ -20,7 +20,7 @@ use JSON::Validator::Schema::Troglodyne;
 
 =head1 NAME
 
-Provisioner::Recipe - Base class for the recipes: what every one of them can do, and what each has to say for itself.
+Provisioner::Recipe - Base class for the recipes, with what every recipe can do and what each one must declare.
 
 =head2 SYNOPSIS
 
@@ -34,139 +34,137 @@ Provisioner::Recipe - Base class for the recipes: what every one of them can do,
 
 =head2 DESCRIPTION
 
-Provides a framework for building deployment makefiles via templated fragments.
-Supports recipes that depend on other recipes, autoconfiguration and more.
+A framework that builds deployment makefiles out of templated fragments.  It
+supports recipes that depend on other recipes, autoconfiguration and more.
 
-A recipe is one installable thing -- a web server, a mail stack, a language
-runtime -- and it answers two questions: what packages does this need, and what
-does the guest have to run to end up with it configured.  C<bin/new_config>
-turns the recipes named for a domain into a makefile, and C<bin/provision>
-builds a guest and runs it.  What an operator writes to ask for one is described
-in L<docs/CONFIGURATION.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/CONFIGURATION.md>.
+A recipe is one installable thing, for example a web server, a mail stack or a
+language runtime.  It answers two questions.  Which packages does it need?
+What must the guest run to end up with it configured?  C<bin/new_config> turns
+the recipes named for a domain into a makefile, and C<bin/provision> builds a
+guest and runs it.
+L<docs/CONFIGURATION.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/CONFIGURATION.md>
+describes what an operator writes to ask for a recipe.
 
 =head3 Naming
 
-The last component of the package name must be lowercase --
+The last component of the package name must be lowercase:
 C<Provisioner::Recipe::nginx>, never C<::Nginx>.  The makefile has uppercase
-targets of its own, and the case is what keeps a recipe from colliding with one.
+targets of its own, and the case keeps a recipe from colliding with one of them.
 
-A recipe may have one specialization per distribution, under a capitalized
-namespace named for it: C<Provisioner::Recipe::Ubuntu::nginx>, a subclass of
-C<Provisioner::Recipe::nginx>.  It answers to the same name, is looked up by
-C<Provisioner::Cookbook/load> out of the C<distro> a domain is configured with,
-and shares the parent's fragment -- what a distribution changes is C<deps>, and
-the makefile it renders is the same one.
+A recipe can have one specialization per distribution, in a capitalized
+namespace named for that distribution.  C<Provisioner::Recipe::Ubuntu::nginx> is
+a subclass of C<Provisioner::Recipe::nginx>.  It answers to the same name, and
+C<Provisioner::Cookbook/load> finds it from the C<distro> of the domain.  It
+shares the fragment of its parent.  A distribution changes C<deps>, and the
+makefile it renders stays the same.
 
 =head3 Where the packages are named
 
 C<deps> belongs in the distro subclass, because a package name is a fact about
-a distribution rather than about the software.  The recipe itself does not
-declare one at all; it inherits the empty C<deps> below.
+a distribution and not about the software.  The recipe itself declares no
+C<deps> and inherits the empty one below.
 
-Which means the failure to know about is a quiet one: a recipe that needs
-packages and has no subclass for the distribution in hand installs none of them,
-and nothing says so until a service will not start.  C<t/recipes.t> is what
-notices -- it asserts that every recipe with packages has them for every
-distribution there is, so forgetting one while adding a distribution fails there
-rather than on a guest.
+This makes one failure quiet.  A recipe that needs packages and has no subclass
+for the current distribution installs none of them.  Nothing reports it until a
+service does not start.  C<t/recipes.t> catches it: it asserts that every recipe
+with packages has them for every distribution.  If you add a distribution and
+forget a recipe, that test fails before a guest does.
 
-Do not reintroduce a C<target_packager> check to get around it; C<t/recipes.t>
+Do not add a C<target_packager> check to get around this.  C<t/recipes.t>
 refuses one.
 
 =head3 The fragment is a makefile, not a shell script
 
 Each recipe renders C<templates/E<lt>distroE<gt>/E<lt>nameE<gt>.tt> into a
-fragment of the makefile that runs on the guest.  Write it with no leading tab; that is added
-for you.  Everything else about it is make's rules rather than a shell's, and
-the differences bite:
+fragment of the makefile that runs on the guest.  Write it with no leading tab,
+because the tab is added for you.  Everything else follows the rules of make,
+not of a shell.  These differences cause failures:
 
 =over 4
 
-=item * Make eats a single C<$> before the shell sees it, so a shell expansion
-needs C<< $$ >>.
+=item * Make removes a single C<$> before the shell sees it.  A shell expansion
+therefore needs C<< $$ >>.
 
-=item * Every line runs in its own shell, so a variable set on one line is gone
-by the next, and a command spanning lines needs a C<\> on each of them.  A
-heredoc cannot work at all -- render the script through C<template_files> and
+=item * Every line runs in its own shell.  A variable set on one line is gone on
+the next, and a command that spans lines needs a C<\> at the end of each.  A
+heredoc cannot work at all.  Render the script through C<template_files> and
 install it.
 
-=item * Recipe lines run under C</bin/sh>, which is dash on Ubuntu rather than
-bash.  No brace expansion, and C<&E<gt>> is a background job and a redirect, not
-a redirect of both streams.
+=item * Recipe lines run under C</bin/sh>, which is dash on Ubuntu, not bash.
+Dash has no brace expansion.  In dash, C<&E<gt>> starts a background job and
+then redirects.  It does not redirect both streams.
 
 =back
 
-Fragments must be re-entrant, because the makefile is run with C<make -j>.  That
-is what C<deps> is for: everything that has to happen before anything else is
-declared up front and installed in one pass, rather than each target racing to
-install its own.
+Fragments must be re-entrant, because the makefile runs with C<make -j>.  That
+is the purpose of C<deps>.  Everything that must happen first is declared up
+front and installed in one pass, so no target races to install its own
+packages.
 
 =head3 Global and per-domain parts
 
-A guest can host several domains, and some of what a recipe does is per domain
-while some of it happens once for the machine.  A recipe with a
-C<E<lt>nameE<gt>.global.tt> beside its fragment gets that one run once no matter
-how many domains are provisioned into the guest; the per-domain fragment runs for
-each.  Configuration for a service with no C<conf.d> directory tends to belong
-in the global half, since two domains cannot each rewrite the same file.
+A guest can host several domains.  Some of what a recipe does is per domain,
+and some of it happens once for the machine.  A recipe can have a
+C<E<lt>nameE<gt>.global.tt> beside its fragment.  That file runs once, however
+many domains the guest holds.  The per-domain fragment runs for each domain.
+Configuration for a service with no C<conf.d> directory usually belongs in the
+global half, because two domains cannot each rewrite the same file.
 
-L<Provisioner::Recipe::configd> is how that stops being true for the software it
-covers: it gives such a file a fragment directory, and a recipe writes into it
-per domain like any other C<conf.d>.  What stays in the global half there is
-what is a fact about the guest rather than about a domain -- see the way
-C<mail> splits main.cf, where saying the milters per domain would have postfix
-run each of them twice.
+L<Provisioner::Recipe::configd> removes that limit for the software it covers.
+It gives such a file a fragment directory, and a recipe writes into it per
+domain like into any other C<conf.d>.  The global half then keeps only the
+facts about the guest, not about a domain.  See how C<mail> splits main.cf:
+milters declared per domain make postfix run each of them twice.
 
-=head3 Conventions a recipe is expected to keep
+=head3 Conventions a recipe must keep
 
 =over 4
 
-=item * Everything the domain owns lives under C<install_dir>, so that backing
-it up is one directory.  Prepend C<install_dir> to any path a fragment names,
-and symlink into it when software insists on a path of its own.
+=item * Everything the domain owns lives under C<install_dir>, so a backup is
+one directory.  Prepend C<install_dir> to every path a fragment names.  If
+software insists on a path of its own, symlink that path into C<install_dir>.
 
 =item * Files and directories are C<0750 user:admin_user>.  C<user> is the
-service account the application runs as, and defaults to the admin user -- see
-C<validate>.
+service account that the application runs as.  It defaults to the admin user,
+see C<validate>.
 
-=item * Anything involved enough to want a shell script goes in C<scripts/>,
-which is copied to the guest whole, rather than into the fragment.
+=item * A task that needs a shell script goes in C<scripts/>, not in the
+fragment.  C<scripts/> is copied to the guest whole.
 
 =back
 
 =head3 Order
 
-The C<data> recipe runs first, and the rest in the order the depsolver settles:
-a recipe is placed ahead of anything it requires, because C<lastuniq> keeps the
-last mention of a dependency and each recipe that requires it names it again.
+The C<data> recipe runs first.  The rest run in the order the depsolver
+settles.  A recipe comes before everything it requires, because C<lastuniq>
+keeps the last mention of a dependency and each recipe that requires it names
+it again.
 
-There is no way to ask for a position.  A configuration key for it existed and
-did nothing -- wherever anything depended on the recipe it named, the depsolver
-placed that recipe and the key had no effect.  For "this needs that to exist
-first", use C<[% script_dir %]/queue_postrun_task>, or wait for what you need in
-your own fragment; both survive C<make -j>, and an ordering cannot.
+You cannot ask for a position.  If one thing must exist before another, use
+C<[% script_dir %]/queue_postrun_task>, or wait for it in your own fragment.
+Both work under C<make -j>, and an order does not.
 
 =head3 Where a template is looked for
 
-Fragments live in F<templates/E<lt>distroE<gt>/>, since every one of them is
-written against apt and systemd today; F<templates/> holds F<makefile.tt> and
-what is genuinely shared, which is most of F<files/> and F<tests/>.  The
-distribution's directory comes first on the search path, so putting a file there
-overrides the generic one and nothing has to know why.
+Fragments live in F<templates/E<lt>distroE<gt>/>, because every fragment is
+written against apt and systemd today.  F<templates/> holds F<makefile.tt> and
+the files that all distributions share, which is most of F<files/> and
+F<tests/>.  The directory of the distribution comes first on the search path.
+A file there overrides the generic one, and nothing else has to know.
 
-Two things about writing one that fail silently.  An apostrophe in a
-C<[%# ... %]> comment opens a string that runs to the next quote, swallowing
-whatever is between; a second apostrophe closes it only when it is on the same
-line, since a string literal cannot span a newline -- C<t/recipes.t> checks each
-line of a comment for that.  And whitespace before
-the C<[%#> is emitted, so indenting a comment to match the block it documents
-indents the line after it too, which in a YAML document means something else.
+Two mistakes in a template fail silently.  First, an apostrophe in a
+C<[%# ... %]> comment opens a string that runs to the next quote and swallows
+the text between them.  A second apostrophe closes it only on the same line,
+because a string literal cannot span a newline.  C<t/recipes.t> checks each line
+of a comment for this.  Second, the whitespace before C<[%#> is emitted.  A
+comment indented to match its block therefore also indents the line after it.
+In a YAML document, that changes the meaning.
 
 =head3 Recipes you do not intend to publish
 
-A C<vendor/> directory in the checkout is gitignored; point the C<libdir>
-parameter of a domain's configuration at it and recipes there are found like any
-other.  See C<bin/new_config> for the search path.
+Git ignores a C<vendor/> directory in the checkout.  Point the C<libdir>
+parameter in the configuration of a domain at it, and recipes there are found
+like any other.  See C<bin/new_config> for the search path.
 
 =cut
 
@@ -174,13 +172,13 @@ other.  See C<bin/new_config> for the search path.
 
 =head3 $name = $recipe->recipe_name()
 
-The name this recipe answers to, of a class or an object: the last component of
-the class, so that a distro's specialization of a recipe --
-C<Provisioner::Recipe::Ubuntu::pdns> -- answers to the same name and looks for
-the same fragment as the recipe it specializes.  Sharing the fragment is the
-point: what a distro changes is the package list, not the makefile.
+The name this recipe answers to, called on a class or an object.  It is the
+last component of the class name.  A distro specialization such as
+C<Provisioner::Recipe::Ubuntu::pdns> therefore answers to the same name and uses
+the same fragment as the recipe it specializes.  A distro changes the package
+list, not the makefile.
 
-Undef for a class not named as a recipe.
+Returns undef for a class whose name is not a recipe name.
 
 =cut
 
@@ -190,9 +188,12 @@ sub recipe_name {
     return $name;
 }
 
-=head3 $class->new(%opts)
+=head3 $recipe = $class->new(%opts)
 
-Create new recipe instance.
+Creates a recipe instance.  C<template_dirs> in C<%opts> is the list of
+directories that the renderer searches for templates.
+
+Dies if the class name is not a recipe name, or if the renderer does not start.
 
 =cut
 
@@ -217,27 +218,29 @@ sub new {
     return bless( \%opts, $class );
 }
 
-=head2 METHODS (you will possibly want to override)
+=head2 METHODS you can override
 
 =head3 $bool = $recipe->is_module()
 
-Whether this recipe is one of the modules the guest's makefile is built out of.
+Returns true if this recipe is one of the modules that the makefile of the
+guest is built from.
 
 True for every recipe that installs something, which is nearly all of them.
-False for the two that direct the build instead of taking part in it --
-L<Provisioner::DistroRecipe> and L<Provisioner::Recipe::vm> -- whose whole job
-happens before there is a guest to run a makefile on.
+False for the two that direct the build and do not take part in it:
+L<Provisioner::DistroRecipe> and L<Provisioner::Recipe::vm>.  All their work
+happens before a guest exists to run a makefile.
 
-C<bin/new_config> depsolves those two like anything else, so they are configured
-and can be depended upon, and then leaves them out of the module list.  Which
-matters for more than the makefile: C<modules> is handed to every template and
-every recipe as the list of what is on this guest, and neither of these is.
+C<bin/new_config> depsolves those two like any other recipe, so they are
+configured and other recipes can depend on them.  Then it leaves them out of the
+module list.  This matters beyond the makefile.  Every template and every recipe
+gets C<modules> as the list of what is on this guest, and neither of these two
+is on it.
 
-They are also the only two that talk to a L<Trog::HV>, and each is handed one
-rather than reaching for it -- see L<Provisioner::Recipe::vm/hv>.  Neither loads
-L<Trog::HV>, and no accessor for it lives here, which is what keeps L<Sys::Virt>
-out of an ordinary recipe: C<bin/recipes> would otherwise need libvirt installed
-to print a schema.
+They are also the only two that talk to a L<Trog::HV>.  Each one receives it
+from its caller and does not create it, see L<Provisioner::Recipe::vm/hv>.
+Neither loads L<Trog::HV>, and this class has no accessor for it.  That keeps
+L<Sys::Virt> out of an ordinary recipe, so C<bin/recipes> does not need libvirt
+installed to print a schema.
 
 =cut
 
@@ -245,23 +248,23 @@ sub is_module { return 1 }
 
 =head3 $bool = $recipe->is_multi_tenant()
 
-Whether two domains provisioned onto one guest can both be configured with this
+Returns true if two domains on one guest can both be configured with this
 recipe.
 
 True for nearly everything.  A recipe that writes per-domain files, or whose
-service reads a C<conf.d>, does not care how many domains are on the guest, and
-L<Provisioner::Recipe::configd> is what makes that true of the services which
-keep their configuration in one file and have none of their own.
+service reads a C<conf.d>, does not care how many domains the guest holds.
+L<Provisioner::Recipe::configd> makes this true for services that keep their
+configuration in one file and have no C<conf.d>.
 
-False for a service that can only ever belong to one domain -- one synapse has
-one C<server_name> -- where a second domain does not add itself so much as
-replace the first, and does it quietly.  C<bin/new_config> refuses to generate
-such a recipe for a domain being layered onto another rather than letting
-whichever was provisioned last win.
+False for a service that can only belong to one domain.  One synapse has one
+C<server_name>.  A second domain does not add itself but silently replaces the
+first.  C<bin/new_config> refuses to generate such a recipe for a domain layered
+onto another.  It does not let the domain provisioned last win.
 
-This is not the same question as what belongs in the global half.  That is work
-done once for the machine, and a recipe can have a great deal of it and still
-serve several domains; this says whether the domains can coexist at all.
+This is a different question from what belongs in the global half.  The global
+half is work done once for the machine, and a recipe with much of it can still
+serve several domains.  This method says whether the domains can coexist at
+all.
 
 =cut
 
@@ -269,8 +272,8 @@ sub is_multi_tenant { return 1 }
 
 =head3 %args = $recipe->args()
 
-Define the args of a recipe in a hash suitable toe be fed into L<JSON::Validator>'s schema() method.
-Must be openapiv3.
+Declares the arguments of the recipe as a hash for the schema() method of
+L<JSON::Validator>.  The schema must be openapiv3.
 
 =cut
 
@@ -281,59 +284,59 @@ sub args {
 
 =head3 %args = $recipe->global_args()
 
-The settings B<every> recipe is handed, declared once.
+The settings that every recipe receives, declared in one place.
 
-C<bin/new_config> builds one hash per domain out of F<ipmap.cfg>, the address
-pool, the machine it is running on and the domain's C<_global>, and hands that
-hash to every recipe it renders.  None of those keys belongs to any one recipe,
-so none of them is in any one recipe's C<args()>: they are here, and C<schema>
-lays them B<underneath> whatever the recipe declares for itself.
+C<bin/new_config> builds one hash per domain from F<ipmap.cfg>, the address
+pool, the machine it runs on and the C<_global> of the domain.  It gives that
+hash to every recipe it renders.  None of these keys belongs to one recipe, so
+no recipe declares them in its C<args()>.  They are declared here, and C<schema>
+puts them under what the recipe declares for itself.
 
-Underneath, because a recipe that declares a colliding key is describing a
-different thing spelled the same, and it is the one that knows.
-L<Provisioner::Recipe::registrar>'s C<user> is the account at the registrar and
-defaults to empty -- which is what stops C<validate> filling it in from
-C<admin_user> and making the lexicon shortcut export an C<AUTH_USERNAME> for a
-registrar that authenticates with a token alone.
-L<Provisioner::Recipe::matrix>'s C<admin_user> is the Synapse account.
+Under, because a recipe that declares a key of the same name describes a
+different thing, and the recipe knows what it means.  The C<user> of
+L<Provisioner::Recipe::registrar> is the account at the registrar, and its
+default is empty.  That empty default stops C<validate> from copying
+C<admin_user> into it.  Without it, the lexicon shortcut exports an
+C<AUTH_USERNAME> for a registrar that authenticates with a token alone.  The
+C<admin_user> of L<Provisioner::Recipe::matrix> is the Synapse account.
 
-B<Nothing here declares a default, and nothing here is required.>  Three
-reasons, each of which has already cost something:
+Nothing here declares a default, and nothing here is required, for three
+reasons:
 
 =over 4
 
-=item * A default would satisfy a recipe that B<requires> the key.  koan
-requires C<user>; a default of the admin account would be taken for an answer on
-every domain that never named a service account.
+=item * A default satisfies a recipe that requires the key.  koan requires
+C<user>.  A default of the admin account counts as an answer on every domain
+that names no service account.
 
-=item * C<validate> fills C<user> in from C<admin_user> B<after> validation, so
-a required field cannot be satisfied by it -- and C<forget_undefs> drops an
-explicitly-empty key only where a default is declared, so a default here would
-turn C<user:> with nothing after it into that same silent fallback.
+=item * C<validate> copies C<admin_user> into C<user> after validation, so that
+fallback cannot satisfy a required field.  Also, C<forget_undefs> drops an
+empty key only where a default is declared.  A default here turns C<user:> with
+no value into the same silent fallback.
 
-=item * C<bin/new_config> writes C<users>, C<resolvers> and the addressing block
-unconditionally over whatever C<_global> said, so a default could never take
-effect and would document an intention that never happens.
+=item * C<bin/new_config> always writes C<users>, C<resolvers> and the
+addressing block over whatever C<_global> said.  A default here can never take
+effect, and it documents an intention that never happens.
 
 =back
 
-C<size> is B<not> here: L<Provisioner::Recipe::vm>'s is the guest disk in bytes
-and L<Provisioner::Recipe::tmpfs>'s is a sizing string like C<50%>.  One word,
-two meanings, neither of them "a setting every recipe is handed" -- and C<vm>
-already owns its one, where C<bin/recipes vm> prints it.  C<cpus> and C<memory>
-are excluded for the same reason, and C<distro>, C<mirror> and C<cache> because
-L<Provisioner::DistroRecipe/args> owns them.
+C<size> is not here.  For L<Provisioner::Recipe::vm>, it is the guest disk in
+bytes.  For L<Provisioner::Recipe::tmpfs>, it is a sizing string like C<50%>.
+One word has two meanings, and neither is a setting that every recipe receives.
+C<vm> already declares its own, and C<bin/recipes vm> prints it.  C<cpus> and
+C<memory> stay out for the same reason.  C<distro>, C<mirror> and C<cache> stay
+out because L<Provisioner::DistroRecipe/args> declares them.
 
-C<libdir> travels in that same hash and is not declared here either.  It is the
-list of extra library directories an operator names in C<_global> so that
-recipes outside this checkout are found, and it is spent before any recipe
-exists: C<bin/new_config> pushes it onto C<@INC> and hands it to
+C<libdir> travels in the same hash and is not declared here either.  It lists
+the extra library directories that an operator names in C<_global>, so that
+recipes outside this checkout are found.  C<bin/new_config> uses it before any
+recipe exists.  It pushes it onto C<@INC> and gives it to
 L<Provisioner::Cookbook/template_dirs>.
 
-None of them reaches a recipe that does not declare it.  C<takes> hands each
-recipe only what its own C<schema> names, which is what lets that schema refuse
-everything else -- so a setting excluded here is kept out of the hash rather
-than ignored inside it, while one a recipe does own still arrives.
+No recipe receives a setting that it does not declare.  C<takes> gives each
+recipe only the keys that its own C<schema> names, so that schema can refuse
+everything else.  A setting left out here stays out of the hash.  A setting
+that a recipe declares still arrives.
 
 =cut
 
@@ -352,13 +355,12 @@ sub global_args {
             admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
             admin_keys  => { type => 'array',  items       => { type => 'string' }, description => "The administrator's ssh keys, read from admin_authorized_keys beside the rest of the configuration and written straight into the guest." },
 
-            # The three that go absent together.  A hypervisor which addresses
-            # its own guests hands out no address of ours, has no NAT bridge to
-            # be reached over, and leaves the guest no gateway of ours to use --
-            # bin/new_config guards all three on manages_addresses, and
+            # These three are absent together.  A hypervisor that addresses its
+            # own guests gives out no address of ours, has no NAT bridge to
+            # reach, and leaves the guest no gateway of ours.  bin/new_config
+            # guards all three on manages_addresses, and
             # Provisioner::Recipe::ubuntu wants a gateway only where there are
-            # ips to go with it.  Typed without nullable, they made a state the
-            # recipes already handle impossible to express.
+            # ips to go with it.
             gateway => { type => 'string', nullable => 1, description => 'The IPv4 gateway guests are built with, or nothing where the platform provides one.' },
             main_ip => { type => 'string', nullable => 1, description => "The guest's static address, or nothing where the hypervisor allocates it." },
             tld_ip  => { type => 'string', nullable => 1, description => "The hypervisor's NAT bridge address, or nothing where it has none." },
@@ -402,27 +404,29 @@ sub global_args {
 
 =head3 %schema = $recipe->schema()
 
-What C<validate> checks against: this recipe's C<args()> with C<global_args>
-laid underneath its C<properties>, refusing any key neither of them declares.
+Returns what C<validate> checks against.  That is the C<args()> of this recipe,
+with C<global_args> under its C<properties>.  The schema refuses every key that
+neither of them declares.
 
-B<Properties are what merges.>  Every other key in a schema -- C<required>,
-C<oneOf> -- is the recipe's alone.  Nineteen recipes declare a C<required>
-list, and L<Hash::Merge> concatenates arrays under every behavior it has, so a
-merge that touched C<required> would hand koan a list with two C<user>s in it.
+Only the properties merge.  Every other key in a schema, such as C<required> or
+C<oneOf>, belongs to the recipe alone.  Many recipes declare a C<required> list,
+and L<Hash::Merge> concatenates arrays under every behavior it has.  A merge of
+C<required> gives koan a list with two C<user> entries.
 
-C<additionalProperties> is set B<here>, and is not a recipe's to answer: it is
-what makes a key nothing declares an error rather than a value silently read by
-nobody.  A recipe therefore has to be handed only what it declares, which is
-C<takes>'s job -- C<bin/new_config> keeps the settings a recipe has no opinion
-about out of the hash it validates, rather than every recipe declaring them.
+This method sets C<additionalProperties>, and a recipe does not choose it.  It
+makes a key that nothing declares an error, not a value that nobody reads.  A
+recipe must therefore receive only what it declares, and C<takes> does that.
+C<bin/new_config> keeps the settings that a recipe does not declare out of the
+hash it validates, so recipes do not have to declare them all.
 
-Deliberately B<not> folded into C<args()>.  L<Provisioner::Cookbook/spec> calls
-C<args()>, and C<bin/recipes>, C<bin/new_guest --scaffold>,
-L<Provisioner::Cookbook/defaults>, L<Provisioner::DistroRecipe/global_defaults>
-and C<bin/new_config>'s C<hv_settings> all read what it returns -- so a global
-declared there would be offered as a field of every recipe to scaffold.  Two of
-those read it directly rather than through L<Provisioner::Cookbook/properties>,
-so hiding them at display time would not work either.
+The global settings are not folded into C<args()>, on purpose.
+L<Provisioner::Cookbook/spec> calls C<args()>.  C<bin/recipes>,
+C<bin/new_guest --scaffold>, L<Provisioner::Cookbook/defaults>,
+L<Provisioner::DistroRecipe/global_defaults> and the C<hv_settings> of
+C<bin/new_config> all read what it returns.  A global declared there appears as
+a field of every recipe to scaffold.  Two of those callers read it directly and
+not through L<Provisioner::Cookbook/properties>, so hiding global settings at
+display time does not work either.
 
 =cut
 
@@ -437,20 +441,20 @@ sub schema {
 
 =head3 %mine = $recipe->takes(%offered)
 
-Whichever of C<%offered> this recipe's C<schema> declares, and nothing else.
+Returns the pairs of C<%offered> that the C<schema> of this recipe declares, and
+nothing else.
 
-For C<bin/new_config>, which hands every recipe one per-domain hash of settings.
-Some of what travels in it is not a recipe's business at all -- C<libdir> is
-spent on C<@INC> before any recipe exists, C<size> is the hypervisor's -- and
-since C<schema> refuses what it does not declare, handing one of those over is
-a refusal rather than a value nobody reads.
+C<bin/new_config> calls it, because it gives every recipe one hash of settings
+per domain.  Some of what travels in that hash does not concern any recipe.
+C<libdir> goes onto C<@INC> before any recipe exists, and C<size> belongs to the
+hypervisor.  C<schema> refuses what it does not declare, so passing one of those
+on causes a refusal.
 
-Filtering here rather than declaring them in C<global_args> is what keeps that
-declaration honest: it lists what a recipe B<acts on>, not everything that
-happens to travel beside it.
+This filter keeps C<global_args> honest.  It lists what a recipe acts on, not
+everything that travels beside it.
 
-A recipe's own configuration does B<not> come through here.  An unknown key
-there is the operator's mistake, and refusing it is the point.
+The configuration of a recipe does not pass through here.  An unknown key there
+is a mistake by the operator, and the schema must refuse it.
 
 =cut
 
@@ -465,7 +469,8 @@ sub takes {
 
 =head3 @fmts = $recipe->formatters()
 
-Define custom template formatters available both in makefile fragments and generated files.
+Declares custom template formatters, for use in makefile fragments and in
+generated files.
 
 =cut
 
@@ -475,17 +480,14 @@ sub formatters {
 
 =head3 @pkgs = $recipe->deps(%recipe_config)
 
-The system packages this recipe needs installed.
+The system packages that this recipe needs installed.
 
-B<Override this in the distro subclass>, not here -- see L</Where the packages
-are named>.  A recipe whose packages are the same everywhere because they are
-not packages at all, C<adminconfig>'s operator-supplied list being the one,
-answers here instead.
+Override this in the distro subclass, not in the recipe.  See L</Where the
+packages are named>.  A recipe whose packages are the same on every
+distribution answers here instead.  C<adminconfig> is one, because the operator
+supplies its list.
 
-Empty by default, which is the right answer for a recipe that installs nothing.
-A recipe that does need packages and has no subclass for the distro in hand is
-a recipe that will silently install none of them, which is what C<t/recipes.t>
-is there to notice.
+Empty by default, which is correct for a recipe that installs nothing.
 
 =cut
 
@@ -495,9 +497,10 @@ sub deps {
 
 =head3 @pkgs = $recipe->dep_conflicts(%recipe_config)
 
-Sometimes a recipe conflicts with a package from another recipe, or installed by default (postfix vs sendmail, for example).
+Packages that conflict with this recipe.  They come from another recipe, or
+the distribution installs them by default, such as sendmail against postfix.
 
-All packages returned hereby will be removed from the dep list.
+Every package returned here is removed from the dependency list.
 
 =cut
 
@@ -505,40 +508,42 @@ sub dep_conflicts {
     return ();
 }
 
-=head3 @hosts = $recipe->fetch_hosts()
+=head3 @hosts = $recipe->fetch_hosts(%recipe_config)
 
-The hosts this recipe downloads from on the guest, by name: C<www.cpan.org>,
-C<codeload.github.com>.  Asked of the class rather than of a configured recipe,
-because the answer is also what the fetch cache fetches from by default -- see
-L<Provisioner::Recipe::fetchcache> -- which cannot depend on any one domain.
+The hosts that this recipe downloads from on the guest, by name, such as
+C<www.cpan.org> or C<codeload.github.com>.
 
-B<Every recipe that downloads anything declares this.>  A recipe that fetches a
-tarball, clones a checkout, or pulls a key and says nothing here is a recipe
-whose downloads never reach the cache -- so it is slower than its neighbors,
-and it is the one that fails when upstream does.  Nothing enforced that for a
-long time and nine hosts went undeclared; C<t/recipes.t> now checks what it can
-see.
+C<bin/new_config> passes the configuration of the recipe for one domain.  The
+method must also answer with no configuration, because
+L<Provisioner::Cookbook/fetch_hosts> asks the class.  That answer is what
+L<Provisioner::Recipe::fetchcache> fetches from by default.
 
-What it cannot see is a host a program reaches on its own: C<nvm install node>
-downloads from C<nodejs.org> without any template naming it.  So the test
-catches an omission that is written down, and the recipe still has to think
-about the ones that are not.
+Every recipe that downloads anything must declare this.  A recipe that fetches
+a tarball, clones a checkout or pulls a key and names no host here gets none of
+the cache.  It is slower than its neighbors, and it fails when the upstream
+fails.  C<t/recipes.t> checks the hosts that it can see.
 
-The B<Ubuntu archive> stays out: a guest reaches it through
-L<Provisioner::Recipe::aptmirror>'s mirrorlist, which is a mirror rather than a
-cache.  A B<third-party apt repository> does not -- nothing else fetches those,
-and C<apt_repo_classes> is how a recipe adds one.  What also stays out is B<a
-host that only a configuration names>: this is asked of the class, with no configuration in hand, so a
-C<repo_url> or an C<api_url> pointed somewhere unusual is not declared and goes
-straight upstream.
+The test cannot see a host that a program reaches on its own.
+C<nvm install node> downloads from C<nodejs.org>, and no template names it.  So
+the test catches an omission that is written down, and the recipe must still
+account for the others.
 
-Empty by default.  On a guest with a C<cache>, each host its recipes name is
-pointed at the cache while it provisions, so what is downloaded from one is
-served out of what the cache has kept, and out of what it kept last time when
-upstream is failing.  Name a host only for what can be fetched as anybody: what
-the cache keeps, it fetches without credentials.  A host whose downloads
-redirect to another names that one too, since the cache follows a redirect only
-to a host it fetches from -- C<github_release_hosts> is GitHub's.
+Leave out the Ubuntu archive.  A guest reaches it through the mirrorlist of
+L<Provisioner::Recipe::aptmirror>, which is a mirror and not a cache.  Include a
+third-party apt repository, because nothing else fetches from it.
+C<apt_repo_classes> is how a recipe adds one.
+
+For a host that the configuration names, such as a C<repo_url> or an
+C<api_url>, return that host when C<%recipe_config> gives it.  Return the
+default host when it does not.
+
+Empty by default.  On a guest with a C<cache>, each host that its recipes name
+points at the cache while the guest provisions.  The cache serves what it kept,
+and it serves what it kept last time when the upstream fails.  Name a host only
+for downloads that anybody can fetch, because the cache fetches without
+credentials.  If downloads from a host redirect to another host, name that host
+too.  The cache follows a redirect only to a host that it fetches from.
+C<github_release_hosts> gives the hosts for GitHub.
 
 =cut
 
@@ -548,8 +553,8 @@ sub fetch_hosts {
 
 =head3 @hosts = $recipe->github_release_hosts()
 
-C<github.com>, and the hosts it redirects a release download to: what a recipe
-downloading a GitHub release names in C<fetch_hosts>.
+Returns C<github.com> and the hosts that it redirects a release download to.  A
+recipe that downloads a GitHub release names these in C<fetch_hosts>.
 
 =cut
 
@@ -559,18 +564,20 @@ sub github_release_hosts {
 
 =head3 @classes = $recipe->cache_classes()
 
-How long L<Provisioner::Recipe::fetchcache> may keep what this recipe
+How long L<Provisioner::Recipe::fetchcache> can keep what this recipe
 downloads, as a list of C<{ class =E<gt> ..., pattern =E<gt> ... }>.  C<class>
-is C<index> for a URL saying which version is current, and C<immutable> for one
-a version or a commit names; anything a recipe does not describe gets the
-cache's C<default>.  C<pattern> is a regex matched against C<HOST/PATH>.
+is C<index> for a URL that says which version is current.  It is C<immutable>
+for a URL that a version or a commit names, and C<aptindex> for the indexes of
+an apt repository, see C<apt_repo_classes>.  A URL that no entry describes gets
+the C<default> class of the cache.  C<pattern> is a regex matched against
+C<HOST/PATH>.
 
-Empty by default, which means the default freshness.
+Empty by default, which gives the default freshness.
 
-This is beside C<fetch_hosts> for the same reason: which URLs under a host never
-change is a fact about that upstream, and the recipe that downloads from it is
-what knows.  A cache that held the list itself would have to be edited every
-time a recipe gained an upstream, which is the coupling this avoids.
+This method sits beside C<fetch_hosts> for the same reason.  Which URLs under a
+host never change is a fact about that upstream, and the recipe that downloads
+from it knows that fact.  If the cache held the list itself, every new upstream
+in a recipe means an edit to the cache.
 
 =cut
 
@@ -580,29 +587,30 @@ sub cache_classes {
 
 =head3 @classes = $recipe->github_release_classes()
 
-The C<cache_classes> entries for a recipe that downloads a GitHub release: the
-release asset and a source archive named by tag or commit never change, and
+The C<cache_classes> entries for a recipe that downloads a GitHub release.  A
+release asset and a source archive named by tag or commit never change.
 C<releases/latest> is the link that says which release is current.
 
-Here rather than in each recipe for the reason C<github_release_hosts> is: it is
-one upstream's layout, and gogs, roundcube and matrix would otherwise carry
-three copies of it that drift apart when GitHub changes it.
+These live here, not in each recipe, for the same reason as
+C<github_release_hosts>.  The layout belongs to one upstream.  Without this,
+gogs, roundcube and matrix each carry a copy, and the copies drift apart when
+GitHub changes it.
 
 =cut
 
 =head3 @classes = $recipe->apt_repo_classes($host)
 
-The C<cache_classes> entries for a third-party apt repository on C<$host>: the
-indexes under F<dists/>, and the packages under F<pool/> which a version names
-and which therefore never change.
+The C<cache_classes> entries for a third-party apt repository on C<$host>.  The
+indexes are under F<dists/>.  The packages are under F<pool/>, and because a
+version names each one, they never change.
 
-Here rather than in each recipe because four of them add an apt source and the
-layout is apt's, not theirs.  Indexes go in their own class because they are the
-one thing the cache must not serve stale: C<InRelease> lists the hashes of the
-C<Packages> beside it, and a stale one of the pair against a fresh other is a
-hash-sum mismatch.  None of the repositories this fleet uses publishes
-C<Acquire-By-Hash>, which would have made the indexes content-addressed and the
-question moot, so C<aptindex> turns C<proxy_cache_use_stale> off.
+These live here, not in each recipe, because several recipes add an apt source
+and the layout belongs to apt.  The indexes get their own class because the
+cache must never serve them stale.  C<InRelease> lists the hashes of the
+C<Packages> beside it.  A stale copy of one with a fresh copy of the other
+causes a hash sum mismatch.  No repository that this fleet uses publishes
+C<Acquire-By-Hash>, which makes the indexes content-addressed and removes the
+problem.  So the C<aptindex> class turns C<proxy_cache_use_stale> off.
 
 =cut
 
@@ -626,7 +634,9 @@ sub github_release_classes {
 
 =head3 %required = $recipe->required_recipes(%opts)
 
-If a recipe depends on another recipe being present, we need to build it as a synthetic recipe and append it to the list of things to provision.
+The recipes that this recipe depends on, as pairs of a recipe name and a sub.
+C<bin/new_config> builds each one as a synthetic recipe and adds it to the list
+of things to provision.
 
 Example output:
 
@@ -634,7 +644,8 @@ Example output:
         nginxproxy => sub { # returns hash, expects same %opts as validate() },
     );
 
-The idea here is to omit having to configure dependent recipes outside of the thing depending on them.
+This lets you configure a dependency inside the recipe that depends on it, not
+separately.
 
 Example usage in a recipe conf:
 
@@ -642,30 +653,34 @@ Example usage in a recipe conf:
         nginxproxy: ...
         ...
 
-This also enables automatic figuring of what to do with a dependent recipe in the event we omit mandatory options.
-In some cases this will allow you to omit configuring it entirely.
-This is configured by setting the sub value.
+The sub returns options for the dependency.  It fills in mandatory options that
+the configuration leaves out.  In some cases, you can then leave the dependency
+out of the configuration entirely.
+
+The base class requires C<ufw> when C<rate_limits> returns limits, and C<data>
+when C<restores> returns something.  An override that wants those edges must
+add what C<SUPER::required_recipes> returns.
 
 =head3 Substitutable dependencies
 
-A key naming an interface rather than a recipe -- one with C<::> in it -- is a
-B<substitutable dependency>, and C<bin/new_config> resolves it to whichever
-recipe implements that interface and serves this domain:
+A key that names an interface, not a recipe, is a substitutable dependency.
+Such a key contains C<::>.  C<bin/new_config> resolves it to the recipe that
+implements that interface and serves this domain:
 
     my %out = (
         'Provisioner::DNSRecipe' => sub { return () },
     );
 
-That is how L<Provisioner::Recipe::letsencrypt> asks for something that can
-answer a C<dns-01> challenge without naming C<pdns>, which is one of the two
-recipes that can.  Which one is the interface's to decide: it is asked, and it
-names the configuration key that settles a tie, so nothing in the depsolver has
-to know what the capability is about.  See
+This is how L<Provisioner::Recipe::letsencrypt> asks for something that can
+answer a C<dns-01> challenge.  It does not name C<pdns>, which is one of the two
+recipes that can.  The interface decides which one.  The depsolver asks it, and
+it names the configuration key that settles a tie.  So the depsolver knows
+nothing about the capability itself.  See
 L<Provisioner::DNSRecipe/implementation_for>.
 
-The answer has to be a recipe this installation has, and one that implements
-what was asked for; a configuration naming anything else is refused there rather
-than three targets later.
+The answer must be a recipe that this installation has and that implements the
+interface.  A configuration that names anything else is refused there, before
+any target runs.
 
 =cut
 
@@ -674,22 +689,18 @@ sub required_recipes {
 
     my @required;
 
-    # A recipe that names limits is a recipe that listens, and something has to
-    # apply them.  Saying so here is what makes the dependency explicit rather
-    # than ufw knowing the name of every recipe that might be installed.
+    # A recipe that names limits listens, and something must apply them.
+    # Declaring the dependency here means that ufw does not have to know every
+    # recipe that listens.
     my %limits = $self->rate_limits(%opts);
     push( @required, ufw => sub { return ( rate_limits => \%limits ) } ) if %limits;
 
-    # Likewise for state: a recipe that says where its salvage goes back is a
-    # recipe that depends on the thing which puts it there.  data walks what
-    # every dependent handed it, rather than each fragment calling restore_state
-    # for itself.
+    # Likewise for state: a recipe that says where its salvage goes back
+    # depends on data, which walks what every dependent gave it.
     # Only where there is a domain to restore into.  Provisioner::Cookbook asks
-    # this at scaffold time with the global configuration and no domain, and a
-    # restores() that interpolates one -- letsencrypt and pdns both do -- dies on
-    # the undef rather than answering, taking bin/new_guest down with it.  There
-    # is nothing to declare a dependency about in that case anyway: a salvage
-    # goes back into a domain, and the question was asked without one.
+    # this at scaffold time with no domain, and a restores() that interpolates
+    # one, as letsencrypt and pdns do, dies on the undef.  A salvage goes back
+    # into a domain, so without one there is nothing to declare.
     my %restores = defined $opts{domain} ? $self->restores(%opts) : ();
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
 
@@ -698,19 +709,19 @@ sub required_recipes {
 
 =head3 $merged = $recipe->reconcile($merged, $incoming)
 
-Settle what two dependents disagreed about.
+Settles what two dependents disagree about.  Returns C<$merged>, changed in
+place.
 
-A recipe that several others depend on is configured once, out of whatever each
-of them asked for.  Where two of them ask for the same field and want different
-things, merging picks a side -- silently, and by an ordering nobody chose.  This
-walks the two structures and hands every such collision to C<resolve_conflict>,
-writing back what it decides.
+Several recipes can depend on one recipe.  It is configured once, from what each
+of them asked for.  If two of them ask for different values in the same field,
+the merge silently picks one, by an order that nobody chose.  This method walks
+the two structures and gives each such collision to C<resolve_conflict>.  It
+writes back what that method decides.
 
-Structure is somebody else's job: this only looks at fields whose values are
-plain scalars in both, so nested hashes are followed into and arrays are left to
-the merge.  Call it with the merged result and the contribution that has just
-arrived; folding it over each contribution in turn reaches the same answer as
-considering them all at once.
+It looks only at fields that hold plain scalars in both structures.  It follows
+nested hashes and leaves arrays to the merge.  Call it with the merged result
+and the contribution that just arrived.  One call per contribution gives the
+same answer as a look at all of them at once.
 
 =cut
 
@@ -732,8 +743,8 @@ sub _reconcile_into {
             next;
         }
 
-        # Whatever the merge left is already one of the two, so a field only one
-        # of them named needs nothing done to it.
+        # The merge already kept one of the two, so a field that only one of
+        # them named needs nothing done to it.
         next if !defined $theirs || !defined $mine;
         next if ref $theirs      || ref $mine;
         next if $theirs eq $mine;
@@ -746,26 +757,25 @@ sub _reconcile_into {
 
 =head3 $value = $recipe->resolve_conflict($path, $mine, $theirs)
 
-Which of two values a pair of dependents asked for this recipe to use.
+Returns the value to use when two dependents ask this recipe for different
+values.
 
-C<$path> is the field they disagreed about, as an arrayref of keys from the top
-of the recipe's configuration.
+C<$path> is the field they disagree about, as an arrayref of keys from the top
+of the configuration of the recipe.
 
-B<Dies by default>, naming the field and both values.  Nothing here can know
-which of two configurations somebody meant, and quietly taking one is how a
-guest ends up built to a configuration nobody wrote.  Overriding this is for the
-cases where the recipe genuinely does know -- see C<Provisioner::Recipe::ufw>,
-where two recipes listening on one port both get the higher of their limits --
-and for those the override should say why it is safe.
+Dies by default, and names the field and both values.  This class cannot know
+which configuration somebody meant.  If it silently takes one, the guest gets a
+configuration that nobody wrote.  Override it only where the recipe does know.
+C<Provisioner::Recipe::ufw> is the example: two recipes that listen on one port
+both get the higher of their limits.  An override must say why it is safe.
 
 =cut
 
 sub resolve_conflict {
     my ( $self, $path, $mine, $theirs ) = @_;
 
-    # The distro's namespace comes off too.  This names the key an operator has
-    # to go and set, and there is no 'Ubuntu::ufw' to set anything under -- the
-    # configuration only ever says 'ufw'.
+    # The distro namespace comes off too.  This names the key that an operator
+    # must set, and the configuration only ever says 'ufw', never 'Ubuntu::ufw'.
     my $recipe = Scalar::Util::blessed($self) || $self;
     $recipe =~ s/\AProvisioner::Recipe::(?:\w+::)?//;
     my $field = join( '.', @$path );
@@ -778,29 +788,30 @@ CONFLICT
 
 =head3 %limits = $recipe->rate_limits(%opts)
 
-The ports this recipe listens on, and the new connections a second from a single
-source each should take before further ones are dropped.
+The ports that this recipe listens on.  For each port, the number of new
+connections per second from one source that it accepts before it drops more.
 
-A key is a port, optionally with a protocol after a slash -- C<1194/udp>, the
-way a ufw application profile spells it.  A bare port means tcp.  A service
-reached over both names both, because the rule is written per protocol and one
-naming neither half is a port that looks limited and is not.
+A key is a port, optionally followed by a slash and a protocol, such as
+C<1194/udp>.  That is how a ufw application profile writes it.  A bare port
+means tcp.  A service that uses both protocols names both, because each rule
+covers one protocol.  A bare port alone leaves the C<udp> half of such a
+service unlimited while it looks limited.
 
-Empty by default: most recipes listen on nothing, or reach the network through
-something that does -- an application behind C<nginxproxy> is covered by
-C<nginx>, not by itself.  A recipe that overrides this gets C<ufw> added to its
-C<required_recipes> and its limits merged into that recipe's, which is where
-they are turned into firewall rules.
+Empty by default.  Most recipes listen on nothing, or reach the network through
+something that does.  C<nginx> covers an application behind C<nginxproxy>, not
+the application itself.  A recipe that overrides this gets C<ufw> in its
+C<required_recipes>.  Its limits merge into the configuration of C<ufw>, which
+turns them into firewall rules.
 
-The numbers are a threshold for abuse rather than a capacity plan: they want to
-sit well above what a busy legitimate source does, since anything below that
-throttles real users.  Note that this is called before validation, so read
-C<%opts> with the same defaults the schema declares.
+The numbers are a threshold for abuse, not a capacity plan.  Set them well above
+what a busy legitimate source does, because a lower limit throttles real users.
+This method runs before validation, so read C<%opts> with the same defaults
+that the schema declares.
 
-Where two recipes name a limit for the same port, the B<higher> is used -- see
-C<resolve_conflict> in L<Provisioner::Recipe::ufw>.  Port and protocol together
-are the key, so C<53> and C<53/udp> are two limits and neither merges into the
-other.
+If two recipes name a limit for the same port, the higher one applies.  See
+C<resolve_conflict> in L<Provisioner::Recipe::ufw>.  The port and the protocol
+together are the key.  C<53> and C<53/udp> are two limits, and neither merges
+into the other.
 
 =cut
 
@@ -810,22 +821,22 @@ sub rate_limits {
 
 =head3 forget_undefs($opts, $schema)
 
-Drop the fields that were named and left empty, so that the schema's default
-gets a chance at them.
+Deletes each field of C<$opts> that is present but undef, where C<$schema>
+declares a default for it, so that the default applies.  It also walks
+nested hashes.  Returns C<$opts>, changed in place.
 
-The validator fills in a default when the key is B<absent>, which is the right
-rule for JSON and the wrong one for YAML.  Written out, a recipe says
+The validator fills in a default only when a key is absent.  That is the right
+rule for JSON and the wrong one for YAML.  A recipe configuration says
 
     ntp:
         makestep:
 
-and means "whatever you think", not "empty" -- but it arrives as an explicit
-undef, which counts as present.  chronyd will not start on a C<makestep> with no
-arguments after it, so the difference is not academic.
+and means "use the default", not "empty".  But it arrives as an explicit undef,
+which counts as present.  chronyd does not start with a C<makestep> that has no
+arguments, so the difference matters.
 
-Only fields that actually declare a default are dropped.  One that does not is
-left undef, because there the distinction between unset and absent may be
-something a recipe cares about.
+A field that declares no default stays undef.  There, a recipe can care about
+the difference between unset and absent.
 
 =cut
 
@@ -851,7 +862,9 @@ sub forget_undefs {
 
 =head3 %opts = $recipe->enrich(%opts)
 
-Additionally setup args based on other args passed.
+Sets more options, based on the options already given.  C<validate> calls it
+after the schema passes, and returns what it returns.  Put here what a schema
+cannot express.
 
 =cut
 
@@ -863,23 +876,21 @@ sub enrich {
 
 =head3 @paths = $recipe->fetch_sources(%opts)
 
-Directories on I<this machine> that the guest will rsync out of, so that
-something can check they are there before a run starts.
+Directories on I<this machine> that the guest rsyncs from.  C<bin/preflight>
+calls this to make sure that they exist before a run starts.
 
-A recipe that ships an operator's own files -- C<adminconfig>'s C<skel>,
-C<openvpnclient>'s C<cert_dir> -- names a path that nothing here creates and
-nothing here validates.  The fragment rsyncs it, so an absent one fails that
-recipe's target twenty minutes into a build, and the error rsync gives for it
-says nothing about which recipe asked or which domain it was for.
+A recipe that ships files of the operator, such as the C<skel> of
+C<adminconfig> or the C<cert_dir> of C<openvpnclient>, names a path that nothing
+here creates or validates.  The fragment rsyncs it.  If the path is absent, the
+target of that recipe fails twenty minutes into a build.  The rsync error does
+not say which recipe asked, or for which domain.
 
-Called with the recipe's raw options rather than its validated ones, and before
-a build rather than during one, so it has to cope with a configuration that is
-not finished: return nothing for a field that is absent instead of assuming it
-is there.  C<bin/preflight> is the caller.
+This method gets the raw options of the recipe, not the validated ones, before
+the build starts.  The configuration can be incomplete.  Return nothing for an
+absent field, and do not assume that it exists.
 
-Not to be confused with C<datadirs>, which are directories under the data
-directory that this tool makes for the recipe.  These are the ones somebody
-else made and we only read.
+Do not confuse these with C<datadirs>, which this tool creates for the recipe.
+Somebody else makes these directories, and the tool only reads them.
 
 =cut
 
@@ -889,28 +900,27 @@ sub fetch_sources {
 
 =head3 @patterns = $recipe->remote_skip()
 
-rsync exclude patterns for paths under C<remote_files> which must not come down.
+rsync exclude patterns for paths under C<remote_files> that must not come down.
 
-C<remote_files> salvages directories, not files, so a directory that is mostly
-state worth keeping can still hold something that is not.  A key which exists so
-that a stolen database is useless is the example: carried onto the next guest it
-would be a key that outlives the machine it was made for, and sitting in a backup
-beside the database it protects it would be no key at all.
+C<remote_files> salvages directories, not files.  A directory full of state
+worth keeping can still hold something that must stay behind.  The example is a
+key that makes a stolen database useless.  On the next guest, that key outlives
+the machine it was made for.  In a backup beside the database it protects, it
+protects nothing.
 
-Anything matching is left where it is.  The guest keeps it, and the rebuilt guest
-makes a new one -- which is the point, and is what whatever generated it is
-expected to cope with.
+A matching file stays where it is.  The old guest keeps it, and the rebuilt
+guest makes a new one.  That is the intent, and whatever generated the file
+must cope with it.
 
-Two things about the vocabulary, both of which decide what a pattern means.  A
-pattern with no slash in it matches that basename at any depth, and one with a
-slash is anchored at the top of the transfer rather than at the root of the
-filesystem.  And the list is handed to every path in the recipe's
-C<remote_files>, not to one of them -- a pattern is relative to whichever
-transfer is running, so C<secrets.key> keeps that name out of all four of
-tCMS's salvages and not only out of the configuration directory.
+Two rules decide what a pattern means.  A pattern with no slash matches that
+basename at any depth.  A pattern with a slash is anchored at the top of the
+transfer, not at the root of the filesystem.  Also, the list applies to every
+path in the C<remote_files> of the recipe, and a pattern is relative to the
+transfer that runs.  So C<secrets.key> keeps that name out of both salvages of
+tCMS, not only out of the configuration directory.
 
-Erring towards leaving a file behind is the right way to err here, which is why
-that last one is not worth working around.
+To leave a file behind by mistake is the safe error here.  That is why the last
+rule needs no workaround.
 
 =cut
 
@@ -920,43 +930,43 @@ sub remote_skip {
 
 =head3 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
-Files the guest has to have that must not travel in the payload, as a map of the
-path on the guest to how one gets there:
+Files that the guest must have but that must not travel in the payload.
+Returns a map from the path on the guest to how the file gets there:
 
-    "$install_dir/matrix.$domain/homeserver.signing.key" => {
+    "/etc/matrix-synapse/homeserver.signing.key" => {
         ref      => "secret:matrix/$domain-signing-key/password",
         generate => \&_signing_key,
         owner    => 'matrix-synapse:matrix-synapse',
         mode     => '0600',
     }
 
-The value lives in the secret store: made once by C<generate>, answered from
-there every provision after.  C<bin/new_config> writes the references, never the
-values, beside the domain; C<bin/provision> resolves them and puts each file on
-the guest before the makefile runs.
+The value lives in the secret store.  C<generate> makes it once, and every
+later provision reads it from the store.  C<bin/new_config> writes the
+references beside the domain, never the values.  C<bin/provision> resolves them
+and puts each file on the guest before the makefile runs.
 
-Which is why this is not C<remote_files>.  A secret salvaged off a guest lands
-in the domain directory, and from there into the payload of every rebuild and
-into every backup taken of it.  These never do -- name the file in
-C<remote_skip> as well and the guest is the only place it sits.
+That is why this is not C<remote_files>.  A secret salvaged off a guest lands
+in the domain directory.  From there, it goes into the payload of every rebuild
+and into every backup of the domain.  These secrets never do.  Name the file in
+C<remote_skip> as well, and the guest is the only place it exists.
 
-A recipe using this must not generate the file itself when it is missing.  It is
-missing because the store could not be reached, and a fresh one is a new
-identity, which is the thing the store exists to prevent.
+A recipe that uses this must not generate the file itself when it is missing.
+The file is missing because the store was not reachable.  A new file is a new
+identity, and the store exists to prevent that.
 
-C<ref> must name a field the store keeps, which is C<password> or C<username>.
-A multi-line value is kept and handed back exactly, so a private key is a
+C<ref> must name a field that the store keeps: C<password> or C<username>.  The
+store keeps a multi-line value and returns it exactly.  So a private key is a
 password as far as the store is concerned.
 
-C<%opts> is what the recipe was configured with, for a secret only some domains
-want: a recipe that returns nothing for a domain that did not ask has none
-placed, and none generated.  A recipe whose secret is unconditional -- most of
-them -- can ignore it.
+C<%opts> is the configuration of the recipe, for a secret that only some
+domains want.  If the recipe returns nothing for a domain, no secret is placed
+or generated for it.  Most recipes have an unconditional secret and can ignore
+C<%opts>.
 
-C<owner> is what the file ends up owned by, not what it lands as.  Placement
-happens before the makefile, so the account usually belongs to a package that is
-not installed yet; C<mode> is what keeps the secret to itself until the recipe
-chowns it, which the recipe has to do.
+C<owner> is the final owner of the file, not the owner it lands with.
+Placement happens before the makefile runs, so the account usually belongs to
+a package that is not installed yet.  C<mode> keeps the secret private until
+the recipe changes the owner, which the recipe must do.
 
 =cut
 
@@ -966,10 +976,11 @@ sub guest_secrets {
 
 =head3 @dirs = $recipe->datadirs()
 
-Directories under the domain's C<install_dir> this recipe needs to exist.
+Directories under the C<install_dir> of the domain that this recipe needs.
 
-Made before the fragment runs, owned the way everything else the domain owns is
-owned, so a fragment does not have to open with a run of C<mkdir -p>.
+They are made before the fragment runs, with the same ownership as everything
+else the domain owns.  A fragment therefore does not need to start with a run
+of C<mkdir -p>.
 
 =cut
 
@@ -979,24 +990,22 @@ sub datadirs {
 
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)
 
-What the guest should be asked to do immediately before its C<remote_files> are
-fetched, as shell commands run there as root.
+Shell commands for the guest to run as root immediately before its
+C<remote_files> are fetched.
 
-A salvage is only as fresh as whatever wrote it.  A database dumped nightly, an
-LDIF exported hourly, a snapshot of something that cannot be copied while it is
-open -- all of them are a cron away from the moment somebody actually rebuilds
-the guest, and the difference is however much happened in between.  This is
-where a recipe closes that gap: it says "take one now", and C<bin/new_config>
-asks, and the fetch that follows carries what the guest looks like at that
-moment rather than what it looked like last night.
+A salvage is only as fresh as whatever wrote it.  A nightly database dump, an
+hourly LDIF export, or a snapshot of something that cannot be copied while
+open, is old by the time somebody rebuilds the guest.  This closes that gap.
+The recipe asks for a new copy now, C<bin/new_config> runs the command, and the
+fetch carries the current state of the guest.
 
     sub remote_prepare { return ('/usr/local/sbin/mariadb-backup.sh') }
 
-A command that fails is a warning rather than an error.  The guest may not have
-the script yet -- it is being asked before its first provision has run -- and
-last night's dump is worth more than no dump at all, which is what dying here
-would leave.  What it must not be is silent, since a salvage nobody refreshed is
-one somebody will restore from later believing otherwise.
+A command that fails gives a warning, not an error.  The guest can lack the
+script, because its first provision has not run yet.  Last night's dump is
+better than no dump, and a die leaves no dump.  The warning must still appear,
+because somebody later restores from a salvage that nobody refreshed.  See
+C<refresh_salvage> in C<bin/new_config> for when a failure dies.
 
 =cut
 
@@ -1006,7 +1015,7 @@ sub remote_prepare {
 
 =head3 %restores = $recipe->restores(%opts)
 
-Where the state this recipe salvaged has to be put back, as a map of the
+Where the state that this recipe salvaged must go back.  Returns a map from the
 destination on the guest to how to get it there:
 
     "/var/lib/deluged/config/state" => {
@@ -1015,29 +1024,29 @@ destination on the guest to how to get it there:
         mode  => '0750',                            # optional
     }
 
-Handed the whole configuration rather than a path and a domain, because what a
-destination is owned by is often one of the other settings -- C<admin_user>,
-the service C<user> -- and a recipe should not have to be told twice.
+The method gets the whole configuration, not a path and a domain.  The owner of
+a destination is often another setting, such as C<admin_user> or the service
+C<user>, and the recipe then has it in hand.
 
-C<data> walks this, so the fragment does not have to call C<restore_state>
-itself.  Keyed on the destination because that is what has to be unique: two
-recipes restoring different things to the same path is a disagreement, and
-C<reconcile> is where it gets settled rather than silently resolved.
+C<data> walks this map, so the fragment does not call C<restore_state> itself.
+The map is keyed on the destination, because the destination must be unique.
+Two recipes that restore different things to one path disagree, and
+C<reconcile> settles that openly.
 
-B<Not derived from C<remote_files>.>  It looks like the inverse and often is,
-but not always: C<mail> salvages C</mail/keys> whole and puts one subdirectory
-of it back at C</etc/opendkim/keys/$domain>, which no rule about reversing the
-map would produce.  Restoring state to the wrong place is destructive, so this
-is said outright rather than inferred.
+This map is not derived from C<remote_files>.  It looks like the inverse, and
+it often is, but not always.  C<mail> salvages C</mail/keys> whole and puts one
+subdirectory of it back at C</etc/opendkim/keys/$domain>.  No rule that
+reverses the map produces that.  A restore to the wrong place destroys data, so
+each recipe states its map.
 
-Leave it empty -- which is the default -- for a recipe whose salvage lands in
-the domain directory the service already reads from, since the C<data> target
-has then already put it where it goes.
+Leave it empty, the default, for a recipe whose salvage lands in the domain
+directory that the service already reads.  The C<data> target already puts the
+salvage there.
 
-A recipe whose destination is owned by a service that is running before the
-makefile starts cannot use this: the restore has to happen between a stop and a
-start inside that recipe's own target.  C<redis> and C<plexmediaserver> are the
-two, and they keep their own C<restore_state> calls.
+A recipe cannot use this if a service owns the destination and runs before the
+makefile starts.  Then the restore must happen between a stop and a start in
+the target of that recipe.  C<redis> and C<plexmediaserver> are the two, and
+they keep their own C<restore_state> calls.
 
 =cut
 
@@ -1048,38 +1057,49 @@ sub restores {
 
 =head3 %path_map = $recipe->remote_files($install_dir, $domain)
 
-What to salvage off a guest that is already running this recipe, as a map of the
-path on the guest to where it lands in the data directory.
+What to salvage off a guest that already runs this recipe.  Returns a map from
+the path on the guest to where it lands in the data directory.
 
-This is how a recipe survives the guest being rebuilt: state that was generated
-rather than configured -- a database dump, keys somebody accepted, a spool --
-comes back down into the data directory, and goes back up when the guest is
-built again.  Anything a recipe can regenerate does not belong here.
+This is how a recipe survives a rebuild of the guest.  State that the guest
+generated, not configured, comes back down into the data directory.  Examples
+are a database dump, keys that somebody accepted, or a spool.  It goes back up
+when the guest is built again.  Do not list anything that the recipe can
+regenerate.
 
-C<bin/new_config> on a cron, tarring up what it collects, is a backup strategy;
-see L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/BACKUPS.md>.
+If you run C<bin/new_config> from cron and archive what it collects, you have a
+backup strategy.  See
+L<docs/BACKUPS.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/docs/BACKUPS.md>.
 
-Which is also the reason C<remote_skip> exists: a directory salvaged wholesale is
-a directory that ends up in that tarball, and some of what lives in one is meant
-to stay on the machine it was made on.
+That is also why C<remote_skip> exists.  A directory salvaged whole ends up in
+that archive, and some of its contents must stay on the machine that made them.
 
-=head4 Naming it is half of it
+=head4 Naming a path is not enough
 
-What C<remote_files> names comes back down and goes back up, and lands under
+What C<remote_files> names comes down and goes back up.  It lands under
 C<install_dir/domain> with everything else in the data directory.  If the
-service reads it somewhere else, the fragment has to put it there:
+service reads it from another place, the fragment must put it there:
 
     [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/pdns' /var/spool/powerdns pdns:pdns
 
-C<restore_state> declines when nothing was salvaged, when what was salvaged is
-empty -- which is what a fetch that could not read the directory leaves -- and
-when the destination already has state in it, which is what keeps
-re-provisioning a live guest from writing a partial copy over the real thing.
+C<restore_state> does nothing in three cases:
+
+=over 4
+
+=item * Nothing was salvaged.
+
+=item * The salvage is empty, which is what a fetch leaves when it cannot read
+the directory.
+
+=item * The destination already holds state.  This keeps a re-provision of a
+live guest from writing a partial copy over the real state.
+
+=back
+
 Call it before the service starts.
 
 A recipe whose state already lives under C<install_dir/domain> needs none of
-this: the data target puts it back where it came from.  That is the reason to
-keep state there when the software will let you.
+this.  The data target puts the state back where it came from.  So keep state
+there when the software allows it.
 
 =cut
 
@@ -1090,18 +1110,18 @@ sub remote_files {
 
 =head3 @files = $recipe->template_files(@loaded_recipes)
 
-Files this recipe generates, as a map of the template under C<templates/files/>
-to where it is installed relative to the domain's configuration directory.
+Files that this recipe generates.  Returns a map from the template under
+C<templates/files/> to where it is installed, relative to the configuration
+directory of the domain.
 
-A name that does not end in C<.tt> is copied rather than rendered, which is what
-you want for something with no variables in it.  The loaded recipes are passed
-in so that a recipe generating something per-service -- ufw's application
-profiles, say -- can generate only what this guest actually needs.
+A name that does not end in C<.tt> is copied, not rendered.  Use that for a
+file with no variables in it.  The method gets the loaded recipes, so a recipe
+that generates something per service can generate only what this guest needs.
+The application profiles of ufw are an example.
 
-Every file named here has to be installed by the fragment.  One that nothing
-installs is dead: either it should be installed and is not, or it is a limb to
-prune, and rendering it either way just leaves a file on the hypervisor that
-nothing reads.
+The fragment must install every file named here.  A file that nothing installs
+is dead.  Either it must be installed and is not, or it must be removed.
+Rendering it only leaves a file on the hypervisor that nothing reads.
 
 =cut
 
@@ -1112,12 +1132,12 @@ sub template_files {
 
 =head3 %vars = $recipe->makefile_vars()
 
-Variables set at the top of the generated makefile, for the whole run rather
-than for this recipe's fragment.
+Variables set at the top of the generated makefile.  They apply to the whole
+run, not only to the fragment of this recipe.
 
-Override this when a fragment needs a value that make itself has to expand.  Do
-not reach for it to pass configuration to your own templates -- that is what
-C<args> and the template variables are for.
+Override this when a fragment needs a value that make itself expands.  Do not
+use it to pass configuration to your own templates.  Use C<args> and the
+template variables for that.
 
 =cut
 
@@ -1125,19 +1145,16 @@ sub makefile_vars {
     return ();
 }
 
-# Global parameter validation
-
 =head3 @tests = $recipe->tests()
 
-Templates under C<templates/tests/> to render and run on the guest once
-provisioning has finished.
+Templates under C<templates/tests/> to render and run on the guest after
+provisioning finishes.
 
-These are the recipe's own account of whether it worked, and they run on the
-guest because that is the only place the answer is: that the service is
-listening, that the config it was given is the config it loaded, that the thing
-it is supposed to serve is served.  Assert what the recipe promises rather than
-what it wrote -- a test that only checks a file exists passes on a guest where
-nothing started.
+With these tests, the recipe reports whether it worked.  They run on the guest,
+because only the guest has the answer.  Is the service listening?  Did it load
+the configuration it was given?  Does it serve what it must serve?  Assert what
+the recipe promises, not what it wrote.  A test that only checks that a file
+exists passes on a guest where nothing started.
 
 See L<t/TESTING.md|https://github.com/Troglodyne-Internet-Widgets/trog-provisioner/blob/master/t/TESTING.md>.
 
@@ -1149,7 +1166,7 @@ sub tests {
 
 =head3 @pms = $recipe->testdeps(@modules)
 
-Perl dependencies for your tests.
+Perl modules that the tests of this recipe need.
 
 =cut
 
@@ -1158,11 +1175,11 @@ sub testdeps {
     return ();
 }
 
-=head2 Methods you probably won't want to override
+=head2 METHODS you usually do not override
 
 =head3 $output = $recipe->render(%template_vars)
 
-Render recipe's makefile template.
+Renders the makefile fragment of the recipe.  See C<render_file>.
 
 =cut
 
@@ -1172,7 +1189,8 @@ sub render ( $self, %template_vars ) {
 
 =head3 $bool = $recipe->has_global_template()
 
-Returns true if a C<$recipe.global.tt> exists in any configured template directory.
+Returns true if a C<$recipe.global.tt> exists in any configured template
+directory.
 
 =cut
 
@@ -1196,8 +1214,8 @@ sub has_template {
 
 =head3 $output = $recipe->render_global(%template_vars)
 
-Render the recipe's global makefile template (C<$recipe.global.tt>).
-Only call this after confirming C<has_global_template> returns true.
+Renders the global makefile fragment of the recipe (C<$recipe.global.tt>).  Call
+this only after C<has_global_template> returns true.
 
 =cut
 
@@ -1205,9 +1223,10 @@ sub render_global ( $self, %template_vars ) {
     return $self->render_file( $self->{global_template}, %template_vars );
 }
 
-=head3 $output = render_file($file, %template_vars)
+=head3 $output = $recipe->render_file($file, %template_vars)
 
-Render specified template file.
+Renders the template C<$file> with the C<vars> of the recipe and
+C<%template_vars>, after C<validated> checks them.  Dies if they are not valid.
 
 =cut
 
@@ -1217,20 +1236,17 @@ sub render_file ( $self, $file, %template_vars ) {
 
 =head3 $output = $recipe->render_raw($file, %template_vars)
 
-Render a template against variables that have B<already> been through
-C<validate>.
+Renders a template with variables that already went through C<validate>.
 
-C<render_file> is the one to call.  This is for the one caller that cannot:
-C<enrich>, which runs inside C<validate> and so cannot ask for a render that
-validates -- C<render_file> would re-enter C<validate>, which would call
-C<enrich>, which would ask for another render.
+Call C<render_file> instead.  This method is for the one caller that cannot:
+C<enrich>, which runs inside C<validate>.  From there, C<render_file> re-enters
+C<validate>, which calls C<enrich>, which asks for another render.
 
-Which a recipe needs when one of its generated files has to appear inside
-another.  A distro's cloud-init carries the setup script by value, in a
-C<write_files> entry, so the script has to be rendered before the user-data
-that quotes it -- and the answer is a template variable rather than an ordering
-between two C<template_files> entries, because nothing about C<template_files>
-promises an order.
+A recipe needs this when one of its generated files appears inside another.
+The cloud-init of a distro carries the setup script by value, in a
+C<write_files> entry.  So the script must be rendered before the user-data that
+quotes it.  The answer is a template variable, not an order between two
+C<template_files> entries, because C<template_files> promises no order.
 
 =cut
 
@@ -1241,14 +1257,14 @@ sub render_raw {
 
 =head3 @written = $recipe->generate_files($output_dir, %template_vars)
 
-Render everything in C<template_files> into C<$output_dir>, and hand back what
-was written, relative to it.
+Renders everything in C<template_files> into C<$output_dir>.  Returns the paths
+it wrote, relative to C<$output_dir>.  Dies if it cannot copy a static file.
 
-A name ending in C<.tt> is rendered and anything else is copied, which is what
-C<template_files> already documents.  Both callers are here rather than in one
-of them: C<bin/new_config> generates a recipe's files while it walks the
-modules, and C<bin/provision> generates the ones that cannot be written until a
-hypervisor has answered for itself -- see C<Provisioner::Recipe::vm>.
+A name that ends in C<.tt> is rendered, and any other file is copied, as
+C<template_files> says.  This method lives here because it has two callers.
+C<bin/new_config> generates the files of a recipe while it walks the modules.
+C<bin/provision> generates the files that cannot exist until a hypervisor
+answers for itself.  See C<Provisioner::Recipe::vm>.
 
 =cut
 
@@ -1277,13 +1293,13 @@ sub generate_files {
 
 =head3 $path = $recipe->template_path($file)
 
-Where a template actually is, out of C<template_dirs>, or dies naming what it
-looked through.
+Returns the path of a template in C<template_dirs>.  Dies with the list of
+directories it searched if none of them has the file.
 
-The renderer finds a template by name on its own; this is for the ones that are
-not rendered -- a file with no variables in it, which C<template_files> copies
-rather than renders -- and for a caller that has to hand the path to something
-else.
+The renderer finds a template by name on its own.  This method is for a file
+that is copied, not rendered, such as a file with no variables in it that
+C<template_files> names.  It is also for a caller that must give the path to
+something else.
 
 =cut
 
@@ -1300,20 +1316,20 @@ sub template_path {
 
 =head3 %opts = $recipe->validate(%opts)
 
-Validate recipe configuration.  Enriches opts if the enrich() sub is setup for your recipe.
+Validates the configuration of the recipe, and returns it as C<enrich> returns
+it.  Dies with every schema error, and names the recipe and the domain.
 
-This is the universal one, and a recipe has no business overriding it: it
-composes the recipe's own C<args> with the settings every recipe is handed from
-C<global_args>, runs the schema over the result, and then calls C<enrich>.  A
-subclass that replaces this discards all three -- its own C<enrich> included,
-since this is what calls it.  Whatever a schema cannot express belongs in
-C<enrich>, which runs afterwards and is the sub to write.
+This method is universal, and a recipe must not override it.  It uses
+C<schema>, which combines the own C<args> of the recipe with C<global_args>.  It
+runs the schema over the options, and then calls C<enrich>.  A subclass that
+replaces this method loses all three, its own C<enrich> too.  Put whatever a
+schema cannot express in C<enrich>, which runs afterwards.
 
-C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> of its own
-to get one.  That default is a fallback rather than the intended configuration:
-the service user owns the domain's files and is what the application runs as,
-and most recipes are written for one that is not the admin -- so set it, on a
-guest built to test a recipe as on a production host.
+C<user> defaults to C<admin_user> here, so a recipe needs no C<enrich> to get
+one.  That default is a fallback, not the intended configuration.  The service
+user owns the files of the domain and runs the application.  Most recipes
+expect a user that is not the admin.  So set it, on a test guest as on a
+production host.
 
 =cut
 
@@ -1321,12 +1337,12 @@ sub validate {
     my ( $self, %opts ) = @_;
     my %args = $self->schema();
 
-    # shallow copy to not pollute later consumers
+    # deep copy, so nothing here writes through to the caller's data
     %opts = %{ clone( \%opts ) };
 
     forget_undefs( \%opts, \%args );
 
-    # Set default coercion to true so that the defaults in the spec are honored
+    # Coerce defaults, so that the defaults in the schema apply
     my $validator = JSON::Validator::Schema::Troglodyne->new;
     $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
     my @errors = $validator->validate( \%opts, \%args );
@@ -1344,30 +1360,27 @@ sub validate {
 
 =head3 %vars = $recipe->validated(%opts)
 
-C<validate>, B<memoized> for the life of the recipe object.
+C<validate>, memoized for the life of the recipe object.
 
-A recipe renders its fragment and then every file in C<template_files>, and each
-of those was a fresh C<validate> and so a fresh C<enrich>.  Anything enrich
-rewrote in place, the next call saw already rewritten.
+A recipe renders its fragment, then every file in C<template_files>, then each
+test.  Each render asks for this, and all of them get the first answer.  So
+C<enrich> runs once per recipe object.
 
-B<One recipe object is one domain's worth of one recipe>, and the options are
-whatever that domain merged for it.  C<bin/new_config> builds a recipe once per
-domain and renders it once -- C<lastuniq> keeps a module from appearing twice in
-a domain's list, and a dependency pulled in by several recipes accumulates their
-options and is rendered once at the end.  So the first answer is the only answer
-there is, and rendering the fragment, each C<template_files> entry and each test
-asks for it again rather than recomputing it.
+One recipe object is one recipe for one domain, and the options are what that
+domain merged for it.  C<bin/new_config> builds a recipe once per domain and
+renders it once.  C<lastuniq> keeps a module from appearing twice in the list
+of a domain.  A dependency that several recipes pull in collects their options
+and renders once at the end.  So the first answer is the only answer.
 
-Calling this on one object with B<different> options therefore gives you the
-first set's answer, and is a bug in the caller rather than a case handled here.
-Where a test needs two configurations, it wants two objects, the same as
-C<new_config> would build.
+If you call this on one object with different options, you get the answer for
+the first set.  That is a bug in the caller, and this method does not handle
+it.  If a test needs two configurations, it needs two objects, as
+C<new_config> builds them.
 
-The memo is on the object rather than in a C<state> variable because that is
-where its lifetime belongs.  C<state> in a named sub is one variable for the
-sub, not one per object, so it would outlive the object it describes: a recipe
-built fresh with a configuration that ought to be rejected would be answered
-from the last one that validated, and the die would never happen.
+The memo is on the object, not in a C<state> variable, because the object has
+the right lifetime.  A C<state> variable in a named sub is one variable for the
+sub, not one per object, so it outlives the object.  A new recipe with a
+configuration that must fail then gets the last valid answer, and never dies.
 
 =cut
 
@@ -1377,9 +1390,10 @@ sub validated {
     return %{ $self->{_validated} };
 }
 
-=head3 %vars = vars()
+=head3 %vars = $recipe->vars()
 
-Default variables for the recipe.
+Default template variables for the recipe.  C<render_file> gives them to
+C<validated> before the variables of the caller.
 
 =cut
 

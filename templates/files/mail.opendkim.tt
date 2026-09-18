@@ -24,6 +24,6 @@ PidFile                 /run/opendkim/opendkim.pid
 Background				yes
 AutoRestart				yes
 
-# The trust anchor enables DNSSEC. In Debian, the trust anchor file is provided
-# by the package dns-root-data.
+# The trust anchor enables DNSSEC.  On Debian, the package dns-root-data
+# supplies the trust anchor file.
 TrustAnchorFile         /usr/share/dns/root.key

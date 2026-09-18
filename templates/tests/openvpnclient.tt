@@ -3,8 +3,8 @@ use strict;
 use warnings;
 use Test::More;
 
-# Named for the domain, both of them: a guest can hold two of these, and the
-# unit, the configuration and the certificates each have to say which.
+# The unit, the configuration and the certificates are named for the domain,
+# because a guest can hold two of these tunnels.
 my $status = `systemctl is-active openvpn-client\@[% domain %] 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'the tunnel for this domain is running');
@@ -16,15 +16,10 @@ foreach my $file (qw{ca.crt client.crt client.key ta.key}) {
 }
 is((stat('/etc/openvpn/client/[% domain %]/client.key'))[2] & 07777, 0600, 'and the key is readable by nobody else');
 
-# The interface the recipe waits for.  That wait was passing the name as a word
-# after `bash -c`, which makes it the inner shell's $0 rather than a variable --
-# so it tested "" against "" and returned success in a hundredth of a second for
-# any interface, including ones that cannot exist.
+# The interface that the recipe waits for, checked here apart from that wait.
 my $link = `ip link show [% device %] 2>&1`;
 like($link, qr/\Q[% device %]\E/, 'the tunnel interface is up under the name this domain was given') or diag $link;
 
-# Nothing is salvaged off this guest: cert_dir on the hypervisor is rsynced over
-# these every run, so a copy taken off the guest would put a client private key
-# in the datadir to no purpose.
+# Nothing is salvaged off this guest.  Provisioner::Recipe::openvpnclient says why.
 
 done_testing();

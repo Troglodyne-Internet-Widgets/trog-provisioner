@@ -1,4 +1,4 @@
-# Only here to make self-signed certs work right, see makefile
+# For the self-signed certificate that templates/makefile.tt makes.
 [req]
 distinguished_name=dn
 [ dn ]

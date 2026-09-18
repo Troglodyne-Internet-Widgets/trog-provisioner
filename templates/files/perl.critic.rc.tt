@@ -1,7 +1,7 @@
 # Troglodyne perlcritic policy
-# Maximally severe to LART agents into compliance.  The same policies as
-# trog-provisioner's own .perlcriticrc, without the allow lists and stop words
-# that only describe that repository.
+# Maximum severity, to make agents comply.  It is meant to hold the same
+# policies as the .perlcriticrc of trog-provisioner, without the allow lists and
+# stop words that only describe that repository.
 severity  = 1
 only      = 1
 force     = 0
@@ -35,7 +35,7 @@ strict = 1
 [CodeLayout::ProhibitIfIfSameLine]
 [ValuesAndExpressions::ConstantBeforeLt]
 [ValuesAndExpressions::ProhibitDuplicateHashKeys]
-# any access checks are necessarily a TOCTOU waiting to happen
+# A file test before an access is a race between the check and the use.
 [ValuesAndExpressions::ProhibitFiletest_f]
 [ValuesAndExpressions::ProhibitFiletest_rwxRWX]
 # Bikeshed
@@ -59,12 +59,12 @@ formats = #!/usr/bin/env perl
 [ProhibitNoWarningsRedefine]
 [RequireFatalWarnings]
 [ProhibitUnusedImports]
-# use re '/aasx' is a pragma, not an import anything calls.
+# use re '/aasx' is a pragma, not an import that code calls.
 allow = re
 [ProhibitUnusedDefinitions]
 [ProhibitPrintSTDERR]
-# Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
-# each of these has to be.
+# The policies of Perl::Critic itself.  only = 1 loads only the policies named
+# here, so each one must be named.
 ;
 ; Not here on purpose, because something above already does the job better:
 ;   CodeLayout::ProhibitQuotedWordLists         RequireQwForLiteralLists
@@ -194,7 +194,8 @@ exclude_functions = print
 [Variables::RequireNegativeIndices]
 # Extensions to perl -c
 [CompileTime]
-# Good idea, but module doesn't install due to bad testsuite...we'll have to fork
+# Good idea, but the module does not install, because its test suite fails.
+# To use it, we must fork it.
 #[Dynamic::ValidateAgainstSymbolTable]
 #at_inc_suffix=lib
 #inspect_required_modules=1

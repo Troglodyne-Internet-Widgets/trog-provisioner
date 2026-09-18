@@ -4,9 +4,8 @@ db_engine    = "lmdb"
 
 replication_factor = [% replication_factor %]
 
-# The secret itself is not here.  bin/provision places it from the store before
-# this makefile runs, and a fresh one every provision would be a rotation that
-# stops the rest of the cluster talking to this node.
+# The secret is not in this file.  bin/provision puts it on the guest from the
+# secret store.  See guest_secrets in Provisioner::Recipe::garage.
 rpc_secret_file = "/etc/garage.rpc_secret"
 rpc_bind_addr   = "0.0.0.0:[% rpc_port %]"
 rpc_public_addr = "127.0.0.1:[% rpc_port %]"

@@ -25,102 +25,105 @@ In recipes.yaml:
             subnet: 10.8.0.0
             netmask: 255.255.255.0
             cipher: AES-256-GCM
-            # dns is optional; if omitted, no DNS servers are pushed to clients
+            # dns is optional. Without it, the server pushes no DNS servers to clients.
             interface: eth0
             redirect_gateway: false
 
 =head2 DESCRIPTION
 
-Sets up an OpenVPN server using easy-rsa for PKI management.
+Sets up an OpenVPN server and uses easy-rsa to manage its PKI.
 
-Generates a server CA, server certificate/key, and DH parameters under
-/etc/openvpn/easy-rsa/. The server listens on the configured port/proto and
-pushes a route for the VPN subnet to clients.
+The recipe makes a CA, a server certificate and key, DH parameters and a TLS
+auth key under F</etc/openvpn/easy-rsa/pki>.  The server listens on the
+configured port and protocol.  It pushes a route for the VPN subnet to clients.
 
-If the ufw recipe is also enabled, a UFW application rule for OpenVPN will be
-installed automatically.
+The recipe renders a ufw application profile for its port and protocol.  If
+the ufw recipe also runs, ufw allows that profile.
 
-=head3 What it takes to route a client's traffic anywhere
+=head3 What it takes to route the traffic of a client
 
-Three things, and two of them are not enough.
+Three things are necessary, and two of them are not sufficient.
 
-C<net.ipv4.ip_forward> is turned on, and a MASQUERADE rule sends the VPN subnet
-out of the guest wearing the guest's address.  Neither is what decides whether a
-forwarded packet lives: it meets the filter FORWARD chain first, and Ubuntu
-ships C</etc/default/ufw> with C<DEFAULT_FORWARD_POLICY="DROP">.  The third
-thing is therefore an accept for the subnet in C<ufw-before-forward>, without
-which the MASQUERADE rule is correct and unreachable -- and a client that
-connects loses its connectivity rather than gaining a route, since
-C<redirect-gateway> has meanwhile told it to send everything here.
+The recipe turns on C<net.ipv4.ip_forward>.  A MASQUERADE rule sends the VPN
+subnet out of the guest with the address of the guest.  But a forwarded packet
+meets the filter FORWARD chain first.  Ubuntu ships C</etc/default/ufw> with
+C<DEFAULT_FORWARD_POLICY="DROP">.
 
-C<setup-masquerade> writes both halves.  The accept names the VPN subnet rather
-than setting C<DEFAULT_FORWARD_POLICY="ACCEPT">, which would make the guest
-willing to route anything for anybody.
+So the third thing is an accept for the subnet in C<ufw-before-forward>.
+Without it, the MASQUERADE rule is correct but no packet reaches it.  If
+C<redirect-gateway> is on, a client that connects then loses all of its
+connectivity.
 
-C<interface> says which interface to masquerade out of, and is not decided here:
-the name depends on how the guest booted -- C<ens3>, C<ens4>, C<enp1s0> -- and a
-wrong one writes a rule that matches nothing and reports success.  Omitted, the
-guest is asked which interface carries its default route at the moment the rule
-is written.
+C<setup-masquerade> writes the accept and the MASQUERADE rule.  The accept names
+the VPN subnet.  The recipe does not set C<DEFAULT_FORWARD_POLICY="ACCEPT">,
+because then the guest routes any traffic for anybody.
 
-C<redirect_gateway> tells clients to route everything through the tunnel, not
-just requests to hosts on the VPN.
-Default off.
+C<interface> names the interface that the MASQUERADE rule sends traffic out of.
+The recipe does not choose it.  The name depends on how the guest booted, for
+example C<ens3>, C<ens4> or C<enp1s0>.  A wrong name gives a rule that matches
+nothing, and C<iptables> reports success.  If you omit it, C<setup-masquerade> asks
+the guest which interface carries its default route when it writes the rule.
+
+C<redirect_gateway> tells clients to send all of their traffic through the
+tunnel, not only the traffic for hosts on the VPN.  The default is off.  The
+server pushes this at connect time.  So a change takes effect on every deployed
+client when it next reconnects.
 
 =head3 The PKI is the part that cannot be made again
 
-Everything else here is regenerated on demand; a new CA is not the same CA.
-Issue it a second time and every client certificate ever signed by the first one
-stops being trusted, and the clients holding them are not here to be told.  So
-the PKI makes the round trip, and the fragment puts it back before easyrsa is
-asked for anything.
+The recipe can make everything else again when it needs to.  A new CA is not
+the same CA.  If the recipe makes a second one, no client certificate that the
+first one signed is trusted any more.  The clients that hold them get no
+message.
 
-The guard on PKI generation is not enough on its own.  It only fires when the
-old pki is still on the disk, which is a re-provision; a guest rebuilt from
-nothing has an empty disk, sails past it and signs itself a new CA.  Restoring
-first is what closes that.
+So the PKI makes the round trip through C<remote_files> and C<restores>.  The
+C<data> target puts the salvaged PKI back before this fragment asks easyrsa for
+anything.
 
-What C<remote_files> names is a staged copy the fragment leaves at
-F</etc/openvpn/pki-salvage>, not the pki itself.  easy-rsa keeps its pki at 0700
-root with the keys at 0600, and the fetch ran as the admin user -- so naming the
-real thing came back with an empty directory and no complaint, and the salvage
-looked like it was working for as long as nobody rebuilt a guest.  The fetch
-reads the guest as root now, so the real pki could be named; whether it should be
-is issue #98, the staged copy also being what keeps what travels apart from what
-the running VPN is using.  The staged copy belongs to the admin user and is readable by
-nobody else, which is the same trade the mail recipe makes to salvage the DKIM
-keys: the CA private key is now readable by whoever holds the admin account, and
-it travels into the data directory and into whatever backup is taken of that.
-That is the price of a VPN that survives its own guest, and it is worth saying
-out loud because the alternative is not free either.
+The guard on PKI generation is not sufficient alone.  It stops generation only
+when the old PKI is still on the disk, which is a re-provision.  A guest that is
+built again from nothing has an empty disk.  It passes the guard and signs a new
+CA for itself.  The restore that comes first prevents that.
 
-The copy is only as new as the last provision, so a client certificate issued by
-hand afterwards is not in it until the next one runs.  The CA it was signed with
-is, which is what keeps the certificate working.
+C<remote_files> names a staged copy, not the PKI itself.  The fragment writes it
+at F</etc/openvpn/pki-salvage>.  The fetch reads the guest as root, so it can
+read the real PKI.  Issue #98 decides whether the recipe names the real PKI.
+The staged copy also keeps the copy that travels apart from the one that the
+running VPN uses.
+
+The staged copy belongs to the admin user and nobody else can read it.  The mail
+recipe makes the same trade to salvage its DKIM keys.  The admin account can
+read the CA private key.  The key travels into the data directory, and into any
+backup of that directory.  That is the cost of a VPN that survives the loss of
+its guest.
+
+The copy is only as new as the last provision.  A client certificate that
+somebody issues by hand after that is not in it until the next provision.  The
+CA that signed it is in the copy, so the certificate continues to work.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
 
-    # Called before validation, so the schema defaults are not in %opts yet;
-    # they have to be repeated rather than read.  A client opens one tunnel and
-    # keeps it, so anything opening hundreds a second is not a client.
+    # This runs before validation, so the schema defaults are repeated here.  A
+    # client opens one tunnel and keeps it, so a source that opens hundreds a
+    # second is not a client.
     #
-    # On the protocol it was configured for.  A limit naming no protocol is
-    # written as tcp, and this listens on udp by default -- so the rule would
-    # match none of the traffic it was meant to limit.
+    # The limit names the configured protocol.  A limit with no protocol is a
+    # tcp rule, and this server listens on udp by default.
     return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One server on the machine -- one F</etc/openvpn/server>, one
-C<openvpn-server@server> -- over one easy-rsa PKI, whose authority is named for
-the domain that built it.  A second domain does not get a tunnel of its own: it
-would either issue from the first domain's authority or replace it, and
-replacing it is what stops every client already given a certificate from
-connecting.
+False.  The machine has one server, with one F</etc/openvpn/server> and one
+C<openvpn-server@server>.  It has one easy-rsa PKI, and the CA has the name of
+the domain that built it.
+
+A second domain does not get a tunnel of its own.  It must issue from the CA of
+the first domain, or replace that CA.  A new CA stops every client that already
+has a certificate from connecting.
 
 =cut
 
@@ -132,28 +135,16 @@ sub args {
             port  => { type => 'integer', minimum => 1024,          default => 1194 },
             proto => { type => 'string',  enum    => [qw{udp tcp}], default => 'udp' },
 
-            # An address is a string with a format, not a type of its own.  As a
-            # type these were never checked -- the validator has no
-            # _validate_type_ipv4 and never reached one, because the fields were
-            # always absent until defaults started being applied.
+            # An address is a string with a format.  The validator has no ipv4 type.
             subnet  => { type => 'string', format  => 'ipv4', default => '10.8.0.0' },
             netmask => { type => 'string', format  => 'ipv4', default => '255.255.255.0' },
             cipher  => { type => 'string', default => 'AES-256-GCM' },
             dns     => { type => 'array',  items   => { type => 'string' } },
 
-            # Which interface VPN traffic is masqueraded out of.  No default,
-            # because the answer is a fact about the guest and not one this
-            # machine can know -- these guests come up as ens3, ens4 or enp1s0
-            # depending on how they booted, and naming the wrong one writes a
-            # rule that matches nothing.  Left unset, setup-masquerade asks the
-            # guest which interface its default route leaves by.
+            # No default, because only the guest knows the name.  See DESCRIPTION.
             interface => { type => 'string' },
 
-            # Whether the server tells clients to send everything down the
-            # tunnel.  Pushed at connect time, so whatever this says takes
-            # effect on every deployed client the next time it reconnects --
-            # turning it on is therefore a change to machines nobody is
-            # touching, which is why it is off unless a domain asks.
+            # Off, because a change reaches every deployed client.  See DESCRIPTION.
             redirect_gateway => { type => 'boolean', default => 0 },
         },
     );
@@ -165,13 +156,22 @@ sub enrich {
     return %opts;
 }
 
-# Convert a dotted-quad netmask (e.g. 255.255.255.0) into a CIDR prefix length
-# (e.g. 24). Used to render iptables/MASQUERADE source CIDRs.
+=head2 $prefix = _netmask_to_cidr($netmask)
+
+Takes a dotted-quad C<netmask>, such as C<255.255.255.0>.  Returns the number of
+bits that are set in it, such as C<24>.  The firewall rules use it as the prefix
+length of the VPN subnet.
+
+Returns 0 for a C<netmask> that is empty, undefined or not a dotted quad.  It does
+not die.
+
+=cut
+
 sub _netmask_to_cidr {
     my ($mask) = @_;
 
-    # Guard the format before inet_aton(), which would otherwise resolve a
-    # non-dotted-quad as a hostname.
+    # Test the format first, because inet_aton() resolves anything else as a
+    # hostname.
     return 0 unless $mask && $mask =~ m{^\d{1,3}(?:\.\d{1,3}){3}$};
     my $packed = inet_aton($mask) or return 0;
     return unpack( '%32b*', $packed );
@@ -183,9 +183,8 @@ sub template_files {
     return (
         'openvpn.server.conf.tt' => 'server.conf',
 
-        # The ufw application profile for the port and protocol this domain
-        # configured.  It lived under ufw, which is handed rate_limits and
-        # nothing else -- so it named two variables it never had.
+        # The ufw application profile.  This recipe renders it, because ufw
+        # gets only rate_limits and not the port or the protocol.
         'openvpn.ufw.conf.tt' => 'openvpn_ufw.conf',
     );
 }
@@ -194,17 +193,15 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The certificate authority.  A rebuilt guest that makes a new one is a
-    # server every existing client refuses to talk to, so this has to arrive
-    # before easyrsa is asked whether it needs to build one.
+    # The PKI with its CA.  It must arrive before the fragment asks easyrsa for
+    # a CA, because a new CA is one that no existing client trusts.
     return ( '/etc/openvpn/easy-rsa/pki' => { from => "$install_dir/$domain/openvpn/pki", owner => 'root:root' } );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # The staged copy: CA, server cert and key, DH params, TLS auth key and
-        # the client certs.
+        # The staged copy of the PKI.  See DESCRIPTION for why it is a copy.
         '/etc/openvpn/pki-salvage/' => 'openvpn/pki/',
     );
 }

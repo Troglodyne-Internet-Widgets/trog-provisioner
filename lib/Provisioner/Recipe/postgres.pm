@@ -21,37 +21,34 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Set up the latest postgres available, put back whatever the guest this one
-replaces had in it, and fall back to the configured dumps for a domain that has
-never had a database.
+This recipe installs the newest postgres in the apt repository of the
+PostgreSQL project.  It puts back the databases that the replaced guest had.  If
+a domain never had a database, it loads the configured dumps instead.
 
 =head3 What a rebuild keeps
 
-The nightly backup writes C</var/backups/postgres/E<lt>timestampE<gt>/>, holding
-the roles and a directory-format dump per database. C<remote_files> brings that
-tree down into the data directory and the C<data> recipe puts it back on the new
-guest under C<install_dir/domain/postgres>. The leg that was missing is the last
-one: C<postgres-restore.sh> imports it, newest finished dump first.
+The nightly backup writes C</var/backups/postgres/E<lt>timestampE<gt>/>.  Each
+of these holds the roles and a directory-format dump for each database.
+C<remote_files> fetches that tree into the data directory.  The C<data> recipe
+then puts it on the new guest under C<install_dir/domain/postgres>.
+C<postgres-restore.sh> imports it from there, and uses the newest finished dump.
 
-Which makes C<dumps> a B<seed> rather than the thing that is loaded. It is what a
-domain with no database yet starts from -- and it is your responsibility to make
-sure such a file has its own C<CREATE DATABASE> statements, since nothing else
-will make one. It is loaded only into a cluster with nothing in it, and only when
-there is no salvaged dump to prefer, because loading it every provision was how a
-rebuild came up holding a snapshot somebody wrote once and none of what had
-happened since.
+So C<dumps> is a B<seed>, not the thing that a rebuild loads.  A domain with no
+database yet starts from it.  You must make sure that each such file has its own
+C<CREATE DATABASE> statements, because nothing else makes the database.  The
+restore loads the seeds only when it restored nothing from a salvaged dump, and
+only into a cluster that has no databases.
 
-Nothing is ever loaded over a database that is already there, which is
-C<scripts/restore_state>'s rule one level down: re-provisioning a running guest
-fetched that guest's own databases minutes earlier, and writing a fetch that came
-up short back over the original would replace the real thing with the half of it
-that could be read. So a rebuilt cluster, which has none of them, gets all of it;
-a live one, which has all of them, gets nothing.
+The restore never loads a dump over a database that is already there.  This is
+the rule of C<scripts/restore_state>, one level down.  When you re-provision a
+running guest, the fetch of its databases happens minutes earlier.  If that
+fetch is short, a write back over the original replaces the real data with the
+part that was readable.  So a rebuilt cluster, which has none of the databases,
+gets all of them.  A live cluster, which has all of them, gets nothing.
 
-A dump counts as restorable when it says it finished -- C<complete>, which the
-backup writes last. A dump taken before the backup learned to say so has no such
-file and will not be restored; an operator who knows one is whole can C<touch>
-it.
+A dump is restorable when it holds the file C<complete>, which the backup writes
+last.  The restore skips a dump without that file.  If you know that such a dump
+is whole, C<touch> its C<complete> file.
 
 =cut
 
@@ -60,9 +57,8 @@ sub args {
         type       => 'object',
         properties => {
 
-            # The seeds a domain with no database of its own starts from, rather
-            # than the things a rebuild loads: what this guest actually had is
-            # salvaged, and beats them.
+            # Seeds for a domain with no database yet.  A salvaged dump wins
+            # over them.  See "What a rebuild keeps".
             dumps => {
                 type  => 'array',
                 items => { type => "string" },
@@ -79,15 +75,24 @@ sub template_files {
     );
 }
 
-# The dumps the nightly backup wrote, which is everything this cluster has that
-# nothing here can regenerate.  What imports them again is postgres-restore.sh --
-# see L</What a rebuild keeps>, and Provisioner::Recipe's remote_files, which is
-# only half a round trip until a fragment does something with what it names.
-# The same reason mariadb has one: the nightly dump is a night old, and the
-# difference is what a rebuild would lose.
+=head3 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Returns the backup script, so the guest takes a fresh dump just before the fetch.
+The nightly dump is up to a day old, and a rebuild loses what changed since.
+
+=cut
+
 sub remote_prepare {
     return ('/usr/local/sbin/postgres-backup.sh');
 }
+
+=head3 %files = $recipe->remote_files($install_dir, $domain)
+
+Returns the backup directory on the guest, mapped to C<postgres/> in the data
+directory.  These dumps are the only thing in the cluster that nothing here can
+make again.  See L</What a rebuild keeps> for what imports them.
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;

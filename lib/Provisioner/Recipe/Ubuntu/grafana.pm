@@ -16,13 +16,12 @@ Provisioner::Recipe::Ubuntu::grafana - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =head1 DESCRIPTION
 
-Only two of the three services are here.  C<grafana> and C<telegraf> are in no
-Ubuntu component, and C<deps> is what cloud-init installs at first boot -- before
-the fragment has added either vendor archive -- so both are installed by the
-fragment instead.  Asking for them here would install nothing and say nothing
-about it, which is the failure
+This list holds one of the three services, C<influxdb>, and C<curl>.  No Ubuntu
+component has C<grafana> or C<telegraf>.  Cloud-init installs C<deps> at first
+boot, before the fragment adds either vendor archive, so the fragment installs
+both.  A request for them here installs nothing and says nothing about it.
 L<Provisioner::Recipe::grafana/Two archives, because neither package exists here>
-describes.
+describes that failure.
 
 =cut
 

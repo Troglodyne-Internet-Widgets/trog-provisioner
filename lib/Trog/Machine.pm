@@ -24,8 +24,8 @@ Trog::Machine - a machine we reach over SSH and put files on
 
 =head1 SYNOPSIS
 
-    # Not used directly.  See Trog::HV and Trog::Guest, either of which is a
-    # Trog::Machine and answers to all of this.
+    # You do not use this class directly.  Trog::HV, Trog::Guest and
+    # Trog::Local are subclasses, and each one has all of these methods.
     my $machine = Trog::HV->new();
 
     $machine->run_sudo(qw{systemctl restart libvirtd});
@@ -34,71 +34,69 @@ Trog::Machine - a machine we reach over SSH and put files on
 
 =head1 DESCRIPTION
 
-There are two machines in this toolkit that are not the one we are running on:
-the hypervisor a guest is built on, and the guest itself.  Everything about
-reaching them is the same -- one SSH connection, commands with exit statuses,
-files that have to arrive somewhere they may not have permission to go -- so it
-is all here, and L<Trog::HV> and L<Trog::Guest> add only what makes them
-different.
+This toolkit reaches two machines other than the one it runs on: the hypervisor
+that a guest is built on, and the guest itself.  The way to reach each one is
+the same.  It is one SSH connection, commands with exit statuses, and files that
+must arrive in places the login user cannot always write to.  So all of that is
+here.  L<Trog::HV> and L<Trog::Guest> add only what makes them different.
+L<Trog::Local> is the machine this tool runs on, with the same interface.
 
 =head2 Why none of this uses sftp
 
 L<Net::SFTP::Foreign> does not fail when the far side refuses a write.  It
-stops.  No error, no return, just a process sitting there until somebody
-notices -- and a root-owned destination is enough to do it.  Neither
-C<put_content> nor C<put> avoids that, and neither does staging the file
-somewhere writable first, because the staging path was never the problem.
+stops.  It gives no error and does not return, and the process waits until
+somebody notices.  A destination that root owns is enough to cause this.
+C<put_content> and C<put> both do it.  A staging file in a writable place does
+not help, because the staging path is not the problem.
 
-So nothing here goes over sftp.  Content is poured down the standard input of a
-command, which reports what happened:
+So nothing here uses sftp.  This module sends content on the standard input of a
+command, and that command reports what happened:
 
-    $ssh->system({ stdin_data => $content }, qw{sudo tee}, $path)
+    $ssh->system({ stdin_data => $content }, 'tee', $path)
 
-C<sudo> goes in front of the write itself rather than in front of a move
-afterwards, so a privileged destination is written correctly the first time and
-there is no intermediate file whose location, ownership or mode can be wrong.
+A destination that needs root takes two commands, because the content and the
+sudo password both need standard input.  See L</SUDO>.
 
 =head2 Why a directory comes over rsync
 
-A whole directory is the one thing here that is neither poured down that stdin
-nor run as a command: it goes through L<File::Rsync>, and it has to.
+A whole directory is the one exception.  It does not go on standard input and it
+is not run as a command.  It goes through L<File::Rsync>, and it must.
 
-The tree usually being asked about is a domain's data directory -- tens of
-gigabytes of video that changes by a handful of files between provisions -- and
-a transport that cannot ask what is already at this end moves all of it every
-run.  That is what the sftp fetch this replaced did, and it is the reason not to
-go back to one.
+The usual tree is the data directory of a domain.  That is tens of gigabytes of
+video, and only a few files change between provisions.  A transport that cannot
+compare against what is already at this end moves all of it on every run.  So
+do not replace rsync with a transport that cannot compare.
 
-The comparison is rsync's own quick check, size and mtime, not C<--checksum>.
-Checksumming a twenty gigabyte data directory reads all of it at both ends every
-run, which costs more than the transfer it exists to avoid.
+rsync compares with its own quick check, size and mtime, not C<--checksum>.  A
+checksum of a twenty gigabyte data directory reads all of it at both ends on
+every run.  That costs more than the transfer it exists to avoid.
 
-None of the sftp reasoning above applies here: rsync reports what happened and
-exits with a status, like anything else on this connection.
+The sftp problem above does not apply here.  rsync reports what happened and
+exits with a status, like any other command on this connection.
 
-rsync has to be installed on both ends.  F<bin/preflight> checks this machine
-and the hypervisor, and every guest this tool builds gets it among its base
+rsync must be installed at both ends.  F<bin/preflight> checks this machine and
+the hypervisor.  Every guest that this tool builds gets rsync among its base
 packages.
 
 =head1 CLASS METHODS
 
 =head2 new(%opts)
 
-C<host>, C<user>, C<port> and C<key_path>, all optional.  Subclasses generally
-work these out from something else and pass them down.
+Takes C<host>, C<user>, C<port> and C<key_path>, all optional, and returns the
+object.  Subclasses usually calculate these values from other data and pass them
+in.
 
 =cut
 
-# Seconds of network silence before a remote command is called wedged.  This is
-# the one that catches a stall promptly: it is inactivity rather than elapsed
-# time, so a slow transfer that keeps moving is never touched by it.
+# Seconds of network silence before a remote command counts as hung.  It
+# measures inactivity, not elapsed time, so a slow transfer that keeps moving
+# never trips it.
 our $TIMEOUT = 120;
 
-# Wall-clock seconds before SIGALRM takes the decision out of the library's
-# hands.  A backstop, not the mechanism: it has to be generous enough to let a
-# tarball across a slow link finish, so it will not catch a hang as promptly as
-# $TIMEOUT does.  Both are package variables so a caller who knows their own
-# network can tighten them.
+# Wall-clock seconds before SIGALRM stops the call.  This is a backstop, and it
+# must be long enough for a tarball to cross a slow link.  So it catches a hang
+# later than $TIMEOUT does.  A caller that knows its own network can lower
+# either value.
 our $HANG_TIMEOUT = 600;
 
 sub new {
@@ -110,18 +108,20 @@ sub new {
 
 =head2 ssh_host, ssh_user, ssh_port, ssh_key, ssh_target
 
-Where and as whom to connect.  C<ssh_port> falls back to 22, the way any other
-ssh client would.
+Where to connect, and as which user.  C<ssh_port> returns 22 when no port is
+set, as any other ssh client does.  C<ssh_target> returns C<user@host>, or only
+the host when no user is set, or undef when no host is set.
 
 =head2 is_local
 
-Whether this "machine" is the one we are running on, in which case everything
-below degrades to a plain local filesystem or C<system()> call.  Only a
-hypervisor is ever local; a guest never is.
+True when this "machine" is the one we run on.  Then each method below becomes a
+plain local filesystem call or a C<system()> call.  A guest is never local.
+L<Trog::Local> always is, and a hypervisor can be.
 
 =head2 describe
 
-What to call this machine in an error message.
+The name for this machine in an error message: its C<ssh_target>, or "this
+machine".
 
 =cut
 
@@ -142,27 +142,28 @@ sub describe ($self) { return $self->ssh_target // 'this machine' }
 
 =head1 THE MACHINE A GUEST FETCHES FROM
 
-A guest pulls its payload -- the Makefile tarball, the domain's data, its
-dotfiles -- off one of these over ssh.  Which machine that is has moved: it used
-to be the hypervisor, back when the hypervisor was also the machine running this
-tool, and it is now L<Trog::Local>, us.  These three are what the fetch needs to
-know about whoever is holding the files, so they are here rather than on either
-subclass.
+A guest pulls its payload over ssh from one of these machines.  The payload is
+the Makefile tarball, the data of the domain and its dotfiles.  That machine is
+L<Trog::Local>, which is us.  The fetch needs these three facts about the machine
+that holds the files, so they are here and not on a subclass.
 
 =head2 transfer_user
 
-The unprivileged account the guest fetches as.
+The unprivileged account that the guest fetches as.  Locally, that is the user
+that runs this tool.  On a remote machine, it is the login user.
 
 =head2 authorized_keys
 
-That account's C<authorized_keys>, which is where a guest's public key is
-written so it can fetch at all.
+The path of the C<authorized_keys> file of that account.  The public key of a
+guest goes there, so that the guest can fetch.  Dies if it cannot find the home
+directory on a remote machine.
 
 =head2 sshd_port
 
-The port that machine's sshd listens on.  Read out of its configuration rather
-than off the wire, since there may be several sshd instances running.  22 when
-nothing says otherwise, which is sshd's own default and not a guess.
+The port that the sshd of that machine listens on.  It comes from the sshd
+configuration, not from the network, because several sshd instances can run at
+once.  If no C<Port> line exists, it returns 22, which is the sshd default.  The
+object keeps the result.
 
 =cut
 
@@ -191,17 +192,15 @@ sub sshd_port {
     my ($self) = @_;
     return $self->{sshd_port} if defined $self->{sshd_port};
 
-    # sshd_config.d as well as sshd_config.  A modern Ubuntu ships an Include for
-    # that directory at the top of the main file, so anything dropped in there
-    # is what sshd actually uses -- reading only sshd_config finds the shipped
-    # default and misses the answer.  Last match wins for the same reason: the
-    # Include comes first, and sshd takes the first value it is given.
+    # Read sshd_config.d as well as sshd_config.  A modern Ubuntu includes that
+    # directory at the top of the main file, so a value in there is the one
+    # sshd uses.  The last match wins for the same reason: the Include comes
+    # first, and sshd takes the first value that it reads.
     my $port = $self->capture_cmd(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
     chomp $port if defined $port;
 
-    # No Port line at all means 22.  That is sshd's own default rather than a
-    # failure to find something, so it is not worth saying -- and this is asked
-    # of ourselves on every provision, where it would be said every time.
+    # No Port line is the sshd default, not a failure, so it gets no warning on
+    # every provision.
     return $self->{sshd_port} = ( $port || 22 );
 }
 
@@ -209,13 +208,14 @@ sub sshd_port {
 
 =head2 ssh
 
-The L<Net::OpenSSH::More> connection, opened on first use and kept, or undef
-when the machine is us and there is nothing to connect to.
+The L<Net::OpenSSH::More> connection.  It opens on first use and the object keeps
+it.  Returns undef when the machine is us, because there is nothing to connect
+to.  Dies if it cannot connect.
 
-C<%opts> is handed to the constructor, so a caller waiting on a machine that is
-still coming up can widen C<retry_interval> and C<retry_max>.  Only the call
-that opens the connection can: every call after it gets the one already made,
-whatever it asks for.
+C<%opts> goes to the constructor.  So a caller that waits on a machine that is
+still starting can increase C<retry_interval> and C<retry_max>.  Only the first
+call can do this.  Every later call gets the existing connection and ignores its
+options.
 
 =cut
 
@@ -231,20 +231,17 @@ sub ssh {
             ( defined $self->ssh_user ? ( user     => $self->ssh_user ) : () ),
             ( defined $self->ssh_key  ? ( key_path => $self->ssh_key )  : () ),
 
-            # Our commands are one-shot, and some of them are pipelines the
-            # persistent Expect shell would rather we didn't send it.
+            # Our commands are one-shot, and some of them are pipelines that
+            # the persistent Expect shell does not handle well.
             use_persistent_shell => 0,
 
-            # A connection of this machine's own.  Otherwise the library hands
-            # back whatever it cached for the same user, host and port, without
-            # asking whether that still reaches anything -- and a guest rebuilt
-            # in the same process at the same address was reached through the
-            # old guest's connection, whose first command died "Broken pipe".
-            # This object keeps its own for as long as it lives.
+            # A connection for this object only.  Otherwise the library returns
+            # the one it cached for the same user, host and port, and does not
+            # test it.  A guest rebuilt at the same address then gets the dead
+            # connection of the old guest.
             no_cache => 1,
 
-            # Last, so a caller can widen the retry budget for a machine that is
-            # still coming up.
+            # Last, so that the options of the caller win.
             %opts,
         );
     } or die 'Could not ssh to ' . $self->describe . ": $@\n";
@@ -256,18 +253,18 @@ sub ssh {
 
 =head2 capture_cmd($shell_command)
 
-Takes a shell string -- pipelines and all -- and returns its standard output.
+Takes a shell string, which can be a pipeline, and returns its standard output.
 
 =head2 run_cmd(@argv)
 
-Takes an argv list and returns the exit code.  The arguments are escaped for
-you, so they may contain anything.  A single argument is handed to the far
-side's shell instead, which is how you write a pipeline.
+Takes an argv list and returns the exit code.  This module escapes the
+arguments, so they can contain any character.  A single argument goes to the
+shell of the far side instead, and that is how you write a pipeline.
 
-Named for what they do rather than C<run> and C<capture>: those are the names
-Perl::Critic::Policy::PreferredBinaries reads as a local runner, and these run
-their command on whatever machine this is -- usually another one, where advice
-to use a perl module instead makes no sense.
+These names say what the methods do.  They are not C<run> and C<capture>,
+because Perl::Critic::Policy::PreferredBinaries reads those names as local
+runners.  These methods run their command on whatever machine this is.  That is
+usually another machine, where advice to use a perl module does not apply.
 
 =cut
 
@@ -275,10 +272,9 @@ sub capture_cmd {
     my ( $self, $cmd ) = @_;
     if ( $self->is_local ) {
 
-        # A string still reaches a shell, which is the documented contract here
-        # -- callers write pipelines.  What run3 buys is stdin closed rather
-        # than inherited, so a command that decides to read one cannot sit there
-        # waiting on a terminal that is busy elsewhere.
+        # A string still goes to a shell, as documented, because callers write
+        # pipelines.  run3 closes stdin, so a command that reads stdin cannot
+        # wait on a terminal that is busy elsewhere.
         IPC::Run3::run3( $cmd, \undef, \my $out, undef );
         return $out;
     }
@@ -295,37 +291,36 @@ sub run_cmd {
 
 =head1 SUDO
 
-Almost everything this tool does on a hypervisor needs root, and C<sudo> over
-an SSH connection has no terminal to ask for a password at.  Left alone it says
-so and fails, which is how a run gets three minutes in and then stops on
-something nobody can act on.
+Almost everything this tool does on a hypervisor needs root.  C<sudo> over an
+SSH connection has no terminal to ask for a password on.  Without help, it says
+so and fails, and a run stops three minutes in on an error that nobody can act
+on.
 
-So: C<sudo -n> first, so a password requirement is an immediate, legible
-failure rather than a wait on a terminal that will never appear.  If that is
-what happened, ask for the password once, remember it for the rest of the run,
-and carry on.
+So this module runs C<sudo -n> first.  If sudo needs a password, that command
+fails at once with a clear message.  It does not wait on a terminal that never
+appears.  Then the module asks for the password once, keeps it for the rest of
+the run, and continues.
 
-When there is nobody to ask -- a run driven by tCMS's reprovision button, or a
-cron -- the password can be handed in before anything starts.  See
-L<Trog::Credentials>.  Without that, such a run fails here rather than hanging,
-which is the right way round but is still a run that did not happen.
+Sometimes nobody is there to ask, for example in a run from the reprovision
+button of tCMS, or from cron.  Then give the password before the run starts, as
+L<Trog::Credentials> describes.  Without it, such a run fails here and does not
+hang.
 
-The password never travels with the data.  C<sudo -S> reads it from standard
-input, which is where C<put_file> and C<write_text> are already sending the
-file, and sudo reading ahead into the content is not a thing to leave to
-chance.  Privileged writes therefore land in a file we own and are moved into
-place afterwards -- one command with the password on stdin, one with the
+The password never goes on the same stream as the data.  C<sudo -S> reads it
+from standard input, and C<put_file> and C<write_text> send the file on standard
+input too.  If sudo reads past the password into the content, the result is
+wrong.  So a privileged write goes first to a file that we own, and C<sudo>
+moves it into place.  One command gets the password on stdin and one gets the
 content, never both.
 
 =head2 sudo_password
 
-The remembered password for this machine, if we have had to ask for one.
-Cached against the machine we asked about, so two objects pointing at the same
-host share it and nobody gets asked twice.
+The password kept for this machine, or undef if we did not ask for one.  The key
+is the target of the machine, so two objects for the same host share it and
+nobody is asked twice.
 
 =cut
 
-# Passwords by target, so rebuilding a machine object does not ask again.
 my %SUDO_PASSWORD;
 
 sub sudo_password {
@@ -339,7 +334,7 @@ sub _remember ( $self, $password ) { return $SUDO_PASSWORD{ $self->_sudo_key } =
 
 =head2 forget_sudo_passwords
 
-Drop every remembered password.  Only tests should need this.
+Clears every kept password.  Only the tests use this.
 
 =cut
 
@@ -348,11 +343,11 @@ sub forget_sudo_passwords { %SUDO_PASSWORD = (); return 1 }
 sub _ask_for_sudo_password {
     my ($self) = @_;
 
-    # Handed to us up front, by whatever is driving a run that has nobody to ask.
+    # Given before the run, by a caller that has nobody to ask.
     return $self->_remember( Trog::Credentials->get('sudo') ) if Trog::Credentials->have('sudo');
 
-    # At the terminal rather than on standard input, which cron and redirected
-    # runs have pointed somewhere nobody is typing.
+    # Ask at the terminal, not on stdin, because cron and redirected runs
+    # point stdin where nobody types.
     my $password;
     eval {
         $password = Trog::Credentials->prompt( '[sudo] password for ' . ( $self->ssh_user // 'you' ) . ' on ' . $self->describe . ':', 'sudo', terminal => 1 );
@@ -375,7 +370,7 @@ sub _ask_for_sudo_password {
     return $self->_remember($password);
 }
 
-# What sudo says when it wants a password it cannot ask for.
+# What sudo prints when it needs a password that it cannot ask for.
 our @WANTS_PASSWORD = ( 'sudo: a password is required', 'sudo: password is required', 'sudo: a terminal is required', 'sudo: no password was provided' );
 
 sub _wants_password {
@@ -392,15 +387,16 @@ sub _wrong_password {
 
 =head2 run_sudo(@argv)
 
-Run something as root, asking for a password if the far side turns out to want
-one.  Returns the exit code, like C<run>.
+Runs C<@argv> as root, and asks for a password if the far side needs one.
+Returns the exit code, like C<run_cmd>.  Dies if it cannot ask for a password,
+or after three wrong ones.
 
 =cut
 
 sub run_sudo {
     my ( $self, @argv ) = @_;
 
-    # A local sudo has our own terminal to ask at, so let it.
+    # A local sudo can ask at our own terminal.
     return $self->run_cmd( 'sudo', @argv ) if $self->is_local;
     return $self->_run_sudo_attempt( 0, @argv );
 }
@@ -424,12 +420,11 @@ sub _run_sudo_attempt {
     my $said = ( $out // '' ) . ( $err // '' );
     return $rc unless _wants_password($said) || _wrong_password($said);
 
-    # Three goes at typing it, then give up rather than loop.
+    # Three tries, then stop.
     die 'Could not authenticate sudo on ' . $self->describe . "\n" if $attempts >= 3;
 
-    # Not warn: this is the second half of a password prompt, being read by
-    # somebody with a terminal in front of them, and a source location stapled
-    # to it would be noise in the middle of them retyping it.
+    # Not warn: this is part of a password prompt, and a source location in it
+    # is noise to somebody who is typing the password again.
     print {*STDERR} "Sorry, try again.\n"     if _wrong_password($said);    ## no critic (ProhibitPrintSTDERR)
     delete $SUDO_PASSWORD{ $self->_sudo_key } if _wrong_password($said);
     $self->_ask_for_sudo_password();
@@ -439,70 +434,87 @@ sub _run_sudo_attempt {
 
 =head1 FILES
 
-Each of these is the obvious local filesystem call when the machine is us, and
-a command over the connection when it isn't.  The C<sudo> option on the writers
-is for destinations we have no business owning -- anything under C</etc>,
-C</usr> or C</root>.  C<mode> says what to chmod the result to afterwards,
-defaulting to 0644, since C<tee> would otherwise leave it to root's umask.
+Each of these is the plain local filesystem call when the machine is us, and a
+command over the connection when it is not.  The C<sudo> option on the writers
+is for destinations that the login user does not own, such as anything under
+C</etc>, C</usr> or C</root>.  With C<sudo>, C<mode> sets the permissions of the
+result, and the default is 0644.  The chmod is necessary because a staging file
+from C<mktemp> is 0600.
 
 =over 4
 
 =item C<file_exists($path)>
 
+True if C<$path> is a plain file.
+
 =item C<mkpath(@paths)>
+
+Makes each directory and its parents.  On a remote machine, if the login user
+cannot make one, it uses C<sudo> and gives the directory to the login user.
+Returns 0 if that fails.
 
 =item C<remove(@paths)>
 
+Deletes each file.
+
 =item C<remove_tree(@paths)>
 
-A directory and everything under it.
+Deletes each directory and everything under it.
 
 =item C<list_dir($path)>
 
-What is in a directory, as names with no path on them and no dotfiles among
-them.  Empty for a directory that is not there, the way C<glob> is: the callers
-are asking what is left somewhere, and nothing is a perfectly good answer.
+Returns the names in a directory, with no path and no dotfiles.  Returns an
+empty list for a directory that does not exist, as C<glob> does.  The callers ask
+what is left in a place, and "nothing" is a valid answer.
 
 =item C<read_text($path)>
 
+Returns the content of the file.  On a remote machine, returns undef if the read
+fails.  Locally, dies if the read fails.
+
 =item C<write_text($path, $content, %opts)>
+
+Writes C<$content> to C<$path>.  Takes C<sudo> and C<mode>.  Returns 1 on
+success and 0 on failure.  Locally, without C<sudo>, dies on failure.
 
 =item C<append_line($path, $line)>
 
-Append a line, but only if it isn't already there.
+Appends a line, but only if the file does not already contain it.
 
 =item C<put_file($local, $remote, %opts)>
 
-One file, from here to there.
+Copies one file from here to there.  Takes C<sudo> and C<mode>.  Returns 1 on
+success and 0 on failure.
 
 =item C<get_dir($remote, $local, %opts)>
 
-A whole directory tree, contents and all.  Incremental: what is already here and
-unchanged does not travel again.  See L</Why a directory comes over rsync>.
+Copies a whole directory tree from that machine to here.  It is incremental: a
+file that is already here and did not change does not travel again.  See
+L</Why a directory comes over rsync>.  Returns 1 on success.  On failure, warns
+with the rsync errors and returns 0.
 
-C<exclude> takes an arrayref of rsync patterns for things that must not come
-down -- see C<remote_skip> in L<Provisioner::Recipe>, which is where the ones we
-use are written.  C<update> leaves a file alone when our copy is the newer one.
+C<exclude> takes an arrayref of rsync patterns for paths that must not come
+down.  The patterns in use come from C<remote_skip> in L<Provisioner::Recipe>.
+C<update> keeps our copy of a file when it is the newer one.
 
-C<sudo> runs the far end as root, for a tree the connecting user cannot read.  A
-service keeps its state in a directory it owns and nobody else can open, and an
-unprivileged fetch of one walks the tree, makes the local directories, copies
-nothing out of them and exits happy -- which is indistinguishable from a guest
-that has no state yet.  It needs passwordless sudo on the far side and fails
-rather than waiting when there is none.
+C<sudo> runs the far end as root, for a tree that the login user cannot read.  A
+service keeps its state in a directory that only it can open.  An unprivileged
+fetch of that directory walks the tree, makes the local directories, copies no
+files, and exits with success.  That looks the same as a guest with no state.
+C<sudo> needs passwordless sudo on the far side, and without it the fetch fails
+and does not wait.
 
-B<Nothing is ever deleted here.>  rsync could, and this is the only direction
-left that it could apply to -- the two pushes that used to go to the hypervisor
-are gone, so C<get_dir> is the only caller.  It must not: this is a salvage, and
-the copy it is writing into is the only one there is.  A guest that stopped
-producing something, or that could not be read on one run, would take our copy
-of it with it.  The backup is the thing that mirrors a source and it deletes on
-purpose, having history to fall back on; this has neither.
+B<Nothing is ever deleted here.>  C<get_dir> is a salvage, and the copy that it
+writes into is the only copy.  If a guest stops making something, or one run
+cannot read it, a delete removes our copy too.  The backup mirrors a source and
+deletes on purpose, because it has history to fall back on.  A salvage has no
+history.
 
-What arrives is owned by whoever is running this, not by the uids it had on the
-guest: rsync only restores ownership when the B<receiving> end is root, and this
-end is not.  Putting it back where the service wants it, as whoever the service
-runs as, is C<scripts/restore_state>'s job and it is told the owner explicitly.
+The files that arrive belong to the user that runs this tool, not to the uids
+that they had on the guest.  rsync restores ownership only when the
+B<receiving> end is root, and this end is not.  C<scripts/restore_state> puts
+the files back as the user that the service runs as.  The caller gives it that
+owner.
 
 =back
 
@@ -556,8 +568,7 @@ sub list_dir {
     my ( $self, $path ) = @_;
     return map { File::Basename::basename($_) } glob "$path/*" if $self->is_local;
 
-    # ls rather than a listing over the connection: sftp is not used here at
-    # all, and for the same reason -- see above.
+    # ls, not sftp.  See "Why none of this uses sftp".
     my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
     return grep { $_ } split( m/\n/, $listing );
 }
@@ -566,19 +577,16 @@ sub read_text {
     my ( $self, $path ) = @_;
     return File::Slurper::read_text($path) if $self->is_local;
 
-    # capture(), not cmd(): cmd chomps, and a file's trailing newline is part
-    # of the file.
+    # capture(), not cmd(): cmd chomps, and the trailing newline is part of the
+    # file.
     #
-    # In scalar context, explicitly.  _unhang calls what it is given in list
-    # context and hands a scalar caller the first element back -- and capture in
-    # list context is one element per line, so without this every file read off
-    # a remote machine came back as its first line.  Whether that was noticed
-    # depended entirely on the file: a one-line one read perfectly.
+    # Scalar context, explicitly.  _unhang calls its code in list context and
+    # gives a scalar caller the first element, and capture in list context
+    # returns one element per line.
     #
-    # The exit status decides, not $ssh->error.  That is sticky -- it holds the
-    # last error from anything on this connection -- so a command that failed
-    # earlier on purpose, like the sudo -n probe, would make a cat that worked
-    # perfectly well look like a failure.
+    # The exit status decides, not $ssh->error.  That error is sticky: it holds
+    # the last error from anything on this connection.  So an earlier failure on
+    # purpose, such as the sudo -n probe, makes a good cat look like a failure.
     my $content = $self->_unhang(
         "cat $path",
         sub { scalar $self->ssh->capture( { timeout => $TIMEOUT }, 'cat', $path ) }
@@ -598,7 +606,7 @@ sub put_file {
 
     if ( $self->is_local ) {
 
-        # Copy it ourselves if we can; sudo is the fallback, not the forecast.
+        # Copy it ourselves if we can, and use sudo only if that fails.
         return 1                                                       if File::Copy::copy( $local, $remote );
         return $self->run_sudo( qw{cp}, $local, $remote ) == 0 ? 1 : 0 if $opts{sudo};
         return 0;
@@ -610,10 +618,9 @@ sub put_file {
 sub get_dir {
     my ( $self, $remote, $local, %opts ) = @_;
 
-    # Locally, whichever machine this is: the destination of a fetch is us.  And
-    # ours to make, because rsync creates the last component of a destination and
-    # not the path above it, which for a salvage is two or three levels down
-    # inside a data directory that may itself be new this run.
+    # Local whichever machine this is, because the destination of a fetch is us.
+    # rsync creates only the last component of a destination, and a salvage goes
+    # two or three levels down in a data directory that can be new this run.
     File::Path::make_path($local);
 
     return $self->_rsync( $self->_there($remote), _here($local), %opts );
@@ -623,13 +630,8 @@ sub append_line {
     my ( $self, $path, $line ) = @_;
     chomp $line;
 
-    # Append.  Never read-modify-write.
-    #
-    # This is somebody's authorized_keys, and the old version of this pulled the
-    # file across, added a line and pushed the whole thing back -- so any read
-    # that came back empty, for any reason at all, rewrote the file with one key
-    # in it and locked its owner out of their own machine.  There is no version
-    # of that which is worth the tidier code.
+    # Append, never read-modify-write.  This is often an authorized_keys file,
+    # and a rewrite after an empty read leaves one key and locks its owner out.
     $self->mkpath( _parent_dir($path) );
 
     if ( $self->is_local ) {
@@ -641,16 +643,30 @@ sub append_line {
         return 1;
     }
 
-    # grep decides whether it is already there, on the far side, so the file
-    # never has to make the trip.
+    # grep on the far side decides if the line is already there, so the file
+    # never makes the trip.
     return 1 if $self->run_cmd( qw{grep -qxF --}, $line, $path ) == 0;
 
     return $self->_pour( { stdin_data => "$line\n" }, $path, append => 1 );
 }
 
-# Write a stream to a path on the far side.  See "Why none of this uses sftp"
-# and "SUDO": the content and the sudo password both want stdin, so a
-# privileged write is two commands and never one.
+=head1 INTERNALS
+
+Private to this module.  They are documented here for the next person to edit
+them.
+
+=head2 _pour(\%stdin, $path, %opts)
+
+Writes a stream to C<$path> on the far side.  C<\%stdin> holds C<stdin_data> or
+C<stdin_file>.  Takes C<append>, C<sudo> and C<mode>.  Returns 1 on success and
+0 on failure.
+
+A privileged write is always two commands, because the content and the sudo
+password both need standard input.  See L</Why none of this uses sftp> and
+L</SUDO>.
+
+=cut
+
 sub _pour {
     my ( $self, $stdin, $path, %opts ) = @_;
 
@@ -678,9 +694,16 @@ sub _pour {
     return $ok ? 1 : 0;
 }
 
-# A privileged append.  It cannot be staged and moved -- that would replace the
-# file rather than add to it -- and the content cannot ride on stdin beside a
-# sudo password, so it is staged and then concatenated on.
+=head2 _sudo_append(\%stdin, $path)
+
+Appends a stream to C<$path> as root.  Returns 1 on success and 0 on failure.
+
+A move of a staged file replaces the file, and the content cannot go on stdin
+next to a sudo password.  So the content goes to a staging file, and
+C<sudo sh -c> concatenates it onto C<$path>.
+
+=cut
+
 sub _sudo_append {
     my ( $self, $stdin, $path ) = @_;
 
@@ -692,15 +715,27 @@ sub _sudo_append {
     return $ok ? 1 : 0;
 }
 
-# The one place left that builds a shell command: >> has no argv spelling.
+=head2 _shq($string)
+
+Returns C<$string> quoted for a POSIX shell.  Only C<_sudo_append> uses it,
+because C<<< >> >>> has no argv form.
+
+=cut
+
 sub _shq {
     my ($str) = @_;
     $str =~ s/'/'\\''/g;
     return "'$str'";
 }
 
-# Somewhere we can definitely write, made by the far side rather than guessed
-# at: mktemp gives us a private file in a directory that exists.
+=head2 _staging_path
+
+Returns the path of a new private file on the far side.  C<mktemp> makes it
+there, so the directory exists and we can write to it.  Warns and returns undef
+if C<mktemp> fails.
+
+=cut
+
 sub _staging_path {
     my ($self) = @_;
 
@@ -712,9 +747,14 @@ sub _staging_path {
     return undef;
 }
 
-# How to name a directory to rsync.  The trailing slash is rsync's way of saying
-# "the contents of this" rather than "this, inside that", and every transfer here
-# means the contents.
+=head2 _here($path), _there($path)
+
+Return the rsync name for a directory.  The trailing slash tells rsync "the
+contents of this", not "this, inside that".  Every transfer here means the
+contents.  C<_there> adds C<user@host:> for a remote machine.
+
+=cut
+
 sub _here { return "$_[0]/" }
 
 sub _there {
@@ -723,16 +763,20 @@ sub _there {
     return $self->ssh_target . ':' . _here($path);
 }
 
-# The ssh rsync is to use.  Spelled out rather than left to rsync's default,
-# because the port and the key are ours to know and neither reaches rsync from
-# the environment -- and because a guest rebuilt an hour ago presents a host key
-# nothing has seen before, which here is the run working rather than an attack.
-# The options are the ones Net::OpenSSH::More puts on its own master, so both
-# ways of reaching a machine agree about what they will accept from it.
-#
-# rsync word-splits this, so a path with a space in it would arrive as two
-# arguments.  Nothing here has one: the keys are written by this tool into the
-# domain directory it also names.
+=head2 _rsh
+
+Returns the ssh command for rsync to use.  It names the port and the key,
+because neither reaches rsync from the environment.  It accepts any host key,
+because a guest rebuilt an hour ago has a new host key, and that is normal here.
+The options are the ones that Net::OpenSSH::More puts on its own master.  So both
+ways to reach a machine accept the same things from it.
+
+rsync splits this string on spaces, so a path with a space becomes two
+arguments.  No path here has one, because this tool writes the keys into the
+domain directory that it also names.
+
+=cut
+
 sub _rsh {
     my ($self) = @_;
 
@@ -748,15 +792,20 @@ sub _rsh {
     return join( ' ', @ssh );
 }
 
-# One rsync, either direction.
-#
-# Deliberately not through _run or _unhang.  This is a local process rather than
-# a command down the connection, and _unhang's limit is wall clock: it would call
-# a transfer of a data directory hung at exactly $HANG_TIMEOUT however well it
-# was going, which is the round-numbered failure that is never the timeout you
-# are looking at.  rsync's own --timeout is silence rather than elapsed time, so
-# a transfer that keeps moving has as long as it needs and one that stops is
-# over.
+=head2 _rsync($src, $dest, %opts)
+
+Runs one rsync from C<$src> to C<$dest>.  Takes C<exclude>, C<sudo> and
+C<update>, as C<get_dir> describes.  Prints the total size transferred.
+Returns 1 on success.  On failure, warns with the rsync errors and returns 0.
+
+This does not go through C<_run> or C<_unhang>.  rsync is a local process, not a
+command down the connection.  The limit of C<_unhang> is wall-clock time, so it
+stops a long data transfer at exactly C<$HANG_TIMEOUT>, however well it goes.
+The C<--timeout> of rsync measures silence, not elapsed time.  So a transfer
+that keeps moving has as long as it needs, and one that stops ends.
+
+=cut
+
 sub _rsync {
     my ( $self, $src, $dest, %opts ) = @_;
 
@@ -766,30 +815,18 @@ sub _rsync {
         archive => 1,
         timeout => $TIMEOUT,
 
-        # What moved, at the end.  The whole point of this is that an unchanged
-        # tree should be able to say so, and without it a walk that sent nothing
-        # looks exactly like one that sent twenty gigabytes.  Human units
-        # because the number this exists to print is measured in gigabytes.
+        # Report what moved, so that an unchanged tree says so.  Human units,
+        # because that number is usually in gigabytes.
         stats            => 1,
         'human-readable' => 1,
 
         ( $self->is_local ? ()                       : ( rsh => $self->_rsh ) ),
         ( @exclude        ? ( exclude => \@exclude ) : () ),
 
-        # As root at the far end, for a fetch of something the connecting user
-        # cannot read.  A service keeps its state in a directory it owns and
-        # nobody else can open, so an unprivileged rsync walks the tree, makes
-        # the local directories, copies nothing out of them and exits happy.
-        #
-        # sudo -n rather than sudo: there is no terminal on the other end of
-        # this, so a sudo that decides to ask for a password would sit there
-        # until the timeout rather than failing.  -n makes it exit instead, and
-        # rsync reports that as a failure the caller can see.
+        # See get_dir for why.  sudo -n, because no terminal at the far end can
+        # answer a password prompt.  -n exits, and rsync reports the failure.
         ( $opts{sudo} ? ( 'rsync-path' => 'sudo -n rsync' ) : () ),
 
-        # Whatever the guest has that is older than our copy stays where it is.
-        # Carried over from the sftp fetch this replaced, which asked for the
-        # same thing under the name newer_only.
         ( $opts{update} ? ( update => 1 ) : () ),
     );
 
@@ -816,20 +853,14 @@ sub _run {
     return $ok ? 1 : 0;
 }
 
-=head2 _unhang($what, $code)
+=head2 _hang_limit($what)
 
-Run something that talks to the far side under a SIGALRM, so a wedge is an
-error with a name on it rather than a tool that sits there.
-
-The library's own C<timeout> should get there first, and does for anything that
-merely stalls.  This is for the case it cannot see: a call that has stopped
-making progress without the connection noticing, which is exactly how sftp
-behaved when the far side refused a write.  Nothing should ever reach it.
+Returns how many seconds one command can run before it counts as hung.  That is
+C<$HANG_TIMEOUT>, or the command's own C<timeout> plus 60 seconds if that is
+longer.
 
 =cut
 
-# How long to let one command run before calling it hung: the default, or the
-# command's own timeout plus a minute if it names a longer one.
 sub _hang_limit {
     my ($what) = @_;
     return $HANG_TIMEOUT unless defined $what;
@@ -845,14 +876,28 @@ sub _hang_limit {
     return $limit;
 }
 
+=head2 _unhang($what, $code)
+
+Runs C<$code>, which talks to the far side, under a SIGALRM.  So a hung call
+becomes an error with a name, and the tool does not wait forever.  C<$what>
+names the command in the error and sets the limit, as C<_hang_limit> describes.
+Returns what C<$code> returns.  Dies with "Gave up on" when the alarm fires, and
+passes on any other error from C<$code>.  Locally, it runs C<$code> with no
+alarm.
+
+The library's own C<timeout> stops a call that only stalls, and it acts first.
+This alarm is for a case that the library cannot see: a call that stops making
+progress while the connection seems fine.  sftp does this when the far side
+refuses a write.  In normal use, nothing reaches this alarm.
+
+=cut
+
 sub _unhang {
     my ( $self, $what, $code ) = @_;
     return $code->() if $self->is_local;
 
-    # This alarm is for a command that should return promptly and does not.  A
-    # command carrying its own timeout is saying how long it may legitimately
-    # take, so it gets that long instead -- waiting for a guest to finish its
-    # Makefile is a single command that blocks for the whole build.
+    # A command with its own timeout, such as a wait for the Makefile of a
+    # guest, blocks for that long on purpose.
     my $limit = _hang_limit($what);
 
     my @result = eval {
@@ -872,12 +917,18 @@ sub _unhang {
     return wantarray ? @result : $result[0];
 }
 
-# Write it ourselves if we can, and reach for sudo only when that fails.
-#
-# This used to ask -w about the parent directory first.  Writing is the only
-# question worth asking: -w answers for a moment that has passed by the time we
-# act on it, and it cannot see an immutable bit, a full disk or a read-only
-# mount -- all of which say "no" to a write that -w said yes to.
+=head2 _write_local($path, $content, %opts)
+
+Writes C<$content> to a local C<$path>.  If that fails and C<sudo> is set, it
+copies the content into place with C<sudo cp> and sets C<mode>, 0644 by default.
+Without C<sudo>, it dies on failure.  Returns 1 on success and 0 on failure.
+
+The write itself is the test of access.  A C<-w> test describes a moment that is
+already past.  It also cannot see an immutable bit, a full disk or a read-only
+mount.
+
+=cut
+
 sub _write_local {
     my ( $self, $path, $content, %opts ) = @_;
 
@@ -900,7 +951,7 @@ sub _parent_dir {
 
 =head1 SEE ALSO
 
-L<Trog::HV>, L<Trog::Guest>
+L<Trog::HV>, L<Trog::Guest>, L<Trog::Local>
 
 =cut
 

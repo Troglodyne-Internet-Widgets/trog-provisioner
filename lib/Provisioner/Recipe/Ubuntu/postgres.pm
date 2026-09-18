@@ -16,18 +16,17 @@ Provisioner::Recipe::Ubuntu::postgres - Ubuntu's C<deps> for L<Provisioner::Reci
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else postgres does is in the recipe this
-inherits from.
+A package name is a fact about a distribution, not about the software.  So the
+package names for Ubuntu are in this module.  Everything else that postgres does
+is in the recipe that this module inherits from.
 
 =cut
 
 sub deps {
 
-    # deps is the list cloud-init installs at first boot, so it can only
-    # name Ubuntu packages: the PGDG repository is not added until the
-    # global fragment runs, which installs the versioned server-dev package
-    # from it.
+    # cloud-init installs this list at first boot, before the PGDG repository
+    # exists.  So it names only Ubuntu packages.  The global fragment adds PGDG
+    # and installs the versioned packages from it.
     return qw{postgresql-common pigz};
 }
 

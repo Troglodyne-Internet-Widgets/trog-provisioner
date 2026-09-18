@@ -1,5 +1,5 @@
 #!/bin/bash
 
-# If we pass an arg, make sure that file exists.
-# Otherwise, check if we need to reboot and do it.
+# Reboot if the system says that it needs a reboot.
+# If you give a file as the argument, reboot only when that file also exists.
 [ -f $1 ] || [ -z $1 ] && [ -f /var/run/reboot-required ] && reboot now

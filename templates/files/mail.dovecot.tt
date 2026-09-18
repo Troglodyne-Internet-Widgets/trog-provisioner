@@ -12,7 +12,8 @@ mail_gid=dovecot
 # Enable Maildir++ quota support.
 mail_plugins = $mail_plugins quota
 
-# Take quota limits from maildirsize file. If it doesn't exist, don't enforce.
+# Take the quota limits from the maildirsize file.  If the file does not
+# exist, do not enforce a quota.
 plugin {
   quota = maildir:User quota
   quota_grace = 0
@@ -38,7 +39,7 @@ protocol lmtp {
   mail_plugins = $mail_plugins sieve
 }
 
-# Whole server SSL
+# SSL for the whole server
 ssl_cert = </etc/ssl/certs/[% domain %].pem
 ssl_key =  </etc/ssl/private/[% domain %].pem
 ssl = required

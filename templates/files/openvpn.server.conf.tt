@@ -16,8 +16,8 @@ auth SHA256
 server [% subnet %] [% netmask %]
 ifconfig-pool-persist /var/log/openvpn/ipp.txt
 
-[%# Said out loud, because unset is not neutral: it takes the historical net30
-    default, which spends a /30 per client and which upstream has deprecated. -%]
+[%# Set explicitly, because without it OpenVPN uses net30.  net30 uses a /30
+    for each client, and upstream deprecates it. -%]
 topology subnet
 
 [% IF dns.size() -%]
@@ -25,19 +25,12 @@ topology subnet
 push "dhcp-option DNS [% d %]"
 [% END -%]
 [% END -%]
-[%# Off unless the domain asks for it.  This decides whether the tunnel is the
-    whole internet for a client or only a route to what is behind the server,
-    and the client is told at connect time -- so the setting takes effect on
-    every deployed client the next time it reconnects, rather than on whoever
-    installs a new one.  Which is the argument for the default being the one
-    that changes nothing on a machine nobody is touching.
-
-    Turn it on for a guest that is meant to be an exit node.  Left off, the
-    client keeps its own default route, and only the VPN subnet plus whatever
-    the server pushes a route for goes down the tunnel. -%]
+[%# Off unless the domain asks for it.  The client gets this at connect time,
+    so a change reaches every deployed client.  Provisioner::Recipe::openvpn has
+    the whole account. -%]
 [% IF redirect_gateway -%]
 # Route all client traffic through the VPN gateway.
-# bypass-dhcp ensures local DHCP still reaches the real gateway.
+# bypass-dhcp keeps local DHCP traffic on the real gateway.
 push "redirect-gateway def1 bypass-dhcp"
 [% END -%]
 

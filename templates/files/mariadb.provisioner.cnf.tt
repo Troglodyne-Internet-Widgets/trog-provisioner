@@ -1,12 +1,12 @@
-# The provisioner's half of mariadb's configuration, as a drop-in the packaged
-# server already reads.  The datadir, socket and basedir are the package's and
-# are deliberately not named here.
+# The part of the mariadb configuration that the provisioner owns, as a drop-in
+# that the packaged server reads.  The datadir, socket and basedir belong to the
+# package, so this file does not name them.
 [mariadbd]
-# Local only.  Anything that needs the database reaches it over the socket.
+# Local only.  Clients connect over the socket.
 skip_networking = 1
 
-# Off in the packaging, and the reason this recipe pins an exact version:
-# binlogs restore only onto the version that wrote them.
+# The package turns this off.  Binlogs restore only onto the version that wrote
+# them, and that is why this recipe pins an exact version.
 log_bin = /var/log/mysql/maria_binlog
 
 max_allowed_packet = 256M

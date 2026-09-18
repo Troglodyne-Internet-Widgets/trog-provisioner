@@ -1,13 +1,12 @@
-[%# The collector forwards a copy of every message it receives to this port, and
-    this is what reads it.  Provisioner::Recipe::grafanasyslog has the account of
-    why the stream comes over a port rather than out of the files the collector
-    writes.
+[%# The collector forwards a copy of each message it receives to this port, and
+    this input reads it.  Provisioner::Recipe::grafanasyslog tells why the
+    stream comes over a port and not from the files that the collector writes.
 
-    Both of the settings below are also telegraf own defaults.  They are written
-    out anyway because they are the contract with the other end: logcollector
-    sends RSYSLOG_SyslogProtocol23Format, which is RFC5424, with octet-counted
-    framing, and a mismatch on either shows up as telegraf parse errors rather
-    than as anything naming the format. -%]
+    Telegraf uses the two settings below by default.  They are written here
+    because they are the contract with the other end.  logcollector sends
+    RSYSLOG_SyslogProtocol23Format, which is RFC5424, with octet-counted framing.
+    If either one does not match, telegraf logs parse errors that do not name
+    the format. -%]
 [[inputs.syslog]]
   server = "tcp://127.0.0.1:[% port %]"
   syslog_standard = "RFC5424"

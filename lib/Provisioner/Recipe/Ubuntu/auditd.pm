@@ -16,9 +16,9 @@ Provisioner::Recipe::Ubuntu::auditd - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else auditd does is in the recipe this
-inherits from.
+A package name belongs to a distribution, not to the software, so it lives
+here.  The recipe that this module inherits from does everything else for
+auditd.
 
 =cut
 

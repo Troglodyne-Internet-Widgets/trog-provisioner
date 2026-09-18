@@ -6,16 +6,15 @@ use Test::More;
 my $rules = '/etc/udev/rules.d/99-diskqueue.rules';
 ok(-f $rules, 'the udev rule is where udev will look for it');
 
-# 99- matters: udev applies rules in filename order and the last write wins, so
-# a rule that sorts early is one anything else can overrule.
+# 99- matters.  udev applies rules in filename order and the last write wins, so
+# any rule that sorts later can overrule this one.
 like($rules, qr{/99-}, 'and sorts last, so nothing dropped in later overrules it');
 
 my $text = do { local (@ARGV, $/) = $rules; <> } // '';
 like($text, qr/ENV\{DEVTYPE\}=="disk"/, 'scoped to whole disks, not partitions that have no queue of their own');
 
-# A rule udev will not parse is a comment with extra steps.  udevadm verify is
-# systemd 250 and later; where there is no such subcommand there is nothing to
-# assert rather than something to fail.
+# udev ignores a rule that it cannot parse.  Older versions of systemd have no
+# udevadm verify, and then there is nothing to assert.
 my $verify = `udevadm verify $rules 2>&1`;
 if ($verify =~ m/unknown command|invalid option/i) {
     note "this udev has no verify subcommand, so the rule was not syntax checked";
@@ -35,8 +34,8 @@ unless (@queues) {
 foreach my $queue (@queues) {
     my ($disk) = $queue =~ m{/sys/block/([^/]+)/};
 
-    # `[none] mq-deadline` when the kernel offers a choice, `none` when it does
-    # not.  Both mean it took.
+    # `[none] mq-deadline` when the kernel offers a choice, and `none` when it
+    # does not.  Both mean that the kernel took the value.
     my $scheduler = do { local (@ARGV, $/) = "$queue/scheduler"; <> } // '';
     chomp $scheduler;
     ok(

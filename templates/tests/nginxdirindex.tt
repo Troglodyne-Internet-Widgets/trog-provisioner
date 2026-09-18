@@ -10,8 +10,8 @@ is($status, 'active', 'nginx is running');
 ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginx domain config exists');
 ok(-d '[% install_dir %]/[% domain %]', 'document root directory exists');
 
-# nginx stays up on the last configuration it accepted, so asking whether it is
-# running says nothing about the file this recipe just wrote.
+# nginx keeps serving the last configuration it accepted, so `is-active` says
+# nothing about the file that this recipe wrote.
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
 

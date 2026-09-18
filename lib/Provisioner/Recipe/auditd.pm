@@ -10,27 +10,28 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-=head1 Provisioner::Recipe::auditd
+=head1 NAME
 
-=head2 SYNOPSIS
+Provisioner::Recipe::auditd - log changes to system files and domain files with auditd.
+
+=head1 SYNOPSIS
 
 In recipes.yaml:
 
     somedomain:
         auditd:
 
-=head2 DESCRIPTION
+=head1 DESCRIPTION
 
-Set up auditd to monitor various goings-on in the system.
+This recipe configures auditd to log writes and attribute changes to these
+places:
 
-In particular we set up rules to watch:
-
-    * Every single binary on the system
-    * Root and admin user homes
+    * The directories that hold binaries and libraries
+    * The home directories of root and the admin user
     * /etc and /var
-    * TODO: watch dirs important to the various targets
+    * The install_dir of each domain
 
-TODO integrate this into some manner of IDS mechanism.
+TODO: send these logs to an intrusion detection system.
 
 =cut
 

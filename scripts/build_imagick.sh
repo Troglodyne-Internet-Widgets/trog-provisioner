@@ -1,18 +1,13 @@
 #!/bin/bash
 
-# Every failure here used to be silent and cascading: curl could not reach the
-# archive, tar was handed a file that was not there, three cd's into a directory
-# that did not exist each failed on their own, and the only thing that reported
-# anything was post_install noticing the exit status at the very end.
+# Stop at the first failure, so that the error names the step that failed.
 set -euo pipefail
 
 VERSION=${1:-}
 [ -n "$VERSION" ] || { echo "build_imagick.sh: no version given" >&2; exit 2; }
 
-# The perl recipe builds this, and imagemagick's bindings are built against it.
-# imagemagick did not declare that it needs it, so on a guest without it the
-# find below found nothing, the name came out empty, and every line after ran
-# against "/opt/perl5//bin/perl".
+# The perl recipe builds this perl, and the Image::Magick bindings are built
+# against it.
 [ -d /opt/perl5 ] || {
     echo "build_imagick.sh: /opt/perl5 is not there; the perl recipe has to run first" >&2
     exit 2
@@ -30,8 +25,8 @@ if "$PERL" -MImage::Magick -e 'exit($Image::Magick::VERSION ? 0 : 1)' 2>/dev/nul
 fi
 
 mkdir -p /tmp/imagick
-# -f so a 404 fails here instead of arriving as "tar: Cannot open", and --retry
-# because the archive is not always reachable first time.
+# -f makes a 404 fail here and not later in tar.  --retry is there because the
+# archive is not always reachable on the first try.
 curl -fL --retry 3 --retry-delay 5 \
     "https://download.imagemagick.org/archive/releases/ImageMagick-$VERSION.tar.xz" \
     -o /tmp/imagick/imagemagick.tar.xz
@@ -39,8 +34,7 @@ curl -fL --retry 3 --retry-delay 5 \
 cd /tmp/imagick && tar --one-top-level=src --strip-components=1 -xf /tmp/imagick/imagemagick.tar.xz
 cd /tmp/imagick/src
 ./configure --with-perl="$PERL" --with-gslib=yes --with-lzma=yes --with-jxl=yes --with-heic=yes --with-gvc=yes --with-gslib=yes --with-freetype=yes --with-fontconfig=yes --with-djvu=yes --with-zip=yes --with-zstd=yes --with-zlib=yes --with-xml=yes --with-webp=yes --with-tiff=yes --with-png=yes --with-raw=yes --with-pango=yes --with-tcmalloc=yes
-# As many jobs as the guest has processors; it gets two by default, and -j8
-# oversubscribes that fourfold.
+# One job for each processor on the guest, which gets two by default.
 make -j"$(nproc 2>/dev/null || echo 2)"
 make install
 grep -q "/usr/local/lib" /etc/ld.so.conf || echo "/usr/local/lib/" >> /etc/ld.so.conf

@@ -1,6 +1,6 @@
 package Provisioner::Recipe::nosnap;
 
-#ABSTRACT: Rip snap out of the system root and branch.
+#ABSTRACT: Remove snap from the system completely.
 
 use 5.041;
 
@@ -17,9 +17,11 @@ use re '/aasx';
 
 =head2 DESCRIPTION
 
-Rip out snap root and branch from the system, and disallow installation of anything requiring it.
+Removes snap and every snap package from the system.  It also pins and holds
+C<snapd> so that apt does not install it again.  Packages that require C<snapd>
+then cannot install.
 
-For those of you who consider it an unacceptable risk to your deployed systems.
+Use it if you consider snap an unacceptable risk on your deployed systems.
 
 =cut
 

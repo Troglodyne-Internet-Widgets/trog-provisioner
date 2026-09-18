@@ -16,9 +16,8 @@ Provisioner::Recipe::Ubuntu::ufw - Ubuntu's C<deps> for L<Provisioner::Recipe::u
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else ufw does is in the recipe this
-inherits from.
+A package name belongs to a distribution, not to the software, so this module
+holds it.  Everything else is in the recipe that this module inherits from.
 
 =cut
 

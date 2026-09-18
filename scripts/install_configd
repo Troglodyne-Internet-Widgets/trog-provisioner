@@ -1,19 +1,19 @@
 #!/bin/bash
-# Install Configd from CPAN against the perl the guest already has.
+# Install Configd from CPAN into the system perl of the guest.
 #
-# Not the one the perl recipe builds into /opt/perl5.  configd runs from a
-# systemd ExecStartPre, so it stands between a service and starting: it has to
-# work on a guest where that perl was never built, and it has to keep working if
-# somebody rebuilds or removes it.  Everything Configd needs is core, so the
-# distribution's perl is enough -- and there are three separate ways to end up
-# installing into the wrong one, so each of them is closed below.
+# This does not use the perl that the perl recipe builds into /opt/perl5.
+# configd runs from a systemd ExecStartPre, so a service cannot start if configd
+# fails.  It must work on a guest that does not have that perl, and it must
+# continue to work if somebody rebuilds or removes that perl.  Configd needs
+# only core modules, so the system perl is sufficient.  There are three ways to
+# install into the wrong perl, and this script closes each of them below.
 #
 # Usage: install_configd [minimum-version] [source]
 #
-# A source is anything cpanm takes in place of a module name -- a tarball on the
-# guest, or a URL.  It is for a build that is not on CPAN yet, and for a guest
-# that cannot reach CPAN at all.  The version check still runs against what ends
-# up installed, so a stale tarball fails here rather than three recipes later.
+# A source is anything that cpanm takes in place of a module name, for example a
+# tarball on the guest or a URL.  Use it for a build that is not on CPAN yet, or
+# for a guest that cannot connect to CPAN.  The version check still runs against
+# what is installed, so an old tarball fails here and not three recipes later.
 set -eu
 
 WANTED=${1:-0.001}
@@ -22,28 +22,27 @@ SOURCE=${2:-}
 PERL=/usr/bin/perl
 CPANM=/usr/bin/cpanm
 
-# One: the environment.  local::lib's variables point at a library path that is
-# not system perl's, and anything inheriting them installs there instead.
+# One: the environment.  The local::lib variables point at a library path that
+# is not the one of the system perl, and a process that inherits them installs
+# there.
 unset PERL5LIB PERL_LOCAL_LIB_ROOT PERL_MB_OPT PERL_MM_OPT
 
 [ -x "$PERL" ] || { echo "install_configd: no system perl at $PERL" >&2; exit 1; }
 
-# Only reach for the network when there is something to fetch.  This runs on
-# every provision of every domain on the guest, and one that already has it
-# should not be waiting on CPAN to be told so.
+# Only connect to the network when there is something to download, because
+# this runs on every provision of every domain on the guest.
 if "$PERL" -e "require Configd; Configd->VERSION(q{$WANTED})" 2>/dev/null; then
     echo "install_configd: Configd $WANTED or newer is already installed"
 else
     [ -x "$CPANM" ] || { echo "install_configd: no $CPANM -- is cpanminus installed?" >&2; exit 1; }
 
-    # Two: the shebang on cpanm, and the cpanm the perl recipe leaves on root's
-    # PATH pointing into /opt/perl5.  Whichever perl cpanm runs under is the one
-    # it installs for, so name both.
+    # Two: the shebang of cpanm, and the cpanm in /opt/perl5 that the perl
+    # recipe puts on the PATH of root.  cpanm installs for the perl that runs
+    # it, so name both.
     #
-    # --mirror-only: what the mirror's own index names, not cpanmetadb, which
-    # can name a release the mirror no longer has -- see "Which release" in
-    # scripts/cpan_install.  Neither request here needs anything older than the
-    # newest release, which is all that index lists.
+    # --mirror-only makes cpanm use the index of the mirror, not cpanmetadb.
+    # See "Which release" in scripts/cpan_install.  Neither request here needs a
+    # release older than the newest, which is all that index lists.
     if [ -n "$SOURCE" ]; then
         echo "install_configd: installing Configd from $SOURCE"
         "$PERL" "$CPANM" --notest --mirror-only "$SOURCE"
@@ -51,10 +50,8 @@ else
         "$PERL" "$CPANM" --notest --mirror-only "Configd~>=$WANTED"
     fi
 
-    # A source is not asked for a version before it is unpacked, so ask what it
-    # turned out to be.  Installing something older than the recipes need is how
-    # a guest ends up with one domain's sender login map and every other
-    # domain's users refused.
+    # cpanm does not check the version of a source before it unpacks it, so
+    # ask what version is now installed.
     "$PERL" -e "require Configd; Configd->VERSION(q{$WANTED})" \
       || { echo "install_configd: what got installed is older than $WANTED" >&2; exit 1; }
 fi
@@ -62,19 +59,17 @@ fi
 SCRIPT="$("$PERL" -MConfig -e 'print $Config{installsitescript} || $Config{installsitebin}')/configd"
 [ -f "$SCRIPT" ] || { echo "install_configd: Configd is installed but there is no configd at $SCRIPT" >&2; exit 1; }
 
-# Three: the shebang on configd itself.  It ships as `#!/usr/bin/env perl`,
-# which ExtUtils::MakeMaker leaves alone -- it only rewrites a shebang that
-# already names a perl -- so the installed program runs whichever perl is first
-# on PATH.  On a guest that also has the perl recipe that can be /opt/perl5's,
-# which has none of this installed, and the failure is "Can't locate Configd.pm"
-# from a program that is plainly right there.
+# Three: the shebang of configd.  It ships as `#!/usr/bin/env perl`.
+# ExtUtils::MakeMaker rewrites only a shebang that names a perl, so it does not
+# change this one.  The installed program then runs the first perl on PATH.  On
+# a guest that also has the perl recipe, that can be the perl in /opt/perl5,
+# which does not have Configd, and configd fails with "Can't locate Configd.pm".
 head -n 1 "$SCRIPT" | grep -qxF "#!$PERL" || sed -i "1s|^#!.*|#!$PERL|" "$SCRIPT"
 
-# systemd refuses a relative path in ExecStartPre, and /usr/bin/configd is the
-# one the generated drop-in names unless it is told otherwise.
+# systemd refuses a relative path in ExecStartPre, and the generated drop-in
+# names /usr/bin/configd unless it gets a different path.
 [ "$SCRIPT" = /usr/bin/configd ] || ln -sf "$SCRIPT" /usr/bin/configd
 
-# Say what the guest can adopt.  This is also the only proof that matters: that
-# the program compiles and finds its own library under the perl that will be
-# running it from ExecStartPre.
+# Say what the guest can adopt.  This also proves that the program compiles and
+# finds its library under the perl that runs it from ExecStartPre.
 echo "install_configd: Configd $("$PERL" -MConfigd -e 'print Configd->VERSION') knows: $(/usr/bin/configd languages | tr '\n' ' ')"

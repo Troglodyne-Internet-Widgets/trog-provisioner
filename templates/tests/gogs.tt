@@ -8,26 +8,18 @@ chomp $status;
 is($status, 'active', 'gogs is running');
 ok(-f '[% install_dir %]/git.[% domain %]/custom/conf/app.ini', 'gogs config exists');
 
-# These four are made in one brace expansion, which is bash and not POSIX sh.
-# Make ran recipe lines under /bin/sh -- dash, here -- until the Makefile said
-# otherwise, and dash made one directory named after the whole brace list, so
-# none of these existed and app.ini had nowhere to be installed.
 foreach my $dir (qw{repos data log custom/conf}) {
     ok(-d "[% install_dir %]/git.[% domain %]/$dir", "the $dir directory was created");
 }
 ok(!-d '[% install_dir %]/git.[% domain %]/{repos,data,log,custom/conf}',
     'and none was created with the braces taken literally');
 
-# The account gogs runs as.  Its useradd sat behind an `id -u ... &>/dev/null ||`
-# guard, and dash reads &> as a background & -- so the guard always succeeded
-# and the account was never created on a guest that did not already have one.
 my $passwd = `getent passwd [% gogs_admin %] 2>/dev/null`;
 ok($passwd, 'the [% gogs_admin %] account exists');
 like($passwd, qr{:\Q[% install_dir %]/git.[% domain %]\E:}, 'with the home directory the recipe asked for');
 
 # The vhost belongs to nginxproxy, which this recipe requires and points at
-# gogs on port 3000.  gogs used to install one of its own from a template that
-# does not exist, which killed the target outright.
+# gogs on port 3000.
 ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
 ok(!-e '/etc/nginx/sites-enabled/git.[% domain %].conf',
     'and gogs did not write a competing one');
@@ -35,36 +27,27 @@ ok(!-e '/etc/nginx/sites-enabled/git.[% domain %].conf',
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
 
-# The database it was actually configured with.  gogs renamed this key from
-# DB_TYPE to TYPE and ignores the one it does not know, so it fell back to its
-# postgres defaults and died on every start -- while app.ini said sqlite3 and
-# the journal said only "status=1/FAILURE".
+# The database key that gogs reads.  gogs ignores the old key DB_TYPE, falls
+# back to its postgres defaults and then does not start.
 my $ini = do { local (@ARGV, $/) = '[% install_dir %]/git.[% domain %]/custom/conf/app.ini'; <> } // '';
 like($ini, qr/^TYPE\s*=\s*sqlite3/m, 'the database type is set with the key gogs reads');
 unlike($ini, qr/^DB_TYPE\s*=/m, 'and not with the one it ignores');
 
-# console as well as file, so a gogs that will not start says why where systemd
-# can see it.
+# Console as well as file, so that the journal shows why gogs does not start.
 like($ini, qr/^MODE\s*=\s*console/m, 'gogs logs to the console as well as its own file');
 
 ok(-s '[% install_dir %]/git.[% domain %]/data/gogs.db', 'the sqlite database was created');
 
-# The release asset is not named after the version alone.  gogs started
-# spelling it gogs_v0.14.2_linux_amd64.tar.gz at 0.14.2, so the URL built from
-# the bare version 404s from that release on -- curl wrote nothing, tar had
-# nothing to open and the whole target died before any of this ran.  Asking the
-# binary its version covers both halves: that one was fetched at all, and that
-# it is the one this domain asked for.
+# From 0.14.2 on, the release asset has a v before the version, as in
+# gogs_v0.14.2_linux_amd64.tar.gz.  The version that the binary reports shows
+# that the fragment fetched a release, and that it is the configured version.
 my $reported = `/usr/local/bin/gogs --version 2>&1`;
 chomp $reported;
 like($reported, qr/\b\Q[% version %]\E\b/, 'the installed gogs is the version configured')
     or diag $reported;
 
-# The git service the last guest was carrying, put where gogs reads it.
-# new_config fetches git.[% domain %] into the domain directory -- every
-# repository, the issue database, the users -- and nothing ever moved it back
-# out again, so a rebuilt guest came up with no repositories at all and met the
-# people who owned them with the installer.
+# The salvage from the last guest must be back where gogs reads it.  new_config
+# fetches it into the domain directory, and the data target puts it back.
 my $salvaged = '[% install_dir %]/[% domain %]/gogs';
 
 sub entries {
@@ -75,9 +58,9 @@ sub entries {
     return @found;
 }
 
-# restore_state leaves the copy alone when the destination already has state --
-# re-provisioning a guest that is still running, whose own repositories are the
-# real ones.  Either way, nothing the copy knows about may be missing here.
+# restore_state does not replace a destination that already has state, as on a
+# live guest that is provisioned again.  In both cases, everything in the
+# salvage must be here.
 my @salvaged_repos = entries("$salvaged/repos");
 if (@salvaged_repos) {
     my @live_repos = entries('[% install_dir %]/git.[% domain %]/repos');
@@ -87,9 +70,8 @@ if (@salvaged_repos) {
 ok(!-e "$salvaged/data/gogs.db" || -s '[% install_dir %]/git.[% domain %]/data/gogs.db',
     'a salvaged database is not sitting in the domain directory with nothing at the live path');
 
-# The session key belongs to the guest, not to the configuration that built it:
-# minting a new one on each provision logs everybody out and voids every second
-# factor.  templates/gogs.tt has the account, next to the code that keeps it.
+# The session key belongs to the guest.  A new key on each provision logs out
+# every user.  See args in Provisioner::Recipe::gogs.
 my ($key) = $ini =~ m/^SECRET_KEY\s*=\s*(\S+)\s*$/m;
 ok($key && length($key) >= 32, 'gogs has a session key of some substance')
     or diag 'SECRET_KEY: ' . ($key // 'unset');
@@ -105,18 +87,16 @@ my $port = `ss -lntp 2>/dev/null | grep -c ':3000 '`;
 chomp $port;
 ok($port >= 1, 'gogs is listening on port 3000');
 
-# The host gogs believes it is.  nginxproxy writes one vhost, answering on the
-# domain and the aliases new_config gives it, and a git. is not among them --
-# so every clone URL gogs printed, every redirect after a login and every
-# webhook it signed named a host that nobody had made and nothing resolved.
+# The host name that gogs uses.  The vhost from nginxproxy answers on the domain
+# and on the aliases that new_config gives it, and git. is not one of them.
 like($ini, qr{^ROOT_URL\s*=\s*https://\Q[% domain %]\E/?\s*$}m, 'ROOT_URL is the domain the vhost answers on')
     or diag $ini;
 like($ini, qr/^DOMAIN\s*=\s*\Q[% domain %]\E\s*$/m, 'and so is DOMAIN');
 unlike($ini, qr{^(ROOT_URL|DOMAIN)\s*=.*\bgit\.\Q[% domain %]\E}m,
     'neither names a git. host the operator would have had to create');
 
-# And it answers there.  The vhost proxies everything now that it serves no
-# statics of its own, so this is the whole path: nginx, the proxy_pass, gogs.
+# And gogs answers there.  The vhost proxies every request, so this tests the
+# whole path: nginx, the proxy_pass and gogs.
 my $served = `curl -sk -o /dev/null -w '%{http_code}' -H 'Host: [% domain %]' https://127.0.0.1/ 2>/dev/null`;
 like($served, qr/^(200|30[0-9])$/, 'the domain itself serves gogs through nginx')
     or diag "got HTTP $served";

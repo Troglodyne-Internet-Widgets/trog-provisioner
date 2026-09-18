@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Idea here is to mail you when something starts espamming the log
+# Print a warning, which cron mails to you, when rsyslog drops messages because
+# of rate limiting.
 IS_RPM=$(which rpm)
 
 if [ ! -z $IS_RPM ]

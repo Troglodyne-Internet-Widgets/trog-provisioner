@@ -1,15 +1,14 @@
-[%# The syslog listener for the fleet.  Provisioner::Recipe::logcollector has the
-    reasoning; the two things worth knowing from in here:
+[%# The syslog listener for the fleet.  Provisioner::Recipe::logcollector gives
+    the full reasons.  Two facts matter here.
 
-    The input has a ruleset of its own, so what arrives from the network is
-    written once, to the file named for its sender, and never reaches the
-    default rules.  That is what keeps this guest own /var/log/syslog its own,
-    and what confines the stop below to remote messages -- an unscoped one would
-    swallow this guest local logging as well.
+    The input has its own ruleset.  So a message from the network is written once,
+    to the file for its sender, and never gets to the default rules.  The stop
+    below applies only to remote messages.  Without the ruleset, it discards the
+    local logs of this guest too.
 
-    secpath-replace is not decoration.  HOSTNAME is whatever the sender put in
-    the message, so without it a sender could call itself ../../etc/cron.d/oops
-    and choose where this guest writes. -%]
+    secpath-replace is necessary.  HOSTNAME is the name that the sender put in the
+    message.  Without secpath-replace, a sender can call itself
+    ../../etc/cron.d/oops and choose where this guest writes. -%]
 [% IF protocol == 'tcp' || protocol == 'both' -%]
 module(load="imtcp")
 input(type="imtcp" port="[% port %]" ruleset="logcollector")
@@ -27,13 +26,12 @@ template(name="logcollector-perhost" type="string" string="[% log_dir %]/%HOSTNA
 
 ruleset(name="logcollector") {
     action(type="omfile" dynaFile="logcollector-perhost" dirCreateMode="0755" fileCreateMode="0640")
-[%# Above the stop, and that is not a matter of taste: stop ends processing for
-    the message, so a forward written below it is one that never runs.
+[%# Above the stop, because stop ends the processing of the message.  A forward
+    below it never runs.
 
-    RFC5424 with octet-counted framing because that is what the telegraf syslog
-    input parses; the default rsyslog format is RFC3164, which it rejects.
-    These go to a consumer on this guest rather than to another collector --
-    Provisioner::Recipe::logcollector has the account. -%]
+    RFC5424 with octet-counted framing, because the telegraf syslog input parses
+    that.  It rejects RFC3164, the default format of rsyslog.  These copies go to
+    a consumer on this guest (see Provisioner::Recipe::logcollector). -%]
 [% FOR dest IN forward -%]
 [% parts = dest.split(':') -%]
     action(type="omfwd" target="[% parts.0 %]" port="[% parts.1 %]" protocol="tcp"

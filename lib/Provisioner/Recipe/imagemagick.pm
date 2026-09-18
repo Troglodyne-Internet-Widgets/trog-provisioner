@@ -20,13 +20,17 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Builds and installs ImageMagick from source with Perl bindings.
+Builds ImageMagick from source with its Perl bindings, and installs it.
 
 =cut
 
-# The bindings are built against the perl the perl recipe installs under
-# /opt/perl5.  Nothing said so, so on a guest that did not happen to have one
-# build_imagick.sh ran everything against "/opt/perl5//bin/perl".
+=head2 %required = $recipe->required_recipes()
+
+Returns C<perl>.  The bindings build against the perl that the perl recipe
+installs under F</opt/perl5>.
+
+=cut
+
 sub required_recipes {
     return ( perl => sub { () } );
 }
@@ -38,9 +42,8 @@ sub args {
         properties => {
 
             # TODO default to the latest imagemagick version available on github releases
-            # A full release including the patch number, which is how the
-            # archive names its tarballs: "7.1.0" is a 404, and without -f curl
-            # saved the error page for tar to fall over.
+            # A full release with the patch number, because the archive names
+            # its tarballs that way: "7.1.0" is a 404.
             version => { type => 'string', pattern => '^[0-9]+[.][0-9]+[.][0-9]+-[0-9]+$' },
         },
     );
@@ -63,8 +66,8 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-A release tarball named by version, which the archive keeps until it prunes it
--- and once pruned, what the cache kept is the only copy left.
+A release tarball named by version.  The archive keeps it until it prunes it.
+After that, the copy in the cache is the only copy left.
 
 =cut
 

@@ -16,9 +16,9 @@ Provisioner::Recipe::Ubuntu::configd - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else configd does is in the recipe this
-inherits from.
+C<deps> returns the Ubuntu packages that configd needs.  A package name belongs to
+a distribution, not to the software, so the names live in this class.  The
+recipe that this class inherits from does everything else.
 
 =cut
 

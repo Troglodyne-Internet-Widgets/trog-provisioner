@@ -9,9 +9,7 @@ use warnings FATAL => 'all';
 
 use re '/aasx';
 
-# Basically our 'install script'
-
-#TODO ideally, we just ship this all as a 'config rpm/deb'.
+#TODO ship all of this as a configuration package (rpm or deb).
 
 =head1 NAME
 
@@ -23,30 +21,25 @@ setup_provisioner - prepare this machine to host guests
 
 =head1 DESCRIPTION
 
-The install script for a I<hypervisor>: everything a machine needs before
-anything can build guests on it.
+The install script for a I<hypervisor>.  It does all that a machine needs
+before the provisioner can build guests on it.
 
-Every step is still a stub: each returns true and says what it ought to be
-doing.  Each step's number is what main() returns when that step fails.
+Each step is a stub at this time.  It returns true, and a TODO comment says what
+it must do.  If a step fails, main() returns the number of that step.
 
 =head2 What this is not
 
-The machine that B<runs> the provisioner is a guest like any other, and
-L<Provisioner::Recipe::trogrunner> is what builds it: perl, the CPAN
-dependencies, F</etc/trog-provisioner>, and a key a hypervisor will trust.  That
-is where the checkout, the toolchain and the configuration went.
+The machine that B<runs> the provisioner is a guest like all others.
+L<Provisioner::Recipe::trogrunner> builds it with perl, the CPAN dependencies,
+F</etc/trog-provisioner>, and a key that a hypervisor trusts.
 
-The rest went the same way, one recipe at a time -- C<auditd>, C<fail2ban>,
-C<cron> and C<tcms> are all recipes now, so a management interface or a log
-ingester is a guest to build rather than a step to run here.  There used to be
-an rsyslog step, which opened a syslog listener by editing F</etc/rsyslog.conf>
-on whatever machine you ran this from, while every guest was told to ship its
-logs to the hypervisor -- a different machine on any fleet with more than one.
-Where a guest sends its logs is L<Provisioner::Recipe::logshipper> now, and the
-listener at the other end is L<Provisioner::Recipe::logcollector>.
+Other services are recipes too: C<auditd>, C<fail2ban>, C<cron> and C<tcms>.
+Thus a management interface or a log ingester is a guest to build, not a step
+to run here.  L<Provisioner::Recipe::logshipper> sets where a guest sends its
+logs.  L<Provisioner::Recipe::logcollector> is the listener that receives them.
 
-What is left is the part that cannot be a guest, because it is the thing guests
-run on.
+This script does only the part that cannot be a guest, because guests run on
+it.
 
 =cut
 
@@ -76,33 +69,30 @@ sub setup_public_bridge {
     return 1;
 }
 
-# TODO: xorriso, which is what builds the cloud-init seed.  bin/preflight's
-# check_iso_builder is what notices it is missing, and it asks it of the
-# hypervisor rather than of the machine driving the run -- because this is
-# where the seed is actually made.
+# TODO: install xorriso, which builds the cloud-init seed on the hypervisor.
+# bin/preflight runs check_iso_builder in Trog::HV::Libvirt to find it.
 sub setup_iso_builder {
     return 1;
 }
 
-# TODO: the storage pool, and a filesystem under it that can carry a quota.
-# Nothing in libvirt counts what a user has allocated and every guest runs as
-# libvirt-qemu whoever defined it, so a pool of its own on a limited filesystem
-# is the only budget a guest can be held to -- see QUOTAS in
-# Provisioner::Recipe::trogrunner, and note_pool_quota in bin/preflight, which
-# says whether this machine has one.
+# TODO: make the storage pool, on a filesystem that can have a quota.  libvirt
+# does not count allocations, and each guest runs as libvirt-qemu.  Thus a pool
+# on a filesystem with a limit is the only budget for a guest.  See QUOTAS in
+# Provisioner::Recipe::trogrunner, and note_pool_quota in Trog::HV::Libvirt.
 sub setup_storage_pool {
     return 1;
 }
 
-# TODO: the two apparmor items nothing else does -- the libvirt-qemu profile
-# override that lets a guest read what it has been given, and a profile for
-# /usr/libexec/virtiofs-better, which has none anywhere.  bin/provision
-# installs the binary on first use; the profile is still the operator's.
+# TODO: add the two apparmor items that nothing else adds.  One is the
+# libvirt-qemu profile override that lets a guest read what it gets.  The other
+# is a profile for /usr/libexec/virtiofs-better, which has no profile.
+# bin/provision installs that binary on first use, but the operator adds its
+# profile.
 sub setup_apparmor {
     return 1;
 }
 
-# TODO: Configure firewall for all the above services
+# TODO: configure the firewall for all the services above
 sub setup_firewall {
     return 1;
 }

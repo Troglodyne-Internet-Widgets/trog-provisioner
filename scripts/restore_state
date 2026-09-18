@@ -1,37 +1,37 @@
 #!/bin/bash
 
-# Put a recipe's salvaged state back where the service looks for it.
+# Put the salvaged state of a recipe back where the service reads it.  The
+# salvage is the state that bin/new_config copied off the old guest.
 #
-# remote_files is a round trip and this is the leg the guest end of it needs.
-# bin/new_config fetches what a recipe named off the running guest, the data
-# target lands it under $install_dir/$domain, and something has to move it to
-# wherever the service actually reads it.  That something is this, called from
-# the recipe's fragment before the service is started.
+# remote_files is a round trip, and this script is the leg on the guest.
+# bin/new_config fetches what a recipe names off the running guest.  The data
+# target puts it under $install_dir/$domain.  This script moves it to where the
+# service reads it.  The fragment of the recipe calls this script before it
+# starts the service.
 #
 #     restore_state <salvaged> <destination> [owner[:group]] [mode]
 #
-# It declines in three cases, each of which is a normal thing to happen rather
-# than an error:
+# It declines (does nothing and exits 0) in three cases.  Each case is normal
+# and is not an error:
 #
-#   - nothing was salvaged.  A guest being built for the first time has no
-#     previous guest to have taken anything off.
+#   - Nothing was salvaged.  A guest that is built for the first time has no
+#     earlier guest to take anything from.
 #
-#   - what was salvaged is empty.  The service may not have written anything yet,
-#     or the fetch may have failed; either way, restoring nothing over something
-#     would be worse than useless.  bin/new_config asks the old guest which of
-#     the two it was and refuses to rebuild over the second.
+#   - The salvage is empty.  Either the service wrote nothing yet, or the fetch
+#     failed.  In both cases, a restore of nothing over something does harm.
+#     bin/new_config asks the old guest which case it was, and bin/provision
+#     refuses to rebuild over the second.
 #
-#   - the destination already has something in it.  This is the important one.
-#     Re-provisioning a guest that is still running fetches its live state
-#     minutes earlier -- and if that fetch came back partial, writing it back
-#     would replace the real thing with the half of it we could read.  The
-#     guest keeps what it has; the copy stays in the domain directory where
-#     somebody can look at it.
+#   - The destination already has content.  This case is the important one.
+#     A new provision of a running guest fetches its live state minutes
+#     earlier.  If that fetch was partial, a restore replaces the real state
+#     with the part that the fetch could read.  The guest keeps what it has,
+#     and the copy stays in the domain directory for somebody to examine.
 #
-# Which means restoring is for a rebuilt guest, and a no-op on a live one, and
-# a recipe whose package populates the destination before the fragment runs has
-# to stop the service and clear it out first, or it will find content here and
-# decline.
+# So a restore is for a rebuilt guest, and it does nothing on a live one.  If
+# the package of a recipe fills the destination before the fragment runs, the
+# recipe must stop the service and empty the destination first.  If not, this
+# script finds content there and declines.
 
 set -euo pipefail
 
@@ -65,18 +65,16 @@ if has_content "$DESTINATION"; then
     exit 0
 fi
 
-# Contents rather than the directory itself when the destination is already
-# there: `mv src dst` on an existing directory puts src *inside* dst, which is
-# how a restore ends up at /var/lib/redis/redis and the service still starts
-# empty.
+# If both are directories, copy the contents and not the directory itself.
+# `mv src dst` on an existing directory puts src inside dst.  The restore then
+# lands at, for example, /var/lib/redis/redis, and the service starts empty.
 #
-# Keeping what the destination was made as.  `cp -a src/. dst/` copies the
-# attributes of src itself onto dst along with the contents, and the salvage
-# came out of a domain directory the data target owns -- so a destination the
-# recipe had just created 2750 dovecot:admin came back 0755 root:root, and the
-# setgid bit that is the whole reason the next salvage can be read went with it.
-# The contents keep the modes they were salvaged with; only the directory the
-# service was given is restored to what the recipe asked for.
+# Keep the mode and owner that the recipe gave the destination.  `cp -a src/.
+# dst/` also copies the attributes of src onto dst.  The salvage comes from a
+# domain directory that the data target owns, so dst becomes 0755 root:root.
+# A destination made 2750 dovecot:admin then loses its setgid bit, and the next
+# salvage needs that bit to read the store.  The contents keep their salvaged
+# modes.
 if [ -d "$SALVAGED" ] && [ -d "$DESTINATION" ]; then
     dest_mode="$(stat -c '%a' "$DESTINATION")"
     dest_owner="$(stat -c '%u:%g' "$DESTINATION")"
@@ -89,12 +87,12 @@ else
     mv "$SALVAGED" "$DESTINATION"
 fi
 
-# Attempted rather than required.  The data target runs before every recipe
-# target, so the account that will own this often belongs to a package that is
-# installed, or a useradd that runs, later -- gogs makes its own in its own
-# target.  The recipe chowns again once the account exists; this is only so the
-# common case does not need it.  Failing here would abort the whole target for
-# something that fixes itself two targets later.
+# Try the chown, but do not require it.  The data target runs before every
+# recipe target, so the owner account often does not exist yet.  A later package
+# or useradd makes it.  For example, gogs makes its own account in its own
+# target.  The recipe chowns again after the account exists, and this chown only
+# covers the common case.  A failure here must not abort the target for a
+# problem that a later target fixes.
 if [ -n "$OWNER" ] && ! chown -R "$OWNER" "$DESTINATION" 2>/dev/null; then
     echo "restore_state: no $OWNER on this guest yet, so $DESTINATION stays root's until the recipe gives it away" >&2
 fi

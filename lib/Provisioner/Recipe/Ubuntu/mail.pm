@@ -16,8 +16,8 @@ Provisioner::Recipe::Ubuntu::mail - Ubuntu's C<deps> and C<dep_conflicts> for L<
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else mail does is in the recipe this
+A package name is a fact about a distribution, not about the software, so the
+package names are here.  The rest of mail is in the recipe that this class
 inherits from.
 
 =cut

@@ -24,28 +24,28 @@ use re '/aasx';
             fuse:
                 - type: "s3fs"
                   options: "ro"
-                  mountpoint:"/mountpoint_in_installdir"
-                  device:"my_bucket_name"
+                  mountpoint: "/mountpoint_in_installdir"
+                  device: "my_bucket_name"
 
 =head2 DESCRIPTION
 
-Attach a disk to the provisioned VM, or fusemount something as the application's user.
+Attach a disk to the provisioned VM, or make a FUSE mount as the user of the
+application.
 
-This is useful in the event you have storage hardware of varying capabilities,
-or if you have a mount requiring secrets to use, such as an AWS bucket.
+Use it when you have storage hardware of different capabilities, or a mount that
+needs secrets, such as an AWS bucket.  L<Provisioner::Recipe::backupdestination>
+uses it to keep its backups on a separate disk.
 
-This recipe is quite useful in conjunction with the 'backuphost' recipe.
+For a chroot mount in the install_dir, use setup_chroot_mount in the script_dir
+from the recipe of your application.
 
-If you want to setup a chroot-mount in the install_dir, use setup_chroot_mount in the script_dir within your application recipe.
+The recipe of your application must install the FUSE driver for each mount (s3fs
+for the example above).
 
-You'll obviously want to have your application's recipe include the relevant FUSE driver (s3fs for the example above).
+If a disk names a pool, give its device as a path relative to that pool.
+Otherwise, give an absolute path to the file or device.
 
-TODO: make this support more than 10 fusemounts at a time (csplit issue).
-
-In the event that a pool is specified in a disk, specify the path relative to that pool.
-Otherwise, use an absolute path to the file or device.
-
-Optionally, you can specify a partition number in a disk, we use 1 by default.
+A disk can name a partition number.  The default is 1.
 
 =cut
 
@@ -99,7 +99,7 @@ sub enrich {
                 $disk->{type}      = 'virtiofs';
                 $disk->{partition} = 'NONE';
 
-                #XXX It is more important to boot than have this fail
+                # nofail, because a boot that succeeds matters more than this mount.
                 $disk->{options} = 'default,nofail';
             }
         }

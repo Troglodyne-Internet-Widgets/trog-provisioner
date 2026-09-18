@@ -12,7 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 =head1 NAME
 
-Provisioner::Recipe::grafanasyslog - the fleet's logs, drawn.
+Provisioner::Recipe::grafanasyslog - the logs of the fleet, drawn.
 
 =head1 SYNOPSIS
 
@@ -22,67 +22,69 @@ Provisioner::Recipe::grafanasyslog - the fleet's logs, drawn.
             admin_password: secret:grafana/logs.example.test/password
         grafanasyslog: ~
 
-C<grafana> is pulled in by this recipe, but its C<admin_password> is not supplied
-with it and cannot be: a password is the operator's to choose, and nothing here
-is entitled to invent one for a vhost that faces the internet.  So C<grafana> is
-configured alongside, as above, and a domain that leaves it out is refused by
-that recipe's schema rather than built with a guessable administrator.
+This recipe pulls in C<grafana>, but it does not supply the C<admin_password>
+of that recipe.  The operator chooses a password.  This recipe does not invent
+one for a vhost that faces the internet.  So you configure C<grafana> next to
+it, as above.  If a domain leaves it out, the schema of C<grafana> refuses the
+domain.  The build does not continue with an administrator password that is
+easy to guess.
 
 =head1 DESCRIPTION
 
-Gives L<Provisioner::Recipe::grafana> something to draw: a telegraf syslog input
-on loopback, the collector forwarding a copy of everything it receives into it,
-and the published syslog dashboard over the result.
+Gives L<Provisioner::Recipe::grafana> data to draw.  This recipe adds three
+things: a telegraf syslog input on loopback, a forward from the collector that
+sends it a copy of each message, and the published syslog dashboard.
 
-The split is that C<grafana> installs and configures the stack -- telegraf,
-influxd and grafana itself -- while this recipe is the one thing that knows the
-stack is being pointed at syslog.  Another recipe wanting something else in the
-same database writes its own telegraf fragment and its own dashboard, and
-changes nothing here.
+C<grafana> installs and configures the stack: telegraf, influxd and grafana.
+This recipe is the only thing that knows that the stack reads syslog.  If a
+different recipe wants other data in the same database, it writes its own
+telegraf fragment and its own dashboard.  It changes nothing here.
 
 =head2 It belongs on the collector itself
 
-C<logcollector> is in C<required_recipes>, so configuring this recipe wires the
-forward up rather than leaving an operator to set it by hand at the other end.
-That is worth knowing before adding it to an arbitrary guest: it would make that
-guest a collector, listening for the fleet.  This is a recipe for the machine
-that already is one.
+C<logcollector> is in C<required_recipes>.  So when you configure this recipe,
+it also configures the forward.  An operator does not set the forward by hand
+at the other end.  If you add this recipe to a guest, that guest becomes a
+collector that listens for the fleet.  Use this recipe only on the machine that
+is already the collector.
 
 =head2 Over a port, not out of the files
 
-The collector already writes every sender's messages to a file, so reading those
-would need no forward at all.  It is the wrong source: by then a message is a
-line of text with the structure parsed out of it, and the dashboard needs the
+The collector writes the messages from each sender to a file.  Telegraf can read
+those files without a forward, but they are the wrong source.  In the file, a
+message is a line of text, and the structure is gone.  The dashboard needs the
 severity, facility, hostname and appname as tags.  Telegraf parses RFC5424 and
-gets all of them, which is why the copy is forwarded before it is filed.
+gets all four.  That is why the collector forwards the copy before it writes
+the file.
 
-Loopback, so nothing is on the wire and no firewall profile is needed.  See
+The forward goes over loopback.  So nothing goes on the wire, and no firewall
+profile is necessary.  See
 L<Provisioner::Recipe::logcollector/Forwarding a copy, for something on this guest>
-for the other end of it, including why the forward is emitted above the C<stop>.
+for the other end.  That section also tells why the forward comes above the
+C<stop>.
 
 =head2 The dashboard names its datasource, and something has to agree
 
-Dashboard 12433 refers to its datasource by name.  Grafana does not substitute
-the C<${DS_*}> placeholders an exported dashboard carries when it loads one from
-a file, so the name is written into the JSON at render time -- and it has to be
-the name C<grafana> gave the datasource it provisioned.  One string in two
-recipes, which is what C<default> on both and a subtest in F<t/recipes.t> pinning
-them together is for.
+Dashboard 12433 refers to its datasource by name.  When grafana loads an
+exported dashboard from a file, it does not replace the C<${DS_*}> placeholders.
+So this recipe writes the name into the JSON when it renders the template.  That
+name must be the name that C<grafana> gave to the datasource it provisioned.
+Two recipes hold the same string.  Both set it as C<default>, and a subtest in
+F<t/recipes.t> makes sure that the two values are equal.
 
 =head2 When two recipes ask for a forward
 
-The C<forward> this injects never reaches C<resolve_conflict>, which is worth
-knowing because most disagreements between two dependents do.  C<reconcile>
-settles fields that are plain scalars on both sides and leaves the rest to
-L<Hash::Merge>, and an array is the rest -- so an operator who has also pointed
-the collector at something of their own keeps both destinations rather than
-getting a refusal.  Two parties each wanting a copy of the stream is a request
-that can be granted whole, so it is.
+The C<forward> that this recipe adds never goes to C<resolve_conflict>.  Most
+disagreements between two dependents do.  C<reconcile> settles fields that hold
+plain scalars on both sides, and L<Hash::Merge> merges the rest.  An array is
+part of the rest.  So if an operator also points the collector at a destination
+of their own, the collector gets both destinations.  It does not refuse.  Two
+parties that each want a copy of the stream can both have one.
 
-Naming the same destination at both ends is the case that needed handling:
-concatenation is literal, so the collector would be given the identical
-C<omfwd> twice and would send every message to that port twice.
-L<Provisioner::Recipe::logcollector> discards the repeats.
+If both ends name the same destination, the merge joins the two lists as they
+are.  The collector then gets the same C<omfwd> twice and sends each message to
+that port twice.  L<Provisioner::Recipe::logcollector> removes the repeated
+destinations.
 
 =cut
 
@@ -90,16 +92,16 @@ L<Provisioner::Recipe::logcollector> discards the repeats.
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<grafana> for the stack, and C<logcollector> for the stream -- configured with
-the forward that points it here.
+Returns C<grafana> for the stack, and C<logcollector> for the stream.  It
+configures C<logcollector> with the forward that points to this recipe.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # Defaulted here as well as in args, because required_recipes is asked
-    # before anything has been validated.
+    # The default is also here, not only in args, because this is called before
+    # anything is validated.
     my $port = $opts{port} // 6514;
 
     return (
@@ -110,8 +112,8 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One telegraf input on one port, one dashboard, and one collector
-forwarding into it.  A second domain would be describing the same stream twice.
+False.  There is one telegraf input on one port, one dashboard, and one
+collector that forwards to it.  A second domain describes the same stream again.
 
 =cut
 
@@ -121,13 +123,13 @@ sub is_multi_tenant { return 0 }
 
 =over 4
 
-=item * C<port> -- the loopback port telegraf accepts the forwarded stream on,
-and the port the collector is configured to send to.  One setting for both ends,
-so they cannot disagree.
+=item * C<port>: the loopback port where telegraf accepts the forwarded
+stream.  It is also the port that the collector sends to.  Both ends read one
+setting, so they cannot disagree.
 
-=item * C<datasource> -- the grafana datasource the dashboard reads.  Must be
-what L<Provisioner::Recipe::grafana> called it; see L</The dashboard names its
-datasource, and something has to agree>.
+=item * C<datasource>: the grafana datasource that the dashboard reads.  It
+must be the name that L<Provisioner::Recipe::grafana> gave it.  See
+L</The dashboard names its datasource, and something has to agree>.
 
 =back
 
@@ -155,6 +157,9 @@ sub args {
 
 =head2 %files = $recipe->template_files()
 
+Returns the telegraf fragment and the dashboard, each as template name to
+output file name.
+
 =cut
 
 sub template_files {
@@ -165,6 +170,8 @@ sub template_files {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns the template for the test that runs on the guest.
 
 =cut
 

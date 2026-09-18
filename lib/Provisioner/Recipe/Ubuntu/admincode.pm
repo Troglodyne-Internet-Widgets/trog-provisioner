@@ -16,9 +16,8 @@ Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Rec
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else admincode does is in the recipe this
-inherits from.
+A package name belongs to a distribution, not to the software, so the names are
+here.  The rest of admincode is in the recipe that this class inherits from.
 
 =cut
 

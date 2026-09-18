@@ -2,7 +2,7 @@
 
 PATH="/usr/libexec/dovecot:$PATH"
 
-# $1 is mail recipient from dovecot
+# $1 is the mail recipient that dovecot passes to this script.
 
 [[ -z $1 ]] && exit 1;
 

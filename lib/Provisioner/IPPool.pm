@@ -1,6 +1,6 @@
 package Provisioner::IPPool;
 
-#ABSTRACT: Shared static IP pool helpers for new_config and list_ip_pool.
+#ABSTRACT: Assign static IP addresses from a pool, and record which are taken.
 
 use 5.041;
 
@@ -20,23 +20,28 @@ use Trog::SQLite();
 
 =head1 NAME
 
-Provisioner::IPPool - shared IP pool helpers for new_config and list_ip_pool
+Provisioner::IPPool - assign static IP addresses from a pool, and record which are taken
 
 =head1 SYNOPSIS
 
     use Provisioner::IPPool;
 
-    # not an interface for general consumption
-    my $pool_block = { addresses => [], cidr => [] };
+    # Only the scripts in bin/ use this interface.
+    my $pool_block = { addresses => '10.0.0.5 10.0.0.6', cidr => '10.0.1.0/29' };
 
     my @ips = Provisioner::IPPool::pool_ips($pool_block);
     my $ip  = Provisioner::IPPool::assign( 'test.test', $pool_block );
 
 =head2 SUBROUTINES
 
-=head3 pool_ips($cfg_hashref)
+=head3 pool_ips($pool)
 
-Return ordered list of IPs from an ip_pool config block in ipmap.cfg.
+C<$pool> is the C<[ip_pool]> block of F<ipmap.cfg>, as a hash reference.
+C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
+Whitespace separates the items in each list.
+
+Returns each address in the pool once, in order.  Dies if a CIDR block is not
+valid.
 
 =cut
 
@@ -62,11 +67,10 @@ sub pool_ips {
                 push @block, $net->ip();
             } while ( ++$net );
 
-            # The first and last address of an IPv4 block are the network and
-            # the broadcast; neither belongs to a host.  Handing one out looks
-            # like it worked right up until the guest cannot talk to anything.
-            # A /31 is a point-to-point link where both addresses are usable
-            # (RFC 3021), and a /32 is one host; neither has any to spare.
+            # The first address of an IPv4 block is the network and the last is
+            # the broadcast.  A guest on either one cannot talk to anything.
+            # A /31 is a point-to-point link with two usable addresses (RFC 3021).
+            # A /32 is one host.  Neither block has an address to spare.
             if ( @block > 2 ) {
                 pop @block;
                 shift @block;
@@ -83,20 +87,19 @@ sub pool_ips {
 
 =head1 WHY A DATABASE
 
-Assignments used to live in the C<[ips]> section of F<ipmap.cfg>, and a file is
-not something two runs can share.  Both read it, both find the same first free
-address, both write, and the second write wins -- so a fan-out of provisions
-hands the same address to two guests and neither of them says so.  It is a race
-you only notice later, when one of them cannot be reached.
+Two runs cannot safely share a file of assignments.  Both read it, both find the
+same free address, and both write it.  The second write wins.  Two guests then
+get the same address, and nothing reports an error.  You find out later, when
+you cannot connect to one of them.
 
-So they live in SQLite instead, and an assignment is a transaction: the row
-either goes in or the address was already taken and the next one is tried.
-Nothing else about the pool changed -- F<ipmap.cfg> still says what the range
-is, in C<[ip_pool]>.
+So the assignments are in SQLite, and each assignment is one transaction.  The
+row goes in, or the address is already taken and C<assign> tries the next one.
+F<ipmap.cfg> still gives the range of the pool, in C<[ip_pool]>.
 
 =head3 db_path()
 
-Where the database lives: F<ips.db> beside the rest of the configuration.
+Returns the path of the database.  This is F<ips.db>, in the same directory as
+the rest of the configuration.
 
 =cut
 
@@ -104,7 +107,8 @@ sub db_path { return Trog::Config->path('ips.db') }
 
 =head3 schema_path()
 
-The DDL, anchored to this checkout the way the generator anchors its scripts.
+Returns the absolute path of F<schema/ips.sql> in this checkout.  The path is
+relative to this file, as C<bin/new_config> finds its scripts.
 
 =cut
 
@@ -114,7 +118,7 @@ sub schema_path {
 
 =head3 dbh()
 
-The handle, schema applied.
+Returns a handle on the database at C<db_path>, with the schema applied.
 
 =cut
 
@@ -122,9 +126,9 @@ sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
 =head3 assignments()
 
-Every address that is spoken for, as a map of domain to address.  This is what
-C<bin/new_config> hands templates as C<ipmap>, and what the pdns zone renders
-its records out of, so it carries the guests and not the reservations.
+Returns a hash reference of each guest domain to its address.  Reservations
+are not in it.  C<bin/new_config> gives this to the templates as C<ipmap>, and
+the pdns zone makes its records from it.
 
 =cut
 
@@ -135,9 +139,8 @@ sub assignments {
 
 =head3 taken()
 
-Every address in the database whatever put it there, as a map of address to the
-name against it.  Reservations included: the point of them is that they are not
-available.
+Returns a hash reference of each address in the database to the name that holds
+it.  Reservations are in it, because a reserved address is not free.
 
 =cut
 
@@ -148,11 +151,10 @@ sub taken {
 
 =head3 held_by($domain)
 
-The address that domain already has, or undef.
+Returns the address that C<$domain> has, or undef.
 
-Guests only.  A reservation is not a domain, and answering with one would let
-C<release> report that it had given the gateway back -- which it must not, and
-does not.
+It looks at guests only.  A reservation is not a domain, and C<release> must
+never report that it gave back the gateway.
 
 =cut
 
@@ -164,11 +166,11 @@ sub held_by {
 
 =head3 reserve($ip, $name)
 
-Record an address as nobody's to hand out -- a hypervisor, a gateway.  Returns
-true if this call is what recorded it.
+Records C<$ip> as an address that no guest gets, for example a hypervisor or a
+gateway.  C<$name> says what holds it.  Returns true if this call wrote the row.
 
-Quiet about an address that is already there: seeding runs on every start and
-has to be able to say the same thing twice.
+An address that is already in the database is not an error.  Seeding runs on
+every start, and it records the same addresses each time.
 
 =cut
 
@@ -180,8 +182,9 @@ sub reserve {
 
 =head3 record($ip, $domain)
 
-Record an address a guest already has, found by looking at a hypervisor rather
-than handed out here.  Returns true if this call is what recorded it.
+Records C<$ip> as the address of the guest C<$domain>.  This is for an address
+that a hypervisor reports, not one that C<assign> gave out.  Returns true if
+this call wrote the row.
 
 =cut
 
@@ -193,11 +196,11 @@ sub record {
 
 =head3 release($domain)
 
-Give the address back.  Returns what was released, or undef if that domain held
-nothing.
+Gives back the address of C<$domain>.  Returns that address, or undef if the
+domain held no address.
 
-C<bin/destroy> calls this, which is the only thing that does: a re-provision
-goes through C<bin/provision> and keeps what the domain already has.
+C<bin/destroy> calls this, and C<bin/reseed_ips> calls it for a domain that no
+hypervisor runs.  A domain that you provision again keeps its address.
 
 =cut
 
@@ -213,16 +216,16 @@ sub release {
 
 =head3 assign($domain, $pool)
 
-The address for C<$domain>, assigning the first free one in the pool if it does
-not have one yet.  Idempotent: a domain that already has an address is answered
-with it and nothing is written.
+Returns the address of C<$domain>.  If the domain has no address, this gives it
+the first free address in C<$pool>.  If it has one, this returns that address
+and writes nothing.
 
-Dies if the pool is unconfigured or exhausted.
+Dies if the pool has no addresses, or if no address in it is free.
 
-The choosing and the writing are one transaction, and that is the whole point
-of this module.  C<BEGIN IMMEDIATE> takes the write lock before the free
-address is looked for, so two provisions running at once cannot both decide on
-the same one -- the second waits, then looks again and finds it taken.
+Choosing the address and writing it are one transaction.  C<BEGIN IMMEDIATE>
+takes the write lock before the search for a free address.  So if two
+provisions run at the same time, the second waits, searches again, and finds
+the address taken.
 
 =cut
 
@@ -235,9 +238,8 @@ sub assign {
 
     my $db = dbh();
 
-    # IMMEDIATE rather than DEFERRED: a deferred transaction takes no lock until
-    # its first write, by which time the other run has read the same free
-    # address out from under this one.
+    # Not DEFERRED: a deferred transaction takes no lock until its first write,
+    # and by then the other run can read the same free address.
     $db->do('BEGIN IMMEDIATE');
 
     my $chosen = eval {
@@ -259,7 +261,7 @@ sub assign {
 
     if ( !defined $chosen ) {
         my $err = $@ || "Could not assign an IP to $domain\n";
-        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- the failure worth reporting is $err, not a rollback of it that could not run
+        eval { $db->do('ROLLBACK') };    ## no critic (ErrorHandling::RequireCheckingReturnValueOfEval) -- report $err, not a failed rollback after it
         die $err;
     }
 
@@ -268,8 +270,8 @@ sub assign {
 
 =head3 forget_seeding()
 
-Drop the record of which hypervisors have been interrogated, so the next seed
-asks all of them again.  Returns how many were forgotten.
+Deletes the record of which hypervisors were seeded, so the next seed asks each
+of them again.  Returns the number of records it deleted.
 
 =cut
 
@@ -280,17 +282,15 @@ sub forget_seeding {
 
 =head3 clear_reservations()
 
-Drop every reservation -- the hypervisors, the gateways, and whatever else was
-found answering.  Returns how many went.
+Deletes each reservation: the hypervisors, the gateways, and the other machines
+that answered on the network.  Returns the number it deleted.
 
-These are B<derived> state: a note of what was observed to be there, not a
-decision anybody made.  So a reseed rebuilds them from scratch, and an address
-that has since gone quiet is correctly freed rather than reserved forever.
+A reservation records what a seed found, not a decision.  So a reseed makes them
+again from the start, and an address that no longer answers becomes free.
 
-Assignments are not touched, and must not be.  A domain holding an address is a
-decision -- something has been told it lives there, or is about to be built on
-it -- and a machine that happens to be switched off during a sweep is not
-evidence that its address is free.
+This does not delete assignments, and it must not.  An assignment is a decision:
+a guest uses that address, or a provision is about to.  A machine that is off
+during a sweep does not make its address free.
 
 =cut
 
@@ -301,16 +301,15 @@ sub clear_reservations {
 
 =head3 ensure_seeded($pool)
 
-Fill the database from what is already out there, once per hypervisor.
+Fills the database from the addresses that are already in use, once for each
+hypervisor.  Returns what C<seed> returns.
 
-Safe to call from every entry point: a hypervisor that has already been
-interrogated is skipped, so this does nothing on all but the first run.
+Each entry point can call this.  It skips each hypervisor that it seeded before,
+so it asks no hypervisor twice.
 
-B<Dies if a hypervisor cannot be reached.>  Seeding half a fleet and then
-handing out addresses is exactly the stomping this exists to prevent, so a
-hypervisor that will not answer stops the run rather than producing a database
-that is quietly missing every guest on it.  Nothing is written for it, so the
-next run tries again.
+Dies if it cannot connect to a hypervisor.  A database with half the fleet
+in it gives out addresses that guests already use.  The seed does not mark that
+hypervisor as done, so the next run tries it again.
 
 =cut
 
@@ -321,36 +320,32 @@ sub ensure_seeded {
 
 =head3 seed($pool)
 
-Record what every hypervisor says its guests are using, plus the addresses that
-belong to the infrastructure rather than to a guest.
+Records the address of each guest on each hypervisor.  It also reserves the
+addresses of the hypervisors, the gateway, and other machines that answer.
+Returns the number of addresses it recorded.
 
-The guests come off the hypervisors and not out of F<ipmap.cfg>: what a
-hypervisor is running is a fact, where the file is a record somebody may have
-edited.  Each domain's address is read from its own F<provision.conf>, which is
-what the guest was actually built with.
+The list of guests comes from the hypervisors, not from F<ipmap.cfg>.  A
+hypervisor reports what it runs, but somebody can edit the file.  The address
+of each guest comes from its own F<provision.conf>, which is what it was built
+with.
 
-The hypervisor and the gateway are recorded only when they fall inside the
-configured pool.  Outside it they cannot be handed out anyway, and a row saying
-so would be noise.
-
-Returns the number of addresses recorded.
+It records an address only when it is in the pool.  C<assign> cannot give out
+an address outside the pool, so a row for one is noise.
 
 =cut
 
 sub seed {
     my ($pool) = @_;
 
-    # Required rather than used at the top: this brings Sys::Virt and an SSH
-    # stack with it, and the common case -- a database that is already seeded --
-    # should not pay for that, nor should the tests.
+    # Not loaded at the top: it loads Sys::Virt and an SSH stack.  A database
+    # that is already seeded, and the tests, do not need them.
     require Trog::Hypervisors;
 
     my $recorded = 0;
     my %in_pool  = map { $_ => 1 } pool_ips($pool);
 
-    # The gateway first, so that it is recorded as the gateway rather than as
-    # one more thing answering on the wire.  Handing a guest its own gateway is
-    # the sort of thing that looks like a network fault for a day.
+    # The gateway goes first, so that its row names it as the gateway and not
+    # as one more machine that answered.
     my $ipmap   = Config::Simple->new( Trog::Config->path('ipmap.cfg') );
     my $global  = $ipmap ? ( $ipmap->param( -block => 'global' ) // {} ) : {};
     my $gateway = $global->{gateway} // q{};
@@ -364,55 +359,46 @@ sub seed {
 
     foreach my $name ( $fleet->configured ? $fleet->names : () ) {
 
-        # Once per hypervisor, and recorded as done only after it has answered
-        # everything.  A sweep is not free and a fleet does not change often, so
-        # this is not work to repeat on every provision -- but a hypervisor that
-        # could not be reached is one to come back to rather than write off.
+        # Once per hypervisor.  The marker at the end of this loop is written
+        # only after the hypervisor answers everything, so a failure is retried.
         next if $done{"hv:$name"};
 
         my $hv = $fleet->hypervisor($name);
 
-        # A hypervisor that addresses its own guests has nothing this pool needs
-        # to know.  Its guests are not holding addresses out of the pool, so
-        # there is nothing to record and nothing to collide with -- and asking
-        # would mean asking a cloud for a libvirt domain list.
+        # A hypervisor that gives its guests their own addresses uses none from
+        # this pool.  It is usually a cloud, which has no libvirt domain list.
         next if $hv->manages_addresses;
 
-        # The sweep first, because what comes after reads the neighbour table it
-        # fills: libvirt only knows a guest's bridged address if the host has
-        # spoken to it lately.
+        # The sweep goes first, because it fills the neighbor table.  libvirt
+        # knows the bridged address of a guest only if the host spoke to it lately.
         my @live = _live_addresses( $hv, [ sort keys %in_pool ] );
 
         foreach my $found ( _guest_addresses($hv) ) {
 
-            # A guest answers on the NAT bridge too, and that address is
-            # libvirt's to hand out rather than ours.
+            # A guest also answers on the NAT bridge, and libvirt gives out
+            # those addresses, not this pool.
             next unless $in_pool{ $found->{ip} };
             $recorded += record( $found->{ip}, $found->{domain} );
         }
 
-        # The hypervisor itself, before the sweep results below, so it is named
-        # for what it is.  hypervisors.conf gives it as the host half of the
-        # libvirt URI, so that is what gets resolved; one we cannot resolve is
-        # not one whose address we can protect.
+        # The hypervisor goes before the sweep results, so that its row names it.
+        # Its address comes from the host part of its libvirt URI.  If that name
+        # does not resolve, nothing is reserved for it.
         my $host = eval { $hv->ssh_host };
         my $ip   = $host ? _resolve($host) : undef;
         $recorded += reserve( $ip, "hv:$name" ) if $ip && $in_pool{$ip};
 
-        # Whatever else is answering.  The guests above come from what they were
-        # configured with and what libvirt claims, which says nothing about the
-        # rest of the network -- a printer, a router, somebody's media box.
+        # Other machines that answer, for example a printer or a router.  The
+        # guests above tell us nothing about the rest of the network.
         my $already = taken();
         foreach my $found (@live) {
 
-            # In the pool only.  The table holds whatever the hypervisor has
-            # spoken to lately, most of which is none of our business: an
-            # address we could never hand out is not worth a row saying so.
+            # The neighbor table holds each address the hypervisor spoke to
+            # lately.  Only an address in the pool needs a row.
             next unless $in_pool{ $found->{ip} };
 
-            # Answering, and not one of ours -- no guest was configured with it
-            # and libvirt did not claim it.  Somebody else's machine, so it is
-            # spoken for whatever we think.
+            # An address that answers and that no guest holds belongs to some
+            # other machine, so it is reserved.
             next if $already->{ $found->{ip} };
             $recorded += reserve( $found->{ip}, "insitu:$found->{mac}" );
         }
@@ -423,16 +409,24 @@ sub seed {
     return $recorded;
 }
 
-# What each guest on this hypervisor was built with.  Asked of the hypervisor in
-# one go rather than a connection per domain, and read out of each domain's own
-# provision.conf: libvirt knows the guest exists but not what address it was
-# configured with, and the ARP table only knows the ones it has spoken to
-# lately -- it misses a quiet guest and keeps an address a destroyed one used to
-# have, so it is wrong in both directions.
+=head3 _guest_addresses($hv)
+
+Returns a list of hash references with the keys C<domain> and C<ip>, one for
+each address of each guest on C<$hv>.  A guest can appear more than once.
+
+It reads the address from the F<provision.conf> of each guest.  libvirt knows
+that a guest exists, but not the address it was built with.  The neighbor table
+misses a quiet guest and keeps the address of a destroyed one.  The command
+runs on the hypervisor once, not once for each domain.
+
+Dies if it cannot connect to libvirt on C<$hv>.  C<ensure_seeded> says why.
+
+=cut
+
 sub _guest_addresses {
     my ($hv) = @_;
 
-    # Deliberately not wrapped in an eval; ensure_seeded says why.
+    # No eval, on purpose.  See ensure_seeded.
     my @names = map { $_->get_name() } $hv->vmm->list_all_domains();
     return () unless @names;
 
@@ -442,15 +436,12 @@ sub _guest_addresses {
         "printf '%s\\t%s\\n' '$q' \"\$(grep -oE '^[[:space:]]*ips[[:space:]]*=[[:space:]]*[0-9.]+' '$dir/$q/provision.conf' 2>/dev/null | grep -oE '[0-9.]+' | head -1)\""
     } @names;
 
-    # And what libvirt says each guest is answering on, which catches one whose
-    # provision.conf is missing or unreadable.
+    # Also ask libvirt for the address of each guest.  This finds a guest whose
+    # provision.conf is missing or cannot be read.
     #
-    # Through virsh on the hypervisor rather than through Sys::Virt over the
-    # connection we already hold, because the ARP source resolves against the
-    # *client's* neighbour table: asked from here, where this machine is not on
-    # the guests' bridge, it reports the NAT address and nothing else.  Asked on
-    # the hypervisor it reports the bridged one.  That is the whole difference,
-    # and it is why this shells out.
+    # This runs virsh on the hypervisor, not Sys::Virt from here.  The ARP
+    # source reads the neighbor table of the client.  This machine is not on
+    # the bridge of the guests, so from here it reports only the NAT address.
     $script .= "\n" . join "\n", map {
         ( my $q = $_ ) =~ s/'/'\\''/g;
         "virsh domifaddr '$q' --source arp 2>/dev/null | grep -oE '[0-9]+(\\.[0-9]+){3}' | sed -e \"s|^|$q\t|\"";
@@ -465,9 +456,8 @@ sub _guest_addresses {
         next unless $domain;
         next unless defined $ip && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
 
-        # A domain answers on the NAT bridge as well, so it turns up more than
-        # once.  Which of its addresses belongs to the pool is decided by the
-        # caller, which is the only thing that knows what the pool is.
+        # A domain also answers on the NAT bridge, so it can appear twice.  The
+        # caller knows the pool, so the caller picks the address in it.
         next if $seen{"$domain\t$ip"}++;
         push( @found, { domain => $domain, ip => $ip } );
     }
@@ -475,42 +465,38 @@ sub _guest_addresses {
     return @found;
 }
 
-# What is answering in the pool right now, as a list of address and MAC.
-#
-# The hypervisor's own neighbour table, which is where libvirt gets what
-# `virsh domifaddr --source arp` reports and what virt-manager shows.  It only
-# holds an address the host has spoken to lately, so the pool is swept first --
-# without that it knew two of this fleet's ten guests, and with it, eight, the
-# other two being in the table under an interface domifaddr did not pick.
-#
-# Swept and read on the hypervisor rather than from here: this machine may not
-# be on that network at all, and the table that matters is the one the guests
-# share a bridge with.
-#
-# A stale entry costs an address that was actually free, which is the safe
-# direction to be wrong in -- unlike handing out one somebody is answering on.
+=head3 _live_addresses($hv, $pool)
+
+C<$pool> is an array reference of addresses.  Returns a list of hash references
+with the keys C<ip> and C<mac>, one for each address that answers now.  The
+C<mac> is C<unknown> if the neighbor table has none.  Returns an empty list if
+C<$pool> is empty or C<$hv> has no bridge device.
+
+It pings each address in the pool from the hypervisor, and then reads the
+neighbor table of the bridge there.  The table holds only the addresses that
+the host spoke to lately, so the ping comes first.  libvirt reads the same table
+for C<virsh domifaddr --source arp>.  This machine can be on a different
+network, so the sweep runs on the hypervisor.
+
+An entry that is out of date reserves an address that is free.  That is the safe
+error, because the other error gives out an address that is in use.
+
+=cut
+
 sub _live_addresses {
     my ( $hv, $pool ) = @_;
     return () unless @$pool;
 
     my $bridge = eval { $hv->bridge_device } or return ();
 
-    # Two signals, because one of them is not trustworthy on its own.
+    # An answer to the ping is the main signal.  A REACHABLE entry in the table
+    # is a second signal, and the table also gives the hardware address.
+    # REACHABLE alone is not reliable: an entry can decay to STALE before the read.
     #
-    # Whether the ping was answered is the reliable one: three identical sweeps
-    # reported twelve, twelve and twelve.  Whether the neighbour table says
-    # REACHABLE is not: the same three sweeps read twelve, twelve and two, the
-    # entries having decayed to STALE between the sweep and the read.  So the
-    # ping reports for itself, and the table is consulted for a second opinion
-    # and for the hardware address.
+    # STALE is not a signal.  It outlives the machine, so reserving it leaks the pool.
     #
-    # STALE is deliberately not a signal.  It outlives the machine that put it
-    # there -- addresses belonging to guests destroyed days earlier were still
-    # in this table, and reserving those would leak the pool a little at a time.
-    #
-    # Unquoted addresses, then the whole script quoted once: these come out of
-    # the pool as numbers and need no quoting of their own, and quoting them
-    # individually closed the sh -c around them, so the sweep never ran at all.
+    # Do not quote each address.  They are numbers, and a quote inside the
+    # script closes the quoting of the sh -c around it.
     my @addresses = grep { m/\A\d+(?:[.]\d+){3}\z/ } @$pool;
     my $script    = join q{ }, map { "(ping -c1 -W1 $_ >/dev/null 2>&1 && echo LIVE $_) &" } @addresses;
     $script .= " wait; ip -4 neigh show dev $bridge";
@@ -533,9 +519,14 @@ sub _live_addresses {
     return map { { ip => $_, mac => $mac{$_} // 'unknown' } } sort keys %live;
 }
 
-# Numeric already, or whatever the resolver says.  undef rather than a die: a
-# hypervisor that does not resolve is a reason to skip its address, not a reason
-# to stop everything else being recorded.
+=head3 _resolve($host)
+
+Returns C<$host> if it is already an IPv4 address.  If not, returns the address
+that the resolver gives, or undef.  It does not die, because the seed skips a
+hypervisor that does not resolve and records the rest.
+
+=cut
+
 sub _resolve {
     my ($host) = @_;
     return $host if $host =~ m/\A\d+(?:[.]\d+){3}\z/;

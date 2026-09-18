@@ -1,6 +1,7 @@
 #!/bin/bash
-# Initial gogs setup: wait for service readiness, then create the admin user.
-# Safe to re-run - create-user exits non-zero if user already exists, which we ignore.
+# Wait for gogs to start, then create the admin user.
+# You can run this again.  If the user exists, create-user fails, and this
+# script ignores that failure.
 
 set -euo pipefail
 

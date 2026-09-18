@@ -1,31 +1,21 @@
-[%# The private half of the backup key does not belong on the guest: the data
-    target syncs the whole domain directory across, so it arrives here and is
-    removed once the public half has been authorised.  -f because a target that
-    dies on an already-absent file makes re-provisioning fail on a guest that
-    is in exactly the state this wanted. -%]
+[%# The data target copies the whole domain directory, so the private half of
+    the backup key arrives here.  It must not stay.  -f, so that a second
+    provision does not fail when the key is already gone. -%]
 rm -f [% install_dir %]/[% domain %]/[% key_file %]
-[%# rsyncd opens its log before it chroots, so the directory has to be out
-    here rather than inside the path of some module. -%]
+[%# rsyncd opens its log before it chroots, so the directory must be outside
+    every module. -%]
 mkdir -p /var/log/rsyncd
-[%# /etc, not /root.  rsync reads the config named in the forced command before
-    it does anything else, and some builds of it will not take one out of /root
-    -- which leaves a key that authenticates perfectly and a daemon that exits
-    before it has served a module. -%]
+[%# /etc, not /root: some builds of rsync do not read a configuration from
+    /root.  Provisioner::Recipe::backup has the whole account. -%]
 mv rsyncd.conf /etc/rsyncd.[% domain %].conf
-[%# Owned by whoever built the payload otherwise: the tarball is unpacked as
-    root, which restores the ownership recorded in it. -%]
+[%# Owned by root, because otherwise the owner is the user who built the payload tarball. -%]
 chown root:root /etc/rsyncd.[% domain %].conf
 chmod 0644 /etc/rsyncd.[% domain %].conf
-[%# Where it lived before it moved, on a guest that has been provisioned once
-    already. -%]
+[%# Removes the configuration from the old location on an older guest. -%]
 rm -f /root/rsyncd.[% domain %].conf
 mkdir -p /root/.ssh; chmod 0700 /root/.ssh
 touch /root/.ssh/authorized_keys; chmod 0600 /root/.ssh/authorized_keys
-[%# Rewritten, rather than appended when absent.  Appending unconditionally grew
-    the file a copy at a time -- the access never changed, which is why nothing
-    noticed -- and skipping the append because the key was already there leaves a
-    guest provisioned before the config moved pointing its forced command at the
-    file in /root that the line above has just removed.  Dropping every line for
-    this key and writing the current one is both at once. -%]
+[%# Delete every line for this key, then write the current one, so the key
+    appears once and with the current forced command. -%]
 sed -i '\|[% pubkey %]|d' /root/.ssh/authorized_keys
 echo "command=\"rsync --daemon --server --config=/etc/rsyncd.[% domain %].conf .\",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding [% pubkey %]" >> /root/.ssh/authorized_keys

@@ -16,9 +16,13 @@ Provisioner::Recipe::Ubuntu::garage - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else garage does is in the recipe this
+A package name belongs to a distribution, not to the software, so it lives
+here.  Everything else that garage does is in the recipe that this class
 inherits from.
+
+=head2 @pkgs = $recipe->deps()
+
+C<curl>, which downloads the garage binary, and C<liblmdb0>.
 
 =cut
 

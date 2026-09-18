@@ -23,8 +23,6 @@ inherits from.
 =cut
 
 sub deps {
-
-    # libtool, seccomp and autotools are all for inotify, which will move to tPSGI eventually
     return qw{sqlite3 libsqlite3-dev libmagic-dev git libxml2-dev libexpat1-dev libssl-dev zlib1g-dev g++ inkscape pkg-config libvirt-dev libpng-dev cmake};
 }
 

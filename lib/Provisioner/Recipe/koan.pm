@@ -12,7 +12,7 @@ use parent qw{Provisioner::Recipe};
 
 use Provisioner::Utils();
 
-# One copy, shared by args and fetch_hosts: two would drift.
+# One copy for args and fetch_hosts, so that two copies do not drift apart.
 our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
 
 use Crypt::PRNG();
@@ -28,48 +28,39 @@ use File::Slurper();
             user: koan
             koan_email: "koan@somedomain.test"
 
-            # Where to fetch koan from.  Defaults to the troglodyne fork
-            # (https://github.com/troglodyne/koan.git, branch add_matrix_e2ee)
-            # which carries the Megolm/Olm E2EE rewrite.  Override only if
-            # you know upstream sukria/koan has caught up.
+            # Where to fetch koan from.  The default is the troglodyne fork,
+            # which has the Megolm/Olm E2EE rewrite.  Change it only if
+            # upstream sukria/koan has that support.
             repo_url:    "https://github.com/troglodyne/koan.git"
             repo_branch: "add_matrix_e2ee"
 
-            # CLI provider that drives the agent (claude|codex|copilot|local)
+            # The CLI that drives the agent (claude|codex|copilot|local).
             cli_provider: "claude"
 
-            # Required when cli_provider=claude  the long-lived OAuth token
-            # produced by `claude setup-token` on a workstation
+            # Required when cli_provider=claude.  This is the long-lived
+            # OAuth token that `claude setup-token` makes on a workstation.
             claude_oauth_token: "sk-ant-..."
 
-            # GitHub bot identity (PAT with repo + notifications scopes)
+            # The GitHub identity of the bot.  The PAT needs the repo and
+            # notifications scopes.
             github_user:  "yourname-koan"
             github_token: "ghp_..."
 
-            # Optional: OpenSSH private key paired with a key registered on
-            # the bot's GitHub account.  When set, the recipe:
-            #   - drops it at ~koan/.ssh/id_koan (mode 0600)
-            #   - derives the pubkey, populates known_hosts for github.com
-            #   - flips `gh config git_protocol` to ssh (so clones produce
-            #     SSH remotes and push goes through the key, not the PAT)
-            #   - configures `git config --global` for ssh-format commit
-            #     signing using the same key
             # Give the bot an ssh identity for git push and commit signing.
-            # The key is made once, kept in the secret store and placed on
-            # the guest by bin/provision -- it never goes in the payload.
-            # Register the pubkey the build prints under the bot's GitHub
-            # account, both as an "Authentication key" (for push) AND a
-            # "Signing key" (so signed commits show as Verified).
+            # See guest_secrets below.  Register the public key that the
+            # build prints on the GitHub account of the bot.  Add it as an
+            # "Authentication key" for push and as a "Signing key", so that
+            # signed commits show as Verified.
             github_ssh_identity: 1
 
-            # Pretty-name for @mentions (defaults to github_user)
+            # The name for @mentions.  The default is github_user.
             github_nickname: "yourname-koan"
 
-            # Personal accounts allowed to drive the bot via @mention
+            # Personal accounts that can drive the bot with an @mention.
             github_authorized_users:
                 - "yourname"
 
-            # Messaging  pick exactly one of telegram / slack / matrix
+            # Messaging.  Pick exactly one of telegram, slack or matrix.
             messaging_provider: "telegram"
             telegram_token:   "123456789:ABC-..."
             telegram_chat_id: "987654321"
@@ -81,151 +72,127 @@ use File::Slurper();
             # matrix_homeserver: "https://matrix.org"
             # matrix_user_id:    "@koan:matrix.org"
             # matrix_room_id:    "!abcdef:matrix.org"
-            # matrix_e2ee:       1                   # default; set 0 for plaintext
-            # Credentials  supply EITHER:
+            # matrix_e2ee:       1                   # the default, 0 for plaintext
+            # For the credentials, give EITHER:
             #   matrix_access_token: "syt_..."       # pre-minted token
             #   matrix_device_id:    "BRAND_NEW"     # required when e2ee=1
-            # OR (mutually exclusive):
-            #   matrix_password:     "hunter2"       # one-shot  bootstrap mints fresh device
-            # matrix_pickle_key: "<64-hex>"          # optional; auto-gen if absent
+            # OR, but not both:
+            #   matrix_password:     "hunter2"       # bootstrap mints a new device
+            # matrix_pickle_key: "<64-hex>"          # optional, see DESCRIPTION
 
-            # Behavior knobs (all optional)
+            # Behavior settings.  All are optional.
             max_runs_per_day: 10
             interval_seconds: 60
 
-            # Optional SMTP for session-digest emails
+            # Optional SMTP for session digest emails.
             # smtp_host:     "smtp.example.test"
             # smtp_port:     587
             # smtp_user:     "koan@example.test"
             # smtp_password: "..."
             # email_to:      "you@example.test"
 
-            # Projects the bot collaborates on.  Each entry needs an
-            # absolute `path` on the guest.  Optional `github_url`
-            # (either "owner/repo" or a full https:// URL) makes the
-            # recipe clone the repo to that path at first provision via
-            # `gh repo clone`, using the bot's github_token; subsequent
-            # provisions skip clone when .git/ already exists.  Without
-            # github_url the path must be present by other means (a
-            # host bind-mount, a manual clone, or `/add_project` via
-            # the bot's chat at runtime).
+            # The projects that the bot works on.  Each entry needs an
+            # absolute `path` on the guest and a `github_url`, either
+            # "owner/repo" or a full https:// URL.  The first provision
+            # clones the repo to that path with `gh repo clone` and the
+            # github_token of the bot.  Later provisions skip the clone
+            # when .git/ is already there.
             projects:
                 myapp:
                     path: "/opt/projects/myapp"
-                    github_url: "myorg/myapp"          # cloned at provision
+                    github_url: "myorg/myapp"
                 api:
                     path: "/opt/projects/api"
                     github_url: "https://github.com/myorg/api.git"
                     cli_provider: "copilot"
-                bind_mounted_thing:
-                    path: "/opt/projects/legacy"        # no github_url  must already exist
 
 =head2 DESCRIPTION
 
-Installs and runs the Kan autonomous coding bot
-(L<https://github.com/troglodyne/koan>, our fork with Megolm/Olm
-end-to-end-encrypted Matrix support; upstream is at
-L<https://github.com/sukria/koan>) as a pair of systemd services
-(C<koan.service> + C<koan-awake.service>) owned by the recipe's service user.
+Installs and runs the Koan autonomous coding bot
+(L<https://github.com/troglodyne/koan>).  This is our fork, with Matrix
+support that is end-to-end encrypted with Megolm/Olm.  Upstream is at
+L<https://github.com/sukria/koan>.  The bot runs as two systemd services,
+C<koan.service> and C<koan-awake.service>, as the service user of the recipe.
 
-When C<messaging_provider> is C<matrix>, E2EE is on by default and a
-brand-new device must be acquired.  The recipe handles this two ways:
+When C<messaging_provider> is C<matrix>, E2EE is on by default and the bot
+needs a new device.  The recipe gets one in one of two ways:
 
 =over 1
 
-=item * B<Pre-mint>: you create a fresh device in Element, pass the
-        resulting C<matrix_access_token> and C<matrix_device_id> in
+=item * B<Pre-mint>: you make a new device in Element.  You give the
+        C<matrix_access_token> and C<matrix_device_id> of that device in
         recipes.yaml.
 
-=item * B<Bootstrap>: you pass C<matrix_password> only.  On first
+=item * B<Bootstrap>: you give only C<matrix_password>.  On the first
         provision the recipe runs C<python -m app.matrix_login> as the
-        service user, which mints a fresh device and writes
-        C<instance/matrix/credentials.env> (0600).  Re-provisions skip
-        the bootstrap as long as that file exists.
+        service user.  This mints a new device and writes
+        C<instance/matrix/credentials.env> in a directory with mode 0700.
+        A later provision skips the bootstrap while that file exists.
 
 =back
 
-Filesystem layout on the guest:
+The layout on the guest:
 
-    [install_dir]/[domain]/           koan user $HOME (.ssh, .gitconfig, .venv)
-    [install_dir]/[domain]/koan/      repo checkout  KOAN_ROOT
+    [install_dir]/[domain]/           $HOME of the service user (.ssh, .gitconfig, .venv)
+    [install_dir]/[domain]/koan/      repo checkout (KOAN_ROOT)
     [install_dir]/[domain]/koan/koan/ python package (PYTHONPATH, WorkingDir)
     [install_dir]/[domain]/koan/.env  secrets
-    [install_dir]/[domain]/koan/instance/  bot state (preserved)
-    [install_dir]/[domain]/koan/logs/      service log files (preserved)
-    [install_dir]/[domain]/.venv/     python virtualenv (outside repo so
-                                      git reset --hard doesn't blow it away)
+    [install_dir]/[domain]/koan/instance/  bot state (kept)
+    [install_dir]/[domain]/koan/logs/      service log files (kept)
+    [install_dir]/[domain]/.venv/     python virtualenv (outside the repo, so
+                                      that git reset --hard does not remove it)
 
-KOAN_ROOT is a subdir of the user's home rather than the home itself
-because the C<service_user> target creates C<install_dir/domain/>
-before the recipe runs, and C<git clone> won't drop a repo into an
-existing non-empty directory.
+KOAN_ROOT is a subdirectory of the home directory, not the home directory
+itself.  The C<service_user> target makes C<install_dir/domain/> before the
+recipe runs, and C<git clone> does not clone into a directory that is not empty.
 
-The Olm/Megolm store lives at C<koan/instance/matrix-store/> and is
-preserved across re-deploys by L</remote_files> alongside the rest of
-C<koan/instance/>.  Losing it means losing the ability to decrypt past
-room sessions, so don't C<rm -rf> the data dir.
+The Olm/Megolm store is at C<koan/instance/matrix-store/>.  C<remote_files>
+keeps it across builds with the rest of C<koan/instance/>.  Without the store,
+the bot cannot decrypt past room sessions, so do not C<rm -rf> the data
+directory.
 
-The recipe:
+The C<matrix_pickle_key> encrypts that store.  If you do not set one,
+C<enrich> makes a new one each time it runs.  Set it to keep the key the same
+from one build to the next.
+
+The recipe does these steps:
 
 =over 1
 
-=item * installs system deps (git, python venv, nodejs+npm, gh)
+=item * It installs the system packages (git, python venv, nodejs and C<npm>, gh).
 
-=item * clones koan into C<install_dir/domain>
+=item * It clones koan into C<install_dir/domain/koan>.
 
-=item * renders C<.env>, C<instance/config.yaml> and C<projects.yaml>
+=item * It renders C<.env>, C<instance/config.yaml> and C<projects.yaml>.
 
-=item * builds the python virtualenv
+=item * It builds the python virtualenv.
 
-=item * installs C<@anthropic-ai/claude-code> globally (when
-        cli_provider=claude)
+=item * It installs C<@anthropic-ai/claude-code> globally when
+        cli_provider=claude.
 
-=item * writes systemd unit files and queues the services to start
+=item * It writes the systemd unit files and queues the services to start.
 
 =back
 
-Secrets (telegram/slack/matrix tokens, github PAT, claude OAuth, SMTP
-password) live only in the rendered C<.env> file, which is installed
-0640 root:I<user>.  The C<instance/> tree is preserved across
-re-provisions via L</remote_files>, so the bot's memory, journal and
-missions survive a rebuild.
+The secrets (the telegram, slack and matrix tokens, the github PAT, the claude
+OAuth token and the SMTP password) are in the rendered C<.env> file.  That file
+is installed 0640 root:I<user>.  The makefile fragment also holds the github
+PAT, and the matrix password and pickle key for the bootstrap.
+
+C<remote_files> keeps the C<instance/> tree across provisions.  So the memory,
+journal and missions of the bot stay after a rebuild.
 
 =head3 Host CPU requirements
 
-When C<cli_provider=claude> the recipe drops the C<@anthropic-ai/claude-code>
-CLI into the guest.  Its bundled v8 snapshot probes cpuid at startup and
-SIGILLs on guests whose CPU model lacks AVX (the qemu default C<qemu64>
-is one such model).  The trog-provisioner driver defaults C<cpu_mode> to
-C<host-passthrough> in C<provision.conf>, which exposes the bare-metal
-CPU and resolves this.  If you override C<cpu_mode> for a koan host
-(e.g. for migration to a differently-specced HV) pick a model that
-advertises AVX, otherwise C<claude> will crash on first invocation.
+When C<cli_provider=claude>, the recipe installs the C<@anthropic-ai/claude-code>
+CLI on the guest.  Its bundled v8 snapshot probes cpuid at startup.  It stops
+with C<SIGILL> on a guest whose CPU model has no AVX, and the qemu default
+C<qemu64> is one such model.  The C<vm> recipe sets C<cpu_mode> to
+C<host-passthrough> by default, which shows the real CPU to the guest.  If you
+change C<cpu_mode> for a koan host, pick a model that has AVX.  Otherwise
+C<claude> crashes the first time it runs.
 
-=head3 deps
-
-System packages required to build and run koan on a Debian guest.
-
-=head3 enrich
-
-Coerces defaults, validates that the messaging provider's credentials
-are present, and that a CLI provider token is supplied where required.
-
-=head3 template_files
-
-Renders the env file, behavior config, project list and two systemd
-units into the config bundle.
-
-=head3 datadirs
-
-Pre-creates the C<koan/> data subdir so C<remote_files> has somewhere
-to drop preserved instance state on first provision.
-
-=head3 remote_files
-
-Pulls back C<instance/> and C<logs/> from the running guest so the
-bot's evolving memory/journal is captured into the data dir for
-re-deploy.
+C<deps> is in L<Provisioner::Recipe::Ubuntu::koan>.
 
 =cut
 
@@ -235,11 +202,10 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  The two units this installs are the machine's -- one
-F</etc/systemd/system/koan.service> and one F<koan-awake.service> -- and both
-name this domain's checkout, its virtualenv and its F<.env> throughout.  A
-second domain does not get a koan of its own; it rewrites those units to point
-at itself.
+False.  This recipe installs two units for the whole machine,
+F</etc/systemd/system/koan.service> and F<koan-awake.service>.  Both name the
+checkout, the virtualenv and the F<.env> of this domain.  A second domain does
+not get its own koan.  It rewrites those units to point at itself.
 
 =cut
 
@@ -253,10 +219,9 @@ sub args {
             koan_email => { type => 'email' },
             repo_url   => { type => 'string', default => $DEFAULT_REPO },
 
-            # Default to the troglodyne fork  it carries the Megolm/Olm E2EE
-            # rewrite of the matrix provider plus the `app.matrix_login` bootstrap
-            # helper.  Upstream koan (sukria/koan) explicitly excludes E2EE.
-            # HTTPS, not SSH: fresh VMs don't have a key registered with GitHub.
+            # The troglodyne fork has the Megolm/Olm E2EE matrix provider and the
+            # `app.matrix_login` bootstrap.  Upstream koan (sukria/koan) excludes E2EE.
+            # HTTPS, not SSH, because a new VM has no key registered with GitHub.
             repo_branch             => { type => 'string', default => 'add_matrix_e2ee' },
             messaging_provider      => { type => 'string', enum    => [qw{telegram slack matrix}], default => 'telegram' },
             telegram_token          => { type => 'string' },
@@ -297,8 +262,7 @@ sub args {
                 },
             },
 
-            # TODO: Don't know how to make these all require one another other than setting them behind an object.
-            # should probably rework to be such.
+            # TODO: Put these in one object, so that the schema can require them together.
             smtp_host     => { type => 'string' },
             smtp_port     => { type => 'integer' },
             smtp_user     => { type => 'string' },
@@ -307,6 +271,20 @@ sub args {
         },
     );
 }
+
+=head2 %opts = $recipe->enrich(%opts)
+
+Sets C<github_nickname> to C<github_user> when it is not given.  For matrix,
+it turns E2EE on by default and mints C<matrix_pickle_key> when E2EE is on and
+no key was given.
+
+Dies when the messaging provider has no credentials, when the matrix
+credentials are not exactly one of a token or a password, and when a token has
+no C<matrix_device_id> under E2EE.  Dies when C<cli_provider> is C<claude> and
+there is no C<claude_oauth_token>.  Dies when only some of the SMTP settings
+are given.
+
+=cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
@@ -327,16 +305,10 @@ sub enrich {
         die "Must set matrix_user_id in [koan] section"    unless $opts{matrix_user_id};
         die "Must set matrix_room_id in [koan] section"    unless $opts{matrix_room_id};
 
-        # E2EE on by default  opt out with matrix_e2ee: 0.
         $opts{matrix_e2ee} //= 1;
         $opts{matrix_e2ee} = !!$opts{matrix_e2ee};
 
-        # Credentials: exactly one of (access_token + device_id) or (password).
-        # Pre-mint path: operator created a brand-new device in Element,
-        # passes both values verbatim.
-        # Bootstrap path: provisioner runs app.matrix_login at first install
-        # using a one-shot password; resulting credentials end up in
-        # instance/matrix/credentials.env (loaded by systemd).
+        # Pre-mint or bootstrap, see DESCRIPTION.
         my $have_token = !!$opts{matrix_access_token};
         my $have_pw    = !!$opts{matrix_password};
         die "matrix needs exactly one of: matrix_access_token (+matrix_device_id), or matrix_password"
@@ -346,7 +318,6 @@ sub enrich {
               if $opts{matrix_e2ee} && !$opts{matrix_device_id};
         }
 
-        # Minted here when E2EE is on and none was given.
         if ( $opts{matrix_e2ee} && !$opts{matrix_pickle_key} ) {
             $opts{matrix_pickle_key} = join '',
               map { ( 0 .. 9, 'a' .. 'f' )[ Crypt::PRNG::rand(16) ] } 1 .. 64;
@@ -356,7 +327,6 @@ sub enrich {
     die "Must set claude_oauth_token in [koan] section when cli_provider=claude"
       if $opts{cli_provider} eq 'claude' && !$opts{claude_oauth_token};
 
-    # SMTP block is optional but must be all-or-nothing
     if ( $opts{smtp_host} || $opts{smtp_user} || $opts{email_to} ) {
         die "smtp_host, smtp_user, smtp_password and email_to must all be set together"
           unless $opts{smtp_host}
@@ -371,19 +341,17 @@ sub enrich {
 
 =head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
 
-The bot's ssh identity, when C<github_ssh_identity> asks for one.
+Returns the ssh identity of the bot when C<github_ssh_identity> is true, and
+an empty list when it is false.
 
-The key is made once and kept in the secret store, so it is answered from there
-on every provision after and never travels in the payload -- it used to be a
-value the operator pasted into F<recipes.d>, which put a private key in the
-configuration, in the domain directory and in the tarball that goes to the guest.
+The first build makes the key and keeps it in the secret store.  Every later
+provision takes it from the store, and the key never goes in the payload.
+C<remote_files> does not name F<.ssh>, so the key is only on the guest and in
+the store.
 
-Nothing salvages it back: C<remote_files> does not name F<.ssh>, so the guest and
-the store are the only places it sits.
-
-B<A domain that had one before this needs its key put in the store first>, with
-C<bin/add_secret>, or the first build mints a new one and GitHub goes on
-expecting the old:
+To keep a key that GitHub already knows, put it in the store with
+C<bin/add_secret> before the first build.  If you do not, that build mints a
+new key and GitHub does not know it:
 
     bin/add_secret --group koan --title <domain>-github-ssh -- "$(cat old_key)"
 
@@ -398,27 +366,34 @@ sub guest_secrets {
         "$install_dir/$domain/.ssh/id_koan" => {
             ref => "secret:koan/$domain-github-ssh/password",
 
-            # ed25519 because it is short enough to sit in a password field
-            # comfortably, and passphrase-less because the bot runs unattended.
+            # Ed25519 because the key fits in a password field, and no
+            # passphrase because the bot runs unattended.
             generate => sub {
                 my $dir  = File::Temp::tempdir( CLEANUP => 1 );
                 my $path = "$dir/id_koan";
                 Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, 'koan' );
 
-                # Without the trailing newline: bin/provision writes the value
-                # with one of its own, and ssh-keygen refuses a key with a blank
-                # line on the end.
+                # Remove the trailing newline.  bin/provision adds one, and
+                # ssh-keygen refuses a key that ends with a blank line.
                 my $key = File::Slurper::read_binary($path);
                 $key =~ s/\n\z//;
                 return $key;
             },
 
-            # root until the fragment gives it away: this is placed before the
-            # makefile runs, so the account does not exist yet.
+            # Owned by root until the fragment gives it to the service user,
+            # because the file is placed before the makefile makes the account.
             mode => '0600',
         },
     );
 }
+
+=head2 @files = $recipe->template_files()
+
+Returns pairs of a template and the file that it renders to: the env file, the
+behavior configuration, the project list, the two systemd units, the ufw
+profile and the gh auth state.
+
+=cut
 
 sub template_files {
     return (
@@ -428,20 +403,33 @@ sub template_files {
         'koan.service.tt'       => 'koan.service',
         'koan-awake.service.tt' => 'koan-awake.service',
 
-        # The ufw profile opening the matrix federation port outbound.
-        # Always rendered; the fragment installs it only when this bot is
-        # actually talking to a homeserver.
+        # The ufw profile that opens the matrix federation port outbound.
+        # It is always rendered, and the fragment installs it only for matrix.
         'koan.ufw.conf.tt' => 'koan_ufw.conf',
 
-        # Pre-seeds gh CLI's auth state so the bot can run `gh` without
-        # ever needing an interactive `gh auth login`.
+        # The gh auth state, so that the bot can run `gh` without `gh auth login`.
         'koan-gh-hosts.yml.tt' => 'koan-gh-hosts.yml',
     );
 }
 
+=head2 @dirs = $recipe->datadirs()
+
+Returns C<koan>, so that C<remote_files> has a data directory to copy into on
+the first provision.
+
+=cut
+
 sub datadirs {
     return qw{koan};
 }
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+Returns what to copy back from the guest into the data directory, so that the
+next build keeps it: C<instance/>, C<logs/>, C<workspace/>, C<projects.yaml>
+and the Claude Code state in F<.claude.json>.
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
@@ -451,9 +439,8 @@ sub remote_files {
         "$install_dir/$domain/koan/workspace/"    => 'koan/workspace/',
         "$install_dir/$domain/koan/projects.yaml" => 'koan/projects.yaml',
 
-        # Preserve Claude Code auth state across re-provisions.
-        # Claude writes account metadata and session state here on first use;
-        # losing it forces interactive re-auth on the next deploy.
+        # Claude writes its account and session state here on first use.
+        # Without it, the next build must log in again by hand.
         "$install_dir/$domain/.claude.json" => '.claude.json',
     );
 }
@@ -462,11 +449,10 @@ sub tests {
     return qw{koan.tt};
 }
 
-=head2 @hosts = $recipe->fetch_hosts()
+=head2 @hosts = $recipe->fetch_hosts(%opts)
 
-GitHub, which serves the koan checkout this recipe clones.  The host of the default only: C<fetch_hosts> is asked of the class,
-without a configuration, so a C<repo_url> pointed somewhere else is not
-declared here and goes straight upstream.
+Returns the host of C<repo_url>, which is GitHub for the default repo.  When
+the class is asked without a configuration, it returns the host of the default.
 
 =cut
 

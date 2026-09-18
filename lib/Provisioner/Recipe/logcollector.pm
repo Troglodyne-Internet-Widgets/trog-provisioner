@@ -30,117 +30,103 @@ and then point the fleet at it:
 
 =head1 DESCRIPTION
 
-Opens a syslog listener, writes what arrives to one file per sending host, and
-rotates them.  The other half is L<Provisioner::Recipe::logshipper>, which is
-configured separately.
+This recipe opens a syslog listener.  It writes the messages that arrive to one
+file for each sending host, and it rotates those files.  The sending half is
+L<Provisioner::Recipe::logshipper>, which you configure separately.
 
 =head2 No sender depends on this
 
-No recipe puts C<logcollector> in its C<required_recipes> in order to ship to it,
-and none should.  That relationship runs one way and through configuration: a
-guest names a destination, and the destination does not know who its senders are.
+No recipe puts C<logcollector> in its C<required_recipes> to ship logs to it.
+The relation goes in one direction, through configuration.  A guest names a
+destination, and the destination does not know its senders.
 
-That is not only tidiness -- it is what makes the arrangement work at all.  See
+This is necessary, not only tidy.  See
 L</It cannot know its senders, so it does not try>.
 
-A consumer sitting on the collector itself is a different relationship, and one
-this recipe does serve.  See L</Forwarding a copy, for something on this guest>.
+A consumer on the collector itself is a different relation, and this recipe
+serves it.  See L</Forwarding a copy, for something on this guest>.
 
 =head2 Forwarding a copy, for something on this guest
 
-C<forward> adds one C<omfwd> action per destination to the collector ruleset,
-above the C<stop>.  Above is load-bearing: C<stop> ends processing for the
-message, so an action written below it never runs at all.
+C<forward> adds one C<omfwd> action for each destination to the collector
+ruleset, above the C<stop>.  The position is necessary.  C<stop> ends the
+processing of the message, so an action below it never runs.
 
-The copy goes out as RFC5424 with octet-counted framing, because that is what a
-telegraf C<[[inputs.syslog]]> parses -- rsyslog sends RFC3164 by default, which
-it rejects.  L<Provisioner::Recipe::grafanasyslog> is what this exists for: it
-requires this recipe and asks for the stream on a loopback port, so the fleet's
-logs reach a dashboard without a second listener on the wire.
+The copy goes out as RFC5424 with octet-counted framing.  The telegraf
+C<[[inputs.syslog]]> input parses that format, and it rejects RFC3164, which
+rsyslog sends by default.
 
-Nothing here opens a firewall port for a destination.  A consumer on this guest
-is reached over loopback, and one off it would be a second collector, which is
-not what this is for.
+L<Provisioner::Recipe::grafanasyslog> is the reason for this feature.  It
+requires this recipe and asks for the stream on a loopback port.  So the logs of
+the fleet reach a dashboard without a second listener on the network.
+
+This recipe opens no firewall port for a destination.  A consumer on this guest
+listens on loopback.  A consumer on a different guest is a second collector, and
+this feature is not for that.
 
 =head2 It cannot know its senders, so it does not try
 
-A collector is built like any other guest, from its own configuration, before
-most of the guests that will ship to it exist.  So it cannot be handed a list of
-them, and it does not route on one:
+A collector is built like any other guest, from its own configuration.  Most of
+the guests that ship to it do not exist yet at that time.  So it cannot get a
+list of them, and it does not route on one:
 
     template(name="..." type="string" string="<log_dir>/%HOSTNAME:::secpath-replace%.log")
 
-One template, evaluated per message.  A new guest starts logging here the moment
-it is built, and nothing has to be added anywhere for that to happen.
+rsyslog evaluates this one template for each message.  A new guest starts to log
+here when it is built, and nothing else has to change.
 
-This replaces an arrangement where C<bin/provision> wrote one drop-in per domain
-onto the hypervisor and restarted rsyslog there on every build, and C<bin/destroy>
-took it back off again.  Two bugs go with it: a destroyed guest's log file no
-longer needs cleaning up, and the rotation stops covering guests that no longer
-exist.
-
-C<secpath-replace> is load-bearing rather than decoration.  C<%HOSTNAME%> is
-whatever the sender put in the message, so without it a sender could name itself
+C<secpath-replace> is necessary.  C<%HOSTNAME%> is the name that the sender put
+in the message.  Without C<secpath-replace>, a sender can call itself
 C<../../etc/cron.d/anything> and choose where this guest writes.
 
 =head2 Remote logs do not land in this guest's own syslog
 
-The listener has a ruleset of its own, and the per-host action ends with C<stop>
-inside it.  So the fleet's messages are written once, to the file named for their
-sender, and never reach the default rules -- this guest's C</var/log/syslog> stays
-its own.  Scoping the C<stop> to that ruleset is what keeps it from swallowing
-this guest's local logging too.
+The listener has its own ruleset, and the per-host action in it ends with
+C<stop>.  So each message from the fleet is written once, to the file for its
+sender.  It never gets to the default rules, and the C</var/log/syslog> of this
+guest contains only its own messages.  Because the C<stop> is in that ruleset
+only, the local logs of this guest are not discarded.
 
-It is also why a plain C<logger> on this guest does not appear under C<log_dir>:
-local messages never enter that ruleset.  Sending one over the port does, which
-is what the guest test does to prove the path end to end.
+For the same reason, a plain C<logger> on this guest does not write to
+C<log_dir>, because local messages do not enter that ruleset.  A message sent to
+the port does enter it.  The guest test sends one to test the full path.
 
-=head2 Rotation actually reopens the files
+=head2 Rotation reopens the files
 
-The logrotate configuration this installs ends with a C<postrotate> that signals
-rsyslog.  The one it replaces had an empty C<postrotate>/C<endscript> pair, so
-nothing ever told rsyslog to reopen what had been rotated out from under it.
+The logrotate configuration ends with a C<postrotate> that signals rsyslog.  This
+makes rsyslog reopen the files that logrotate moved.
 
 =head2 It wants a guest of its own
 
-Not fatal, but worth knowing: it listens on a privileged port for the whole
-fleet, and it grows without bound in proportion to how much everything else
-says.  C<retain> and C<rotate> are the only things bounding that, and
-C<allowed_senders> is the only thing bounding who can contribute to it.
+This is not a requirement, but know it.  The collector listens on a privileged
+port for the full fleet.  Its data grows without limit, in proportion to how much
+the other guests log.  Only C<retain> and C<rotate> limit the size, and only
+C<allowed_senders> limits who can send.
 
 =cut
 
 =head1 METHODS
 
-=head2 %args = $recipe->args()
-
-=over 4
-
-=item * C<log_dir> -- where the per-sender files go.  Outside C<install_dir> on
-purpose: the C<data> target chowns and chmods C<< install_dir/<domain> >>
-recursively on every provision, and this is a directory that only ever grows.
-
-=item * C<allowed_senders> -- CIDRs permitted to log here.  Empty means rsyslog
-does not filter by source and whatever reaches the port is accepted, which is
-then only as narrow as the firewall.
-
-=item * C<forward> -- C<host:port> destinations each received message is copied
-to before it is filed.  See L</Forwarding a copy, for something on this guest>.
-
-=back
-
-=cut
-
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One listener on the machine: one port, one ruleset, one
-F</etc/rsyslog.d/09-logcollector.conf>.  A second domain would not add a
-collector beside the first, it would rewrite the one the fleet is already
-shipping to.
+False.  The machine has one listener: one port, one ruleset, and one
+F</etc/rsyslog.d/09-logcollector.conf>.  A second domain does not add a second
+collector.  It rewrites the collector that the fleet already ships to.
 
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %args = $recipe->args()
+
+Returns the schema.  C<bin/recipes> shows each field, its default and its
+description.
+
+C<log_dir> is outside C<install_dir> on purpose.  On each provision, the C<data>
+target runs C<chown> and C<chmod> recursively on C<< install_dir/<domain> >>,
+and this directory only grows.
+
+=cut
 
 sub args {
     return (
@@ -190,8 +176,8 @@ sub args {
             forward => {
                 type => 'array',
 
-                # Validated here rather than checked in enrich, so that a
-                # malformed destination names itself and the field it is in.
+                # Validated here, not in enrich, so that the error names the
+                # bad destination and its field.
                 items       => { type => 'string', pattern => '^[^:\s]+:[0-9]+$' },
                 default     => [],
                 description => 'host:port destinations each received message is copied to, above the ruleset stop.  For a consumer on this guest, such as the telegraf grafanasyslog configures.  A bracketed IPv6 literal is refused rather than supported: the consumers this exists for are on loopback.',
@@ -202,15 +188,13 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Drops repeated C<forward> destinations.
+Returns C<%opts> with each repeated C<forward> destination removed.
 
-More than one party can ask the collector to forward to the same place -- an
-operator naming it, and L<Provisioner::Recipe::grafanasyslog> asking for it as a
-dependent -- and those contributions are concatenated rather than settled
-between: C<reconcile> handles fields that are scalars on both sides and leaves
-arrays to L<Hash::Merge>, which joins them literally.  So the identical
-destination arrives twice, and without this the ruleset gets the same C<omfwd>
-twice and sends every message to that port twice.
+More than one party can ask for the same destination.  For example, an operator
+names it, and L<Provisioner::Recipe::grafanasyslog> asks for it as a dependent.
+C<reconcile> settles only scalar fields, and L<Hash::Merge> joins the two arrays.
+Without this method, the ruleset gets two identical C<omfwd> actions and sends
+each message to that port twice.
 
 =cut
 
@@ -224,18 +208,18 @@ sub enrich {
 
 =head2 %limits = $recipe->rate_limits(%opts)
 
-On the configured port rather than on 514, so a collector that was moved has the
-limit applied where it is actually listening.  A busy fleet holds connections
-open rather than opening one per message, so this is generous for what it needs
-to be.
+Returns a limit of 256 on the configured port and protocol, not on 514.  So a
+collector on a different port gets the limit where it listens.  A busy fleet
+keeps its connections open and does not open one for each message, so this
+limit is generous.
 
 =cut
 
 sub rate_limits {
     my ( $self, %opts ) = @_;
 
-    # Defaulted here as well as in args, because required_recipes is asked
-    # before anything has been validated.
+    # Defaulted here and in args, because required_recipes asks for these
+    # limits before validation.
     my $port = $opts{port}     // 514;
     my $prot = $opts{protocol} // 'tcp';
 
@@ -246,6 +230,9 @@ sub rate_limits {
 
 =head2 %files = $recipe->template_files()
 
+Returns the rsyslog configuration, the logrotate configuration and the ufw
+profile, each mapped to the name of the file that it becomes.
+
 =cut
 
 sub template_files {
@@ -253,14 +240,15 @@ sub template_files {
         'logcollector.conf.tt'      => 'logcollector.conf',
         'logcollector.logrotate.tt' => 'logcollector.logrotate',
 
-        # The ufw profile for the port this guest configured, rendered here
-        # rather than by ufw, which is handed rate_limits and nothing else and
-        # so cannot name a port that was configured over here.
+        # Rendered here, not by ufw, because ufw gets only rate_limits and
+        # does not know the port that this recipe configured.
         'logcollector.ufw.conf.tt' => 'logcollector_ufw.conf',
     );
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns the guest test F<logcollector.tt>.
 
 =cut
 

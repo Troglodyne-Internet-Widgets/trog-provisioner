@@ -3,72 +3,63 @@ use strict;
 use warnings;
 use Test::More;
 
-[%# Every assertion here is one of the things koan measured as absent when it
-    was asked to work on this repository and could not: no perl new enough to
-    load a single module, no cpanm, no Sys::Virt, no configuration.
+[%# A runner needs a perl that can load this distribution, cpanm, Sys::Virt,
+    and a configuration.  These assertions make sure that it has them.
 
     No apostrophes in an Xslate comment. -%]
 my $user    = '[% user %]';
 my $dir     = '[% install_dir %]/[% domain %]';
 my $confdir = "$dir/etc/trog-provisioner";
 
-# The perl the perl recipe built, found the way the fragment finds it: through
-# the cpanm link build_latest_perl.sh puts in /root/bin, which is the only path
-# here that does not depend on the domain naming a service user.  The home
-# directory of an admin user is /home/<them> and not the domain directory, and
-# assuming otherwise is what perl.tt already had to be fixed for.
-# The newest perl under /opt/perl5, which is how scripts/cpan_install finds the
-# one it installs into, and how everything else on a guest reaches it.
+# The newest perl under /opt/perl5.  scripts/cpan_install and everything else
+# on a guest find the perl this way.
 my ($bin) = reverse sort glob('/opt/perl5/*/bin');
 ok( $bin && -d $bin, 'the perl recipe built a perl under /opt/perl5' )
     or BAIL_OUT( 'no perl was built: nothing under /opt/perl5' );
 diag "the built perl is in $bin" if $bin;
 
-# The version, as a number, because that is the thing that was wrong: every
-# module in the distribution declares `use 5.041`, and a 5.38 toolchain cannot
-# load one of them to run so much as a syntax check.
+# The version as a number.  Every module in the distribution declares
+# `use 5.041`, and an older perl cannot load one even for a syntax check.
 #
-# \$] escaped: unescaped, it is interpolated by the perl running this test
-# rather than by the one being asked about.
+# \$] is escaped, or the perl that runs this test interpolates it.
 chomp( my $version = `$bin/perl -e 'print \$]' 2>/dev/null` );
 ok( $version && $version >= 5.041, "the runner perl is $version, which can load this distribution" )
     or diag 'Everything below needs a perl >= 5.041 and will fail without one';
 
-# Running, not merely present.  A dangling symlink satisfies -e, and dzil and
-# yath were both shipped as exactly that on every guest with the perl recipe.
+# Each tool must run, not only exist, because a dangling symlink satisfies -e.
 foreach my $tool (qw{cpanm perlcritic dzil prove}) {
     my $said = `$bin/$tool --version 2>&1`;
     ok( $? == 0 && length $said, "$bin/$tool runs" )
         or diag "$tool said: $said";
 }
 
-# dzil comes with the perl rather than being asked for, since a distribution
-# that needs it cannot install it for itself.
+# dzil comes with the perl, because a distribution that needs it cannot
+# install it for itself.
 ok( -x "$bin/dzil", "$bin/dzil is there for the checkout dependencies" );
 
-# Sys::Virt binds the API of the libvirt it was built against and does not say
-# so when it is wrong -- it shows up later as a missing constant, blamed on
-# whatever was being done at the time.  bin/preflight asks this of the machine
-# it runs on; here it is asked of the guest, where it can still be fixed.
+# Sys::Virt binds the API of the libvirt that it was built against.  A
+# mismatch shows up later as a missing constant, with no clear cause.
+# bin/preflight asks this of its own machine.  Here the guest is asked, while
+# the problem can still be fixed.
 chomp( my $libvirt = `pkg-config --modversion libvirt 2>/dev/null` );
 chomp( my $sysvirt = `$bin/perl -MSys::Virt -e 'print Sys::Virt->VERSION' 2>&1` );
 my ($want) = $libvirt =~ m/^(\d+\.\d+)/;
 my ($have) = $sysvirt =~ m/^v?(\d+\.\d+)/;
 
-# The name says what is being asked, not what came back: an unreadable
-# Sys::Virt answers with a page of @INC, and a test name is one line.
+# The name says what is asked, not what came back.  A Sys::Virt that does not
+# load answers with a page of @INC, and a test name is one line.
 is( $have, $want, "Sys::Virt matches the libvirt-dev this guest has ($libvirt)" )
     or diag "Sys::Virt said: $sysvirt";
 
-# The two files bin/preflight insists on, plus the question it does not ask:
-# the address pool creates ips.db in this directory on first use, so a
-# directory the runner cannot write is a runner that cannot assign an address.
+# Two files that bin/preflight requires, and one thing it does not ask.  The
+# address pool creates ips.db in this directory on first use.  If the runner
+# cannot write here, it cannot assign an address.
 ok( -r "$confdir/ipmap.cfg",    'ipmap.cfg is readable' );
 ok( -r "$confdir/recipes.yaml", 'recipes.yaml is readable' );
 is( readlink('/etc/trog-provisioner') // q{}, $confdir, '/etc/trog-provisioner points at it' );
 
-# In /etc rather than a dotfile under the domain directory, which is only a
-# home when the domain names a service user.
+# In /etc, not a dotfile under the domain directory.  That directory is a home
+# only if the domain names a service user.
 ok( -r '/etc/profile.d/trogrunner.sh', 'and a login shell is told the same thing' );
 is( system( "runuser -u $user -- test -w '$confdir'" ), 0, "$user can write there, which is where ips.db goes" );
 [% IF hypervisors.keys().size() %]
@@ -83,17 +74,15 @@ ok( -r "$confdir/secrets.kdbx", 'the secret store is in place' );
 my $checkout = "$dir/[% checkout_dir %]";
 ok( -d "$checkout/.git", 'the checkout is there' );
 
-# The sentence from every one of those six pull requests, turned into an
-# assertion.  A syntax check is the cheapest thing that fails when the perl is
-# too old, and the first thing that stops failing when it is not.
+# A syntax check is the cheapest test that fails when the perl is too old.
 is( system("cd '$checkout' && $bin/perl -Ilib -c lib/Provisioner/Recipe.pm >/dev/null 2>&1"), 0,
     'the distribution modules compile under the runner perl' );
 
 is( system("cd '$checkout' && $bin/prove -l t/Provisioner-Recipe.t >/dev/null 2>&1"), 0,
     'and its own tests run' );
 [% ELSE %]
-# The negative assertion the no-checkout case actually needs: a runner that
-# manages its own repositories should not find a second copy of this one.
+# A runner that manages its own repositories must not get a second copy of
+# this one.
 ok( !-e "$dir/trog-provisioner", 'no checkout was made, which is what was asked for' );
 [% END %]
 [% IF hypervisor_access != 'none' %]
@@ -107,16 +96,16 @@ SKIP: {
     is( $owner, $user, "owned by $user rather than by root" );
     is( system("ssh-keygen -y -f '$key' >/dev/null 2>&1"), 0, 'and ssh can read it' );
 
-    # Where ssh actually looks.  Nothing on a libvirt qemu+ssh URI can point it
-    # anywhere else, and the domain directory is this user home only when the
+    # Where ssh looks.  Nothing in a libvirt qemu+ssh URI can point it
+    # elsewhere.  The domain directory is the home of this user only if the
     # domain names a service user.
     chomp( my $keyhome = `getent passwd $user | cut -d: -f6` );
     ok( -e "$keyhome/.ssh/id_ed25519", "and reachable at $keyhome/.ssh/id_ed25519, which is where ssh will look" );
 }
 [% END %]
 
-# Net::OpenSSH::More will not start on an ssh config wider than this, and every
-# remote thing the runner does goes through it.  adminconfig ships one 0775.
+# Net::OpenSSH::More does not start if the ssh config mode is wider than this,
+# and the runner does all remote work through it.  adminconfig ships one 0775.
 chomp( my $home = `getent passwd $user | cut -d: -f6` );
 SKIP: {
     skip 'no ssh config to check', 1 unless -e "$home/.ssh/config";
@@ -124,14 +113,13 @@ SKIP: {
     is( sprintf( '%04o', $stat[2] & 07777 ), '0600', "$home/.ssh/config is narrow enough for Net::OpenSSH::More" );
 }
 
-# Reported rather than asserted.  Most of what preflight checks is about the
-# hypervisor, and failing this guest over the state of somebody else machine
-# would be wrong -- but the list an operator still has to work through belongs
-# in the provision log rather than nowhere.
+# Reported, not asserted.  Most preflight checks are about the hypervisor,
+# which is not this guest.  But the operator needs the list in the provision
+# log.
 diag "bin/preflight on this guest:";
 [% IF checkout %]
-# As the service user, not as root: the key a hypervisor trusts is in that
-# user's ~/.ssh, and root asking would only ever report that it cannot connect.
+# As the service user, not as root.  The key that a hypervisor trusts is in
+# the ~/.ssh of that user, so root can only report that it cannot connect.
 diag $_ for split( "\n", `runuser -u $user -- sh -c "cd '$dir/[% checkout_dir %]' && $bin/perl -Ilib bin/preflight" 2>&1` );
 [% ELSE %]
 diag 'skipped: no checkout here to run it from';

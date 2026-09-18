@@ -1,9 +1,9 @@
-[%# Sourced by every login shell on the guest, out of /etc/profile.d.
+[%# Every login shell on the guest sources this from /etc/profile.d.
 
-    TROG_PROVISIONER_CONFIG is belt and braces: /etc/trog-provisioner is a
-    symlink to the same directory, which is what the tools read when nothing
-    says otherwise.  It is here so that a shell which has this and a checkout
-    somewhere unexpected still reads the right configuration.
+    TROG_PROVISIONER_CONFIG is a second guard.  /etc/trog-provisioner is a
+    symlink to the same directory, and the tools read it when nothing says
+    otherwise.  With this variable, a checkout in an unusual place still reads
+    the correct configuration.
 
     No apostrophes in an Xslate comment. -%]
 export TROG_PROVISIONER_CONFIG='[% install_dir %]/[% domain %]/etc/trog-provisioner'

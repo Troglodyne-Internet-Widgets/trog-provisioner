@@ -3,8 +3,8 @@ use strict;
 use warnings;
 use Test::More;
 
-# A DN with anything but ASCII in it arrives base64 encoded, on both sides of
-# the comparison at the bottom of this file.
+# LDIF gives a DN that is not plain ASCII in base64, on both sides of the
+# comparison at the bottom of this file.
 use MIME::Base64 qw{decode_base64};
 
 my $status = `systemctl is-active slapd 2>/dev/null`;
@@ -13,32 +13,23 @@ is($status, 'active', 'slapd is running');
 
 ok(-f '/etc/ldap/slapd.d/cn=config.ldif', 'slapd OLC config exists');
 
-# On the port this domain configured, not on 636.  SLAPD_SERVICES named a bare
-# ldaps:///, so slapd listened on the default whatever port: said, and asking
-# after 636 here agreed with it and reported a pass either way.
+# The configured port, not always 636.
 my $ldaps = `ss -tlnp 2>/dev/null | grep ':[% port %] '`;
 ok($ldaps, 'LDAPS is listening on port [% port %]') or diag `ss -tlnp 2>/dev/null | grep slapd`;
 
-# Verify base DN is accessible
 my $search = `ldapsearch -x -H ldap:///  -b "[% base_dn %]" -s base 2>/dev/null`;
 like($search, qr/dn:\s*[% base_dn %]/i, 'base DN is searchable');
 
-# A package name that does not exist in the archive is not an error anywhere:
-# it is simply never installed.  libldap-2.5-0 was in this list, and on Ubuntu
-# 24.04 the archive has libldap2.
+# A package name that is not in the archive causes no error.  The package is
+# only missing.
 foreach my $pkg (qw{slapd ldap-utils libldap2}) {
-    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
-    # variable inside backticks long before dpkg ever sees it.
+    # dpkg -s, because Perl interpolates a ${Status} format in backticks.
     my $installed = `dpkg -s $pkg 2>/dev/null`;
     like($installed, qr/Status: install ok installed/, "$pkg is installed");
 }
 
-# LDAPS, against the certificate every guest has.  The TLS modify used to name
-# dehydrated's output directly, which does not exist until letsencrypt has
-# succeeded -- so on a fresh guest slapd refused it with error 80 and the build
-# stopped there.
-# Unfolded first: LDIF wraps at 78 columns and continues with a leading space,
-# so a path this long arrives split across two lines and matches nothing.
+# LDAPS uses the certificate that every guest has.  LDIF wraps at 78 columns
+# and continues with a leading space, so join the lines before the match.
 my $tls = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCertificateFile 2>/dev/null`;
 $tls =~ s/\n //g;
 like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
@@ -46,53 +37,39 @@ like($tls, qr{olcTLSCertificateFile:\s*/etc/ssl/certs/\Q[% domain %]\E\.pem},
 
 ok(-e '/etc/ssl/certs/[% domain %].pem',    'and that certificate is there');
 
-# No CA file is configured: on a fresh guest the only certificate is the
-# self-signed pair the ssl target makes, which carries no basicConstraints and
-# is not a CA -- and slapd refuses a server certificate offered as one.
+# No CA file.  The self-signed pair from the ssl target is not a CA, and slapd
+# refuses a server certificate given as one.
 my $ca = `ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config -LLL olcTLSCACertificateFile 2>/dev/null`;
 $ca =~ s/\n //g;
 unlike($ca, qr{olcTLSCACertificateFile:\s*/etc/ssl/certs/}, 'the server certificate is not offered as a CA')
     or diag $ca;
 ok(-e '/etc/ssl/private/[% domain %].pem',  'along with its key');
 
-# slapd has to be able to read the key, which it does as the openldap group.
+# slapd reads the key through the openldap group.
 my @stat = stat('/etc/ssl/private/[% domain %].pem');
 is(scalar getgrgid($stat[5] // -1), 'openldap', 'the key is group openldap');
 
-# AppArmor is what actually decides whether slapd may open the key.  It confines
-# the executable rather than the account, and resolves the symlink out of
-# /etc/ssl into /etc/letsencrypt before deciding -- so checking the file as the
-# openldap user says nothing about it.  Four correct permission fixes went in
-# ahead of this one and none of them was the reason.
+# AppArmor decides whether slapd can open the key.  It confines the executable,
+# not the account, and it checks the real path behind the symlink.  So a read
+# test as the openldap user does not show a denial.
 ok(-s '/etc/apparmor.d/local/usr.sbin.slapd', 'the AppArmor override for slapd is installed');
 my $aa = do { local (@ARGV, $/) = '/etc/apparmor.d/local/usr.sbin.slapd'; <> } // '';
 like($aa, qr{/etc/letsencrypt/live/\*\* r}, 'and lets slapd read the certificate directory');
 
-# Nothing denied since boot, which is the only place this failure is recorded.
+# The audit log is the only record of an AppArmor denial.
 my $denials = `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -ac slapd`;
 chomp $denials;
 is($denials + 0, 0, 'and AppArmor has denied slapd nothing') or diag `grep -a 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | grep -a slapd | tail -3`;
 
-# Owning the file is not the same as reaching it: /etc/ssl/private is
-# 0710 root:ssl-cert, so openldap has to be in that group to traverse it.  When
-# it could not, the TLS modify failed with error 80 and said nothing about why.
-# The group that makes /etc/ssl/private traversable at all.  It comes from the
-# ssl-cert package, and without that package it does not exist -- `adduser
-# openldap ssl-cert` then fails with "The group `ssl-cert' does not exist" and
-# takes the target with it.
+# /etc/ssl/private is 0710 root:ssl-cert, so openldap must be in ssl-cert to
+# get to the key.  The ssl-cert package makes that group.
 my $groups = `id -nG openldap 2>/dev/null`;
 like($groups, qr/\bssl-cert\b/, 'openldap is in the ssl-cert group') or diag $groups;
 
-# And the running slapd is in it too.  Group membership applies to a process
-# started after the change, so a slapd restarted before joining the group is one
-# that still cannot read the key -- the same error 80, from a process whose
-# account has the right group and whose process does not.
-# The process table, not systemd.  slapd has no native unit here: what runs it
-# is /etc/init.d/slapd through systemd-sysv-generator, and a generated unit
-# never learns a MainPID -- `systemctl show -p MainPID --value slapd` answers 0
-# on a slapd that is plainly running and serving.  Asked that way this block
-# skipped itself on every guest it has ever been run on, which is the one thing
-# an assertion must not do quietly.
+# The running slapd must be in the group too.  A process gets its groups when
+# it starts, so a slapd started before the change cannot read the key.
+# pgrep, not systemd: slapd runs from /etc/init.d through
+# systemd-sysv-generator, and its unit reports a MainPID of 0.
 my ($pid) = `pgrep -x slapd 2>/dev/null` =~ m/(\d+)/;
 SKIP: {
     skip 'slapd is not running', 1 unless $pid;
@@ -111,10 +88,8 @@ foreach my $f ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %]
 my $services = `grep -oP '^SLAPD_SERVICES=.*' /etc/default/slapd 2>/dev/null`;
 like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
 
-# What a rebuild will be rebuilt from.  Nothing regenerates the directory, and
-# the fetch is sftp as the admin user with no sudo -- so what has to exist is an
-# export that account can read.  templates/files/ldap.export.sh.tt says why it
-# is an export rather than a copy.
+# The export that a rebuild loads.  templates/files/ldap.export.sh.tt says why
+# it is an export and not a copy.
 my $export_dir = '/var/backups/ldap';
 ok(-d $export_dir, 'the directory is exported to somewhere the fetch can reach');
 
@@ -127,8 +102,8 @@ is(($dstat[2] // 0) & 07777, 0700, 'and nobody else on the guest can read it')
 foreach my $ldif (qw{data.ldif config.ldif}) {
     ok(-s "$export_dir/$ldif", "$ldif was exported and is not an empty file");
 
-    # Exactly what the fetch does: sftp as the admin user, no sudo, and no
-    # error anywhere when it turns out it cannot read the thing it came for.
+    # The export belongs to the admin user, as restores() in
+    # Provisioner::Recipe::ldap also sets it.
     my $rc = system("sudo -u [% admin_user %] test -r '$export_dir/$ldif'");
     is($rc, 0, "and the admin user can read $ldif");
 }
@@ -145,10 +120,8 @@ sub unwrapped {
 my $exported = unwrapped("$export_dir/data.ldif");
 like($exported, qr/^dn:\s*\Q[% base_dn %]\E$/mi, 'the data export is this domain and not an empty database');
 
-# What the seed put there, rather than what the package did.  The base entry
-# above is dpkg-reconfigure's work out of the debconf answers and is present
-# whether the seed ran, failed or was never called -- so it says nothing about
-# the seed.  These three are the seed's alone.
+# Entries that only the seed makes.  dpkg-reconfigure makes the base entry
+# above, so that entry proves nothing about the seed.
 foreach my $rdn ('ou=People', 'ou=Groups', 'cn=ldapusers,ou=Groups') {
     like($exported, qr/^dn:\s*\Q$rdn,[% base_dn %]\E$/mi, "the seed made $rdn");
 }
@@ -163,27 +136,21 @@ like($exported_config, qr/^dn:\s*cn=config$/mi, 'and the configuration database 
 ok(-x '/usr/local/sbin/ldap-export.sh', 'the exporter is installed');
 ok(-x '/usr/local/sbin/ldap-reload.sh', 'and so is the reloader the next guest runs');
 
-# Hourly, because an hour is what a rebuild is allowed to lose.  An export that
-# only ever ran during the provision would age into a directory as it was on
-# build day, which is the failure this whole arrangement exists to prevent.
+# Each hour, because a rebuild can lose at most one hour.  An export made only
+# at provision time gets older each day.
 my $export_cron = do { local (@ARGV, $/) = '/etc/cron.d/ldap-export'; <> } // '';
 like($export_cron, qr{^\S+ \S+ \S+ \S+ \S+ +root +/usr/local/sbin/ldap-export\.sh}m,
     'and it is run on a cron rather than only at provision time') or diag $export_cron;
 
-# And the other end of it: what came off the last guest is in the directory this
-# one is serving.  slapcat rather than ldapsearch on both sides -- it reads the
-# database as root, so no ACL hides an entry from the comparison and no
-# olcSizeLimit truncates it into a false pass.
+# Every entry from the last guest is in the directory that this guest serves.
+# slapcat, not ldapsearch, because it reads the database as root.  So no ACL
+# hides an entry and no olcSizeLimit cuts the list short.
 sub dns_of {
     my ($body) = @_;
     my @dns;
 
-    # Unwrapped here rather than by the caller.  slapcat's output is LDIF as
-    # much as the file it wrote is, so it wraps at the same 78 columns and
-    # continues with the same leading space -- and only the file side was ever
-    # being joined back up, so a DN long enough to wrap came off the live
-    # directory truncated at the fold and matched nothing on the other side.
-    # Both sides come through here, so this is where the join belongs.
+    # Joined here, because both sides of the comparison are LDIF and wrap at
+    # 78 columns.
     $body =~ s/\n //g;
 
     foreach my $line (split m/\n/, $body) {
@@ -200,10 +167,8 @@ SKIP: {
     skip 'this guest had nothing salvaged to reload, so it seeded its directory instead', 1
         unless -s $reloaded;
 
-    # 2>&1 and not 2>/dev/null.  What this compares is the whole of one side
-    # against the whole of the other, so a slapcat that stopped partway through
-    # looks exactly like a directory that lost the entries it stopped before --
-    # and the sentence saying which it was is the one being discarded.
+    # 2>&1, not 2>/dev/null.  A slapcat that stops early looks like lost
+    # entries, and its error message is the only thing that tells them apart.
     my $live_ldif = `slapcat -F /etc/ldap/slapd.d -b '[% base_dn %]' 2>&1`;
     my %live      = map { $_ => 1 } dns_of($live_ldif);
     my @lost      = grep { !$live{$_} } dns_of(unwrapped($reloaded));
@@ -212,11 +177,7 @@ SKIP: {
         or diag "missing: " . join(', ', splice(@lost, 0, 10)) . "\nslapcat said:\n$live_ldif";
 }
 
-# The firewall profile, not a rule.  setup-ufw-rules allows whatever `ufw app
-# list` reports, so a profile is what the ufw target applies.  A `ufw allow` in
-# this recipe's fragment named no port that survived scrutiny either way: slapd
-# ships an LDAPS profile covering the default of 636, and a domain that set
-# port: to anything else had nothing naming the port it was given.
+# A firewall profile, not a rule.  templates/files/ldap.ufw.conf.tt says why.
 my $profile = '/etc/ufw/applications.d/ldap';
 ok(-f $profile, 'the ldap firewall profile was installed');
 my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
@@ -225,12 +186,8 @@ like($prof, qr/^ports=\Q[% port %]\E\/tcp$/m, 'and it names the port this domain
 SKIP: {
     skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
 
-    # ufw has to be able to parse it, which is what listing it proves: a
-    # malformed profile is not reported, it is simply absent from the list.
-    # Listed is the whole assertion.  A profile ufw will not parse -- a section
-    # named for something already in /etc/services, which is what [ldap] was --
-    # is skipped with a warning on stderr and is simply absent here; no rule is
-    # ever made from it and nothing else fails.
+    # The list proves that ufw parsed the profile.  ufw leaves out a profile
+    # that it cannot parse, and gives no error.
     my $apps = `ufw app list 2>&1`;
     like($apps, qr/^\s*slapd\s*$/m, 'ufw lists it as an application') or diag $apps;
 

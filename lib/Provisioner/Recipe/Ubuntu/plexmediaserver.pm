@@ -16,9 +16,9 @@ Provisioner::Recipe::Ubuntu::plexmediaserver - Ubuntu's C<deps> for L<Provisione
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else plexmediaserver does is in the recipe this
-inherits from.
+A package name belongs to the distribution, not to the software, so the package
+names are here.  The recipe that this module inherits from does everything else
+for plexmediaserver.
 
 =cut
 

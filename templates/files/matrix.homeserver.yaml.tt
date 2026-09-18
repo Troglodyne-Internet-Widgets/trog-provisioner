@@ -1,18 +1,16 @@
-# Configuration file for Synapse.
+# The configuration file for Synapse.
 #
-# For more information on how to configure Synapse, including a complete accounting of
-# each option, go to docs/usage/configuration/config_documentation.md or
+# docs/usage/configuration/config_documentation.md in Synapse describes every
+# option.  It is also at
 # https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html
 
 server_name: "matrix.[% domain %]"
 pid_file: /var/run/matrix-synapse.pid
 
-# Synapse refuses to start until this is answered one way or the other, and says
-# so as a configuration error rather than anything about statistics:
+# Synapse does not start without a value here.  It stops with this configuration
+# error, which does not mention statistics:
 #   Please opt in or out of reporting homeserver usage statistics, by setting
 #   the `report_stats` key in your config file to either True or False.
-# Off unless the domain says otherwise, since opting a homeserver into reporting
-# is the operator's to decide rather than ours.
 report_stats: [% report_stats ? 'true' : 'false' %]
 
 public_baseurl: https://matrix.[% domain %]/
@@ -52,7 +50,6 @@ admin_contact: 'mailto:admin@[% domain %]'
 federation_domain_whitelist:
   - [% domain %]
 
-# URL preview
 url_preview_enabled: true
 
 url_preview_ip_range_blacklist:
@@ -75,15 +72,12 @@ url_preview_url_blacklist:
 url_preview_accept_language:
   - en
 
-# Registration requires email
 registrations_require_3pid:
   - email
 
-# Auto join rooms
 auto_join_rooms:
   - "#general:[% server_name %]"
 
-# Email config
 email:
   smtp_host: "[% smtp_host %]"
   smtp_port: "[% smtp_port %]"
@@ -93,7 +87,7 @@ email:
   notif_from: "%(app)s chat server <[% smtp_user %]@[% smtp_domain %]>"
 [% IF modules.grep('redis').size() %]
 
-# Redis pub/sub - enabled because redis recipe is co-loaded on this host
+# Redis pub/sub, because the redis recipe runs on this guest too.
 redis:
   enabled: true
   host: "[% redis_host %]"

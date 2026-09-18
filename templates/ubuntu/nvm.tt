@@ -1,36 +1,28 @@
 # A shell profile for nvm to install itself into.
 #
 # The installer appends its loader to one of ~/.bashrc, ~/.bash_profile,
-# ~/.zprofile, ~/.zshrc or ~/.profile, and when it finds none it says
+# ~/.zprofile, ~/.zshrc or ~/.profile.  If it finds none, it says
 #   Profile not found. Tried ~/.bashrc ...
-# and carries on without wiring anything up.  A service user's home is made by
-# useradd with no skeleton in it, so there is no .bashrc there -- nvm installed
-# fine, node installed fine, and no shell ever loaded either.
+# and continues without a loader.  useradd makes the home of a service user
+# with no skeleton, so that home has no .bashrc.
 NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
 test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
 test -f "$$NVM_HOME/.bashrc" || { touch "$$NVM_HOME/.bashrc"; chown '[% user %]' "$$NVM_HOME/.bashrc"; }
 
-# Install nvm for [% user %] via the official install script (idempotent)
+# Install nvm for [% user %] with the official install script.  It is safe to run again.
 su - [% user %] -s /bin/bash -c \
     "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/[% nvm_version %]/install.sh | bash"
 
-# Install latest Node.js and set it as the default alias
+# Install the latest Node.js and make it the default alias
 su - [% user %] -s /bin/bash -c \
     ". ~/.nvm/nvm.sh && nvm install node && nvm alias default node"
 
-# Both of these go in the .bashrc the user actually reads, which is the one in
-# the home directory passwd gives them.
+# These lines go in the .bashrc in the home directory that passwd gives the
+# user.  For a service user, that is the domain directory.  For the admin user,
+# which is the default, it is under /home.
 #
-# This used to write to install_dir/domain/.bashrc on the grounds that the
-# user's home is the domain directory.  That is true of a service user, which
-# the service_user target creates with -d there, and false of the admin user --
-# and user defaults to admin_user.  So nvm went into ~/.nvm, courtesy of the
-# `su -` above, and the lines that make it usable went somewhere that shell
-# never looks.
-#
-# The loader is written here too rather than left to the installer: it only
-# appends when it found a profile of its own accord, and a profile this target
-# created a moment ago is not one it will add to twice.
+# This target also writes the nvm loader, and does not rely on the installer
+# for it.  The grep keeps out a second copy if the installer wrote one.
 NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
 test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
 grep -qF 'NVM_DIR' "$$NVM_HOME/.bashrc" 2>/dev/null \

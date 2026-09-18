@@ -24,14 +24,14 @@ Trog::Utils - the small things more than one of these programs needs
 
 =head2 prompt($message, %opts)
 
-Ask a question and hand back what was typed.  C<%opts> reach L<IO::Prompter>
-untouched: C<-echo> to mask what is typed, C<-in> and C<-out> to ask somewhere
-other than standard input.
+Asks a question and returns what the user typed.  C<%opts> go to
+L<IO::Prompter> unchanged.  For example, C<-echo> masks what the user types, and
+C<-in> and C<-out> ask somewhere other than standard input.
 
-Call this rather than C<IO::Prompter::prompt>, which reads from C<*ARGV> and so
-dies with C<Can't open *ARGV> in any program that has arguments -- the domain
-being one here.  C<@ARGV> is flattened for the call and C<local> to it, so it is
-whatever it was again by the time this returns.
+Call this and not C<IO::Prompter::prompt>.  That sub reads from C<*ARGV>, so it
+dies with C<Can't open *ARGV> in a program that has arguments, such as a domain.
+This sub makes C<*ARGV> C<local> to the call, so C<@ARGV> is the same again when
+it returns.
 
 =cut
 

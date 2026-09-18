@@ -21,65 +21,68 @@ use Getopt::Long ();
 
 =head2 DESCRIPTION
 
-How what recipes install from CPAN reaches the perl the C<perl> recipe built:
-that recipe's target calls this once for each step of its C<cpan_deps>, and the
-verbs are the steps' -- see L<Provisioner::Recipe::perl>:
+This script installs what recipes ask for from CPAN into the perl that the
+C<perl> recipe built.  The target of that recipe calls it once for each step of
+its C<cpan_deps>.  The verbs are the names of those steps, and
+L<Provisioner::Recipe::perl> documents them.
 
 =over 4
 
-=item * C<install> -- anything cpanm takes in place of a module name.
+=item * C<install> installs anything that cpanm takes in place of a module name.
 
-=item * C<installdeps> -- what the distribution in C<DIR> says it needs.
+=item * C<installdeps> installs what the distribution in C<DIR> says it needs.
 
-=item * C<dzil> -- what C<dzil authordeps> and then C<dzil listdeps> say is
-missing in C<DIR>, in that order, because C<dist.ini> names plugins and dzil
-cannot read it to answer the second until the first are installed.  A dzil that
-fails fails the step, rather than reading as nothing missing.
+=item * C<dzil> installs what C<dzil authordeps> and then C<dzil listdeps> say
+is missing in C<DIR>.  The order is necessary.  F<dist.ini> names plugins, and
+dzil cannot read it to answer C<listdeps> until those plugins are installed.  If
+dzil fails, the step fails.  A failure does not count as nothing missing.
 
-=item * C<pin> -- C<MODULE> at the version pkg-config reports for
-C<PKGCONFIG_PACKAGE>, asked when this runs.  C<Sys::Virt> is why: it has to
-match the C<libvirt> it builds against.
+=item * C<pin> installs C<MODULE> at the version that pkg-config reports for
+C<PKGCONFIG_PACKAGE> when this runs.  C<Sys::Virt> is the reason for this verb.
+Its version must match the C<libvirt> that it builds against.
 
 =back
 
 =head3 Which perl
 
-The newest under F</opt/perl5>, looked for each time this runs rather than
-written into the task, because that perl's path is its version and the version
-is whatever was current the day the guest was built.  Its cpanm, Module::Build
-and Dist::Zilla are there because F<build_latest_perl.sh> put them there before
-anything called this.
+The script uses the newest perl under F</opt/perl5>.  It looks for that perl
+each time it runs, because the path of the perl contains its version.  That
+version is the one that was current on the day the guest was built.
+F<build_latest_perl.sh> installs cpanm, Module::Build and Dist::Zilla into that
+perl before anything calls this script.
 
-Written for the system perl, which is what runs it.
+The system perl runs this script, so the script is written for it.
 
 =head3 Which release
 
-The one the mirror's own F<02packages.details.txt.gz> names: cpanm is run with
-C<--mirror-only>, so a module is looked up in the index of the mirror it is
-then fetched from.  Left to itself cpanm asks cpanmetadb, a separate service
-that can name a release the mirror no longer has -- and cpanm reports that fetch
-as C<OK> and fails on unpacking the empty file.  A mirror's index can be behind,
-but does not name a file that mirror is missing.
+The script installs the release that the F<02packages.details.txt.gz> of the
+mirror names.  It runs cpanm with C<--mirror-only>, so cpanm looks up a module
+in the index of the same mirror it downloads from.  Without that flag, cpanm
+asks cpanmetadb, which is a separate service.  cpanmetadb can name a release
+that the mirror no longer has.  cpanm then reports that download as C<OK> and
+fails when it unpacks the empty file.  The index of a mirror can be out of
+date, but it does not name a file that the mirror does not have.
 
-Except for a request the index cannot answer.  It names only the newest release
-of each module, so a spec that rules the newest out -- C<Module@version>, which
-is what C<pin> asks for, or a requirement with C<==>, C<!=> or C<< < >> in it --
-is resolved through MetaCPAN as before, and so is everything else on that cpanm
-command line.
+One kind of request is an exception.  The index names only the newest release
+of each module.  Some specs exclude the newest release: C<Module@version>, which
+is what C<pin> asks for, or a requirement that contains C<==>, C<!=> or
+C<< < >>.  cpanm resolves such a spec through MetaCPAN, without
+C<--mirror-only>.  All the other specs on that cpanm command line then resolve
+the same way.
 
 =head3 Whose checkout
 
-A C<dzil> directory is a checkout a recipe made and handed to its service user,
-and this runs as root, so the git that dzil's plugins run while answering
-C<listdeps> refuses it as a repository owned by somebody else.  That directory
-is trusted as a C<safe.directory> for the dzil commands asked of it and nothing
-else: as git's command-scope configuration, in C<GIT_CONFIG_COUNT> and its
-pairs, rather than written into anybody's F<.gitconfig>.
+A C<dzil> directory is a checkout that a recipe made and gave to its service
+user.  This script runs as root.  When dzil plugins run git to answer
+C<listdeps>, git refuses the checkout because another user owns it.  The script
+trusts that directory as a C<safe.directory> only for the dzil commands it
+runs there.  It sets this in the command-scope configuration of git, through
+C<GIT_CONFIG_COUNT> and its pairs.  It does not write to any F<.gitconfig>.
 
 =cut
 
-# Where the perl recipe builds.  A variable so that t/cpan_install.t can point
-# this at a tree of its own.
+# A variable, not a constant, so that t/cpan_install.t can point it at its own
+# tree.
 our $PERL_ROOT = '/opt/perl5';
 
 my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin ARGS\n";
@@ -137,8 +140,13 @@ sub main {
     return $rc;
 }
 
-# --mirror-only, unless one of the specs needs a release older than the newest,
-# which the mirror index does not list: see "Which release" above.
+=head2 @flags = mirror_only(@specs)
+
+Returns C<--mirror-only>, or an empty list if one of C<@specs> excludes the
+newest release.  See L</Which release>.
+
+=cut
+
 sub mirror_only {
     my @specs = @_;
     return ( grep { m{\@|~.*(?:<|!=|==)}aa } @specs ) ? () : ('--mirror-only');
@@ -149,8 +157,13 @@ sub usage {
     return 2;
 }
 
-# The bin directory of the perl to install into: the newest built under
-# PERL_ROOT, which is how every other consumer on a guest finds it too.
+=head2 $dir = perl_bin()
+
+Returns the F<bin> directory of the newest perl under C<$PERL_ROOT>.  See
+L</Which perl>.  Dies if no perl is built there.
+
+=cut
+
 sub perl_bin {
     my @built = sort glob("$PERL_ROOT/*/bin");
     die "cpan_install: nothing is built under $PERL_ROOT, so there is no perl to install into.  The perl recipe builds one; is it on this guest?\n"
@@ -158,9 +171,17 @@ sub perl_bin {
     return $built[-1];
 }
 
-# The two ways this touches anything outside itself, so that a test can stand
-# in for both.  run_in answers with the exit code, capture_in with the exit code
-# and then the lines.
+=head2 $rc = run_in($dir, @cmd)
+
+Runs C<@cmd> in C<$dir>, or in the current directory if C<$dir> is undef.
+Returns its exit code, as C<exit_code> gives it.  Dies if it cannot enter
+C<$dir>.
+
+This sub and C<capture_in> are the only ways the script touches anything
+outside itself, so that a test can replace both.
+
+=cut
+
 sub run_in {
     my ( $dir, @cmd ) = @_;
 
@@ -173,6 +194,14 @@ sub run_in {
     return $rc;
 }
 
+=head2 ($rc, @lines) = capture_in($dir, @cmd)
+
+Runs C<@cmd> in C<$dir>, or in the current directory if C<$dir> is undef.
+Returns its exit code, and then the lines it wrote to standard output.  Dies if
+it cannot enter C<$dir> or cannot start C<@cmd>.
+
+=cut
+
 sub capture_in {
     my ( $dir, @cmd ) = @_;
 
@@ -181,18 +210,22 @@ sub capture_in {
     open( my $fh, '-|', @cmd ) or die "cpan_install: cannot run $cmd[0]: $!\n";                  ## no critic (ProhibitPipeOpen) -- reading what the child said is the whole point of this sub
     my @lines = <$fh>;
 
-    # Unchecked on purpose: closing a pipe reports false whenever the child
-    # exited nonzero, which is the outcome this sub exists to hand back rather
-    # than die on.  The status it set is read out of $? on the next line.
+    # Unchecked, because close is false for any nonzero exit, which this sub
+    # returns instead of dying on.
     close $fh;    ## no critic (InputOutput::RequireCheckedSyscalls)
     my $rc = exit_code($?);
     chdir $was if defined $dir;
     return ( $rc, @lines );
 }
 
-# A finished child's $? as an exit code, the way a shell reports one: 127 for a
-# command that never ran, and 128 plus the signal for one a signal killed --
-# which $? >> 8 alone reports as a success.
+=head2 $rc = exit_code($status)
+
+Returns the C<$?> of a finished child as a shell reports it.  A command that
+did not run gives 127.  A command that a signal killed gives 128 plus the signal
+number, because C<<< $? >> 8 >>> alone reports that as success.
+
+=cut
+
 sub exit_code {
     my ($status) = @_;
 

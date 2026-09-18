@@ -1,12 +1,10 @@
-[%# The fleet the runner builds guests on.
+[%# The fleet of hypervisors on which the runner builds guests.
 
-    Always rendered, installed only when there is a hypervisor to name: an
-    absent file means "this machine", which is the right answer for a runner
-    that is its own hypervisor, and an empty one would mean the same thing much
-    less obviously.
+    Always rendered, and installed only if there is a hypervisor to name.  See
+    templates/ubuntu/trogrunner.tt.
 
-    pool_name beside pool_path, and partition, are the only two limits a guest
-    can be held to -- see QUOTAS in Provisioner::Recipe::trogrunner. -%]
+    pool_name with pool_path, and partition, are the only two limits on a
+    guest.  See QUOTAS in Provisioner::Recipe::trogrunner. -%]
 [% FOR name IN hypervisors.keys().sort() -%]
 [% SET hv = hypervisors.$name -%]
 [[% name %]]

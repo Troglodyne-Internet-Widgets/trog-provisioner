@@ -1,14 +1,12 @@
-[%# Discovery, alongside the streaming port.  1900/udp is SSDP, which is how
-    DLNA clients find the server; 32410/32412/32413/32414/udp is Plex GDM, the
-    protocol local servers and clients use to find each other; 32469/udp is
-    the DLNA server itself.  Without these a client that already has the
-    address can still reach it, but nothing on the LAN can find that address
-    in the first place.
+[%# The discovery ports, beside the streaming port.  DLNA clients find the
+    server with SSDP on 1900/udp.  Local Plex servers and clients find each
+    other with Plex GDM on 32410, 32412, 32413 and 32414/udp.  32469/udp is the
+    DLNA server.  Without these ports, a client that knows the address can
+    connect, but nothing on the LAN can find the address.
 
-    Opened unconditionally rather than behind a flag: a media server nobody can
-    find is the failure mode people actually hit, and a flag to turn discovery
-    off for someone who does not want GDM and DLNA answering on their LAN is
-    easy to add later if anyone asks for one. -%]
+    These ports are always open, with no flag to close them.  A media server
+    that nobody can find is the usual failure.  If somebody does not want GDM
+    and DLNA on their LAN, add a flag then. -%]
 [plexmediaserver]
 title=Plex Media Server
 description=Plex personal media streaming server

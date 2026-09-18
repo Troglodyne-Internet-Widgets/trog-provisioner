@@ -1,23 +1,23 @@
 [%# cloud-init network-config v1 for a guest, rendered by
     Provisioner::Recipe::ubuntu.
 
-    Two interfaces: the outbound bridge, which carries the addresses this guest
-    is reached at, and the libvirt NAT, which is how the hypervisor finds it
-    before those work.
+    It has two interfaces.  The outbound bridge carries the addresses that
+    reach this guest.  The libvirt NAT is how the hypervisor finds the guest
+    before those addresses work.
 
-    Matched on MAC rather than on name.  The names below are what each ends up
-    called; which card is which is decided by the address, because that is the
-    one thing about an interface we choose and the guest cannot disagree with.
+    Each interface matches on its MAC address, not on its name.  The names below
+    are what the guest calls each interface.  We choose the MAC address and the
+    guest cannot change it, so the MAC address decides which card is which.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of a
     string and swallows the template as far as the next quote. -%]
 ---
 [% IF !bridge_mac -%]
-[%# Nothing here defined this machine, so its MACs and interface names are not
-    ours to know: a service assigned them when it created the guest.  There is
-    no way to write a config matched on a MAC we were never told, and the
-    platform has already addressed the guest -- so say so, which is cloud-init
-    for leave the network alone. -%]
+[%# Nothing here defined this machine, so we do not know its MAC addresses or
+    interface names.  A service assigned them when it created the guest.  A
+    configuration cannot match on a MAC address that nobody gave us.  The
+    platform already gave the guest its addresses, so tell cloud-init to leave
+    the network alone. -%]
 network:
   config: disabled
 [% ELSE -%]
@@ -51,9 +51,9 @@ network:
 [% END -%]
 [% END -%]
 [% ELSE -%]
-[%# No addresses configured, so the bridge asks for one the same way the NAT
-    side does.  Which is rarely what you want on the outbound side, and is what
-    a guest with no ips in its provision.conf gets. -%]
+[%# With no addresses configured, the bridge uses DHCP, as the NAT side does.
+    A guest with no ips in its provision.conf gets this.  It is rarely what you
+    want on the outbound side. -%]
         - type: dhcp
 [% END -%]
     - type: physical

@@ -6,7 +6,7 @@
 [% script_dir %]/add_to_fstab [% mount.device %] [% mount.mountpoint %] [% mount.type %] [% mount.options %] [% mount.partition %]
 [% END -%]
 [% IF fuse.size() %]
-# this works because we generate them in the same order as we are splitting them!
+# mountN matches loop.index because fusemounts.txt has the units in the order of fuse.
 csplit --suppress-matched --quiet --digits 1 --prefix mount -- fusemounts.txt "/--SEPARATOR--/" "{*}"
 [% END -%]
 [% FOREACH mount IN fuse %]

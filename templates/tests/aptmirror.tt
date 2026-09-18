@@ -3,9 +3,9 @@ use warnings;
 
 use Test::More;
 
-# What this asserts is the configuration, never that the mirror is populated.
-# The first sync runs in the background for hours, so a test that waited for it
-# would fail every mirror host on the build that created it.
+# This asserts the configuration, never that the mirror is full.  The first
+# sync runs in the background for hours.  A test that waits for it fails every
+# new mirror host.
 
 my $spool  = '[% spool %]';
 my $root   = '[% mirror_root %]';
@@ -19,9 +19,9 @@ is( $nginx_active, 'active', 'nginx is running' );
 my $nginx_t = `nginx -t 2>&1`;
 like( $nginx_t, qr/test is successful/, 'and its configuration is valid' ) or diag $nginx_t;
 
-# The spool is served by address, because a guest fetching packages has one and
-# does not yet have a resolver.  Asking with the address as the Host is the only
-# way to find out that nginx routes it here rather than to some other server.
+# nginx serves the spool by address, because a guest that fetches packages has
+# no resolver yet.  Only a request with the address as the Host shows that nginx
+# routes it to this server.
 chomp( my $code = `curl -s -o /dev/null -w '%{http_code}' -H 'Host: $listen' 'http://127.0.0.1$path/' 2>/dev/null` );
 is( $code, '200', "the mirror answers at $path for a request addressed by IP" );
 
@@ -43,8 +43,7 @@ ok( -d $root, 'the directory nginx serves exists, so the vhost is not pointing a
 chomp( my $loaded = `systemctl show -p LoadState --value apt-mirror.service 2>/dev/null` );
 is( $loaded, 'loaded', 'the sync is a systemd unit' );
 
-# The default is ninety seconds.  A sync that gets killed leaves a partial spool
-# that nginx serves as though it were a mirror, which degrades quietly.
+# The default is ninety seconds.  aptmirror.service says why that is a problem.
 chomp( my $timeout = `systemctl show -p TimeoutStartUSec --value apt-mirror.service 2>/dev/null` );
 is( $timeout, 'infinity', 'and systemd will not time it out' );
 
@@ -67,8 +66,8 @@ cmp_ok( $free_gb, '>=', [% require_free_gb %], "at least [% require_free_gb %]GB
   . "for the sizes, and raise `size` in this domain's _global.";
 [% END %]
 
-# Where the sync actually got to, so the provision log says.  Not an assertion:
-# an empty mirror on the build that created it is expected.
+# The progress of the sync, for the provision log.  This is not an assertion,
+# because the mirror is empty on the build that created it.
 chomp( my $syncing = `systemctl is-active apt-mirror.service 2>/dev/null` );
 my $last = eval { do { open( my $fh, '<', "$spool/var/last_sync" ) or die $!; local $/; <$fh> } };
 diag( "apt-mirror is '$syncing'; last completed sync: " . ( $last // 'none yet' ) );

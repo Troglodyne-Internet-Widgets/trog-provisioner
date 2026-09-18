@@ -1,7 +1,7 @@
-[%# Not named syslog: ufw skips a profile whose section name is also a service
-    name in /etc/services -- syslog is 514/udp there -- and says so only as a
-    warning on stderr, so the profile is absent from `ufw app list`, no rule is
-    ever made from it, and nothing fails. -%]
+[%# Not named syslog.  ufw skips a profile whose section name is also a service
+    name in /etc/services, and syslog is 514/udp there.  ufw writes only a
+    warning to stderr.  The profile is then absent from `ufw app list`, no rule
+    comes from it, and nothing fails. -%]
 [logcollector]
 title=Log collector
 description=Syslog collection for the fleet, on the port this guest configured

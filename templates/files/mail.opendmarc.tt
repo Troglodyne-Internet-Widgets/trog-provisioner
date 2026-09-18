@@ -2,9 +2,8 @@
 AuthservID mail.[% domain %]
 TrustedAuthservIDs mail.[% domain %]
 
-# XXX this shit is so incredibly twitchy,
-# 0777 is the ONLY way it will work with chrooted postfix, sigh
-# running as any other user than opendmarc WILL NOT WORK
+# XXX Do not change UMask or UserID.  With a chrooted postfix, only a 0777
+# socket works, and only when opendmarc runs as the opendmarc user.
 UMask 000
 UserID opendmarc:postfix
 PidFile /run/opendmarc/opendmarc.pid

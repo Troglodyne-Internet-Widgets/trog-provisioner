@@ -22,23 +22,36 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Sets up application rules for all your enabled recipes (and whatever else is installed on the system).
+Allows every application profile that ufw knows.  That includes the profiles
+that this recipe renders for the enabled recipes, and the profiles of other
+installed packages.
 
-Optionally set up port forwarding.
+Limits the rate of new connections to ssh and to each port that a recipe
+listens on.  The networks in C<admin_networks> are exempt from these limits.
+
+Forwards the ports in C<port_forwards>, if you give any.
 
 =cut
 
 use File::Path qw{rmtree};
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Adds to C<admin_networks> every address of ours that reaches the guest, and
+returns C<%opts>.  It takes the addresses from C<transfer_ips>.  If that list
+is empty, it takes C<transfer_ip>.  Each address is added once, before the
+networks that the operator named.
+
+The provisioner fetches the payload over ssh many times, and then administers
+the guest over ssh.  These connections do not always come from the same
+address of ours.  If only one address is exempt, the rate limits count the
+other.
+
+=cut
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Every address the provisioner can arrive from is one, whether or not
-    # anybody said so: it fetches the payload over ssh repeatedly and then
-    # administers the guest over ssh again, and those are not always the same
-    # address of ours -- a remote hypervisor is reached over the guest's static
-    # address and a local one over its NAT lease.  Naming only the one the
-    # payload came from leaves the other counted by the limit.
     my @nets = @{ $opts{admin_networks} // [] };
     my @ours = @{ $opts{transfer_ips}   // [] };
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
@@ -50,18 +63,24 @@ sub enrich {
     return %opts;
 }
 
+=head2 $value = $recipe->resolve_conflict($path, $mine, $theirs)
+
+If two recipes name different limits for one port in C<rate_limits>, returns
+the higher limit.  Any other disagreement goes to
+L<Provisioner::Recipe/resolve_conflict>, which dies.
+
+A limit says where the traffic to a port stops being plausible.  The recipe
+that expects the most legitimate traffic knows that best.  If the lower limit
+wins, a quiet recipe throttles the users of a busy one.
+
+=cut
+
 sub resolve_conflict {
     my ( $self, $path, $mine, $theirs ) = @_;
 
-    # Two recipes listening on the same port each name a limit for it, and the
-    # higher one is the safe answer: a limit says where traffic to that port
-    # stops being plausible, and the recipe expecting the most legitimate
-    # traffic is the one that knows.  Taking the lower would let a quiet recipe
-    # throttle a busy one's users, so adding a recipe could break a working one.
     return $mine > $theirs ? $mine : $theirs
       if @$path == 2 && $path->[0] eq 'rate_limits';
 
-    # Anything else here is a genuine disagreement, and the base class says so.
     return $self->SUPER::resolve_conflict( $path, $mine, $theirs );
 }
 
@@ -70,25 +89,20 @@ sub args {
         type       => 'object',
         properties => {
 
-            # New connections a second a single source may open to a port
-            # before it is dropped.  ufw's own `limit` is six in thirty seconds,
-            # which is right for ssh and rate limits real visitors off a web
-            # server -- so setup-ufw-rules limits only OpenSSH and these are the
-            # real limits.
+            # The number of new connections a second that one source can open
+            # to a port before the firewall drops more.  These are the only
+            # limits.  setup-ufw-ratelimits writes them, and says why ufw's own
+            # `limit` is not used.
             #
-            # Only ssh is named here, because ssh is the one port every guest
-            # has whether or not any recipe asked for it.  The rest arrive from
-            # the recipes that actually listen, through their rate_limits: see
-            # Provisioner::Recipe::rate_limits.  Setting a port here still wins
-            # if it is higher, which is how an operator raises one.
+            # Only ssh is here, because every guest has ssh.  The other ports
+            # come from the recipes that listen on them, through
+            # Provisioner::Recipe/rate_limits.  If an operator sets a higher
+            # limit for a port here, the higher limit applies.
             #
-            # The default is on the port rather than on the map holding it.  A
-            # default one level up means "when this property is absent", and
-            # required_recipes hands rate_limits over whole -- so the first
-            # recipe that listened on anything supplied the key, and ssh's limit
-            # was never filled in on any guest that had one.  On the property it
-            # means "when this key is missing from the map", which is what was
-            # always meant by it.
+            # The default is on the port, not on the map.  A default on the map
+            # applies only when rate_limits is absent.  required_recipes gives
+            # rate_limits over whole, so any recipe that listens supplies the
+            # map.  A default on the port applies when that key is missing.
             rate_limits => {
                 type       => 'object',
                 default    => {},
@@ -97,12 +111,8 @@ sub args {
                 },
             },
 
-            # Networks allowed in without ufw's rate limit.  Its limit denies a
-            # source that opens six connections in thirty seconds, and a
-            # provision opens far more than that -- so without an exemption the
-            # provisioner throttles itself out of the guest partway through
-            # building it, and everything after that fails as "connection
-            # refused" on an address that worked a minute earlier.
+            # Networks that are exempt from rate_limits.  enrich adds every
+            # address of ours that reaches the guest.
             admin_networks => {
                 type    => 'array',
                 items   => { type => 'string' },
@@ -123,16 +133,24 @@ sub args {
     );
 }
 
-# Profiles for services whose ports this recipe can actually know, which means
-# the ones that are fixed.  A recipe hands ufw its rate_limits and nothing else,
-# so a profile here cannot name a port the other recipe made configurable --
-# redis and openvpn both did, and both are rendered by their own recipes now.
+# Profiles only for services with fixed ports.  A recipe gives ufw its
+# rate_limits and nothing else, so a profile here cannot know a configurable
+# port.  A recipe with a configurable port renders its own profile.
 my %template2rule = (
     'ufw.pdns.tt'            => 'ufw/pdns',
     'ufw.mail.tt'            => 'ufw/mail',
     'ufw.plexmediaserver.tt' => 'ufw/plexmediaserver',
     'ufw.garage.tt'          => 'ufw/garage',
 );
+
+=head2 %files = $recipe->template_files(@recipes)
+
+Removes the C<ufw> directory in C<output_dir> and makes a new, empty one.
+Returns the application profiles to render, as a map from template to output
+path.  The C<ufw.http.tt> profile is always in the map.  Each recipe in
+C<@recipes> that has a profile for fixed ports adds its own.
+
+=cut
 
 sub template_files {
     my ( $self, @recipes ) = @_;
@@ -142,7 +160,6 @@ sub template_files {
     rmtree $dir;
     mkdir $dir;
 
-    # Only render the profiles this guest actually needs
     my %ret = ( 'ufw.http.tt' => 'ufw/http' );
 
     return %ret unless @recipes;

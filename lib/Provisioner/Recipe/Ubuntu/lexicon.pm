@@ -16,9 +16,9 @@ Provisioner::Recipe::Ubuntu::lexicon - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else lexicon does is in the recipe this
-inherits from.
+A package name is a fact about a distribution, not about the software, so it is
+here.  The recipe that this class inherits from does everything else that lexicon
+does.
 
 =cut
 

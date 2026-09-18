@@ -2,68 +2,58 @@ mkdir -p /etc/redis
 mkdir -p /var/log/redis
 chown redis:redis /var/log/redis
 chmod 0750 /var/log/redis
-# redis has an `include` and no conf.d -- the included file has to be named from
-# the file doing the including, and a glob is a fatal error -- so configd
-# generates redis.conf from /etc/redis/redis.conf.d instead.  Writing a fragment
-# rather than the whole file is also what keeps the distribution's redis.conf:
-# it becomes 00-original, and everything we have no opinion about goes on
-# working the way the package intended.
+# redis has an `include` but no conf.d.  The including file must name each
+# included file, and a glob is a fatal error.  So configd makes redis.conf from
+# /etc/redis/redis.conf.d.  A fragment, not a whole file, also keeps the
+# redis.conf of the distribution as 00-original.  Each setting that the
+# provisioner does not set keeps the value from the package.
 #
-# The directory is made here as well as by `configd adopt`, with the mode adopt
-# would give it, because the makefile does not promise which of us runs first.
+# `configd adopt` also makes this directory, with this mode.  The makefile does
+# not set which of the two runs first.
 install -d -m 0750 -o root -g redis /etc/redis/redis.conf.d
-# 0600 root:root: the fragment can hold requirepass, and the only thing that
-# reads it is configd, running as root out of the unit's ExecStartPre.
+# 0600 root:root, because the fragment can hold requirepass.  Only configd
+# reads it, as root, from the ExecStartPre of the unit.
 install -m 0600 -o root -g root redis.conf /etc/redis/redis.conf.d/50-provisioner
-[%# The firewall profile for the port redis was configured with.  Declared as a
-    profile because that is what setup-ufw-rules applies -- it allows whatever
-    `ufw app list` reports -- and named redis-server because ufw skips a profile
-    whose section name is also in /etc/services, which is what the one shipped
-    under ufw was called, so it has never once been loaded. -%]
+[%# The firewall profile for the configured redis port.  It is a profile
+    because setup-ufw-rules allows each profile that `ufw app list` shows.
+    templates/files/redis.ufw.conf.tt says why its name is redis-server. -%]
 install -m 0644 -o root -g root redis_ufw.conf /etc/ufw/applications.d/redis-server
-[%# The RDB and the AOF -- whatever redis was being used for beyond a cache --
-    live in /var/lib/redis, and the package leaves that directory redis:redis
-    0750.  Both legs of the round trip remote_files promises run into that, and
-    neither of them used to happen until the fetch read the guest as root (see
-    issue #76): a 0750 directory owned by redis came back empty over an
-    unprivileged sftp session and said so to nobody.
+[%# The RDB and the AOF live in /var/lib/redis.  They are what redis holds
+    beyond a cache.  The package makes the directory redis:redis 0750.  The
+    fetch reads it as root, so it needs no other owner or mode.
 
-    Reading as root ended that, and with it the reason to hand the group on that
-    directory to the admin user: issue #98.  What restore_state moves in still needs
-    to end up owned by redis rather than whoever ran the fetch locally --
-    rsync only restores ownership when the receiving end is root, and the local
-    end of a fetch is not -- so the chown below stays; only the admin group and
-    the setgid bit that kept it on files redis wrote afterwards are gone.
+    restore_state leaves what it moves owned by the user that ran the fetch.
+    rsync sets the owner only when the receiving end is root, and the local end
+    of a fetch is not.  So the chown below gives the files back to redis.
 
-    Restoring has an ordering problem the other recipes do not.  redis is
-    already up by the time this runs -- cloud-init installs the package, and
-    installing it starts it -- so it owns the destination, and it reads an RDB
-    only at startup while writing one whenever it likes.  Anything put under a
-    running redis is therefore both ignored and doomed.  Hence stopping it
-    first.  But a stop is itself a save when there are snapshot points
-    configured, and the empty dump.rdb that leaves behind is exactly what makes
-    restore_state decline on the grounds that the destination already has state
-    in it.  So the directory is asked whether it holds anything while redis is
-    still up, and the snapshot the stop wrote is thrown away only if it did not.
-    A guest that really does have state keeps it and restore_state declines for
-    the right reason; a rebuilt one gets its keyspace back.  The postrun restart
-    at the end of this fragment is where redis reads what was put there.
+    The restore has an order problem that the other recipes do not have.
+    cloud-init installs the package, and the install starts redis.  So redis
+    runs before this fragment.  redis reads an RDB only when it starts, but it
+    writes one at any time.  So redis ignores a file put under it while it
+    runs, and later overwrites it.  For this reason the fragment stops redis
+    first.
 
-    One redis serves the whole guest, so this is the global fragment and it runs
-    once -- for whichever domain was provisioned into the guest first, which is
-    the domain directory the state travels in. -%]
+    If snapshot points are set, the stop also writes a snapshot.  That empty
+    dump.rdb makes restore_state decline, because the destination then has
+    content.  So the fragment asks whether the directory has content while
+    redis still runs.  It deletes the snapshot from the stop only if the
+    directory was empty before.  A guest with real state keeps it, and
+    restore_state declines correctly.  A rebuilt guest gets its keyspace back.
+
+    One redis serves the whole guest.  So this is the global fragment, and it
+    runs once, for the first domain provisioned into the guest.  The salvage
+    travels in the directory of that domain. -%]
 mkdir -p /var/lib/redis
 if [ -n "$$(find /var/lib/redis -mindepth 1 -print -quit 2>/dev/null)" ]; then HAD_STATE=1; else HAD_STATE=; fi; \
 systemctl stop redis-server || /bin/true; \
 if [ -z "$$HAD_STATE" ]; then rm -rf /var/lib/redis/*; fi
 [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/redis' /var/lib/redis
 chown -R redis:redis /var/lib/redis
-[%# Up again here rather than only at the end with the rest of the deferred
-    work.  redis was running for the whole provision before any of this existed,
-    since cloud-init starts it, and anything later in the makefile is entitled
-    to go on assuming that; this is only closing the window the stop above
-    opened, and is where redis reads the restored keyspace back in.  The queued
-    restart below is still what picks up the configuration configd merged. -%]
+[%# Start redis here, not only at the end with the other deferred work.
+    cloud-init starts redis, so later parts of the makefile expect it to run.
+    This start closes the gap that the stop above opened, and here redis reads
+    the restored keyspace.  The queued restart below loads the configuration
+    that configd merged. -%]
 systemctl start redis-server
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable redis-server

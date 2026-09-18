@@ -3,22 +3,20 @@ mkdir -p /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] /home/[% admin_user %]/bin
 chown [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/[% basedir %]
 [% IF admin_user != user %]
-[%# One admin home, and it holds one directory of that name -- so where a
-    machine hosts several domains the first one built keeps the link and the
-    rest must not die on it.  ln alone exits non-zero on a name already there,
-    which takes this target and everything after it down with it. -%]
+[%# The admin has one home.  If several domains on one machine use the same
+    basedir, the first domain built keeps the link.  ln fails on a name that
+    exists, and that stops this target and every target after it. -%]
 test -e /home/[% admin_user %]/[% basedir %] || sudo -u [% admin_user %] ln -s [% install_dir %]/[% domain %]/[% basedir %] /home/[% admin_user %]/[% basedir %]
 [% END %]
-[%# gh from its own archive rather than the distro.  Ubuntu noble ships 2.45.0,
-    which predates GitHub retiring the Projects-classic GraphQL field -- so
+[%# gh from its own archive, not from Ubuntu.  Ubuntu noble ships gh 2.45.0,
+    which is older than the removal of the Projects-classic GraphQL field.  So
     `gh pr edit` there fails with a deprecation notice about projectCards and
-    edits nothing, on a guest whose whole job is working on repositories. -%]
+    edits nothing. -%]
 curl -fsS https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg
 chmod 0644 /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
-[%# Checked on its own before the general update, so an archive refusing us
-    fails here naming itself rather than as apt noise and a bare error from the
-    install afterwards. -%]
+[%# Update this archive alone first, so that a failure names the archive.
+    Otherwise it shows as apt noise and a bare error from the install. -%]
 DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/github-cli.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
@@ -27,11 +25,10 @@ DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] gh
 cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [% FOR repo in repos_from %]
-[%# The token on stdin rather than in argv, where ps showed it to anyone on the
-    guest for as long as the clones took.  install -m 0600 first, so the file is
-    never briefly world-readable with a token already in it; the redirect is
-    opened by the root shell before sudo drops to the admin, so nothing but
-    root needs to be able to read it. -%]
+[%# The token goes on stdin, because ps shows argv to every user on the guest.
+    install -m 0600 makes the file before the token goes in, so the token is
+    never world-readable.  The root shell opens the redirect before sudo changes
+    to the admin, so only root needs to read the file. -%]
 install -m 0600 /dev/null [% install_dir %]/[% domain %]/.repos_for.token
 printf '%s' '[% repo.token %]' > [% install_dir %]/[% domain %]/.repos_for.token
 [% FOR entity in repo.repos_for %]
@@ -41,8 +38,8 @@ rm -f [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]
 [% packager_invocation | mark_raw %] [% FOR pkg IN extra_pkgs %] [% pkg %][% END %]
 [% IF modules.grep('perl').size() %]
-[%# --notest outright: what this smokes is the repositories own suites, which
-    smoke_perl_modules.pl runs with prove, rather than the suites of what they
-    depend on.  cpan_notest is the perl recipe setting and is not read here. -%]
+[%# --notest always, because this smokes the suites of the repositories and not
+    the suites of their dependencies.  smoke_perl_modules.pl runs those suites
+    with prove.  The cpan_notest setting of the perl recipe does not apply. -%]
 [% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl [% install_dir %]/[% domain %]/[% basedir %] [% script_dir %]/cpan_install --notest installdeps"
 [% END -%]

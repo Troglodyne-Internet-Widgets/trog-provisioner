@@ -18,8 +18,8 @@ use Provisioner::Utils();
 
 =head1 NAME
 
-Provisioner::DNSRecipe - who holds a domain's zone, and how anything here
-reaches it.
+Provisioner::DNSRecipe - which server holds the zone of a domain, and how
+lexicon gets to it.
 
 =head1 SYNOPSIS
 
@@ -39,76 +39,73 @@ reaches it.
 
 =head1 DESCRIPTION
 
-Writing an C<_acme-challenge> record means talking to whoever holds the zone,
-and this fleet has two answers: the C<pdns> a guest runs for its own name, and
-the registrar holding a public one.  They are the same thing to lexicon -- a
-provider, a credential, and sometimes an endpoint -- and different in every
-other way, which is what an interface is for.
+To answer a C<dns-01> challenge, something writes an C<_acme-challenge> record
+into the zone of the domain.  Two kinds of server hold a zone here.  The first
+is the C<pdns> server that a guest runs for its own name.  The second is the
+registrar that holds a public zone.  To lexicon, each one is a provider, a
+credential, and sometimes an endpoint.
 
-A recipe that can answer such a challenge inherits from this and says what
-lexicon needs to reach it.  Everything that writes a record renders from that
-one answer: L<Provisioner::Recipe::letsencrypt>'s dehydrated hook, and the
-per-domain shortcut L<Provisioner::Recipe::lexicon> installs.  Before this they
-were copies of the same knowledge, and they had already drifted -- the shortcut
-named an environment variable lexicon does not read, so it had never once been
-pointed at the API socket.
+A recipe that can answer a challenge inherits from this class.  It tells what
+lexicon needs to get to its server.  Everything that writes a record renders
+from that one answer.  This includes the dehydrated hook of
+L<Provisioner::Recipe::letsencrypt>, and the shortcut for each domain that
+L<Provisioner::Recipe::lexicon> installs.
 
 =head2 It is a recipe in the ordinary way
 
-This sits between L<Provisioner::Recipe> and the recipes that implement it, the
-way L<Provisioner::DistroRecipe> does for a distribution.  An implementation is
-a recipe like any other: it declares C<args>, it is configured out of
-F<recipes.yaml>, it renders a fragment if it has anything to install.  What this
-class adds is one question it has to answer.
+This class sits between L<Provisioner::Recipe> and the recipes that implement
+it.  L<Provisioner::DistroRecipe> does the same for a distribution.  An
+implementation is a recipe like all others.  It declares C<args>, it gets its
+configuration from F<recipes.yaml>, and it renders a fragment if it has
+something to install.  This class adds one question that it must answer:
+C<lexicon_credentials>.
 
 =head2 Which implementation a domain uses
 
-A domain under a reserved TLD is served by the guest itself, because no public
+The guest serves a domain under a reserved TLD itself, because no public
 registrar can hold a zone for one.  A domain with registrar credentials and no
-local server uses the registrar.  A guest with both is ambiguous, and
-L<Provisioner::Recipe::letsencrypt>'s C<dns_preference> is the tiebreaker that
-names which of the two holds the zone this name is served from.
+local server uses the registrar.  If a guest has both, the C<dns_preference> of
+L<Provisioner::Recipe::letsencrypt> tells which one holds the zone.  See
+C<implementation_for> for the full rules.
 
 =cut
 
-# The implementation that runs on the guest itself.
 our $LOCAL_IMPLEMENTATION = 'pdns';
 
-# RFC 2606 and RFC 6761 keep these for documentation, testing and private use,
-# so no public registrar holds a zone under one and the guest serves it or
-# nothing does.
+# RFC 2606 and RFC 6761 keep these for documentation, testing and private use.
+# So no public registrar holds a zone under one, and only the guest can serve it.
 our @RESERVED_TLDS = qw{test example invalid localhost};
 
 =head1 METHODS AN IMPLEMENTATION MUST ANSWER
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-How lexicon reaches the server holding this domain's zone, as:
+Returns how lexicon gets to the server that holds the zone of this domain, as
+these keys:
 
 =over 4
 
-=item * C<type> -- the lexicon provider name, which is also what names its
-environment variables and the shortcut installed for it.
+=item * C<type>: the name of the lexicon provider.  This name also names the
+environment variables of the provider and the shortcut installed for it.
 
-=item * C<user> -- the account, where the provider wants one.  Empty is normal;
-a token alone is what most of them take.
+=item * C<user>: the account, if the provider wants one.  Usually it is empty,
+because most providers take only a token.
 
-=item * C<key> -- the token lexicon authenticates with.
+=item * C<key>: the token that lexicon authenticates with.
 
-=item * C<opts> -- flags every lexicon invocation for this provider needs, as a
-string.  Empty for most.
+=item * C<opts>: flags that every lexicon command for this provider needs, as a
+string.  Usually it is empty.
 
-=item * C<extra> -- provider options beyond the credential, as a list of
-C<{ key =E<gt> ..., value =E<gt> ... }>.  Each becomes
-C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>, because lexicon derives an environment
-variable from the provider name plus the option name -- so C<--pdns-server>
-is C<PDNS_SERVER> here and the provider is prefixed around it.
+=item * C<extra>: provider options other than the credential, as a list of
+C<{ key =E<gt> ..., value =E<gt> ... }>.  Each one becomes
+C<LEXICON_E<lt>TYPEE<gt>_E<lt>KEYE<gt>>.  Lexicon makes the name of an
+environment variable from the provider name and the option name.  So
+C<--pdns-server> is C<PDNS_SERVER> here, and the provider goes around it.
 
 =back
 
-Dies in this class.  A recipe that cannot say how it is reached is not one
-anything can write a record through, and saying so beats rendering a hook that
-exports nothing and fails in the middle of an order.
+This class does not answer it, and dies.  Without this answer, the hook exports
+nothing and fails in the middle of an order.  An early failure is better.
 
 =cut
 
@@ -116,13 +113,11 @@ sub lexicon_credentials { return shift->_unanswered('lexicon_credentials') }
 
 =head2 $name = $recipe->local_implementation()
 
-Which implementation runs on the guest itself: C<pdns>, the server this fleet
-runs.
+Returns the implementation that runs on the guest itself: C<pdns>.
 
-What to require when only a server on this guest will do.
+Require it when only a server on this guest will do.  For example,
 L<Provisioner::Recipe::acmeca> validates a C<dns-01> challenge through the
-host's own resolver, so a registrar could not serve it however the tiebreaker
-fell.
+resolver of the host.  So a registrar can never serve that challenge.
 
 =cut
 
@@ -130,13 +125,13 @@ sub local_implementation { return $LOCAL_IMPLEMENTATION }
 
 =head2 $key = $recipe->tiebreaker_key()
 
-Which configuration key names the implementation a recipe prefers, where more
-than one could answer.  C<dns_preference>.
+Returns the configuration key that names the implementation a recipe prefers,
+when more than one can answer: C<dns_preference>.
 
-Declared here so C<bin/new_config> can resolve a substitutable dependency on
-this interface without knowing anything about the recipes that declare one: it
-asks the interface which key to read, and reads it out of the configuration of
-whichever recipe asked.
+C<implementation_for> reads its preference from this key.  A recipe that hands
+a preference down to another recipe uses this key to name it.
+L<Provisioner::Recipe::letsencrypt> does this for
+L<Provisioner::Recipe::lexicon>.
 
 =cut
 
@@ -144,14 +139,11 @@ sub tiebreaker_key { return 'dns_preference' }
 
 =head2 @tlds = $recipe->reserved_tlds()
 
-The top-level domains no public registrar holds a zone under, and so no public
-CA will issue for: they are not public suffixes, so nobody can demonstrate
-control of a name beneath one.
+Returns the top-level domains that no public registrar holds a zone under.  No
+public CA issues a certificate for a name under one of them.
 
-Asked rather than reached for.  L<Provisioner::Recipe::letsencrypt> needs the
-same list to decide which CA issues, which is a different question from which
-provider serves the zone -- but it is one list, and a second copy of it is a
-second thing to keep right.
+L<Provisioner::Recipe::letsencrypt> uses this list to choose the CA.  Ask for
+the list with this method.  Do not keep a second copy of it.
 
 =cut
 
@@ -159,26 +151,57 @@ sub reserved_tlds { return @RESERVED_TLDS }
 
 =head2 $name = $recipe->implementation_for(%opts)
 
-Which implementation serves this domain's zone: C<pdns> where the guest holds
-it, C<registrar> where somebody else does.
+Returns the implementation that serves the zone of C<domain>: C<pdns> if the
+guest holds it, and C<registrar> if another party holds it.
 
-Dies rather than guessing, and there are three ways to be told so.  A registrar
-named for a name under a TLD RFC 2606 reserves could never answer for it.  The
-local server asked for where none is configured is not there.  And a guest
-configured with both, naming neither, is a tie nothing here can settle -- so
-C<tiebreaker_key> is what settles it.
+It takes these options:
 
-C<configured> is what the domain is configured with and C<host_configured> what
-the guest holding it is, for a domain layered onto another; C<host> names that
-guest, and is used to say which one was looked at.  All three are passed in
-rather than fetched -- see C<_configures>.
+=over 4
 
-Asked of the domain's configuration rather than of the module list, because that
-list is not the same before and after the depsolver has run: the two callers
-here sit either side of it.  Both C<bin/new_config>, resolving a substitutable
-dependency on this interface, and L<Provisioner::Recipe::letsencrypt>, rendering
-the hook, ask this one question rather than each answering it -- which is how
-they came to disagree before.
+=item * C<domain>: the domain to ask about.
+
+=item * C<configured>: the configuration of the domain, as a hash reference.
+Required.
+
+=item * C<host>: the guest that the domain is layered onto, if there is one.
+Error messages name it.
+
+=item * C<host_configured>: the configuration of that guest, as a hash
+reference, or undef.
+
+=item * C<dns_preference>: optional.  The key is the one that
+C<tiebreaker_key> names.
+
+=back
+
+The caller passes the configurations in, and this method does not fetch them.
+Provisioner::Cookbook answers about the configuration that the environment
+names.  But F<bin/new_config> takes C<--recipes>, so the configuration of the
+run can be a different one.  Only the caller knows which one applies.
+
+Ask this method, and do not work out the answer again.  The depsolver in
+C<resolve_substitutable_dependency> in
+L<Provisioner::Cookbook> and
+L<Provisioner::Recipe::letsencrypt> both ask it.  It reads the configuration of
+the domain, not the module list, because the depsolver changes that list.
+
+It does not guess.  It dies in these conditions:
+
+=over 4
+
+=item * C<configured> is not a hash reference.
+
+=item * The preference names the registrar for a name under a reserved TLD.
+No registrar can answer for such a name.
+
+=item * The preference names C<pdns>, but the guest has no C<pdns>
+configuration.
+
+=item * The guest has both, and no preference names one of them.
+
+=item * The guest has neither.
+
+=back
 
 =cut
 
@@ -194,9 +217,8 @@ sub implementation_for {
 
     my $server = $opts{host} // $domain;
 
-    # Both candidates asked the same way and of the same places: the domain's
-    # own configuration and the machine's, since a domain layered onto another
-    # is served by what that guest runs.
+    # Look in the host configuration too, because the guest that a domain is
+    # layered onto serves it.
     my @where     = ( $opts{configured}, $opts{host_configured} );
     my $local     = ( $reserved || _configures( $LOCAL_IMPLEMENTATION, @where ) ) ? 1 : 0;
     my $registrar = _configures( 'registrar', @where );
@@ -212,9 +234,8 @@ sub implementation_for {
         return $stated;
     }
 
-    # No tie to break under a reserved TLD, whatever credentials a domain
-    # inherited: a public registrar is not a provider that could serve one, so
-    # there is only ever the one candidate.
+    # A registrar cannot serve a reserved TLD, so inherited credentials do not
+    # make a tie.
     return $LOCAL_IMPLEMENTATION if $reserved;
 
     return 'registrar'           if $registrar && !$local;
@@ -228,12 +249,13 @@ sub implementation_for {
 
 =head2 $name = $recipe->provider_for(%opts)
 
-Which implementation serves C<$opts{domain}>, read out of the configuration this
-run was pointed at.
+Returns the implementation that serves C<$opts{domain}>.  It reads the
+configuration that the environment names, from L<Provisioner::Cookbook>.
 
-C<implementation_for> with the three configurations fetched rather than handed
-over.  Use that one where a caller already holds them -- F<bin/new_config>
-resolving a substitutable dependency does -- and this one where it does not.
+This is C<implementation_for>, but it fetches the three configurations itself.
+If you already have them, call C<implementation_for>, as the depsolver of
+F<bin/new_config> does.  If not, call this method.  It dies as
+C<implementation_for> does.
 
 =cut
 
@@ -252,11 +274,13 @@ sub provider_for {
 
 =head2 %credentials = $recipe->credentials_for(%opts)
 
-What lexicon needs to reach whoever holds C<$opts{domain}>'s zone: C<provider_for>,
-asked for its C<lexicon_credentials>.
+Returns what lexicon needs to get to the server that holds the zone of
+C<$opts{domain}>.  It asks C<provider_for> for the provider, and then asks that
+provider for its C<lexicon_credentials>.
 
-Dies naming the provider where a domain is configured with one this installation
-does not have, or one that cannot answer a challenge at all.
+It dies as C<provider_for> does.  It also dies, with the name of the provider,
+if this installation has no recipe for that provider, or if that recipe cannot
+answer a challenge.
 
 =cut
 
@@ -268,10 +292,18 @@ sub credentials_for {
     return $class->_implementation($provider)->lexicon_credentials( _provider_config( $provider, %opts ) );
 }
 
-# The recipe implementing a provider, as a class.  Loaded rather than
-# instantiated: lexicon_credentials reads its arguments and nothing on the
-# object, and constructing one would want template_dirs a caller asking this has
-# no business knowing about.
+=head2 $class = $recipe->_implementation($provider)
+
+Returns the class of the recipe that implements C<$provider>.  It loads the
+class and does not make an object.  An object needs C<template_dirs>, which a
+caller of this method has no reason to know.  C<lexicon_credentials> reads only
+its arguments, so the class is enough.
+
+Dies if no recipe has that name, or if the recipe is not a
+Provisioner::DNSRecipe.
+
+=cut
+
 sub _implementation {
     my ( $class, $provider ) = @_;
 
@@ -282,13 +314,18 @@ sub _implementation {
     return $impl;
 }
 
-# What to ask an implementation its credentials with: that recipe's own block for
-# this domain, falling back to the machine's, since a domain layered onto another
-# is served by what that guest runs.
-#
-# Whatever the operator wrote there and nothing else.  A credential nobody
-# configured is the implementation's to settle -- see
-# Provisioner::Recipe::pdns/api_key_for.
+=head2 %args = _provider_config($provider, %opts)
+
+Returns the arguments for C<lexicon_credentials>: the configuration block of
+C<$provider> for C<$opts{domain}>, and C<domain>.  If the domain has no block,
+it uses the block of the guest that the domain is layered onto.
+
+It returns only what the operator configured.  If a credential is missing, the
+implementation decides what to do.  See C<api_key_for> in
+L<Provisioner::Recipe::pdns>.
+
+=cut
+
 sub _provider_config {
     my ( $provider, %opts ) = @_;
 
@@ -298,16 +335,14 @@ sub _provider_config {
     return ( %{$conf}, domain => $opts{domain} );
 }
 
-# Whether a recipe appears in any of the configurations handed over: the
-# domain's, and the machine's where it is layered onto another.
-#
-# Handed rather than fetched.  Asking Provisioner::Cookbook would answer about
-# the configuration the environment names, and a resolver that goes looking
-# cannot be told which one it is being asked about -- bin/new_config takes
-# --recipes, so the two can in principle be different files.  Every real
-# invocation points both at one directory, scratch guests included, so this is
-# not a fault anybody has hit; it is a question with no safe default, and the
-# caller is the only one that knows the answer.
+=head2 $bool = _configures($recipe, @where)
+
+Returns 1 if C<$recipe> is a key in one of the hash references in C<@where>,
+and 0 if not.  It ignores an element that is not a hash reference.  See
+C<implementation_for> for why the caller passes the configurations in.
+
+=cut
+
 sub _configures {
     my ( $recipe, @where ) = @_;
 

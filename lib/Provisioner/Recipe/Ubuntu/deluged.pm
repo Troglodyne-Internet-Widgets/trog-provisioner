@@ -16,9 +16,9 @@ Provisioner::Recipe::Ubuntu::deluged - Ubuntu's C<deps> for L<Provisioner::Recip
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else deluged does is in the recipe this
-inherits from.
+A package name belongs to the distribution, not to the software, so the package
+names are here.  The recipe that this module inherits from does everything else
+for deluged.
 
 =cut
 

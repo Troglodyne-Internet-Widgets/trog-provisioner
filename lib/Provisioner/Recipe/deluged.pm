@@ -21,48 +21,43 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Sets up a Deluge bittorrent seedbox daemon and serves completed downloads
-via nginx for public HTTP access at C<files.[domain]/torrents/>.
+Sets up a Deluge BitTorrent seedbox daemon, and serves the completed downloads
+over public HTTP.
 
-The nginx vhost uses C<autoindex> so directory listings are browsable and
-work as an HTTP feed for torrent apps.  Deluge web UI runs on C<web_port>
-and is proxied through the same nginx vhost at C</deluge/>.
+The vhost comes from C<nginxproxy>, which this recipe requires.  It serves the
+completed downloads at C</torrents/> on the domain, with C<autoindex> on.  So a
+person or a torrent app can browse the directory listings as an HTTP feed.  The
+vhost sends every other request to the Deluge web UI on C<web_port>.
 
-The BitTorrent listen ports (6881-6891) are registered as a UFW application
-profile so they are opened automatically when the C<ufw> recipe is also
-loaded.
-
-NOTE: Add C<files> to the C<aliases> section of ipmap.cfg for the domain
-so that C<files.[domain]> is covered by the SSL certificate.
+The recipe registers the BitTorrent listen ports (6881-6891) as a UFW
+application profile.  If the C<ufw> recipe is also loaded, it opens these ports.
 
 =head3 What survives a rebuild
 
-C<remote_files> salvages C</var/lib/deluged/config/state/>, and the makefile
-fragment puts it back before the daemon is started.  That directory is
-C<torrents.state> and the fastresume data beside it: the list of what deluged is
-meant to be seeding and how far through each one it got.  A rebuilt seedbox
-without it comes up idle, and nothing else on the machine can say what it was
-doing.
+C<remote_files> salvages C</var/lib/deluged/config/state/>.  C<restores> tells
+the C<data> target to put it back before the daemon starts.  That directory
+holds C<torrents.state> and the fastresume data next to it.  They are the list
+of torrents that deluged seeds, and the progress of each one.  Without them, a
+rebuilt seedbox starts idle, and nothing else on the machine knows what it did.
 
-The rest of the config directory is left behind on purpose.  This recipe
-rewrites C<core.conf> from its own template on every provision, so salvaging
-that preserves nothing.  The C<auth> file is a set of daemon credentials
-generated on first start which C<deluge-web> copies into its own config, and
-restoring one half of that pair gives a web UI that cannot talk to the daemon it
-is running against; generated fresh together they agree.  Something that
-regenerates correctly does not belong in C<remote_files>.
+The recipe does not salvage the rest of the configuration directory, on purpose:
 
-The fragment used to give the admin user the group on the path down to
-C<state/>, 0750 on the directories and 0640 on what is in them -- from when the
-fetch ran as that user and a tree owned C<debian-deluged:debian-deluged> came
-back empty and said nothing about it. The fetch reads the guest as root now
-(issue #76), so that is no longer needed, and issue #98 took it back out: the
-path stays C<debian-deluged:debian-deluged>, mode unchanged. Salvaging the
-whole config directory, which is what this recipe asked for before, would still
-be wrong even though the fetch could now read it: C<core.conf> is rewritten
-from its own template on every provision, and C<auth> is regenerated together
-with the web UI's copy of it, so a salvage of either preserves nothing worth
-having.
+=over 4
+
+=item * The recipe writes C<core.conf> from its own template on every new guest,
+so a salvaged copy preserves nothing.
+
+=item * The daemon generates the C<auth> file of credentials on first start, and
+C<deluge-web> copies them into its own configuration.  If you restore only one
+half of that pair, the web UI cannot talk to its daemon.  Two halves that are
+generated together agree.
+
+=back
+
+A file that regenerates correctly does not belong in C<remote_files>.
+
+The fetch reads the guest as root.  So the whole path down to C<state/> stays
+C<debian-deluged:debian-deluged>, and no other account gets access to it.
 
 =cut
 
@@ -89,10 +84,10 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One deluged, one F</var/lib/deluged/config/core.conf>, and the download
-location in it is this domain's directory.  A second domain would point the
-daemon at its own and leave the first with a client writing somewhere it does
-not look.
+False.  There is one deluged and one F</var/lib/deluged/config/core.conf>, and
+its download location is the directory of this domain.  A second domain points
+the daemon at its own directory.  Then the client of the first domain writes to
+a place that the first domain does not look.
 
 =cut
 
@@ -125,9 +120,7 @@ sub restores {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # The torrent state only.  The configuration around it is regenerated
-        # every provision and the daemon credentials have to be, so this is the
-        # whole of what a rebuild cannot make again for itself.
+        # The torrent state only.  See "What survives a rebuild" above.
         '/var/lib/deluged/config/state/' => 'deluged/state/',
     );
 }

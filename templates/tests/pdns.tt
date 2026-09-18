@@ -11,23 +11,19 @@ my $recursor = `systemctl is-active pdns-recursor 2>/dev/null`;
 chomp $recursor;
 is($recursor, 'active', 'pdns-recursor is running');
 
-# The release train the recipe asked for.  This used to install from
-# auth-master, PowerDNS's development branch, so guests ended up running
-# 5.1.0~alpha1+master.380 -- whatever had landed on master that morning.
+# A release train, not a development build from auth-master.
 my $version = `pdns_server --version 2>&1`;
 unlike($version, qr/alpha|beta|rc\d|master/i, 'pdns is a release, not a development build')
     or diag $version;
 
-# And new enough for the API socket.  webserver-address takes a unix socket path
-# only from 5.0.0; on 4.9 pdns_server will not start at all, saying "Unable to
-# convert presentation address" -- to its own log, which is not the journal.
+# New enough for the API socket.  webserver-address takes a unix socket path
+# only from 5.0.0.  On 4.9, pdns_server does not start, and it says "Unable to
+# convert presentation address" in its own log, not in the journal.
 my ($major) = $version =~ m/(\d+)\.\d+\.\d+/;
 ok($major && $major >= 5, "pdns is 5.x or newer, which the socket API needs (got $major)")
     or diag $version;
 
-# Chrooted, with every path it opens named relative to that root.  The unit was
-# given a bare --chroot, which takes a directory and had none, so pdns_server
-# exited before logging anywhere.
+# pdns runs in a chroot, and names every path that it opens relative to it.
 my $exec = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
 like($exec, qr{--chroot=/var/spool/powerdns\b}, 'pdns chroots into its spool directory')
     or diag $exec;
@@ -36,14 +32,13 @@ my $domain_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/sqlite.conf'; <
 like($domain_conf, qr{^gsqlite3-database=/zones\.db$}m,
     'the database is named relative to the chroot') or diag $domain_conf;
 
-# And it is where that resolves to from outside.
+# The same file, as the host sees it.
 my $zonedb = '/var/spool/powerdns/zones.db';
 ok(-s $zonedb, 'which is /var/spool/powerdns/zones.db on the host');
 
-# Whichever way this guest got its database -- loaded from the zonefile on a
-# first build, or handed back the previous guest's on a rebuild -- it has to be
-# answering for this domain by the end of it.  The rebuild is the case that used
-# to come out empty, and the case the guard on the zone load can now break.
+# The database must answer for this domain, whether a first build loaded it
+# from the zonefile or a rebuild restored it.  The guard on the zone load can
+# break the rebuild case.
 my $domain_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM domains WHERE name='[% domain %]'" 2>&1` // '';
 chomp $domain_rows;
 is($domain_rows, '1', 'the zone database answers for this domain, exactly once') or diag $domain_rows;
@@ -52,11 +47,11 @@ my $record_rows = `sqlite3 '$zonedb' "SELECT COUNT(*) FROM records r JOIN domain
 chomp $record_rows;
 ok($record_rows =~ m/^[0-9]+$/ && $record_rows > 0, "and has records for it ($record_rows)") or diag $record_rows;
 
-# restore_state takes the salvage away when it puts it back, so one still
-# sitting in the domain directory means it declined.  Declining is the right
-# answer against a guest that already had its zones -- it is the wrong one while
-# the salvage holds records this database has never seen, which is a rebuild
-# that threw away every zone edit lexicon or DCV made since the last provision.
+# restore_state removes the salvage when it restores it, so a salvage still in
+# the domain directory means that it declined.  That is correct for a guest that
+# already had its zones.  It is wrong when the salvage holds records that this
+# database does not have.  The rebuild then lost every zone edit since the last
+# provision.
 my $salvaged = '[% install_dir %]/[% domain %]/pdns/zones.db';
 SKIP: {
     skip 'no previous guest was salvaged from', 1 unless -s $salvaged;
@@ -68,21 +63,19 @@ SKIP: {
         or diag "salvage at $salvaged was never restored into $zonedb";
 }
 
-# The socket itself, which is what lexicon talks to.
+# The API socket, which lexicon uses.
 my $api = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/api.conf'; <> } // '';
 my ($sock) = $api =~ m/^webserver-address=(\S+)/m;
 SKIP: {
     skip 'the API is not on a unix socket', 1 unless $sock && $sock =~ m{^/};
-    # Named inside the chroot, so it appears under the spool from out here.
+    # The path is inside the chroot, so on the host it is under the spool.
     my $onhost = $sock =~ m{^/var/spool/powerdns/} ? $sock : "/var/spool/powerdns$sock";
     ok(-S $onhost, "the API socket is at $onhost") or diag $api;
 }
 
-# One key, presented by everything that talks to this API.  The server is the
-# guest's rather than the domain's, so the credential is settled once per guest
-# and read back by whoever needs it -- see Provisioner::Recipe::pdns/api_key_for.
-# A second one is not a warning, it is a 401 on every challenge, and the only
-# place that shows is the fetcher failing long after this target went green.
+# Every client of this API presents one key.  See api_key_for in
+# Provisioner::Recipe::pdns.  A different key gets a 401 on every challenge,
+# and that shows only when the fetcher fails, after this target passed.
 my ($api_key) = $api =~ m/^api-key=(\S+)/m;
 ok($api_key && length($api_key) >= 32, 'the API is configured with a credential')
     or diag $api;
@@ -91,9 +84,8 @@ my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]'; <> } // '';
 SKIP: {
     skip 'the API has no key to compare against', 1 unless $api_key;
 
-    # One shortcut per domain now, for whichever provider holds its zone -- so a
-    # guest running this server for a domain the registrar holds has one that
-    # talks to the registrar, and nothing to say about this key.
+    # There is one shortcut per domain, for the provider that holds its zone.
+    # If the registrar holds the zone, the shortcut does not use this key.
     skip 'this domain writes its records through another provider', 1
         unless $shortcut =~ m/^export LEXICON_POWERDNS_/m;
 
@@ -102,8 +94,8 @@ SKIP: {
         or diag "shortcut has " . ($shortcut_key // '(none)');
 }
 
-# dehydrated's hook, where the domain also runs letsencrypt.  A guest running
-# this server for something else has no hook and nothing to disagree with.
+# The hook of dehydrated, if the domain also runs letsencrypt.  Without
+# letsencrypt, the guest has no hook to compare.
 my $hook_path = '/etc/dehydrated/hooks/[% domain %].sh';
 SKIP: {
     skip 'this domain does not run dehydrated', 1 unless $api_key && -f $hook_path;
@@ -118,9 +110,8 @@ my $recursor_conf = do { local (@ARGV, $/) = '/etc/powerdns/recursor.conf'; <> }
 my $zones_file    = '/etc/powerdns/forward-zones';
 my $zones         = do { local (@ARGV, $/) = $zones_file; <> } // '';
 
-# Zones go in forward-zones-file, one per line, rather than into a fragment in
-# recursor.d: the recursor refuses a file using `forward-zones+=` outright.
-# templates/pdns.tt has the account.
+# Zones go in forward-zones-file, one per line, not in a fragment in
+# recursor.d.  templates/ubuntu/pdns.tt says why.
 like($recursor_conf, qr{^forward-zones-file=\Q$zones_file\E}m,
     'the recursor is pointed at a forward zones file') or diag $recursor_conf;
 ok(-f $zones_file, 'and that file exists');
@@ -128,39 +119,36 @@ ok(-f $zones_file, 'and that file exists');
 like($zones, qr/^\Q[% domain %]\E=127\.0\.0\.1:2500$/m,
     'this domain forwards to the authoritative server on 2500') or diag $zones;
 
-# One line per zone, however many times this has been provisioned.
+# One line per zone, however many times the guest was provisioned.
 my %seen;
 my @dupes = grep { $seen{$_}++ } grep { m/\S/ } split m/\n/, $zones;
 is_deeply(\@dupes, [], 'no forward zone is listed twice') or diag $zones;
 
-# And nothing left over from somebody checking that recursion worked.
+# No zone is left from a manual check of recursion.
 unlike($zones, qr/^test\.test=/m, 'no hardcoded test.test forward zone') or diag $zones;
 
-# Nothing should be dropping config fragments into recursor.d any more.
+# Nothing writes configuration fragments into recursor.d.
 ok(!-e '/etc/powerdns/recursor.d/[% domain %].conf',
     'no per-domain fragment in recursor.d');
 
-# The unit configure_pdns rewrites.  It used to end the command line with a
-# bare --chroot, which takes a value and was given none, so pdns_server refused
-# to start every time and the only thing said out loud was systemd's "Failed to
-# start pdns.service".
+# The unit that configure_pdns rewrites.  A --chroot with no value stops
+# pdns_server, and systemd says only "Failed to start pdns.service".
 my $execstart = `systemctl show -p ExecStart --value pdns 2>/dev/null`;
 like($execstart, qr{/usr/sbin/pdns_server}, 'the pdns unit runs pdns_server') or diag $execstart;
 unlike($execstart, qr/--chroot(?![=\w])/, 'and not with a --chroot that has no value')
     or diag $execstart;
 
 
-# chroot(2) needs CAP_SYS_CHROOT, so a pdns_server the unit starts as User=pdns
-# never enters the chroot -- and then every path in its configuration, all of
-# which are written relative to that root, points somewhere on the real
-# filesystem that either does not exist or is not its to write.
+# chroot(2) needs CAP_SYS_CHROOT, so a pdns_server that starts as User=pdns
+# never enters the chroot.  Every path in its configuration is relative to that
+# root, so each one then points to the wrong place on the real filesystem.
 my $unit_user = `systemctl show -p User --value pdns 2>/dev/null`;
 chomp $unit_user;
 ok($unit_user eq 'root' || $unit_user eq '', 'pdns starts with the privilege it needs to chroot') or diag "User=$unit_user";
 
-# Both sets, not just the bounding one: the ambient set is what the process
-# actually starts holding, and a pdns that can chroot but cannot setuid spends
-# its life failing to drop privileges once a second.
+# Both sets, not only the bounding set.  The process starts with the ambient
+# set.  A pdns that can chroot but cannot setuid fails to drop privileges once a
+# second.
 foreach my $set (qw{CapabilityBoundingSet AmbientCapabilities}) {
     my $caps = `systemctl show -p $set --value pdns 2>/dev/null`;
     like($caps, qr/cap_sys_chroot/i, "$set lets it chroot");
@@ -171,15 +159,14 @@ my $global_conf = do { local (@ARGV, $/) = '/etc/powerdns/pdns.d/00-global.conf'
 like($global_conf, qr/^setuid=pdns$/m, 'and gives it up itself once it is inside');
 like($global_conf, qr/^setgid=pdns$/m, 'both halves of it');
 
-# Which is the whole point: the API socket lands inside the chroot, where
-# synczones and the patched lexicon look for it.
+# The API socket is inside the chroot, where synczones and the patched lexicon
+# look for it.
 ok(-S '/var/spool/powerdns/api.sock', 'the API socket exists, so the webserver bound it')
     or diag `systemctl status pdns --no-pager -n 15 2>&1 | tail -8`;
 
-# pdns runs as pdns and the payload arrives owned by the admin user, so a
-# fragment moved into place and left alone is one pdns cannot read -- it falls
-# back to the packaged defaults, binds 0.0.0.0:53 on top of the recursor, and
-# exits.  Which looks like anything except a permissions problem.
+# pdns runs as pdns, and the payload arrives owned by the admin user.  If pdns
+# cannot read a fragment, it uses the packaged defaults, binds 0.0.0.0:53 on top
+# of the recursor, and exits.  Nothing in that says it is a permissions problem.
 foreach my $fragment (qw{00-global.conf sqlite.conf api.conf}) {
     my $path = "/etc/powerdns/pdns.d/$fragment";
     ok(-f $path, "$fragment is installed");
@@ -189,46 +176,43 @@ foreach my $fragment (qw{00-global.conf sqlite.conf api.conf}) {
     ok($st[2] & 0040, "$fragment is group readable, so pdns can actually read it");
 }
 
-# What the fragments are for: without them pdns takes the packaged default of
-# 0.0.0.0:53, which is where the recursor already is.
+# Without the fragments, pdns takes the packaged default of 0.0.0.0:53, where
+# the recursor already is.
 my $ports = `ss -lnup 2>/dev/null`;
 like($ports, qr/127\.0\.0\.1:2500/, 'pdns is on the port the recipe puts it on') or diag $ports;
 
-# The recursor forwards this zone to the authoritative half, and it validates
-# DNSSEC by default -- so without a negative trust anchor it answers SERVFAIL
-# for the one zone this guest exists to serve, while resolving everything else.
-# Nothing noticed until an ACME challenge could not be seen.
 # The zonefile as pdns loaded it.  $ORIGIN is this domain, so a name written
-# without a trailing dot has the origin put on it again -- and an alias is
-# already the whole name.  That made www.[% domain %] answer only as
-# www.[% domain %].[% domain %], on every guest, with nothing noticing: the
-# letsencrypt test asserts the certificate SAN rather than resolution.
+# without a trailing dot gets the origin again, and an alias is already the
+# whole name.
 #
-# Asserted against the zonefile rather than against what resolves, because the
-# dnsrecords recipe publishes the same names through lexicon -- so a resolution
-# test would pass on its work rather than on this zone being right.
+# Checked against the zonefile, not against what resolves, because the
+# dnsrecords recipe publishes the same names through lexicon.  A resolution
+# test passes on its work, not on this zone.
 my $zonefile = do { local (@ARGV, $/) = '/var/spool/powerdns/[% domain %]/bind.zone'; <> } // '';
 ok(length $zonefile, 'the zonefile pdns loaded its zone from is still on the guest');
 unlike($zonefile, qr/\Q[% domain %].[% domain %]\E/, 'no name in it carries the origin twice')
     or diag $zonefile;
 
-# And nothing in the zone the server actually answers from, whoever put it there.
+# Nor in the zone that the server answers from, whoever wrote it.
 my $served = `/opt/lexicon/[% domain %] list CNAME --output=JSON 2>&1`;
 unlike($served, qr/\Q[% domain %].[% domain %]\E/, 'nor in the zone the server answers from')
     or diag $served;
 
-# Each alias resolving, which is the thing the doubling actually cost.
+# Each alias resolves.
 my @aliases = qw([% FOREACH alias IN full_aliases.sort() %][% alias %] [% END %]);
 foreach my $alias (@aliases) {
     my $answer = `dig \@127.0.0.1 -p 53 +short '$alias' 2>&1`;
     like($answer, qr/\S/, "$alias resolves to something") or diag $answer;
 }
 
+# The recursor forwards this zone to the authoritative server, and it validates
+# DNSSEC by default.  Without a negative trust anchor, it answers SERVFAIL for
+# the zone that this guest serves.
 my $status = `dig \@127.0.0.1 -p 53 '[% domain %]' SOA 2>&1`;
 like($status, qr/status: NOERROR/, 'the recursor answers for our own zone, rather than failing to validate it')
     or diag $status;
 
-# Per zone, not by turning validation off: something bogus must still be bogus.
+# The anchor is per zone, so a zone that fails validation still gets SERVFAIL.
 my $bogus = `dig \@127.0.0.1 -p 53 dnssec-failed.org A 2>&1`;
 SKIP: {
     skip 'no route to the public internet', 1 unless $bogus =~ m/status:/;

@@ -1,27 +1,24 @@
-[%# The account step-ca runs as.  It owns the intermediate key and the database
-    and nothing else; the certificates stay root-owned and world readable. -%]
+[%# The account that step-ca runs as.  It owns only the intermediate key and
+    the database.  The certificates stay owned by root and readable by all. -%]
 id -u step-ca >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d [% steppath %] step-ca
 install -d -o root    -g root    -m 0755 [% steppath %] [% steppath %]/certs [% steppath %]/config
 install -d -o step-ca -g step-ca -m 0700 [% steppath %]/secrets
 install -d -o step-ca -g step-ca -m 0750 [% steppath %]/db
-[%# The fleet authority the provisioner holds the key to, and the intermediate
-    it signed for this guest.  step-ca is handed the root only to chain to: the
-    root key never leaves the provisioner, which is what lets this be the same
-    authority the fetch cache uses. -%]
+[%# The fleet authority and the intermediate that it signed for this guest.
+    step-ca gets only the certificate of the root, to chain to.  The root key
+    stays on the provisioner.  See perldoc Provisioner::Recipe::acmeca. -%]
 install -o root    -g root    -m 0644 acmeca-root.crt         [% steppath %]/certs/root_ca.crt
 install -o root    -g root    -m 0644 acmeca-intermediate.crt [% steppath %]/certs/intermediate_ca.crt
 install -o step-ca -g step-ca -m 0600 acmeca-intermediate.key [% steppath %]/secrets/intermediate_ca_key
 install -o root    -g root    -m 0644 acmeca.ca.json          [% steppath %]/config/ca.json
-[%# Permanently, unlike the copy the fetch cache installs of this same
-    certificate:
-    scripts/fetch_via_cache installs that one for the length of the build and
-    takes it out again before the guest tests run, so a certificate issued here
-    would stop verifying exactly when something came to check it. -%]
+[%# Installed for good.  scripts/fetch_via_cache installs its copy of this
+    certificate only for the build, and removes it before the guest tests run.
+    Without this copy, a certificate from this CA fails when a test checks it. -%]
 install -o root -g root -m 0644 acmeca-root.crt /usr/local/share/ca-certificates/trog-acmeca.crt
 update-ca-certificates >/dev/null
-[%# The binary.  Found rather than named: the directory inside the release
-    tarball carries the version, and a layout that changes upstream would
-    otherwise install nothing and fail later at ExecStart. -%]
+[%# The binary.  find locates it, because the directory in the tarball carries
+    the version.  If upstream changes the layout, a fixed path installs nothing
+    and ExecStart fails later. -%]
 INSTALLED=$$(/usr/local/bin/step-ca version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
 if [ "$$INSTALLED" != "[% version %]" ]; then \
 	ARCH=$$(dpkg --print-architecture); \
@@ -36,7 +33,7 @@ if [ "$$INSTALLED" != "[% version %]" ]; then \
 fi
 install -o root -g root -m 0644 acmeca.service /etc/systemd/system/acmeca.service
 systemctl daemon-reload
-[%# Started here rather than queued: the fetcher letsencrypt queues asks this
-    for a certificate during the postrun, so it has to be answering by then. -%]
+[%# Started now and not queued.  The fetcher that letsencrypt queues asks this
+    CA for a certificate during the postrun. -%]
 systemctl enable --now acmeca
 echo 'acmeca: issuing from the fleet authority at https://localhost:[% port %]/acme/trog/directory'

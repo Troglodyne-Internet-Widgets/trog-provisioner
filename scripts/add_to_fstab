@@ -12,9 +12,8 @@ PARTITION=${5:-1}
 
 ACTUAL_TARGET=$(grep "^$TARGET" /root/devices.map | awk -F '=' '{print $2}')
 
-# An unknown device used to be written into fstab regardless, as a line
-# beginning with a space: a broken fstab, and a guest that may not come back
-# from a reboot.  Refuse instead.
+# Refuse an unknown device, because its fstab line is broken and the guest can
+# fail to boot.
 [ -n "$ACTUAL_TARGET" ] || {
     echo "add_to_fstab: no device for '$TARGET' in /root/devices.map" >&2
     exit 1
@@ -29,9 +28,7 @@ mkdir -p "$LINK_NAME"
 
 LINE="$ACTUAL_TARGET $LINK_NAME $TYPE $OPTIONS 0 0"
 
-# Appended only when it is not already there.  What was here rewrote the whole
-# file every run -- sorting every entry into a different order and dropping
-# every comment along the way -- to achieve the same thing.
+# Append only a line that is not there, so the order and comments of fstab stay.
 if ! grep -qxF "$LINE" /etc/fstab; then
     cp /etc/fstab /etc/fstab.bak
     printf '%s\n' "$LINE" >> /etc/fstab

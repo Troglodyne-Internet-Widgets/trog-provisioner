@@ -1,18 +1,14 @@
 #!/bin/bash
 # Usage: wait_for_iface <interface> <timeout_seconds>
+#
+# Wait until the interface exists.  Exit 124 if it does not exist after
+# timeout_seconds, which is 30 by default.
 IFACE="${1:?Usage: wait_for_iface <interface> <timeout_seconds>}"
 TIMEOUT="${2:-30}"
 
-# Exported, not passed as a trailing word.  A word after the -c string becomes
-# the inner shell's $0, so IFACE was never set in there -- which made this
-#   ip link show        (no argument: lists everything)
-#   | grep -Po          (no pattern: a usage error, and no output)
-#   [ "" = "" ]         (true on the first pass)
-# so it returned success in a hundredth of a second for any interface at all,
-# including ones that cannot exist.  Nothing waited for a tunnel that was never
-# coming up.
+# Export IFACE, and do not pass it as a word after the -c string.  That word
+# becomes $0 of the inner shell, not a variable.
 export IFACE
 
-# `ip link show <iface>` already exits non-zero when there is no such interface,
-# so there is nothing for grep to do.
+# `ip link show <iface>` exits non-zero when the interface does not exist.
 timeout "$TIMEOUT" bash -c 'until ip link show "$IFACE" >/dev/null 2>&1; do sleep 1; done'

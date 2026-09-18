@@ -1,43 +1,36 @@
 #!/bin/bash
 
-# Take a snapshot of garage's metadata that can actually be carried off the guest.
+# Take a snapshot of the garage metadata that the fetch can carry off the guest.
 #
-# The objects under [% data_dir %] are ordinary files and are salvaged as they
-# are.  The metadata is not: it is an LMDB database, and LMDB writes
-# db.lmdb/data.mdb and lock.mdb 0600 whatever the mode of the directory holding
-# them.  Root can read those, so the fetch is no longer what stops us taking the
-# database itself -- this is: a live LMDB copied out from under a running writer
-# is a database with a torn page in it, and it restores looking fine.
+# The objects under [% data_dir %] are ordinary files, and the fetch copies them
+# as they are.  The metadata is an LMDB database.  A copy of a live LMDB
+# database has torn pages, and it restores as if it were good.
 #
-# So garage is asked for a snapshot instead, which is what `meta snapshot` is
-# for, and that is what remote_files names.  It is written under
-# [% metadata_dir %]/snapshots by garage itself, and made readable here
-# afterwards.
+# So this script asks garage for a snapshot with `meta snapshot`, and
+# remote_files names the snapshots.  garage writes them under
+# [% metadata_dir %]/snapshots, and this script then sets their owner and mode.
 #
-# Old ones are pruned to the last few: a snapshot is the size of the metadata,
-# and the point of keeping more than one is that the newest may have been taken
-# during whatever went wrong.
+# The script keeps only the newest few.  A snapshot is as large as the
+# metadata.  More than one is kept because the newest one can come from the
+# time when the problem occurred.
 
 set -euo pipefail
 
 SNAPDIR='[% metadata_dir %]/snapshots'
 KEEP=3
 
-# --all would ask every node in the cluster; this guest is responsible for its
-# own metadata and nobody else's.
+# Not --all, which asks every node in the cluster.  This guest keeps only its
+# own metadata.
 /usr/local/bin/garage meta snapshot
 
-# garage names them by timestamp, so the newest sorts last.  A snapshot it did
-# not manage to write is not a thing to prune towards.
+# If garage wrote no snapshot, stop here and prune nothing.
 if [ ! -d "$SNAPDIR" ]; then
     echo "garage-snapshot.sh: garage wrote no snapshot under $SNAPDIR" >&2
     exit 1
 fi
 
-# garage's own, and nobody else's.  The fetch reads the guest as root now (issue
-# #76), so the admin group and the setgid bit that used to buy it a read here
-# widen nothing but the metadata, which says what every object in the store is
-# and who may read it.
+# Only garage can read these.  The metadata says what every object in the store
+# is and who can read it.  The fetch runs as root and needs no group here.
 chown -R garage:garage "$SNAPDIR"
 find "$SNAPDIR" -type d -exec chmod 0750 {} +
 find "$SNAPDIR" -type f -exec chmod 0640 {} +

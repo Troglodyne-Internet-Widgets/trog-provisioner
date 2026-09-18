@@ -18,28 +18,28 @@ Provisioner::Recipe::Ubuntu::trogrunner - Ubuntu's C<deps> for L<Provisioner::Re
 
 =head2 deps
 
-These are all here to let something on CPAN build.  A guest running a
-source-built perl has no binary package to fall back on for any of it, so a
-missing header is a failed C<cpanm> forty minutes into a provision rather than
-an apt that quietly did nothing.
+Each of these lets a distribution from CPAN build.  A guest with a perl built
+from source has no binary package to use instead.  So a missing header is a
+failed C<cpanm> forty minutes into a provision, not an apt step that did
+nothing.
 
 =over 4
 
-=item * C<libvirt-dev> and C<pkg-config> for C<Sys::Virt>, which is the whole
-reason a runner is different from any other guest.
+=item * C<libvirt-dev> and C<pkg-config> for C<Sys::Virt>.  This is the reason
+a runner differs from any other guest.
 
-=item * C<uuid-dev> for C<UUID>.  It links C<libuuid>, so without it the
-failure is at link time and reads as a toolchain problem rather than a missing
-package.
+=item * C<uuid-dev> for C<UUID>.  It links C<libuuid>.  Without the package,
+the build fails at link time, and the error looks like a toolchain problem.
 
 =item * C<libssl-dev> for C<Net::SSLeay>, C<libexpat1-dev> for C<XML::Parser>,
-C<libsqlite3-dev> for C<DBD::SQLite> -- the address pool is a SQLite database.
+and C<libsqlite3-dev> for C<DBD::SQLite>.  The address pool is a SQLite
+database.
 
 =back
 
-C<xorriso> is deliberately not here: C<bin/preflight> asks that of the
-hypervisor, which is where the cloud-init seed is actually built.  C<rsync> and
-C<openssh-client> are already among the base packages every guest gets.
+C<xorriso> is not here.  C<bin/preflight> asks for it on the hypervisor, which
+is where the cloud-init seed is built.  C<rsync> and C<openssh-client> are
+already in the base packages of every guest.
 
 =cut
 

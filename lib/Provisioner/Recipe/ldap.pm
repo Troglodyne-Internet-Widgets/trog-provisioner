@@ -18,7 +18,7 @@ use parent qw{Provisioner::Recipe};
         ldap:
             admin_password: s3cr3t
 
-Or with explicit base DN and LDAPS port:
+Or with a base DN and an LDAPS port of your choice:
 
     somedomain:
         ldap:
@@ -28,63 +28,55 @@ Or with explicit base DN and LDAPS port:
 
 =head2 DESCRIPTION
 
-Installs and configures OpenLDAP (slapd) as a domain identity server.
+Installs and configures OpenLDAP (slapd) as the identity server of a domain.
 
-Users from C<users.yaml> are seeded as POSIX accounts with the C<inetOrgPerson>,
-C<posixAccount>, and C<shadowAccount> object classes, plus C<ldapPublicKey> for
-SSH public key storage.
+The seed adds each user in C<users> as a POSIX account.  Each account has the
+C<inetOrgPerson>, C<posixAccount> and C<shadowAccount> object classes.
 
-LDAPS is configured using the certificate provided by the C<letsencrypt> recipe.
-Port 389 (plain LDAP) is left open for local connections only; C<port> -- 636
-unless the domain says otherwise -- carries LDAPS and is exposed for remote
-authentication (e.g. SSSD clients).  It is what slapd is told to listen on and
-what the firewall profile opens, so the two cannot disagree.
+LDAPS uses C</etc/ssl/certs/E<lt>domainE<gt>.pem> and its key.  The ssl target
+makes a self-signed pair there on every guest.  The C<letsencrypt> fetcher
+replaces it with a real certificate when it has one.
 
-Requires the C<letsencrypt> recipe for TLS certificates.
+slapd listens for LDAPS on C<port>, which is 636 by default.  Remote clients,
+for example SSSD, use this port.  The firewall profile opens the same value, so
+the two agree.  slapd also listens for plain LDAP on port 389 and on the
+C<ldapi> socket.
 
 =head2 SURVIVING A REBUILD
 
-The seed is what a directory starts as, not what it is.  Every password a user
-has changed since, every SSH key they have added, every group an operator made
-by hand, lives in C</var/lib/ldap> and in nothing else -- so a guest rebuilt
-from the recipe alone comes up with its users as they were on the day it was
-first provisioned, and nobody finds out until somebody cannot log in.
+The seed is the start of a directory, not its current state.  Users change
+passwords and add SSH keys, and operators add groups.  All of that is only in
+C</var/lib/ldap>.  A guest rebuilt from the recipe alone has its users as they
+were on the day of the first provision.
 
-C</var/lib/ldap> cannot simply be salvaged, and neither can C</etc/ldap/slapd.d>.
-The package ships both 0700 C<openldap:openldap>, which the fetch can read now
-that it runs as root -- but copying them would still be wrong, and that is the
-half of the reason that does not go away.  MDB is a private on-disk format, tied to the slapd that
-wrote it and the architecture it was written on, and the point of a rebuild is
-that the new guest is not the old one.
+The recipe does not copy C</var/lib/ldap> or C</etc/ldap/slapd.d> off the guest.
+MDB is a private on-disk format.  It is tied to the slapd that wrote it and to
+the architecture of that machine, and a rebuilt guest can have a different slapd.
 
-So the directory is exported instead.  C<ldap-export.sh> runs hourly and writes
-C<slapcat> output to C</var/backups/ldap>, owned by the admin user, and that is
-what C<remote_files> names.  On the next guest C<ldap-reload.sh> loads the data
-half back with C<slapadd> before the seed runs, and the seed then does what it
-was always supposed to do: fill in what is missing, rather than be the whole
-directory.
+So the recipe exports the directory instead.  C<ldap-export.sh> runs each hour.
+It writes C<slapcat> output to C</var/backups/ldap>, which the admin user owns.
+C<remote_files> names that directory.  On the next guest, C<ldap-reload.sh>
+loads the data with C<slapadd> before the seed runs.  The seed then only adds
+what is missing.
 
-The configuration database comes down beside the data and does not go back up.
-C<cn=config> names the schema of the slapd that wrote it, the paths that slapd
-was built with, and the TLS settings this recipe rewrites on every provision;
-restoring a previous guest's copy over a new one is how you get a slapd that
-will not start and will not say why.  It is exported so that an ACL or an
-overlay somebody added is legible and can be put back deliberately.
+The export also holds the configuration database, but the reload does not load
+it.  C<cn=config> names the schema, the build paths and the TLS settings of the
+slapd that wrote it.  This recipe writes the TLS settings again on each
+provision.  If you load an old copy over a new guest, slapd can fail to start
+and give no reason.  The export keeps the old configuration so that an operator
+can read an ACL or an overlay and add it again by hand.
 
-An hour is therefore what a rebuild can lose, and only ever what changed in that
-hour.
+A rebuild can lose at most the changes of the last hour.
 
 =cut
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One slapd, and its suffix, its organization and its TLS certificate are
-all named for the domain it was configured with.
+Returns false.  A guest has one slapd.  Its suffix, its organization and its
+TLS certificate all use the name of the domain that configured it.
 
-This recipe is the machine's half already, which makes the second domain's case
-quieter rather than better: its target never runs, so it does not overwrite what
-the first domain configured -- it simply has no directory of its own while
-looking as though it does.
+If a second domain on the same guest names ldap, its target does not run.  It
+does not overwrite the first directory, but it gets no directory of its own.
 
 =cut
 
@@ -119,47 +111,24 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Derive base_dn from domain: example.test -> dc=example,dc=test
-    #
-    # split(/[.]/) and not split('.'): the first argument to split is a pattern,
-    # and '.' as a pattern matches every character -- so this produced no parts
-    # at all and an empty base_dn for any domain that did not set one.
+    # example.test becomes dc=example,dc=test.
     unless ( $opts{base_dn} ) {
         my $domain = $opts{domain} // '';
         my @parts  = split( /[.]/, $domain );
         $opts{base_dn} = join( ',', map { "dc=$_" } @parts );
     }
 
-    # slapd derives its real base DN from the domain debconf is given, so that
-    # has to be the domain base_dn describes rather than the guest hostname.
-    # Configured separately they drift apart, and then the seed cannot bind:
-    # "ldap_bind: Invalid credentials (49)", swallowed by the /bin/true after
-    # it, leaving a directory with nothing in it.
+    # slapd makes its base DN from the domain that debconf gives it.  So that
+    # domain comes from base_dn, not from the hostname, or the seed cannot bind.
     ( $opts{ldap_domain} = $opts{base_dn} ) =~ s/\bdc=//g;
     $opts{ldap_domain} =~ tr/,/./;
 
-    # The dc the base entry names, taken from the base DN rather than from the
-    # domain.  The seed used to work it out itself with domain.split('.'), and
-    # split's argument is a pattern there as much as it is in perl -- so '.'
-    # matched every character, the entry went out with an empty dc, and slapd
-    # refused it:
-    #   ldap_add: Naming violation (64)
-    #     value of single-valued naming attribute 'dc' conflicts with value
-    #     present in entry
-    # which ldapadd -c stepped over and nothing has ever noticed, because the
-    # entry it could not add is one dpkg-reconfigure has always made already.
-    # Off base_dn and not the domain because an operator who sets base_dn is
-    # naming a tree the hostname does not describe, and the dc has to be the
-    # first component of the DN the entry is filed under either way.
+    # The dc of the base entry must be the first component of base_dn.  An
+    # operator who sets base_dn can name a tree that the hostname does not.
     ( $opts{base_dc} ) = $opts{base_dn} =~ m/\Adc=([^,]+)/;
 
     return %opts;
 }
-
-# ssl-cert is here for its group, not for a certificate: it owns
-# /etc/ssl/private, which Ubuntu ships 0710 root:ssl-cert, and slapd has to be
-# in that group to read the key through it.  Without the package the group does
-# not exist at all and `adduser openldap ssl-cert` fails outright.
 
 sub template_files {
     my ($self) = @_;
@@ -172,17 +141,19 @@ sub template_files {
         'ldap.export.cron.tt'   => 'ldap-export.cron',
         'ldap.reload.sh.tt'     => 'ldap-reload.sh',
 
-        # The ufw application profile for this domain's port.  A profile is
-        # what setup-ufw-rules applies -- it allows whatever `ufw app list`
-        # reports -- rather than something a fragment has to get past the ufw
-        # target, which runs after this one.
+        # A ufw application profile for the port.  setup-ufw-rules allows each
+        # profile that `ufw app list` shows.
         'ldap.ufw.conf.tt' => 'ldap_ufw.conf',
     );
 }
 
-# An export taken now.  The cron runs hourly, and an hour of a directory is a
-# password somebody changed and a key somebody added that a rebuild would put
-# back the way they were.
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Returns C<ldap-export.sh>, which the guest runs before the fetch.  The cron runs
+it each hour, so without this call a rebuild can lose up to an hour of changes.
+
+=cut
+
 sub remote_prepare {
     return ('/usr/local/sbin/ldap-export.sh');
 }
@@ -191,10 +162,8 @@ sub restores {
     my ( $self, %opts ) = @_;
     my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
 
-    # Into the export directory rather than straight at slapd: this is where the
-    # hourly export writes and where the next fetch looks, so a rebuilt guest has
-    # its last known directory in the one place from the moment it is built.  The
-    # reload that reads it back is this recipe's own, and runs later.
+    # Into the export directory, not into slapd.  The export writes there and
+    # the fetch reads there.  ldap-reload.sh loads it into slapd later.
     return ( '/var/backups/ldap' => { from => "$install_dir/$domain/ldap", owner => "$admin:$admin" } );
 }
 

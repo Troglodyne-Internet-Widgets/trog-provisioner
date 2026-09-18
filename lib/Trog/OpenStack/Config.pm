@@ -32,27 +32,52 @@ Trog::OpenStack::Config - clouds.yaml: where a cloud is, and how to log into it
 
 =head1 DESCRIPTION
 
-F<clouds.yaml> is how the rest of the OpenStack world writes down where a cloud
-is and how to log into it: it is what C<python-openstackclient> reads, and what
-Horizon hands you when you ask for credentials.  So it is what we read too,
-rather than inventing a second file for facts that already have a home.
+Other OpenStack tools keep the location of a cloud and its login in
+F<clouds.yaml>.  C<python-openstackclient> reads it, and Horizon gives it to you
+when you ask for credentials.  This module reads the same file, so these facts
+are in one file only.
 
-One cloud comes back as a flat hash.  The file nests the credential under an
-C<auth> key and leaves everything else at the top level, which is a distinction
-that matters to nobody calling this, so it is flattened away.
+A cloud comes back as a flat hash.  The file puts the credential under an
+C<auth> key and the rest at the top level.  No caller needs that difference, so
+the hash has one level.
 
 =head1 CLASS METHODS
 
 =cut
 
-# Where clouds.yaml is looked for, in order.
-#
-# OS_CLIENT_CONFIG_FILE first, because that is the variable every other
-# OpenStack client honors and somebody who has set it means it.  Then the
-# installation's own configuration directory, so a deployment can carry a file
-# of its own.  Then the two paths a person's own file lands in -- the documented
-# one, and the top of $HOME, which is where you end up if you just saved what
-# Horizon gave you.  The system-wide file last.
+=head2 _candidates
+
+Returns the paths where F<clouds.yaml> can be, in the order to try them:
+
+=over 4
+
+=item 1.
+
+C<$OS_CLIENT_CONFIG_FILE>.  Every other OpenStack client obeys it, so a person
+who sets it wants it.
+
+=item 2.
+
+F<clouds.yaml> in the configuration directory of L<Trog::Config>, so that an
+installation can have its own file.
+
+=item 3.
+
+F<$HOME/clouds.yaml>, where a file that you save from Horizon usually goes.
+
+=item 4.
+
+F<$HOME/.config/openstack/clouds.yaml>, the documented location for your own
+file.
+
+=item 5.
+
+F</etc/openstack/clouds.yaml>, the file for the whole system.
+
+=back
+
+=cut
+
 sub _candidates {
     my @home =
       $ENV{HOME}
@@ -69,14 +94,15 @@ sub _candidates {
 
 =head2 file
 
-Which F<clouds.yaml> we read, and what was in it.  Returns C<($path, $text)>.
+Returns C<($path, $text)>: the first F<clouds.yaml> that it can read, and its
+contents.
 
-Opens each candidate rather than asking whether it is there first.  A file that
-exists and cannot be read is the same problem to us as one that does not exist,
-and testing before opening only buys a window for the answer to change.
+It opens each path and does not first test if the file exists.  A file that it
+cannot read is the same problem as a file that is not there.  Also, a test
+before the open gives the file time to change.
 
-Dies naming every path it tried, because "no clouds.yaml" is otherwise the least
-actionable error this module can produce.
+Dies with a list of each path that it tried, because "no clouds.yaml" alone does
+not tell you what to fix.
 
 =cut
 
@@ -94,18 +120,25 @@ sub file {
 
 =head2 load($name)
 
-The named cloud, as a flat hash reference.
+Returns the cloud named C<$name>, as a flat hash reference.
 
-C<$name> defaults to C<$OS_CLOUD>.  Failing that, a file with exactly one cloud
-in it needs no name -- there is nothing to choose between.  A file with several
-does: picking one at random would be picking one of somebody's production
-clouds at random, so that is an error listing what there was to choose from.
+The default for C<$name> is C<$OS_CLOUD>.  If neither is set, a file with one
+cloud needs no name.  A file with more than one cloud is an error that lists
+them.  A random choice can pick a production cloud.
 
-The returned hash carries the C<auth> keys (C<auth_url>,
-C<application_credential_id>, C<application_credential_secret>, or
-C<username>/C<password>) alongside C<auth_type>, C<region_name>, C<interface>
-and C<identity_api_version>, plus C<name> and C<source> saying which cloud out
-of which file this was.
+The hash holds the keys from C<auth>: C<auth_url>,
+C<application_credential_id> and C<application_credential_secret>, or
+C<username> and C<password>.  It also holds C<auth_type> (default
+C<password>), C<region_name>, C<interface> (default C<public>) and
+C<identity_api_version> (default 3).  C<name> and C<source> give the cloud and
+the file that it came from.
+
+A non-empty C<$OS_AUTH_URL>, C<$OS_APPLICATION_CREDENTIAL_ID>,
+C<$OS_APPLICATION_CREDENTIAL_SECRET> or C<$OS_REGION_NAME> replaces the value
+from the file.
+
+Dies when no file can be read or parsed, when the file has no clouds, when the
+cloud is not there or cannot be chosen, and when it has no C<auth_url>.
 
 =cut
 
@@ -138,7 +171,12 @@ sub load {
     return $class->_flatten( $cloud, $name, $path );
 }
 
-# The file's own layout, less the nesting, plus what the environment has to say.
+=head2 _flatten($cloud, $name, $path)
+
+Returns C<$cloud> as the hash that C<load> describes.
+
+=cut
+
 sub _flatten {
     my ( $class, $cloud, $name, $path ) = @_;
 
@@ -154,9 +192,8 @@ sub _flatten {
         region_name          => $cloud->{region_name},
     );
 
-    # The environment beats the file for the credential itself.  A CI run gets
-    # its secret from somewhere that is not a file on disk, and should not have
-    # to rewrite the file to use it.
+    # The environment wins over the file, so that a CI run that gets its
+    # secret from elsewhere does not have to change the file.
     my %from_env = (
         auth_url                      => 'OS_AUTH_URL',
         application_credential_id     => 'OS_APPLICATION_CREDENTIAL_ID',

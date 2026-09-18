@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Let you know when something segfaults
+# Report a new segfault in the system log.
 
 IS_RPM=$(which rpm)
 

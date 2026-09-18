@@ -16,9 +16,8 @@ Provisioner::Recipe::Ubuntu::redis - Ubuntu's C<deps> for L<Provisioner::Recipe:
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else redis does is in the recipe this
-inherits from.
+A package name belongs to a distribution, not to the software, so it is here.
+The parent recipe does everything else for redis.
 
 =cut
 

@@ -30,25 +30,32 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-When you have files on the host which need backing up, but aren't already covered by the provisioning process itself.
+Serves files on this guest to a backup destination, so that another machine can copy them offsite between provisions.
+Pair it with a guest that runs L<Provisioner::Recipe::backupdestination> to automate the backups.
 
-Alternatively, if you want to back things up offsite in between provisions (almost certain you will) this makes such simple.
+Each target is an rsync module that the destination can copy.
+The recipe makes a target for each path in the C<remote_files> of each recipe on the guest, named for the recipe and a number, for example C<mariadb1>.
+Use C<targets> to add paths that come from systems this framework does not provision.
 
-Pair with a VM using L<Provisioner::Recipe::backupdestination> to fully automate backups.
+C<excludes> maps a target to rsync exclude patterns, separated by spaces.
+The recipe adds the C<remote_skip> patterns of each recipe to the target of that recipe.
+Your patterns add to these and do not replace them, so an extra exclude never starts to back up a signing key.
 
-We backup everything described in the remote_files section of any recipe, and anything you add to 'targets' in the recipe configuration.
-Ideally your recipes describe all such things sufficiently, but sometimes you have to interface with systems not provisioned by this framework.
+C<key_file> is the path of a private key, relative to the data directory of the domain.
+The recipe gets the public half from it, and dies with C<Could not extract pubkey from ...> when it cannot.
+The public half goes into the authorized_keys of root with a forced command and no login rights.
+The makefile then deletes the private half from the guest.
 
-Backups are implemented via SSH authorized key read-only restricted execution of an ephemeral & chrooted instance of rsyncd as root on port 40404.
+A connection with that key starts a read-only, chrooted rsync daemon as root, which the configuration puts on port 40404.
+The daemon reads its configuration from /etc/rsyncd.$DOMAIN.conf, which the forced command names.
+The configuration is not in /root, because some builds of rsync do not read a configuration from there.
 
-The daemon's configuration is written to /etc/rsyncd.$DOMAIN.conf, and the forced command on the backup key names it there.
-Not /root: some builds of rsync decline to read a config out of it.
+The daemon logs to /var/log/rsyncd/$DOMAIN.log.
+/etc/logrotate.d/rsyncd-backup rotates that log weekly and keeps 12 weeks.
+Without a log file, rsyncd sends its messages down the ssh connection, and this guest keeps no record of a failed module or transfer.
+Transfer logging is off, because the destination records what it asked for in /var/log/backups/$HOST.log.
 
-What that daemon has to say goes to /var/log/rsyncd/$DOMAIN.log, rotated weekly by /etc/logrotate.d/rsyncd-backup and kept for a quarter.
-Told no log file, rsyncd says it down the ssh connection instead and the machine being copied off keeps nothing: a module that fails to open, or a transfer that stops halfway, is then only visible to the destination.
-Transfer logging is left off, since the destination already records what it asked for in /var/log/backups/$HOST.log; what this is for is the half of a failed backup that the destination cannot see.
-
-TODO: Make this module consult all the other loaded recipes to know what uid/gid ought we do it as
+TODO: Consult the other recipes on the guest to choose the user and group that each module runs as.
 
 =cut
 
@@ -86,15 +93,8 @@ sub enrich {
     my $targets = $opts{targets};
     %$targets = ( %default_targets, %$targets );
 
-    # What each recipe says must not travel, against the target that recipe's
-    # remote_files produced.  remote_skip exists to keep a key out of a backup
-    # sitting beside the database it protects -- Provisioner::Recipe says so in
-    # as many words -- and the salvage has always honoured it while this side
-    # carried the file anyway.
-    #
-    # Added to what an operator wrote rather than replaced by it: these are not
-    # a default to be overridden, and somebody excluding one more directory
-    # should not silently start backing up a signing key.
+    # remote_skip adds to the excludes of the operator and is never replaced
+    # by them.  See DESCRIPTION.
     my $excludes = $opts{excludes} // {};
     foreach my $target ( sort keys %default_skips ) {
         my @both = grep { $_ } ( $default_skips{$target}, $excludes->{$target} );

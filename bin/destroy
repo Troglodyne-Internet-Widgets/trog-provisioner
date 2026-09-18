@@ -24,7 +24,7 @@ use Pod::Usage   qw{pod2usage};
 
 =head1 NAME
 
-destroy - tear a provisioned VM back down
+destroy - remove a provisioned VM
 
 =head1 SYNOPSIS
 
@@ -41,78 +41,93 @@ destroy - tear a provisioned VM back down
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Skips the
-search described under C<--hvconf> and goes straight there.  A remote
-hypervisor has to be named with an ssh transport
+The libvirt connection string of the hypervisor that holds the domain.  With
+it, destroy does not search the fleet (see C<--hvconf>) and goes to that
+hypervisor.  Name a remote hypervisor with an ssh transport
 (C<qemu+ssh://user@host/system>).
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
-When it exists, every hypervisor in it is asked whether it has this guest, and
-the one that does is the one we destroy on.
+The fleet definition.  The default is F</etc/trog-provisioner/hypervisors.conf>.
+If the file exists, destroy asks each hypervisor in it for the guest.  It
+destroys the guest on the hypervisor that has it.
 
 =item B<--domaindir> DIR
 
-Where the per-domain directories live.  Defaults to F</opt/domains>.
+The directory that holds the per-domain directories.  The default is
+F</opt/domains>.
 
 =item B<--purge>
 
-Also delete the domain directory, on both this machine and the hypervisor.
+Also delete the domain directory on this machine.
 
 =item B<--purge-data>
 
-Also delete the domain's directory under the data source, on this machine and on
-the hypervisor that held the guest.  C<bin/new_config> makes it for the datadirs
-the recipes ask for, writes into it whatever was salvaged off the last guest,
-and ships a copy to the hypervisor for the guest to pull its payload out of.
+Also delete the directory of the domain under the data source, on this machine
+and on the hypervisor that held the guest.  C<bin/new_config> makes this
+directory for the datadirs that the recipes ask for.  It also writes into it
+what it salvaged from the last guest.
 
-Never implied by C<--purge>, and not to be used on a domain anything will be
-restored onto: a real domain's data directory is where its backups come back
-from.  It is for throwaway guests, which is what the provisioning-recipes
-skill's teardown passes it for.
+C<--purge> does not include this option.  Do not use it on a domain that you
+will restore.  The data directory of a real domain is where its backups come
+back from.  The option is for throwaway guests, and the teardown of the
+provisioning-recipes skill passes it for them.
 
 =item B<--orphans>
 
-Sweep rather than destroy one domain: every C<.test> directory, in the data
-source and in the domain directory of each hypervisor in the fleet, that no
-hypervisor has a guest for and no recipe configuration names -- here and on each
-of them.  Takes no domain.  Pair it with C<--dryrun> first; it says what it
-found and where each copy is.
+Sweep instead of destroying one domain.  The sweep removes every C<.test>
+directory in the data source and in the domain directory of each hypervisor in
+the fleet, if two things are true:
 
-Only C<.test>, which RFC 2606 reserves: nothing real is named under it, and
-every real domain's data sits in the same directory.  The two exclusions are
-the rest of the safety of it, so neither is inferred and neither may be
-unavailable: a name a hypervisor still has is a live guest however old its
-directory looks, and a name the configuration carries is one somebody means to
-build again.
+=over 4
 
-A hypervisor that will not say what guests it has takes the run down rather than
-being counted as holding none: its guests are exactly the names that would then
-look like orphans.
+=item *
+
+No hypervisor has a guest with that name.
+
+=item *
+
+No recipe configuration names it.
+
+=back
+
+The sweep looks on this machine and on each hypervisor.  It takes no domain.
+Run it with C<--dryrun> first.  It says what it found and where each copy is.
+
+The sweep touches only C<.test>, which RFC 2606 reserves, so no real domain has
+a name under it.  The data of every real domain is in the same directory, so the
+two conditions above are the rest of the safety.  Neither one is guessed, and
+neither can be missing.  A name that a hypervisor still has is a live guest,
+however old its directory is.  A name that the configuration has is one that
+somebody intends to build again.
+
+If a hypervisor does not say what guests it has, the run stops.  The sweep does
+not count it as a hypervisor with no guests, because its guests are exactly the
+names that then look like orphans.
 
 =item B<--backups>
 
-Sweep rather than destroy one domain: every disk that
+Sweep instead of destroying one domain.  The sweep removes every disk that
 C<bin/provision --clone-on-nonreusable> copied aside, on each hypervisor in the
-fleet.  Takes no domain.  Pair it with C<--dryrun> first; it names every copy and
-says which machine holds it.
+fleet.  It takes no domain.  Run it with C<--dryrun> first.  It names every copy
+and the machine that holds it.
 
-A copy is a volume rather than a domain, so nothing else in the toolkit removes
-one -- and this spares nothing, not even a copy whose guest is still running.
-C<sweep_backups> has why, and why that is not the bargain C<--orphans> makes.
+A copy is a volume, not a domain, so nothing else in the toolkit removes one.
+This sweep removes every copy, even a copy whose guest still runs.
+C<sweep_backups> tells why, and why this is not the same rule as C<--orphans>.
 
 =item B<--dryrun>
 
-Say what would be removed without removing any of it.
+Say what destroy will remove, and remove nothing.
 
 =back
 
 =head1 DESCRIPTION
 
-Undoes what C<provision> did: stops and undefines the VM, destroys the
-disks belonging to it, and removes the authorized key it left behind.  Shared resources -- the base image and the
-storage pool -- are left alone.
+destroy undoes what C<provision> did.  It stops and undefines the VM, destroys
+its disks, and removes the authorized keys that were added for it.  Then it
+returns the address of the domain to the pool.  It does not touch the shared
+resources, which are the base image and the storage pool.
 
 =cut
 
@@ -141,24 +156,23 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    # The domain arrives on the command line and ends up in an rm.
+    # The domain comes from the command line and goes into an rm.
     $domain =~ s/\///g;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'That is not a domain' )
       if $domain =~ m/\A[.]*\z/;
 
-    # A domain no hypervisor holds is not always a mistake: a guest that shares
-    # another domain's machine never had one of its own.  What is on this side
-    # is still ours to take back -- the domain directory, the authorized key,
-    # and above all the address, which stays reserved against a domain nobody
-    # has if this stops here.
+    # A domain that no hypervisor holds is not always a mistake.  A guest that
+    # shares the machine of another domain never had a VM of its own.  We still
+    # remove what is on this side: the domain directory, the authorized key and
+    # the address.  If this stops here, the address stays reserved for a domain
+    # that nobody has.
     my $hosted = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir ) };
     my $err    = $@;
     my $hv     = $hosted;
     unless ($hv) {
 
-        # Why, and not just that: this is the whole of what an operator running
-        # this by hand is told, and "nothing has it" reads the same for a shared
-        # guest as for a domain whose name they typed wrong.
+        # Print the reason too.  "Nothing has it" reads the same for a shared
+        # guest and for a domain name with a typing error.
         print $err if $err;
         print "Nothing in the fleet has $domain, so only what is on this side goes.\n";
         $hv = Trog::HV->from_config( undef, ( defined $domain_dir ? ( domain_dir => $domain_dir ) : () ) )->activate();
@@ -171,22 +185,19 @@ sub main {
     $announce .= "[DRY RUN] No changes will be made.\n" if $dryrun;
     print $announce;
 
-    # Steps 1 to 4, and then the address whatever became of them.  Held rather
-    # than left to abort the run, because the address is the one thing here
-    # whose leaking costs somebody else something later: it stays reserved
-    # against a domain that no longer exists, and nothing can be given it.
+    # Steps 1 to 4, then the address, whatever happened in steps 1 to 4.  A
+    # failure does not stop the run, because a leaked address stays reserved
+    # for a domain that does not exist.
     #
-    # There is a live way in.  annihilate_domain dies outright when a guest will
-    # not stop or will not undefine, destroy_vm does not catch it, and both sit
-    # upstream of step five.  Volumes do not: delete_volume warns and returns
-    # false, which is why a disk that will not go has never cost an address.
+    # The eval is for annihilate_domain, which dies if a guest does not stop or
+    # undefine.  delete_volume only warns and returns false.
     my $failure;
     eval {
         # 1. Stop and undefine the VM
         #
-        # Only where one is: a domain nothing hosts has no VM and no disks, and
-        # the fallback above is this machine, which is not a hypervisor at all
-        # on a fleet that keeps them elsewhere.
+        # Only if there is one.  A domain that nothing hosts has no VM and no
+        # disks, and the fallback above is this machine, which is not always a
+        # hypervisor.
         if ($hosted) {
             destroy_vm( $domain, $dryrun );
 
@@ -194,7 +205,7 @@ sub main {
             destroy_disks( $domain, $dryrun );
         }
 
-        # 3. Remove the domain's SSH pubkey from the HV's authorized_keys
+        # 3. Remove its keys from authorized_keys, here and on the hypervisors
         remove_authorized_key( $domain, $dryrun );
         remove_runner_key( $domain, $dryrun );
 
@@ -215,21 +226,19 @@ sub main {
     # 5. Give the address back to the pool
     release_ip( $domain, $dryrun );
 
-    # Said plainly, because the address coming back is not the teardown having
-    # worked, and an operator who reads "Done." will take it as exactly that.
+    # The address came back, but that does not mean the teardown worked.
     print $failure  ? "Done, except for what failed above.\n" : "Done.\n";
     return $failure ? 1                                       : 0;
 }
 
 =head2 release_ip($domain, $dryrun)
 
-Hand the domain's static address back to the pool.
+Give the static address of the domain back to the pool.  Returns 1 if it
+released an address, and 0 if the domain had none or C<$dryrun> is true.
 
-Here and nowhere else: re-provisioning a guest goes through C<bin/provision>,
-which keeps whatever address the domain already has.  This is the deliberate
-"take it away" verb, so it is the one that should let go of the address --
-otherwise the pool fills with entries for guests that stopped existing, which
-is what the C<[ips]> section of F<ipmap.cfg> did for years.
+Only destroy releases an address.  C<bin/provision> keeps the address that the
+domain already has when it builds the guest again.  If destroy did not release
+it, the pool fills with entries for guests that do not exist.
 
 =cut
 
@@ -281,8 +290,8 @@ sub destroy_disks {
 sub remove_authorized_key {
     my ( $domain, $dryrun ) = @_;
 
-    # Ours, because ours is where bin/provision wrote it: the guest fetches its
-    # payload from this machine, so this is the account it was authorized on.
+    # This machine, because the guest fetches its payload from here, so
+    # bin/provision authorized the key here.
     my $this_machine = Trog::Local->new();
     my $pubkey_file  = Trog::HV->new()->domain_dir . "/$domain/key.rsa.pub";
     my $pubkey       = eval { File::Slurper::read_text($pubkey_file) };
@@ -292,9 +301,8 @@ sub remove_authorized_key {
     my $ak = $this_machine->authorized_keys;
     return unless $this_machine->file_exists($ak);
 
-    # Taking a line out means rewriting the file, so this is the one place that
-    # has to read it first -- and the one place that can lock somebody out of
-    # their own machine by getting it wrong.  Refuse on anything unexpected.
+    # A mistake when the file is written again can lock the owner out of this
+    # machine.  Refuse anything unexpected.
     my $contents = $this_machine->read_text($ak);
     die "Could not read $ak on " . $this_machine->describe . "; refusing to rewrite it blind\n"
       unless $contents;
@@ -318,21 +326,22 @@ sub remove_authorized_key {
 
 =head2 remove_runner_key($domain, $dryrun)
 
-Take a runner's key back off every hypervisor it was let in to.
+Remove the key of a runner from each hypervisor that authorized it.  Returns
+nothing.  Dies if the public key beside the domain does not look like a key, or
+if an F<authorized_keys> file that exists is empty or cannot be read.
 
-The counterpart of C<authorize_runner_key> in F<bin/provision>, and the reason
-the public half is written beside the domain rather than only kept in the
-store: this needs no passphrase, and a destroy that stops to prompt for one is
-a destroy nobody runs.
+This is the counterpart of C<authorize_runner_key> in F<bin/provision>.  It
+reads the public half from the domain directory, not from the store, so it
+needs no passphrase.  A destroy that stops to ask for a passphrase is a destroy
+that nobody runs.
 
-Which hypervisors is a configuration question, so the Cookbook answers it.
+C<Provisioner::Cookbook> says which hypervisors to clean.
 
-Every line carrying the key goes, rather than the one line C<bin/provision>
-wrote.  The key is generated per domain and kept in the store, so there is
-nobody else a line carrying it could belong to -- and matching the whole line
-instead leaves the grant standing whenever the C<from=> restriction or the
-comment has been edited on the hypervisor since.  What is refused is a key that
-does not look like one, which is the case that would match half the file.
+It removes every line that has the key material in it, not only the line that
+C<bin/provision> wrote.  The key is generated per domain and kept in the store,
+so no other grant can have it.  A match on the whole line fails if somebody
+edited the C<from=> restriction or the comment on the hypervisor.  The check on
+the key prevents a short or empty string that matches half the file.
 
 =cut
 
@@ -344,11 +353,7 @@ sub remove_runner_key {
     return unless defined $pubkey;
     chomp $pubkey;
 
-    # The key material, not the whole line.  What bin/provision wrote carries a
-    # from= restriction and a comment, and either can have been edited by hand
-    # on the hypervisor since -- matching the line would then leave the grant
-    # standing for a guest that no longer exists.  The material is what
-    # authorizes anything, so it is what has to go.
+    # The key material, not the whole line.  The POD above tells why.
     my ($material) = ( split( q{ }, $pubkey ) )[1];
     die "The public key beside $domain does not look like one; refusing to match on it\n"
       if !defined $material || length($material) <= 32;
@@ -377,10 +382,8 @@ sub remove_runner_key {
             next;
         }
 
-        # Every line carrying this key is a grant to the guest being destroyed:
-        # the key is generated per domain and lives in the store, so there is
-        # nobody else it could belong to.  More than one means a re-provision
-        # wrote the line differently at some point, and both have to go.
+        # More than one line means that a provision wrote the line differently
+        # at some time.  All of them go.
         print "Removing $going line(s) carrying $domain's key from $ak on $name\n";
         next if $dryrun;
 
@@ -407,13 +410,14 @@ sub purge_domain_dir {
 
 =head2 purge_data_dir($domain, $hv, $dryrun)
 
-Remove the domain's directory under the data source, here and on C<$hv> -- the
-hypervisor that held the guest, worked out before it went, since the fleet can
-only say which one did for as long as it does.  Undef for C<$hv> is this machine
-alone.
+Remove the directory of the domain under the data source, here and on C<$hv>.
+C<$hv> is the hypervisor that held the guest.  The caller finds it before the
+guest goes, because after that the fleet cannot say which one held it.  If
+C<$hv> is undef, only this machine is cleaned.
 
-Says so, rather than failing, when nothing says where the data source is, and
-when the directory is not there: a provision that died early made none.
+If nothing says where the data source is, it says so and returns.  It does not
+fail if the directory is not there, because a provision that stopped early
+makes none.  Returns nothing.
 
 =cut
 
@@ -440,18 +444,35 @@ sub purge_data_dir {
 
 =head2 sweep_backups($uri, $hvconf, $dryrun)
 
-Take away the disks C<bin/provision --clone-on-nonreusable> copied aside.
+Remove the disks that C<bin/provision --clone-on-nonreusable> copied aside.
+Returns 0 if it removed every copy, found none, or C<$dryrun> is true.  Returns
+1 if a copy did not go.
 
-Nothing else ever will: a copy is deliberately not one of the volumes
-C<guest_volumes> names, so destroying the guest it came from leaves it standing.
+Nothing else removes them.  C<guest_volumes> does not name a copy, so a destroy
+of its guest leaves the copy in place.
 
-All of them, rather than the ones whose guest has gone.  C<sweep_orphans>'
-exclusion cannot be borrowed: a copy outliving its guest is the case where it is
-the only thing left.  What guards this instead is that it looks at nothing but
-copies, names every one before any goes, and removes none under C<$dryrun>.
+It removes all copies, even those whose guest still exists.  The rule of
+C<sweep_orphans> does not apply here.  When a copy outlives its guest, the copy
+is the only thing left.  Three things guard this sweep instead:
 
-A backend that makes no such copies reports none.  A pool that cannot be read
-throws, and nothing here catches it.
+=over 4
+
+=item *
+
+It looks only at copies.
+
+=item *
+
+It names every copy before it removes one.
+
+=item *
+
+It removes none when C<$dryrun> is true.
+
+=back
+
+A backend that makes no copies reports none.  If a pool cannot be read, the
+backend dies, and nothing here catches it.
 
 =cut
 
@@ -482,8 +503,8 @@ sub sweep_backups {
         return 0;
     }
 
-    # delete_volume warns and answers false for one it could not take, so count
-    # what went rather than what was asked to go.
+    # delete_volume warns and returns false if it cannot remove a volume, so
+    # count the volumes that went.
     my $removed = 0;
     foreach my $name (@copies) {
         $removed++ for grep { $_ } map { $_->delete_volume($name) } @{ $found{$name} };
@@ -495,12 +516,10 @@ sub sweep_backups {
 
 =head2 sweep_orphans($uri, $hvconf, $dryrun)
 
-What C<--orphans> does: every C<.test> directory under C<sweep_roots> that no
-hypervisor in the fleet has a guest for and no recipe configuration names, here
-and on each of them.  Non-zero when there was nowhere to look.
-
-A hypervisor that cannot say what guests it holds takes the run down rather than
-being counted as holding none.
+The sweep that C<--orphans> runs, over the directories that C<sweep_roots>
+returns.  See C<--orphans> for what it removes.  Returns 1 if there was nowhere
+to look, and 0 otherwise.  Dies if a hypervisor cannot say what guests it
+holds.
 
 =cut
 
@@ -509,10 +528,8 @@ sub sweep_orphans {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
-    # Every guest anywhere in the fleet, asked of the hypervisor rather than of
-    # libvirt, because not every hypervisor has one -- a cloud answers this out
-    # of Nova, and asking it for a domain list stopped the sweep for the whole
-    # fleet.
+    # Ask the hypervisor, not libvirt, because a cloud has no libvirt.  It
+    # answers from Nova.
     my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
     foreach my $hv (@hvs) {
         $spoken_for{$_} = 1 for $hv->guest_names;
@@ -520,12 +537,11 @@ sub sweep_orphans {
 
     my @roots = sweep_roots(@hvs) or return 1;
 
-    # This machine, as something with the same file operations on it as a
-    # hypervisor has, so the copy here and the copy there are taken away the
-    # same way.
+    # This machine, with the same file operations as a hypervisor, so the copy
+    # here and the copy there are removed the same way.
     my $here = Trog::HV->candidate();
 
-    # name => the copies of it there are, as [ machine, path ] pairs.
+    # name => its copies, as [ machine, path ] pairs.
     my %found;
     foreach my $root (@roots) {
         push @{ $found{ File::Basename::basename($_) } }, [ $here, $_ ] for grep { -d $_ } glob "$root/*.test";
@@ -562,15 +578,15 @@ sub sweep_orphans {
 
 =head2 sweep_roots(@hvs)
 
-The directories a run leaves things in: the data source, and the domain
-directory of each hypervisor.  Empty, having said why, only when there is
-neither.
+Returns the directories that a run leaves things in: the data source, and the
+domain directory of each hypervisor.  Returns an empty list, with a warning,
+only if there are neither.
 
-The data source is C<Provisioner::Cookbook>'s answer, which is C<_base>'s
-C<_global: data_source> or the C<data> recipe's C<from> before it.  Without one
-the domain directories are still swept: they come out of the fleet, because that
-is where C<purge_domain_dir> gets the one it purges, and a configuration that says
-nothing about data still builds guests into them.
+The data source comes from C<Provisioner::Cookbook>, which reads
+C<_global: data_source>.  If there is none, the domain directories are still
+swept.  They come from the fleet, because C<purge_domain_dir> gets its
+directory there too.  A configuration that says nothing about data still builds
+guests into them.
 
 =cut
 
@@ -589,9 +605,9 @@ sub sweep_roots {
 
 =head2 where_they_are($copies)
 
-The machines a name was found on, for saying so: C<here> for this one and the
-hypervisor's name for the others, each mentioned once however many directories
-it turned up in.
+Returns the machines where a name was found, for a message.  This machine is
+C<here>, and a hypervisor is its name.  Each machine is in the list once, however
+many directories it had.
 
 =cut
 

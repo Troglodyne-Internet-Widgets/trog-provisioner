@@ -8,20 +8,19 @@ my $code = '[% install_dir %]/[% domain %]/[% basedir %]';
 ok(-d $code, 'code directory exists');
 ok(-d '/home/[% admin_user %]/bin', 'admin bin directory exists');
 
-# The admin has to own both, or nothing it runs as that user can write to them.
+# The admin must own both, or nothing that runs as the admin can write to them.
 foreach my $dir ($code, '/home/[% admin_user %]/bin') {
     my @st = stat $dir;
     is(scalar getpwuid($st[4] // -1), '[% admin_user %]', "$dir is owned by the admin");
 }
 
-# The helper the recipe copies in and then calls by absolute path, once per
-# configured repository.  Copied without a mode, it is whatever the payload had.
+# The recipe copies this helper in without setting a mode, then runs it by its
+# absolute path.
 ok(-x '/home/[% admin_user %]/bin/repos_for', 'repos_for is installed and executable');
 
-# gh, and from its own archive rather than the distro.  Asking only whether it
-# is installed would pass on the Ubuntu package, which is the whole problem:
-# noble ships 2.45.0, and gh pr edit there fails against the Projects-classic
-# field GitHub has retired.
+# gh must come from its own archive, not from Ubuntu, and a test that it is
+# installed passes on the Ubuntu package too.  templates/ubuntu/admincode.tt
+# says why.
 ok(qx{command -v gh}, 'gh is installed');
 
 my $ghlist = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/github-cli.list'; <> } // '';
@@ -33,17 +32,12 @@ my $ghpolicy = qx{apt-cache policy gh 2>/dev/null};
 like($ghpolicy, qr{cli\.github\.com}, 'and gh came from that archive, not the distro')
     or diag $ghpolicy;
 
-# What it was asked to check out, per entity rather than per directory.
+# Test each entity, not the directory.  Every entity clones into the one
+# basedir, so a count of the directory passes when any single entity worked.
 #
-# Every entity clones into this one basedir, so counting what is in there goes
-# green as soon as any single entity worked.  That is how a cache keyed by
-# api_url alone -- which cloned nothing at all for every entity after the first
-# -- went unnoticed here.
-#
-# repos_for writes what each entity was told it had into .repos_for.json in the
-# admin home, keyed by api_url and then by entity.  That file answers both
-# questions this needs: whether the entity was fetched for at all, and which
-# directories it should have left behind.
+# repos_for records the repositories of each entity in .repos_for.json in the
+# admin home, by api_url and then by entity.  That file tells whether an entity
+# was fetched, and which directories it must leave.
 my $repos_cache = '/home/[% admin_user %]/.repos_for.json';
 ok(-f $repos_cache, 'repos_for recorded what it fetched');
 
@@ -62,8 +56,8 @@ if (-f $repos_cache) {
     ok(ref $named eq 'HASH', '[% entity %] was fetched from [% repo.api_url %]')
         or diag 'nothing under that entity in the cache, so repos_for never asked for it';
 
-    # A clone that failed leaves no directory, and the recipe does not stop for
-    # it, so this is where that shows.
+    # repos_for goes on past a failed clone, which leaves no directory, so the
+    # failure shows here.
     my @absent = grep { !-d "$code/$_" } sort keys %{ $named || {} };
     is(scalar @absent, 0, 'every repository [% entity %] has is checked out')
         or diag "not under $code: @absent";
@@ -71,7 +65,6 @@ if (-f $repos_cache) {
 [% END -%]
 [% END -%]
 
-# The extra packages the recipe was configured with.
 [% FOR pkg IN extra_pkgs %]
 {
     my $installed = `dpkg -s [% pkg %] 2>/dev/null`;

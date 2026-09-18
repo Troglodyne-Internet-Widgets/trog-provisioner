@@ -8,19 +8,21 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
-=head1 Provisioner::Recipe::grubconf
+=head1 NAME
 
-=head2 SYNOPSIS
+Provisioner::Recipe::grubconf - set grub variables, such as the kernel command line.
+
+=head1 SYNOPSIS
 
     grubconf:
         grub_vars:
             GRUB_CMDLINE_LINUX: "net.ifnames=0 ipv6.disable=1"
 
-=head2 DESCRIPTION
+=head1 DESCRIPTION
 
-Configure grub.
-
-Useful for disabling sometimes-harmful things like new adapter names or ipv6.
+Writes each key of C<grub_vars> as C<KEY="value"> to
+F</etc/default/grub.d/00-grub.conf>, then runs C<update-grub>.  Use it to turn
+off things such as the new names for network adapters, or IPv6.
 
 =cut
 

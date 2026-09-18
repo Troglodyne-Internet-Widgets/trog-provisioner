@@ -1,15 +1,13 @@
-[%# Nothing to install for a guest that is its own destination; the generated
-    file is empty in that case.  See Provisioner::Recipe::logshipper. -%]
+[%# A guest that is its own destination installs nothing, and its generated
+    file is empty.  See Provisioner::Recipe::logshipper. -%]
 [% IF target -%]
 install -o root -g root -m 0644 logshipper.conf /etc/rsyslog.d/10-logshipper.conf
-[%# The outbound hole.  These guests deny outgoing by default, and a profile is
-    how this tree spells "this guest talks on this port" -- setup-ufw-rules
-    issues an allow out for every one it finds. -%]
+[%# The outbound hole.  These guests deny outgoing traffic by default, and
+    setup-ufw-rules issues an allow out for every profile it finds. -%]
 install -o root -g root -m 0644 logshipper_ufw.conf /etc/ufw/applications.d/logshipper
-[%# Deferred for the reason pdns defers its own rsyslog drop-in: post_install
-    runs before the guest tests do, so the restart has happened by the time
-    anything asks whether the destination is reachable, and two recipes writing
-    to rsyslog.d cost one restart between them rather than one each. -%]
+[%# Queued, because nothing in the build reads the drop-in back.  post_install
+    runs before the guest tests, so rsyslog restarts before a test asks if the
+    destination is reachable. -%]
 [% script_dir %]/queue_postrun_task systemctl restart rsyslog
 echo 'logshipper: forwarding [% selector %] to [% target %]:[% port %] over [% protocol %].'
 [% ELSE -%]

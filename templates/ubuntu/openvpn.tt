@@ -1,22 +1,16 @@
 	# Set up easy-rsa PKI
 	mkdir -p /etc/openvpn/easy-rsa
 	cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
-	# Put back the PKI taken off the last guest, before easyrsa is asked for
-	# anything.  The guard below only ever fires on a re-provision, where the old
-	# pki is still on the disk; a rebuilt guest has a new disk and sails straight
-	# past it, issues itself a new CA, and every client certificate ever issued
-	# off the old one stops working -- with the clients nowhere to be told.
-	# restore_state declines when nothing was salvaged and when there is already
-	# a pki here, so this is a no-op on both of the cases that are not a rebuild.
-	# --batch on every one of these.  easyrsa prompts for a Common Name
-	# otherwise, and a make recipe has no terminal to answer from, so gen-req
-	# read EOF and died with "Error making certificate request" -- taking the
-	# whole provision with it.  Piping an answer in only worked for the two that
-	# ask exactly one question.
+	# The data target already put back the PKI of the last guest.  The guards
+	# below protect only a PKI that is on the disk.  Provisioner::Recipe::openvpn
+	# has the whole account.
 	#
-	# Guarded on what each step produces rather than run unconditionally: in
-	# batch mode init-pki erases an existing PKI without asking, and that would
-	# invalidate every client certificate already issued on a re-provision.
+	# --batch on every call.  Without it, easyrsa prompts for a Common Name, and
+	# a make recipe has no terminal to answer from.
+	#
+	# Each step has a guard on the file that it makes.  In batch mode, init-pki
+	# erases an existing PKI without a prompt, and every client certificate
+	# stops working.
 	if [ ! -f /etc/openvpn/easy-rsa/pki/ca.crt ]; then \
 	    cd /etc/openvpn/easy-rsa && \
 	    ./easyrsa --batch init-pki && \
@@ -33,17 +27,11 @@
 	if [ ! -f /etc/openvpn/easy-rsa/pki/ta.key ]; then \
 	    cd /etc/openvpn/easy-rsa && openvpn --genkey secret pki/ta.key; \
 	fi
-	# A restored pki arrives with whatever the data directory was chmodded to,
-	# which is 0750 on every last file in it, and easyrsa makes its own at 0700
-	# with the keys at 0600.  Put both back at the second of those.
+	# A restored PKI arrives at 0750, the mode of the data directory.  easyrsa
+	# makes its own at 0700 with the keys at 0600.  Set both to the second.
 	#
-	# Spelled out per type rather than with u=rwX, which is what was here and only
-	# ever looked right on a first build.  X is "execute if it is a directory or
-	# somebody already has execute", and after the data target every restored file
-	# does -- so a rebuilt guest came out with a 0700 CA key, a 0700 ca.crt, and
-	# executable certificates copied on into /etc/openvpn/server.  The recipe's own
-	# test caught it on the second provision and not the first, which is exactly
-	# the shape of a bug that only exists on the path that matters.
+	# One mode for each type, not u=rwX.  X keeps execute on a file that already
+	# has it, and every restored file has it.
 	find /etc/openvpn/easy-rsa/pki -type d -exec chmod 0700 {} +
 	find /etc/openvpn/easy-rsa/pki -type f -exec chmod 0600 {} +
 	# Copy PKI files into place
@@ -52,21 +40,13 @@
 	cp /etc/openvpn/easy-rsa/pki/private/server.key  /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/dh.pem              /etc/openvpn/server/
 	cp /etc/openvpn/easy-rsa/pki/ta.key              /etc/openvpn/server/
-	# Every one of them, not just the two secrets: cp gives a new file the mode of
-	# the one it came from, so what lands here is whatever the pki was left at, and
-	# naming only the keys let the certificates carry a rebuild's mode across.
+	# All five, not only the keys: cp gives a new file the mode of its source.
 	chmod 0600 /etc/openvpn/server/ca.crt /etc/openvpn/server/server.crt /etc/openvpn/server/server.key /etc/openvpn/server/dh.pem /etc/openvpn/server/ta.key
-	# Stage a copy of the pki that the next fetch can actually read.  new_config
-	# comes in over sftp as [% admin_user %] with no sudo, and the pki is 0700
-	# root with 0600 keys, so naming it in remote_files fetched an empty
-	# directory and said nothing about it.  Staging is what the mail recipe does
-	# with the DKIM keys, and it costs the same thing: the CA private key is
-	# readable by whoever holds the admin account from here on, and it travels
-	# into the data directory and into any backup taken of that.  The alternative
-	# is a VPN that does not survive its own guest.
+	# Stage the copy that remote_files names.  Provisioner::Recipe::openvpn
+	# says why it is a copy, and what it costs.
 	#
-	# Remade from scratch each run so a certificate revoked since the last one
-	# does not sit here looking current.
+	# Made again on each run, so that a certificate revoked since the last run
+	# does not stay here and look current.
 	rm -rf /etc/openvpn/pki-salvage
 	mkdir -p /etc/openvpn/pki-salvage
 	cp -a /etc/openvpn/easy-rsa/pki/. /etc/openvpn/pki-salvage/
@@ -74,9 +54,8 @@
 	find /etc/openvpn/pki-salvage -type d -exec chmod 0700 {} +
 	find /etc/openvpn/pki-salvage -type f -exec chmod 0600 {} +
 	# Deploy server configuration
-	# The firewall profile for this port and protocol.  Rendered here because the
-	# copy that lived under ufw named variables ufw is never given, so it wrote
-	# ports=/ on every guest.
+	# The firewall profile for this port and protocol.  ufw does not get them,
+	# so this recipe renders it.
 	install -m 0644 -o root -g root openvpn_ufw.conf /etc/ufw/applications.d/openvpn-server
 	cp server.conf /etc/openvpn/server/server.conf
 	chown root:root /etc/openvpn/server/server.conf
@@ -84,25 +63,21 @@
 	# Enable IP forwarding
 	echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-openvpn.conf
 	sysctl -p /etc/sysctl.d/99-openvpn.conf
-	# Forwarding and NAT for VPN clients: let the VPN subnet be forwarded, and
-	# masquerade it out of the guest's egress interface.  Both, because either
-	# on its own routes nothing -- a forwarded packet meets the filter FORWARD
-	# chain before it ever reaches nat POSTROUTING, and ufw's forward policy is
-	# DROP.  Mirrors the setup-port-forwards pattern by editing
-	# /etc/ufw/before.rules so the rules survive reboots without needing
-	# iptables-persistent.
+	# Forwarding and NAT for VPN clients.  setup-masquerade lets the VPN subnet
+	# through the filter FORWARD chain, and masquerades it out of the egress
+	# interface of the guest.  Both are necessary, because the FORWARD chain
+	# comes before nat POSTROUTING and ufw drops there.  Like
+	# setup-port-forwards, it edits /etc/ufw/before.rules, so the rules survive
+	# a reboot without iptables-persistent.
 	#
-	# Unconditional, and the interface optional.  A guest running this recipe
-	# routes for its clients or it is a VPN that takes them off the internet,
-	# so there is no configuration in which leaving the rules out is the right
-	# answer.  Left unnamed, setup-masquerade asks the guest which interface
-	# its default route leaves by, which is the only place that answer exists.
+	# Always, and the interface is optional.  Without these rules, a client of
+	# this VPN loses the internet.  If no interface is named, setup-masquerade
+	# asks the guest which interface carries its default route.
 	#
-	# Deferred, because the ufw target opens with a `ufw reset` and that
-	# restores before.rules from the packaged copy -- taking these rules with
-	# it if they were written during the makefile.  post_install runs after
-	# every target, and the ufw target queues its own `systemctl restart ufw`
-	# behind this one, so the rules are in the file before ufw reads it.
+	# Queued for after the makefile, because the ufw target starts with a
+	# `ufw reset`.  That reset puts back the packaged before.rules and removes
+	# these rules.  The ufw target queues its `systemctl restart ufw` after this
+	# task, so ufw reads the file with the rules in it.
 	[% script_dir %]/queue_postrun_task [% script_dir %]/setup-masquerade '[% subnet %]/[% cidr %][% IF interface %]=[% interface %][% END %]'
 	# Enable and start the service
 	systemctl daemon-reload

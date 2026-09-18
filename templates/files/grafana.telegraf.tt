@@ -1,15 +1,13 @@
 [%# Where telegraf sends what it collects.  The packaged telegraf.conf has no
-    active output of any kind -- every [[outputs.*]] in it is commented -- so
-    without this fragment telegraf gathers the host metrics its own sample turns
-    on and discards all of them.
+    active output, because each [[outputs.*]] in it is a comment.  Without this
+    fragment, telegraf collects the host metrics that its sample turns on and
+    discards all of them.
 
-    A fragment in telegraf.d rather than an edit of telegraf.conf, which the
-    package owns and replaces. -%]
+    A fragment in telegraf.d, not an edit of telegraf.conf, because the package
+    owns and replaces telegraf.conf. -%]
 [[outputs.influxdb]]
   urls = ["http://127.0.0.1:8086"]
   database = "[% influx_database %]"
-[%# The database is made by grafana_influx_setup.sh, which puts a retention on
-    it.  Left to itself telegraf creates a missing one that never expires
-    anything, which on a guest taking the fleet whole syslog stream is a disk
-    that fills quietly. -%]
+[%# grafana_influx_setup.sh creates the database with a retention.  A database
+    that telegraf creates never expires anything. -%]
   skip_database_creation = true

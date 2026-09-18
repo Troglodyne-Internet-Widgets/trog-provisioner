@@ -2,7 +2,7 @@
 
 package Provisioner::Bin::reseed_ips;
 
-#ABSTRACT: Ask the hypervisors again, when the address database has drifted.
+#ABSTRACT: Ask the hypervisors again when the address database is out of date.
 
 use 5.041;
 
@@ -23,50 +23,52 @@ use Provisioner::IPPool();
 
     reseed_ips [--dryrun] [--prune] [--ipmap=file]
 
-Interrogate every hypervisor again and bring F<ips.db> back in line with what is
-actually out there.
+Ask each hypervisor again, and make F<ips.db> agree with the addresses that are
+in use now.
 
-Seeding normally happens once per hypervisor and is then remembered, because a
-sweep is not free and a fleet does not change often.  That is the right default
-and the wrong one the day something is built, moved or destroyed by hand -- so
-this is how you say "look again".
+Seeding (the first sweep that fills F<ips.db>) usually occurs one time for each
+hypervisor.  The database then remembers the result, because a sweep takes time
+and a fleet does not change often.  But if you build, move or destroy a guest by
+hand, the database is then wrong.  Run this command to tell the tool to look
+again.
 
     $ bin/reseed_ips --dryrun
     $ bin/reseed_ips
 
 =head2 WHAT IT REBUILDS, AND WHAT IT LEAVES ALONE
 
-Reservations -- the hypervisors, the gateways, and whatever else was found
-answering on the wire -- are B<derived>.  They are a note of what was observed,
-not a decision anybody made, so they are dropped and rebuilt.  An address that
-has since gone quiet is freed; one that has appeared is taken.
+Reservations are B<derived>.  They are the hypervisors, the gateways, and any
+other address that answered on the network.  A reservation records what the
+sweep found, not a decision that a person made.  So this command removes the
+reservations and makes them again.  An address that no longer answers becomes
+free.  A new address that answers becomes taken.
 
-Assignments are B<not> touched.  A domain holding an address is a decision:
-something has been told it lives there, or is about to be built on it.  A guest
-that happens to be switched off while the sweep runs is not evidence that its
-address is free, and quietly handing it to the next thing that asks is the
-failure this whole database exists to prevent.
+This command does B<not> change assignments.  An assignment is a decision: a
+domain uses the address, or a build is about to use it.  A guest that is off
+during the sweep does not show that its address is free.  To give that address
+to a different guest is the failure that this database prevents.
 
-So the ordinary run only ever adds assignments -- guests found on a hypervisor
-that the database did not know about.
+Thus a usual run only adds assignments.  It adds one for each guest on a
+hypervisor that the database did not know about.
 
 =head2 --prune
 
-Also drop assignments for domains no hypervisor is running.
+Also remove the assignment of each domain that no hypervisor runs.
 
-This is the one that can take an address away from something, so it is not the
-default and it says what it removed.  Use it when the database has accumulated
-domains that genuinely no longer exist -- a guest destroyed without
-C<bin/destroy>, which is the only thing that releases an address on its own.
+This option can take an address away from a domain.  Thus it is not the
+default, and it prints what it removed.  Use it when the database holds domains
+that do not exist now.  This occurs when a person destroys a guest without
+C<bin/destroy>.  C<bin/destroy> is the only command that releases an address
+by itself.
 
-Note that a domain configured but not yet built has no hypervisor running it
-either, and looks exactly the same from here.  If you have assigned addresses
-ahead of provisioning, pruning will take them back.
+A domain that has a configuration but no build also has no hypervisor that
+runs it.  This command cannot tell the two apart.  If you assigned addresses
+before you provisioned, C<--prune> removes those assignments.
 
 =head2 --dryrun
 
-Do all of it inside a transaction and roll it back, reporting what would have
-changed.  The hypervisors are really asked; nothing is really written.
+Do all the work inside a transaction, print what changes, and then roll the
+transaction back.  The command asks the hypervisors, but it writes nothing.
 
 =cut
 
@@ -92,9 +94,8 @@ sub main {
     my $db     = Provisioner::IPPool::dbh();
     my %before = %{ Provisioner::IPPool::taken() };
 
-    # Everything, or nothing.  A reseed that stopped halfway would leave the
-    # reservations cleared and not yet rebuilt, which is a database saying the
-    # gateway is available.
+    # All of it or none of it.  A reseed that stops halfway leaves no
+    # reservations, and then the database says that the gateway is free.
     $db->do('BEGIN IMMEDIATE');
 
     my $ok = eval {
@@ -113,7 +114,7 @@ sub main {
 
     my %after = %{ Provisioner::IPPool::taken() };
 
-    # Read back before the rollback, or there would be nothing to report.
+    # Read the result before the rollback, because the rollback removes it.
     $db->do( $dryrun ? 'ROLLBACK' : 'COMMIT' );
 
     report( \%before, \%after, $dryrun );
@@ -122,7 +123,10 @@ sub main {
 
 =head2 prune_absent($pool, $before)
 
-Drop assignments for domains no hypervisor is running.  Returns how many went.
+Releases the address of each domain in C<$before> that no hypervisor runs.
+C<$before> is the hashref that C<Provisioner::IPPool::taken> returns.  It skips
+the C<hv:>, C<gateway:> and C<insitu:> reservations.  Returns how many it
+released.
 
 =cut
 
@@ -152,7 +156,8 @@ sub prune_absent {
 
 =head2 report($before, $after, $dryrun)
 
-Say what changed, address by address.
+Prints each address that changed, and then a summary line.  C<$before> and
+C<$after> are hash references from C<Provisioner::IPPool::taken>.  Returns 0.
 
 =cut
 

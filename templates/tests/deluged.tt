@@ -13,44 +13,38 @@ is($web, 'active', 'deluge-web is running');
 
 ok(-d '[% install_dir %]/[% domain %]/torrents', 'torrent storage directory exists');
 
-# Everything this recipe puts in place, checked where it was put.  The recipe
-# used to move a deluged_nginx.conf that template_files never generated, so the
-# target died partway and left the rest of this undone.
+# Each file that this recipe installs, in the place that it puts it.
 ok(-f '/var/lib/deluged/config/core.conf', 'the core config was installed');
 ok(-f '/etc/ufw/applications.d/deluged',   'and the ufw application profile');
 
-# The web UI is served through nginxproxy, which this recipe requires rather
-# than writing a vhost of its own.  A second vhost here would be one this recipe
-# invented, and there was one.
+# nginxproxy serves the web UI.  This recipe requires it and writes no vhost of
+# its own.
 ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the vhost');
 ok(!-e '/etc/nginx/sites-enabled/files.[% domain %].conf',
     'and deluged did not write a competing one');
 
-# The state directory, made here rather than by deluged, because the torrent
-# state salvaged off the last guest is restored into it before the daemon is
-# started at all.
+# The fragment makes the state directory, so that it exists before deluged
+# first starts.
 ok(-d '/var/lib/deluged/config/state', 'the torrent state directory is there before deluged makes it');
 
-# The path down to it used to be walkable by the admin user too, since the
-# salvage was an sftp session as that user with no sudo. The fetch reads the
-# guest as root now (issue #76), so issue #98 took that back out: the whole
-# path stays debian-deluged:debian-deluged, and nobody else can walk it.
+# The fetch reads the guest as root.  So the whole path stays
+# debian-deluged:debian-deluged, and no other account can walk it.
 foreach my $dir (qw{/var/lib/deluged /var/lib/deluged/config /var/lib/deluged/config/state}) {
     my @st = stat($dir);
     is(scalar getgrgid($st[5] // -1), 'debian-deluged', "$dir is still group debian-deluged");
     ok(!($st[2] & 0007), "$dir is closed to everybody outside that account");
 }
 
-# The group stops there: core.conf is this domain configuration, rewritten from
-# the template every provision, and nothing off the guest reads it.
+# core.conf keeps its group too.  The fragment writes it from the template on
+# every new guest, and nothing off the guest reads it.
 my @core = stat('/var/lib/deluged/config/core.conf');
 is(scalar getgrgid($core[5] // -1), 'debian-deluged', 'core.conf keeps the group it had');
 ok(!($core[2] & 0007), 'and is readable by nobody else');
 
-# What remote_files is a round trip for.  State salvaged off the last guest is
-# restored before deluged starts and the copy in the data directory goes away
-# when it is; still sitting there with an empty state directory beside it is a
-# restore that never happened, and a seedbox that has forgotten every torrent.
+# The round trip of remote_files.  The restore moves the salvaged state out of
+# the data directory before deluged starts.  If the salvage is still there and
+# the state directory is empty, the restore did not happen.  The seedbox then
+# forgets every torrent.
 sub has_content {
     my ($dir) = @_;
     opendir(my $dh, $dir) or return 0;
@@ -63,16 +57,15 @@ ok(!has_content('[% install_dir %]/[% domain %]/deluged/state')
     || has_content('/var/lib/deluged/config/state'),
     'nothing was salvaged and left unrestored beside an empty state directory');
 
-# Modes per type, not u=rwX: the data target lands a salvage 0750, X preserves
-# an execute bit somebody already has, and the state would come back executable
-# on a rebuild while looking right on a first build.
+# One mode per type, not u=rwX.  The data target lands a salvage 0750, and X
+# keeps that execute bit.  So a rebuild brings the state back executable, and a
+# first build does not show it.
 #
-# The files are asked what they must not be rather than for one exact mode.
-# deluged writes torrents.state itself once it is running, under its own umask
-# and after the fragment has finished chmodding, so an exact 0640 here passes
-# only on a guest where deluged never got that far.  What a rebuild must not
-# bring back is an execute bit, and what nobody outside the account may have is
-# anything at all; 0660 from the daemon is neither.
+# Ask the files for the bits that they must not have, not for one exact mode.
+# deluged writes torrents.state itself after the fragment runs chmod, under its
+# own umask.  So an exact 0640 passes only on a guest where deluged did not
+# start.  A file must not be executable, and must give no access outside the
+# account.  The 0660 that the daemon writes breaks neither rule.
 my $state = "/var/lib/deluged/config/state";
 SKIP: {
     skip "no state directory yet", 3 unless -d $state;

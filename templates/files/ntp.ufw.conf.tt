@@ -1,22 +1,20 @@
-[%# An application profile rather than a bare `ufw allow`.  setup-ufw-rules
-    opens with `ufw reset`, which drops every rule on the guest, and the ufw
-    target runs after this one, so a rule added here would be gone by the time
-    setup-ufw-rules ran.  Profiles live in /etc/ufw/applications.d, which the
-    reset does not touch, so what is declared here is what setup-ufw-rules
-    allows -- out as well as in -- once it walks `ufw app list`.  Chrony is
-    client-only (port 0 in ntp.chrony.conf.tt), so the outbound half is the
-    one this recipe actually needs; the inbound half comes along for free the
-    same way it does for every other profile.
+[%# The ufw recipe sets `default deny outgoing`, so chrony needs this profile
+    to reach 123/udp.  It is an application profile, not a bare `ufw allow`.
+    setup-ufw-rules starts with `ufw reset`, which drops every rule on the
+    guest.  The ufw target runs after this one, so setup-ufw-rules removes any
+    rule that this target adds.  Profiles live in /etc/ufw/applications.d, and
+    the reset does not touch that directory.  setup-ufw-rules walks `ufw app
+    list` and allows each profile there, out and in.  chrony is a client only
+    (port 0 in ntp.chrony.conf.tt), so this recipe needs only the outbound half.
 
-    Named ntp-client and not ntp, because ufw refuses a profile whose section
-    name is also a service name in /etc/services and says so only as a
-    warning on stderr:
+    The name is ntp-client, not ntp.  ufw skips a profile whose section name is
+    also a service name in /etc/services.  It says so only as a warning on
+    stderr:
 
         WARN: Skipping .ntp.: also in /etc/services
 
-    -- so the profile would be absent from `ufw app list`, no rule would ever
-    be made from it, and chrony would go on reaching nothing without a single
-    failure printed anywhere a provision looks. -%]
+    Then ufw makes no rule from the profile.  chrony reaches no server, and no
+    log that a provision reads shows a failure. -%]
 [ntp-client]
 title=NTP client
 description=Outbound time sync for chrony

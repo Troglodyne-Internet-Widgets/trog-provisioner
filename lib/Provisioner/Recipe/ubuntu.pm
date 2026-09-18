@@ -10,7 +10,7 @@ use re '/aasx';
 
 use parent qw{Provisioner::DistroRecipe};
 
-# What ssh-keygen defaults to for RSA, which is what this used to shell out to.
+# What ssh-keygen defaults to for RSA.
 my $RSA_BITS = 3072;
 
 use File::Slurper();
@@ -32,26 +32,26 @@ Provisioner::Recipe::ubuntu - what it means for a guest to be an Ubuntu guest.
 
 =head1 DESCRIPTION
 
-The distribution every guest here has been built on since before there was
-anywhere to say so.
+The distribution that every guest here runs.
 
-See L<Provisioner::DistroRecipe> for what a distro recipe is and what it has to
+See L<Provisioner::DistroRecipe> for what a distro recipe is and what it must
 answer.
 
 =head2 The YAML is quoted by something that knows YAML
 
-cloud-init's user-data carries an operator's own account names, GECOS fields and
-contact address, and a network configuration carries whatever addresses and
-search domains it was given.  A template writing those out unquoted is a
-template that produces a file cloud-init rejects the moment one of them holds a
-colon or an apostrophe -- and the guest then fails to boot with nothing to read.
+The user-data for cloud-init holds account names, GECOS fields and a contact
+address from the operator.  A network configuration holds the addresses and
+search domains that it was given.  If a template writes those without quotes,
+cloud-init rejects the file when one of them holds a colon or an apostrophe.
+The guest then does not boot, and nothing tells you why.
 
-So the structure of each document is the template, which is what makes it
-readable and lets a distribution override it, and every value that is not a fixed
-literal goes through the C<yaml> formatter, which is L<YAML::XS> doing the
-quoting.  That is also why nothing here interpolates a bare C<[% var %]> into
-YAML: Xslate escapes for HTML by default, so an ampersand in a GECOS would
-arrive on the guest as C<&amp;>.
+So the template gives the structure of each document.  That keeps it readable,
+and a distribution can override it.  Every value that is not a fixed literal
+goes through the C<yaml> formatter, where L<YAML::XS> does the quoting.
+
+That is also why nothing here puts a bare C<[% var %]> into YAML.  Xslate
+escapes for HTML by default, so an ampersand in a GECOS field arrives on the
+guest as C<&amp;>.
 
 =cut
 
@@ -60,13 +60,24 @@ arrive on the guest as C<&amp;>.
 =head2 The five answers
 
 C<packager>, C<base_image>, C<packager_invocation>, C<packager_up_invocation>
-and C<packager_remove_invocation>: apt, and the current Ubuntu LTS cloud image.
+and C<packager_remove_invocation>.  The packages are deb packages, installed
+with apt-get.  The image is the cloud image for the release that C<release>
+pins.
 
-The install invocation is as forgiving as it can be made: retries, because an
-apt mirror behind nginx does occasionally drop one; C<--force-confdef> and
-C<--force-confold>, because a package asking which config file to keep has
-nobody to ask; and C<--force-overwrite>, because two packages shipping the same
-path is common enough and not worth failing an entire build over.
+The install invocation accepts as much as it can:
+
+=over 4
+
+=item * C<Acquire::Retries=3>, because an apt mirror behind nginx sometimes
+drops a request.
+
+=item * C<--force-confdef> and C<--force-confold>, because nobody is there to
+answer when a package asks which configuration file to keep.
+
+=item * C<--force-overwrite>, because two packages often ship the same path,
+and that is not a reason to fail a build.
+
+=back
 
 =cut
 
@@ -83,22 +94,7 @@ sub packager_invocation {
 
 =head2 $url = $recipe->image_for($release)
 
-Where the cloud image for a named release lives.
-
-=head2 $url = $recipe->current_image()
-
-The image for whichever LTS Canonical currently says is supported, or undef if
-it could not be asked.  See L<Provisioner::DistroRecipe/current_image>.
-
-=head2 $codename = $recipe->current_release()
-
-That release's codename, out of F<meta-release-lts> -- the file Ubuntu's own
-upgrader reads, so it is the answer rather than an inference from one.  The last
-entry marked supported is the current one; the file lists the next LTS before it
-ships, with C<Supported: 0>, which is exactly the entry a "highest version wins"
-reading would pick wrongly.
-
-Undef if the fetch fails.  Nothing here is worth failing a preflight over.
+Returns the URL of the cloud image for the named release.
 
 =cut
 
@@ -107,11 +103,33 @@ sub image_for {
     return "https://cloud-images.ubuntu.com/$release/current/$release-server-cloudimg-amd64.img";
 }
 
+=head2 $url = $recipe->current_image()
+
+Returns the image for the LTS release that Canonical now says is supported.
+Returns undef if the request fails.  See
+L<Provisioner::DistroRecipe/current_image>.
+
+=cut
+
 sub current_image {
     my ($self) = @_;
     my $release = $self->current_release or return undef;
     return $self->image_for($release);
 }
+
+=head2 $codename = $recipe->current_release()
+
+Returns the codename of that release, from F<meta-release-lts>.  The Ubuntu
+upgrader reads that file, so it gives the answer directly.  The current release
+is the last entry marked supported.
+
+The file lists the next LTS before its release, with C<Supported: 0>.  A parser
+that takes the highest version picks that entry, which is wrong.
+
+Returns undef if the fetch fails, or if no entry is marked supported.  Nothing
+here is worth failing a preflight over.
+
+=cut
 
 sub current_release {
     my ($self) = @_;
@@ -130,10 +148,10 @@ sub current_release {
 
 =head2 @pkgs = $recipe->deps()
 
-What every guest needs regardless of what is being put on it: something to make
-a certificate with, ssh in both directions, rsync for the payload, retry for the
-recipes that use it, and a mailer so cron and the makefile have somewhere to
-send failures.
+Returns what every guest needs, whatever else goes on it.  That is C<openssl> to
+make a certificate, ssh as server and client, rsync for the payload, and retry
+for the recipes that use it.  It also has sendmail, so that cron and the
+makefile can send failures somewhere.
 
 =cut
 
@@ -143,16 +161,16 @@ sub deps { return qw{openssl openssh-server openssh-client rsync retry sendmail}
 
 =head2 BLOCK_SCALAR_INDENT
 
-How far in the body of a C<|> block scalar starts.
+Returns the indent of the body of a C<|> block scalar.
 
-YAML wants it deeper than the key that introduces it, and every C<content: |>
-in the user-data sits four spaces in -- a C<- path:> entry at two, its keys at
-four -- so the body has to begin at five or more.  Six is the next step on the
-two-space rhythm the rest of the document keeps.
+YAML wants the body deeper than the key that starts it.  Every C<content: |>
+in the user-data is four spaces in.  A C<- path:> entry is at two, and its keys
+are at four.  So the body must start at five or more.  Six is the next step of
+the two-space indent that the rest of the document uses.
 
-One depth, so one filter.  Everything carried by value in this document is
-written at that depth for exactly this reason: a block that sat a level deeper
-would want a second filter differing from this one only in a number.
+There is one depth, so there is one filter.  For that reason, everything that
+this document carries by value is at that depth.  A block one level deeper
+needs a second filter that differs from this one only in a number.
 
 =cut
 
@@ -160,10 +178,10 @@ sub BLOCK_SCALAR_INDENT { return 6 }
 
 =head2 @fmts = $recipe->formatters()
 
-C<yaml> hands a value to L<YAML::XS> and puts back what it says, for the places
-a document takes one -- with one correction, for a scalar PyYAML would read as
-a base-60 number and libyaml would not.  C<indent> is for a whole file carried
-inside another as a block scalar.
+Returns two formatters.  C<yaml> gives a value to L<YAML::XS> and returns what
+it writes, for the places in a document that take a value.  It also quotes a
+scalar that PyYAML reads as a base-60 number and libyaml does not.  C<indent>
+indents a whole file that another file carries as a block scalar.
 
 =cut
 
@@ -174,20 +192,22 @@ sub formatters {
     );
 }
 
-# Everything these documents are written for is read by cloud-init, which is
-# PyYAML, and PyYAML still implements YAML 1.1 sexagesimals while the libyaml
-# under YAML::XS does not.  So a scalar of colon-separated numbers -- which is
-# what a MAC address with no hex letters in it is -- comes back out of Dump bare,
-# because libyaml sees a string, and is read on the guest as a base-60 integer.
-# cloud-init then calls .lower() on it, the whole network stage dies, and the
-# guest sits on systemd-networkd-wait-online forever without ever saying why.
-#
-# Quoting it costs nothing for the parsers that were already right.
+# cloud-init reads these documents with PyYAML, which reads YAML 1.1
+# sexagesimals.  The libyaml under YAML::XS does not, so Dump leaves
+# colon-separated numbers unquoted, as in a MAC address with no hex letters.
+# PyYAML reads that as a base-60 integer, and the network stage of cloud-init
+# dies on .lower().
+# The guest then waits on systemd-networkd-wait-online forever.
 my $SEXAGESIMAL = qr/\A[-+]?\d[\d_]*(?::[0-5]?\d)+(?:[.][\d_]*)?\z/;
 
-# YAML::XS always leads with a document marker and always ends with a newline;
-# neither is wanted where this is being pasted into a document that already has
-# both.
+=head2 $text = _yaml($value)
+
+Returns C<$value> as YAML, without the document marker and the final newline
+that L<YAML::XS> always adds.  The document that the text goes into already has
+both.  A scalar that matches C<$SEXAGESIMAL> comes back in single quotes.
+
+=cut
+
 sub _yaml {
     my ($value) = @_;
 
@@ -210,17 +230,17 @@ sub _indent {
 
 =head2 $hv = $recipe->hv()
 
-The hypervisor this guest is being built for, as handed to the constructor.
+Returns the hypervisor that this guest is built for, as given to the
+constructor.
 
-Passed in rather than reached for.  A recipe that calls C<Trog::HV-E<gt>new()>
-itself puts the recipe layer in front of the machine layer in the loading order,
-which is backwards -- and it meant an ordinary recipe pulled in L<Sys::Virt>.
-Nothing here loads L<Trog::HV> now; it only speaks its interface.
+The recipe does not call C<Trog::HV-E<gt>new()> itself.  That puts the recipe
+layer before the machine layer in the load order, and an ordinary recipe then
+loads L<Sys::Virt>.  Nothing here loads L<Trog::HV>.  It only uses its
+interface.
 
-C<bin/new_config> hands one to every builder it makes, and C<bin/provision> to
-the one it builds directly.  Dies rather than defaulting, because a hypervisor
-chosen here would be a second answer to a question placement has already
-settled.
+C<bin/new_config> gives one to every builder it makes.  C<bin/provision> gives
+one to the builder that it makes itself.  Dies if there is none, because a
+hypervisor chosen here is a second answer to a question that placement settled.
 
 =cut
 
@@ -232,15 +252,16 @@ sub hv {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Work out everything the five templates read that is not simply handed to every
-recipe.
+Returns C<%opts> with the values added that the four templates read and that
+not every recipe gets.
 
-The setup script travels I<inside> another file rather than beside it --
-cloud-init carries it by value, in C<write_files> -- so it is rendered here
-instead of being left to an ordering between C<template_files> entries, which
-promises nothing about which of them is rendered first.  C<render_raw> is what
-makes that possible without recursing back through C<validate>; see
+The setup script goes I<inside> another file, not beside it.  cloud-init
+carries it by value, in C<write_files>.  So this method renders it, because the
+order of C<template_files> entries does not say which one renders first.
+C<render_raw> renders it without a second pass through C<validate>.  See
 L<Provisioner::Recipe/render_raw>.
+
+Dies if C<ips> is set without C<gateway>, or if C<contact_email> is not set.
 
 =cut
 
@@ -250,19 +271,14 @@ sub enrich {
     my $hv  = $self->hv;
     my $sub = $self->template_subdir;
 
-    # Both are ours to decide, so neither has to be configured: the domain XML
-    # pins the PCI slots, and systemd names a PCI NIC after its hotplug slot.
-    # The MAC is what actually does the work -- cloud-init matches on it and
-    # renames the interface to the name below -- so a guest whose kernel names
-    # things some other way still gets the right configuration on the right
-    # card.  dhcp_devname and bridge_devname override what it ends up called.
+    # We define the machine, so we know all four values.  The domain XML pins the
+    # PCI slots, and systemd names a PCI NIC after its hotplug slot.  cloud-init
+    # matches on the MAC and renames the interface.  So the right card gets the
+    # configuration, whatever the kernel calls it.
     #
-    # All four of those are things we know because we defined the machine.  A
-    # guest a service created is not one we defined: it assigns the MAC and the
-    # image decides the interface name, and neither is knowable before the guest
-    # exists.  So they are left unset, and the network-config says to leave the
-    # network alone -- which is what a cloud image expects, its addressing
-    # coming from the platform rather than from a seed.
+    # A service that builds a guest by API assigns the MAC, and the image picks
+    # the name.  So they stay unset, and the network-config leaves the network
+    # to the platform, as a cloud image expects.
     unless ( $hv->builds_by_api ) {
         my ( $nat_name, $bridge_name ) = $hv->nic_names;
         $opts{dhcp_devname}   //= $nat_name;
@@ -271,9 +287,8 @@ sub enrich {
         $opts{bridge_mac}     //= $hv->guest_mac( $opts{domain}, 1 );
     }
 
-    # Which mirror, and whether apt is allowed to install from it unverified.
-    # The second follows from the first and so cannot be a schema default; see
-    # Provisioner::DistroRecipe.
+    # mirror_insecure follows from mirror_uri, so it cannot be a schema default.
+    # See Provisioner::DistroRecipe.
     $opts{mirror_uri} = $self->mirror_uri(%opts);
     $opts{mirror_insecure} //= $opts{mirror_uri} ? 1 : 0;
 
@@ -290,29 +305,30 @@ sub enrich {
     $opts{users}     = $self->_users(%opts);
     $opts{packages}  = _first_boot_packages( $opts{packages} );
 
-    # A list rather than two lines of the template, because the first of them
-    # has a newline in the middle of it and a YAML sequence item written by hand
-    # could not carry one.  The trailing space and that newline are both as they
-    # have always been.
+    # A list, not two lines of the template, because the first item has a
+    # newline in it.  A YAML sequence item written by hand cannot carry one.
     $opts{runcmd} = [
         qq{echo "root:$opts{contact_email}\n" > /etc/aliases },
         q{echo 'bash /root/setup.sh' | at now},
     ];
 
-    # Straight out of the recipe's own templates, so a distribution that wants a
-    # different setup script writes one and gets it.
+    # From the templates of the recipe, so a distribution can have its own.
     $opts{setup_script} = $self->render_raw( "files/$sub.setup.sh.tt", %opts );
 
     return %opts;
 }
 
-# What cloud-init installs before the makefile runs, which is not quite what the
-# recipes asked for.
-#
-# atd is how the makefile gets started at all, make is what runs it, bash is
-# the shell it runs recipe lines with, and
-# something has to accept mail -- sendmail unless a recipe has asked for postfix,
-# which conflicts with it.
+=head2 $pkgs = _first_boot_packages($packages)
+
+Returns the packages that cloud-init installs before the makefile runs.  That
+is C<$packages>, plus what the makefile needs.  atd starts the makefile, make
+runs it, and bash is the shell for recipe lines.
+
+Something must also accept mail.  So it adds sendmail, unless C<$packages>
+has postfix, which conflicts with it.
+
+=cut
+
 sub _first_boot_packages {
     my ($packages) = @_;
 
@@ -323,12 +339,17 @@ sub _first_boot_packages {
     return [ uniq @pkgs ];
 }
 
-# The users cloud-init is to create, with the guest's own key authorized for the
-# admin among them.
-#
-# That key is how this machine gets back in to run the makefile again, so it goes
-# on the account that can sudo rather than on root, whose login the ssh recipe
-# locks down to keys anyway.
+=head2 $users = $recipe->_users(%opts)
+
+Returns the users that cloud-init creates.  The public half of the guest key is
+added to the C<ssh_authorized_keys> of the user named C<admin_user>.
+
+That key is how this machine gets back in to run the makefile again.  It goes
+on the account that can sudo, not on root.  The makefile limits the root login
+to keys.
+
+=cut
+
 sub _users {
     my ( $self, %opts ) = @_;
 
@@ -346,26 +367,26 @@ sub _users {
 
 =head2 $key = $recipe->guest_keypair(%opts)
 
-The keypair this guest fetches its payload with, made if it has none, as a hash
-of C<private>, C<public> and C<path>.
+Returns the keypair that this guest fetches its payload with, as a hash of
+C<private>, C<public> and C<path>.  Makes the pair if the domain has none.
+Dies if a half of the pair is still missing after that.
 
-Both halves go into the guest's cloud-init, and the public one is authorized on
-whichever machine is holding the payload -- which is the caller's to do, not
-this recipe's, since it is a change to a machine rather than to a domain
-directory.  C<bin/destroy> is what takes it back out.
+Both halves go into the cloud-init of the guest.  The caller authorizes the
+public half on the machine that holds the payload.  That is a change to a
+machine, not to a domain directory, so this recipe does not make it.
+C<bin/destroy> takes it back out.
 
-In perl rather than through C<ssh-keygen>: see
-L<Provisioner::Utils/write_ssh_keypair>, which is where the one thing that is
-not obvious about writing these lives.
+L<Provisioner::Utils/write_ssh_keypair> writes the pair in perl, not with
+C<ssh-keygen>.  It also has the one fact about writing these that is not
+obvious.
 
-A domain that already has a keypair keeps it: the key identifies the machine
-rather than the build, and a guest is rebuilt around the key it is seeded with,
-so replacing one leaves whoever already holds it unable to get back in.
+A domain that has a keypair keeps it.  The key identifies the machine, not the
+build, and a rebuilt guest keeps the key that it was seeded with.  A new key
+locks out whoever holds the old one.
 
-A domain with no pair gets one, since the user-data is written out of it.  Which
-means the caller has to put a sealed key back beside this one before calling:
-C<Trog::Guest::seal_key> takes the private half off the disk, and only the public
-half is left to find.
+A domain with no pair gets a new one, because the user-data is written from it.
+C<Trog::Guest::seal_key> removes the private half from the disk.  So before the
+call, the caller must put a sealed key back beside its public half.
 
 =cut
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Deploy a DNS challenge using lexicon
+# Answer a DNS challenge with lexicon.
 # Based almost entirely on:
 # https://raw.githubusercontent.com/dns-lexicon/dns-lexicon/HEAD/examples/dehydrated.default.sh
 
@@ -9,10 +9,9 @@ set -u
 set -o pipefail
 
 export PROVIDER_UPDATE_DELAY=${PROVIDER_UPDATE_DELAY:-"30"}
-[%# The same credential, under the same name and in the same shape, as the
-    shortcut templates/files/lexicon.shortcut.sh.tt exports -- both rendered
-    from Provisioner::DNSRecipe/credentials_for.  This said "registrar", which
-    for a guest serving its own zone named powerdns. -%]
+[%# The same credential, with the same name and format, as the shortcut that
+    templates/files/lexicon.shortcut.sh.tt exports.  Both come from
+    Provisioner::DNSRecipe/credentials_for. -%]
 [% IF lexicon.type -%]
 export PROVIDER="[% lexicon.type %]"
 [% IF lexicon.user -%]
@@ -43,22 +42,19 @@ function deploy_challenge {
         : $((DELAY_COUNTDOWN--))
     done
 
-    # This hook is called once for every domain chain that needs to be
-    # validated, including any alternative names you may have listed.
+    # dehydrated calls this hook once for each domain chain to validate,
+    # including the alternative names.
     #
     # Parameters:
-    #- DOMAIN
-    #   The domain name (CN or subject alternative name) being
-    #   validated.
+    # - DOMAIN
+    #   The domain name (CN or subject alternative name) to validate.
     # - TOKEN_FILENAME
-    #   The name of the file containing the token to be served for HTTP
-    #   validation. Should be served by your web server as
-    #   /.well-known/acme-challenge/${TOKEN_FILENAME}.
+    #   The name of the file that holds the token for HTTP validation. The
+    #   web server serves it as /.well-known/acme-challenge/${TOKEN_FILENAME}.
     # - TOKEN_VALUE
-    #   The token value that needs to be served for validation. For DNS
-    #   validation, this is what you want to put in the _acme-challenge
-    #   TXT record. For HTTP validation it is the value that is expected
-    #   be found in the $TOKEN_FILENAME file.
+    #   The token value for validation. For DNS validation, this goes in the
+    #   _acme-challenge TXT record. For HTTP validation, it is the content of
+    #   the $TOKEN_FILENAME file.
 }
 
 function clean_challenge {
@@ -72,9 +68,9 @@ function clean_challenge {
         --content="${TOKEN_VALUE}"
     done
 
-    # This hook is called after attempting to validate each domain
-    # chain, whether or not validation was successful. Here you
-    # can delete files or DNS records that are no longer needed.
+    # dehydrated calls this hook after it tries to validate each domain
+    # chain, whether or not the validation succeeded. It removes the TXT
+    # records that deploy_challenge added.
     #
     # The parameters are the same as for deploy_challenge.
 }
@@ -84,8 +80,7 @@ function invalid_challenge() {
 
     echo "invalid_challenge called: ${DOMAIN}, ${RESPONSE}"
 
-    # This hook is called if the challenge response has failed, so domain
-    # owners can be aware and act accordingly.
+    # dehydrated calls this hook if the challenge response failed.
     #
     # Parameters:
     # - DOMAIN
@@ -100,9 +95,7 @@ function deploy_cert {
 
     echo "deploy_cert called: ${DOMAIN}, ${KEYFILE}, ${CERTFILE}, ${FULLCHAINFILE}, ${CHAINFILE}"
 
-    # This hook is called once for each certificate that has been
-    # produced. Here you might, for instance, copy your new certificates
-    # to service-specific locations and reload the service.
+    # dehydrated calls this hook once for each new certificate.
     #
     # Parameters:
     # - DOMAIN
@@ -123,8 +116,8 @@ function unchanged_cert {
 
     echo "unchanged_cert called: ${DOMAIN}, ${KEYFILE}, ${CERTFILE}, ${FULLCHAINFILE}, ${CHAINFILE}"
 
-    # This hook is called once for each certificate that is still
-    # valid and therefore wasn't reissued.
+    # dehydrated calls this hook once for each certificate that is still
+    # valid, and so was not issued again.
     #
     # Parameters:
     # - DOMAIN
@@ -141,23 +134,10 @@ function unchanged_cert {
 }
 
 exit_hook() {
-  # This hook is called at the end of a dehydrated command and can be used
-  # to do some final (cleanup or other) tasks.
-  #
-  # What it is used for is leaving the certificate store where the next rebuild
-  # can salvage it, since dehydrated writes a fresh private key 0600 root on
-  # every renewal -- so this has to run after every dehydrated command, not just
-  # the one the provision queues.
-  #
-  # It was a flat `chmod -R 0660`, which takes the execute bit off the
-  # directories along with everything else.  After the first nightly renewal
-  # nobody could so much as enter the tree, and the guest looked backed up when
-  # it was not.
-  #
-  # bin/new_config fetches /var/lib/dehydrated/certs as root now (issue #76), so
-  # this no longer needs to leave anything readable to the admin account: issue
-  # #98 took that back out. Certificates are public and stay world readable; the
-  # private keys are back to 0600 root.
+  # dehydrated calls this hook at the end of each command, including the
+  # nightly renewal, which does not run get_cert.  It sets the ownership and
+  # the modes of the certificate store.  Directories keep their execute bit,
+  # or nobody can enter the tree.  Provisioner::Recipe::letsencrypt says why.
   chown -R root:root /var/lib/dehydrated
   find /var/lib/dehydrated -type d -exec chmod 0755 {} +
   find /var/lib/dehydrated -type f -exec chmod 0644 {} +
@@ -166,8 +146,7 @@ exit_hook() {
 }
 
 startup_hook() {
-  # This hook is called before the dehydrated command to do some initial tasks
-  # (e.g. starting a webserver).
+  # dehydrated calls this hook before each command.
 
   :
 }

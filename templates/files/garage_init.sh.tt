@@ -1,6 +1,6 @@
 #!/bin/bash
-# Initialise a single-node Garage cluster layout and create configured buckets.
-# Idempotent - safe to run multiple times.
+# Give a single-node Garage cluster its layout, and create the configured
+# buckets.  You can run it more than one time.  It changes only what is missing.
 
 set -euo pipefail
 
@@ -22,11 +22,10 @@ wait_for_garage() {
 
 wait_for_garage
 
-# Apply single-node layout if the zone is not yet configured
+# If the layout does not show the zone yet, assign this node to it.
 if ! $GARAGE layout show 2>/dev/null | grep -qF '[% zone %]'; then
-    # `node id -q` prints <id>@<host>:<port>, which is what `node connect`
-    # wants.  `layout assign` wants the id on its own and answers
-    # "0 nodes match" when given the whole thing.
+    # `node id -q` prints <id>@<host>:<port>.  `layout assign` wants only the
+    # id, and answers "0 nodes match" when it gets the whole string.
     NODE_ID=$($GARAGE node id -q 2>/dev/null | head -n1 | cut -d@ -f1)
     echo "Assigning node $NODE_ID to zone [% zone %] with capacity [% capacity %]"
     $GARAGE layout assign -z '[% zone %]' -c '[% capacity %]' "$NODE_ID"
@@ -36,7 +35,7 @@ else
     echo "Layout already configured for zone [% zone %]."
 fi
 
-# Create any requested buckets
+# Create each configured bucket that does not exist.
 [% FOR bucket IN buckets %]
 if $GARAGE bucket info '[% bucket %]' 2>/dev/null | grep -q 'Bucket:'; then
     echo "Bucket [% bucket %] already exists."

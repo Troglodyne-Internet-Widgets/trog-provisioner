@@ -21,33 +21,32 @@ was given
 
 =head1 DESCRIPTION
 
-L<OpenStack::Client>'s constructor builds its user agent with
+The constructor of L<OpenStack::Client> makes its user agent with
 
     ssl_opts => { verify_hostname => 0 }
 
-hardcoded, and offers no argument to say otherwise.  The one thing it does let
-you choose is the class it calls C<new> on -- so this is that class, and it puts
-verification back.
+in its code, and no argument changes it.  But you can choose the class that it
+calls C<new> on.  This is that class, and it turns the check back on.
 
-This is not housekeeping.  Every request after the first carries C<X-Auth-Token>,
-a bearer credential good until the token expires; with hostname verification off
-we hand it to whatever answered the connection, and a production cloud reached
-over the internet is exactly where that matters.
+Each request after the first carries C<X-Auth-Token>.  This is a bearer
+credential, good until the token expires.  Without the hostname check, the
+token goes to any server that answers the connection.  A production cloud over
+the internet is where that is most dangerous.
 
 =head1 CLASS METHODS
 
 =head2 new(%opts)
 
-As L<LWP::UserAgent>, with C<verify_hostname> and C<SSL_verify_mode> forced on
-after whatever the caller asked for.
+Returns a new user agent, as L<LWP::UserAgent> does.  C<verify_hostname> and
+C<SSL_verify_mode> are always on, whatever C<%opts> asks for.
 
 =cut
 
 sub new {
     my ( $class, %opts ) = @_;
 
-    # Last word rather than a default, because the caller we exist for is the
-    # one passing verify_hostname => 0.
+    # These come last, not as defaults, because OpenStack::Client passes
+    # verify_hostname => 0.
     $opts{ssl_opts} = {
         %{ $opts{ssl_opts} // {} },
         verify_hostname => 1,
@@ -59,7 +58,7 @@ sub new {
 
 =head1 SEE ALSO
 
-L<Trog::OpenStack::Auth>, which is what asks for this.
+L<Trog::OpenStack::Auth>, which uses this class.
 
 =cut
 

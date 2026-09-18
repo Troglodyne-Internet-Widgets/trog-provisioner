@@ -17,50 +17,49 @@ use parent qw{Provisioner::Recipe};
     somedomain:
         perllsp:
 
-    # Or with explicit perl path (useful when the perl recipe is not active):
+    # Or name the perl to use, for example when the perl recipe is not active:
     somedomain:
         perllsp:
             perl_path: /opt/perl5/perl-5.38.0/bin/perl
 
 =head2 DESCRIPTION
 
-Installs L<PerlNavigator|https://github.com/bscan/PerlNavigator>, a
-Language Server Protocol (LSP) implementation for Perl, and configures
-vim to use it via the C<vim-lsp> plugin family.
+Installs L<PerlNavigator|https://github.com/bscan/PerlNavigator>, a Language
+Server Protocol (LSP) implementation for Perl.  It also configures vim to use
+PerlNavigator through the C<vim-lsp> plugin family.
 
-When the C<perl> recipe is co-listed in the same domain the template
-detects C</opt/perl5/*/bin/perl> and passes the found path to
-PerlNavigator so it analyses code with the custom perl build rather
-than the system default.
+If a perl exists under C</opt/perl5/*/bin/perl>, the vim configuration gives
+that path to PerlNavigator.  The C<perl> recipe puts its build there.
+PerlNavigator then analyzes code with that perl and not with the system perl.
 
-Vim plugins are installed into C<~admin_user/.vim/pack/> using vim 8+
-native package loading -- no plugin manager required.  Each is pinned to a
-commit and fetched as that commit's tarball: nothing here uses a plugin's
-history, and a pinned commit makes two guests built a month apart the same
-guest.
+The vim plugins go into C<~admin_user/.vim/pack/>.  Vim 8 and later loads
+packages from there, so no plugin manager is necessary.  Each plugin is pinned
+to a commit, and the recipe fetches the tarball of that commit.  Nothing here
+uses the history of a plugin.  The pin makes two guests built a month apart
+the same guest.
 
 =head3 deps
 
 System packages: C<nodejs>, C<npm>, C<vim>.
 
-=head3 validate
+=head3 args
 
-No required fields.  Optional:
+No field is required.  The optional fields are:
 
 =over 4
 
 =item perl_path
 
-Absolute path to the perl binary PerlNavigator should use.  Defaults to
-the system perl (C</usr/bin/perl>); overridden at runtime by the template
-when the C<perl> module is present.
+The absolute path to the perl binary that PerlNavigator uses.  The default is
+the system perl (C</usr/bin/perl>).  A perl under C</opt/perl5/> replaces it
+when the vim configuration loads.
 
 =item vim_plugins
 
-The plugins, keyed by the directory each is unpacked into under
-C<~/.vim/pack/lsp/start/>, each a GitHub C<repo> and the 40-character commit
-C<ref> to install.  The vim-lsp family is there by default, one entry at a time,
-so naming another plugin adds it and naming one of the defaults moves its pin.
+The plugins, keyed by the directory that each one unpacks into under
+C<~/.vim/pack/lsp/start/>.  Each plugin is a GitHub C<repo> and the 40-character
+commit C<ref> to install.  The vim-lsp family is there by default, one entry at
+a time.  So a new name adds a plugin, and the name of a default moves its pin.
 
     perllsp:
         vim_plugins:
@@ -70,8 +69,8 @@ so naming another plugin adds it and naming one of the defaults moves its pin.
 
 =head3 template_files
 
-Renders C<perllsp.vimrc.tt> into a C<perllsp.vim> vimrc snippet placed in
-the admin user's C<~/.vim/> directory.
+Renders C<perllsp.vimrc.tt> into C<perllsp.vim>, a vimrc snippet.  The fragment
+installs it in the C<~/.vim/> directory of the admin user.
 
 =cut
 
@@ -84,9 +83,8 @@ my %PLUGIN = (
     },
 );
 
-# The vim-lsp family, each at the commit it was last checked at.  A commit
-# rather than a branch: a pin is what makes two guests built a month apart the
-# same guest.
+# The vim-lsp family, each at the commit it was last checked at.  The POD says
+# why a pin is a commit.
 my %DEFAULT_PLUGINS = (
     'async'                => { repo => 'prabirshrestha/async.vim',            ref => '2082d13bb195f3203d41a308b89417426a7deca1' },
     'vim-lsp'              => { repo => 'prabirshrestha/vim-lsp',              ref => 'bbffa60cb08a6a2d67e2086a89699ab00a084fe9' },
@@ -111,9 +109,9 @@ sub args {
 
 =head3 enrich
 
-Turns C<vim_plugins> into C<plugins>, a list in directory order, each with the
-C<dir>, C<repo> and C<ref>.  Dies on a directory name that is not one plain path
-component, since the fragment empties that directory before unpacking into it.
+Turns C<vim_plugins> into C<plugins>, a list sorted by directory.  Each item has
+a C<dir>, a C<repo> and a C<ref>.  Dies if a directory name is not one plain
+path component, because the fragment empties that directory before it unpacks.
 
 =cut
 
@@ -150,7 +148,7 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-A tarball codeload serves for a full commit SHA is that commit, for good.
+A tarball that codeload serves for a full commit SHA never changes.
 
 =cut
 

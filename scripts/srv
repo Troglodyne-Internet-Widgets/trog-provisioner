@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Handy if you don't want a makefile failure for something that *might* exist.
+# Run `systemctl VERB SERVICE` only if SERVICE has a unit file in
+# /etc/systemd/system.
 
 VERB=$1
 SERVICE=$2

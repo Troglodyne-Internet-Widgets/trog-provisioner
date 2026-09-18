@@ -1,6 +1,6 @@
-[%# The provider that loads every dashboard JSON a recipe drops into
+[%# The provider that loads each dashboard JSON that a recipe puts in
     /var/lib/grafana/dashboards.  One provider serves all of them, so a recipe
-    adding a dashboard writes a file there and nothing here changes. -%]
+    that adds a dashboard writes a file there and this file does not change. -%]
 apiVersion: 1
 
 providers:
@@ -9,11 +9,11 @@ providers:
     folder: ""
     type: file
     disableDeletion: false
-[%# Rescanned while running, so a dashboard written by a later target appears
-    without a restart this recipe would have to queue. -%]
+[%# Grafana rescans while it runs, so a dashboard that a later target writes
+    appears without a restart. -%]
     updateIntervalSeconds: 30
-[%# Edits in the browser are not written back to the file, and are replaced when
-    the file changes.  The file is the source of truth. -%]
+[%# Grafana does not write browser edits back to the file, and replaces them
+    when the file changes.  The file is the source of truth. -%]
     allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

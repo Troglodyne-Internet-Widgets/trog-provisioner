@@ -16,9 +16,13 @@ Provisioner::Recipe::Ubuntu::koan - Ubuntu's C<deps> for L<Provisioner::Recipe::
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else koan does is in the recipe this
+A package name is a fact about a distribution, not about the software, so it
+is here.  Everything else that koan does is in the recipe that this class
 inherits from.
+
+=head2 @pkgs = $recipe->deps()
+
+Returns the Ubuntu packages that koan needs to build and run.
 
 =cut
 
@@ -37,10 +41,8 @@ sub deps {
       build-essential
     };
 
-    # libolm is only strictly required when messaging_provider=matrix
-    # with E2EE on, but it's small and the host is single-purpose
-    # always include so the pip install of matrix-nio[e2e] never
-    # fails for want of a header.
+    # Only matrix with E2EE needs libolm, but it is small.  Always install it,
+    # so that the pip install of matrix-nio[e2e] always finds its header.
     push @pkgs, qw{libolm-dev libffi-dev};
     return @pkgs;
 }

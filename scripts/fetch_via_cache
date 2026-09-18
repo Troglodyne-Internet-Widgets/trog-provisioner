@@ -1,18 +1,20 @@
 #!/bin/bash
-# Point the hosts this guest downloads from at the fleet's fetch cache while it
-# provisions, and give them back afterwards.  The guest's half of
-# Provisioner::Recipe::fetchcache, whose perldoc has the account.
+# While this guest provisions, send its downloads to the fetch cache of the
+# fleet.  Afterwards, send them upstream again.  This is the half of
+# Provisioner::Recipe::fetchcache that runs on the guest, and its perldoc has
+# the full account.
 #
 #   fetch_via_cache on ADDRESS AUTHORITY HOST...
 #   fetch_via_cache off
 #
-# on trusts AUTHORITY -- what the cache's certificate is signed by -- and then
-# asks the cache for each HOST by name, over TLS.  Only the hosts it answers for
-# go into /etc/hosts, so a cache that is down, or one that does not fetch from
-# some host, leaves that host going upstream.  off takes both back out.
+# "on" trusts AUTHORITY, the certificate that signs the certificate of the
+# cache.  Then it asks the cache for each HOST by name, over TLS.  Only the
+# hosts that the cache answers for go into /etc/hosts.  If the cache is down,
+# or does not fetch from a host, that host stays upstream.  "off" removes the
+# hosts and the authority.
 #
-# Exits zero whatever the cache does: a cache saves a build time and outages,
-# and is never a reason for one to fail.
+# Exits zero whatever the cache does.  A cache saves build time and outages,
+# and it must never make a build fail.
 
 HOSTS_FILE=${FETCH_VIA_CACHE_HOSTS:-/etc/hosts}
 ANCHOR=${FETCH_VIA_CACHE_ANCHOR:-/usr/local/share/ca-certificates/trog-fetchcache.crt}
@@ -37,7 +39,7 @@ on)
 
     install -m 0644 "$authority" "$ANCHOR" && update-ca-certificates >/dev/null
 
-    # Replaced rather than added to, so a make run again does not stack them.
+    # Replaced, not added to, so that a second make run does not add them twice.
     forget
     answered=()
     for host in "$@"; do

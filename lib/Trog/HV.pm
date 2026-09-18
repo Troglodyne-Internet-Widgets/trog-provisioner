@@ -41,96 +41,95 @@ Trog::HV - the hypervisor we are provisioning against, whichever kind it is
 
 =head1 DESCRIPTION
 
-Everything in this toolkit that used to assume "the hypervisor is this machine"
-goes through here, and everything that assumed "the hypervisor runs libvirt"
-goes through a backend.
+Everything in this toolkit that works with the hypervisor goes through this
+class.  Everything that depends on the kind of hypervisor goes through a backend.
 
 This class is what the rest of the toolkit talks to.  It owns the singleton, the
-per-domain directory, and the arithmetic that decides which hypervisor a guest
-fits on, none of which depends on what is running the guests.  A backend owns
+directory for each domain, and the arithmetic that decides which hypervisor a
+guest fits on.  None of these depends on what runs the guests.  A backend owns
 the rest.
 
-The object is a singleton.  C<< Trog::HV->new() >> with no arguments hands back
-whichever hypervisor was configured earlier in the process, so callers do not
-have to pass it around.  What comes back is a backend instance, so it answers to
-everything here I<and> to everything that backend adds.
+The object is a singleton.  C<< Trog::HV->new() >> with no arguments returns the
+hypervisor that this process configured earlier, so callers do not pass it
+around.  The object that comes back is a backend instance.  It answers to every
+method here I<and> to every method that the backend adds.
 
 =head1 WHAT A BACKEND HAS TO PROVIDE
 
-A backend is a subclass of this class.  It is chosen by L</backend_for(%opts)>,
-built by its own C<build>, and has to answer to the following, because this class
-and the scripts above it both call them:
+A backend is a subclass of this class.  L</backend_for(%opts)> chooses it, and
+its own C<build> makes it.  This class and the scripts above it call the methods
+below, so a backend must answer to each one:
 
 =over 4
 
-=item * C<build(%opts)> and C<config_keys>: how one gets made, and which
+=item * C<build(%opts)> and C<config_keys>: how to make one, and which
 F<hypervisors.conf> keys make it.
 
 =item * C<is_local> and C<describe>, which every diagnostic prints.
+L<Trog::Machine> gives a default for both.
 
-=item * C<capacity>, in the form L</shortfalls(%needs)> and L</headroom(%needs)>
-read it: a hash with C<memory_mb>, C<memory_free>, C<memory_committed>, C<cpus>,
-C<cpus_allocatable>, C<cpus_committed>, C<cpus_free>, C<disk_free> and
-C<guests>.
+=item * C<capacity>, in the form that L</shortfalls(%needs)> and
+L</headroom(%needs)> read: a hash with C<memory_mb>, C<memory_free>,
+C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
+C<cpus_free>, C<disk_free> and C<guests>.
 
-=item * the guest lifecycle -- C<domain_exists> and C<annihilate_domain> --
-and the snapshot four, C<snapshot_names>,
-C<snapshot_current_name>, C<create_snapshot> and C<revert_snapshot>.
+=item * The guest lifecycle, C<domain_exists> and C<annihilate_domain>.  Also
+the four snapshot methods: C<snapshot_names>, C<snapshot_current_name>,
+C<create_snapshot> and C<revert_snapshot>.
 
-=item * C<guest_names>, every guest it has, which is what tells an orphan sweep
-that a directory belongs to something still running.
+=item * C<guest_names>, every guest that the backend has.  An orphan sweep uses
+it to tell that a directory belongs to a guest that still exists.
 
-=item * C<guest_ssh_ip>, the address a built guest is reached at.
+=item * C<guest_ssh_ip>, the address at which you reach a built guest.
 
-=item * C<clear_guest>, whatever has to go before a guest of that name can be
-made.  For libvirt that is the domain, its disks and the addresses it held; a
-cloud rebuilds the server it already has, so there is nothing to clear.  Takes
-C<keep_disk>, which says to leave the guest's disk where it is -- see
-C<rollback_possible> for when that is allowed.
-
-=item * C<snapshot_before_rebuild($domain, capacity =E<gt> $bytes)>, the
-rollback point taken immediately before a rebuild, or undef when there is none
-to take.  Whatever a backend has to do to the guest to make that snapshot
-possible happens in there rather than in the caller -- see below.
+=item * C<clear_guest>, which removes what must go before a guest of that name
+can be made.  For libvirt, that is the domain, its disks and the addresses it
+held.  A cloud rebuilds the server it already has, so it has nothing to clear.
+It takes C<keep_disk>, which tells it to leave the disk of the guest in place.
+See C<rollback_possible> for when that is allowed.
 
 =item * C<rollback_possible($domain, capacity =E<gt> $bytes)>, whether a
-snapshot taken now would still be there to go back to after the rebuild.
+snapshot taken now is still there to go back to after the rebuild.
+C<snapshot_before_rebuild> asks it.
 
-The two backends answer it for opposite reasons.  A cloud's snapshot is an image
-that lives outside the server, so it survives whatever happens to the guest, and
-the answer is yes whenever there is a server.  libvirt's snapshot lives inside
-the guest's qcow2, so it survives only if that file does -- which it does only
-when the disk can be kept, and it can be kept only when nothing about the disk
-being asked for has changed.
+The two backends answer it for opposite reasons.  A cloud snapshot is an image
+outside the server.  It survives whatever happens to the guest, so the answer is
+yes when a server exists.  A libvirt snapshot lives inside the qcow2 file of the
+guest, so it survives only if that file does.  The file survives only when the
+disk is kept, and the disk is kept only when the requested disk did not change.
 
-=item * C<provision_guest>, the guest itself, from the seed C<bin/provision>
-has written.  Returns the address it came up at, which C<guest_ssh_ip> is then
-asked how to reach.
+=item * C<provision_guest>, the guest itself, made from the seed that
+C<bin/provision> wrote.  It returns the address that the guest came up at.
+C<guest_ssh_ip> then tells how to reach that guest.
 
-=item * C<would_provision>, what the two above would do, for a dry run.
+=item * C<would_provision>, for a dry run.  It describes what C<clear_guest>
+and C<provision_guest> are to do, and does not do it.
 
-=item * C<prepare_host>, C<release_seed> and C<guest_volumes>: what has to be
-done to a hypervisor before it can build, to a guest once cloud-init has read
-its seed, and to a guest's disks once it is gone.  A backend with nothing to do
-for one says so by doing nothing, which is what lets the scripts above call all
-three without asking first which kind of hypervisor they have.
+=item * C<prepare_host>, C<release_seed> and C<guest_volumes>: the work on a
+hypervisor before it can build, on a guest after cloud-init reads its seed, and
+on the disks of a guest after it is gone.  A backend with nothing to do for one
+of them does nothing.  So the scripts above call all three, and do not ask first
+which kind of hypervisor they have.
 
-=item * C<builds_by_api> and C<manages_addresses>, which are what F<bin/provision>
-and L<Provisioner::IPPool> branch on rather than on a class name.  Only where
-the two kinds take genuinely different paths -- a guest defined from XML rather
-than asked of a service, an address we allocate rather than one we are given --
-and not for a step one of them merely has no use for.  That is what the three
-above are for.
+=item * C<builds_by_api> and C<manages_addresses>.  L<Provisioner::Recipe::ubuntu>,
+F<bin/new_config> and L<Provisioner::IPPool> branch on these, not on a class
+name.  They are only for where the two kinds take different paths: a guest
+defined from XML or requested from a service, an address that we allocate or one
+that we receive.  They are not for a step that one kind does not need.  The
+three methods above are for that.  Both are false here.
+
+=item * C<preflight_checks> and C<preflight_notes>, and the checks
+C<check_reachable> and C<check_transfer_ip>.  See L</PREFLIGHT>.
 
 =back
 
-Every one of these is declared here, and dies naming the backend and the method
-it left out.  So a third backend that forgets one finds out at the call, in
-words, rather than as "Can't locate object method" from somewhere in
-F<bin/provision>.
+This class declares each method in the list that it does not answer itself.
+That declaration dies, and names the backend and the missing method.  So a new
+backend that leaves one out gets a clear error at the call, not "Can't locate
+object method" from somewhere in F<bin/provision>.
 
-A method that means nothing to a backend should die saying so, rather than
-return an undef the caller will carry somewhere else before failing.
+If a method means nothing to a backend, the backend must die and say so.  It
+must not return an undef that the caller carries somewhere else before it fails.
 
 =head1 CLASS METHODS
 
@@ -141,43 +140,35 @@ my $INSTANCE;
 
 =head2 new(%opts)
 
-Build (or return) the hypervisor.
+Build or return the hypervisor.
 
-Called with no meaningful options it returns the instance built earlier in the
-process, or a fresh local one if there wasn't any.  Called with options it
-builds a new hypervisor and makes I<that> the instance from then on, so the
-configuration only has to be read once.
+If no option is set, it returns the instance built earlier in the process.  If
+there is none, it builds a local one.  If options are set, it builds a new
+hypervisor and makes I<that> the instance from then on.  So the configuration
+is read only once.
 
-Options: C<uri>, C<pool_path>, C<pool_name>, C<domain_dir>, C<bridge_device>,
-C<virbr_device>, C<partition>.  Undefined and empty values are ignored, which
-lets callers pass unset command line options straight through.
+The options are the constructor options of each backend (see C<config_keys>),
+the limits under L</PLACEMENT>, and C<name>.  An option with a false value
+(undef, empty or 0) is dropped.  So callers can pass unset command line options
+straight through.
 
 =cut
 
 sub new {
     my ( $class, %opts ) = @_;
 
-    # Drop the options that weren't actually given, so an unset --connect
-    # doesn't look like a request for a different hypervisor.
+    # Drop options that are not set, so an unset --connect does not ask for a
+    # different hypervisor.
     my %given = map { $_ => $opts{$_} } grep { $opts{$_} } keys %opts;
     return $INSTANCE if $INSTANCE && !%given;
 
     return $class->candidate(%given)->activate();
 }
 
-=head2 candidate(%opts)
-
-Build a hypervisor without making it the current one.
-
-C<new> is a singleton because almost everything wants "the hypervisor we are
-working with".  Choosing between several is the exception: L<Trog::Hypervisors>
-has to hold them all at once to compare them, and only the winner becomes
-current.  Same options as C<new>, plus C<name>.
-
 =head2 activate
 
-Make this hypervisor the one C<new> hands back from here on.  Returns itself,
-so it chains.
+Make this hypervisor the one that C<new> returns from now on.  Returns the
+object, so calls can chain.
 
 =cut
 
@@ -187,12 +178,24 @@ sub activate {
     return $self;
 }
 
+=head2 candidate(%opts)
+
+Build a hypervisor and return it, but do not make it the current one.
+
+C<new> is a singleton because almost every caller wants the one hypervisor of
+this run.  L<Trog::Hypervisors> is the exception.  It holds several hypervisors
+at once to compare them, and only the winner becomes current.  Takes the same
+options as C<new>.  Dies where C<backend_for> or the C<build> of the backend
+dies.
+
+=cut
+
 sub candidate {
     my ( $class, %opts ) = @_;
 
     my %given = map { $_ => $opts{$_} } grep { $opts{$_} } keys %opts;
 
-    # Asked of a backend directly, that is the answer.  Asked of us, pick one.
+    # Called on a backend class, use that backend.  Called on this class, choose one.
     my $backend = $class eq __PACKAGE__ ? $class->backend_for(%given) : $class;
 
     return $backend->build(%given);
@@ -200,7 +203,7 @@ sub candidate {
 
 =head2 backends
 
-Every backend class, loaded.
+Returns the class name of every backend, and loads each one.
 
 =cut
 
@@ -209,9 +212,8 @@ sub backends {
 
     my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack};
 
-    # Required rather than used at the top of the file: every backend is a
-    # subclass of this class, so loading one from here at compile time is a
-    # cycle.
+    # Loaded with require here, not with use at the top: each backend is a
+    # subclass of this class, so a load at compile time makes a cycle.
     foreach my $backend (@backends) {
         my $path = $backend =~ s{::}{/}gr;
         require "$path.pm";    ## no critic (Modules::RequireBarewordIncludes)
@@ -222,19 +224,20 @@ sub backends {
 
 =head2 backend_for(%opts)
 
-Which backend these options are asking for.
+Returns the backend class that these options ask for: L<Trog::HV::OpenStack>
+if C<cloud> is set, and L<Trog::HV::Libvirt> if it is not.  Dies if both
+C<cloud> and C<uri> are set.
 
-The one seam there is.  Everything else about supporting a second kind of
-hypervisor is a subclass; this is the sentence that decides you get one.
+This is the one seam.  Everything else about a second kind of hypervisor is a
+subclass, and this method decides which subclass you get.
 
 =cut
 
 sub backend_for {
     my ( $class, %opts ) = @_;
 
-    # A cloud is named; a libvirt hypervisor is reached at a URI.  Naming both,
-    # or neither, is a configuration that cannot be satisfied rather than one to
-    # pick a winner from.
+    # A cloud has a name, and a libvirt hypervisor has a URI.  A configuration
+    # that names both cannot be satisfied, so do not choose one of them.
     my $named_cloud = length $opts{cloud};
     my $named_uri   = length $opts{uri};
 
@@ -250,12 +253,13 @@ sub backend_for {
 
 =head2 options_from_block($block)
 
-Turn one F<hypervisors.conf> block into constructor options.
+Turn one F<hypervisors.conf> block into constructor options, and return them as
+a list of pairs.  A key that the block does not set is left out.
 
-Every backend's keys, because which backend a block describes is decided by what
-is in it -- so all of them have to be read before that question can be asked.
-Each backend says which keys are its own in C<config_keys>; the limits below are
-this class's, since placement is.
+It reads the keys of every backend, because the content of a block decides
+which backend it describes.  So all keys must be read before that decision.
+Each backend names its own keys in C<config_keys>.  This class reads the
+placement limits, because placement belongs to this class.
 
 =cut
 
@@ -280,21 +284,18 @@ sub options_from_block {
 
 =head2 from_config($config, %override)
 
-Build the hypervisor from a L<Config::Simple> object, with anything passed in
-C<%override> (i.e. from the command line) winning over what the file says.  A
-false C<$config> is fine and means "everything is defaulted".
+Build the hypervisor from a L<Config::Simple> object through C<new>, and return
+it.  A defined value in C<%override>, for example from the command line, wins
+over the file.  A false C<$config> is allowed, and means that every value takes
+its default.
 
-Reads C<libvirt_uri> for the URI, and C<pool_path>, C<pool_name>,
-C<domain_dir>, C<bridge_device>, C<virbr_device> and C<partition> under their
-own names.
+It reads C<libvirt_uri> for C<uri>.  It reads every other constructor option of
+each backend under its own name.
 
 =cut
 
-# Constructor option => the configuration key it reads.
-#
-# Every backend's keys, not just one's: which backend a block describes is
-# decided by what is in it, so all of them have to be read before that question
-# can be asked.
+# Constructor option => the configuration key it reads, for every backend.  See
+# options_from_block for why every backend.
 my %CONFIG_KEY = (
     uri => 'libvirt_uri',
     map { $_ => $_ } qw{
@@ -319,7 +320,7 @@ sub from_config {
 
 =head2 forget()
 
-Drop the memoized instance.  Only tests should need this.
+Drop the stored instance.  Only the tests call this.
 
 =cut
 
@@ -332,8 +333,8 @@ sub forget {
 
 =head2 name
 
-What F<hypervisors.conf> calls this hypervisor, or undef when it didn't come
-from there.
+Returns the name of this hypervisor in F<hypervisors.conf>, or undef if it did
+not come from there.
 
 =cut
 
@@ -341,10 +342,10 @@ sub name ($self) { return $self->{name} }
 
 =head2 explicit
 
-Whether this hypervisor was actually asked for, rather than arrived at by
-default.  Callers read it as "somebody has already decided, do not place around
-them", which is a question worth asking of any backend -- so it lives here even
-though only a connection URI can be defaulted.
+Whether somebody asked for this hypervisor, as opposed to a default choice.
+Callers read it as "somebody already decided, do not place around them".  Any
+backend can answer that, so it lives here.  At present, only a connection URI
+can take a default.
 
 =cut
 
@@ -354,9 +355,10 @@ sub explicit ($self) { return $self->{explicit} }
 
 =head2 domain_dir
 
-Where the per-domain directories live.  Not a backend's business: it is a
-directory on whichever machine is running this, holding what we generated for a
-guest, and it means the same thing however that guest gets built.
+Returns the directory that holds the directory of each domain.  It is not the
+business of a backend.  It is a directory on the machine that runs this code,
+and it holds what we generated for a guest.  Its meaning does not change with
+how the guest gets built.
 
 =cut
 
@@ -364,12 +366,12 @@ sub domain_dir ($self) { return $self->{domain_dir} // $self->default_domain_dir
 
 =head2 default_domain_dir
 
-Where a domain's directory goes when nothing says otherwise.
+Returns the directory for domains when nothing else sets one.
 
-A class method, so C<bin/provision> can ask before it has a hypervisor to ask --
-it needs the path to find F<provision.conf>, and F<provision.conf> is where the
-hypervisor comes from.  Spelling the default there as well is how the two came
-to be able to disagree.
+It is a class method, so C<bin/provision> and C<bin/restore> can call it before
+they have a hypervisor.  C<bin/provision> needs the path to find
+F<provision.conf>, and F<provision.conf> names the hypervisor.  Keep the default
+here only, so that the two cannot disagree.
 
 =cut
 
@@ -377,27 +379,29 @@ sub default_domain_dir { return '/opt/domains' }
 
 =head1 WHICH WAY A GUEST GETS BUILT
 
-Two questions the scripts above have to ask, which every backend answers
-differently and which nothing up there should answer by looking at a class name.
+The code above this class asks two questions.  Each backend answers them in its
+own way, and no caller answers them from a class name.
 
 =head2 builds_by_api
 
-Whether a guest is created by asking a service for one, rather than by defining
-a domain from the XML L<Provisioner::Recipe::vm> renders.  Which is a different
-path through F<bin/provision>, a different set of checks in F<bin/preflight>,
-and interfaces whose names nobody here chose.  What it is I<not> for is the
-storage pool, the seed ISO and the cdrom: those are L</prepare_host($virtiofs)>,
-L</release_seed($domain)> and L</guest_volumes($domain)>, which a service-built guest answers by
-having nothing to do.
+Whether a service creates a guest on request, as opposed to a domain defined
+from the XML that L<Provisioner::Recipe::vm> renders.  If it does, the service
+assigns the MAC and the image names the interfaces.  So
+L<Provisioner::Recipe::ubuntu> leaves the network configuration to the image.
+
+It is I<not> for the storage pool, the seed ISO or the cdrom.  Those are
+L</prepare_host($virtiofs)>, L</release_seed($domain)> and
+L</guest_volumes($domain)>, and a guest that a service builds answers them by
+doing nothing.
 
 =head2 manages_addresses
 
-Whether the hypervisor hands its guests the address they are reached at, rather
-than us choosing one for them out of F<ipmap.cfg>'s pool.
+Whether the hypervisor gives its guests their addresses, so that we do not
+choose one out of the pool in F<ipmap.cfg>.
 
-Where it does, the pool has nothing to allocate, nothing of ours to collide
-with, and no reason for L<Provisioner::IPPool> to sweep that hypervisor at all --
-the addresses it would find are not drawn from the pool it is protecting.
+If it does, the pool has nothing to allocate and nothing of ours to collide
+with.  L<Provisioner::IPPool> does not sweep that hypervisor, because its
+addresses do not come from the pool.
 
 =cut
 
@@ -406,29 +410,29 @@ sub manages_addresses { return 0 }
 
 =head1 WHAT EVERY BACKEND ANSWERS
 
-Declared here so that leaving one out is an error that names itself.  See
-L</WHAT A BACKEND HAS TO PROVIDE> for what each is for.
+This class declares these methods, so a backend that leaves one out gets an
+error that names the method.  See L</WHAT A BACKEND HAS TO PROVIDE> for the
+purpose of each.
 
 =head2 prepare_host($virtiofs)
 
-Whatever the hypervisor needs before a guest can be built on it.  C<$virtiofs>
+Does what the hypervisor needs before a guest can be built on it.  C<$virtiofs>
 is our copy of F<virtiofs-better>, for a backend whose guests run in a qemu
-process that wants it.
+process that uses it.
 
 =head2 release_seed($domain)
 
-Called once the guest says cloud-init has finished, and not before: until then
-it may still be reading its seed.
+Called after the guest reports that cloud-init finished, and not before.  Until
+then, the guest can still be reading its seed.
 
 =head2 guest_volumes($domain)
 
-The volumes that are this guest's alone and ours to delete once it is gone.
-Never the base image, which every other guest is built on.
+Returns the volumes that belong to this guest alone, which we delete after the
+guest is gone.  Never the base image, because every other guest is built on it.
 
 =cut
 
-# Named, so the message says whose method is missing and that it is owed,
-# rather than that some object somewhere could not find it.
+# Declared, so the error names the class and the method that it owes.
 sub _abstract {
     my ( $self, $method ) = @_;
     die( ( ref($self) || $self ) . " does not implement $method, which every backend has to\n" );
@@ -454,20 +458,19 @@ sub would_provision       ( $self, @ ) { return $self->_abstract('would_provisio
 
 =head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
 
-The rollback point taken immediately before a rebuild, or undef when there is
-none to take.  C<capacity> is the size the rebuild is asking for, which is what
-C<rollback_possible> weighs.
+Takes a snapshot just before a rebuild, as the rollback point, and returns its
+name.  C<capacity> is the size that the rebuild asks for, and
+C<rollback_possible> uses it.  Backends do not override this method.
 
-Undef rather than a name whenever the snapshot did not happen -- the backend
-said there was nothing worth going back to, or C<create_snapshot> warned and
-returned false.  What the caller does with a name is offer it to an operator as
-the way home, so one handed back for a snapshot that is not there is worse than
-saying nothing.
+Returns undef whenever the snapshot did not happen.  That is when
+C<rollback_possible> is false, or when C<create_snapshot> warns and returns
+false.  The caller offers a returned name to an operator as the way back.  So a
+name for a snapshot that does not exist is worse than no name.
 
-The name is the day and second it was taken, because that is what an operator
-reads back out of the backend and types at C<bin/restore>.  No colons in it: it
-reaches a command line, and on libvirt the snapshot XML as well.  Nothing sorts
-on it -- C<snapshot_names> orders by creation time -- so this is for the reader.
+The name holds the date and the time to the second.  An operator reads it back
+out of the backend and types it at C<bin/restore>.  It has no colons, because
+it goes onto a command line, and on libvirt into the snapshot XML too.  Nothing
+sorts on it, because C<snapshot_names> sorts by creation time.
 
 =cut
 
@@ -478,21 +481,19 @@ sub snapshot_before_rebuild {
 
     my $name = 'before-reprovision-' . Time::Piece::localtime()->strftime('%Y-%m-%d-%H%M%S');
 
-    # Disk only, and left down.  The guest is about to be rebuilt, so writing
-    # its memory out would cost time and size for a state nobody will go back
-    # to, and starting it again afterwards would only be to stop it a moment
-    # later.  A cloud has neither distinction to make and ignores both.
+    # Disk only, and left down: the rebuild follows at once, so a memory image
+    # and a restart are waste.  A cloud ignores both options.
     return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
 =head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
 
-Whether rebuilding this domain would take the existing guest apart rather than
-building over it.  C<capacity> is the size the build asks for.
+Whether a rebuild of this domain takes the existing guest apart, as opposed to
+a build over it.  C<capacity> is the size that the build asks for.
 
-False here: a backend that replaces a server's root disk in place keeps the
-server and its addresses, so there is nothing to lose.  libvirt overrides it.
-What to do about a true answer is F<bin/provision>'s.
+False here: a backend that replaces the root disk of a server in place keeps the
+server and its addresses, so nothing is lost.  L<Trog::HV::Libvirt> overrides
+it.  F<bin/provision> decides what to do about a true answer.
 
 =cut
 
@@ -500,9 +501,9 @@ sub rebuild_destroys_guest { return 0 }
 
 =head2 $hv->clone_guest_disk($domain)
 
-Copy a guest's disk aside before a rebuild destroys it; where the copy landed,
-or undef.  Undef here, and nothing asks: only a backend answering true above has
-a guest to copy aside.
+Copies the disk of a guest aside before a rebuild destroys it.  Returns where
+the copy is, or undef.  Undef here, and nothing calls this one: only a backend
+that answers true to C<rebuild_destroys_guest> has a guest to copy aside.
 
 =cut
 
@@ -510,9 +511,9 @@ sub clone_guest_disk { return }
 
 =head2 $hv->backup_volumes
 
-The disks C<clone_guest_disk> left behind, by name.  Empty here, for the same
-reason.  Asked rather than worked out by the caller, so the name a copy is given
-stays the backend's business.
+Returns the names of the disks that C<clone_guest_disk> left behind.  An empty
+list here, for the same reason.  Callers ask for this list and do not match
+names themselves, so the name of a copy stays the business of the backend.
 
 =cut
 
@@ -520,18 +521,18 @@ sub backup_volumes { return () }
 
 =head1 PLACEMENT
 
-Whether one more guest will fit, and which hypervisor it fits on best.
+Whether one more guest fits, and which hypervisor it fits on best.
 
-The numbers come from a backend's C<capacity>; the judgment is here, so that
-every backend is placed on by the same rules rather than each inventing its own.
+The numbers come from the C<capacity> of a backend.  The judgment is here, so
+the same rules place guests on every backend.
 
 =head2 reserve_memory, reserve_cpus, reserve_disk, max_guests, cpu_overcommit
 
-The limits from F<hypervisors.conf>.  C<reserve_memory> is MB to leave for the
-host itself, C<reserve_disk> is bytes to leave in the pool, C<max_guests> caps
-the domain count (0 means no cap), and C<cpu_overcommit> is how many vCPUs per
-physical CPU is considered acceptable.  They default to 2048MB, 1 CPU, 10GB, no
-cap, and 4.
+The limits from F<hypervisors.conf>.  C<reserve_memory> is the MB to keep for
+the host, and C<reserve_cpus> is the CPUs to keep for the host.  C<reserve_disk>
+is the bytes to keep free in the pool.  C<max_guests> caps the domain count, and
+0 means no cap.  C<cpu_overcommit> is the acceptable number of vCPUs for each
+physical CPU.  The defaults are 2048MB, 1 CPU, 10GB, no cap, and 4.
 
 =cut
 
@@ -543,8 +544,8 @@ sub cpu_overcommit ($self) { return $self->{cpu_overcommit} // 4 }
 
 =head2 capacity
 
-What the hypervisor has, and what it has already promised.  Provided by the
-backend; L</WHAT A BACKEND HAS TO PROVIDE> lists the keys this expects back.
+Returns what the hypervisor has, and what it already promised.  The backend
+provides it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
 
 =cut
 
@@ -552,8 +553,9 @@ sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
 
 =head2 shortfalls(%needs)
 
-Every reason this hypervisor cannot take a guest wanting C<memory_mb>, C<cpus>
-and C<disk_bytes>, in words a person can act on.  An empty list means it fits.
+Returns every reason why this hypervisor cannot take a guest that wants
+C<memory_mb>, C<cpus> and C<disk_bytes>.  Each reason is text that a person can
+act on.  An empty list means that the guest fits.
 
 =cut
 
@@ -590,9 +592,9 @@ sub _gb ($bytes) { return int( ( $bytes // 0 ) / ( 1024 * 1024 * 1024 ) ) }
 
 =head2 headroom(%needs)
 
-How comfortably this hypervisor would hold the guest, from 0 (exactly full) to
-1 (empty), taken as the tightest of the three resources once the guest is on
-it.  Placing by the tightest resource is what keeps one hypervisor from filling
+Returns how much room this hypervisor has left after it takes the guest, from 0
+(exactly full) to 1 (empty).  The value comes from the tightest of the three
+resources.  Placement by the tightest resource stops one hypervisor from filling
 its disk while the fleet still has plenty of RAM.
 
 =cut
@@ -620,26 +622,26 @@ sub _fraction {
 
 =head1 PREFLIGHT
 
-What a hypervisor can be asked about itself, before a guest is built on it.
+What a hypervisor can report about itself before a guest is built on it.
 
-C<bin/preflight> prints these; it does not know them.  Which questions are worth
-asking depends entirely on the backend -- passwordless sudo means nothing to a
-cloud, and a Keystone catalog means nothing to libvirt -- so each one says
-which it answers and in what order, and the script walks that list.  It used to
-branch on C<builds_by_api> in two places to decide, which is a decision only the
-backend can make correctly.
+C<bin/preflight> prints these answers, but does not know them.  The backend
+decides which questions matter.  Passwordless sudo means nothing to a cloud, and
+a Keystone catalog means nothing to libvirt.  So each backend names the
+questions it answers and their order, and the script walks that list.
 
 Every check and note returns C<{ ok =E<gt> 1 }>, or C<{ ok =E<gt> 0, what
-=E<gt> ..., fix =E<gt> ... }> saying what is wrong and what to do about it.
+=E<gt> ..., fix =E<gt> ... }>.  C<what> says what is wrong, and C<fix> says
+what to do about it.
 
 =head2 @names = $hv->preflight_checks()
 
-The checks this backend answers, in the order they should be asked.  Each names
-a method on it.  A failure here means a guest cannot be built.
+Returns the names of the checks that this backend answers, in the order to ask
+them.  Each name is a method on the backend.  A failed check means that a guest
+cannot be built.
 
 =head2 @names = $hv->preflight_notes()
 
-The same, for things worth having rather than things required.
+The same, for things that are good to have but not required.
 
 =cut
 
@@ -648,7 +650,7 @@ sub preflight_notes  ( $self, @ ) { return $self->_abstract('preflight_notes') }
 
 =head2 $result = $hv->_verdict($ok, $what, $fix)
 
-One check's answer, in the shape C<bin/preflight> prints.
+Returns the answer of one check, in the form that C<bin/preflight> prints.
 
 =cut
 
@@ -659,26 +661,34 @@ sub _verdict {
 
 =head2 $hv->check_reachable(), $hv->check_transfer_ip()
 
-Declared here and answered by the backend, because both questions are real for
-either kind and neither has a shared answer.  Reaching a machine is an ssh
-login; reaching a cloud is a credential that authenticates and a catalog with
-compute, image and network in it.  Finding the address a guest fetches from
-means asking the routing table about a NAT bridge, or reading it out of
-F<ipmap.cfg> because a cloud has nothing to ask until the guest exists.
+This class declares both, and the backend answers them.  Both questions apply to
+either kind, but the answers have nothing in common.
+
+To reach a machine is an ssh login.  To reach a cloud is a credential that
+authenticates, and a catalog with compute, image and network in it.  To find the
+address that a guest fetches from, libvirt asks the routing table about a NAT
+bridge.  A cloud reads it out of F<ipmap.cfg>, because it has nothing to ask
+until the guest exists.
 
 =cut
 
 sub check_reachable   ( $self, @ ) { return $self->_abstract('check_reachable') }
 sub check_transfer_ip ( $self, @ ) { return $self->_abstract('check_transfer_ip') }
 
-# Both ends, because both ends run one.  A domain's data directory goes up to the
-# hypervisor over rsync and comes off the guest being replaced over rsync, and
-# rsync is the only thing in this toolkit that has to exist on the machine
-# driving a run as well as on the machine being driven.
-#
-# Guests are not asked and do not need to be: every one this tool builds installs
-# rsync among its base packages, and one that has not been built yet has nothing
-# to salvage.
+=head2 $result = $hv->check_rsync()
+
+Checks that rsync is on this machine and, for a remote hypervisor, on the
+hypervisor too.  The data directory of a domain goes up to the hypervisor over
+rsync, and comes off the guest that is replaced over rsync.  Nothing else in
+this toolkit must exist on both the machine that drives a run and the machine
+that it drives.
+
+It does not check guests.  Every guest that this tool builds installs rsync
+among its base packages, and a guest that is not built yet has nothing to
+salvage.
+
+=cut
+
 sub check_rsync {
     my ($self) = @_;
 
@@ -700,17 +710,23 @@ on $where.
 FIX
 }
 
-# A recipe that ships an operator's own files names a directory nothing here
-# creates: adminconfig's skel, openvpnclient's cert_dir.  The guest rsyncs those
-# out of this machine, so an absent one fails that recipe's target part way
-# through a build -- and rsync's error for it names neither the recipe that
-# asked nor the domain it was for.
-#
-# Asked of every domain rather than of one, because preflight is about the
-# machine and because skel is usually said once in _base for the whole fleet.
-# Read raw, without validating or enriching: a configuration with a CHANGEME
-# still in it is one somebody is in the middle of writing, and refusing to look
-# at it would withhold exactly the answer they need next.
+=head2 $result = $hv->check_fetch_sources()
+
+Checks that every directory that a recipe fetches from this machine exists here.
+
+A recipe that ships the files of an operator names a directory that nothing here
+creates, for example C<skel> for adminconfig or C<cert_dir> for openvpnclient.
+The guest copies those out of this machine with rsync.  If one is absent, the
+target of that recipe fails partway through a build.  The rsync error names
+neither the recipe nor the domain.
+
+It checks every domain, because preflight is about the machine and C<skel> is
+usually set once in C<_base> for the whole fleet.  It reads the configuration
+raw, without validation or enrichment.  A configuration that still has a
+CHANGEME in it is one that somebody is writing, and they need this answer next.
+
+=cut
+
 sub check_fetch_sources {
     my ($self) = @_;
 
@@ -752,6 +768,14 @@ that change they are still over there.  Bring them here:
 FIX
 }
 
+=head2 $result = $hv->check_config()
+
+Checks that the configuration directory from L<Trog::Config> has a readable
+F<ipmap.cfg> and F<recipes.yaml>, and an F<admin_authorized_keys> that is not
+empty.
+
+=cut
+
 sub check_config {
     my ($self) = @_;
 
@@ -759,9 +783,8 @@ sub check_config {
 
     my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml admin_authorized_keys};
 
-    # A key file holding nothing is worse than one that is not there: it passes
-    # a check for existence and then stops bin/new_config, which is the round
-    # trip this check exists to save.
+    # An empty key file passes a check for existence and then stops
+    # bin/new_config, which is the failure that this check prevents.
     push( @missing, 'admin_authorized_keys' )
       if !@missing && !-s "$dir/admin_authorized_keys";
 
@@ -783,22 +806,23 @@ the guest boots, which delays every provision and fails when GitHub is down.
 FIX
 }
 
-# Not a requirement: nothing here needs it to provision anything, and failing a
-# run over its absence would refuse runs that would have worked.  It is the
-# difference between guessing at why a guest will not boot and reading its disk,
-# so it is worth saying it is missing.
-# Is the image guests are built on still the one the distribution would put them
-# on?  A note rather than a check: a pin one release behind is a decision
-# somebody may well have made on purpose, and a mirror that will not answer is
-# no reason to refuse to build anything.
+=head2 $result = $hv->note_stale_image()
+
+Whether the image that guests are built on is still the current one from the
+distribution.  It is a note and not a check.  A pin one release behind can be a
+deliberate decision, and a mirror that does not answer is no reason to refuse a
+build.
+
+=cut
+
 sub note_stale_image {
     my @stale;
 
     foreach my $name ( Provisioner::Cookbook->distros() ) {
         my $distro = Provisioner::Cookbook->load($name);
 
-        # Undef means the distribution has no way of being asked, or was asked
-        # and did not answer.  Either way there is nothing to report.
+        # Undef means that the distribution cannot be asked, or did not answer.
+        # Either way, there is nothing to report.
         my $current = $distro->current_image or next;
         next if $current eq $distro->base_image;
 
@@ -828,15 +852,18 @@ perldoc Provisioner::DistroRecipe.
 FIX
 }
 
-# Is anything telling guests where to get their packages?
-#
-# Two things worth saying and they are not the same.  Having built a mirror and
-# pointed nothing at it is the more annoying of the two, because the work is
-# already done and the fleet is still paying for it every build.
-#
-# Reads the configuration and nothing else.  In particular it does not ask the
-# ip pool whether a named mirror has an address -- that would have a read-only
-# command create ips.db, and it is bin/new_config's question to answer anyway.
+=head2 $result = $hv->note_apt_mirror()
+
+Whether anything tells guests where to get their packages.  It reports two
+different conditions.  A mirror that is built but that nothing points at is the
+worse one, because the work is done and every build still pays for downloads.
+
+It reads the configuration and nothing else.  It does not ask the IP pool
+whether a named mirror has an address.  That makes a read-only command create
+F<ips.db>, and the question belongs to C<bin/new_config>.
+
+=cut
+
 sub note_apt_mirror {
     my $conf = eval { Provisioner::Cookbook->configuration() } // {};
 
@@ -894,21 +921,24 @@ as it does now -- only slower.
 FIX
 }
 
-# Whether a path can be opened for reading, which is all 'is the configuration
-# there' amounts to.
-# Is anything a secret sitting in the configuration in the clear?
-#
-# The store exists so that a password is a reference and the value is somewhere
-# encrypted -- and most of what wants one already is.  What this looks for is the
-# ones written literally, which nothing else would ever mention: they validate,
-# they render, and they work.
-#
-# Names the file and the field and never the value.  A note that prints a
-# password to fix a password being printed would be its own answer.
+=head2 $result = $hv->note_plaintext_secrets()
+
+Whether the configuration holds any secret in clear text.
+
+The secret store exists so that the configuration holds a reference, and the
+value is encrypted somewhere else.  Most values that need one already work that
+way.  This note finds the values written literally, which nothing else reports:
+they validate, they render, and they work.
+
+It names the file and the field, and never the value.  A note that prints a
+password to fix a printed password defeats itself.
+
+=cut
+
 sub note_plaintext_secrets {
 
-    # Read as it sits on disk rather than through Cookbook: this is about what is
-    # written in the files, and a merged view cannot say which one to edit.
+    # Read the files as they are on disk, not through Cookbook: a merged view
+    # cannot say which file to edit.
     my $dir = Trog::Config->dir;
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- which of these a configuration actually has
     my @files = grep { -f } ( "$dir/recipes.yaml", glob("$dir/recipes.d/*.yaml") );
@@ -939,12 +969,18 @@ Rotate anything that has been sitting in a file long enough to have been read.
 FIX
 }
 
-# Where a secret is written out rather than referred to.
-#
-# Two ways of telling, because neither catches the other.  A field named for a
-# password holding something that is not a reference is the common one; and
-# anything at all that is a private key is one wherever it is written, which is
-# how a key pasted into a field named for something else gets found.
+=head2 @paths = _plaintext_in($node, $path)
+
+Returns the path of each value under C<$node> that is a secret written out, not
+a reference.  C<$path> is the path of C<$node> itself.
+
+It uses two tests, because neither one catches what the other catches.  The
+common case is a field named for a password that holds something other than a
+reference.  Also, any value that is a private key is a secret wherever it is.
+So a key pasted into a field with another name is found too.
+
+=cut
+
 sub _plaintext_in {
     my ( $node, $path ) = @_;
 
@@ -952,9 +988,8 @@ sub _plaintext_in {
     return map { _plaintext_in( $node->{$_}, $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
     return () if ref $node || !$node;
 
-    # Already a reference, or a placeholder bin/new_guest wrote for somebody to
-    # fill in -- which new_config refuses to build from, so it is not a secret
-    # sitting anywhere.
+    # A reference is not a secret.  Neither is a placeholder from bin/new_guest,
+    # because new_config refuses to build from one.
     return ()      if $node =~ m/\Asecret:/;
     return ($path) if $node =~ m/-----BEGIN[ ][[:upper:] ]*PRIVATE[ ]KEY-----/;
     return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
@@ -962,9 +997,8 @@ sub _plaintext_in {
     my ($field) = $path =~ m/([^.\[\]]+)\z/;
     return () unless defined $field;
 
-    # _file and _path name where something is, not what it is: backup's key_file
-    # holds a filename, and telling somebody to put "backup.rsa" in the store
-    # would be advice about nothing.
+    # _file and _path name a location, not a secret: the key_file of backup
+    # holds a filename such as "backup.rsa".
     return ()      if $field =~ m/_(?:file|path)\z/;
     return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)key\z/;
 
@@ -973,7 +1007,7 @@ sub _plaintext_in {
 
 sub readable {
     my ($path) = @_;
-    return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- whether it can be read is the whole question; what reads it opens it for itself
+    return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- the only question is whether it can be read, and what reads it opens it itself
 }
 
 =head1 SEE ALSO

@@ -31,97 +31,94 @@ use Provisioner::Utils();
 
 =head2 DESCRIPTION
 
-An ACME server on the guest, issuing from the same authority the fetch cache
-signs with -- see L<Provisioner::Recipe::fetchcache/authority>.
+An ACME server on the guest.  It issues from the same authority that signs the
+certificate of the fetch cache.  See L<Provisioner::Recipe::fetchcache/authority>.
 
-A guest named under a reserved TLD cannot be issued a certificate by a public
-CA: nothing outside this fleet can resolve the name, so no challenge it sets can
-be validated, and every provision of one ends with dehydrated failing and the
-makefile red.  The guest is left working, on the self-signed pair the C<ssl>
-target makes, but the path that would have issued it a real certificate is never
-exercised by anything.
+A public CA cannot issue a certificate for a name under a reserved TLD.  Nothing
+outside this fleet can resolve the name, so the CA cannot validate a challenge
+for it.  dehydrated then fails and the makefile is red.  The guest still works
+on the self-signed pair that the C<ssl> target makes.  But nothing runs the path
+that issues a real certificate.
 
-This is the other end of that path.  dehydrated, its hook, lexicon and the
-C<_acme-challenge> record are all unchanged; only the CA it asks is different.
-What was untested is then tested, on the guest, with the real client.
+This recipe is the other end of that path.  dehydrated, its hook, lexicon and
+the C<_acme-challenge> record do not change.  Only the CA that dehydrated asks
+is different.  So the real client runs the real path, on the guest.
 
 =head2 Why it runs here, on the guest
 
-Because the guest is already authoritative for its own name.
-L<Provisioner::Recipe::pdns> runs an authoritative server on C<127.0.0.1:2500>
-and a recursor on C<:53> which forwards this domain to it, and letsencrypt's
-C<dns_preference> resolves to that server, pointing lexicon at its API socket.
-So the record is written, served and read without a packet leaving the machine,
-and a CA in the same place needs no view of the fleet to validate anything.
+The guest is already authoritative for its own name.
+L<Provisioner::Recipe::pdns> runs an authoritative server on C<127.0.0.1:2500>.
+It also runs a recursor on C<:53>, which forwards this domain to that server.
+The C<dns_preference> of letsencrypt resolves to that server, and points lexicon
+at its API socket.  So the guest writes, serves and reads the record without a
+packet that leaves the machine.  A CA on the same machine can then validate the
+record with no view of the fleet.
 
-A CA elsewhere would need one: step-ca resolves a C<dns-01> challenge through
-its own host's resolver, and nothing outside this guest can answer for its zone.
+A CA on another host cannot.  step-ca resolves a C<dns-01> challenge through
+the resolver of its own host, and nothing off this guest can answer for its
+zone.
 
-It listens on loopback alone.  The only client is this guest's own dehydrated,
-so there is no port to open and no rate limit to set.
+The CA listens on loopback only.  Its only client is the dehydrated of this
+guest.  So there is no port to open and no rate limit to set.
 
 =head2 One CA for the guest, not one for each domain
 
 step-ca is a single service with one database, one listener and one
-intermediate, so this recipe is the guest's rather than the domain's and its
-fragment is the global half: installed, configured and started once however many
-domains the guest ends up holding.
+intermediate.  So this recipe belongs to the guest and not to the domain.  Its
+fragment is the global half.  The guest installs, configures and starts it
+once, for any number of domains.
 
-Nothing addresses this CA by the name of a domain.  dehydrated is pointed at
-C<https://localhost:port/acme/trog/directory> and the listener is bound to
-loopback, so C<ca.json> names C<localhost> and nothing else -- which also
-retires a way for it to refuse to start, since a name outside the constraint
-below crash-loops step-ca and a second domain's name is exactly that whenever
-the two are under different top-level domains.
+Nothing addresses this CA by the name of a domain.  dehydrated asks
+C<https://localhost:port/acme/trog/directory>, and the listener is bound to
+loopback.  So C<ca.json> names C<localhost> and nothing else.  This matters
+because step-ca crash-loops on a name outside the constraint below.  The name of
+a second domain under a different top-level domain is such a name.
 
-What does still follow the first domain built is C<constrain_to>, and therefore
-what this CA may issue for at all.  A guest whose domains share a top-level
-domain -- which is the ordinary case, and every case under a reserved one --
-wants nothing done about that.  A guest mixing them has to say C<constrain_to>
-for itself; the constraint is a list, and one intermediate can carry several.
+C<constrain_to> still follows the first domain that the guest builds.  So it
+sets what this CA can issue for at all.  Usually the domains of a guest share a
+top-level domain, and under a reserved TLD they always do.  Then nothing needs
+to change.  If a guest mixes top-level domains, it must set C<constrain_to>
+itself.  The constraint is a list, and one intermediate can carry several.
 
 =head2 The intermediate, and what stops it signing the internet
 
-The authority's private key stays on the provisioner, as it does for the fetch
-cache: step-ca never sees it.  What it gets is an intermediate, minted here at
-C<generate_files> time and shipped in the payload, and the root to chain to.
-That is step-ca's documented arrangement -- it does not need the root signing
-key -- and it is what lets this be the same authority rather than a second one
+The private key of the authority stays on the provisioner, as it does for the
+fetch cache.  step-ca never sees it.  step-ca gets an intermediate and the root
+to chain to.  This recipe makes the intermediate at C<generate_files> time and
+ships it in the payload.  step-ca documents this arrangement and does not need
+the root signing key.  So this is the same authority, and not a second one that
 nothing trusts.
 
-The consequence has to be stated plainly, because it is the reason
-C<constrain_to> exists.  That authority carries no name constraints of its own
-and vouches for any name at all, and its certificate is installed into the trust
-store of every guest that provisions through the fetch cache.  An intermediate
-key shipped to a throwaway guest is therefore a key that could mint a trusted
-certificate for anybody's domain, on a machine built to be thrown away.
+That has a consequence, and it is the reason C<constrain_to> exists.  The
+authority has no name constraints of its own and vouches for any name.  Every
+guest that provisions through the fetch cache installs its certificate into the
+trust store.  So an intermediate key on a throwaway guest can mint a trusted
+certificate for the domain of anybody.
 
-So the intermediate is issued with a name constraint permitting only
-C<constrain_to>, and a guest that tried to issue for anything else would be
-refused by the client checking the chain rather than trusted.  The constraint is
-inherited by anything the intermediate goes on to sign, which is what makes it
-sufficient on its own.
+So the intermediate carries a name constraint that permits only
+C<constrain_to>.  If the guest issues for any other name, the client that checks
+the chain refuses it.  Everything that the intermediate signs inherits the
+constraint, so the constraint is sufficient on its own.
 
-C<localhost> is permitted alongside it, and that is not a loophole being left
-open.  step-ca issues its own listener certificate from this intermediate when
-it starts, for the names in C<ca.json>, and refuses to start at all if the
-constraint forbids one of them -- measured on a guest, where it crash-looped on
-C<DNS name "localhost" is not permitted by any constraint>.  The name the CA
-answers to therefore has to be inside the constraint.  What that grants is a
-certificate for C<localhost> signed by the fleet authority, which is worth
-exactly as much as the loopback interface it names.
+The constraint also permits C<localhost>, and this is not a loophole.  When
+step-ca starts, it issues its own listener certificate from this intermediate,
+for the names in C<ca.json>.  If the constraint forbids one of them, step-ca
+does not start.  It crash-loops on
+C<DNS name "localhost" is not permitted by any constraint>.  So the name that
+the CA answers to must be inside the constraint.  The result is a certificate
+for C<localhost> that the fleet authority signed.  It is worth exactly as much as
+the loopback interface that it names.
 
 =cut
 
-# The release the fragment downloads.  It has to be one that was actually
-# published: a version that was not is a 404 on the guest partway through a
-# provision rather than an older step-ca.
+# The release that the fragment downloads.  It must be a published release,
+# because any other version is a 404 on the guest in the middle of a provision.
 our $STEP_CA_VERSION = '0.30.2';
 
 our $DEFAULT_PORT = 9000;
 
-# Five years.  Shorter than the authority's ten, so it expires before what
-# signed it, and far longer than the guests it serves ever live.
+# Five years.  This is shorter than the ten years of the authority, so it
+# expires before its signer.  It is far longer than any guest lives.
 our $INTERMEDIATE_DAYS = 1825;
 my $DAY = 86_400;
 
@@ -175,15 +172,14 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-C<constrain_to> comes from the guest this CA is built for.  A CA on a guest
-exists to issue that guest its certificate, and the guest's own top-level domain
-is therefore the only one it has any business vouching for -- so the constraint
-follows the domain rather than a fixed default that is right for C<.test> and
-wrong for every other reserved TLD.
+Sets C<constrain_to> to the top-level domain of C<$opts{domain}>, unless the
+domain already names one.  A CA on a guest issues that guest its certificate.
+So the top-level domain of the guest is the only one it vouches for.
 
-Derived here rather than declared in the schema because a schema default cannot
-depend on another field.  A domain naming C<constrain_to> explicitly keeps what
-it named.
+A schema default cannot depend on another field, so this happens here and not
+in C<args>.
+
+Dies if C<constrain_to> is not set and C<domain> has no top-level domain.
 
 =cut
 
@@ -199,19 +195,16 @@ sub enrich {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-The DNS server on this guest, which is what answers the challenge this CA sets.
-Named through L<Provisioner::DNSRecipe/local_implementation> rather than
-literally: what serves a zone is the interface's business, and this recipe only
-needs to say that a registrar will not do -- step-ca validates through the
-host's own resolver, so the record has to be one the guest itself serves.
+Requires the DNS server on this guest, which answers the challenge that this CA
+sets.  The name comes from L<Provisioner::DNSRecipe/local_implementation>.  The
+interface decides what serves a zone.  This recipe only says that a registrar
+cannot do it, because step-ca validates through the resolver of its own host.
 
-Nothing is handed to it: its API key is the operator's to supply, and a guest
-that names this recipe without configuring one should be told so rather than
-issued a key nobody chose.
+It hands that recipe nothing.  The DNS recipe makes its own API key when the
+operator sets none.
 
-letsencrypt is B<not> required here, and the edge points the other way: a domain
-can stand up a CA without asking anything of it, while a domain pointing
-dehydrated at one needs it to exist first.
+It does B<not> require letsencrypt.  The edge points the other way: a domain
+that points dehydrated at this CA needs the CA first.
 
 =cut
 
@@ -244,8 +237,8 @@ sub template_files {
 
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
-The configuration and the unit, and then the key material the CA issues from:
-see C<intermediate>.
+Writes the configuration and the unit, and then the key material that the CA
+issues from.  See C<intermediate>.
 
 =cut
 
@@ -260,15 +253,17 @@ sub generate_files {
 
 =head2 @written = $recipe->intermediate($output_dir, $tld)
 
-Sign an intermediate with the fetch cache's authority, constrained to names
-under C<$tld>, and write it into C<$output_dir> as F<acmeca-intermediate.crt>
-with its key as F<acmeca-intermediate.key> -- plus the authority itself as
-F<acmeca-root.crt>, which the guest needs to chain to and to trust.
+Signs an intermediate with the authority of the fetch cache, constrained to
+names under C<$tld> and C<localhost>.  Writes it into C<$output_dir> as
+F<acmeca-intermediate.crt>, and its key as F<acmeca-intermediate.key>.  Also
+writes the authority as F<acmeca-root.crt>, which the guest chains to and
+trusts.  Returns those three file names.
 
-The authority is made by whichever of the two recipes asks for it first and kept
-thereafter, so a fleet that runs both a cache and a CA has one root and not two.
+The first of the two recipes to ask makes the authority, and both keep it.  So a
+fleet with a cache and a CA has one root.  Only the certificate of the root
+travels.  Its key stays where it was made.
 
-The root travels as a certificate only.  Its key stays where it was made.
+Dies if it cannot copy the certificate of the authority.
 
 =cut
 
@@ -281,10 +276,9 @@ sub intermediate {
 
     my ( $cert, $key ) = IO::Socket::SSL::Utils::CERT_create(
 
-        # CA sets basicConstraints and the key usage that lets step-ca sign with
-        # this; the constraint is the extension, because there is no argument
-        # for one.  Naming basicConstraints here as well would be a second copy
-        # of an extension OpenSSL has already been given.
+        # CA sets basicConstraints and the key usage that step-ca signs with.
+        # The name constraint goes in ext, because no argument sets one.  Do not
+        # add basicConstraints to ext, because CA already gives it to OpenSSL.
         CA        => 1,
         subject   => { commonName => "trog-provisioner acme intermediate for .$tld" },
         issuer    => [ $ca_cert, $ca_key ],

@@ -1,12 +1,12 @@
 #!/bin/bash
-# MariaDB logical backup script - run nightly, keeps 7 days of dumps.
-# Dumps each database per-table (data+schema), grants, views, and routines.
-# All dumps are pigz-compressed.  Per-table and per-database jobs run in parallel.
+# A logical backup of MariaDB.  Cron runs it each night, and it keeps the seven
+# newest dumps.  Each database gets one file per table, plus its views, routines
+# and grants, all compressed with pigz.  The databases dump in parallel.
 set -euo pipefail
 
-# No --defaults-file: this runs as root out of cron, and root authenticates over
-# the unix socket.  The mariadb-* names rather than the mysql-* ones, which are
-# compatibility symlinks from a package this recipe does not install.
+# No --defaults-file, because this runs as root and root authenticates over the
+# unix socket.  The mysql-* names are symlinks from a package that this recipe
+# does not install.
 MYSQL="mariadb"
 MYSQLDUMP="mariadb-dump --single-transaction=true --lock-tables=false"
 DUMP_BASE=/var/backups/mysql
@@ -14,7 +14,7 @@ DATE=$(date +%Y%m%d-%H%M%S)
 DEST="$DUMP_BASE/$DATE"
 JOBS=$(nproc)
 
-# System databases contain no user data and cannot be imported with plain mysqldump
+# System databases hold no user data, and a plain dump of them does not import.
 SKIP_RE='^(information_schema|performance_schema|sys)$'
 
 mkdir -p "$DEST"
@@ -24,13 +24,14 @@ dump_db() {
     local dbdir="$DEST/$db"
     mkdir -p "$dbdir"
 
-    # Per-table data + schema (excluding triggers/routines handled separately)
+    # The data and schema of each table.  --skip-routines, because mariadb-dump
+    # has no --no-routines and exits 2 with no output for it.
     $MYSQL -sN -e "SHOW TABLES IN \`$db\`" | while read -r table; do
         $MYSQLDUMP --skip-triggers --skip-routines "$db" "$table" \
             | pigz > "$dbdir/$table.sql.gz"
     done
 
-    # Views only - dump structure, filter to view objects
+    # The views, as structure only.
     $MYSQL -sN -e \
         "SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$db'" \
         | while read -r view; do
@@ -38,46 +39,37 @@ dump_db() {
                 | pigz >> "$dbdir/views.sql.gz"
         done
 
-    # Stored procedures and functions
+    # The stored procedures and functions.
     $MYSQLDUMP --no-data --no-create-info --no-create-db \
         --skip-triggers --routines "$db" \
         | pigz > "$dbdir/routines.sql.gz"
 
-    # Grants for users that have explicit privileges on this database.
-    #
-    # Allowed to fail without taking the backup with it: --system=users asks
-    # mysql.user a question that MariaDB 11.4 answers with "Illegal mix of
-    # collations", and the table data is what a rebuild cannot do without.  The
-    # empty file is removed rather than left, so the restore does not read half
-    # a list of accounts as the whole of it, and the failure is on stderr where
-    # the cron mails it.
+    # The accounts.  This step can fail and the backup continues, because
+    # MariaDB 11.4 answers --system=users with "Illegal mix of collations".  The
+    # table data is what a rebuild cannot do without.  Remove the partial file,
+    # so that the restore does not read part of the accounts as all of them.
+    # The error goes to stderr, and cron mails it.
     if ! $MYSQLDUMP --system=users --insert-ignore "$db" | pigz > "$dbdir/grants.sql.gz"; then
         echo "mariadb-backup.sh: could not dump the accounts for $db; its data is still here" >&2
         rm -f "$dbdir/grants.sql.gz"
     fi
 }
 
-# --skip-routines, not --no-routines: mariadb-dump has no such option, exits 2
-# and writes nothing, so every per-table and per-view file was a 20-byte gzip of
-# an empty stream -- a dump directory of the right shape with no data in it.
 export -f dump_db
 export MYSQL MYSQLDUMP DEST
 
 DBS=$($MYSQL -sN -e "SHOW DATABASES" | grep -Evx "$SKIP_RE")
 
-# set -e again inside the shell xargs starts: these options are not inherited
-# across bash -c, so a dump_db that failed returned 0 to xargs and the backup
-# reported success having written nothing.
+# Set the options again inside the shell that xargs starts.  bash -c does not
+# inherit them, and without them a failed dump_db returns 0.
 echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'set -euo pipefail; dump_db "$@"' _ {}
 
-# Written last, and only reached because everything above worked: this is what
-# tells mariadb-restore.sh the dump is whole.  A rebuilt guest imports the newest
-# dump that has one, and half a database restored is worse than none -- it leaves
-# the server holding data, which is what stops the next provision from trying
-# again.
+# Written last, so it exists only if everything above worked.  It tells
+# mariadb-restore.sh that the dump is whole.  mariadb-restore.sh explains why
+# it refuses a dump without it.
 : > "$DEST/complete"
 
-# Prune: keep only the 7 most recent dated backup directories
+# Keep only the seven newest dump directories.
 ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
 
 echo "MariaDB backup complete: $DEST"

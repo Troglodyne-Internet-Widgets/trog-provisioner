@@ -19,6 +19,7 @@ use MIME::Base64();
 
     somedomain:
         matrix:
+            server_name: matrix.example.test
             admin_user: admin
             admin_password: somepassword
             smtp_host: smtp.example.test
@@ -29,90 +30,26 @@ use MIME::Base64();
 
 =head2 DESCRIPTION
 
-Installs and configures Matrix Synapse homeserver with nginx reverse proxy,
-and includes Synapse Admin web interface. Requires nginxproxy recipe.
+Installs and configures a Matrix Synapse homeserver behind an nginx reverse
+proxy, with the ketesa admin web interface.  This recipe requires the
+C<nginxproxy> recipe.
 
-NOTE: For SSL certificates to work properly with matrix subdomains, ensure
-'matrix' and 'admin.matrix' are included in the aliases section of ipmap.cfg
-for your domain.
+Synapse answers at C<matrix.$domain>, and the admin interface at
+C<admin.matrix.$domain>.  Add C<matrix> and C<admin.matrix> to the C<aliases>
+section of F<ipmap.cfg> for the domain, so that the SSL certificate covers
+them.
 
-=head3 deps
+The package names are in the subclass for each distribution, for example
+L<Provisioner::Recipe::Ubuntu::matrix>.
 
-Returns system package dependencies for Matrix Synapse.
+=head2 %required = $recipe->required_recipes(%opts)
 
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: list of Debian package names
-
-=back
-
-=head3 enrich
-
-Sets defaults and computes derived configuration options.
-
-=over 1
-
-=item INPUTS: %opts hash with matrix configuration
-
-=item OUTPUTS: processed %opts hash
-
-=back
-
-=head3 template_files
-
-Returns template file mappings.
-
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: hash of template source => destination mappings
-
-=back
-
-=head3 datadirs
-
-Where the salvaged homeserver lands in the domain's data directory, so that the
-fragment has a fixed place to look for it whether or not there was a guest to
-take it off.
-
-There was a C<matrix-admin> beside it that nothing has ever written to: the
-admin interface came down as C<admin.matrix>, and no longer comes down at all.
-
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: list of directory names
-
-=back
-
-=head3 remote_files
-
-The homeserver directory, which is everything this server is.  C<homeserver.db>
-holds every room, message and account; the media store sits beside it; and
-C<homeserver.signing.key> is the identity the rest of the federation knows it
-by.  A guest rebuilt without them is a stranger wearing the same name, so the
-fragment puts them back with C<restore_state> before synapse is started.
-
-The admin interface used to be salvaged too, and is not any more.  The fragment
-downloads it from its GitHub release on every provision, so a copy of it went
-down to the hypervisor and back up again preserving nothing, and sat in the
-backups being a web application somebody else maintains.
-
-=over 1
-
-=item INPUTS: $install_dir, $domain
-
-=item OUTPUTS: hash of remote path => local backup path
-
-=back
+C<nginxproxy>, with a vhost on port 80 that redirects to SSL, and a vhost on
+port 443 that proxies to synapse on C<127.0.0.1:8008>.  nginx does not cache
+the C<_matrix> and C<_synapse/client> paths.
 
 =cut
 
-# XXX this probably does not work in isolation!
 sub required_recipes {
     my ( $self, %opts ) = @_;
     my $ipv6 = $opts{ipv6} // 1;
@@ -135,14 +72,20 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One synapse is one homeserver, and C<server_name> is the identity it
-federates under rather than a setting it can hold two of.  Everything else
-follows it -- the public base URL, the database, the media store -- so a second
-domain on the guest would not be added to this one, it would be this one.
+False.  One synapse is one homeserver, and C<server_name> is the identity that
+it federates under.  It cannot hold two of them.  The public base URL, the
+database and the media store all follow from it.  So a second domain on the
+guest does not join this homeserver.  It replaces it.
 
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %args = $recipe->args()
+
+The configuration that this recipe takes.  C<bin/recipes> lists it.
+
+=cut
 
 sub args {
     my ($self) = @_;
@@ -152,13 +95,9 @@ sub args {
         properties => {
             server_name => { type => 'string' },
 
-            # Read by homeserver.yaml, which leaves the cache stanza out
-            # entirely when nothing is set here.
             redis_password => { type => 'string', description => 'Password for the redis the homeserver caches in.  Unset configures the homeserver without one.' },
 
-            # Listed on the guest's index page.  The template used it before
-            # anything declared it, and its loop said chan while its body said
-            # channel, so every suggestion came out as #@domain.
+            # Listed on the index page of the guest.
             channels                   => { type => 'array',  items   => { type => 'string' }, default => [] },
             admin_user                 => { type => 'string', default => 'admin' },
             admin_password             => { type => 'string' },
@@ -170,15 +109,20 @@ sub args {
             require_transport_security => { type => 'boolean', default => 1 },
             ipv6                       => { type => 'boolean', default => 1 },
 
-            # Synapse will not start until this is answered either way.  Off
-            # unless the domain says otherwise: opting a homeserver into
-            # reporting its usage is the operator's call, not this recipe's.
+            # Off by default, because the operator decides whether to report
+            # usage.  See matrix.homeserver.yaml.tt for why synapse needs it.
             report_stats => { type => 'boolean', default => 0 },
             redis_host   => { type => 'string',  default => '127.0.0.1' },
             redis_port   => { type => 'integer', minimum => 1024, default => 6379 },
         },
     );
 }
+
+=head2 %files = $recipe->template_files()
+
+A map from each template to the name of the file that it renders.
+
+=cut
 
 sub template_files {
     my ($self) = @_;
@@ -193,21 +137,32 @@ sub template_files {
     );
 }
 
+=head2 @dirs = $recipe->datadirs()
+
+C<matrix>, the directory in the data directory of the domain where the salvaged
+homeserver lands.  C<restores> puts it back from there.
+
+=cut
+
 sub datadirs {
     return qw{matrix};
 }
 
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+
+The signing key of the homeserver and the registration shared secret, each
+generated once and kept in the secret store.  The signing key is the identity
+that the rest of the federation knows this server by.
+
+=cut
+
 sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # Under synapse's own configuration directory rather than the domain
-    # directory, for two reasons.  bin/provision places these before the
-    # makefile runs, and matrix.tt restores its salvage into the domain
-    # directory -- which restore_state declines to do once anything is sitting
-    # in it, so a secret placed there stopped the media store coming back.  And
-    # the domain directory is what the data recipe carries off to the
-    # hypervisor and into every backup taken of it, which is the one place a
-    # secret held in the store should never end up.
+    # Under /etc/matrix-synapse, not the domain directory, for two reasons.  A
+    # secret placed where the salvage goes back stops restore_state, which does
+    # nothing when its destination already holds a file.  And the data recipe
+    # carries the domain directory into every backup.
     return (
         "/etc/matrix-synapse/homeserver.signing.key" => {
             ref      => "secret:matrix/$domain-signing-key/password",
@@ -224,10 +179,17 @@ sub guest_secrets {
     );
 }
 
-# What signedjson writes: the algorithm, a short version tag naming this key
-# among any others the server has had, and the 32 seed bytes in unpadded
-# base64.  Made here rather than on the guest because a guest that makes its own
-# makes a new one every time it is rebuilt.
+=head2 $key = _signing_key()
+
+Returns a new signing key in the format that C<signedjson> writes.  That is the
+algorithm, a short version tag that names this key among any others the server
+had, and 32 seed bytes in base64 without padding.
+
+The key is made here, not on the guest, because a guest that makes its own
+makes a new one on every rebuild.
+
+=cut
+
 sub _signing_key {
     my $version = 'a_' . join( '', map { ( 'a' .. 'z', 'A' .. 'Z' )[ Crypt::PRNG::rand(52) ] } 1 .. 4 );
     my $seed    = MIME::Base64::encode_base64( Crypt::PRNG::random_bytes(32), '' );
@@ -236,37 +198,61 @@ sub _signing_key {
     return "ed25519 $version $seed";
 }
 
-# The signing key is in the secret store and is put on the guest from there, so
-# it has no business coming back off one -- salvaged, it would sit in the domain
-# directory and in every backup taken of it.
-#
-# Kept now that the key is placed under /etc/matrix-synapse and cannot be
-# salvaged from there anyway: a guest built before that move still has one in
-# its domain directory, and this is what stops a rebuild carrying it home.
+=head2 @patterns = $recipe->remote_skip()
+
+C<homeserver.signing.key>.  The key comes from the secret store, so it must not
+come back off a guest into the domain directory and its backups.
+
+The key lives under F</etc/matrix-synapse>, which is not salvaged.  A guest built
+by an older version of this recipe can still have a copy in its domain
+directory, and this keeps a rebuild from fetching it.
+
+=cut
+
 sub remote_skip {
     return ('homeserver.signing.key');
 }
+
+=head2 %restores = $recipe->restores(%opts)
+
+Puts the salvaged homeserver back at C<$install_dir/matrix.$domain>.  That is
+the database and the media store.
+
+=cut
 
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The media store and the database.  No owner: the fragment chowns the whole
-    # tree to matrix-synapse afterwards anyway.
+    # No owner: the fragment chowns the whole tree after it installs synapse.
     return ( "$install_dir/matrix.$domain" => { from => "$install_dir/$domain/matrix" } );
 }
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+The homeserver directory, which is everything this server is.  C<homeserver.db>
+holds every room, message and account, and the media store is next to it.  A
+guest rebuilt without them starts empty.  C<restores> puts them back before
+synapse starts.
+
+The admin interface is not salvaged.  The fragment downloads it from its GitHub
+release on every provision.
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # The homeserver only.  admin.matrix was salvaged beside it, and the
-    # fragment re-downloads that release from GitHub every provision regardless,
-    # so the round trip preserved nothing and only put somebody else's web
-    # application in our backups.
     return (
         "$install_dir/matrix.$domain/" => 'matrix/',
     );
 }
+
+=head2 @tests = $recipe->tests()
+
+F<matrix.tt>, the test that runs on the guest.
+
+=cut
 
 sub tests {
     return qw{matrix.tt};
@@ -274,8 +260,9 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-GitHub, which serves the ketesa admin interface as a release: see
-C<github_release_hosts> in L<Provisioner::Recipe>.
+C<packages.matrix.org>, which serves the synapse package.  Also GitHub, which
+serves the ketesa admin interface as a release.  See C<github_release_hosts> in
+L<Provisioner::Recipe>.
 
 =cut
 
@@ -286,8 +273,9 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-GitHub's, which C<Provisioner::Recipe> holds so that the three recipes
-downloading a release do not each carry a copy.
+The classes for the apt repository at C<packages.matrix.org>, and the classes
+for GitHub.  L<Provisioner::Recipe> keeps both, so that each recipe does not
+carry its own copy.
 
 =cut
 

@@ -14,7 +14,7 @@ use Trog::HV();
 
 =head1 NAME
 
-Trog::Hypervisors - the fleet, and which of them a guest belongs on
+Trog::Hypervisors - the fleet, and which hypervisor a guest belongs on
 
 =head1 SYNOPSIS
 
@@ -23,18 +23,18 @@ Trog::Hypervisors - the fleet, and which of them a guest belongs on
     my $fleet  = Trog::Hypervisors->load(Trog::Config->path('hypervisors.conf'));
     my $config = Config::Simple->new('/opt/domains/vm.example.test/provision.conf');
 
-    # Where does this guest already live, or where should it go?
+    # Where the guest lives now, or where it goes.
     my $hv = $fleet->select_for('vm.example.test', $config);
 
 =head1 DESCRIPTION
 
 F<provision.conf> describes a I<guest>: how much memory it wants, which packages
-go on it, who administers it.  None of that has anything to do with which
-machine ends up running it, and a guest definition that names a hypervisor is a
-guest definition you cannot move.
+go on it, who administers it.  None of that decides which machine runs it.  A
+guest definition that names a hypervisor cannot move.
 
-So the fleet lives in its own file.  F<hypervisors.conf>, in F</etc/trog-provisioner>, is an INI file with one block
-per hypervisor, named however you like:
+So the fleet has its own file.  F<hypervisors.conf>, in
+F</etc/trog-provisioner>, is an INI file with one block per hypervisor.  Give
+each block any name you like:
 
     [hv1]
     libvirt_uri    = qemu+ssh://root@hv1.example.test/system
@@ -51,41 +51,43 @@ per hypervisor, named however you like:
     [hv2]
     libvirt_uri    = qemu+ssh://root@hv2.example.test/system
 
-Every key but C<libvirt_uri> is optional; see L<Trog::HV> for what they mean and
-what they default to.  Two of them are worth knowing about before they are
-needed: C<pool_name> beside C<pool_path> is how a hypervisor gets a storage pool
-of its own, which -- on a filesystem carrying a quota -- is the only limit a
-guest can actually be held to, and C<partition> puts every guest built here in
-one systemd slice, which is the only place CPU and I/O can be capped for the lot
-of them.  Neither imposes anything by itself.
+Each block needs C<libvirt_uri> or C<cloud>, and not both.  Every other key is
+optional.  L<Trog::HV> says what each key means and what its default is.
 
-When the file doesn't exist there is no fleet, everything behaves exactly as it
-did before, and the hypervisor is whatever F<provision.conf> or C<--connect>
-says -- which for most people is still "this machine".
+Know two keys before you need them.  C<pool_name> beside C<pool_path> gives a
+hypervisor a storage pool of its own.  On a filesystem with a quota, that pool
+is the only limit a guest can be held to.  C<partition> puts every guest built
+here in one systemd slice.  That slice is the only place to cap CPU and I/O for
+all of them together.  Neither key sets a limit by itself.
+
+If the file does not exist, there is no fleet.  The hypervisor is then whatever
+F<provision.conf> or C<--connect> names, which for most people is this machine.
 
 =head1 CHOOSING
 
 Two questions, in this order.
 
-B<Where does this guest already live?>  Asked of libvirt on each hypervisor in
-turn, rather than of a file we wrote down earlier, because the file goes stale
-the moment somebody migrates a guest by hand and libvirt never does.  A guest
-that already exists somewhere stays there; re-provisioning is not a reason to
-move a VM out from under its disks.
+B<Where does this guest already live?>  Each hypervisor in turn is asked
+whether it runs the guest.  The answer comes from the hypervisor, not from a
+file written earlier.  A file goes stale when somebody migrates a guest by hand,
+and the hypervisor does not.  A guest that already exists somewhere stays there.
+A new provision is not a reason to move a VM away from its disks.
 
-B<If it lives nowhere yet, where does it fit?>  Every hypervisor that can hold
-it is scored on how comfortable it would be afterwards, and the roomiest wins.
-If none can hold it, that is an error naming each hypervisor and what it was
-short of -- provisioning a guest onto a machine that cannot run it produces a
-worse day than refusing to.
+B<If it lives nowhere yet, where does it fit?>  Each hypervisor that can hold
+the guest gets a score for the room it has left afterwards, and the roomiest
+wins.  If none can hold it, the error names each hypervisor and what it lacks.
+A refusal is better than a guest on a machine that cannot run it.
 
 =head1 CLASS METHODS
 
 =head2 load($path)
 
-Read a fleet from F<hypervisors.conf>.  A path that doesn't exist is not an
-error: it gives back an empty fleet, which is how "no fleet configured" is
-spelled.
+Reads a fleet from F<hypervisors.conf> and returns it.  No fleet is a normal
+state.  So when C<$path> is undef, does not exist or cannot be read, this
+returns an empty fleet, which means that no fleet is configured.
+
+Dies when a file it can read names no hypervisor.  That includes a file with
+keys but no C<[name]> header.
 
 =cut
 
@@ -95,14 +97,10 @@ sub load {
     my $self = bless { path => $path, order => [], blocks => {} }, $class;
     return $self unless defined $path;
 
-    # No fleet configured is a normal state, so a file we cannot read is the
-    # same answer as one that is not there: this machine, and no placement.
     my $config = eval { Config::Simple->new($path) } or return $self;
 
-    # Config::Simple gives us "block.key" pairs and no way to ask for the block
-    # names, and %vars is a hash, so the order has to come from the file itself.
-    # Sorting those keys was alphabetical, which looked like file order for
-    # exactly as long as every fleet was called hv1, hv2, hv3.
+    # Config::Simple returns "block.key" pairs in a hash and cannot list the
+    # block names, so the order must come from the file itself.
     my %vars = $config->vars();
     my %in_file;
     foreach my $key ( keys %vars ) {
@@ -118,19 +116,23 @@ sub load {
         $self->{blocks}{$block} = $config->get_block($block);
     }
 
-    # Config::Simple files anything outside a [block] under 'default', so a
-    # file that forgot its headers looks like one hypervisor of that name.
-    # Say so rather than provisioning onto a machine nobody meant to name.
+    # Config::Simple puts any key outside a [block] under 'default', so a file
+    # with no headers looks like one hypervisor with that name.
     die "$path names no hypervisors; every one needs a [name] header of its own\n"
       if !@{ $self->{order} } || ( @{ $self->{order} } == 1 && $self->{order}[0] eq 'default' );
 
     return $self;
 }
 
-# The [block] headers, in the order they appear.
-#
-# Anything Config::Simple filed outside a header lands under 'default' and has
-# no header line to find, so load() falls back to the remaining names for those.
+=head2 _block_order($path)
+
+Returns the names of the C<[block]> headers in C<$path>, in file order, or an
+empty list when the file cannot be read.  Config::Simple puts any key outside a
+header under C<default>, which has no header line.  So C<load> adds the names
+this does not find after these.
+
+=cut
+
 sub _block_order {
     my ($path) = @_;
 
@@ -148,9 +150,9 @@ sub _block_order {
 
 =head2 default_path
 
-Where F<hypervisors.conf> lives when nobody said otherwise: in the
-configuration directory, with the rest of what describes this installation.
-See L<Trog::Config>.
+Returns the path of F<hypervisors.conf> when the caller names no other.  It is
+in the configuration directory, with the rest of the configuration of this
+installation.  See L<Trog::Config>.
 
 =cut
 
@@ -158,15 +160,15 @@ sub default_path { return Trog::Config->path('hypervisors.conf') }
 
 =head2 find($domain, %opts)
 
-The hypervisor a guest is on, made current -- for every tool that acts on an
-existing guest rather than creating one.  Takes C<uri>, C<hvconf>,
+Returns the hypervisor that runs a guest, made current.  I<Made current> means
+that L<Trog::HV/new> returns it from then on.  Every tool that acts on an
+existing guest, and does not create one, uses this.  Takes C<uri>, C<hvconf>,
 C<domain_dir> and C<config>, all optional.
 
-An explicit C<uri> (i.e. C<--connect>) wins outright.  Failing that, a
-configured fleet is searched, and not finding the guest anywhere in it is an
-error: acting on a guest we cannot locate would silently do nothing, or worse,
-do it to the wrong machine.  With no fleet configured this falls back to
-C<Trog::HV::from_config>, which is where the hypervisor used to come from.
+An explicit C<uri> (that is, C<--connect>) wins.  Otherwise this searches a
+configured fleet, and dies if no hypervisor in it has the guest.  An action on
+a guest that nobody can find does nothing, or acts on the wrong machine.  With
+no fleet configured, this returns C<< Trog::HV->from_config >>.
 
 =cut
 
@@ -192,12 +194,13 @@ sub find {
 
 =head2 configured
 
-Whether there is a fleet at all.  False means every other method here has
-nothing to say and the caller should carry on the old way.
+Returns true when there is a fleet.  When it is false, the other methods here
+have nothing to say.  The hypervisor then comes from F<provision.conf> or
+C<--connect>.
 
 =head2 names
 
-The hypervisor names, in the order the file lists them.
+Returns the hypervisor names, in the order of the file.
 
 =cut
 
@@ -206,9 +209,10 @@ sub names      ($self) { return @{ $self->{order} } }
 
 =head2 hypervisor($name)
 
-One hypervisor by name, built but not made current.  Dies if the file doesn't
-name it, since a typo in C<hypervisor=> should not silently place a guest
-somewhere else.
+Returns one hypervisor by name, built but not made current.  Dies if the file
+does not name it, because a typo in C<hypervisor=> must not put a guest
+somewhere else.  Also dies if its block has both C<libvirt_uri> and C<cloud>, or
+neither.
 
 =cut
 
@@ -218,9 +222,8 @@ sub hypervisor {
     my $block = $self->{blocks}{$name}
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
-    # Say which block is wrong, by name.  A block that names neither would
-    # otherwise fall through to libvirt's default connection -- that is, to this
-    # machine -- which is the one placement nobody writing a fleet file meant.
+    # A block with neither key otherwise gets the default libvirt connection,
+    # which is this machine.
     my $has_uri   = length $block->{libvirt_uri};
     my $has_cloud = length $block->{cloud};
 
@@ -237,7 +240,7 @@ sub hypervisor {
 
 =head2 hypervisors
 
-Every hypervisor in the fleet, built but not made current.
+Returns every hypervisor in the fleet, built but not made current.
 
 =cut
 
@@ -248,11 +251,11 @@ sub hypervisors {
 
 =head2 hosting($domain)
 
-The hypervisor already running C<$domain>, or undef if none of them is.
+Returns the hypervisor that already runs C<$domain>, or undef when none does.
 
-A hypervisor we cannot reach is warned about and skipped: it may well be the one
-holding the guest, but a fleet that stops working because one machine is down
-for maintenance is worse than one that says so and carries on.
+This warns about a hypervisor it cannot reach, and skips it.  Perhaps that one
+holds the guest.  But a fleet that stops when one machine is down for
+maintenance is worse than one that warns and continues.
 
 =cut
 
@@ -273,9 +276,10 @@ sub hosting {
 
 =head2 place($domain, %needs)
 
-The roomiest hypervisor that can hold a guest wanting C<memory_mb>, C<cpus> and
-C<disk_bytes>.  Dies naming every hypervisor and what it was short of when none
-can.
+Returns the roomiest hypervisor that can hold a guest that wants C<memory_mb>,
+C<cpus> and C<disk_bytes>, and prints which one it chose.  When none can, dies
+with the name of each hypervisor and what it lacks.  A hypervisor that cannot be
+reached is in that list as unreachable.
 
 =cut
 
@@ -317,13 +321,18 @@ sub place {
 
 =head2 select_for($domain, $config)
 
-The hypervisor for a guest, made current: wherever it already lives, else
-wherever F<provision.conf> pins it with C<hypervisor=>, else wherever it fits
-best.
+Returns the hypervisor for a guest, made current (see C<find>).  That is the
+hypervisor where the guest already lives.  If it lives nowhere, it is the one
+that F<provision.conf> pins with C<hypervisor=>.  With no pin, it is the one
+where the guest fits best.
 
-C<$config> is the guest's F<provision.conf>, or the C<_global> block of its
-recipe as a plain hashref -- either way it is read for the C<memory>, C<cpus>
-and C<size> the guest asks for, and for a C<hypervisor> pin.
+C<$config> is the F<provision.conf> of the guest, or the C<_global> block of its
+recipe as a plain hashref.  F<bin/new_config> passes the block, because it
+knows these values before there is a F<provision.conf>.  Either way, this reads
+C<memory>, C<cpus>, C<size> and C<hypervisor> from it.
+
+Dies when the pinned hypervisor is not in the file or cannot take the guest.
+Also dies when no hypervisor can take it.  See C<place>.
 
 =cut
 
@@ -348,9 +357,13 @@ sub select_for {
     return $self->place( $domain, _needs($config) )->activate();
 }
 
-# What the guest is asking for.  Out of its provision.conf, or out of the
-# _global block of its recipe -- the requirements are the same either way, and
-# new_config knows them before there is a provision.conf to read them from.
+=head2 _needs($config)
+
+Returns what a guest asks for, as C<memory_mb>, C<cpus> and C<disk_bytes>
+pairs.  C<$config> is as for C<select_for>.
+
+=cut
+
 sub _needs {
     my ($config) = @_;
     return (

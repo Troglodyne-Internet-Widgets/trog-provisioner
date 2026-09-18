@@ -9,11 +9,9 @@ ok(-f $conf, 'stub resolver config exists');
 my $text = do { local (@ARGV, $/) = $conf; <> } // '';
 like($text, qr/^DNSStubListener\s*=\s*no/m, 'and it turns the stub listener off');
 
-# Which is the whole point: the stub holds 127.0.0.53:53, and a real resolver on
-# this guest cannot have port 53 until it lets go.  The file being present says
-# nothing about resolved having read it, so this asks the running system rather
-# than the configuration -- the restart happens in the recipe's own target, and
-# a guest where it silently did not take is exactly what this is here to catch.
+# This is the purpose of the recipe.  The stub holds 127.0.0.53:53, and a real
+# resolver on this guest cannot use port 53 until the stub lets go of it.  The
+# file does not prove that resolved read it, so this asks the running system.
 my $listening = `ss -lntu 2>/dev/null`;
 unlike($listening, qr/127\.0\.0\.53:53\b/, 'nothing is listening on the stub address')
     or diag $listening;
@@ -22,8 +20,8 @@ my $status = `systemctl is-active systemd-resolved 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'systemd-resolved is still running');
 
-# And name resolution still works, because turning the stub off is only safe
-# when something else is answering.
+# Names must still resolve, because turning the stub off is safe only when
+# something else answers.
 my $resolved = `getent hosts localhost 2>/dev/null`;
 ok($resolved, 'names still resolve');
 

@@ -25,27 +25,28 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-Downloads the 'complete' Roundcube webmail tarball for the specified version from
-GitHub releases and installs it into $install_dir/webmail.$domain, served over
-php-fpm behind an nginx vhost at webmail.[domain] (port 80 redirects to 443).
+Downloads the 'complete' Roundcube webmail tarball of the given version from
+GitHub releases, and installs it into $install_dir/webmail.$domain.  php-fpm
+serves it behind an nginx vhost at webmail.[domain], and port 80 redirects to
+443.
 
-Each domain gets its own php-fpm pool listening on a dedicated unix socket, so
-multiple roundcube installs can coexist on the same host.
+Each domain gets its own php-fpm pool, which listens on its own unix socket.  So
+several roundcube installs can run on one host.
 
 User data (contacts, identities, preferences) lives in a SQLite database in
-$install_dir/webmail.$domain_data, which is initialized from Roundcube's
-sqlite.initial.sql as it will not autocreate. That directory is registered in
-remote_files, so it comes down off a guest being rebuilt and is picked up by the
-'backup' recipe.
+$install_dir/webmail.$domain_data.  Roundcube does not create its own schema, so
+the fragment loads it from sqlite.initial.sql.  C<remote_files> names that
+directory, so it comes down off a guest that is rebuilt, and the 'backup' recipe
+picks it up.
 
-Coming down is only half of it: the fragment calls C<restore_state> to put it
-back where the DSN in config.inc.php points, and initializes the schema only
-when that left nothing there. Nobody can type a contact list back in, so the
-alternative to restoring it is losing it.
+C<restores> puts it back where the DSN in config.inc.php points.  The C<data>
+target does this before the fragment runs, and the fragment loads the schema
+only when no database is there.  Nobody can type a contact list back in, so the
+only other choice is to lose it.
 
-Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, i.e. a
-host running L<Provisioner::Recipe::mail>. TLS uses the certificate provided by
-the 'letsencrypt' recipe, so ensure 'webmail' is in the aliases section of
+Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, that is,
+a host that runs L<Provisioner::Recipe::mail>.  TLS uses the certificate from
+the 'letsencrypt' recipe, so 'webmail' must be in the aliases section of
 ipmap.cfg for your domain.
 
 Requires the nginx recipe.
@@ -55,8 +56,6 @@ Requires the nginx recipe.
 sub required_recipes {
     return ( nginx => sub { () } );
 }
-
-# NOTE: FPM php.ini: /etc/php/8.3/fpm/php.ini
 
 sub template_files {
     my ( $class, @modules ) = @_;
@@ -93,23 +92,17 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # user falls back to admin_user the way validate would, because
-    # required_recipes is asked before anything is validated.
+    # user falls back to admin_user as validate does, because required_recipes
+    # runs before validation.
     my $user = $opts{user} // $opts{admin_user} // 'root';
 
-    # Contacts, identities and every per-user preference live in the one sqlite
-    # file, and the fragment declines to seed a schema over a restored one.
     return ( "$install_dir/webmail.${domain}_data" => { from => "$install_dir/$domain/roundcube", owner => "$user:www-data" } );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # The sqlite database with the user data: contacts, identities and
-        # per-user preferences, none of which anything else has a copy of.  The
-        # fragment restores it from the domain directory before the vhost is
-        # reloaded, and only creates the schema when there was nothing to
-        # restore.
+        # The sqlite database of user data.  See DESCRIPTION.
         "$install_dir/webmail.${domain}_data/" => 'roundcube/',
     );
 }
@@ -132,8 +125,8 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-GitHub's, which C<Provisioner::Recipe> holds so that the three recipes
-downloading a release do not each carry a copy.
+The classes for GitHub.  C<Provisioner::Recipe> holds them, so that the three
+recipes that download a release do not each carry a copy.
 
 =cut
 

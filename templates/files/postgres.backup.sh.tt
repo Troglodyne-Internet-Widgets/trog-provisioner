@@ -1,7 +1,8 @@
 #!/bin/bash
-# PostgreSQL logical backup script - run nightly, keeps 7 days of dumps.
-# Dumps global objects (roles/tablespaces) once, then each database in parallel
-# using pg_dump --format=directory (which itself parallelises at table-level).
+# PostgreSQL logical backup.  Cron runs it every night, and it keeps the seven
+# newest dumps.  It dumps the global objects (roles and tablespaces) once.  Then
+# it dumps each database in parallel with pg_dump --format=directory, which also
+# works in parallel across tables.
 set -euo pipefail
 
 DUMP_BASE=/var/backups/postgres
@@ -9,12 +10,9 @@ DATE=$(date +%Y%m%d-%H%M%S)
 DEST="$DUMP_BASE/$DATE"
 JOBS=$(nproc)
 
-# pg_dump does the writing and it is the postgres user, so a directory root made
-# for itself is one it cannot create the per-database dump in -- which is what
-# this was, and why nothing but globals.sql.gz ever appeared in a dated
-# directory.  0755 because the thing that reads it back for a rebuild is the
-# admin user over sftp with no sudo; see the chmod at the end, which is the same
-# reason applied to what pg_dump makes for itself.
+# Owned by postgres, because pg_dump runs as postgres and writes into it.  0755,
+# because a rebuild reads it back as the admin user over sftp, with no sudo.
+# The chmod at the end does the same for what pg_dump makes.
 install -d -m 0755 -o postgres -g postgres "$DEST"
 
 # Global objects: roles, tablespaces, passwords
@@ -22,7 +20,7 @@ sudo -u postgres pg_dumpall --globals-only | pigz > "$DEST/globals.sql.gz"
 
 dump_db() {
     local db="$1"
-    # directory format writes one file per table - allows pg_restore --table
+    # Directory format writes one file per table, so pg_restore --table works.
     sudo -u postgres pg_dump --format=directory --jobs="$JOBS" \
         --file="$DEST/$db" "$db"
 }
@@ -30,25 +28,23 @@ dump_db() {
 export -f dump_db
 export DEST JOBS
 
-# All user databases except template catalogs
+# All user databases: not the templates, and not the postgres database
 DBS=$(sudo -u postgres psql -tAc \
     "SELECT datname FROM pg_database WHERE datistemplate=false AND datname NOT IN ('postgres')")
 
 echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'dump_db "$@"' _ {}
 
-# pg_dump creates a directory-format dump 0700, and what salvages it for a
-# rebuilt guest is bin/new_config over sftp as the admin user, with no sudo.  A
-# dump nobody but postgres can read is a rebuild that comes up empty.
+# pg_dump makes a directory-format dump 0700.  bin/new_config fetches it over
+# sftp as the admin user, with no sudo.  If only postgres can read the dump, the
+# rebuild comes up empty.
 chmod -R a+rX "$DEST"
 
-# Written last, and only reached because everything above worked: this is what
-# tells postgres-restore.sh the dump is whole.  A rebuilt guest imports the
-# newest dump that has one, and half a cluster restored is worse than none -- it
-# leaves the cluster holding databases, which is what stops the next provision
-# from trying again.
+# Written last, so it exists only if everything above worked.  It tells
+# postgres-restore.sh that the dump is whole.  The restore never writes over a
+# database that exists, so a database restored from half a dump stays half.
 : > "$DEST/complete"
 
-# Prune: keep only the 7 most recent dated backup directories
+# Keep only the 7 newest dated backup directories
 ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
 
 echo "PostgreSQL backup complete: $DEST"

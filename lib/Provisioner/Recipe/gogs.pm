@@ -29,83 +29,25 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Installs and configures Gogs self-hosted Git service with nginx reverse proxy.
-Optionally mirrors all public repositories from specified GitHub users and orgs
-on a scheduled interval.
+Installs and configures the Gogs self-hosted Git service behind an nginx reverse
+proxy.  If you name GitHub users or organizations, it also mirrors all their
+public repositories on a schedule.
 
-Requires nginxproxy recipe.
+This recipe requires the C<nginxproxy> recipe.
 
-Served at the domain itself, not at C<git.$domain>: the vhost nginxproxy writes
-answers on the domain and the aliases C<new_config> gives it, and nothing was
-adding a C<git> to those.  The recipe keeps its files under
+Gogs answers at the domain itself, not at C<git.$domain>.  The vhost that
+C<nginxproxy> writes answers on the domain and on the aliases that C<new_config>
+gives it, and C<git> is not one of them.  The recipe keeps its files under
 C<$install_dir/git.$domain>, which is a directory name and not a hostname.
 
-=head3 deps
+The package names are in the subclass for each distribution, for example
+L<Provisioner::Recipe::Ubuntu::gogs>.
 
-Returns system package dependencies.
+=head2 %required = $recipe->required_recipes(%opts)
 
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: list of Debian package names
-
-=back
-
-=head3 template_files
-
-Returns template file mappings.
-
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: hash of template source => destination mappings
-
-=back
-
-=head3 datadirs
-
-Returns directories to create for data storage.
-
-=over 1
-
-=item INPUTS: none
-
-=item OUTPUTS: list of directory names
-
-=back
-
-=head3 remote_files
-
-The whole of C<git.$domain>, which is every repository, the issue database and
-the accounts that can push to any of it.  None of it is regenerable, and the
-fragment puts it back with C<restore_state> before gogs is started.
-
-C<custom/conf/app.ini> comes along inside it, which is how C<SECRET_KEY>
-survives a rebuild: see L</args>.
-
-=over 1
-
-=item INPUTS: $install_dir, $domain
-
-=item OUTPUTS: hash of remote path => local backup path
-
-=back
-
-=head3 args
-
-C<secret_key> has no default, deliberately.  It signs sessions and encrypts 2FA
-enrollments, and it used to be minted afresh by every C<bin/new_config> run --
-which is a rotation rather than a default: re-provisioning logged everybody out
-and voided every second factor, unless an operator had thought to pin the key in
-C<recipes.yaml>.
-
-So the guest owns it.  It already lives in C<app.ini> there, C<remote_files>
-brings that file back, and the fragment lifts the key out of whatever C<app.ini>
-is on the guest before overwriting it -- minting one only when there genuinely is
-none.  Setting it here still works and still wins, for a key an operator is
-keeping somewhere else.
+Requires C<nginxproxy>, with a vhost on port 80 that redirects to SSL and a vhost
+on port 443 that proxies to gogs on C<127.0.0.1:3000>.  C<ipv6> in C<%opts>
+turns IPv6 on or off for the port 443 vhost, and it is on by default.
 
 =cut
 
@@ -130,14 +72,30 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One gogs is one site: C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
-and the repositories, the database and the sessions all live under that domain's
-directory.  A second domain provisioned onto the guest would rewrite all of them
-to point at itself.
+False.  One gogs is one site.  C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,
+and the repositories, the database and the sessions are all in the directory of
+that domain.  A second domain on the guest rewrites all of them to point at
+itself.
 
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %schema = $recipe->args()
+
+The JSON schema for the configuration of this recipe.
+
+C<secret_key> has no default, on purpose.  The key signs sessions and encrypts
+2FA enrollments.  A new key on each provision logs out every user and voids
+every second factor.
+
+So the guest owns the key.  It is in F<app.ini> on the guest, and
+C<remote_files> salvages that file.  Before the fragment installs a new
+F<app.ini>, it takes the key out of the old one.  It makes a new key only when
+there is no key.  If you set C<secret_key> in F<recipes.yaml>, that value
+replaces the key on the guest.  Use this for a key that you keep somewhere else.
+
+=cut
 
 sub args {
     return (
@@ -151,15 +109,19 @@ sub args {
             github_token    => { type => 'string' },
             mirror_interval => { type => 'integer', minimum => 1, maximum => 23, default => 6 },
 
-            # No default.  This was `default => _seekrit()`, evaluated once per
-            # new_config run, so every re-provision handed gogs sixty-four fresh
-            # characters and took every session and every 2FA enrolment with it.
-            # The guest owns the key; the fragment carries it forward.
+            # No default, on purpose: the guest owns the key.  See the POD above.
             secret_key => { type => 'string' },
             ipv6       => { type => 'boolean', default => 1 },
         },
     );
 }
+
+=head2 %files = $recipe->template_files()
+
+Maps each template in F<templates/files/> to the file name that the fragment
+installs: the systemd unit, F<app.ini>, the setup script and the mirror script.
+
+=cut
 
 sub template_files {
     return (
@@ -170,19 +132,43 @@ sub template_files {
     );
 }
 
+=head2 @dirs = $recipe->datadirs()
+
+C<gogs>, the directory under the domain directory that receives the salvage.
+
+=cut
+
 sub datadirs {
     return qw{gogs};
 }
+
+=head2 %restores = $recipe->restores(%opts)
+
+Puts the salvaged C<gogs> directory back at C<$install_dir/git.$domain>.  That
+is every repository, the issue database and the users.  The C<data> target does
+the restore before the target of this recipe runs.
+
+=cut
 
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # Every repository, the issue database and the users.  No owner: the account
-    # that ends up holding it is made by this recipe's own target, which runs
-    # after data, and the chown -R there covers the restored tree.
+    # No owner: this recipe makes the account after data runs, and its chown -R
+    # covers the restored tree.
     return ( "$install_dir/git.$domain" => { from => "$install_dir/$domain/gogs" } );
 }
+
+=head2 %path_map = $recipe->remote_files($install_dir, $domain)
+
+Salvages all of C<$install_dir/git.$domain>.  That is every repository, the
+issue database and the accounts that can push to them.  None of it can be made
+again.  See C<restores> above for where it goes back.
+
+F<custom/conf/app.ini> is in that directory, so C<SECRET_KEY> survives a
+rebuild.  See C<args> above.
+
+=cut
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
@@ -191,29 +177,34 @@ sub remote_files {
     );
 }
 
+=head2 @tests = $recipe->tests()
+
+F<gogs.tt>, the test that runs on the guest.
+
+=cut
+
 sub tests {
     return qw{gogs.tt};
 }
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-GitHub, which serves gogs' release tarballs: see C<github_release_hosts> in
-L<Provisioner::Recipe>.
+GitHub, which serves the release tarballs of gogs.  See C<github_release_hosts>
+in L<Provisioner::Recipe>.  Also C<api.github.com>, which F<gogs.mirror.sh> asks
+for the list of repositories of each user and organization.
 
 =cut
 
 sub fetch_hosts {
     my ($class) = @_;
 
-    # api.github.com as well: gogs.mirror.sh asks it which repositories an
-    # account or an organization has before cloning any of them.
     return ( 'api.github.com', $class->github_release_hosts );
 }
 
 =head2 @classes = $recipe->cache_classes()
 
-GitHub's, which C<Provisioner::Recipe> holds so that the three recipes
-downloading a release do not each carry a copy.
+The classes for GitHub.  L<Provisioner::Recipe> keeps them, so that each recipe
+that downloads a release does not carry its own copy.
 
 =cut
 

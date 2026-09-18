@@ -3,7 +3,7 @@
 TARGET=$1
 LINK_NAME=$2
 
-# Mount things inside a chroot
+# Add a bind mount of TARGET at LINK_NAME to /etc/fstab, and mount it.
 mkdir -p $LINK_NAME
 cp /etc/fstab /tmp/fstab.new
 echo "$TARGET $LINK_NAME none defaults,bind 0 0" >> /tmp/fstab.new

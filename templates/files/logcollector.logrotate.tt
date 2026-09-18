@@ -9,9 +9,8 @@
     notifempty
     create 0640 root adm
     sharedscripts
-[%# Without this nothing tells rsyslog to reopen what was rotated out from under
-    it, and it keeps writing to the renamed file forever.  The configuration this
-    replaced had an empty postrotate/endscript pair, which does nothing at all. -%]
+[%# This tells rsyslog to reopen its files.  Without it, rsyslog continues to
+    write to the renamed file. -%]
     postrotate
         /usr/lib/rsyslog/rsyslog-rotate
     endscript

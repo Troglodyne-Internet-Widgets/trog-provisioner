@@ -15,9 +15,8 @@ use parent qw{Provisioner::Recipe};
 use HTTP::Tiny;
 use Cpanel::JSON::XS();
 
-# Used when the tag list cannot be reached.  It has to be a version that is
-# actually published, because a version that is not is a 404 on the guest
-# halfway through the provision rather than an older garage.
+# The version to use when the tag list cannot be read.  It must be a published
+# release, because the guest dies on a 404 for any other version.
 our $FALLBACK_VERSION = 'v2.4.1';
 
 # What latest_version found; see its POD.
@@ -48,91 +47,34 @@ my $TAGS = 'https://api.github.com/repos/deuxfleurs-org/garage/tags';
 
 =head2 DESCRIPTION
 
-Installs and configures L<Garage|https://garagehq.deuxfleurs.fr/>, a lightweight
-S3-compatible distributed object-storage server.
+Installs and configures L<Garage|https://garagehq.deuxfleurs.fr/>, a small
+S3-compatible object store that can run on many nodes.
 
-Downloads the statically-linked garage binary from garagehq.deuxfleurs.fr,
-installs a systemd service, writes C</etc/garage.toml>, and runs C<garage_init.sh> to
-apply a single-node layout and create any requested S3 buckets.
+The recipe downloads the statically linked garage binary from
+garagehq.deuxfleurs.fr and installs a systemd service.  It writes
+C</etc/garage.toml>.  It then runs C<garage_init.sh>, which applies a
+single-node layout and makes the buckets that you name.  A cron job takes a
+snapshot of the metadata every night.
+
+The packages that garage needs come from the distribution subclass.  See
+L<Provisioner::Recipe::Ubuntu::garage>.
 
 =head3 Surviving a rebuild
 
-C<data_dir> and C<metadata_dir> are salvaged off a running guest and put back on
-the one that replaces it, before garage is started, so a rebuilt node comes up
-with its buckets and their contents rather than as an empty single-node cluster
-with a fresh layout.
-
-Both directories used to be owned C<garage> with the admin user as their group
-and the setgid bit set, from when the fetch was an sftp session as that user
-with no sudo and C<garage:garage> 0750 read back as an empty directory and said
-nothing about it: the objects were readable from then on by whoever held the
-admin account, and traveled into the data directory and into whatever backup
-was taken of it.
-
-The fetch reads the guest as root now (issue #76), so that is no longer needed,
-and issue #98 took it back out: both directories are C<garage:garage> again, no
-admin group and no setgid.  C<restore_state> still lands what it moves in owned
-by whoever ran the fetch locally, not by garage, so the fragment still chowns
-them back to C<garage:garage> afterwards.  C<garage.service> keeps its
-C<UMask=0027> regardless -- narrower than the systemd default either way, and
-no longer tied to a group nothing reads through anymore.
-
-Only the default paths are salvaged.  C<remote_files> is called without the
-domain configuration, so a node told to keep its data somewhere else is fetched
-from C</var/lib/garage> regardless -- which finds nothing rather than the wrong
-thing, and wants naming in the backup targets by hand.  Restoring is not
-affected; the fragment knows the configured paths and uses them.
-
-=head3 deps
-
-Requires C<curl> to download the Garage binary.
-
-=head3 validate
-
-Validates the recipe configuration:
-
-=over 4
-
-=item The RPC secret
-
-The 32-byte hex secret nodes in a cluster authenticate to each other with.  It
-is not a configuration field: it is kept in the secret store, placed on the
-guest as C</etc/garage.rpc_secret> by C<bin/provision>, and named to garage by
-C<rpc_secret_file>.  So it is the same secret across provisions -- a fresh one
-is a rotation, and the rest of the cluster stops talking to this node -- and it
-never sits in the domain directory, which is what gets carried off to the
-hypervisor and into every backup.  See C<guest_secrets> in
+A rebuild keeps the objects under C<data_dir> and the newest metadata snapshot.
+The new node starts with its buckets and their contents, not as an empty
+cluster with a new layout.  See C<remote_files> and C<restores> in
 L<Provisioner::Recipe>.
 
-=item C<version> (optional, default C<latest>)  Garage release tag to download,
-or C<latest> for the newest stable one, which C<enrich> looks up -- see
-C<latest_version> below.
+C<data_dir> and C<metadata_dir> are C<garage:garage> 0750.  A restore does not
+leave them owned by garage, so the fragment changes the owner back after it.
+C<garage.service> sets C<UMask=0027>, which is narrower than the systemd
+default.
 
-=item C<data_dir> (optional, default C</var/lib/garage/data>)
-
-=item C<metadata_dir> (optional, default C</var/lib/garage/meta>)
-
-=item C<replication_factor> (optional, default C<1>)  1 for single-node.
-
-=item C<s3_region> (optional, default C<garage>)
-
-=item C<api_port> (optional, default C<3900>)  S3 API listen port.
-
-=item C<rpc_port> (optional, default C<3901>)  Inter-node RPC port.
-
-=item C<web_port> (optional, default C<3902>)  S3 static-web serve port.
-
-=item C<admin_port> (optional, default C<3903>)  Admin API port.
-
-=item C<zone> (optional, default C<dc1>)  Zone name for the layout assignment.
-
-=item C<capacity> (optional, default C<1G>)  Storage capacity hint for layout.
-
-=item C<nofile_limit> (optional, default C<65536>)  C<LimitNOFILE> value for the systemd unit.
-
-=item C<buckets> (optional)  List of bucket names to create after startup.
-
-=back
+Only the default paths are salvaged.  C<remote_files> does not get the domain
+configuration.  If a node keeps its data in another place, the fetch finds
+nothing, and you must add that path to the backup targets.  C<restores> gets
+the configuration, so the restore uses the configured paths.
 
 =cut
 
@@ -140,14 +82,13 @@ C<latest_version> below.
 
 The newest stable garage release, as its tag: C<v2.4.1>.
 
-Read out of GitHub's tag list rather than its releases, because the GitHub
-repository is a mirror that has never cut one.  When GitHub does not answer it
-is C<$FALLBACK_VERSION>, with a warning, since a garage older than intended is
-otherwise silent.
+It reads the tag list on GitHub, not the releases, because that repository is
+a mirror with no releases.  If GitHub does not answer, it warns and returns
+C<$FALLBACK_VERSION>.  Without the warning, an older garage than you asked for
+goes unnoticed.
 
-Memoized for the life of the process in C<$LATEST>: every guest one
-C<bin/new_config> run builds gets the same answer from one request.  Nothing
-clears it but the process ending.
+The answer stays in C<$LATEST> until the process ends.  So every guest that
+one run of C<bin/new_config> builds gets the same version from one request.
 
 =cut
 
@@ -159,9 +100,14 @@ sub latest_version {
     };
 }
 
-# The first stable tag in a GitHub tag list, which is newest first, or undef if
-# there was no list to read.  Only the stable ones: the list carries -rc, -beta
-# and -internal tags we do not want to put on a guest.
+=head2 $tag = _newest_stable_tag($url)
+
+Returns the first stable tag in the GitHub tag list at C<$url>.  The list is
+newest first.  The list also holds C<-rc>, C<-beta> and C<-internal> tags, which
+are skipped.  Returns undef if the list cannot be read.
+
+=cut
+
 sub _newest_stable_tag {
     my ($url) = @_;
 
@@ -175,6 +121,19 @@ sub _newest_stable_tag {
     }
     return undef;
 }
+
+=head2 %files = $recipe->guest_secrets($install_dir, $domain)
+
+C</etc/garage.rpc_secret>, the 32-byte hex secret that the nodes of a cluster
+use to authenticate to each other.  C<bin/provision> puts it on the guest from
+the secret store, and C<rpc_secret_file> in C<garage.toml> names it.
+
+So it is the same secret for every provision.  A new one is a rotation, and
+the rest of the cluster stops talking to this node.  It is also never in the
+domain directory, which goes into every backup.  See C<guest_secrets> in
+L<Provisioner::Recipe>.
+
+=cut
 
 sub guest_secrets {
     my ( $self, $install_dir, $domain ) = @_;
@@ -193,12 +152,8 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The objects as they are, and the metadata as a snapshot -- LMDB copied out
-    # from under a running writer restores looking fine and is not, so
-    # remote_prepare asks garage for one and this is what puts it back.
-    # Defaulted here as well as in args, because required_recipes is asked before
-    # anything is validated: what it sees is what the domain wrote, and a domain
-    # that took the default wrote nothing at all.
+    # Defaulted here as well as in args, because required_recipes calls this
+    # before validation, with only what the domain wrote.
     my $data     = $opts{data_dir}     // '/var/lib/garage/data';
     my $metadata = $opts{metadata_dir} // '/var/lib/garage/meta';
 
@@ -210,8 +165,7 @@ sub restores {
 
 sub rate_limits {
 
-    # S3 and admin, RPC between nodes, and the web endpoint.  These are the
-    # ports templates/files/ufw.garage.tt opens.
+    # The ports that templates/files/ufw.garage.tt opens.
     return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
 }
 
@@ -225,6 +179,43 @@ first, it would take its place.
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %args = $recipe->args()
+
+The RPC secret is not configured here.  See C<guest_secrets>.
+
+=over 4
+
+=item C<version> (optional, default C<latest>)  The garage release tag to
+download, or C<latest> for the newest stable one.  C<enrich> looks that up.
+
+=item C<data_dir> (optional, default C</var/lib/garage/data>)
+
+=item C<metadata_dir> (optional, default C</var/lib/garage/meta>)
+
+=item C<replication_factor> (optional, default C<1>)  1 for a single node.
+
+=item C<s3_region> (optional, default C<garage>)
+
+=item C<api_port> (optional, default C<3900>)  The S3 API port.
+
+=item C<rpc_port> (optional, default C<3901>)  The RPC port between nodes.
+
+=item C<web_port> (optional, default C<3902>)  The S3 static web port.
+
+=item C<admin_port> (optional, default C<3903>)  The admin API port.
+
+=item C<zone> (optional, default C<dc1>)  The zone name for the layout.
+
+=item C<capacity> (optional, default C<1G>)  The storage capacity for the layout.
+
+=item C<nofile_limit> (optional, default C<65536>)  C<LimitNOFILE> for the systemd unit.
+
+=item C<buckets> (optional)  The bucket names to make after garage starts.
+
+=back
+
+=cut
 
 sub args {
     my $self = shift;
@@ -254,8 +245,9 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Turns a C<version> of C<latest> into the release it currently is.  Here rather than in C<args>, so that asking what this recipe
-takes -- C<bin/recipes>, C<bin/new_guest>, a test -- never asks the internet.
+Changes a C<version> of C<latest> into the current release.  This is not in
+C<args>, so C<bin/recipes>, C<bin/new_guest> and the tests can ask what this
+recipe takes without a network request.
 
 =cut
 
@@ -277,9 +269,14 @@ sub template_files {
     );
 }
 
-# A snapshot taken now, rather than whatever the nightly cron last left: the
-# metadata is what says which object is which, and a rebuild wants the one that
-# matches the objects coming down beside it.
+=head2 @commands = $recipe->remote_prepare($install_dir, $domain)
+
+Returns C<garage-snapshot.sh>, which the guest runs before the fetch.  The
+metadata says which object is which, so a rebuild needs a snapshot that matches
+the objects fetched with it.  The nightly snapshot is older than they are.
+
+=cut
+
 sub remote_prepare {
     return ('/usr/local/sbin/garage-snapshot.sh');
 }
@@ -287,28 +284,12 @@ sub remote_prepare {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # The objects, and a snapshot of the metadata that says what they are, which
-    # together are everything about a garage node that is not already in
-    # garage.toml.
+    # A snapshot, not the metadata itself, because a copy of a live LMDB
+    # database has torn pages and restores as if it were good.
     #
-    # A snapshot rather than the metadata directory itself, because that is an
-    # LMDB database: LMDB writes its files 0600 whatever the directory says, so
-    # the group the rest of the tree is given never reaches them and the fetch
-    # reads nothing -- and copying a live LMDB out from under a running writer
-    # produces a database with a torn page in it that restores looking fine.
-    # garage-snapshot.sh asks garage for one nightly; see garage.tt for the leg
-    # that puts it back.
-    # templates/garage.tt is the other half: it calls restore_state on each of
-    # them before garage is started.
-    #
-    # The defaults in practice, whatever the domain configured.  Nothing hands
-    # this method the domain configuration: bin/new_config builds the recipe
-    # object out of the provisioner options alone, and backupdestination calls
-    # it on the class name, so there is no data_dir on $self to find.  An
-    # operator who moved either directory therefore gets a fetch of a path that
-    # is not there and a restore with nothing to do -- a rebuild that loses the
-    # objects rather than one that corrupts them, and a path to name in the
-    # backup targets by hand.
+    # In practice these are always the defaults.  bin/new_config builds the
+    # object from the provisioner options only, and backupdestination calls
+    # this on the class name.  See "Surviving a rebuild" above.
     my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
     my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
     return (

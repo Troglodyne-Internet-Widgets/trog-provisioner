@@ -1,27 +1,26 @@
 [%# trog-provisioner, on a guest that can run it.
 
-    A makefile fragment, so: one shell per line, dash rather than bash, `$$`
-    for anything the shell should expand, `\` on every continued line, and no
-    heredocs.  See Provisioner::Recipe.
+    A makefile fragment.  Each line runs in its own shell, which is dash, not
+    bash.  Write `$$` for what the shell expands, `\` on every continued line,
+    and no heredocs.  See Provisioner::Recipe.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
-    string and swallows the template as far as the next quote.
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it.
 
     Layout, under the domain directory:
       etc/trog-provisioner/   ipmap.cfg, recipes.yaml, ips.db
-      the checkout dir        when there is one
+      the checkout dir        if there is one
       .ssh/id_ed25519         the key a hypervisor trusts, linked into the home
-    and /etc/trog-provisioner is a symlink to the first of those. -%]
+    /etc/trog-provisioner is a symlink to the first of these. -%]
 
-# The configuration directory, and /etc pointing at it.
+# The configuration directory, and a link to it from /etc.
 #
-# A symlink rather than the real thing so that ips.db -- which the address pool
-# creates in there on first use, and which is the runner memory of who holds
-# what -- lives under install_dir, gets salvaged onto the next rebuild, and is
-# writable by the user doing the assigning rather than by root alone.
+# A symlink, so that ips.db is under install_dir.  The next rebuild salvages
+# it, and the user that assigns addresses can write it.  See datadirs in
+# Provisioner::Recipe::trogrunner.
 #
-# -n on ln, or a re-provision fails: without it the second run puts the link
-# inside the directory the first run made.
+# -n on ln, or the second run puts the link inside the directory that the
+# first run made.
 install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/etc/trog-provisioner'
 ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisioner
 
@@ -29,89 +28,79 @@ install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.ipmap.cfg    '[
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
 [% IF hypervisors.keys().size() %]
-# Rendered always, installed only when a fleet was named: no file at all means
-# "this machine", which is what libvirt does anyway and what a runner that is
-# its own hypervisor wants.  An empty file would mean the same thing far less
-# obviously.
+# Installed only if the domain names a fleet.  No file means "this machine",
+# which a runner that is its own hypervisor wants.  An empty file means the
+# same, but less clearly.
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.hypervisors.conf '[% install_dir %]/[% domain %]/etc/trog-provisioner/hypervisors.conf'
 [% END %]
 [% IF store %]
-# The runner own secret store, out of this domain data directory.  Not
-# generated here and not generated on the guest: a new keepass database is a
-# new set of passwords, and every guest the runner has already built is
-# configured against the old ones.
+# The secret store of the runner, from the data directory of this domain.
+# Nothing generates it, because a new keepass database has new passwords.
+# Every guest that the runner built uses the old ones.
 install -o '[% user %]' -g '[% user %]' -m 0600 '[% install_dir %]/[% domain %]/[% store %]' '[% install_dir %]/[% domain %]/etc/trog-provisioner/secrets.kdbx'
 [% END %]
-# /etc/profile.d rather than a dotfile in the domain directory: that directory
-# is the home of whoever the domain runs as only when it names a service user,
-# and a runner does not have to.  Sourced by every login shell either way, so
-# whoever ends up on this guest gets the checkout on their PATH.
+# /etc/profile.d, not a dotfile in the domain directory.  That directory is a
+# home only if the domain names a service user, and a runner does not have to.
+# Every login shell sources this, so each user gets the checkout on the PATH.
 install -o root -g root -m 0644 trogrunner.profile /etc/profile.d/trogrunner.sh
 
-# Net::OpenSSH::More refuses to start at all on an ssh config wider than 0600 --
-# "[FATAL] Permissions on ... are not correct: got=0775, expected=0600" -- and
-# every remote thing this tool does goes through it.  The dotfiles adminconfig
-# installs ship one 0775, so a runner that had never opened an ssh connection
-# was configured to fail the first time it tried.
+# Net::OpenSSH::More does not start if the ssh config mode is wider than 0600.
+# It says "[FATAL] Permissions on ... are not correct: got=0775,
+# expected=0600".  This tool does all remote work through it.  The dotfiles
+# that adminconfig installs ship one with mode 0775.
 #
-# Fixed here rather than in adminconfig because the file belongs to whoever
-# wrote those dotfiles, and this is the recipe that makes a guest care.  Only
-# the mode is touched; what is in the file is theirs.
-#
-# Measured on a guest: plain ssh to the hypervisor worked and bin/preflight
-# could not reach it, which is the shape of failure that costs an afternoon.
+# The fix is here, not in adminconfig, because this recipe needs the narrow
+# mode.  Only the mode changes.  The file content belongs to whoever wrote the
+# dotfiles.
 h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'trogrunner: no home directory for [% user %]' >&2; exit 1; fi; install -d -o '[% user %]' -g '[% user %]' -m 0700 "$$h/.ssh"; test -f "$$h/.ssh/config" && chmod 0600 "$$h/.ssh/config" || true
 [% IF hypervisor_access != 'none' %]
-# The key a hypervisor is asked to trust.
+# The key that a hypervisor is asked to trust.
 #
-# bin/provision put it here before this makefile started, out of the secret
-# store and owned by root -- which is what guest_secrets promises and why this
-# gives it away rather than installing it.  The mode is re-asserted because the
-# data target chmods this tree and ssh refuses a key any wider than 0600.
+# bin/provision put it here from the secret store before this makefile
+# started, owned by root, as guest_secrets says.  So this changes the owner and
+# does not install it.  The data target changes the modes in this tree, and ssh
+# refuses a key wider than 0600, so this sets the mode again.
 install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
 test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2
 test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || true
 [% script_dir %]/queue_postrun_task "test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519'"
 
-# And in the home directory, which is where ssh will look for it -- ssh reads
-# ~/.ssh whoever it is run by, and nothing on the command line of a libvirt
-# qemu+ssh URI can tell it otherwise.
+# Also link it into the home directory, because ssh looks in ~/.ssh.  Nothing
+# in a libvirt qemu+ssh URI can point ssh elsewhere.
 #
-# Asked of passwd rather than assumed: the domain directory is the home only
-# when the domain names a service user, and a runner does not have to.  The
-# linked-to copy stays canonical, because that is the path guest_secrets writes
-# and remote_skip keeps out of the salvage; the link is a no-op when the two
-# are the same directory.
+# The home comes from passwd.  The domain directory is the home only if the
+# domain names a service user, and a runner does not have to.  The key in the
+# domain directory is the main copy.  guest_secrets writes that path, and
+# remote_skip keeps it out of the salvage.  If the two directories are the
+# same, no link is made.
 h="$$(getent passwd '[% user %]' | cut -d: -f6)"; [ "$$h" = '[% install_dir %]/[% domain %]' ] || ln -sfn '[% install_dir %]/[% domain %]/.ssh/id_ed25519' "$$h/.ssh/id_ed25519"
 [% FOR name IN hypervisors.keys().sort() %]
 [% SET hv = hypervisors.$name %]
 [% IF hv.ssh_host %]
-# Host keys for [% name %].  Not optional and not the same question ssh asks:
-# the qemu+ssh transport verifies host keys where Net::OpenSSH::More does not,
-# so an unseeded known_hosts is a hypervisor that refuses on first contact
-# while a plain ssh to the same machine works fine.
+# Host keys for [% name %].  The qemu+ssh transport verifies host keys, and
+# Net::OpenSSH::More does not.  With an empty known_hosts, the hypervisor
+# refuses on first contact, although plain ssh to it works.
 #
-# runuser rather than root, and into the home rather than the domain directory,
-# for the same reason as above: both halves have to be the file ssh will read.
+# runuser, not root, and into the home, not the domain directory, for the
+# same reason as above.  ssh must read both files.
 h="$$(getent passwd '[% user %]' | cut -d: -f6)"; runuser -u '[% user %]' -- ssh-keygen -F '[% hv.ssh_host %]' >/dev/null 2>&1 || runuser -u '[% user %]' -- sh -c "ssh-keyscan -p '[% hv.ssh_port %]' '[% hv.ssh_host %]' >> '$$h/.ssh/known_hosts'"
 [% END %]
 [% END %]
 [% END %]
 [% IF checkout %]
-# The checkout.  Only when there is nothing there at all: one that came down
-# from the guest being replaced is what somebody was working in, and cloning
-# over it would throw that away.  koan.tt has the same guard for the same
-# reason.
+# The checkout, only if nothing is there.  A checkout salvaged from the
+# replaced guest holds work, and a clone over it loses that work.  koan.tt has
+# the same guard.
 #
-# A subdirectory rather than the domain directory itself -- service_user made
-# that before this ran, and git clone refuses a target that is not empty.
+# A subdirectory, not the domain directory, because service_user made that
+# first, and git clone refuses a target that is not empty.
 #
-# HOME= on every git: this runs out of atd, which seeds no environment at all,
-# and git as root with no HOME does not merely warn.
+# HOME= on every git, because atd gives no environment, and git as root with
+# no HOME does more than warn.
 [ -e '[% install_dir %]/[% domain %]/[% checkout_dir %]/.git' ] || HOME='[% install_dir %]/[% domain %]' git clone --branch '[% repo_branch %]' '[% repo_url %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 chown -R '[% user %]:[% admin_user %]' '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null | grep -qFx '[% install_dir %]/[% domain %]/[% checkout_dir %]' || HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]/[% checkout_dir %]'
 [% END %]
-[%# What this installs from CPAN it hands the perl recipe, whose target installs
-    it once this fragment has made the checkout: Sys::Virt pinned, and what the
-    checkout says it needs.  See Provisioner::Recipe::trogrunner. -%]
+[%# This recipe hands its CPAN modules to the perl recipe.  Its target installs
+    them after this fragment makes the checkout: Sys::Virt pinned, and what the
+    checkout needs.  See required_recipes in Provisioner::Recipe::trogrunner. -%]

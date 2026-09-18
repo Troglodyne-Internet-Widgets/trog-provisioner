@@ -3,21 +3,18 @@ use strict;
 use warnings;
 use Test::More;
 
-# The client everything on the guest writes a record with.  Nothing installed it
-# unless letsencrypt happened to be on the guest, while pdns patched it and both
-# DNS recipes installed a shortcut that runs it.
+# The client that every recipe on the guest uses to write a DNS record.
 my $which = `command -v lexicon 2>/dev/null`;
 like($which, qr/\S/, 'lexicon is installed') or diag 'no lexicon on PATH';
 
-# The shortcut an operator reaches for, with the credentials already in it.
+# The shortcut that an operator uses.  It contains the credentials.
 my $shortcut = '/opt/lexicon/[% domain %]';
 
 ok(-f $shortcut, 'the lexicon shortcut is installed');
 ok(-x $shortcut, 'and can be run');
 
-# A guest built before this was a file has a directory here, holding one
-# shortcut per provider.  The rebuild takes it away rather than moving the new
-# file inside it.
+# On an older guest this path is a directory with one shortcut per provider.
+# The build must remove it, not move the new file into it.
 ok(!-d $shortcut, 'as a file, rather than the per-provider directory it used to be');
 
 my @st = stat $shortcut;

@@ -34,128 +34,118 @@ use Provisioner::Utils();
                         - "INBOX.foo"
                         - "INBOX.bar"
             mail_aliases:
-                - Me: you
-                - You: me
+                - from: "Me"
+                  to: "you"
+                - from: "You"
+                  to: "me"
 
 =head2 DESCRIPTION
 
-Setup and configure a mailserver (postfix MUA, dovecot LDA, amavis + opendmarc + opendkim)
+Set up and configure a mail server.  postfix sends and receives mail.  dovecot
+serves IMAP and POP3, and puts the mail that postfix gives it into the
+mailboxes.  amavis, opendmarc and opendkim filter and sign the mail.
 
-Supports SMTP relaying to other hosts, and in general chooses sane defaults.
-Optionally restrict what hosts you use the relay for sending to.
+The recipe can relay SMTP through another host.  C<relay.to> limits the relay
+to mail for the destinations it names.  The other defaults are sane.
 
-Sets up the virtual users you specify with the provided passwords, and mailboxes.
+The recipe makes the virtual users you specify, with their passwords and
+mailboxes.
 
-If you have existing mailboxes, they ought be in $data_dir/mailnames/
-If a sieve script in the $data_dir/mailnames/$USER/$USER.sieve exists, we will run sievec on it, and link it as .dovecot.sieve.
+Put existing mailboxes in C<$install_dir/$domain/mailnames/>.  If
+C<mailnames/$USER/$USER.sieve> exists, the recipe links it as
+C<.dovecot.sieve> and compiles it with sievec.
 
-TODO: gather this data from something secure, such as keepass or vault.
+TODO: get the passwords from a secure store, such as keepass or vault.
 
 =head3 Two domains on one guest
 
 postfix, opendkim and opendmarc each keep their configuration in a single file
-with no C<conf.d>, and C<postconf -e> B<sets> a parameter rather than adding to
-one -- so provisioning a second domain onto a guest that already hosts one used
-to replace the first domain's C<mydestination> instead of joining it, and mail
-for that domain quietly stopped being delivered locally.
+with no C<conf.d>.  Also, C<postconf -e> B<sets> a parameter and cannot add to
+one.  If the recipe writes those files, a second domain on the guest replaces
+the configuration of the first.
 
-So this recipe writes fragments rather than files. The C<configd> recipe is
-pulled in to adopt those three, and what goes into the fragment directories is:
+So this recipe writes fragments, not files.  It pulls in the C<configd> recipe
+to adopt those three files.  These things go into the fragment directories:
 
 =over 4
 
 =item * C</etc/postfix/main.cf.d/40-mail> and C</etc/postfix/master.cf.d/40-mail>,
-from the global half -- the guest's own mail stack, said once. The milters live
-here for a reason: C<smtpd_milters> is a list configd joins across fragments,
-and two domains each naming opendkim would have postfix sign every message
-twice.
+from the global half.  They hold the mail stack of the guest, said once.  The
+milters are here because configd joins C<smtpd_milters> across fragments.  If
+two domains each name opendkim, postfix signs every message two times.
 
 =item * C</etc/postfix/main.cf.d/50-E<lt>domainE<gt>> and
-C</etc/opendmarc.conf.d/50-E<lt>domainE<gt>>, per domain -- the parts that
-actually name it. C<masquerade_domains>, C<virtual_mailbox_domains> and every
-parameter naming a lookup table are joined across domains, so each of them gets
-what it asked for.
+C</etc/opendmarc.conf.d/50-E<lt>domainE<gt>>, one for each domain.  These are
+the parts that name the domain.  configd joins C<masquerade_domains>,
+C<virtual_mailbox_domains> and every parameter that names a lookup table
+across domains.  So each domain gets what it asked for.
 
-=item * C</etc/opendkim.conf.d/40-mail>, from the global half, since nothing in
-it is per domain.
+=item * C</etc/opendkim.conf.d/40-mail>, from the global half, because nothing
+in it is specific to a domain.
 
-=item * C</etc/postfix/domains/E<lt>domainE<gt>/>, which is not a configd
-fragment directory at all but this domain's lookup tables -- the virtual maps,
-the transport and relay maps, the header checks, the sender-login map. Each is
-named from that domain's main.cf fragment, and postfix searches the list, so a
-second domain adds tables where it used to overwrite them.
+=item * C</etc/postfix/domains/E<lt>domainE<gt>/>.  This is not a configd
+fragment directory.  It holds the lookup tables of the domain: the virtual
+maps, the transport and relay maps, the header checks and the sender-login
+map.  The main.cf fragment of the domain names each table, and postfix
+searches the list.  So a second domain adds its own tables.
 
 =back
 
-=head3 Address classes, and the access table that is gone
+=head3 Address classes
 
-The alias names C<www.> and C<mail.> used to be in both C<mydestination> and
-C<virtual_mailbox_domains>, which postfix's C<VIRTUAL_README> says never to do:
-"NEVER list a virtual MAILBOX domain name as a mydestination domain!"  A domain
-in two address classes has no defined answer to which recipients are valid
-there, and a C<check_recipient_access> pcre table existed to paper over it --
-one file, per-domain content, ending in a catch-all reject, so the second domain
-provisioned took the first one's inbound mail with it.
+C<virtual_mailbox_domains> is the domain itself.  C<mydestination> is
+C<$myhostname> and C<localhost>.  No domain is in both.  The
+C<VIRTUAL_README> of postfix says: "NEVER list a virtual MAILBOX domain name
+as a mydestination domain!"  A domain in two address classes has no defined
+set of valid recipients.
 
-The overlap is gone and so is the table. C<virtual_mailbox_domains> is the
-domain itself, C<mydestination> is C<$myhostname> and C<localhost>, and postfix
-makes the check by itself: a recipient absent from C<virtual_mailbox_maps> is
-rejected with "User unknown in virtual mailbox table".
+postfix checks recipients by itself.  It rejects a recipient that is not in
+C<virtual_mailbox_maps> with "User unknown in virtual mailbox table".
 
-=head3 Who may send as whom
+=head3 Who can send as whom
 
-C<smtpd_sender_login_maps> names this domain's C<sender_login> table and
-C<reject_authenticated_sender_login_mismatch> enforces it, placed ahead of
-C<permit_sasl_authenticated> because a restriction list stops at the first
-permit. One authenticated user can therefore no longer send as another.
+C<smtpd_sender_login_maps> names the C<sender_login> table of this domain, and
+C<reject_authenticated_sender_login_mismatch> enforces it.  The check comes
+before C<permit_sasl_authenticated>, because a restriction list stops at the
+first permit.  So one authenticated user cannot send as another.
 
-The consequence to know about: an authenticated client whose C<MAIL FROM> is
-B<absent> from that table is refused too, because an address with no owner is
-owned by nobody. The table is generated from the accounts and the mail aliases
-together for exactly that reason, and an address a user really sends from that
-neither mentions is mail that stops going out. Unauthenticated senders are not
-checked against it -- deciding what to believe about those is DMARC's job.
+Know this consequence.  postfix also refuses an authenticated client whose
+C<MAIL FROM> is B<absent> from that table, because nobody owns that address.
+So the recipe makes the table from the accounts and the mail aliases together.
+If a user sends from an address that neither of them names, that mail does not
+go out.  The table does not apply to unauthenticated senders.  DMARC decides
+what to do about those.
 
-=head3 What a rebuild keeps, and what being able to keep it costs
+=head3 What a rebuild keeps, and what that costs
 
-C<remote_files> names two things: this domain's mail store, and C</mail/keys>.
+C<remote_files> names two things: the mail store of this domain, and
+C</mail/keys>.
 
-C</mail/keys> is not where opendkim keeps its keys -- that is
-C</etc/opendkim/keys>, which belongs to opendkim -- it is a copy of them made
-for the fetch to read, and stays a copy: C<bin/new_config> reads the guest as
-root now (issue #76), so it could read C</etc/opendkim/keys> directly, but
-repointing C<remote_files> at the real directory is a bigger change than issue
-#98 asks for. What issue #98 did take out is the copy's ownership -- it used to
-be the admin account's, from when the fetch could not sudo and a directory it
-could not read came back empty and said nothing about having done so, which for
-a signing key means every past signature failing to verify the next time it is
-built. The copy is C<root:root> now, still 0600 in a 0700 directory: as tight as
-it gets for something that has to sit outside the daemon that owns the original.
+C</mail/keys> is not where opendkim keeps its keys.  opendkim owns
+C</etc/opendkim/keys>, and C</mail/keys> is a copy for the fetch to read.
+C<bin/new_config> reads the guest as root, so it can read
+C</etc/opendkim/keys> directly.  A possible follow-up is to point
+C<remote_files> at that directory and drop the copy.  The copy is
+C<root:root>, 0600 in a 0700 directory.  That is as tight as it can be for a
+file outside the daemon that owns the original.
 
-The mail store is salvaged where it stands, and the mode it stands in is
-C<2750>, owned C<dovecot:dovecot>. That is not tidiness: dovecot copies the mode
-and the group of the nearest existing parent onto every maildir and message file
-it creates, so the group and the setgid bit on C</mail/E<lt>domainE<gt>> are what
-decide whether the rebuild B<after> the next one still has mail to salvage. The
-fragment used to finish with C<chown -R dovecot:dovecot>, and dovecot keeps its
-maildirs to itself, so the mail survived one rebuild and not two -- which is
-what widened both the initial directory and this closing chown to the admin
-group. The fetch reads the guest as root now, so issue #98 put C<dovecot:dovecot>
-back in both places.
+The recipe salvages the mail store where it is.  Its mode is C<2750>, owned by
+C<dovecot:dovecot>.  This is necessary.  dovecot copies the mode and the group
+of the nearest parent onto every maildir and message file that it makes.  So
+the group and the setgid bit on C</mail/E<lt>domainE<gt>> decide the group and
+the mode of the whole store.
 
-The cost that stays, in both cases, is not who can read them on the guest
-anymore -- nobody outside C<dovecot>, C<opendkim> and root can -- but that what
-comes down still lands in the provisioner's data directory and in whatever
-backs that directory up: all of this domain's mail, and the key that signs its
-outbound, held there regardless of how narrow the guest itself leaves them.
+On the guest, only C<dovecot>, C<opendkim> and root can read these files.  But
+the fetched copy goes into the data directory of the provisioner and into its
+backups.  That copy holds all the mail of this domain and the key that signs
+its outbound mail.
 
-=head3 What still cannot come apart
+=head3 What cannot come apart
 
-C<myhostname> and the TLS certificate can only have one value, because postfix
-has one of each, and C</etc/aliases> is likewise one file; the last domain
-provisioned wins all three. Those are visible disagreements now -- C<configd
-status postfix> lists the fragments and who wrote them -- rather than a silent
-overwrite.
+postfix has one C<myhostname> and one TLS certificate, and C</etc/aliases> is
+one file.  So the last domain provisioned sets all three.  C<configd status
+postfix> shows these disagreements, because it lists the fragments and what
+wrote them.
 
 =cut
 
@@ -166,8 +156,8 @@ use Crypt::Digest::SHA512 qw{sha512};
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # configd is what gives main.cf, master.cf, opendkim.conf and
-    # opendmarc.conf the fragment directories the templates here write into.
+    # configd gives main.cf, master.cf, opendkim.conf and opendmarc.conf the
+    # fragment directories that the templates here write into.
     return (
         configd => sub { return ( languages => [qw{opendkim opendmarc postfix}] ) },
         $self->SUPER::required_recipes(%opts),
@@ -187,19 +177,16 @@ sub args {
                         password => {
                             type => 'string',
 
-                            # A secret: reference rather than the password
-                            # itself.  What is rendered from this is a
-                            # salted_sha_512 hash, so the payload never carries
-                            # the plaintext -- but the configuration file does,
-                            # and bin/preflight says so.
+                            # The template renders a salted_sha_512 hash, so
+                            # the payload never holds the plaintext.  A literal
+                            # password stays in the configuration file, and
+                            # bin/preflight says so.
                             description => 'The mailbox password.  Write it as a secret: reference; the value belongs in the store rather than in recipes.d.',
                         },
                         gecos => { type => 'string' },
 
-                        # The mailboxes doveadm makes for this account beyond
-                        # INBOX.  It has been in the SYNOPSIS and read by the
-                        # template since either existed, and was the one thing
-                        # under `names` nothing declared.
+                        # The mailboxes that doveadm makes for this account,
+                        # in addition to INBOX.
                         mailboxes => { type => 'array', items => { type => 'string' }, default => [] },
                     },
                 },
@@ -225,7 +212,8 @@ sub args {
                 },
             },
 
-            # Built for us by bin/new_config from the ipmap
+            # bin/new_config fills this from the aliases block of the
+            # configuration.
             full_aliases => {
                 type    => 'array',
                 default => [],
@@ -270,20 +258,16 @@ sub template_files {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Every address an authenticated user of this domain may put in MAIL FROM,
-    # and which login owns it.  smtpd_sender_login_maps rejects an authenticated
-    # sender whose address is not in here at all, so an address a user really
-    # sends from and that this misses is mail that stops going out -- which is
-    # why it is built from the same two things the accounts and the aliases are.
+    # Every address that an authenticated user of this domain can put in MAIL
+    # FROM, and the login that owns it.  See "Who can send as whom" in the POD.
     #
-    # The SASL login name is the full address, because that is what the dovecot
-    # passwd file this pairs with is keyed on.
+    # The SASL login name is the full address, because the dovecot passwd file
+    # uses the full address as its key.
     my @logins = map { { address => "$_\@$opts{domain}", owner => "$_\@$opts{domain}" } }
       sort keys %{ $opts{names} // {} };
 
-    # An alias is owned by whoever it delivers to.  `to` is written as a local
-    # part most of the time and as a full address when it leaves the domain, and
-    # appending the domain to one of those gives an owner nobody can ever be.
+    # The owner of an alias is the address it delivers to.  `to` is a local
+    # part or a full address, so only a local part gets the domain appended.
     push @logins, map {
         {
             address => "$_->{from}\@$opts{domain}",
@@ -321,9 +305,9 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # Not the inverse of remote_files, which is why this is said rather than
-    # derived: the whole of /mail/keys comes down, and one directory out of it
-    # goes back somewhere else entirely.
+    # Not the inverse of remote_files, so it is not derived from it.  The
+    # fetch takes all of /mail/keys, and one directory of it goes back to
+    # /etc/opendkim/keys.
     return (
         "/etc/opendkim/keys/$domain" => { from => "$install_dir/$domain/.mail/keys/$domain", owner => 'opendkim:opendkim' },
         "/mail/$domain"              => { from => "$install_dir/$domain/mailnames",          owner => 'dovecot:dovecot' },

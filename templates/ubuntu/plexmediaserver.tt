@@ -1,62 +1,46 @@
-[%# repo.plex.tv, and the v2 signing key.  This pointed at
-    downloads.plex.tv/repos/deb, which Plex has retired: every path under
-    /repos/ there answers 403, and since a missing key on that bucket answers
-    403 rather than 404, it read as the far end refusing us rather than as a
-    URL that is no longer anything.  The key moved too, and it is a different
-    key -- so reaching the old repository would not have been enough either. -%]
+[%# repo.plex.tv, and the v2 signing key.  Plex retired
+    downloads.plex.tv/repos/deb, where every path answers 403.  The v2 key is a
+    different key, not the old key at a new URL. -%]
 # Add the official Plex apt repository
 curl -fsS https://downloads.plex.tv/plex-keys/PlexSign.v2.key | gpg --dearmor -o /usr/share/keyrings/plex.gpg
 echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://repo.plex.tv/deb/ public main" > /etc/apt/sources.list.d/plexmediaserver.list
-[%# The Plex repository is checked on its own, before the general update, so that
-    a repository refusing us fails here saying so.  Rolled into the update of
-    everything else it was three lines of apt noise followed by a bare
-    "Error 100" from the install, which names neither the repository nor the
-    reason. -%]
+[%# Update from the Plex repository alone, before the general update.  If the
+    repository refuses us, the failure then names it.  Inside the general update,
+    the only sign is an "Error 100" from the install. -%]
 DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
   || { echo "plexmediaserver: repo.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
 DEBIAN_FRONTEND="noninteractive" apt-get update -q
 [% packager_invocation | mark_raw %] plexmediaserver
-# Ensure the plex service user exists (created by package but guard anyway)
+# Make sure that the plex service user exists.  The package makes it, but guard anyway.
 id plex > /dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /var/lib/plexmediaserver plex
-[%# Plex has to be stopped before anything below touches the library or the
-    preferences, both of which a running Plex owns.  Installing the package
-    starts it, and it writes its own copy of Preferences.xml back out, so
-    everything set at the bottom of this target was overwritten before the guest
-    had finished provisioning -- the file ended up carrying the
-    MachineIdentifier Plex wrote and none of the certificate or account
-    settings.  It is started again in the postrun tasks at the end. -%]
+[%# Stop Plex before anything below touches the library or the preferences.
+    The package install starts Plex.  A running Plex keeps Preferences.xml in
+    memory and writes its own copy back over the changes below.  The postrun
+    tasks at the end start Plex again. -%]
 systemctl stop plexmediaserver; /bin/true
-[%# The library off the last guest, put back before Plex is started again: the
-    metadata it built by scanning, what everybody watched and how far into it
-    they got, and the playlists.  The media is on a mount and survives on its
-    own; what a rebuild loses is everything the library remembered about it.
+[%# Put back the library from the last guest before Plex starts again.
+    Provisioner::Recipe::plexmediaserver says what the library holds.
 
-    Installing the package started Plex, and Plex lays its whole directory
-    skeleton down within seconds of starting, so restore_state finds a
-    destination with content in it and declines on that alone.  The skeleton is
-    cleared out of the way first -- but only when this guest has nothing under
-    Metadata, which is what separates a library minutes old from one that has
-    been cataloguing media and is worth more than the copy fetched off it just
-    now. -%]
+    The package install started Plex, and Plex makes its directory skeleton
+    within seconds.  restore_state finds content in the destination and
+    declines.  So remove the skeleton first, but only when this guest has
+    nothing under Metadata.  A guest with metadata has a library worth more than
+    the copy fetched off it. -%]
 PMS='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
 if [ -n "$$(find '[% install_dir %]/[% domain %]/plexmediaserver' -mindepth 1 -print -quit 2>/dev/null)" ] \
     && [ -z "$$(find "$$PMS/Metadata" -mindepth 1 -print -quit 2>/dev/null)" ]; then \
     rm -rf /var/lib/plexmediaserver; \
 fi
 [% script_dir %]/restore_state '[% install_dir %]/[% domain %]/plexmediaserver' /var/lib/plexmediaserver
-[%# plex:plex, over whatever was restored as much as over a fresh install. The
-    admin user used to own the group here instead, because the salvage was an
-    sftp session as that user with no sudo and a library Plex kept to itself
-    came back empty without saying so. The fetch reads the guest as root now
-    (issue #76), so that is no longer needed; issue #98 took it back out. -%]
+[%# plex:plex, for a restored library and for a new install alike. -%]
 # Plex data directory
 mkdir -p '/var/lib/plexmediaserver/Library/Application Support'
 chown -R plex:plex /var/lib/plexmediaserver
 chmod -R 0750 /var/lib/plexmediaserver
 [% IF claim_token %]
-# Write claim token for initial server linking (consumed on first start)
+# Write the claim token that links the server the first time.  Plex uses it on first start.
 grep -q '^PLEX_CLAIM=' /etc/default/plexmediaserver \
     && sed -i 's|^PLEX_CLAIM=.*|PLEX_CLAIM=[% claim_token %]|' /etc/default/plexmediaserver \
     || echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
@@ -67,20 +51,16 @@ mkdir -p '[% dir %]'
 chown plex:[% admin_user %] '[% dir %]'
 chmod 0750 '[% dir %]'
 [% END %]
-# Configure Plex Preferences.xml with SSL cert and account info.
+# Configure Plex Preferences.xml with the SSL certificate and the account.
 #
 # One logical line, and one line of python.  Make runs each recipe line in its
-# own shell, so PREFS_DIR set on its own line was empty everywhere it was used
-# -- and the preferences file went to /Preferences.xml rather than into Plex's
-# library.  The python was worse: a "-c" string spanning several lines with no
-# continuations, so make handed the shell a quote it never closed.
-[%# It reads and modifies rather than writing a fresh file, which is what makes
-    a restored library and this generated file agree: a library brings its own
-    Preferences.xml, carrying the MachineIdentifier and the token that says this
-    server is already claimed by an account, and those are exactly the things a
-    rebuilt guest must keep to come back as the same server rather than as a new
-    one waiting to be claimed.  Only the three settings this recipe is the
-    authority on go over the top of them. -%]
+# own shell, so a variable set on one line is empty on the next.  A "-c" string
+# over several lines without continuations gives the shell a quote that never
+# closes.
+[%# Read and change the file, do not write a new one.  A restored library keeps
+    its MachineIdentifier and claim token that way.  Only the three settings
+    that this recipe owns change.  Provisioner::Recipe::plexmediaserver has the
+    whole account. -%]
 PREFS_DIR='/var/lib/plexmediaserver/Library/Application Support/Plex Media Server'; \
 mkdir -p "$$PREFS_DIR"; \
 PLEX_CERT='/etc/ssl/certs/[% domain %].pem' \
@@ -92,6 +72,6 @@ chown -R plex:plex "$$PREFS_DIR"; \
 chmod 0640 "$$PREFS_DIR/Preferences.xml"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable plexmediaserver
-[%# restart, not start: if anything left it running, start is a no-op and Plex
-    goes on using the preferences it had in memory. -%]
+[%# restart, not start.  If Plex is still running, start does nothing and Plex
+    keeps the preferences it has in memory. -%]
 [% script_dir %]/queue_postrun_task systemctl restart plexmediaserver
