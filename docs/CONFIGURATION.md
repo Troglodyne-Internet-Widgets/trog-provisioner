@@ -30,6 +30,8 @@ basedir=/opt/domains
 admin_user=test
 admin_gecos=Testy Testerson
 admin_email=test@test.test
+gateway=192.168.1.254
+resolvers=192.168.1.254, 8.8.8.8
 [ips]
 tickle.test.test=192.168.1.1
 [aliases]
@@ -43,6 +45,18 @@ ns2=ns2.test.test
 machine**, one directory per fully qualified name. It is easy to confuse with
 the `data` recipe's `to`, which is where things land **on the guest**; they are
 frequently both `/opt/domains`, and they are not the same directory.
+
+`gateway` and `resolvers` are required, and every guest is built with them:
+`resolvers` becomes the nameservers in its network configuration and the list
+its resolver is pointed at.
+
+**Do not put a loopback address in `resolvers`.** It answers only on a guest
+running its own DNS server, and for that guest
+`Provisioner::Recipe::nostubresolver` puts `127.0.0.1` in front by itself. Named
+here it reaches every guest, and on the rest nothing is listening there — a
+wasted lookup each time, and `Provisioner::Recipe::fetchcache` strips it back
+out of the list it hands nginx. `bin/new_config` refuses one rather than
+letting it through.
 
 Two optional settings say how a guest reaches back here for its payload, and
 neither is normally needed:

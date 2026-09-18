@@ -370,8 +370,23 @@ sub handle_domain {
     my $gateway = $global_conf->{gateway};
     die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
 
-    my $resolvers = $global_conf->{resolvers};
-    die "Must set resolvers in global section of $cfile" unless $resolvers;
+    # Coerced here, once, because everything below reads it as a list and
+    # Config::Simple hands back a bare string for a single-valued key.  It was
+    # coerced into the global configuration further down and left a scalar here,
+    # so an installation naming exactly one resolver got "Can't use string as an
+    # ARRAY ref" out of the provision.conf line rather than a guest.
+    my $resolvers = Provisioner::Utils::coerce_arrayref( $global_conf->{resolvers} );
+    die "Must set resolvers in global section of $cfile" unless @$resolvers;
+
+    # Loopback answers on a guest running its own DNS and nowhere else, and the
+    # recipe that turns the stub listener off is what puts it in front for such a
+    # guest -- see Provisioner::Recipe::nostubresolver.  Named here it reaches
+    # every guest, most of which have nothing listening there: nginx in the fetch
+    # cache rotates through this list, so every few lookups was a refused
+    # connection, and Provisioner::Recipe::fetchcache strips it back out again.
+    my @loopback = grep { m/\A127[.]/ || $_ eq '::1' } @$resolvers;
+    die "resolvers in the global section of $cfile names @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
+      if @loopback;
 
     # Every domain is fully qualified, here and in recipes.d.  There is no tld
     # to append and no separate notion of an addon: a domain that is not under
@@ -687,7 +702,7 @@ sub handle_domain {
     # distro recipe's alone, for every recipe: one running a resolver of its
     # own -- nginx, in the fetch cache -- needs to know where to send it.
     $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
-    $global_config->{resolvers} = Provisioner::Utils::coerce_arrayref($resolvers);
+    $global_config->{resolvers} = $resolvers;
 
     # Where every recipe's tests are written, data's included: it is a module
     # now, so the loop below renders them out of the configuration it ended up

@@ -111,7 +111,7 @@ admin_user=doge
 admin_email=bogus\@test.test
 admin_gecos=Test Test
 gateway=192.168.1.254
-resolvers=127.0.0.1, 192.168.1.254, 8.8.8.8, 1.1.1.1
+resolvers=192.168.1.254, 8.8.8.8, 1.1.1.1
 bridge_devname=ens4
 dhcp_devname=ens3
 [ip_pool]
