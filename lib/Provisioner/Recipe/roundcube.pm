@@ -44,17 +44,37 @@ target does this before the fragment runs, and the fragment loads the schema
 only when no database is there.  Nobody can type a contact list back in, so the
 only other choice is to lose it.
 
-Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, that is,
-a host that runs L<Provisioner::Recipe::mail>.  TLS uses the certificate from
-the 'letsencrypt' recipe, so 'webmail' must be in the aliases section of
-ipmap.cfg for your domain.
+Expects IMAP on mail.[domain]:143 and submission on mail.[domain]:587, so it
+requires L<Provisioner::Recipe::mail> and is served from the same guest.  That
+is the only arrangement this configures: config.inc.php names mail.[domain] and
+has no way to be told to name anything else.  Pointing a webmail install at a
+mailserver somewhere else wants an IMAP provider a domain can choose, the way it
+chooses a DNS one -- see L<Provisioner::DNSRecipe>.
 
-Requires the nginx recipe.
+TLS uses the certificate provided by the 'letsencrypt' recipe.  The C<webmail>
+name is declared in L<Provisioner::Recipe/subdomains>, not written into
+ipmap.cfg.
+
+Requires the nginx and mail recipes.
 
 =cut
 
 sub required_recipes {
-    return ( nginx => sub { () } );
+    return (
+        nginx => sub { () },
+        mail  => sub { () },
+    );
+}
+
+=head2 @names = $recipe->subdomains()
+
+C<webmail>, which is the only name this is served at:
+F<roundcube.nginx.tt> answers for C<webmail.$domain> and nothing else.
+
+=cut
+
+sub subdomains {
+    return qw{webmail};
 }
 
 sub template_files {

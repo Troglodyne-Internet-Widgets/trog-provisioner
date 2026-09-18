@@ -1,6 +1,7 @@
 # The default of 64 is too small for a long domain.  nginx sizes this
-# hash by its longest server_name, and every vhost has the domain, www, mail
-# and its aliases.  With 64, nginx does not start, and only `nginx -t` shows why:
+# hash by its longest server_name, and a vhost carries the domain and every
+# name its recipes declare.  With 64, nginx does not start, and only `nginx -t`
+# shows why:
 #   could not build server_names_hash, you should increase
 #   server_names_hash_bucket_size: 64
 server_names_hash_bucket_size [% server_names_hash_bucket_size %];

@@ -19,6 +19,16 @@ use File::Slurper();
 
 use FindBin::libs;
 
+# Real declarers rather than fakes.  subdomain_aliases is handed recipe classes
+# and calls subdomains on them, so these have to be compiled for the names below
+# to answer at all -- while nothing is imported from any of them, which is what
+# the policy sees.
+## no critic (ProhibitUnusedImports)
+use Provisioner::Recipe();
+use Provisioner::Recipe::nginx();
+use Provisioner::Recipe::mail();
+## use critic
+
 use_ok('Provisioner::Utils');
 
 subtest 'fleet_address: what a name for another machine turns out to be' => sub {
@@ -113,6 +123,28 @@ subtest 'somewhere it cannot write is fatal, not silent' => sub {
     # A key that was not written is a service that will not start.  Whoever is
     # reading the build output should be told, rather than finding out later.
     ok( exception { Provisioner::Utils::write_pem( "$dir/no/such/dir/key.pem", "key\n", 0600 ) }, 'a directory that does not exist' );
+};
+
+subtest 'subdomain_aliases qualifies what the recipes declare' => sub {
+    my $ask = sub { [ Provisioner::Utils::subdomain_aliases( 'test.test', @_ ) ] };
+
+    is_deeply( $ask->(),                             [],                'no recipes is no names' );
+    is_deeply( $ask->('Provisioner::Recipe'),        [],                'nor is a recipe that declares none' );
+    is_deeply( $ask->('Provisioner::Recipe::nginx'), ['www.test.test'], 'a label comes back as the whole name' );
+
+    # mail declares its three in the order it thinks of them.  Sorted here, so
+    # that editing a recipe does not reshuffle a generated file.
+    is_deeply(
+        $ask->('Provisioner::Recipe::mail'),
+        [qw{autoconfig.test.test autodiscover.test.test mail.test.test}],
+        'and several come back sorted'
+    );
+
+    is_deeply(
+        $ask->( 'Provisioner::Recipe::nginx', 'Provisioner::Recipe::nginx' ),
+        ['www.test.test'],
+        'a label declared twice is named once'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();

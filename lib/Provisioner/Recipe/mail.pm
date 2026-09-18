@@ -226,6 +226,18 @@ sub args {
     );
 }
 
+=head2 @names = $recipe->subdomains()
+
+C<mail>, which the MX names and the SRV records point at, and C<autodiscover>
+and C<autoconfig>, which F<mail.autodiscover_vhost.tt> answers for so a client
+can find its own settings.
+
+=cut
+
+sub subdomains {
+    return qw{mail autodiscover autoconfig};
+}
+
 sub template_files {
     my ( $self, @recipes ) = @_;
 

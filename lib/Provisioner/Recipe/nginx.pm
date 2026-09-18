@@ -36,6 +36,17 @@ sub rate_limits {
     return ( 80 => 1024, 443 => 1024 );
 }
 
+=head2 @names = $recipe->subdomains()
+
+C<www>, which the vhost this writes answers for: it serves the domain and every
+alias, and www is an alias rather than a name of its own.
+
+=cut
+
+sub subdomains {
+    return qw{www};
+}
+
 sub args {
     return (
         properties => {

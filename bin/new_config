@@ -604,13 +604,6 @@ sub handle_domain {
         hv => $hv,
     );
 
-    # Every web host in the map gets www and mail CNAMEs, not only this domain.
-    foreach my $each_domain ( keys(%$ip_conf) ) {
-        $alias_conf->{$each_domain} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$each_domain} );
-        push( @{ $alias_conf->{$each_domain} }, map { "$_.$each_domain" } qw{www mail} );
-        $alias_conf->{$each_domain} = [ uniq @{ $alias_conf->{$each_domain} } ];
-    }
-
     # An address, not a name, because the guest fetches before its DNS works.
     $global_config->{transfer_ip}  = $transfer_ip;
     $global_config->{transfer_ips} = \@transfer_ips;
@@ -689,6 +682,17 @@ sub handle_domain {
     # Not the distro and vm recipes, which direct the build, because every
     # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
+
+    # Here rather than where the map is read, because that is before the
+    # depsolver has run and a name belonging to a dependency would be missed.
+    # $global_config->{aliases} holds this same hash, so everything rendered
+    # below sees what this adds.
+    $alias_conf->{$domain} = [
+        uniq(
+            @{ $alias_conf->{$domain} // [] },
+            Provisioner::Utils::subdomain_aliases( $domain, map { $builders{$_} } @modules )
+        )
+    ];
 
     # A recipe that cannot serve a second domain replaces the first, so refuse
     # it here.  This compares a tenant with its host only, not with the other

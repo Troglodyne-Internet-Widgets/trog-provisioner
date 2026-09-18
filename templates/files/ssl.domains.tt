@@ -1,1 +1,4 @@
-[% domain %] [% FOR alias IN full_aliases %] [% alias %][% END %][% IF modules.grep('matrix').size() %] matrix.[% domain %] admin.matrix.[% domain %][% END %]
+[%# Every name the guest answers for: a recipe declares what it serves, via
+    Provisioner::Recipe subdomains, and bin/new_config puts it in the aliases.
+    Nothing is named here. -%]
+[% domain %] [% FOR alias IN full_aliases %] [% alias %][% END %]

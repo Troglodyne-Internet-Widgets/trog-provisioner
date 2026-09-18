@@ -986,6 +986,24 @@ sub datadirs {
     return ();
 }
 
+=head3 @names = $recipe->subdomains()
+
+The names under the domain that this recipe serves, as labels rather than whole
+names: C<www>, not C<www.$domain>.
+
+C<bin/new_config> adds one alias per label, asked of every recipe the depsolver
+settled on -- so a name belonging to a dependency is added too.  C<full_aliases>
+is where the zone, the vhost and the certificate all read it from.
+
+Empty by default, which is the ordinary answer: a recipe reached at the domain
+itself declares nothing.
+
+=cut
+
+sub subdomains {
+    return ();
+}
+
 =head3 @commands = $recipe->remote_prepare($install_dir, $domain)
 
 Shell commands for the guest to run as root immediately before its

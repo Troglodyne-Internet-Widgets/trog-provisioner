@@ -49,13 +49,15 @@ my %VARS = (
 );
 
 sub zone {
+    my (%over) = @_;
+
     my $recipe = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new(
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => tempdir( CLEANUP => 1 ),
         distro        => 'ubuntu',
     );
 
-    return $recipe->render_file( 'files/pdns.zone.tt', %VARS, api_key => 'a-key' );
+    return $recipe->render_file( 'files/pdns.zone.tt', %VARS, %over, api_key => 'a-key' );
 }
 
 subtest 'a name given in full is emitted absolute' => sub {
@@ -69,14 +71,18 @@ subtest 'a name given in full is emitted absolute' => sub {
     like( $zone, qr/^\Qmail.$DOMAIN\E\.\s+IN\s+CNAME\s+\@/m, 'each of them' );
 
     # The MX target had the same fault, while every SRV target beside it was
-    # already absolute.
-    like( $zone, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./, 'the MX target ends in a dot' );
+    # already absolute.  Asked of a zone that serves mail, which is the only
+    # kind that has an MX to get wrong.
+    my $mail = zone( modules => ['mail'] );
+    like( $mail, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./, 'the MX target ends in a dot' );
 
     # One assertion for the whole class, so a third instance is caught without
-    # anybody having to think of it: nothing in the zone carries the origin
+    # anybody having to think of it: nothing in either zone carries the origin
     # twice.
     unlike( $zone, qr/\Q$DOMAIN.$DOMAIN\E/, 'and no name in the zone has the origin on it twice' )
       or diag $zone;
+    unlike( $mail, qr/\Q$DOMAIN.$DOMAIN\E/, 'nor in the mail records beside them' )
+      or diag $mail;
 };
 
 subtest 'a label that belongs to the zone stays relative' => sub {
@@ -84,13 +90,37 @@ subtest 'a label that belongs to the zone stays relative' => sub {
 
     # The opposite mistake.  These are labels rather than names, so a trailing
     # dot would make each of them a name at the root instead.
-    like( $zone, qr/^ns1\s+IN\s+A\s/m,            'ns1 is a label' );
-    like( $zone, qr/^autodiscover\s+IN\s+CNAME/m, 'as is autodiscover' );
-    like( $zone, qr/^autoconfig\s+IN\s+CNAME/m,   'and autoconfig' );
+    like( $zone, qr/^ns1\s+IN\s+A\s/m, 'ns1 is a label' );
+
+    # The template carries the zone and invents no names: what a recipe serves
+    # it declares, and bin/new_config puts it in the aliases rendered above.
+    unlike( $zone, qr/^autodiscover\s+IN\s+CNAME/m, 'it no longer invents autodiscover for a domain that serves no mail' );
+    unlike( $zone, qr/^autoconfig\s+IN\s+CNAME/m,   'nor autoconfig' );
+    unlike( $zone, qr/matrix/,                      'nor a matrix block of its own' );
 
     # Absolute already, and the pattern the MX record above should have
-    # followed.
-    like( $zone, qr/^_imaps\._tcp\s+IN\s+SRV\s+0\s+0\s+993\s+\Qmail.$DOMAIN\E\./m, 'an SRV target is absolute' );
+    # followed.  Asked of a zone that serves mail: the SRVs are written only
+    # where something answers on the name they point at.
+    like( zone( modules => ['mail'] ), qr/^_imaps\._tcp\s+IN\s+SRV\s+0\s+0\s+993\s+\Qmail.$DOMAIN\E\./m, 'an SRV target is absolute' );
+};
+
+subtest 'a record points only at a name the guest actually has' => sub {
+
+    # The MX, the five SRVs and the autoconfig TXT all name a host the mail
+    # recipe declares, so on a domain running no mail they would point at a name
+    # with no record at all.
+    my $without = zone();
+
+    unlike( $without, qr/IN\s+MX\s/,  'no MX where nothing serves mail' ) or diag $without;
+    unlike( $without, qr/IN\s+SRV\s/, 'nor the mail SRVs' )               or diag $without;
+    unlike( $without, qr/mailconf=/,  'nor an autoconfig URL for a name nothing answers on' );
+    unlike( $without, qr/_domainkey/, 'nor DKIM placeholders' );
+
+    my $with = zone( modules => ['mail'] );
+
+    like( $with, qr/IN\s+MX\s+10\s+\Qmail.$DOMAIN\E\./, 'and the MX is there where mail is served' );
+    like( $with, qr/^_imaps\._tcp\s+IN\s+SRV/m,         'with the SRVs beside it' );
+    like( $with, qr/mailconf=/,                         'and the autoconfig record' );
 };
 
 subtest 'the apex is the origin, not a name of its own' => sub {
@@ -102,7 +132,10 @@ subtest 'the apex is the origin, not a name of its own' => sub {
 };
 
 subtest 'the submission SRV record names the port postfix listens on' => sub {
-    my $zone = zone();
+
+    # Asked of a zone that serves mail, since the mail records are written only
+    # where something answers on the name they point at.
+    my $zone = zone( modules => ['mail'] );
 
     # RFC 6186 spells it _submission._tcp, and mail.postfix.master.tt runs
     # submission on 587.
