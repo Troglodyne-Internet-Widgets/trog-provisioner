@@ -506,6 +506,19 @@ subtest 'a recipe that needs nothing gets nothing' => sub {
     }
 }
 
+{
+
+    package Provisioner::Recipe::t_reader;
+    our @ISA = ('Provisioner::Recipe');    ## no critic (ClassHierarchies::ProhibitExplicitISA)
+
+    # What its sub was handed, for the test to read.
+    our %handed;
+
+    sub required_recipes {
+        return ( t_satisfied => sub { %handed = @_; return ( needed => 'x' ) } );
+    }
+}
+
 sub dependencies_of {
     my ( $named, %opts ) = @_;
     my $mock = Test::MockModule->new('Provisioner::Cookbook');
@@ -537,6 +550,16 @@ subtest 'the walk reaches a dependency of a dependency' => sub {
 
     is_deeply( $blocks->{t_deep}, { buried => Provisioner::Cookbook->PLACEHOLDER }, 'reached through t_dep' );
     ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
+};
+
+subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
+
+    dependencies_of( ['t_reader'] );
+    is( $Provisioner::Recipe::t_reader::handed{domain},      'd.test',       'the domain it was called for, which no _global can name' );
+    is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/opt/domains', 'and the default install_dir, when _global names none' );
+
+    dependencies_of( ['t_reader'], global_config => { install_dir => '/srv' } );
+    is( $Provisioner::Recipe::t_reader::handed{install_dir}, '/srv', 'but what _global says wins' );
 };
 
 subtest 'resolve_dependencies closes the list over what its recipes require' => sub {

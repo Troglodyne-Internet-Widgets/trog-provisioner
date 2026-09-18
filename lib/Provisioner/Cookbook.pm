@@ -775,11 +775,16 @@ not call C<SUPER> must not drop those, and many overrides do not call it.
 
 A C<required_recipes> sub gets the global configuration and the configuration
 of the requiring recipe, and reads both.  For example, C<tcms> builds a path
-from C<install_dir> and C<domain>.  Without them it dies, and its message is
-about a path, not about a configuration.  So this dies with a message that
-names the recipe that did not answer and the dependency it was asked about.
-That configuration comes from C<_global> in F<recipes.yaml>.  A caller without
-it has a file to fix, not a dependency to skip.
+from C<install_dir> and C<domain>.  The sub always gets those two.  C<domain> is
+the domain that this was called for.  If C<_global> names no C<install_dir>,
+the sub gets the default of the C<install_dir> method.  A value in
+C<global_config> takes precedence.
+
+A sub that reads any other global dies without it, and its message is about
+what it was building, not about a configuration.  So this dies with a message
+that names the recipe that did not answer and the dependency it was asked
+about.  That configuration comes from C<_global> in F<recipes.yaml>.  A caller
+without it has a file to fix, not a dependency to skip.
 
 =cut
 
@@ -795,6 +800,15 @@ sub resolve_dependencies {
     # Every refusal below names the domain.
     my $domain = $args{domain}
       or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
+
+    # What every required_recipes sub is handed.  The domain and install_dir
+    # are there even when the caller's _global has neither, because no file can
+    # name the domain, and install_dir has a default.  A value in _global wins.
+    my %given = (
+        domain      => $domain,
+        install_dir => $class->install_dir( $domain, {} ),
+        %$global_config,
+    );
 
     my $depmod_conf = {};
     my %builders;
@@ -816,8 +830,8 @@ sub resolve_dependencies {
 
         # The base class first, then the recipe.  See L</Two sources, on purpose>.
         my %dep_recipes = (
-            Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
-            $builder->required_recipes( %$global_config, %$pconf ),
+            Provisioner::Recipe::required_recipes( $builder, %given, %$pconf ),
+            $builder->required_recipes( %given, %$pconf ),
         );
 
         # Sorted, so that two identical provisions produce the same makefile.
@@ -850,7 +864,7 @@ sub resolve_dependencies {
             my %depargs;
             if ( ref $dep_recipes{$required} eq 'CODE' ) {
                 my $said;
-                my $answered = eval { %depargs = $dep_recipes{$required}->( %$global_config, %$pconf ); 1 };
+                my $answered = eval { %depargs = $dep_recipes{$required}->( %given, %$pconf ); 1 };
                 $said = $@ unless $answered;
                 die "$domain: the $module recipe could not say what it wants from $required.\n" . "It said: $said" . "A required_recipes sub reads the global configuration it is handed, so this is usually one of those missing.  Those come from _global in recipes.yaml.\n"
                   unless $answered;
