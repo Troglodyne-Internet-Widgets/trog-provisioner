@@ -2,11 +2,9 @@ RUN_USER = [% gogs_admin %]
 RUN_MODE = prod
 
 [database]
-; TYPE, not DB_TYPE.  gogs renamed this key, and an unrecognised one is simply
-; ignored -- so it fell through to its own defaults, which are postgres, and
-; every start died on
+; TYPE, not DB_TYPE.  gogs ignores DB_TYPE and falls back to its default,
+; postgres.  Then every start fails with
 ;   failed to connect to `host=127.0.0.1 user=gogs database=gogs`
-; while the configuration plainly said sqlite3.
 TYPE = sqlite3
 PATH    = [% install_dir %]/git.[% domain %]/data/gogs.db
 
@@ -14,11 +12,9 @@ PATH    = [% install_dir %]/git.[% domain %]/data/gogs.db
 ROOT = [% install_dir %]/git.[% domain %]/repos
 
 [server]
-; The domain itself, not git.<domain>.  gogs is served by the vhost nginxproxy
-; writes for this domain, which answers on the domain and its aliases -- and a
-; git. was neither among them nor guaranteed to resolve, so every clone URL gogs
-; printed, every redirect it issued after a login and every webhook it signed
-; named a host the operator had to go and create by hand.
+; The domain itself, not git.<domain>.  The nginxproxy vhost for this domain
+; answers on the domain and its aliases, and not on git.<domain>.  Every clone
+; URL, login redirect and webhook that gogs makes names this host.
 DOMAIN       = [% domain %]
 HTTP_PORT    = 3000
 HTTP_ADDR    = 127.0.0.1
@@ -40,18 +36,15 @@ PROVIDER_CONFIG = [% install_dir %]/git.[% domain %]/data/sessions
 
 [log]
 ROOT_PATH = [% install_dir %]/git.[% domain %]/log
-; console as well as file, so that systemd gets it.  On file alone a gogs that
-; refuses to start says so only inside its own log directory: the journal shows
-; "Main process exited, code=exited, status=1/FAILURE" and nothing else, which
-; is not enough to act on.
+; console as well as file, so that the journal shows why gogs does not start.
+; With file alone, the reason is only in the log directory, and the journal
+; shows only "Main process exited, code=exited, status=1/FAILURE".
 MODE      = console, file
 LEVEL     = Info
 
 [security]
 INSTALL_LOCK = true
-; Empty here unless recipes.yaml pins one, and filled in by the fragment from
-; whatever key the guest already had.  This used to be sixty-four characters
-; minted by the new_config run that wrote this file, which meant a new key on
-; every re-provision: every session invalid, every 2FA enrolment undecryptable,
-; and nothing to say why.
+; Empty unless recipes.yaml sets one.  The fragment fills in the key that the
+; guest already has.  A new key on each provision makes every session invalid
+; and every 2FA enrolment unreadable.
 SECRET_KEY   = [% secret_key %]
