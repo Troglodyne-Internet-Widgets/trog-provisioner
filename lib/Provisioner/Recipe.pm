@@ -1169,7 +1169,7 @@ Perl modules that the tests of this recipe need.
 =cut
 
 sub testdeps {
-    my @modules = @_;
+    my ( $self, @modules ) = @_;
     return ();
 }
 
