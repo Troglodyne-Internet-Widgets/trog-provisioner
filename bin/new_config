@@ -327,6 +327,29 @@ sub hv_settings {
     return @settings;
 }
 
+=head2 $lines = hv_lines($global_config, $written)
+
+Returns the C<hv_settings> lines for F<provision.conf>, one C<key=value> each,
+each starting with a newline.  It takes only the keys that C<$global_config>
+sets and that C<$written> does not name.  None of them gets a default here: an
+absent key lets F<bin/provision> decide.
+
+An empty value counts as absent, because Config::Simple reads a bare C<key=> as
+an empty string.  A value of 0 is written: C<disk_iothreads=0> turns iothreads
+off.
+
+=cut
+
+sub hv_lines {
+    my ( $global_config, $written ) = @_;
+
+    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a setting of "0" is still a setting
+    my @keys = grep { !$written->{$_} && length $global_config->{$_} } hv_settings();
+    ## use critic
+
+    return join( q{}, map { "\n$_=$global_config->{$_}" } @keys );
+}
+
 =head2 $hv = choose_hypervisor($domain, $requirements)
 
 Returns the L<Trog::HV> for the guest: the one that C<--connect> named, else the
@@ -923,12 +946,9 @@ sub handle_domain {
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
 
-    # Only the keys that _global sets and that are not written above, with no
-    # default, because an absent key lets bin/provision decide.  An empty value
-    # is absent too, because Config::Simple reads a bare `key=` as an empty
-    # string.
+    # The hypervisor settings that _global sets.  See hv_lines.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
-    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && $global_config->{$_} } hv_settings() );
+    $pconf .= hv_lines( $global_config, \%written );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 

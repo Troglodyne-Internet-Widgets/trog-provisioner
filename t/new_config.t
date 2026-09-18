@@ -312,6 +312,16 @@ subtest 'hv_settings offers the machine knobs, not the facts about the machine' 
     is( "@offered", q{}, 'and none of those can be named in _global' );
 };
 
+# A setting of 0 is an answer, and the vm recipe reads disk_iothreads=0 as "no
+# iothreads".  An empty one is not: Config::Simple reads a bare `key=` that way.
+subtest 'hv_lines passes a setting of 0 through, and leaves out an empty one' => sub {
+    my $lines = Trog::Provisioner::Config::Generator::hv_lines( { disk_iothreads => 0, disk_cache => q{}, disk_queues => undef, cpu_mode => 'host-passthrough' }, { cpu_mode => 1 } );
+
+    like( $lines, qr/^disk_iothreads=0$/m, 'a 0 is written' );
+    unlike( $lines, qr/disk_cache|disk_queues/, 'an empty or absent setting is not' );
+    unlike( $lines, qr/cpu_mode/,               'and neither is one already written above' );
+};
+
 # A stand-in for the sftp session, which is the only part of the salvage check
 # that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
 # what the guest said when asked whether the path still holds anything.
