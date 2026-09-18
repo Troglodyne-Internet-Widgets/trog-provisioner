@@ -1554,7 +1554,7 @@ sub bridge_device {
 
     my $device = $self->capture_cmd(q{brctl show | grep -vP 'vnet|virbr' | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
-    die "Could not determine outbound bridge device on " . $self->uri . "!\n" . "Set bridge_device in provision.conf if autodetection can't find it.\n"
+    die "Could not determine outbound bridge device on " . $self->uri . "!\n" . "Set bridge_device in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
       unless $device;
 
     return $self->{bridge_device} = $device;
@@ -1566,7 +1566,7 @@ sub virbr_device {
 
     my $device = $self->capture_cmd(q{brctl show | grep virbr | tail -n1 | awk '{print $1}'});
     chomp $device if defined $device;
-    die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in provision.conf if autodetection can't find it.\n"
+    die "Could not determine libvirt network device on " . $self->uri . "!\n" . "Set virbr_device in this hypervisor's block of hypervisors.conf, or in provision.conf if there is no hypervisors.conf.\n"
       unless $device;
 
     return $self->{virbr_device} = $device;

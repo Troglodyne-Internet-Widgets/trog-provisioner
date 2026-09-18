@@ -335,6 +335,19 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     ok( Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor' );
 };
 
+subtest 'a bridge nothing can find says where to name it' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( capture_cmd => sub { return q{} } );
+    my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test/system' );
+
+    # The same key is read from either file, depending on whether there is a fleet.
+    for my $key (qw{bridge_device virbr_device}) {
+        my $why = exception { $hv->$key() };
+        like( $why, qr/Set[ ]$key[ ]in[ ]this[ ]hypervisor's[ ]block/, "$key: in hypervisors.conf, where a fleet reads it" );
+        like( $why, qr/in[ ]provision[.]conf[ ]if[ ]there[ ]is[ ]no/,  "$key: or in provision.conf, without one" );
+    }
+};
+
 # --- has_tpm ------------------------------------------------------------------
 subtest 'a guest gets a TPM only where one means something' => sub {
     my ( $asked, $answer );
