@@ -51,6 +51,9 @@ uses any other value as written.  So a destination inside this installation does
 not need DNS to receive the logs that tell you DNS is down.  You name an
 external syslog service the usual way.
 
+The recipe refuses a URL, because rsyslog takes a host there.  It reads the
+transport and the port from C<protocol> and C<port>.
+
 This is deliberately weaker than C<mirror> in L<Provisioner::DistroRecipe>,
 which B<dies> on a name that the pool does not know.  The mirror must die,
 because cloud-init uses it before the guest has a resolver.  This recipe runs
@@ -127,7 +130,7 @@ sub args {
         properties => {
             host => {
                 type        => 'string',
-                description => 'Where to send this guest logs.  Required: a guest that does not run this recipe already ships nowhere, so there is no off.  A name the ip pool knows is resolved to its address; anything else is used as written.',
+                description => 'Where to send this guest logs.  Required: a guest that does not run this recipe already ships nowhere, so there is no off.  A name the ip pool knows is resolved to its address; anything else is used as written.  A host, not a URL.',
             },
             port => {
                 type        => 'integer',
@@ -216,6 +219,18 @@ sub target {
         print "$domain is the log destination, so it keeps its logs rather than forwarding them to itself.\n";
         return q{};
     }
+
+    # The omfwd action of rsyslog takes a host name or an address in target=,
+    # and has protocol= and port= for the rest of what a URL says.
+    die <<"NOPE" if $kind eq 'url';
+'$opts{host}' is a URL, and $domain ships its logs to a host.  rsyslog takes the
+host alone, and the transport and port from their own settings:
+
+    logshipper:
+        host: logs.example.test
+        protocol: tcp
+        port: 514
+NOPE
 
     return $value;
 }

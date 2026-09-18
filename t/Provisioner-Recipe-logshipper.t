@@ -92,6 +92,14 @@ subtest 'a destination the pool does not know is used as written' => sub {
     like( conf($dir), qr/\Qtarget="syslog.vendor.example"\E/, 'passed through' );
 };
 
+subtest 'a destination named as a URL fails the build' => sub {
+    like(
+        exception { generated( host => 'tcp://logs.test.test' ) },
+        qr/'tcp:\/\/logs[.]test[.]test'[ ]is[ ]a[ ]URL/,
+        'rather than handing rsyslog a target with a scheme in it'
+    );
+};
+
 subtest 'the three constants that were hardcoded are settings now' => sub {
     my ($dir) = generated( port => 5514, protocol => 'udp', selector => '*.warn;auth,authpriv.*' );
 
