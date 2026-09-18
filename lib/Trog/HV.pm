@@ -884,7 +884,7 @@ sub note_apt_mirror {
 
         foreach my $name ( sort keys %$recipes ) {
             my $opts = $recipes->{$name};
-            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && length( $opts->{mirror} // q{} );
+            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && $opts->{mirror};
             push( @mirrors, $domain ) if $name eq 'aptmirror' && defined $domain;
         }
     }

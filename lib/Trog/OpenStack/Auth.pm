@@ -184,7 +184,7 @@ sub new {
     die "No application credential id provided in \"application_credential_id\"\n"
       unless $id;
     die "No application credential secret provided in \"application_credential_secret\"\n"
-      unless ref $secret eq 'CODE' || length $secret;
+      unless ref $secret eq 'CODE' || length $secret;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
     my $self = bless {
         package_ua       => $args{package_ua} // 'Trog::OpenStack::UserAgent',

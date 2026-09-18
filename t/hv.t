@@ -432,10 +432,10 @@ subtest 'remote work goes through commands with an exit status' => sub {
             my ( $self, $opts, @cmd ) = @_;
             push @commands, { opts => $opts, cmd => [@cmd] };
 
-            my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;
+            my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- an argument of "0" is still an argument
             $files{ $argv[2] } = delete $files{ $argv[1] } if $argv[0] eq 'mv';
 
-            $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            $? = 0;                                                                                       ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );
