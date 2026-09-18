@@ -812,7 +812,12 @@ sub resolve_dependencies {
             Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
             $builder->required_recipes( %$global_config, %$pconf ),
         );
-        foreach my $required ( keys(%dep_recipes) ) {
+
+        # Sorted, so that two identical provisions produce the same makefile.
+        # Hash order is per process, so without this the targets come out in a
+        # different sequence every run.  It does not touch the ordering rule:
+        # each dependency is still appended after the recipe that named it.
+        foreach my $required ( sort keys(%dep_recipes) ) {
 
             # A substitutable dependency names an interface.  Resolve it to a
             # recipe here, because has() accepts only \w+, and the code below

@@ -564,6 +564,32 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     is( scalar @$modules, scalar keys %at, 'and the list comes back deduplicated, so callers need not' );
 };
 
+subtest 'the same configuration comes back in the same order every run' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    my ($modules) = Provisioner::Cookbook->resolve_dependencies(
+        modules     => ['t_requirer'],
+        domain_conf => { t_requirer => {} },
+        distro      => 'ubuntu',
+        provisioner => {
+            template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+            output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
+        },
+        domain => 'd.test',
+    );
+
+    my %at;
+    my $i = 0;
+    $at{$_} = $i++ for @$modules;
+
+    # t_requirer names both of these, so nothing but the walk decides which lands
+    # first.  Taken in hash order that was a different answer in every process,
+    # and the makefile built from this list came out with its targets in a
+    # different sequence on each run of an unchanged configuration.
+    cmp_ok( $at{t_dep}, '<', $at{t_satisfied}, 'two recipes required by one are placed in lexical order' );
+};
+
 # Configuring a dependency explicitly: a block inside a recipe's stanza, named
 # for a recipe it requires.  See docs/CONFIGURATION.md.
 subtest 'a dependency configured inside its requirer is lifted out of the stanza' => sub {
