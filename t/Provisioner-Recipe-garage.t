@@ -113,6 +113,15 @@ subtest 'enrich: latest is looked up once, and a version named never is' => sub 
     like( exception { recipe()->validate( version => '2.4.1' ) }, qr/version/, 'and one that is neither a tag nor latest is refused' );
 };
 
+subtest 'remote_files: the objects and the snapshots, never the live metadata' => sub {
+    my $expected = {
+        '/var/lib/garage/data/'           => 'garage/data/',
+        '/var/lib/garage/meta/snapshots/' => 'garage/snapshots/',
+    };
+    is_deeply( { $GARAGE->remote_files( '/bogus', 'a.test' ) },  $expected, 'asked of the class' );
+    is_deeply( { recipe()->remote_files( '/bogus', 'a.test' ) }, $expected, 'and the same of an object' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

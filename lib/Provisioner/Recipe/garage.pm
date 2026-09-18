@@ -233,7 +233,7 @@ sub args {
             admin_port         => { type => 'integer', default => 3903, minimum => 1024 },
             zone               => { type => 'string',  default => 'dc1' },
             capacity           => { type => 'string',  default => '1G' },
-            nofile_limit       => { type => 'integer', default => '65536' },
+            nofile_limit       => { type => 'integer', default => 65536 },
             buckets            => {
                 type    => 'array',
                 default => [],
@@ -284,17 +284,17 @@ sub remote_prepare {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # A snapshot, not the metadata itself, because a copy of a live LMDB
-    # database has torn pages and restores as if it were good.
+    # The objects, and a snapshot of the metadata.  A snapshot, not the metadata
+    # itself, because a copy of a live LMDB database has torn pages and
+    # restores as if it were good.
     #
-    # In practice these are always the defaults.  bin/new_config builds the
-    # object from the provisioner options only, and backupdestination calls
-    # this on the class name.  See "Surviving a rebuild" above.
-    my $data_dir     = ref($self) ? ( $self->{data_dir}     // '/var/lib/garage/data' ) : '/var/lib/garage/data';
-    my $metadata_dir = ref($self) ? ( $self->{metadata_dir} // '/var/lib/garage/meta' ) : '/var/lib/garage/meta';
+    # Always the default directories.  bin/new_config builds the object from the
+    # provisioner options only, and backupdestination calls this on the class
+    # name, so neither passes data_dir.  An operator who moves either directory
+    # must name it in the backup targets.  See "Surviving a rebuild" above.
     return (
-        "$data_dir/"               => 'garage/data/',
-        "$metadata_dir/snapshots/" => 'garage/snapshots/',
+        '/var/lib/garage/data/'           => 'garage/data/',
+        '/var/lib/garage/meta/snapshots/' => 'garage/snapshots/',
     );
 }
 

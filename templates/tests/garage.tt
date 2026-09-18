@@ -33,7 +33,8 @@ foreach my $bucket (qw{[% buckets.join(' ') %]}) {
 
 # The two paths in remote_files: the objects, and the metadata snapshot.
 # bin/new_config fetches them as root, so garage:garage 0750 is enough, and
-# they need no other group and no setgid bit.
+# they need no other group and no setgid bit.  The snapshot, not the metadata
+# itself, because a copy of a live LMDB database has torn pages.
 my %garage_dirs = (
     data      => '[% data_dir || '/var/lib/garage/data' %]',
     snapshots => '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots',
@@ -55,15 +56,6 @@ ok(scalar @snaps, 'and there is one to salvage') or diag `ls -la '[% metadata_di
 ok(-x '/usr/local/sbin/garage-snapshot.sh', 'the snapshot script is installed');
 my $cron = do { local (@ARGV, $/) = '/etc/cron.d/garage-snapshot'; <> } // '';
 like($cron, qr{garage-snapshot\.sh}, 'and runs on a schedule, so the salvage is never older than a day');
-
-# The fetch takes the snapshot, never the live database.  This tests only that
-# the admin user cannot read the live database.
-my $live = '[% metadata_dir || '/var/lib/garage/meta' %]/db.lmdb';
-SKIP: {
-    skip 'no db.lmdb yet', 1 unless -d $live;
-    my $denied = `su -s /bin/sh -c 'find "$live" ! -readable -print' [% admin_user %] 2>&1`;
-    isnt($denied, '', 'the live database is not readable by the fetch, which is why the snapshot exists');
-}
 
 # The restore half.  restore_state removes the salvage after it puts it back.
 # If the salvage is still there and garage started empty, the rebuild lost it.

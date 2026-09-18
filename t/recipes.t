@@ -1086,6 +1086,23 @@ subtest 'no recipe hands out a default that changes between runs' => sub {
     }
 };
 
+# The validator coerces a string default to a number, so a quoted one works.
+# It still shows in bin/recipes as a string, and it reads as a mistake.
+subtest 'a numeric setting has a numeric default' => sub {
+    no warnings 'experimental::builtin';
+
+    foreach my $recipe ( sort @available ) {
+        my %spec  = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        my $props = $spec{properties} // {};
+        foreach my $name ( sort keys %$props ) {
+            my $type = $props->{$name}{type} // q{};
+            next unless $type eq 'integer' || $type eq 'number';
+            next unless defined $props->{$name}{default};
+            ok( builtin::created_as_number( $props->{$name}{default} ), "$recipe: $name defaults to a number, not a string" );
+        }
+    }
+};
+
 # cron runs a job with /bin/sh, which is dash on Ubuntu, and dash reads &> as a
 # background & followed by a redirection.  A cron line written with it runs
 # detached, captures nothing, and reports success to cron the instant it starts
