@@ -44,12 +44,6 @@ it.
 =cut
 
 sub main {
-    my @args = @_;
-
-    #    GetOptionsFromArray(\@args,
-    #
-    #    );
-
     setup_kvm()           or return 1;
     setup_public_bridge() or return 2;
     setup_iso_builder()   or return 3;
