@@ -51,8 +51,9 @@ subtest "the helper scripts ride along in the tarball" => sub {
     is_deeply( [ sort @packed ], [@packed], 'in a stable order, so the tarball is reproducible' );
     like( $_, qr{\Ascripts/}, "$_ is stored under scripts/" ) for $packed[0];
 
-    my @source = Provisioner::Utils::files_in("$checkout/scripts");
+    my @source = grep { !m/\A[.]/ } Provisioner::Utils::files_in("$checkout/scripts");
     is( scalar @packed, scalar @source, 'all of them, not some of them' );
+    ok( !( grep { m{\Ascripts/[.]} } @packed ), 'and no dotfile, which is configuration for the tools and not a script' );
 
     for my $rel (@packed) {
         ok( -f "$cfg_dir/$rel", "$rel landed in the domain directory" );

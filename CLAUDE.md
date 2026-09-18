@@ -102,6 +102,8 @@ everything else here declares `use 5.041` -- and `.perlcriticrc` leaves seven
 policies out on the stated grounds that 5.041 makes them unnecessary, which is
 not true one directory over.  `.perlcriticrc.scripts` names those seven and
 drops what does not fit a script whose job is to drive ufw, iptables or cpanm.
+`scripts/.perlcriticrc` is a link to it, so that a tool that looks for a
+profile beside the file it lints, the editor included, finds the right one.
 
 The hook does the tidy and both perlcritic lines for you, over the files you
 staged, once it is installed: `cp git-hooks/pre-commit .git/hooks/`.  Do that
