@@ -20,7 +20,7 @@ use re '/aasx';
                   mountpoint: "/mountpoint_on_guest"
                   device: "device_dir_or_file_on_HV"
                   partition: 2
-                  pool: tf_disks
+                  pool: default
             fuse:
                 - type: "s3fs"
                   options: "ro"
@@ -67,8 +67,8 @@ sub args {
 
                         # enrich overrides pool for a device that is a directory or a
                         # block device on the hypervisor, and partition for a directory.
-                        partition => { type => 'integer', minimum => 1,          default     => 1 },
-                        pool      => { type => 'string',  default => 'tf_disks', description => 'The storage pool on the hypervisor that device is a volume in.' },
+                        partition => { type => 'integer', minimum => 1,         default     => 1 },
+                        pool      => { type => 'string',  default => 'default', description => 'The storage pool on the hypervisor that device is a volume in.' },
                     },
                 },
             },

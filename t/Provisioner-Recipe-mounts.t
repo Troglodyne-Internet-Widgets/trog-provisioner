@@ -41,8 +41,8 @@ sub disk {
 
 subtest 'a volume in a pool' => sub {
     my $default = disk( device => 'bogus-volume' );
-    is( $default->{pool},      'tf_disks', 'is in tf_disks by default' );
-    is( $default->{partition}, 1,          'and mounts its first partition' );
+    is( $default->{pool},      'default', 'is in the pool that libvirt calls default, by default' );
+    is( $default->{partition}, 1,         'and mounts its first partition' );
 
     my $given = disk( device => 'bogus-volume', pool => 'bogus_pool', partition => 2 );
     is( $given->{pool},      'bogus_pool', 'the pool given is kept' );
