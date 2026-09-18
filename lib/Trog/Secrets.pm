@@ -32,8 +32,8 @@ it answers.
 
 =head1 DESCRIPTION
 
-A recipe does not carry a password.  It carries a note that says where the
-password is:
+A recipe configuration must not carry a password.  It carries a reference that
+says where the password is:
 
     registrar:
         key: "secret:troglodyne/easydns_token/password"

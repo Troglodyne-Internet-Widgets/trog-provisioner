@@ -55,7 +55,8 @@ Put existing mailboxes in C<$install_dir/$domain/mailnames/>.  If
 C<mailnames/$USER/$USER.sieve> exists, the recipe links it as
 C<.dovecot.sieve> and compiles it with sievec.
 
-TODO: get the passwords from a secure store, such as keepass or vault.
+Give each password as a C<secret:> reference, not in the clear.  See
+L<Trog::Secrets>.
 
 =head3 Two domains on one guest
 

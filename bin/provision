@@ -535,8 +535,8 @@ sub main {
     my $data = "$domain_dir/$domain/data.tar.gz";
     close( _must_read( $data, "No data to host for $domain" ) ) or die "Could not close $data: $!\n";
 
-    # Its storage pool and the virtiofs shim, or nothing on a hypervisor that
-    # has neither.
+    # The storage pool, and the virtiofs shim that lets a guest mount a
+    # directory of the hypervisor.  A hypervisor that has neither does nothing.
     $hv->prepare_host("$FindBin::Bin/../virtiofs-better");
 
     # If this domain depends on another, build that guest first.  With
@@ -567,7 +567,6 @@ sub main {
 
     }
 
-    #TODO: Find how to apply the cloud-init of the second domain when it has a dependency.
     my ( $user, $ip ) = provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => $reuser, depends => $depends, dryrun => $dryrun, nonreusable => $nonreusable );
     return 0 if $dryrun;
 
