@@ -2,12 +2,37 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Temp();
 
 my $admin_user = '[% admin_user %]';
 my $home       = "/home/$admin_user";
 
 my $nav = `npm list -g perlnavigator-server 2>/dev/null`;
 like($nav, qr/perlnavigator-server/, 'perlnavigator-server installed globally via npm');
+
+# The wrapper comes first on PATH, and starts the server that npm installed.
+chomp( my $nav_cmd = `sh -c 'command -v perlnavigator'` );
+is($nav_cmd, '/usr/local/sbin/perlnavigator', 'perlnavigator is the wrapper that adds the perl shim');
+ok(-x '/usr/local/bin/perlnavigator', 'and the server that it starts is there');
+ok(-x '/usr/local/lib/perlnavigator-shim/perl', 'and so is the shim');
+
+# The shim gives a criticWrapper.pl run the .perlcriticrc of the linted file.
+# A stand-in criticWrapper.pl prints what it got, so this needs no Perl::Critic.
+{
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    mkdir "$dir/repo";
+    mkdir "$dir/repo/.git";
+    mkdir "$dir/repo/lib";
+    open( my $rc, '>', "$dir/repo/.perlcriticrc" ) or die $!;
+    close $rc;
+    open( my $pm, '>', "$dir/repo/lib/Probe.pm" ) or die $!;
+    close $pm;
+    open( my $cw, '>', "$dir/criticWrapper.pl" ) or die $!;
+    print {$cw} 'print $ENV{PERLCRITIC} // q{none};';
+    close $cw;
+    my $got = `env -u PERLCRITIC /usr/local/lib/perlnavigator-shim/perl $dir/criticWrapper.pl --file $dir/repo/lib/Probe.pm`;
+    is($got, "$dir/repo/.perlcriticrc", 'the shim gives perlcritic the .perlcriticrc of the linted file');
+}
 
 ok(-d "$home/.vim/pack/lsp/start", 'vim-lsp pack directory exists');
 ok(-f "$home/.vim/perllsp.vim", 'perllsp.vim vimrc snippet installed');

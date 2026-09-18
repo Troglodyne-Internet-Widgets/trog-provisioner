@@ -1,0 +1,22 @@
+#!/bin/sh
+# Start perlnavigator with the perl shim ahead of every other perl on PATH, so
+# that each perlcritic run gets the profile of the file that it lints.  The
+# shim is in ../lib/perlnavigator-shim beside this file, and says how it
+# chooses.  Provisioner::Recipe::perllsp installs both.
+
+self=$(readlink -f "$0")
+shim_dir=$(dirname "$(dirname "$self")")/lib/perlnavigator-shim
+
+real=
+IFS=:
+for d in $PATH; do
+    if [ -x "$d/perlnavigator" ] && [ "$(readlink -f "$d/perlnavigator")" != "$self" ]; then
+        real=$d/perlnavigator
+        break
+    fi
+done
+unset IFS
+
+[ -n "$real" ] || { echo "perlnavigator: no real perlnavigator on PATH" >&2; exit 127; }
+
+PATH="$shim_dir:$PATH" exec "$real" "$@"
