@@ -155,13 +155,13 @@ hostname verification for a connection we are about to send a token over.
 sub new {
     my ( $class, $endpoint, %args ) = @_;
 
-    die "No Keystone endpoint provided\n" unless length $endpoint;
+    die "No Keystone endpoint provided\n" unless $endpoint;
 
     my $id     = $args{application_credential_id};
     my $secret = $args{application_credential_secret};
 
     die "No application credential id provided in \"application_credential_id\"\n"
-      unless length $id;
+      unless $id;
     die "No application credential secret provided in \"application_credential_secret\"\n"
       unless ref $secret eq 'CODE' || length $secret;
 
@@ -275,7 +275,7 @@ sub _authenticate {
 
     my $token = $response->header('X-Subject-Token');
     die "Authenticating against $self->{endpoint} returned no token\n"
-      unless length $token;
+      unless $token;
 
     my $catalog = $body->{token}{catalog};
     die "Authenticating against $self->{endpoint} returned no service catalog\n"
@@ -303,7 +303,7 @@ sub cache_path {
     my ($self) = @_;
 
     my $dir = $self->{cache_dir} // _default_cache_dir();
-    return unless length $dir;
+    return unless $dir;
 
     # Neither the endpoint nor the credential id belongs in a filename -- one
     # has slashes in it and the other is a credential -- and both have to be in
@@ -316,9 +316,9 @@ sub cache_path {
 
 sub _default_cache_dir {
     my $base = $ENV{XDG_CACHE_HOME};
-    $base = "$ENV{HOME}/.cache" if !length( $base // '' ) && length( $ENV{HOME} // '' );
+    $base = "$ENV{HOME}/.cache" if !$base && $ENV{HOME};
 
-    return unless length( $base // '' );
+    return unless $base;
     return "$base/trog-provisioner";
 }
 
@@ -351,7 +351,7 @@ sub _restore {
 sub _looks_current {
     my ( $cached, $endpoint ) = @_;
 
-    return 0 unless length( $cached->{token} // '' );
+    return 0 unless $cached->{token};
     return 0 unless ref $cached->{catalog} eq 'ARRAY' && @{ $cached->{catalog} };
 
     # The endpoint is in the cache key already, so this is belt and braces --

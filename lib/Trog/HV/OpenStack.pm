@@ -131,7 +131,7 @@ sub build {
     my ( $class, %given ) = @_;
 
     die "An OpenStack hypervisor needs a 'cloud' naming an entry in clouds.yaml\n"
-      unless length $given{cloud};
+      unless $given{cloud};
 
     return bless {%given}, $class;
 }
@@ -317,7 +317,7 @@ answering to a domain name is a situation to be told about, not to guess at.
 sub server {
     my ( $self, $name ) = @_;
 
-    die "server() needs a name\n" unless length $name;
+    die "server() needs a name\n" unless $name;
 
     # The route filters client side on an exact match, so this cannot pick up a
     # guest that merely has $name as a prefix -- which the Nova API's own name
@@ -440,7 +440,7 @@ sub _is_ipv4 ($address) { return ( $address->{addr} // '' ) =~ m/\A\d+(?:[.]\d+)
 sub _network_is_external {
     my ( $self, $name ) = @_;
 
-    return 0 unless length $name;
+    return 0 unless $name;
     return $self->{_external}{$name} if exists $self->{_external}{$name};
 
     my ($network) = grep { ref $_ && ( $_->{name} // '' ) eq $name } $self->api->networks();
@@ -559,7 +559,7 @@ sub create_guest {
     my ( $self, %spec ) = @_;
 
     my $name = $spec{name};
-    die "create_guest needs a name\n" unless length $name;
+    die "create_guest needs a name\n" unless $name;
 
     # Say which one is missing and where it goes.  There is no guessing a flavor
     # or an image: what exists is the cloud's to say.
@@ -571,7 +571,7 @@ sub create_guest {
     foreach my $needed (qw{flavor image network}) {
         $spec{$needed} //= $self->{$needed};
         die "Building '$name' on " . $self->describe . " needs '$needed'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
-          unless length $spec{$needed};
+          unless $spec{$needed};
     }
 
     $spec{floating_network} //= $self->floating_network;
@@ -582,9 +582,9 @@ sub create_guest {
     push @optional, ( availability_zone => $spec{availability_zone} // $self->availability_zone )
       if defined( $spec{availability_zone} // $self->availability_zone );
     push @optional, ( user_data => $spec{user_data} )
-      if length $spec{user_data};
+      if $spec{user_data};
     push @optional, ( network_for_floating_ip => $spec{floating_network} )
-      if length $spec{floating_network};
+      if $spec{floating_network};
 
     return $self->api->create_vm(
         name           => $name,
@@ -625,11 +625,11 @@ sub rebuild_guest {
 
     my $image = $spec{image} // $self->image;
     die "Rebuilding '$name' on " . $self->describe . " needs 'image'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
-      unless length $image;
+      unless $image;
 
     my %rebuild = ( imageRef => $self->_image_id($image) );
     $rebuild{user_data} = MIME::Base64::encode_base64( $spec{user_data}, '' )
-      if length $spec{user_data};
+      if $spec{user_data};
 
     $self->_nova( POST => "/servers/$server->{id}/action", { rebuild => \%rebuild }, $REBUILD_MICROVERSION );
 
@@ -898,7 +898,7 @@ sub check_transfer_ip {
     my $named  = $config ? $config->param('global.transfer_ip') : undef;
     $named = $named->[0] if ref $named eq 'ARRAY';
 
-    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if length $named;
+    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
 
     return $self->_verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
 A guest scps its payload and rsyncs its data directory out of this machine, so
@@ -929,7 +929,7 @@ sub check_cloud_resources {
     );
     $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
 
-    my @unset = grep { !length $wanted{$_} } sort keys %wanted;
+    my @unset = grep { !$wanted{$_} } sort keys %wanted;
     return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
 The cloud's block in hypervisors.conf has to say what to build guests as.  What
 exists is the cloud's to say, so ask it rather than guessing:

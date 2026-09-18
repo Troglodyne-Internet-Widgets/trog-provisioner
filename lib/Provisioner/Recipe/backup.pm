@@ -97,7 +97,7 @@ sub enrich {
     # should not silently start backing up a signing key.
     my $excludes = $opts{excludes} // {};
     foreach my $target ( sort keys %default_skips ) {
-        my @both = grep { length } ( $default_skips{$target}, $excludes->{$target} );
+        my @both = grep { $_ } ( $default_skips{$target}, $excludes->{$target} );
         $excludes->{$target} = join( ' ', @both ) if @both;
     }
     $opts{excludes} = $excludes;

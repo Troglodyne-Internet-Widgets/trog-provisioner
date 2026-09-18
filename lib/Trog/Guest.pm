@@ -83,7 +83,7 @@ our $STATUS_GRACE = '60s';
 sub new {
     my ( $class, %opts ) = @_;
 
-    die "A guest needs a host to connect to\n" unless length $opts{host};
+    die "A guest needs a host to connect to\n" unless $opts{host};
     return $class->SUPER::new(%opts);
 }
 
@@ -297,7 +297,7 @@ sub seal_key {
     my ( $class, $domain, $path ) = @_;
 
     my $private = eval { File::Slurper::read_binary($path) };
-    return 0 unless length $private;
+    return 0 unless $private;
 
     my $store = _store() or return 0;
 

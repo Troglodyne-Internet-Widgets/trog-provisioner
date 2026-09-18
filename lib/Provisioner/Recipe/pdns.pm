@@ -145,7 +145,7 @@ sub lexicon_credentials {
     # anything on that path, and taking $opts{api_key} on faith rendered an
     # empty token into the file dehydrated executes.
     my $key =
-      length( $opts{api_key} // q{} )
+        $opts{api_key}
       ? $opts{api_key}
       : $self->api_key_for( $opts{domain} );
 
@@ -177,7 +177,7 @@ sub api_key_for {
     my $server = Provisioner::Cookbook->host_of($domain) // $domain;
 
     my $configured = Provisioner::Cookbook->domain_config($server)->{ $self->recipe_name }{api_key};
-    return $configured if length $configured;
+    return $configured if $configured;
 
     state %made;
     return $made{ $server // q{} } //= Crypt::PRNG::random_bytes_hex(32);
@@ -191,7 +191,7 @@ sub enrich {
     # for this API reached every recipe on the guest and was owned by none of
     # them.
     $opts{api_key} = $self->api_key_for( $opts{domain} )
-      unless length( $opts{api_key} // q{} );
+      unless $opts{api_key};
 
     my $extras = $opts{extra_records} // '';
     if ($extras) {

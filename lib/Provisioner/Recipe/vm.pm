@@ -230,7 +230,7 @@ sub create_storage {
 
     foreach my $file (qw{user-data meta-data network-config}) {
         die "No $file to build the cloud-init seed for $domain from\n"
-          unless length $opts{seed}{$file};
+          unless $opts{seed}{$file};
     }
 
     my $volume = "$domain-qcow2";
@@ -351,7 +351,7 @@ sub _tpm {
 # Config::Simple tells them apart and nothing here wants to.
 sub _asked {
     my ( $opts, $key ) = @_;
-    return undef unless length $opts->{$key};
+    return undef unless $opts->{$key};
     return $opts->{$key};
 }
 

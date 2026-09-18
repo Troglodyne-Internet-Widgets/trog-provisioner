@@ -354,7 +354,7 @@ sub seed {
     my $ipmap   = Config::Simple->new( Trog::Config->path('ipmap.cfg') );
     my $global  = $ipmap ? ( $ipmap->param( -block => 'global' ) // {} ) : {};
     my $gateway = $global->{gateway} // q{};
-    foreach my $gw ( grep { length } split /[\s,]+/, $gateway ) {
+    foreach my $gw ( grep { $_ } split /[\s,]+/, $gateway ) {
         $recorded += reserve( $gw, "gateway:$gw" ) if $in_pool{$gw};
     }
 
@@ -462,7 +462,7 @@ sub _guest_addresses {
     my ( @found, %seen );
     foreach my $line ( split m/\n/, $said ) {
         my ( $domain, $ip ) = split m/\t/, $line, 2;
-        next unless length $domain;
+        next unless $domain;
         next unless defined $ip && $ip =~ m/\A\d+(?:[.]\d+){3}\z/;
 
         # A domain answers on the NAT bridge as well, so it turns up more than

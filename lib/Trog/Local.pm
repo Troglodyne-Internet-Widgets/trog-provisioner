@@ -141,7 +141,7 @@ sub transfer_ips {
     my ( @ours, %seen );
 
     foreach my $towards (@towards) {
-        next unless length $towards;
+        next unless $towards;
 
         # A cidr is a network rather than something to connect to, and the
         # addresses a domain is configured with are written as one.

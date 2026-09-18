@@ -420,7 +420,7 @@ sub required_recipes {
         my $class  = Provisioner::Cookbook->load($local);
 
         my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
-        unless ( length $configured ) {
+        unless ($configured) {
 
             # Asked of the recipe that owns it rather than minted here, and
             # asked now rather than left to enrich: this runs before validation,

@@ -198,7 +198,7 @@ sub required_recipes {
         perl => sub {
             my %opts = ( Provisioner::Cookbook->defaults('trogrunner'), @_ );
             my $sys_virt =
-              length( $opts{libvirt_version} // q{} )
+              $opts{libvirt_version}
               ? { install => ["Sys::Virt\@$opts{libvirt_version}"] }
               : { pin     => { module => 'Sys::Virt', pkgconfig => 'libvirt' } };
 
@@ -370,7 +370,7 @@ sub enrich {
       unless @{ $opts{config}{admin_keys} // [] };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
-      if $opts{checkout} && ( !length( $opts{checkout_dir} // q{} ) || $opts{checkout_dir} eq '.' );
+      if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );
 
     # Both of these are written into a path under the domain directory, so an
     # absolute one silently means somewhere else entirely: `store:
@@ -378,7 +378,7 @@ sub enrich {
     # renders as /opt/domains/<domain>//etc/..., which fails as a missing file
     # rather than as the mistake it is.
     _under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
-    _under_the_domain( $opts{store},        'store' )        if length( $opts{store} // q{} );
+    _under_the_domain( $opts{store},        'store' )        if $opts{store};
 
     foreach my $name ( sort keys %{ $opts{hypervisors} } ) {
         my $block = $opts{hypervisors}{$name};
@@ -432,13 +432,13 @@ sub _restore_refs {
 # understand -- the same trick, and for the same reason, as Trog::HV::_parse_uri.
 sub _ssh_parts {
     my ($uri) = @_;
-    return undef unless length $uri;
+    return undef unless $uri;
 
     my ( $scheme, $authority ) = URI::Split::uri_split($uri);
-    return undef unless length $scheme;
+    return undef unless $scheme;
 
     my ( undef, $transport ) = split( quotemeta('+'), $scheme, 2 );
-    my $server = ( length $authority ) ? URI->new("ssh://$authority") : undef;
+    my $server = $authority ? URI->new("ssh://$authority") : undef;
 
     return {
         ssh  => ( defined $transport && $transport eq 'ssh' ) ? 1             : 0,

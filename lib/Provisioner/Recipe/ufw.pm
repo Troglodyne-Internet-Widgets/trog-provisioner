@@ -44,7 +44,7 @@ sub enrich {
     push( @ours, $opts{transfer_ip} ) if !@ours && $opts{transfer_ip};
 
     my %named = map { $_ => 1 } @nets;
-    unshift( @nets, grep { length $_ && !$named{$_}++ } @ours );
+    unshift( @nets, grep { $_ && !$named{$_}++ } @ours );
     $opts{admin_networks} = \@nets;
 
     return %opts;

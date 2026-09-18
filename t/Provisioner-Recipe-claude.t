@@ -71,7 +71,7 @@ foreach my $what ( sort keys %CASES ) {
         my @orphans  = grep {
             my $at     = index( $_, '@' );
             my $market = $at >= 0 ? substr( $_, $at + 1 ) : q{};
-            !length($market) || !$declared{$market}
+            !$market || !$declared{$market}
         } keys %{ $conf->{enabledPlugins} // {} };
 
         is_deeply( \@orphans, [], 'no enabled plugin names a marketplace that is not there' )

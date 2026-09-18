@@ -159,7 +159,7 @@ sub new {
 
     # Drop the options that weren't actually given, so an unset --connect
     # doesn't look like a request for a different hypervisor.
-    my %given = map { $_ => $opts{$_} } grep { length $opts{$_} } keys %opts;
+    my %given = map { $_ => $opts{$_} } grep { $opts{$_} } keys %opts;
     return $INSTANCE if $INSTANCE && !%given;
 
     return $class->candidate(%given)->activate();
@@ -190,7 +190,7 @@ sub activate {
 sub candidate {
     my ( $class, %opts ) = @_;
 
-    my %given = map { $_ => $opts{$_} } grep { length $opts{$_} } keys %opts;
+    my %given = map { $_ => $opts{$_} } grep { $opts{$_} } keys %opts;
 
     # Asked of a backend directly, that is the answer.  Asked of us, pick one.
     my $backend = $class eq __PACKAGE__ ? $class->backend_for(%given) : $class;
@@ -728,7 +728,7 @@ sub check_fetch_sources {
             next unless ref $opts eq 'HASH';
 
             foreach my $path ( eval { $class->fetch_sources(%$opts) } ) {
-                next unless length $path;
+                next unless $path;
                 $wanted{$path}{$name} = 1;
             }
         }
@@ -850,7 +850,7 @@ sub note_apt_mirror {
         my $global  = eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {};
         my $recipes = eval { Provisioner::Cookbook->domain_config( $domain, $conf ) } // {};
 
-        $pointed = 1 if length( $global->{mirror} // q{} );
+        $pointed = 1 if $global->{mirror};
 
         foreach my $name ( sort keys %$recipes ) {
             my $opts = $recipes->{$name};
@@ -948,9 +948,9 @@ FIX
 sub _plaintext_in {
     my ( $node, $path ) = @_;
 
-    return map { _plaintext_in( $node->[$_], "$path\[$_]" ) } 0 .. $#$node                       if ref $node eq 'ARRAY';
-    return map { _plaintext_in( $node->{$_}, length $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
-    return () if ref $node || !length $node;
+    return map { _plaintext_in( $node->[$_], "$path\[$_]" ) } 0 .. $#$node                if ref $node eq 'ARRAY';
+    return map { _plaintext_in( $node->{$_}, $path ? "$path.$_" : $_ ) } sort keys %$node if ref $node eq 'HASH';
+    return () if ref $node || !$node;
 
     # Already a reference, or a placeholder bin/new_guest wrote for somebody to
     # fill in -- which new_config refuses to build from, so it is not a secret

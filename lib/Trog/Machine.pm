@@ -183,7 +183,7 @@ sub authorized_keys {
     my $home = $self->capture_cmd('echo $HOME');
     chomp $home if defined $home;
     die 'Could not determine the home directory of the transfer user on ' . $self->describe . "\n"
-      unless length $home;
+      unless $home;
     return "$home/.ssh/authorized_keys";
 }
 
@@ -370,7 +370,7 @@ sub _ask_for_sudo_password {
           . "in /etc/sudoers.d/, via visudo -- or hand the password in with --credentials, as Trog::Credentials describes.\n";
     };
 
-    die 'No password given for ' . $self->describe . "\n" unless length $password;
+    die 'No password given for ' . $self->describe . "\n" unless length $password;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a password of "0" is still a password
 
     return $self->_remember($password);
 }
@@ -559,7 +559,7 @@ sub list_dir {
     # ls rather than a listing over the connection: sftp is not used here at
     # all, and for the same reason -- see above.
     my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
-    return grep { length } split( m/\n/, $listing );
+    return grep { $_ } split( m/\n/, $listing );
 }
 
 sub read_text {
@@ -706,7 +706,7 @@ sub _staging_path {
 
     my $path = $self->capture_cmd('mktemp');
     chomp $path  if defined $path;
-    return $path if length $path && $path =~ m{\A/};
+    return $path if $path && $path =~ m{\A/};
 
     warn 'Could not make a staging file on ' . $self->describe . "\n";
     return undef;
@@ -895,7 +895,7 @@ sub _write_local {
 sub _parent_dir {
     my ($path) = @_;
     $path =~ s{/[^/]*\z}{};
-    return length($path) ? $path : '/';
+    return $path ? $path : '/';
 }
 
 =head1 SEE ALSO

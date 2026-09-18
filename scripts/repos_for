@@ -27,13 +27,13 @@ sub main {
     GetOptionsFromArray( \@args, 'reset' => \$reset ) or die $USAGE;
 
     my ( $api_url, @entities ) = @args;
-    die $USAGE unless length $api_url && @entities;
+    die $USAGE unless $api_url && @entities;
 
     # On stdin rather than in argv, where ps shows it to anyone on the guest for
     # as long as the clones take.
     my $token = <STDIN>;    ## no critic (InputOutput::ProhibitExplicitStdin) -- <> reads the files named in argv, and argv here holds the url and the entities
     chomp $token if defined $token;
-    die "No API token on stdin.\n" unless length $token;
+    die "No API token on stdin.\n" unless $token;
 
     my $path  = cache_file();
     my $cache = $reset ? {} : read_cache($path);

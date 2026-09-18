@@ -130,7 +130,7 @@ sub lookup {
               or die "No entry '$want->{title}' in group '$group' of $file\n";
 
             die "Entry '$want->{title}' in '$group' has no $want->{field}\n"
-              unless length $entry->{ $want->{field} };
+              unless length $entry->{ $want->{field} };    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
             $values{ $want->{path} } = $entry->{ $want->{field} };
         }
@@ -229,7 +229,7 @@ sub remember {
         my $g     = $kdbx->find_group( { title => $group } );
         my $entry = $g && $kdbx->find_entry( { group => $g->{gid}, title => $title } );
 
-        if ( $entry && length $entry->{$field} ) {
+        if ( $entry && length $entry->{$field} ) {    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
             $values{$ref} = $entry->{$field};
             next;
         }
@@ -339,7 +339,7 @@ sub parse {
 
     my ( $group, $title, $field ) = split( m{/}, substr( $reference, length 'secret:' ) );
     die "Malformed secret '$reference': wanted secret:group/entry/field\n"
-      unless length $group && length $title && length $field;
+      unless $group && $title && $field;
 
     return ( $group, $title, $field );
 }
