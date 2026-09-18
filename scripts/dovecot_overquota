@@ -6,7 +6,7 @@ PATH="/usr/libexec/dovecot:$PATH"
 
 [[ -z $1 ]] && exit 1;
 
-dovecot-lda -d $1 -o "plugin/quota=maildir:User quota:noenforcing" <<MAIL
+dovecot-lda -d "$1" -o "plugin/quota=maildir:User quota:noenforcing" <<MAIL
 From: postmaster@$(hostname -f)
 To: $1
 Date: $(date --rfc-2822)
@@ -20,7 +20,7 @@ Greetings!
 Delete any mail you don't need after backing it up
 and/or reply to this mail in supplication of more bytes.
 
-Alternatively, do nothing and cease to recieve mail.
+Alternatively, do nothing and cease to receive mail.
 We get paid the same either way.
 
 Thanks,

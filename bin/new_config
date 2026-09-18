@@ -53,7 +53,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -69,6 +69,10 @@ The files describe your installation, not this software, so they are not in the
 checkout.  To use a different set, set C<TROG_PROVISIONER_CONFIG> to the
 directory that holds them.  To name one file at a time, use the --recipes and
 --ipmap options.  See L<Trog::Config>.
+
+The --hvconf option names the fleet definition that chooses the hypervisor of a
+new guest.  The default is F</etc/trog-provisioner/hypervisors.conf>.  See
+L<Trog::Hypervisors>.
 
 Most of what you put in the main recipes.yaml goes in the _base section:
 
@@ -198,7 +202,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $cfile, $sfile, $pfile, $skip_ssh, $dryrun );
+our ( $cfile, $sfile, $pfile, $hvconf, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
@@ -255,9 +259,10 @@ sub salvage_gaps { return %SALVAGE_GAPS }
 sub main {
     my @args = @_;
 
-    # Clear the gaps of the last run, because a process can call main() more
-    # than once.
+    # Clear the gaps and the fleet of the last run, because a process can call
+    # main() more than once.
     %SALVAGE_GAPS = ();
+    undef $hvconf;
 
     my $credentials;
     GetOptionsFromArray(
@@ -265,6 +270,7 @@ sub main {
         'ipmap=s'     => \$cfile,
         'secrets=s'   => \$sfile,
         'recipes=s'   => \$pfile,
+        'hvconf=s'    => \$hvconf,
         'skip_ssh'    => \$skip_ssh,
         'credentials' => \$credentials,
         'dryrun'      => \$dryrun,
@@ -321,6 +327,29 @@ sub hv_settings {
     return @settings;
 }
 
+=head2 $lines = hv_lines($global_config, $written)
+
+Returns the C<hv_settings> lines for F<provision.conf>, one C<key=value> each,
+each starting with a newline.  It takes only the keys that C<$global_config>
+sets and that C<$written> does not name.  None of them gets a default here: an
+absent key lets F<bin/provision> decide.
+
+An empty value counts as absent, because Config::Simple reads a bare C<key=> as
+an empty string.  A value of 0 is written: C<disk_iothreads=0> turns iothreads
+off.
+
+=cut
+
+sub hv_lines {
+    my ( $global_config, $written ) = @_;
+
+    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a setting of "0" is still a setting
+    my @keys = grep { !$written->{$_} && length $global_config->{$_} } hv_settings();
+    ## use critic
+
+    return join( q{}, map { "\n$_=$global_config->{$_}" } @keys );
+}
+
 =head2 $hv = choose_hypervisor($domain, $requirements)
 
 Returns the L<Trog::HV> for the guest: the one that C<--connect> named, else the
@@ -335,7 +364,7 @@ sub choose_hypervisor {
     my $chosen = Trog::HV->new();
     return $chosen if $chosen->explicit;
 
-    my $fleet = Trog::Hypervisors->load( Trog::Hypervisors->default_path() );
+    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
     return $chosen unless $fleet->configured;
 
     return $fleet->select_for( $domain, $requirements );
@@ -477,6 +506,7 @@ sub handle_domain {
     # Provisioner::Cookbook/install_dir says why they belong to _global.
     $global_config->{install_dir} //= Provisioner::Cookbook->install_dir( $domain, $rconf );
     $global_config->{data_source} //= Provisioner::Cookbook->data_source( $domain, $rconf );
+    my $data_dir = Provisioner::Cookbook->data_dir( $domain, $rconf );
 
     # Merged from this copy, not from the file, so that the resolved secrets
     # stay in it.
@@ -499,9 +529,7 @@ sub handle_domain {
     my @paths = @{ Provisioner::Cookbook->template_dirs( $distro_name, @$libdirs ) };
 
     die "Nothing says where $fqdn's data comes from: set data_source in _global.\n"
-      unless $global_config->{data_source};
-
-    my $data_dir = "$global_config->{data_source}/$fqdn";
+      unless $data_dir;
 
     my @data_users;
     my $data_users_f = "$data_dir/users.yaml";
@@ -793,8 +821,9 @@ sub handle_domain {
 
     my $extra_packages = join( ', ', @pkgs );
 
-    # makefile.tt puts the data target first, so that each recipe finds
-    # its state already restored.  So data comes out of %fragments, where it
+    # makefile.tt runs the data target with its global targets, before the
+    # target of any recipe, so that each recipe finds its state already
+    # restored.  So data comes out of %fragments, where it
     # makes a second state/data: target, and out of the ordered list, where it
     # runs last.
     #
@@ -917,12 +946,9 @@ sub handle_domain {
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
 
-    # Only the keys that _global sets and that are not written above, with no
-    # default, because an absent key lets bin/provision decide.  An empty value
-    # is absent too, because Config::Simple reads a bare `key=` as an empty
-    # string.
+    # The hypervisor settings that _global sets.  See hv_lines.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );
-    $pconf .= join( '', map { "\n$_=$global_config->{$_}" } grep { !$written{$_} && $global_config->{$_} } hv_settings() );
+    $pconf .= hv_lines( $global_config, \%written );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
 

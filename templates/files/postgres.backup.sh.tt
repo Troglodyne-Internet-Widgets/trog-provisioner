@@ -1,8 +1,8 @@
 #!/bin/bash
 # PostgreSQL logical backup.  Cron runs it every night, and it keeps the seven
-# newest dumps.  It dumps the global objects (roles and tablespaces) once.  Then
-# it dumps each database in parallel with pg_dump --format=directory, which also
-# works in parallel across tables.
+# newest finished dumps.  It dumps the global objects (roles and tablespaces)
+# once.  Then it dumps each database in turn with pg_dump --format=directory,
+# which works in parallel across tables.
 set -euo pipefail
 
 DUMP_BASE=/var/backups/postgres
@@ -32,7 +32,9 @@ export DEST JOBS
 DBS=$(sudo -u postgres psql -tAc \
     "SELECT datname FROM pg_database WHERE datistemplate=false AND datname NOT IN ('postgres')")
 
-echo "$DBS" | xargs -P "$JOBS" -I{} bash -c 'dump_db "$@"' _ {}
+# One database at a time: each pg_dump opens JOBS + 1 connections, and JOBS of
+# them at once can pass max_connections.
+echo "$DBS" | xargs -P 1 -I{} bash -c 'dump_db "$@"' _ {}
 
 # pg_dump makes a directory-format dump 0700.  bin/new_config fetches it over
 # sftp as the admin user, with no sudo.  If only postgres can read the dump, the
@@ -44,7 +46,22 @@ chmod -R a+rX "$DEST"
 # database that exists, so a database restored from half a dump stays half.
 : > "$DEST/complete"
 
-# Keep only the 7 newest dated backup directories
-ls -1dt "$DUMP_BASE"/[0-9]* 2>/dev/null | tail -n +8 | xargs -r rm -rf
+# Keep the seven newest finished dumps, and each dump that is newer than the
+# oldest of them.  Count only dumps with complete, so that failed runs do not
+# push finished dumps out.  Order them by the timestamp in the name.
+FINISHED=()
+for dir in "$DUMP_BASE"/[0-9]*/; do
+    if [ -f "${dir}complete" ]; then
+        FINISHED+=( "$(basename "$dir")" )
+    fi
+done
+if [ "${#FINISHED[@]}" -gt 7 ]; then
+    OLDEST_KEPT=$(printf '%s\n' "${FINISHED[@]}" | sort -r | sed -n 7p)
+    for dir in "$DUMP_BASE"/[0-9]*/; do
+        if [[ "$(basename "$dir")" < "$OLDEST_KEPT" ]]; then
+            rm -rf "$dir"
+        fi
+    done
+fi
 
 echo "PostgreSQL backup complete: $DEST"

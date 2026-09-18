@@ -18,6 +18,9 @@ delete, and which renderings of a record it counts as the same one
 
 use Test::More;
 use Net::DNS::RR();
+use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
+use File::Slurper::Temp();
 
 use FindBin;
 use FindBin::libs;
@@ -111,6 +114,52 @@ subtest 'an update names the record it is updating' => sub {
     );
 
     is( $crud->{update}[0]{id}, 'id-soa', 'the update carries the provider identifier' );
+};
+
+# Records are matched in zonefile order, so a provider record is only known to
+# be unwanted once every zonefile record has had its turn.
+subtest 'a record the provider has is kept when a later zonefile record matches it' => sub {
+    my $crud = diff(
+        [ rr('x.test. 600 IN A 10.0.0.1'), rr('y.test. 600 IN A 10.0.0.2') ],
+        [ remote( name => 'y.test', ttl => 600, type => 'A', content => '10.0.0.2', id => 'id-y' ) ],
+    );
+
+    is( scalar @{ $crud->{create} }, 1,        'the record the provider lacks is created' );
+    is( $crud->{create}[0]{name},    'x.test', 'and it is that one' );
+    is_deeply( $crud->{delete}, [], 'and the one it has is not deleted' );
+};
+
+subtest 'a provider record nothing matches is deleted once' => sub {
+    my $crud = diff(
+        [ rr('a.test. 600 IN A 10.0.0.1'), rr('b.test. 600 IN A 10.0.0.2') ],
+        [ remote( name => 'c.test', ttl => 600, type => 'A', content => '10.0.0.3', id => 'id-c' ) ],
+    );
+
+    is( scalar @{ $crud->{create} }, 2, 'both zonefile records are created' );
+    is_deeply( [ map { $_->{id} } @{ $crud->{delete} } ], ['id-c'], 'and the stranger is deleted, once' );
+};
+
+subtest 'a zonefile with two SOA records is refused' => sub {
+    my $e = exception {
+        diff(
+            [ rr('baz.test. 900 IN SOA ns.test. root.test. 1 2 3 4 5'), rr('baz.test. 900 IN SOA ns.test. root.test. 2 2 3 4 5') ],
+            [ remote( name => 'baz.test', ttl => 900, type => 'SOA', content => 'ns.test. root.test. 9 2 3 4 5', id => 'id-soa' ) ],
+        );
+    };
+    like( $e, qr/two[ ]updates[ ]to[ ]SOA/, 'rather than updating the one SOA twice' );
+};
+
+# Before anything is listed, so this runs no lexicon.
+subtest 'a server for a driver whose server option is unknown is refused by name' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/synczones.conf", "[bogusdriver]\nserver=bogus.test\n" );
+    File::Slurper::Temp::write_text( "$dir/test.test.zone", "\$ORIGIN test.test.\n\@ 300 IN A 10.0.0.1\n" );
+
+    like(
+        exception { ZoneSyncer::main( qw{--driver bogusdriver --quiet --config}, "$dir/synczones.conf", "$dir/test.test.zone" ) },
+        qr/gives[ ]bogusdriver[ ]a[ ]server/,
+        'rather than dying on an undefined option name'
+    );
 };
 
 done_testing();

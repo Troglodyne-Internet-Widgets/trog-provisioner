@@ -19,7 +19,7 @@ use Trog::HV();
 use Trog::Local();
 use Trog::Config();
 use Trog::Hypervisors();
-use IO::Prompter();
+use Trog::Utils();
 
 =head1 NAME
 
@@ -105,7 +105,7 @@ sub main {
 
 =head2 $seeded = seed_admin_keys()
 
-If F<admin_authorized_keys> is missing, this offers to fill it in with
+If F<admin_authorized_keys> is missing or empty, this offers to fill it in with
 ssh-import-id.  It asks for a service (C<gh> or C<lp>) and a name on that
 service.  Every guest gets its admin keys from this file.
 
@@ -118,7 +118,7 @@ Returns 1 if ssh-import-id succeeded, and 0 in all other cases.
 
 sub seed_admin_keys {
     my $path = Trog::Config->path('admin_authorized_keys');
-    return 0 if -e $path;
+    return 0 if -s $path;
 
     return 0 unless Trog::Local->interactive;
 

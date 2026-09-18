@@ -56,7 +56,7 @@ mkdir -p /etc/nginx/sites-enabled
 cp matrix-admin.nginx.conf /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chown root:root /etc/nginx/sites-enabled/admin.matrix.[% domain %].conf
 chmod 0644 /etc/nginx/sites-enabled/*.conf
-install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www; /bin/true
+install -m 0755 -o [% user %] -g www-data -d [% install_dir %]/[% domain %]/www
 install -m 0755 -o [% user %] -g www-data matrix.index.html [% install_dir %]/[% domain %]/www
 # Enable synapse now, and start it in postrun.
 systemctl daemon-reload

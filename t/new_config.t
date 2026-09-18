@@ -312,6 +312,16 @@ subtest 'hv_settings offers the machine knobs, not the facts about the machine' 
     is( "@offered", q{}, 'and none of those can be named in _global' );
 };
 
+# A setting of 0 is an answer, and the vm recipe reads disk_iothreads=0 as "no
+# iothreads".  An empty one is not: Config::Simple reads a bare `key=` that way.
+subtest 'hv_lines passes a setting of 0 through, and leaves out an empty one' => sub {
+    my $lines = Trog::Provisioner::Config::Generator::hv_lines( { disk_iothreads => 0, disk_cache => q{}, disk_queues => undef, cpu_mode => 'host-passthrough' }, { cpu_mode => 1 } );
+
+    like( $lines, qr/^disk_iothreads=0$/m, 'a 0 is written' );
+    unlike( $lines, qr/disk_cache|disk_queues/, 'an empty or absent setting is not' );
+    unlike( $lines, qr/cpu_mode/,               'and neither is one already written above' );
+};
+
 # A stand-in for the sftp session, which is the only part of the salvage check
 # that has to be a guest.  Two answers are all _salvage_gap asks it for: whether
 # what the guest said when asked whether the path still holds anything.
@@ -471,6 +481,25 @@ IPMAP
     my $none = ( Trog::Provisioner::Config::Generator::get_config() )[1];
 
     is_deeply( $none, {}, 'and a map naming no aliases at all has none, rather than undef' );
+};
+
+# bin/provision passes its --hvconf here, and the fleet it names is the one
+# that places the guest.
+subtest 'choose_hypervisor asks the fleet that --hvconf names' => sub {
+    my @loaded;
+    my $hv    = Test::MockModule->new('Trog::HV');
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $hv->redefine( new => sub { return bless( { explicit => 0 }, 'Trog::HV' ) } );
+    $fleet->redefine( load => sub { push @loaded, $_[1]; return bless( { order => [] }, 'Trog::Hypervisors' ) } );
+
+    local $Trog::Provisioner::Config::Generator::hvconf = '/bogus/fleet.conf';
+    Trog::Provisioner::Config::Generator::choose_hypervisor( 'vm.test.test', {} );
+    is_deeply( \@loaded, ['/bogus/fleet.conf'], 'the named fleet, not the default one' );
+
+    @loaded = ();
+    local $Trog::Provisioner::Config::Generator::hvconf = undef;
+    Trog::Provisioner::Config::Generator::choose_hypervisor( 'vm.test.test', {} );
+    is_deeply( \@loaded, [ Trog::Hypervisors->default_path() ], 'and the default one when none is named' );
 };
 
 done_testing();

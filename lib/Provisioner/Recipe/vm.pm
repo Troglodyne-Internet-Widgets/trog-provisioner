@@ -167,7 +167,7 @@ sub args {
             },
             disk_iothreads => {
                 type        => 'integer',
-                description => "Threads qemu processes this guest's disk requests on.  Defaults to 1, which is what gets submission off qemu's main loop.  More than one is worth asking for on a guest with several busy disks; one disk's queues are only spread across several threads on libvirt 10 with qemu 9.",
+                description => "Threads qemu processes this guest's disk requests on.  Defaults to 1, which is what gets submission off qemu's main loop.  0 leaves it there.  More than one is worth asking for on a guest with several busy disks; one disk's queues are only spread across several threads on libvirt 10 with qemu 9.",
             },
             disk_queues => {
                 type        => 'integer',
@@ -387,7 +387,7 @@ tells the first two apart, and nothing here needs to.
 
 sub _asked {
     my ( $opts, $key ) = @_;
-    return undef unless $opts->{$key};
+    return undef unless length $opts->{$key};    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- "0" is an answer: disk_iothreads=0 turns iothreads off
     return $opts->{$key};
 }
 

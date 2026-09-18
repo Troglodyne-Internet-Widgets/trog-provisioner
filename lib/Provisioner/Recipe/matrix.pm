@@ -57,7 +57,7 @@ sub required_recipes {
         nginxproxy => sub {
             (
                 vhosts => {
-                    80  => { ssl_redirect => 1, ipv6 => 1 },
+                    80  => { ssl_redirect => 1, ipv6 => $ipv6 },
                     443 => {
                         ssl            => 1,
                         proxy_uri      => 'http://127.0.0.1:8008',

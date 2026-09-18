@@ -352,6 +352,12 @@ subtest 'more than one iothread is only spread where qemu can spread it' => sub 
     unlike( $unmapped, qr/<iothread[ ]id=/, 'rather than a mapping it would refuse to start with' );
 };
 
+subtest 'zero iothreads is an answer, not an absent one' => sub {
+    my $xml = _tuned_xml( libvirt => 10_000_000, qemu => 9_000_000, config => { disk_iothreads => 0 } );
+    unlike( $xml, qr/<iothreads>/, 'disk_iothreads=0 gives no iothread pool' ) or diag $xml;
+    unlike( $xml, qr/iothread='/,  'and puts the disk on none' );
+};
+
 subtest 'the throttle is per disk, and says so when it cannot be honoured' => sub {
     my %limits = ( disk_total_iops_sec => 2000, disk_total_bytes_sec => 100_000_000 );
 

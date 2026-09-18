@@ -14,7 +14,7 @@ upstream [% upstream %] {
 [% IF vhosts.$vhost.ssl_redirect %]
 server {
     listen [% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
-    [% IF ipv6 %]
+    [% IF vhosts.$vhost.ipv6 %]
     listen [::]:[% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
     server_tokens off;
@@ -34,8 +34,8 @@ server {
 [% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
 server {
-    listen [% $vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
-    [% IF ipv6 %]
+    listen [% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
+    [% IF vhosts.$vhost.ipv6 %]
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 

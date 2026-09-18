@@ -184,7 +184,7 @@ sub new {
     die "No application credential id provided in \"application_credential_id\"\n"
       unless $id;
     die "No application credential secret provided in \"application_credential_secret\"\n"
-      unless ref $secret eq 'CODE' || length $secret;
+      unless ref $secret eq 'CODE' || length $secret;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
 
     my $self = bless {
         package_ua       => $args{package_ua} // 'Trog::OpenStack::UserAgent',
@@ -462,10 +462,12 @@ sub _store {
         my ($dir) = $path =~ m{^(\N*)/[^/]+$};
         File::Path::make_path( $dir, { mode => 0o700 } );
 
-        # Atomic, so that two provisions at the same time cannot leave a
-        # half-written file.
+        # write_binary renames a temporary file over $path, so that two
+        # provisions at once cannot leave a half-written file.  It takes the
+        # mode of that temporary file from this package variable, so no other
+        # user can read the token, even before the rename.
+        local $File::Slurper::Temp::FILE_TEMP_PERMS = 0o600;
         File::Slurper::Temp::write_binary( $path, $encoded );
-        chmod 0600, $path;
         1;
     };
 

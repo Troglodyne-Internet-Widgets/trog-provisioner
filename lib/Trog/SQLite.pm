@@ -51,7 +51,6 @@ my $dbh = {};
 
 sub dbh {
     my ( $schema, $dbname ) = @_;
-    $dbh //= {};
     return $dbh->{$dbname} if $dbh->{$dbname};
 
     # No touch first, because DBD::SQLite creates the file on connect.

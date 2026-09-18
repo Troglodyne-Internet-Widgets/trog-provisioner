@@ -218,7 +218,7 @@ allow_unused_subroutine_arguments = 1
 # Each of these returns a guard, which does its work by being held until the
 # end of its scope: a mock, a mocked file, or a change of directory.  The
 # bare names are helpers in t/ that return a Test::MockModule.
-allow_if_computed_by = Test::MockModule->new Test::MockFile->file Test::MockFile->new_dir pushd with_capacity with_vmm with_registrar guest_that cloud_hv here http
+allow_if_computed_by = Test::MockModule->new Test::MockFile->file Test::MockFile->new_dir pushd with_capacity with_vmm with_registrar guest_that cloud_hv here http with_fleet
 [Variables::ProtectPrivateVars]
 [Variables::RequireLexicalLoopIterators]
 [Variables::RequireLocalizedPunctuationVars]

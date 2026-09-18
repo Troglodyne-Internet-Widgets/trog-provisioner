@@ -124,6 +124,18 @@ subtest 'remember() seats what a run resolved, so recipes read that' => sub {
     is( Provisioner::Cookbook->domain_config('a.test')->{pdns}{api_key}, 'secret:g/e/password', 'and forget() puts it back to what is on disk' );
 };
 
+subtest 'template_dirs puts the directory the distro recipe names first' => sub {
+    my $base = Provisioner::Cookbook->template_dir;
+    is_deeply( Provisioner::Cookbook->template_dirs('ubuntu'), [ "$base/ubuntu", $base ], 'the distro directory, then the generic one' );
+    is_deeply( Provisioner::Cookbook->template_dirs(undef),    [$base],                   'and only the generic one with no distro' );
+
+    # The recipe reads its generated files out of template_subdir, so the
+    # search path has to name that directory and not the recipe name.
+    my $ubuntu = Test::MockModule->new( Provisioner::Cookbook->load('ubuntu') );
+    $ubuntu->redefine( template_subdir => sub { return 't_elsewhere' } );
+    is( Provisioner::Cookbook->template_dirs('ubuntu')->[0], "$base/t_elsewhere", 'the distro directory is the one template_subdir names' );
+};
+
 subtest 'domain_config folds _base into the domain, the way a provision reads it' => sub {
     my $conf = {
         _base => {
@@ -340,7 +352,7 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
     sub args {
         return (
             type       => 'object',
-            required   => [qw{needed defaulted nested listed}],
+            required   => [qw{needed defaulted nested listed filled}],
             properties => {
                 needed    => { type => 'string' },
                 defaulted => { type => 'string', default => 'a default' },
@@ -356,6 +368,10 @@ subtest 'properties() reads what the validator reads, and nothing else' => sub {
                     },
                 },
                 bag => { type => 'object', additionalProperties => { type => 'string' } },
+
+                # Only additionalProperties, as grubconf's grub_vars: nothing to
+                # scaffold through, and it may not be empty.
+                filled => { type => 'object', minProperties => 1, additionalProperties => { type => 'string' } },
 
                 # Answered by whatever builds the guest rather than by an
                 # operator: the storage volume it made, the MAC it assigned.
@@ -389,9 +405,10 @@ subtest 'a scaffold is the smallest thing that could work' => sub {
         'a required object is scaffolded through, required fields only'
     );
     is_deeply( $config->{listed}, [ Provisioner::Cookbook->PLACEHOLDER ], 'an array gets one item to copy' );
+    is( $config->{filled}, Provisioner::Cookbook->PLACEHOLDER, 'a required map that may not be empty gets a placeholder' );
 
     is_deeply(
-        [ sort @todo ], [qw{t_scaffold.listed[0] t_scaffold.needed t_scaffold.nested.inner}],
+        [ sort @todo ], [qw{t_scaffold.filled t_scaffold.listed[0] t_scaffold.needed t_scaffold.nested.inner}],
         'and the paths that need a human come back, defaults not among them'
     );
 };
@@ -402,6 +419,7 @@ subtest 'all => 1 is the full menu' => sub {
     is( $config->{opt_dflt},         'optional default',                 'optional fields appear, with their defaults' );
     is( $config->{optional},         Provisioner::Cookbook->PLACEHOLDER, 'and without' );
     is( $config->{nested}{inner_op}, Provisioner::Cookbook->PLACEHOLDER, 'through nested objects too' );
+    ok( !exists $config->{bag}, 'but a map that may be empty is left out, since nothing in it can be offered' );
 };
 
 subtest 'a readOnly field is never offered to fill in' => sub {

@@ -123,6 +123,10 @@ sub args {
                         ssl_redirect => { type => 'boolean' },
 
                         ssl => { type => 'boolean' },
+
+                        # No default, because enrich reads an absent one as on.
+                        # The ipv6 of the recipe still turns it off for every vhost.
+                        ipv6 => { type => 'boolean' },
                     },
                 },
             },
@@ -192,12 +196,10 @@ sub enrich {
 
     # The template loops over vhosts, so make them for the flat interface.
     if ( !$opts{vhosts} && ( $opts{proxy_uri} || $opts{static_dir} ) ) {
-        my $ipv6 = $opts{ipv6} // 1;
         $opts{vhosts} = {
-            80  => { ssl_redirect => 1, ipv6 => $ipv6 },
+            80  => { ssl_redirect => 1 },
             443 => {
-                ssl  => 1,
-                ipv6 => $ipv6,
+                ssl => 1,
                 ( $opts{proxy_uri}  ? ( proxy_uri  => $opts{proxy_uri} )  : () ),
                 ( $opts{static_dir} ? ( static_dir => $opts{static_dir} ) : () ),
             },
@@ -233,6 +235,7 @@ sub enrich {
         my $serves_static;
         my %traverse;
         foreach my $vopts ( values %{ $opts{vhosts} } ) {
+            $vopts->{ipv6} = $opts{ipv6} && ( $vopts->{ipv6} // 1 ) ? 1 : 0;
             next if $vopts->{ssl_redirect};
             next unless $vopts->{static_dir};
             $serves_static = 1;

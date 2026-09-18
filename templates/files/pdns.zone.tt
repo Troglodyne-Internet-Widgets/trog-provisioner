@@ -8,10 +8,10 @@ $TTL    300
                         1209600           ; Expire
                         10800 )           ; Minimum
 
-; We are our own nameserver, delegated.
+; This guest is the nameserver that the zone is delegated to.
 @ 300 IN NS ns1.[% domain %].
 
-; If we have any *other* namservers clustered, add them too.
+; The other nameservers in the cluster, if there are any.
 [% FOREACH ns IN nameservers.values().sort() %]
 @        300      IN NS   [% ns %].
 [% END -%]
@@ -45,7 +45,8 @@ autoconfig   IN CNAME @
 ; Autodiscover TXT record
 @ IN TXT "mailconf=https://autoconfig.[% domain %]/autoconfig/autoconfig.xml"
 
-; DKIM/DMARC. If we have mail setup, we'll modify this with the relevant lexicon script.
+; DKIM and DMARC placeholders.  If the guest runs mail, a lexicon script
+; replaces them.
 default._domainkey IN TXT  "o=-"
 mail._domainkey    IN TXT  "o=-"
 _dmarc             IN TXT  "v=DMARC1; p=none"
@@ -54,7 +55,7 @@ _dmarc             IN TXT  "v=DMARC1; p=none"
 _imaps._tcp        IN SRV 0 0 993 mail.[% domain %].
 _pop3s._tcp        IN SRV 0 0 995 mail.[% domain %].
 _smtps._tcp        IN SRV 0 0 465 mail.[% domain %].
-_submission.tcp    IN SRV 0 0 564 mail.[% domain %].
+_submission._tcp   IN SRV 0 0 587 mail.[% domain %].
 _autodiscover._tcp IN SRV 0 0 80  mail.[% domain %].
 
 [% IF modules.grep('matrix').size() %]
@@ -63,7 +64,8 @@ matrix       IN CNAME @
 admin.matrix IN CNAME @
 [% END -%]
 
-; Include your DKIM key record below, ACME/CAA & GSV et cetera
+; The extra_records from the configuration follow, for example a DKIM key,
+; or ACME, CAA or GSV records.
 [% IF extra_records %]
 [% extra_records | mark_raw %]
 [% END %]

@@ -19,10 +19,10 @@ Once you have loaded the client,
 use the below connection details.
 
 Connection Details
-  Home Server: https://[% domain %]:8448
+  Home Server: https://matrix.[% domain %]
   Suggested Channels:
     [% FOR chan IN channels %]
-    #[% chan %]@[% domain %]
+    #[% chan %]:matrix.[% domain %]
     [% END %]
 
 If you already have a matrix account on another

@@ -35,10 +35,10 @@
   <iothreads>[% tuning.iothreads %]</iothreads>
 [% END -%]
 
-  <!-- i440fx, not q35: every guest on these hypervisors is i440fx, and the
-       machine type decides the PCI topology a guest's kernel already knows.
-       `pc` is the alias for the host qemu's newest i440fx, so this does not
-       pin a version the next hypervisor may not have. -->
+  <!-- i440fx, not q35.  The machine type decides the PCI topology that the
+       guest kernel knows, and the guests on these hypervisors run on i440fx.
+       `pc` is the alias for the newest i440fx that the host qemu has, so this
+       pins no version that another hypervisor does not have. -->
   <os>
     <type arch='x86_64' machine='pc'>hvm</type>
   </os>
@@ -48,9 +48,9 @@
     <pae/>
   </features>
 
-  <!-- host-passthrough by default, so the guest sees the real CPU including
-       AVX and friends.  Anything that probes cpuid for vector extensions
-       needs it; migratability is what you trade for that. -->
+  <!-- host-passthrough by default, so the guest sees the real CPU, AVX
+       included.  Software that probes cpuid for vector extensions needs it.
+       The cost is that the guest cannot migrate to a host with another CPU. -->
   <cpu mode='[% cpu_mode %]'/>
   <clock offset='utc'/>
 
@@ -155,7 +155,7 @@
       <backend type='emulator' version='2.0'/>
     </tpm>
 [% END -%]
-    <!-- Cloud images expect a console and sulk without one:
+    <!-- Cloud images expect a console, and do not boot cleanly without one:
          https://bugs.launchpad.net/cloud-images/+bug/1573095 -->
     <serial type='pty'><target port='0'/></serial>
     <console type='pty'><target type='serial' port='0'/></console>
@@ -163,8 +163,8 @@
 
     <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
     <video><model type='cirrus' vram='16384' heads='1' primary='yes'/></video>
-    <!-- stats period is what makes `virsh dommemstat` say anything; the
-         existing guests have it. -->
+    <!-- The stats period makes `virsh dommemstat` report the memory use of
+         the guest. -->
     <memballoon model='virtio'>
       <stats period='5'/>
     </memballoon>

@@ -24,6 +24,7 @@ use File::Temp       qw{tempdir};
 use File::Path();
 use File::Slurper();
 use File::Slurper::Temp();
+use IPC::Run3();
 
 use FindBin::libs;
 
@@ -255,6 +256,36 @@ subtest 'a file read off a remote machine comes back whole' => sub {
         return $self->{content};
     }
 }
+
+subtest 'list_dir takes a path with a space in it' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Path::make_path("$dir/two words/inside");
+
+    my ( $machine, $mock ) = here();
+    is_deeply( [ $machine->list_dir("$dir/two words") ], ['inside'], 'on this machine' );
+    undef $mock;
+
+    # The command goes to a shell here rather than over ssh, which is what the
+    # far side does with it too.
+    my $remote = Test::MockModule->new('Trog::Machine');
+    $remote->redefine( capture_cmd => sub { IPC::Run3::run3( $_[1], \undef, \my $out, \undef ); return $out } );
+    is_deeply( [ remote()->list_dir("$dir/two words") ],         ['inside'], 'and on another' );
+    is_deeply( [ remote()->list_dir("$dir/none; echo leaked") ], [],         'where a semicolon is part of the name, not the end of a command' );
+};
+
+subtest 'a file copied here with sudo gets the mode it was asked for' => sub {
+    my ( $machine, $mock ) = here();
+    my @sudo;
+    $mock->redefine( run_sudo => sub { my ( $self, @argv ) = @_; push @sudo, \@argv; return 0 } );
+    my $copy = Test::MockModule->new('File::Copy');
+    $copy->redefine( copy => sub { return 0 } );
+
+    ok( $machine->put_file( '/bogus/setup.sh', '/bogus/root/setup.sh', sudo => 1, mode => '0755' ), 'the copy works' );
+    is_deeply( $sudo[-1], [qw{chmod 0755 /bogus/root/setup.sh}], 'and is given the mode asked for' );
+
+    $machine->put_file( '/bogus/devices.map', '/bogus/root/devices.map', sudo => 1 );
+    is_deeply( $sudo[-1], [qw{chmod 0644 /bogus/root/devices.map}], 'or 0644, whatever the umask of root' );
+};
 
 subtest 'what sudo says when it wants a password it cannot ask for' => sub {
     my $wants = sub { Trog::Machine::_wants_password(@_) };    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests

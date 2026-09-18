@@ -36,8 +36,8 @@ my $gripes = `sudo -u '[% admin_user %]' find '$store' -print 2>&1 >/dev/null`;
 isnt($gripes, '', 'the admin user can no longer walk the mail store');
 
 # The DKIM key, and the staged copy of it.  remote_files names the staged copy,
-# not the original.  Provisioner::Recipe::mail says why.  install_dkim_records
-# looks for the copy at exactly this path.
+# not the original.  Provisioner::Recipe::mail says why.  restores() takes the
+# key back from exactly this path.
 ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM signing key');
 ok(!-e '/mail/keys/keys', 'staged once, rather than into itself');
 SKIP: {
@@ -134,4 +134,18 @@ SKIP: {
 }
 [% END %]
 [% END %]
+# install_dkim_records publishes the key into a zone this guest serves itself,
+# once for each selector however many times the guest has been provisioned.
+SKIP: {
+    my $zones = '/var/spool/powerdns/zones.db';
+    skip 'this guest serves no zones with pdns', 2 unless -f $zones;
+    my $served = `sqlite3 $zones "SELECT count(*) FROM domains WHERE name='[% domain %]'" 2>&1`;
+    chomp $served;
+    skip 'this guest does not serve the zone for [% domain %]', 2 unless $served;
+    foreach my $selector (qw{default mail}) {
+        my $count = `sqlite3 $zones "SELECT count(*) FROM records WHERE name='$selector._domainkey.[% domain %]' AND type='TXT'" 2>&1`;
+        chomp $count;
+        is($count, 1, "one DKIM record for the $selector selector");
+    }
+}
 done_testing();

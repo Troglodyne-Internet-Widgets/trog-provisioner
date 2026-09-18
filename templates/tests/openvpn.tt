@@ -46,15 +46,17 @@ my $subject = `openssl x509 -noout -subject -in /etc/openvpn/easy-rsa/pki/ca.crt
 like($subject, qr/\Q[% domain %]\E/, 'the CA is named for the domain') or diag $subject;
 
 # The staged copy is what remote_files names, so a rebuilt guest keeps its CA.
-# It belongs to [% admin_user %] and nobody else can read it.
+# It keeps what travels apart from what the running VPN uses.  It belongs to
+# [% admin_user %] and nobody else can read it.  Provisioner::Recipe::openvpn
+# has the whole account.
 my $stage = '/etc/openvpn/pki-salvage';
-ok(-d $stage, 'the pki was staged where the fetch can reach it');
+ok(-d $stage, 'the pki was staged for the fetch');
 foreach my $file (qw{ca.crt private/ca.key issued/server.crt}) {
     ok(-s "$stage/$file", "the staged pki has $file");
 }
 
 my $uid = getpwnam('[% admin_user %]');
-is((stat($stage))[4], $uid, 'the staged pki belongs to [% admin_user %], who does the fetching');
+is((stat($stage))[4], $uid, 'the staged pki belongs to [% admin_user %]');
 is((stat("$stage/private/ca.key"))[4], $uid, 'and so does the CA key inside it');
 is((stat("$stage/private/ca.key"))[2] & 07777, 0600, 'which nobody else can read');
 is(slurp("$stage/ca.crt"), slurp('/etc/openvpn/easy-rsa/pki/ca.crt'), 'the staged CA is the one in use');

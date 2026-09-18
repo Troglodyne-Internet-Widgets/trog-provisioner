@@ -17,7 +17,7 @@ use YAML::XS();
 
 use File::Which();
 use Time::Piece();
-use List::Util qw{uniq};
+use List::Util qw{any uniq};
 
 =head1 NAME
 
@@ -157,12 +157,11 @@ straight through.
 sub new {
     my ( $class, %opts ) = @_;
 
-    # Drop options that are not set, so an unset --connect does not ask for a
-    # different hypervisor.
-    my %given = map { $_ => $opts{$_} } grep { $opts{$_} } keys %opts;
-    return $INSTANCE if $INSTANCE && !%given;
+    # An option that is not set is not a request for a different hypervisor,
+    # so an unset --connect gets the current one.
+    return $INSTANCE if $INSTANCE && !any { $opts{$_} } keys %opts;
 
-    return $class->candidate(%given)->activate();
+    return $class->candidate(%opts)->activate();
 }
 
 =head2 activate
@@ -285,37 +284,41 @@ sub options_from_block {
 =head2 from_config($config, %override)
 
 Build the hypervisor from a L<Config::Simple> object through C<new>, and return
-it.  A defined value in C<%override>, for example from the command line, wins
-over the file.  A false C<$config> is allowed, and means that every value takes
-its default.
+it.  A value in C<%override>, for example from the command line, wins over the
+file.  An empty override counts as not given, as it does in C<new>, so the file
+still answers for it.  A false C<$config> is allowed, and means that every value
+takes its default.
 
-It reads C<libvirt_uri> for C<uri>.  It reads every other constructor option of
-each backend under its own name.
+It reads every key that a backend names in C<config_keys>: C<libvirt_uri> for
+C<uri>, and the rest under their own names.
 
 =cut
-
-# Constructor option => the configuration key it reads, for every backend.  See
-# options_from_block for why every backend.
-my %CONFIG_KEY = (
-    uri => 'libvirt_uri',
-    map { $_ => $_ } qw{
-      pool_path pool_name domain_dir bridge_device virbr_device partition
-      cloud flavor image network floating_network availability_zone security_group keypair
-    },
-);
 
 sub from_config {
     my ( $class, $config, %override ) = @_;
 
-    my $param = sub {
-        my ($key) = @_;
-        return undef unless $config;
-        my $val = $config->param($key);
-        $val = $val->[0] if ref $val eq 'ARRAY';
-        return ( length $val ) ? $val : undef;
-    };
+    # The keys of every backend, because what a configuration contains decides
+    # which backend it describes.
+    my %key = map { $_->config_keys } $class->backends;
 
-    return $class->new( map { $_ => $override{$_} // $param->( $CONFIG_KEY{$_} ) } keys %CONFIG_KEY );
+    return $class->new( map { $_ => ( $override{$_} || $class->config_value( $config, $key{$_} ) ) } keys %key );
+}
+
+=head2 config_value($config, $key)
+
+Returns one value from a configuration, which is a L<Config::Simple> object or
+a plain hashref.  A key that is given more than once returns its first value.
+Returns undef when there is no configuration, no such key, or an empty value.
+
+=cut
+
+sub config_value {
+    my ( $class, $config, $key ) = @_;
+    return undef unless $config;
+
+    my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
+    $value = $value->[0] if ref $value eq 'ARRAY';
+    return ( length $value ) ? $value : undef;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a setting of "0" is still a setting
 }
 
 =head2 forget()
@@ -761,8 +764,8 @@ A guest rsyncs these out of this machine, and the recipe that wants one fails
 when it is not there:
 
 $detail
-They used to be read off the hypervisor, so on an installation that predates
-that change they are still over there.  Bring them here:
+An older installation keeps them on the hypervisor.  If yours does, bring them
+here:
 
     rsync -a @{[ $self->ssh_host // 'the-hypervisor' ]}:<path>/ <path>/
 FIX
@@ -881,7 +884,7 @@ sub note_apt_mirror {
 
         foreach my $name ( sort keys %$recipes ) {
             my $opts = $recipes->{$name};
-            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && length( $opts->{mirror} // q{} );
+            $pointed = 1 if $distro{$name} && ref $opts eq 'HASH' && $opts->{mirror};
             push( @mirrors, $domain ) if $name eq 'aptmirror' && defined $domain;
         }
     }

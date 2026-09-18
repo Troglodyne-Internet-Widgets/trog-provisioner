@@ -20,7 +20,9 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
 
 use Test::More;
-use Capture::Tiny qw{capture_stdout};
+use Capture::Tiny    qw{capture_stdout};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
 use File::Temp();
 use File::Slurper::Temp();
 
@@ -87,5 +89,68 @@ subtest 'a dry run says would, and a real one does not' => sub {
     like( $said, qr/would[ ]be[ ]freed/, 'said in the conditional' );
     like( $said, qr/Nothing[ ]written/,  'and says so plainly' );
 };
+
+# A fleet of fake hypervisors, each answering guest_names with the names it is
+# given, and a release that records rather than writes.
+sub with_fleet {
+    my (%guests) = @_;
+
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine(
+        load => sub {
+            return bless { guests => \%guests }, 'Test::FakeFleet';
+        }
+    );
+    return $fleet;
+}
+
+sub released_by_prune {
+    my (%before) = @_;
+
+    my @released;
+    my $pool = Test::MockModule->new('Provisioner::IPPool');
+    $pool->redefine( release => sub { push @released, $_[0]; return 1 } );
+
+    my $err = exception { Provisioner::Bin::reseed_ips::prune_absent( \%before ) };
+    return ( $err, [ sort @released ] );
+}
+
+subtest 'prune releases only what no hypervisor is running' => sub {
+    my $fleet = with_fleet( hv1 => ['running.test'], hv2 => ['cloudy.test'] );
+
+    my ( $err, $released ) = released_by_prune(
+        '10.0.0.1' => 'running.test',
+        '10.0.0.2' => 'cloudy.test',
+        '10.0.0.3' => 'gone.test',
+        '10.0.0.4' => 'gateway:10.0.0.4',
+    );
+    is( $err, undef, 'it runs' );
+    is_deeply( $released, ['gone.test'], 'a guest on either hypervisor keeps its address, a gateway is never released, and the rest go' );
+};
+
+subtest 'prune refuses when there is no fleet to ask' => sub {
+    my $fleet = with_fleet();
+
+    my ( $err, $released ) = released_by_prune( '10.0.0.1' => 'running.test' );
+    like( $err, qr/hypervisors[.]conf/, 'it says what it needs' );
+    is_deeply( $released, [], 'and releases nothing' );
+};
+
+{
+
+    package Test::FakeFleet;
+
+    sub configured ($self) { return scalar keys %{ $self->{guests} } }
+    sub names      ($self) { my @names = sort keys %{ $self->{guests} }; return @names }
+
+    sub hypervisor ( $self, $name ) {
+        return bless { names => $self->{guests}{$name} }, 'Test::FakeHV';
+    }
+
+    package Test::FakeHV;
+
+    # guest_names, and not the libvirt handle: a cloud has no vmm.
+    sub guest_names ($self) { return @{ $self->{names} } }
+}
 
 done_testing();

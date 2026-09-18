@@ -24,8 +24,10 @@ shift
 # the domain directory is 0750 to the admin group, and postgres is not in it.
 psql_super() { sudo -u postgres psql --quiet --no-psqlrc "$@"; }
 
+# The name comes from a directory in the salvage, so a quote in it is doubled
+# before it goes into the string literal.
 database_exists() {
-    [ -n "$(psql_super -tAc "SELECT 1 FROM pg_database WHERE datname='$1'")" ]
+    [ -n "$(psql_super -tAc "SELECT 1 FROM pg_database WHERE datname='${1//\'/\'\'}'")" ]
 }
 
 user_databases() {

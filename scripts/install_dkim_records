@@ -3,13 +3,17 @@
 # Make a DKIM record for a domain and install it into the pdns server for that
 # domain.
 
-# Do nothing if the pdns database for the domain is not there.
-[[ ! -f /var/spool/powerdns/$1/zones.db ]] && exit 0;
+# One sqlite database holds every zone that the pdns recipe serves on this guest.
+ZONES_DB=/var/spool/powerdns/zones.db
+KEY=/etc/opendkim/keys/$1/default.private
+
+# Do nothing if pdns is not installed.
+[[ ! -f $ZONES_DB ]] && exit 0;
 
 # Do nothing if the DKIM key is not there.
-[[ ! -f /mail/keys/$1/default.private ]] && exit 0;
+[[ ! -f $KEY ]] && exit 0;
 
-DKIM_KEY=$(openssl rsa -in /etc/opendkim/keys/$1/default.private -pubout 2>/dev/null | sed "1,1d;$ d;" | sed -z "s/\n//g")
+DKIM_KEY=$(openssl rsa -in "$KEY" -pubout 2>/dev/null | sed "1,1d;$ d;" | sed -z "s/\n//g")
 
 if [ -z "$DKIM_KEY" ]
 then
@@ -22,10 +26,23 @@ DKIM_RECORD="v=DKIM1; h=sha256; k=rsa; t=y; p=$DKIM_KEY"
 echo "Installing DKIM Key:"
 echo "$DKIM_RECORD"
 
-SQL="insert or replace into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'default._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
-echo "$SQL" | sqlite3 /var/spool/powerdns/$1/zones.db
-SQL="insert or replace into records (domain_id, name, type,content,ttl,prio,disabled) select id , 'mail._domainkey.$1', 'TXT', '$DKIM_RECORD', 300, 0, 0 from domains where name='$1'"
-echo "$SQL" | sqlite3 /var/spool/powerdns/$1/zones.db
+# The values go into SQL string literals, so a single quote in one is doubled.
+DOMAIN_SQL=${1//\'/\'\'}
+RECORD_SQL=${DKIM_RECORD//\'/\'\'}
+
+# Delete, then insert.  The records table has no unique key on name and type,
+# so an insert never replaces a record that is already there.
+for SELECTOR in default mail
+do
+	NAME_SQL="$SELECTOR._domainkey.$DOMAIN_SQL"
+	sqlite3 "$ZONES_DB" <<SQL || exit 1
+BEGIN;
+DELETE FROM records WHERE name='$NAME_SQL' AND type='TXT';
+INSERT INTO records (domain_id, name, type, content, ttl, prio, disabled)
+    SELECT id, '$NAME_SQL', 'TXT', '$RECORD_SQL', 300, 0, 0 FROM domains WHERE name='$DOMAIN_SQL';
+COMMIT;
+SQL
+done
 
 systemctl restart pdns
 

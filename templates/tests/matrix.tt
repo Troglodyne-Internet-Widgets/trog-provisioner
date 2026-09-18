@@ -29,8 +29,10 @@ ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
 my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
 unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
 [% FOREACH chan IN channels %]
-like($index, qr/#\Q[% chan %]\E\@/, 'channel [% chan %] is listed');
+like($index, qr/#\Q[% chan %]:matrix.[% domain %]\E/, 'channel [% chan %] is listed as a room alias on this homeserver');
 [% END %]
+# synapse listens only behind nginxproxy, at its public_baseurl.
+like($index, qr{Home Server: https://\Qmatrix.[% domain %]\E\s}, 'the page names the homeserver at its public URL') or diag $index;
 
 # Some of the packages that the recipe asks for.  A package name that does not
 # exist makes nothing fail.  It is only never installed.
@@ -49,6 +51,17 @@ ok(-s '/usr/share/keyrings/matrix-org-archive-keyring.gpg', 'and its signing key
 ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is installed');
 my $syntax = `bash -n [% script_dir %]/matrix_register_admin.sh 2>&1`;
 is($syntax, '', 'and is a valid shell script') or diag $syntax;
+
+# The postrun ran the script before these tests, and the script fails if it
+# cannot register the admin.  So the account exists, with the admin flag set.
+SKIP: {
+    my $db = '[% install_dir %]/matrix.[% domain %]/homeserver.db';
+    skip 'synapse has made no database', 1 unless -e $db;
+    skip 'no sqlite3 to read it with', 1 unless system('command -v sqlite3 >/dev/null 2>&1') == 0;
+    my $admin = `sqlite3 $db "SELECT admin FROM users WHERE name = '\@[% admin_user %]:matrix.[% domain %]'" 2>&1`;
+    chomp $admin;
+    is($admin, 1, 'the admin user is registered as an admin') or diag $admin;
+}
 
 # The salvage of the last guest, put back where synapse reads it.  homeserver.db
 # holds every room, message and account.

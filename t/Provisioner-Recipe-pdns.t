@@ -26,6 +26,7 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Provisioner::Cookbook();
+use Provisioner::Recipe::pdns();
 
 # These patterns quotemeta a literal on purpose: a fixture domain full of dots
 # that would otherwise need escaping one at a time.
@@ -98,6 +99,28 @@ subtest 'the apex is the origin, not a name of its own' => sub {
     like( $zone, qr/^\$ORIGIN\s+\Q$DOMAIN\E\./m,               'the zone declares its origin' );
     like( $zone, qr/^\@\s+IN\s+A\s+192\.168\.1\.50/m,          'and the address is on the apex' );
     like( $zone, qr/^\@\s+300\s+IN\s+NS\s+\Qns1.$DOMAIN\E\./m, 'with an absolute nameserver' );
+};
+
+subtest 'the submission SRV record names the port postfix listens on' => sub {
+    my $zone = zone();
+
+    # RFC 6186 spells it _submission._tcp, and mail.postfix.master.tt runs
+    # submission on 587.
+    my ($record) = $zone =~ m/^(_submission\N*)$/m;
+    is( ( split ' ', $record // q{} )[0], '_submission._tcp', 'on _submission._tcp' ) or diag $zone;
+    like( $record, qr/SRV\s+0\s+0\s+587\s+\Qmail.$DOMAIN\E\./, 'at port 587 on the mail host' );
+};
+
+subtest 'synczones and the API config name the socket the recipe binds' => sub {
+    local $Provisioner::Recipe::pdns::API_SOCKET = '/bogus/api.sock';
+    my $recipe = Provisioner::Cookbook->load( 'pdns', distro => 'ubuntu' )->new(
+        template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
+        output_dir    => tempdir( CLEANUP => 1 ),
+        distro        => 'ubuntu',
+    );
+
+    like( $recipe->render_file( 'files/pdns.synczones.tt', %VARS, api_key => 'a-key' ), qr{^server=local:/bogus/api[.]sock$}m, 'synczones reads it from $API_SOCKET' );
+    like( $recipe->render_file( 'files/pdns.api.tt',       %VARS, api_key => 'a-key' ), qr{/bogus/api[.]sock},                 'and so does the API config' );
 };
 
 Test::NoWarnings::had_no_warnings();

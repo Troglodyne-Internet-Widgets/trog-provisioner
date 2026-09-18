@@ -232,7 +232,7 @@ sub args {
             matrix_homeserver       => { type => 'string' },
             matrix_user_id          => { type => 'string' },
             matrix_room_id          => { type => 'string' },
-            matrix_e2ee             => { type => 'boolean' },
+            matrix_e2ee             => { type => 'boolean', default => 1 },
             matrix_access_token     => { type => 'string' },
             matrix_device_id        => { type => 'string' },
             matrix_password         => { type => 'string' },
@@ -253,9 +253,10 @@ sub args {
                 default              => {},
                 additionalProperties => {
                     type       => 'object',
-                    required   => [qw{github_url}],
+                    required   => [qw{path}],
                     properties => {
-                        cli_provider => { type => 'string', enum => [qw{claude codex copilot local}], default => 'claude' },
+                        path         => { type => 'string', pattern => '^/' },
+                        cli_provider => { type => 'string', enum    => [qw{claude codex copilot local}], default => 'claude' },
                         github_url   => { type => 'string' },
                         base_branch  => { type => 'string', default => 'master' },
                     }
@@ -291,22 +292,19 @@ sub enrich {
 
     $opts{github_nickname} //= $opts{github_user};
 
-    if ( $opts{cli_provider} eq 'telegram' ) {
+    if ( $opts{messaging_provider} eq 'telegram' ) {
         die "Must set telegram_token in [koan] section"   unless $opts{telegram_token};
         die "Must set telegram_chat_id in [koan] section" unless defined $opts{telegram_chat_id};
     }
-    elsif ( $opts{cli_provider} eq 'slack' ) {
+    elsif ( $opts{messaging_provider} eq 'slack' ) {
         die "Must set slack_bot_token in [koan] section"  unless $opts{slack_bot_token};
         die "Must set slack_app_token in [koan] section"  unless $opts{slack_app_token};
         die "Must set slack_channel_id in [koan] section" unless $opts{slack_channel_id};
     }
-    elsif ( $opts{cli_provider} eq 'matrix' ) {
+    elsif ( $opts{messaging_provider} eq 'matrix' ) {
         die "Must set matrix_homeserver in [koan] section" unless $opts{matrix_homeserver};
         die "Must set matrix_user_id in [koan] section"    unless $opts{matrix_user_id};
         die "Must set matrix_room_id in [koan] section"    unless $opts{matrix_room_id};
-
-        $opts{matrix_e2ee} //= 1;
-        $opts{matrix_e2ee} = !!$opts{matrix_e2ee};
 
         # Pre-mint or bootstrap, see DESCRIPTION.
         my $have_token = !!$opts{matrix_access_token};

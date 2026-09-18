@@ -85,13 +85,18 @@ and F<tests/>.
 Each vendor F<libdir> comes after the checkout, in the same pattern.  A vendor
 recipe adds to what ships here and does not override it.
 
+The distribution's directory is the one its recipe names in C<template_subdir>.
+That recipe looks up its own generated files there as well, so the two cannot
+name different directories.  C<$distro> has to name a distro recipe.
+
 =cut
 
 sub template_dirs {
     my ( $class, $distro, @libdirs ) = @_;
 
-    my @bases = ( $class->template_dir, map { "$_/templates" } @libdirs );
-    return [ map { ( ( $distro ? "$_/$distro" : () ), $_ ) } @bases ];
+    my $subdir = $distro ? $class->load($distro)->template_subdir : undef;
+    my @bases  = ( $class->template_dir, map { "$_/templates" } @libdirs );
+    return [ map { ( ( $subdir ? "$_/$subdir" : () ), $_ ) } @bases ];
 }
 
 =head2 names
@@ -520,11 +525,13 @@ sub _scaffold_value {
 
     if ( $type eq 'object' ) {
 
-        # An object with only additionalProperties has nothing to scaffold, so
-        # it is left out.
+        # An object with only additionalProperties has nothing to scaffold.  It
+        # is left out, unless it must have a property, and then a person must
+        # choose one.
         my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
-        return ( undef, () ) unless %$sub;
-        return ( $sub,  @todo );
+        return ( $sub,                @todo ) if %$sub;
+        return ( $class->PLACEHOLDER, $path ) if ( $prop->{minProperties} // 0 ) > 0;
+        return ( undef,               () );
     }
 
     if ( $type eq 'array' ) {
@@ -1119,8 +1126,8 @@ Returns the directory of the domain under the data source.  Returns undef if
 C<$domain> is empty or if nothing names the data source.
 
 C<bin/new_config> makes the data directories of the recipes in it, and writes
-into it what it fetched from the last guest.  Then it ships the directory to
-the hypervisor, and the guest pulls its payload from it.
+into it what it fetched from the last guest.  The guest fetches its payload
+from this machine, not from the hypervisor.
 C<bin/destroy --purge-data> removes it.
 
 =cut

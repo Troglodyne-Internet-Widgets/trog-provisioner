@@ -210,6 +210,7 @@ sub args {
                 properties => {
                     host => { type => "string" },
                     port => { type => "integer", minimum => 0 },
+                    to   => { type => "array",   items   => { type => "string" }, default => [] },
                 },
             },
 

@@ -306,6 +306,7 @@ my %required_config = (
     letsencrypt => {},
     pdns        => { api_key        => 'test-api-key' },
     grafana     => { admin_password => 's3cr3t' },
+    grubconf    => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
 
     registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
     matrix    => {
@@ -439,13 +440,37 @@ rejects_missing(
     'matrix rejects missing admin_password'
 );
 
-rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
-rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },           'ldap_uri', 'sssd rejects missing ldap_uri' );
-rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',  'sssd rejects missing base_dn' );
+rejects_missing( 'ldap',  {},                                          'admin_password', 'ldap rejects missing admin_password' );
+rejects_missing( 'tpsgi', {},                                          'routers',        'tpsgi rejects missing routers' );
+rejects_missing( 'sssd',  { base_dn => 'dc=test,dc=test' },            'ldap_uri',       'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd',  { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',        'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints
 # ----------------------------------------------------------------
+subtest 'grubconf refuses to render an empty fragment' => sub {
+    my $r = 'Provisioner::Recipe::grubconf'->new(%PROV);
+    like( exception { $r->render(%G) },                    qr{/grub_vars:[ ]Missing},      'grub_vars is required' );
+    like( exception { $r->render( %G, grub_vars => {} ) }, qr{/grub_vars:[ ]Not[ ]enough}, 'and has to set something' );
+};
+
+subtest 'grubconf writes its variables in the same order every time' => sub {
+    my $r    = 'Provisioner::Recipe::grubconf'->new(%PROV);
+    my %vars = map { $_ => 'x' } qw{GRUB_A GRUB_B GRUB_C GRUB_D GRUB_E GRUB_F};
+    my $conf = $r->render_file( 'files/grubconf.tt', %G, grub_vars => \%vars );
+    my @set  = $conf =~ m/^(GRUB_[[:upper:]]+)=/mg;
+    is_deeply( \@set, [ sort keys %vars ], 'sorted by name' ) or diag $conf;
+};
+
+subtest 'ldap seeds the mail address a user is given' => sub {
+    my $r    = 'Provisioner::Recipe::ldap'->new(%PROV);
+    my %cfg  = ( %G, admin_password => 's3cr3t', base_dn => 'dc=test,dc=test' );
+    my $seed = $r->render_file( 'files/ldap.seed.ldif.tt', %cfg, users => [ { name => 'someone', mail => 'someone@test.test' } ] );
+    like( $seed, qr/^mail:[ ]someone\@test[.]test$/m, 'as the mail attribute' ) or diag $seed;
+
+    like( exception { $r->validate( %cfg, users => [ { name => 'someone', mail => ['someone@test.test'] } ] ) }, qr{/users/0/mail}, 'and it is one address, not a list' );
+};
+
 subtest 'ntp rejects empty server list' => sub {
     my $r   = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => [] ) };
@@ -1083,6 +1108,23 @@ subtest 'no recipe hands out a default that changes between runs' => sub {
         };
 
         is_deeply( $defaults->( \%second ), $defaults->( \%first ), "$recipe: the same configuration twice running" );
+    }
+};
+
+# The validator coerces a string default to a number, so a quoted one works.
+# It still shows in bin/recipes as a string, and it reads as a mistake.
+subtest 'a numeric setting has a numeric default' => sub {
+    no warnings 'experimental::builtin';
+
+    foreach my $recipe ( sort @available ) {
+        my %spec  = eval { Provisioner::Cookbook->spec($recipe) } or next;
+        my $props = $spec{properties} // {};
+        foreach my $name ( sort keys %$props ) {
+            my $type = $props->{$name}{type} // q{};
+            next unless $type eq 'integer' || $type eq 'number';
+            next unless defined $props->{$name}{default};
+            ok( builtin::created_as_number( $props->{$name}{default} ), "$recipe: $name defaults to a number, not a string" );
+        }
     }
 };
 
@@ -1960,7 +2002,7 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     # The delete is not the same thing and has to stay: it takes off limits an
     # older provision left on a profile, which ufw keeps alongside an allow
     # rather than displacing with it.
-    like( $code, qr/\Qufw --force delete limit in\E/, 'while an older limit is still cleaned off' );
+    like( $code, qr/\bufw\(\s*qw\{--force\s+delete\s+limit\s+in\}/, 'while an older limit is still cleaned off' );
 
     # Rate limiting lives in the other script, and the exemptions with it.
     my $limits = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-ratelimits");

@@ -18,6 +18,7 @@ use Test::MockModule qw{strict};
 
 use File::Temp();
 use File::Slurper();
+use File::Slurper::Temp();
 use FindBin;
 use FindBin::libs;
 
@@ -266,6 +267,43 @@ subtest 'a screenshot is streamed straight here, and named for what it is' => su
     # this replaced wrote to a file ending .ppm regardless.
     is( Trog::Bin::DebugBoot::screen_file( 'vm.test', 'image/png' ),               '/tmp/vm.test-screen.png', 'a PNG is named .png' );
     is( Trog::Bin::DebugBoot::screen_file( 'vm.test', 'image/x-portable-pixmap' ), '/tmp/vm.test-screen.ppm', 'and a PPM .ppm' );
+};
+
+# bin/preflight and this both tell an operator what to install when the tools
+# are missing.  Two package names for one fix is one too many.
+subtest 'a missing disk tool names the package preflight names' => sub {
+    my $mock = with_vmm();
+    $mock->redefine( capture_cmd => sub { $? = 127 << 8; return q{} } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads $? after this returns, as it would after a real command
+    $mock->redefine( run_cmd     => sub { return 1 } );
+
+    my $hv  = bless( {}, 'Trog::HV::Libvirt' );
+    my $err = exception { Trog::Bin::DebugBoot::guest_tool( $hv, qw{virt-cat -d vm.test /etc/hostname} ) };
+
+    my ($package) = $hv->note_libguestfs->{fix} =~ m/apt[ ]install[ ](\S+)/;
+    ok( $package, 'preflight names a package' );
+    like( $err, qr/apt[ ]install[ ]\Q$package\E\n/, 'and the same one is named here' );
+};
+
+# The fleet decides which hypervisor has the guest, as it does for destroy,
+# snapshot and restore.  What it finds has to be the current hypervisor too,
+# because code under Trog::HV asks Trog::HV->new() for it.
+subtest 'the hypervisor that has the guest is found and made current' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/hypervisors.conf", "[hv1]\nlibvirt_uri=qemu+ssh://root\@hv1.test.test/system\n\n[hv2]\nlibvirt_uri=qemu+ssh://root\@hv2.test.test/system\n" );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' ? 1 : 0 } );
+
+    Trog::HV->forget();
+    my $hv = Trog::Bin::DebugBoot::hypervisor( 'vm.test', undef, "$dir/hypervisors.conf" );
+    is( $hv->name,       'hv2', 'the one that has it' );
+    is( Trog::HV->new(), $hv,   'and it is the current hypervisor' );
+
+    $mock->redefine( domain_exists => sub { 0 } );
+    my $err = exception { Trog::Bin::DebugBoot::hypervisor( 'vm.test', undef, "$dir/hypervisors.conf" ) };
+    like( $err, qr/vm[.]test/,        'a guest nothing has is named' );
+    like( $err, qr/Pass[ ]--connect/, 'and the way round it is said' );
+    Trog::HV->forget();
 };
 
 done_testing();

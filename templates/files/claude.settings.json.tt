@@ -3,7 +3,7 @@
 [% IF modules.grep('perllsp').size() %]
     "perlnavigator@claude-code-perlnavigator": true,
 [% END -%]
-[% IF modules.grep('perl').size() %]
+[% IF modules.grep('^perl$').size() %]
     "perl-development@perigrin-marketplace": true,
 [% END %]
     "perl-slop@troglodyne-marketplace": true
@@ -17,7 +17,7 @@
       }
     },
 [% END -%]
-[% IF modules.grep('perl').size() %]
+[% IF modules.grep('^perl$').size() %]
     "perigrin-marketplace": {
       "source": {
         "source": "github",

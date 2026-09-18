@@ -345,7 +345,7 @@ sub select_for {
         return $existing->activate();
     }
 
-    my $pinned = _param( $config, 'hypervisor' );
+    my $pinned = Trog::HV->config_value( $config, 'hypervisor' );
     if ( defined $pinned ) {
         my $hv      = $self->hypervisor($pinned);
         my @reasons = $hv->shortfalls( _needs($config) );
@@ -367,19 +367,10 @@ pairs.  C<$config> is as for C<select_for>.
 sub _needs {
     my ($config) = @_;
     return (
-        memory_mb  => _param( $config, 'memory' ),
-        cpus       => _param( $config, 'cpus' ),
-        disk_bytes => _param( $config, 'size' ),
+        memory_mb  => Trog::HV->config_value( $config, 'memory' ),
+        cpus       => Trog::HV->config_value( $config, 'cpus' ),
+        disk_bytes => Trog::HV->config_value( $config, 'size' ),
     );
-}
-
-sub _param {
-    my ( $config, $key ) = @_;
-    return undef unless defined $config;
-
-    my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
-    $value = $value->[0] if ref $value eq 'ARRAY';
-    return ( length $value ) ? $value : undef;
 }
 
 sub _oneline {

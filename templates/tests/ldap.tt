@@ -91,21 +91,22 @@ like($services, qr/ldaps:/, 'slapd is listening for ldaps') or diag $services;
 # The export that a rebuild loads.  templates/files/ldap.export.sh.tt says why
 # it is an export and not a copy.
 my $export_dir = '/var/backups/ldap';
-ok(-d $export_dir, 'the directory is exported to somewhere the fetch can reach');
+ok(-d $export_dir, 'the directory is exported to the path remote_files names');
 
 my @dstat = stat($export_dir);
 is(scalar getpwuid($dstat[4] // -1), '[% admin_user %]',
-    'the export belongs to the admin user, who is the one who fetches it');
+    'the export belongs to the admin user');
 is(($dstat[2] // 0) & 07777, 0700, 'and nobody else on the guest can read it')
     or diag sprintf('mode %04o', ($dstat[2] // 0) & 07777);
 
 foreach my $ldif (qw{data.ldif config.ldif}) {
     ok(-s "$export_dir/$ldif", "$ldif was exported and is not an empty file");
 
-    # The export belongs to the admin user, as restores() in
-    # Provisioner::Recipe::ldap also sets it.
-    my $rc = system("sudo -u [% admin_user %] test -r '$export_dir/$ldif'");
-    is($rc, 0, "and the admin user can read $ldif");
+    # The export holds every password hash in the directory.
+    my @fstat = stat("$export_dir/$ldif");
+    is(scalar getpwuid($fstat[4] // -1), '[% admin_user %]', "and $ldif belongs to the admin user");
+    is(($fstat[2] // 0) & 07777, 0600, 'and only that user can read it')
+        or diag sprintf('mode %04o', ($fstat[2] // 0) & 07777);
 }
 
 # LDIF wraps at 78 columns and continues with a leading space, so a DN longer

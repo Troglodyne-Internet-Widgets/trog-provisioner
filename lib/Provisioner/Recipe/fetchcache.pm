@@ -280,7 +280,7 @@ sub args {
                 # a host that the class alone does not name.
                 properties           => { map { $_ => { type => 'boolean', default => 1 } } List::Util::uniq( sort Provisioner::Cookbook->fetch_hosts, Provisioner::Cookbook->configured_fetch_hosts ) },
                 additionalProperties => { type => 'boolean' },
-                description          => 'Hosts the cache will fetch from, each true or false.  The defaults are every host a recipe names in fetch_hosts; naming another adds it, and naming a default false removes it.',
+                description          => 'Hosts the cache fetches from, each true or false.  The defaults are every host that a recipe names in fetch_hosts.  Name another host to add it.  Set a default host to false to remove it.',
             },
             store => {
                 type        => 'string',
@@ -291,7 +291,7 @@ sub args {
                 type        => 'integer',
                 default     => 20,
                 minimum     => 1,
-                description => 'How much of the disk copies may take, in GB.  nginx enforces it lazily, so the store can briefly exceed it.',
+                description => 'The most disk space that copies can use, in GB.  nginx enforces this limit lazily, so the store can go over it for a short time.',
             },
             min_free_gb => {
                 type        => 'integer',
@@ -303,7 +303,7 @@ sub args {
                 type        => 'string',
                 default     => '100y',
                 pattern     => $duration,
-                description => 'How long a copy nobody asks for is kept.  A hundred years by default, so that only running out of room removes anything: the copy nobody has asked for in a year is the pinned version upstream may no longer have.',
+                description => 'How long a copy that nobody asks for is kept.  The default is a hundred years, so that only a full disk removes a copy.  A copy that nobody asked for in a year can be a pinned version that upstream no longer has.',
             },
             fresh_apt_index => {
                 type        => 'string',
@@ -315,7 +315,7 @@ sub args {
                 type        => 'string',
                 default     => '10m',
                 pattern     => $duration,
-                description => 'How long an index -- which version is current -- is used before upstream is asked again.',
+                description => 'How long an index is used before upstream is asked again.  An index is a file that says which version is current.',
             },
             fresh_immutable => {
                 type        => 'string',

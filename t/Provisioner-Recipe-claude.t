@@ -58,6 +58,7 @@ my %CASES = (
     'a guest with perl and perllsp' => [qw{perl perllsp claude}],
     'a guest with perl alone'       => [qw{perl claude}],
     'a guest with neither'          => [qw{claude}],
+    'a guest with perllsp alone'    => [qw{perllsp claude}],
 );
 
 foreach my $what ( sort keys %CASES ) {
@@ -88,6 +89,16 @@ subtest 'the troglodyne plugin is enabled whatever else the guest runs' => sub {
     ok( $conf,                                                       'the settings render as valid JSON' ) or return;
     ok( $conf->{enabledPlugins}{'perl-slop@troglodyne-marketplace'}, 'perl-slop is enabled under the name it is published as' )
       or diag 'enabled: ' . join( ', ', sort keys %{ $conf->{enabledPlugins} // {} } );
+};
+
+# Gated on the perl recipe by its name, and perllsp is a different name.
+subtest 'the perl plugin is enabled only where the perl recipe runs' => sub {
+    my ( undef, $with )    = settings_for(qw{perl claude});
+    my ( undef, $without ) = settings_for(qw{perllsp claude});
+
+    ok( $with->{enabledPlugins}{'perl-development@perigrin-marketplace'},     'a guest with perl gets it' );
+    ok( !$without->{enabledPlugins}{'perl-development@perigrin-marketplace'}, 'a guest with perllsp and no perl does not' );
+    ok( !$without->{extraKnownMarketplaces}{'perigrin-marketplace'},          'nor its marketplace' );
 };
 
 Test::NoWarnings::had_no_warnings();

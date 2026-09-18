@@ -173,6 +173,15 @@ subtest 'the guest has what this recipe installs into the perl needs to build' =
     ok( $deps{perlbrew},     'and perlbrew, which builds the perl and brings a compiler with it' );
 };
 
+subtest 'the tidy and critic configurations' => sub {
+    my @lines = split m/\n/, rendered();
+
+    is_deeply( [ grep { m{\binstall\b.*\s/etc/perl(?:tidy|critic)rc$} && !m/-m[ ]0644/ } @lines ], [], 'are installed 0644, since nothing runs them' );
+
+    my ($tidy) = grep { m{^ln[ ].*/\.perltidyrc} } @lines;
+    like( $tidy, qr{^ln[ ]-s[ ]/etc/perltidyrc[ ]}, 'and the .perltidyrc of the domain links to the tidy one' );
+};
+
 subtest 'a dependent told no install_dir dies, rather than installing from somewhere else' => sub {
     my %required = recipe('tcms')->required_recipes();
     like( exception { $required{perl}->( domain => $DOMAIN ) }, qr/defined,[ ]positive-length/, 'tcms' );

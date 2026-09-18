@@ -101,8 +101,8 @@ secret from standard input, so nothing is left there to answer a prompt.
 An empty answer is a valid answer.
 
 Dies if the input ends before an answer, and does not return an empty password.
-Dies if C<terminal> is set and it cannot open the terminal.  Dies after it asks
-if C<$name> is not a known name.
+Dies if C<terminal> is set and it cannot open the terminal.  Dies before it
+asks if C<$name> is not a known name.
 
 =cut
 
@@ -111,6 +111,9 @@ sub prompt {
     $message //= 'Enter password:';
     my $what = $name // 'a password';
 
+    # Before asking, because remember would refuse the name after somebody had
+    # already typed the answer.
+    _known( $name, q{} )      if defined $name;
     return $class->get($name) if defined $name && $class->have($name);
 
     my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
@@ -150,11 +153,17 @@ Returns 1.  Dies if C<$name> is not a known name.
 sub remember {
     my ( $class, $name, $value ) = @_;
 
-    die "Unknown credential '$name'.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
-      unless $KNOWN{$name};
+    _known( $name, q{} );
 
     $CREDENTIAL{$name} = $value;
     return 1;
+}
+
+# Die unless $name is one a caller may ask for.  $where says where it came from.
+sub _known {
+    my ( $name, $where ) = @_;
+    return 1 if $KNOWN{$name};
+    die "Unknown credential '$name'$where.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n";
 }
 
 =head2 get($name)
@@ -217,8 +226,7 @@ sub load {
         die "Could not read the credentials given on standard input.\n" . "Expected 'name: value', got: $line\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
           unless defined $name;
 
-        die "Unknown credential '$name' given on standard input.\n" . 'Known names: ' . join( ', ', sort keys %KNOWN ) . "\n"
-          unless $KNOWN{$name};
+        _known( $name, ' given on standard input' );
 
         $CREDENTIAL{$name} = $value;
     }

@@ -15,4 +15,8 @@ ok(-d '[% install_dir %]/[% domain %]', 'document root directory exists');
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
 
+# nginx -t passes a conflicting server name with only a warning, and then
+# ignores the name in the second block that claims it.
+unlike($check, qr/conflicting server name/, 'and no name is claimed twice') or diag $check;
+
 done_testing();

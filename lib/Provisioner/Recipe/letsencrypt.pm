@@ -314,6 +314,11 @@ sub enrich {
     # exports of one credential cannot drift apart.
     $params{lexicon} = { Provisioner::DNSRecipe->credentials_for(%params) };
 
+    # The socket lexicon talks to, where the provider is reached through one,
+    # which get_cert waits for before it asks for a challenge.
+    my %extra = map { $_->{key} => $_->{value} } @{ $params{lexicon}{extra} // [] };
+    $params{lexicon_socket} = $extra{PDNS_SERVER} // q{};
+
     return %params;
 }
 

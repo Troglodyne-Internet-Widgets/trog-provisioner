@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use Test::More;
 
-my $frag = '/etc/default/grub.d/00-grub.conf';
+my $frag = '/etc/default/grub.d/99-grubconf.cfg';
 ok(-f $frag, 'grub config fragment exists');
 
 my $text = do { local (@ARGV, $/) = $frag; <> } // '';

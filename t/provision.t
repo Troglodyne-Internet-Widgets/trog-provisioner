@@ -979,4 +979,29 @@ sub _quietly {
     return wantarray ? @result : $result[0];
 }
 
+# The generator places the guest, so it has to place it in the fleet that
+# --hvconf names, which is the one choose_hypervisor reads afterwards.
+subtest 'the generator is handed the fleet that --hvconf names' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "_base:\n" );
+
+    require "$FindBin::Bin/../bin/new_config";    ## no critic (Modules::RequireBarewordIncludes)
+    my @flags;
+    my $generator = Test::MockModule->new( 'Trog::Provisioner::Config::Generator', no_auto => 1 );
+    $generator->redefine( main         => sub { @flags = @_; return 0 } );
+    $generator->redefine( salvage_gaps => sub { return () } );
+
+    quietly(
+        sub {
+            Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml", hvconf => '/bogus/fleet.conf' } );
+        }
+    );
+    my %given = @flags[ 0 .. $#flags - 1 ];
+    is( $given{'--hvconf'}, '/bogus/fleet.conf', 'passed on to the generator' );
+
+    quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml" } ) } );
+    %given = @flags[ 0 .. $#flags - 1 ];
+    ok( !exists $given{'--hvconf'}, 'and not passed when there is none, so the generator reads the default' );
+};
+
 done_testing;

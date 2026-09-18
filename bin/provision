@@ -648,6 +648,7 @@ sub generate_config {
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
+    push( @flags, '--hvconf', $opts->{hvconf} ) if defined $opts->{hvconf};
 
     # For the generator, this only keeps the key of a guest that is up.  See
     # DRY RUNS in bin/new_config.

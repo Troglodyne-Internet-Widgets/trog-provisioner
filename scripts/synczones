@@ -104,7 +104,11 @@ sub main {
 
             # A driver that needs a server address takes it with the option
             # that %d2o names.
-            push( @preamble, "--$d2o{$driver}=" . qq{'$dconf{"$driver.server"}'} ) if $dconf{"$driver.server"};
+            if ( $dconf{"$driver.server"} ) {
+                my $option = $d2o{$driver}
+                  or die "$cfile gives $driver a server, and synczones does not know which lexicon option takes it for that driver\n";
+                push( @preamble, "--$option=" . qq{'$dconf{"$driver.server"}'} );
+            }
 
             my $lexicon = join( ' ', @preamble );
             foreach my $type (@record_types) {
@@ -129,7 +133,7 @@ sub main {
                         push( @cmd_suffix, "--ttl $ttl" )            if $action ne 'delete';
                         push( @cmd_suffix, "--name '$name'" )        if $action ne 'delete';
                         push( @cmd_suffix, "--content '$content'" )  if $action ne 'delete';
-                        my $suffix = join( ' ', @cmd_suffix ) // '';
+                        my $suffix = join( ' ', @cmd_suffix );
                         my $do_cmd = qq{$lexicon $action $origin $type $suffix};
 
                         if ($dryrun) {
@@ -172,7 +176,6 @@ sub zonediff {
 
     my @to_update;
     my @to_create;
-    my @to_delete;
   OUTER: while ( my $to_sync = shift @$zones_from_file ) {
         my $raw = $to_sync->plain;
         my $update_id;
@@ -212,15 +215,16 @@ sub zonediff {
         # A zone has exactly one SOA, so it gets an update.  NS is not in
         # @record_types, so zonediff never sees it.
         my $do_update = any { $to_sync->type eq $_ } qw{SOA NS};
+        my $ref2push  = $do_update ? \@to_update : \@to_create;
 
-        # For any other type, delete the provider records that did not match
-        # and create the record from the zonefile.
-        push( @to_delete, @$zones_actual ) unless $do_update;
-        my $ref2push = $do_update ? \@to_update : \@to_create;
-
-        die "Cannot attempt to do two updates to " . $to_sync->type() . " records." if $do_update && @to_update > 1;
+        die "Cannot attempt to do two updates to " . $to_sync->type() . " records." if $do_update && @to_update;
         push( @$ref2push, { content => $to_sync->rdstring, name => $to_sync->owner, id => $update_id, ttl => $to_sync->ttl } );
     }
+
+    # Delete the provider records that no zonefile record matched, after every
+    # record had the chance to match.  The new records take their place.
+    my @to_delete = @to_create ? @$zones_actual : ();
+
     return ( update => \@to_update, create => \@to_create, delete => \@to_delete );
 }
 

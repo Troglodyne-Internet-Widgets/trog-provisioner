@@ -325,8 +325,27 @@ subtest 'from_config reads provision.conf, the command line wins' => sub {
     my $overridden = Trog::HV->from_config( $config, uri => 'qemu+ssh://cli/system' );
     is( $overridden->uri, 'qemu+ssh://cli/system', '--connect beats config' );
 
+    # An empty option is one nobody gave, as new() reads it, so the file still
+    # answers.
+    my $unset = Trog::HV->from_config( $config, uri => q{}, domain_dir => q{} );
+    is( $unset->uri,        'qemu+ssh://confuser@confhv/system', 'an empty --connect does not hide libvirt_uri' );
+    is( $unset->domain_dir, '/srv/domains',                      'nor an empty domain_dir the one in the file' );
+
     Trog::HV->forget();
     ok( Trog::HV->from_config(undef)->is_local, 'a missing config is just the local hypervisor' );
+};
+
+subtest 'a bridge nothing can find says where to name it' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( capture_cmd => sub { return q{} } );
+    my $hv = Trog::HV->candidate( uri => 'qemu+ssh://root@hv.test/system' );
+
+    # The same key is read from either file, depending on whether there is a fleet.
+    for my $key (qw{bridge_device virbr_device}) {
+        my $why = exception { $hv->$key() };
+        like( $why, qr/Set[ ]$key[ ]in[ ]this[ ]hypervisor's[ ]block/, "$key: in hypervisors.conf, where a fleet reads it" );
+        like( $why, qr/in[ ]provision[.]conf[ ]if[ ]there[ ]is[ ]no/,  "$key: or in provision.conf, without one" );
+    }
 };
 
 # --- has_tpm ------------------------------------------------------------------
@@ -413,10 +432,10 @@ subtest 'remote work goes through commands with an exit status' => sub {
             my ( $self, $opts, @cmd ) = @_;
             push @commands, { opts => $opts, cmd => [@cmd] };
 
-            my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;
+            my @argv = grep { $_ ne 'sudo' && $_ ne '-n' && $_ ne '-S' && $_ ne '-p' && length } @cmd;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- an argument of "0" is still an argument
             $files{ $argv[2] } = delete $files{ $argv[1] } if $argv[0] eq 'mv';
 
-            $? = 0;    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
+            $? = 0;                                                                                       ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real call
             return ( '', '' );
         }
     );

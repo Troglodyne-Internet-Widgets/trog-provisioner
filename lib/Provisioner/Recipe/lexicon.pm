@@ -62,7 +62,7 @@ sub args {
                 type        => 'string',
                 enum        => [qw{pdns registrar}],
                 description =>
-                  'Which recipe holds this zone, where the guest has more than one that could.  The same tiebreaker Provisioner::Recipe::letsencrypt takes, and a guest running that needs nothing here: it resolves the provider and hands the answer down.  Set it here for a guest that has both a server of its own and registrar credentials and does not run letsencrypt -- pdns and registrar each require this recipe without saying which of them holds the zone, so there is nothing else to settle the tie and the build stops until somebody does.',
+                  'Which recipe holds this zone, when the guest has more than one recipe that can.  Provisioner::Recipe::letsencrypt takes the same tiebreaker.  A guest that runs letsencrypt needs nothing here, because letsencrypt resolves the provider and hands the answer down.  Set it here for a guest that does not run letsencrypt and has both its own DNS server and registrar credentials.  pdns and registrar each require this recipe without saying which of them holds the zone.  So nothing else settles the tie, and the build stops until somebody sets it.',
             },
         },
     );

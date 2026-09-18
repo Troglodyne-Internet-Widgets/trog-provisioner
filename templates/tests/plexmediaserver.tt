@@ -87,4 +87,10 @@ SKIP: {
         or diag $status;
 }
 
+[% IF claim_token -%]
+# Plex reads the claim token from here on its first start.
+my $defaults = do { local (@ARGV, $/) = '/etc/default/plexmediaserver'; <> } // '';
+like($defaults, qr/^PLEX_CLAIM=\Q[% claim_token %]\E$/m, 'the claim token is where plex reads it');
+
+[% END -%]
 done_testing();

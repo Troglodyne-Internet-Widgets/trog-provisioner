@@ -9,7 +9,6 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use File::KeePass::KDBX();
-use IO::Prompter();
 use Scalar::Util qw{looks_like_number};
 
 =head1 NAME

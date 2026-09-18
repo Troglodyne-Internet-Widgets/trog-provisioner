@@ -17,7 +17,6 @@ use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
-use Trog::HV();
 use Trog::Hypervisors();
 
 # What this tool produces, a file name or a port, goes to stdout for capture.
@@ -177,13 +176,9 @@ sub main {
 sub hypervisor {
     my ( $domain, $uri, $hvconf ) = @_;
 
-    return Trog::HV->new( uri => $uri ) if $uri;
-
-    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
-    return Trog::HV->new() unless $fleet->configured;
-
-    return $fleet->hosting($domain)
-      || die "No hypervisor in the fleet has $domain.\n" . "Pass --connect if it is somewhere the fleet does not list.\n";
+    my $hv = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf ) }
+      or die $@ . "Pass --connect if $domain is somewhere the fleet does not list.\n";
+    return $hv;
 }
 
 sub log_path { return "$LOG_DIR/$_[0]-console.log" }
@@ -407,7 +402,7 @@ sub guest_tool {
     my $out = $hv->capture_cmd( join ' ', 'sudo', $tool, map { _shq($_) } @args );
     my $rc  = $? >> 8;
 
-    die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install guestfs-tools\n" if $rc == 127;
+    die "$tool is not on " . $hv->describe . ".\n" . "  sudo apt install libguestfs-tools\n" if $rc == 127;
 
     return ( $out, $rc );
 }

@@ -86,6 +86,24 @@ subtest 'the fragment fetches each pinned tarball into an emptied directory' => 
     unlike( $out, qr/(?<!\$)\$(?!\$)/, 'and nothing in it is a make variable by accident' );
 };
 
+# perllsp does not require perl, so a guest can run it with the system perl.
+subtest 'the vimrc looks for the built perl only on a guest that builds one' => sub {
+    foreach my $case ( [ [qw{perllsp}], 0 ], [ [qw{perl perllsp}], 1 ] ) {
+        my ( $modules, $built ) = @$case;
+        my $dir = tempdir( CLEANUP => 1 );
+        recipe()->generate_files( $dir, domain => 'lsp.test.test', install_dir => '/opt/domains', admin_user => 'admin', script_dir => '/root/bin', main_ip => '192.168.1.9', modules => $modules );
+        my $vimrc = do { local ( @ARGV, $/ ) = "$dir/perllsp.vim"; <> }
+          // q{};
+        my $what = join( ' and ', @$modules );
+        if ($built) {
+            like( $vimrc, qr{/opt/perl5}, "a guest with $what looks under /opt/perl5" );
+        }
+        else {
+            unlike( $vimrc, qr{/opt/perl5|perl[ ]recipe[ ]is[ ]active}, "a guest with $what does not" );
+        }
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

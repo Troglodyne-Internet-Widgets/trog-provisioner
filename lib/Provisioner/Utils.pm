@@ -9,7 +9,6 @@ use warnings FATAL => 'all';
 use re '/aasx';
 
 use File::Find();
-use List::Util   qw{any};
 use MIME::Base64 qw{encode_base64};
 
 use Data::Validate::Email();
@@ -37,22 +36,6 @@ Helpers that the recipes and the modules around them share.
 =cut
 
 =head2 SUBROUTINES
-
-=head3 already_required($module)
-
-Returns 1 if a key of C<%INC> contains C<$module>, and 0 if none does.  Pass
-the path form that C<%INC> uses, for example C<Provisioner/Recipe/backup.pm>.
-
-A caller uses this to skip a second C<require> that redefines subs.
-
-=cut
-
-sub already_required {
-    my $module    = shift;
-    my @available = keys(%INC);
-    return 1 if any { m/\Q$module\E/ } @available;
-    return 0;
-}
 
 =head3 files_in($dir)
 

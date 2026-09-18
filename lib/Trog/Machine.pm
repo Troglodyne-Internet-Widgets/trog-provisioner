@@ -6,8 +6,8 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
-use File::Basename();
 use File::Path();
+use Path::Tiny();
 use File::Copy();
 use File::Temp();
 use List::Util qw{any};
@@ -192,10 +192,9 @@ sub sshd_port {
     my ($self) = @_;
     return $self->{sshd_port} if defined $self->{sshd_port};
 
-    # Read sshd_config.d as well as sshd_config.  A modern Ubuntu includes that
-    # directory at the top of the main file, so a value in there is the one
-    # sshd uses.  The last match wins for the same reason: the Include comes
-    # first, and sshd takes the first value that it reads.
+    # Read sshd_config.d as well as sshd_config, because a modern Ubuntu
+    # includes that directory from the main file.  Any match will do, because
+    # sshd listens on every Port line that it reads, not only the first.
     my $port = $self->capture_cmd(q{grep -h '^Port ' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | tail -n1 | awk '{print $2}'});
     chomp $port if defined $port;
 
@@ -439,7 +438,8 @@ command over the connection when it is not.  The C<sudo> option on the writers
 is for destinations that the login user does not own, such as anything under
 C</etc>, C</usr> or C</root>.  With C<sudo>, C<mode> sets the permissions of the
 result, and the default is 0644.  The chmod is necessary because a staging file
-from C<mktemp> is 0600.
+from C<mktemp> is 0600, and a local copy through sudo gets the umask of root.  A
+write without C<sudo> leaves the mode to the writer.
 
 =over 4
 
@@ -566,10 +566,14 @@ sub remove_tree {
 
 sub list_dir {
     my ( $self, $path ) = @_;
-    return map { File::Basename::basename($_) } glob "$path/*" if $self->is_local;
+    if ( $self->is_local ) {
+        return () unless -d $path;
+        my @names = sort map { $_->basename } Path::Tiny::path($path)->children(qr/\A[^.]/);
+        return @names;
+    }
 
     # ls, not sftp.  See "Why none of this uses sftp".
-    my $listing = $self->capture_cmd("ls -1 $path 2>/dev/null") // '';
+    my $listing = $self->capture_cmd( 'ls -1 ' . _shq($path) . ' 2>/dev/null' ) // '';
     return grep { $_ } split( m/\n/, $listing );
 }
 
@@ -607,9 +611,10 @@ sub put_file {
     if ( $self->is_local ) {
 
         # Copy it ourselves if we can, and use sudo only if that fails.
-        return 1                                                       if File::Copy::copy( $local, $remote );
-        return $self->run_sudo( qw{cp}, $local, $remote ) == 0 ? 1 : 0 if $opts{sudo};
-        return 0;
+        return 1 if File::Copy::copy( $local, $remote );
+        return 0 unless $opts{sudo};
+        return 0 if $self->run_sudo( qw{cp}, $local, $remote );
+        return $self->run_sudo( 'chmod', ( $opts{mode} // '0644' ), $remote ) == 0 ? 1 : 0;
     }
 
     return $self->_pour( { stdin_file => $local }, $remote, %opts );
@@ -717,8 +722,9 @@ sub _sudo_append {
 
 =head2 _shq($string)
 
-Returns C<$string> quoted for a POSIX shell.  Only C<_sudo_append> uses it,
-because C<<< >> >>> has no argv form.
+Returns C<$string> quoted for a POSIX shell, for a command that has to be one
+string.  C<_sudo_append> uses it because C<<< >> >>> has no argv form, and
+C<list_dir> uses it for the path it lists.
 
 =cut
 
