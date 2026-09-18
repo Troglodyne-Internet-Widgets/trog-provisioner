@@ -145,7 +145,11 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 [CodeLayout::ProhibitHardTabs]
 [CodeLayout::ProhibitTrailingWhitespace]
 [CodeLayout::RequireConsistentNewlines]
-[CodeLayout::RequireTidyCode]
+; [CodeLayout::RequireTidyCode] is off on purpose.  git-hooks/pre-commit runs
+; perltidy over every staged Perl file before it runs this profile, so every
+; commit is tidy whatever this policy would say.  In an editor, the policy only
+; repeated that, and ran perltidy over the whole file on every check.
+; [CodeLayout::RequireTidyCode]
 [CodeLayout::RequireTrailingCommas]
 [ControlStructures::ProhibitLabelsWithSpecialBlockNames]
 [ControlStructures::ProhibitMutatingListFunctions]
