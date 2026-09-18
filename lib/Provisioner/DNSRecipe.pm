@@ -266,7 +266,7 @@ sub provider_for {
 
     return $class->implementation_for(
         %opts,
-        configured      => Provisioner::Cookbook->domain_config( $opts{domain} ) // {},
+        configured      => Provisioner::Cookbook->domain_config( $opts{domain} ),
         host            => $host,
         host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
     );
@@ -307,9 +307,11 @@ Provisioner::DNSRecipe.
 sub _implementation {
     my ( $class, $provider ) = @_;
 
-    my $impl = eval { Provisioner::Cookbook->load($provider) };
-    die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n" unless $impl;
-    die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n"                       unless $impl->isa('Provisioner::DNSRecipe');
+    die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n"
+      unless Provisioner::Cookbook->has($provider);
+
+    my $impl = Provisioner::Cookbook->load($provider);
+    die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n" unless $impl->isa('Provisioner::DNSRecipe');
 
     return $impl;
 }

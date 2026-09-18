@@ -256,6 +256,30 @@ subtest 'the interface names the key that settles a tie' => sub {
     ok( exists $schema{properties}{ Provisioner::DNSRecipe->tiebreaker_key }, 'and the recipe that takes it declares it' );
 };
 
+subtest 'credentials_for tells a missing provider from a broken one' => sub {
+    my $dns = Test::MockModule->new('Provisioner::DNSRecipe');
+    $dns->redefine( provider_for => sub { return 'nosuchprovider' } );
+
+    like(
+        exception { Provisioner::DNSRecipe->credentials_for( domain => 'a.test' ) },
+        qr/nosuchprovider[ ]is[ ]not[ ]a[ ]recipe/,
+        'a provider with no recipe is named as missing'
+    );
+
+    # A recipe that exists but does not compile has to show its own error.
+    # Reporting it as missing sends the operator to look for a file that is there.
+    $dns->redefine( provider_for => sub { return 'broken' } );
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( has  => sub { return 1 } );
+    $cookbook->redefine( load => sub { die "syntax error at broken.pm line 3\n" } );
+
+    like(
+        exception { Provisioner::DNSRecipe->credentials_for( domain => 'a.test' ) },
+        qr/syntax[ ]error[ ]at[ ]broken[.]pm/,
+        'a provider whose recipe does not load shows why it did not'
+    );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;
