@@ -392,7 +392,7 @@ sub required_recipes {
     # Handed the provider this domain resolved to.  lexicon renders one shortcut,
     # for whoever holds the zone, so it has the same tie to settle -- and the key
     # that settles it is written in this recipe's block rather than in its own.
-    push( @required, lexicon => sub { return length $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
+    push( @required, lexicon => sub { return $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
 
     return ( @required, $self->SUPER::required_recipes(%opts) );
 }
