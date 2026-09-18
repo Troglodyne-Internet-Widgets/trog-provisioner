@@ -10,6 +10,13 @@ is($status, 'active', 'koan service is running');
 ok(-d '[% install_dir %]/[% domain %]/koan', 'koan repo directory exists');
 ok(-d '[% install_dir %]/[% domain %]/.venv', 'python virtualenv exists');
 
+# git clones koan as root, and the bot writes its logs and instance there as
+# [% user %].
+foreach my $dir ('[% install_dir %]/[% domain %]/koan', '[% install_dir %]/[% domain %]/koan/logs') {
+    my @st = stat $dir;
+    is(scalar getpwuid($st[4] // -1), '[% user %]', "$dir is owned by [% user %]");
+}
+
 # The recipe ends by setting these to root, group the service user, mode 0640.
 # The bot reads its secrets but cannot change them.
 foreach my $file (

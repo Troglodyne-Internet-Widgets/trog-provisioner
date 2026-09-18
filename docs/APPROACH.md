@@ -13,6 +13,16 @@
 
 * When you need to restart services or interact with things which may or may not be present and functioning at the time your recipe's target runs, be sure to queue it as a postrun task.
 
+## Who owns the domain directory
+
+Several recipes write into `[% install_dir %]/[% domain %]`, and the last `chown` to run wins.  So the owners are fixed here, and each recipe keeps to them.
+
+* The domain directory belongs to `user:admin_user`.  The `service_user` target and the data recipe set that owner.  No other recipe changes the owner of the directory itself.
+* A recipe that needs a different owner sets it on its own subdirectory only.  For example, admincode gives its `basedir` to the admin, and tpsgi gives `www` and `run` to the `www-data` group.
+* Use `chown -R` only on a directory that the recipe made and owns.  A recipe that checks out into the domain directory itself chowns what it checked out, and not the domain directory.
+* If another account must read the domain directory, change the mode and not the owner.  nginxproxy adds `o+x`, and nginxdirindex adds `o+rX` to everything that is not a dot entry.
+* Give each recipe a guest test for the owners that it depends on.
+
 ## Waiting on things
 
 * Don't ever use static sleeps unless inside of a polling loop which checks that what you are waiting on is actually ready.  It's fine to write a standalone script to do this when necessary.
