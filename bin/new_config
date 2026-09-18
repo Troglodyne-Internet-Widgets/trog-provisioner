@@ -683,23 +683,14 @@ sub handle_domain {
     # template gets `modules` as the list of what is on the guest.
     @modules = grep { $builders{$_}->is_module } @modules;
 
-    # The names the recipes on this guest serve, added to whatever ipmap.cfg
-    # already gives the domain.  Every domain in the map used to be handed www
-    # and mail here whatever it ran, while the zone template and ssl.domains.tt
-    # each grew their own rule for matrix -- so a domain serving neither got
-    # names nothing answered on, and roundcube's webmail resolved nowhere.
-    #
-    # Asked of the depsolved list rather than of what recipes.d names, so a name
-    # belonging to a recipe that arrived as a dependency is added as well:
-    # roundcube brings nginx, and www is nginx's to declare.
-    #
     # Here rather than where the map is read, because that is before the
-    # depsolver has run.  $global_config->{aliases} holds this same hash, so
-    # everything rendered below sees what this adds.
+    # depsolver has run and a name belonging to a dependency would be missed.
+    # $global_config->{aliases} holds this same hash, so everything rendered
+    # below sees what this adds.
     $alias_conf->{$domain} = [
         uniq(
             @{ $alias_conf->{$domain} // [] },
-            map { "$_.$domain" } sort map { $builders{$_}->subdomains } @modules
+            Provisioner::Utils::subdomain_aliases( $domain, map { $builders{$_} } @modules )
         )
     ];
 

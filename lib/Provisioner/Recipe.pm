@@ -991,18 +991,12 @@ sub datadirs {
 The names under the domain that this recipe serves, as labels rather than whole
 names: C<www>, not C<www.$domain>.
 
-C<bin/new_config> adds one alias per label, for every recipe the guest ends up
-with.  That is what makes the name resolve, the vhost answering for it
-reachable, and the certificate cover it: C<full_aliases> is where all three read
-it from.
+C<bin/new_config> adds one alias per label, asked of every recipe the depsolver
+settled on -- so a name belonging to a dependency is added too.  C<full_aliases>
+is where the zone, the vhost and the certificate all read it from.
 
-Empty by default, and empty is the ordinary answer -- a recipe served at the
-domain itself declares nothing.  L<Provisioner::Recipe::gogs> is one on purpose:
-it is reached at the domain, and C<git.$domain> is a directory rather than a
-host.
-
-Asked of the recipes the depsolver settled on rather than of the ones written
-down, so a name belonging to a recipe that arrived as a dependency is added too.
+Empty by default, which is the ordinary answer: a recipe reached at the domain
+itself declares nothing.
 
 =cut
 

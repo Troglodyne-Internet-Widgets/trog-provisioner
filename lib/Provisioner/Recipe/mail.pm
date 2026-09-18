@@ -232,10 +232,6 @@ C<mail>, which the MX names and the SRV records point at, and C<autodiscover>
 and C<autoconfig>, which F<mail.autodiscover_vhost.tt> answers for so a client
 can find its own settings.
 
-The zone emitted the autodiscover pair for every domain, mail recipe or not, and
-C<mail> was given to every domain in the map beside it.  A domain that serves no
-mail has no use for any of the three.
-
 =cut
 
 sub subdomains {

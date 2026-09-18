@@ -92,11 +92,8 @@ subtest 'a label that belongs to the zone stays relative' => sub {
     # dot would make each of them a name at the root instead.
     like( $zone, qr/^ns1\s+IN\s+A\s/m, 'ns1 is a label' );
 
-    # autodiscover and autoconfig were emitted here for every domain, mail
-    # recipe or not, and a matrix block decided two more names for itself.  Both
-    # are the recipe's to declare now -- Provisioner::Recipe/subdomains -- and
-    # bin/new_config puts what they declare into the aliases this already
-    # renders.  So the template carries the zone and invents no names.
+    # The template carries the zone and invents no names: what a recipe serves
+    # it declares, and bin/new_config puts it in the aliases rendered above.
     unlike( $zone, qr/^autodiscover\s+IN\s+CNAME/m, 'it no longer invents autodiscover for a domain that serves no mail' );
     unlike( $zone, qr/^autoconfig\s+IN\s+CNAME/m,   'nor autoconfig' );
     unlike( $zone, qr/matrix/,                      'nor a matrix block of its own' );
@@ -109,11 +106,9 @@ subtest 'a label that belongs to the zone stays relative' => sub {
 
 subtest 'a record points only at a name the guest actually has' => sub {
 
-    # The MX and the five SRVs name mail.<domain>, and the autoconfig TXT names
-    # autoconfig.<domain>.  Both are the mail recipe to declare, so on a domain
-    # running no mail they point at a host with no record at all.  They resolved
-    # before only because every domain in the map was handed a mail. CNAME
-    # whether it served any mail or not.
+    # The MX, the five SRVs and the autoconfig TXT all name a host the mail
+    # recipe declares, so on a domain running no mail they would point at a name
+    # with no record at all.
     my $without = zone();
 
     unlike( $without, qr/IN\s+MX\s/,  'no MX where nothing serves mail' ) or diag $without;
@@ -137,7 +132,10 @@ subtest 'the apex is the origin, not a name of its own' => sub {
 };
 
 subtest 'the submission SRV record names the port postfix listens on' => sub {
-    my $zone = zone();
+
+    # Asked of a zone that serves mail, since the mail records are written only
+    # where something answers on the name they point at.
+    my $zone = zone( modules => ['mail'] );
 
     # RFC 6186 spells it _submission._tcp, and mail.postfix.master.tt runs
     # submission on 587.

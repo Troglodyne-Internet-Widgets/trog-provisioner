@@ -157,6 +157,27 @@ sub lastuniq {
     return @out;
 }
 
+=head3 subdomain_aliases($domain, @recipes)
+
+One fully qualified alias per label the recipes declare in
+L<Provisioner::Recipe/subdomains>, sorted and once each: C<www> under
+C<test.test> comes back as C<www.test.test>.
+
+C<@recipes> is anything that answers C<subdomains> -- the classes
+L<Provisioner::Cookbook/load> returns, or built recipe objects.
+
+Returns ARRAY.
+
+=cut
+
+sub subdomain_aliases {
+    my ( $domain, @recipes ) = @_;
+
+    my %seen;
+
+    return grep { !$seen{$_}++ } sort map { "$_.$domain" } map { $_->subdomains } @recipes;
+}
+
 =head3 qualify_address($value, $domain)
 
 Adds C<$domain> to a local part to make an address.  An address stays exactly

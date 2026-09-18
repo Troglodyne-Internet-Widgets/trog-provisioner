@@ -99,13 +99,10 @@ IPMAP
     return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ) );
 }
 
-# Every name the guest is told to answer for, out of the self-signed
-# certificate the makefile makes before anything else runs.
-#
-# Read from there rather than from a variable inside the generator, because that
-# list is what a guest actually ends up with: the same full_aliases reaches the
-# zone, the nginx vhost and the ACME certificate, and this is the one place it
-# is written down in full.
+# Every name the guest is told to answer for, out of the self-signed certificate
+# the makefile makes first.  Read from there rather than from inside the
+# generator: the same full_aliases reaches the zone, the vhost and the ACME
+# certificate, and this is where it is written down in full.
 sub names_in {
     my ($makefile) = @_;
     return () unless defined $makefile;
@@ -139,9 +136,6 @@ subtest 'a domain gets the names its recipes serve, and no others' => sub {
     my ( $err, $makefile ) = generate( 'plain.test', ntp => undef );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
-    # www and mail went to every domain in the ip map, whatever it ran.  A
-    # domain serving neither has no use for either: the name resolved to a guest
-    # with nothing listening, and the certificate covered it.
     my @names = names_in($makefile);
     is_deeply( \@names, ['plain.test'], 'a domain running neither a web server nor mail answers for itself alone' )
       or diag explain \@names;
@@ -197,8 +191,7 @@ subtest 'the certificate list is the aliases, and invents nothing' => sub {
     like( $domains, qr/\bwww[.]cert[.]test\b/,    'the aliases are listed' );
     like( $domains, qr/\bmatrix[.]cert[.]test\b/, 'including one a recipe declared' );
 
-    # It named the matrix pair itself before, as a second copy of the rule in
-    # pdns.zone.tt -- so a certificate could cover a name the zone did not.
+    # A certificate must not cover a name the zone does not carry.
     unlike( $domains, qr/admin[.]matrix/, 'and it adds no name of its own for a recipe on the guest' )
       or diag $domains;
 };

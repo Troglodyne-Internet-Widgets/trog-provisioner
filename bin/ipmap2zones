@@ -20,6 +20,7 @@ use Net::IP;
 use List::Util   qw{uniq};
 use Getopt::Long qw{GetOptionsFromArray};
 use Provisioner::Cookbook();
+use Provisioner::Utils();
 use Trog::Config();
 use Provisioner::IPPool();
 use File::Slurper::Temp;
@@ -45,13 +46,8 @@ It renders C<templates/files/pdns.zone.tt>, the template that the pdns recipe
 installs.  The output is not always the same as what the recipe installs,
 because it has no extra records.
 
-=head2 A domain is required
-
-It used to generate for every domain that had an address when given none.  That
-was answerable while every zone carried the same C<www> and C<mail> regardless
-of what the domain ran.  It is not any more: the names a zone carries are the
-ones its recipes declare -- see L<Provisioner::Recipe/subdomains> -- so the
-answer is per domain.  Name the one you want.
+At least one domain must be named: a zone carries the names its recipes declare
+(see L<Provisioner::Recipe/subdomains>), so the answer differs per domain.
 
 =head1 OPTIONS
 
@@ -117,8 +113,8 @@ sub main {
 
         my @recipes = recipes_for($domain);
 
-        my $aliases = _coerce_arrayref( $alias_conf->{$domain} );
-        $alias_conf->{$domain} = [ uniq( @$aliases, map { "$_.$domain" } subdomains_for(@recipes) ) ];
+        my $aliases = Provisioner::Utils::coerce_arrayref( $alias_conf->{$domain} );
+        $alias_conf->{$domain} = [ uniq( @$aliases, Provisioner::Utils::subdomain_aliases( $domain, map { Provisioner::Cookbook->load($_) } @recipes ) ) ];
 
         my %vars = (
             domain        => $domain,
@@ -129,9 +125,8 @@ sub main {
             serial        => time(),
             extra_records => '',
 
-            # What the domain runs, which the zone needs for more than the
-            # names: the mail records point at mail.<domain>, so they are
-            # written only where something answers there.
+            # The zone needs this for more than the names: the mail records are
+            # written only where something answers on what they point at.
             modules => \@recipes,
         );
 
@@ -144,15 +139,10 @@ sub main {
     return 0;
 }
 
-# What this domain is configured to run, as recipe names.
-#
-# What recipes.d says out loud, rather than a depsolved list: there is no
-# depsolver here.  bin/new_config asks the recipes it settled on, so a name
-# belonging to a dependency is in the zone it writes and not necessarily in this
-# one.
-#
-# A configuration naming a recipe this installation does not have is somebody
-# else's error to report rather than a reason to write no zone at all.
+# What recipes.d names, rather than a depsolved list: there is no depsolver here,
+# so a name belonging to a dependency is in the zone bin/new_config writes and
+# not necessarily in this one.  An unknown recipe is skipped rather than fatal --
+# reporting it belongs to whatever reads the configuration for real.
 sub recipes_for {
     my ($domain) = @_;
 
@@ -161,16 +151,6 @@ sub recipes_for {
     my @recipes = grep { Provisioner::Cookbook->has($_) } sort keys %$configured;
 
     return @recipes;
-}
-
-# The names those recipes serve, sorted and once each.
-sub subdomains_for {
-    my (@recipes) = @_;
-
-    my @names;
-    push( @names, Provisioner::Cookbook->load($_)->subdomains ) for @recipes;
-
-    return uniq( sort @names );
 }
 
 sub _formatters {
@@ -189,12 +169,6 @@ sub _formatters {
             }
         ),
     );
-}
-
-sub _coerce_arrayref {
-    my ($input) = @_;
-    return [] unless $input;
-    return ref $input eq 'ARRAY' ? $input : [$input];
 }
 
 exit main(@ARGV) unless caller;

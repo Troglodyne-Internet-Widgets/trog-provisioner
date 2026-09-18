@@ -82,10 +82,6 @@ sub zone_for {
 }
 
 subtest 'a domain has to be named' => sub {
-
-    # It generated for every domain in [ips] when given none.  That was
-    # answerable while every zone carried the same www and mail; now the names
-    # are the ones that domain's recipes declare, so the answer is per domain.
     like(
         exception { Trog::Provisioner::IPMap2Zones::main( '--ipmap', $ipmap_file ) },
         qr/Name[ ]at[ ]least[ ]one[ ]domain/,
@@ -112,8 +108,6 @@ subtest 'a domain that serves neither gets neither name' => sub {
     my $zone = zone_for('plain.test');
     ok( defined $zone, 'a zone was written' ) or return;
 
-    # www and mail were pushed onto every domain here, in a second copy of the
-    # list bin/new_config kept.
     unlike( $zone, qr/^www[.]plain[.]test/m,  'no www for a domain running no web server' ) or diag $zone;
     unlike( $zone, qr/^mail[.]plain[.]test/m, 'and no mail for one running no mail' )       or diag $zone;
 
@@ -153,6 +147,41 @@ subtest 'a domain the pool has no address for is refused' => sub {
 
     like( $err, qr/No[ ]address[ ]for[ ]'nowhere[.]test'/, 'naming what it has no address for says so' );
     like( $err, qr/ips[.]db/,                              'and says where it looked for one' );
+};
+
+subtest 'a recipe this installation does not have is skipped' => sub {
+
+    # Refusing the zone outright would take the names of every recipe beside it
+    # down too.  This rewrites recipes.yaml, so it runs last.
+    File::Slurper::Temp::write_text(
+        "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
+        YAML::XS::Dump( { 'odd.test' => { nginx => undef, 'not-a-recipe' => undef } } )
+    );
+    Provisioner::Cookbook->forget();
+
+    Provisioner::IPPool::record( '192.168.1.63', 'odd.test' );
+
+    my ( $oh, $odd_ipmap ) = tempfile();
+    print {$oh} <<'IPMAP';
+[global]
+admin_email=doge@test.test
+[nameservers]
+ns1=ns1.test.test
+IPMAP
+    close($oh) or die "Cannot close $odd_ipmap: $!";
+
+    my $out = tempdir( CLEANUP => 1 );
+    my $err = exception {
+        Trog::Provisioner::IPMap2Zones::main( '--ipmap', $odd_ipmap, '--output-dir', $out, 'odd.test' );
+    };
+    is( $err, undef, 'a name this installation has no recipe for is not fatal' ) or diag $err;
+
+    my $file = "$out/odd.test.zone";
+    my $zone = -f $file ? File::Slurper::read_text($file) : undef;
+    ok( defined $zone, 'the zone is still written' ) or return;
+
+    like( $zone, qr/^www[.]odd[.]test\.\s+IN\s+CNAME\s+\@/m, 'and the recipe it does have still contributes its name' )
+      or diag $zone;
 };
 
 done_testing();

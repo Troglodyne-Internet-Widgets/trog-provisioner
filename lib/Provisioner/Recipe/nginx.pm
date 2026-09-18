@@ -41,10 +41,6 @@ sub rate_limits {
 C<www>, which the vhost this writes answers for: it serves the domain and every
 alias, and www is an alias rather than a name of its own.
 
-Every domain in the map used to be given this whether or not it ran a web
-server.  A domain that serves nothing over HTTP has no use for the name, and a
-certificate covering one nothing answers on is a name somebody has to explain.
-
 =cut
 
 sub subdomains {

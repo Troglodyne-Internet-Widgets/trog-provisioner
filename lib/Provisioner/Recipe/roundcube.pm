@@ -59,10 +59,6 @@ Requires the nginx and mail recipes.
 
 =cut
 
-# mail, because config.inc.php names mail.$domain for IMAP and submission and
-# nothing configures it to name anything else.  Without the dependency that is a
-# host the guest need not have: the name answered because every domain in the map
-# was given a mail. alias, whether or not anything was listening behind it.
 sub required_recipes {
     return (
         nginx => sub { () },
@@ -74,9 +70,6 @@ sub required_recipes {
 
 C<webmail>, which is the only name this is served at:
 F<roundcube.nginx.tt> answers for C<webmail.$domain> and nothing else.
-
-It was never among the aliases a domain was given, so the name resolved nowhere
-and no certificate covered it -- the vhost was there and unreachable.
 
 =cut
 

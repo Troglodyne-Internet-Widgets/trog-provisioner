@@ -1,6 +1,4 @@
-[%# The domain and its aliases, which is every name the guest answers for: a
-    recipe declares what it serves and bin/new_config adds it here.  This used
-    to name the matrix pair itself, as a second copy of the rule in
-    pdns.zone.tt -- so a certificate could cover a name the zone did not, or the
-    other way about. -%]
+[%# Every name the guest answers for: a recipe declares what it serves, via
+    Provisioner::Recipe subdomains, and bin/new_config puts it in the aliases.
+    Nothing is named here. -%]
 [% domain %] [% FOR alias IN full_aliases %] [% alias %][% END %]
