@@ -474,7 +474,7 @@ subtest 'the sweep covers the domain directory as well as the data source' => su
     File::Path::remove_tree("$data/live.test");
 };
 
-subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
+subtest 'a hypervisor that will not say what it has takes the run down' => sub {
     write_config();
     make_path("$data/orphan.test");
 
@@ -483,9 +483,13 @@ subtest 'a hypervisor that will not say what it has stops the sweep' => sub {
     $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
     $hv->redefine( vmm        => sub { die "connection refused\n" } );
 
-    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
-    is( $rc, 1, 'the sweep fails rather than carrying on' );
-    like( $said, qr/nothing[ ]is[ ]swept/, 'and says so' );
+    # libvirt's own words rather than ours.  Nothing catches this to reword it,
+    # which is the whole point: a hypervisor that cannot be asked what it holds
+    # is not one anything here could work against.
+    my $refused = exception {
+        says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } )
+    };
+    like( $refused, qr/connection[ ]refused/, 'the sweep dies rather than carrying on' );
 
     # The guests it holds are exactly the ones that would look like orphans.
     ok( -d "$data/orphan.test", 'nothing was removed on the strength of a list it could not get' );
