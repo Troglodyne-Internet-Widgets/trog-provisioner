@@ -32,6 +32,9 @@ Provisioner::IPPool - assign static IP addresses from a pool, and record which a
     my @ips = Provisioner::IPPool::pool_ips($pool_block);
     my $ip  = Provisioner::IPPool::assign( 'test.test', $pool_block );
 
+The addresses in the pool are on the subnet of the primary bridge of the
+hypervisor.  F<docs/NETWORK.md> says what that means.
+
 =head2 SUBROUTINES
 
 =head3 pool_ips($pool)

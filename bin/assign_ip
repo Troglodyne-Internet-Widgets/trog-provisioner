@@ -26,6 +26,10 @@ use Provisioner::IPPool();
 Print the static address that C<DOMAIN> holds.  If it holds none, assign it
 the first free address in the pool and print that.
 
+A static address is on the subnet of the primary bridge of the hypervisor, the
+network that it shares with other machines.  It is not an address on the NAT
+network of libvirt.  F<docs/NETWORK.md> describes the network model.
+
 If the domain already holds an address, this prints it and writes nothing.  So
 a script can call this when it does not know if the domain was provisioned.
 
