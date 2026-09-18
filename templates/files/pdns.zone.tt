@@ -55,7 +55,7 @@ _dmarc             IN TXT  "v=DMARC1; p=none"
 _imaps._tcp        IN SRV 0 0 993 mail.[% domain %].
 _pop3s._tcp        IN SRV 0 0 995 mail.[% domain %].
 _smtps._tcp        IN SRV 0 0 465 mail.[% domain %].
-_submission.tcp    IN SRV 0 0 564 mail.[% domain %].
+_submission._tcp   IN SRV 0 0 587 mail.[% domain %].
 _autodiscover._tcp IN SRV 0 0 80  mail.[% domain %].
 
 [% IF modules.grep('matrix').size() %]
