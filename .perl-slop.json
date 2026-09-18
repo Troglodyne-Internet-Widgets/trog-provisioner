@@ -1,0 +1,9 @@
+{
+  "before_edit": {
+    "lib/Provisioner/Recipe/**": ["writing-recipes"]
+  },
+  "before_commit": {
+    "lib/Provisioner/Recipe/**": ["provisioning-recipes"],
+    "templates/**": ["provisioning-recipes"]
+  }
+}

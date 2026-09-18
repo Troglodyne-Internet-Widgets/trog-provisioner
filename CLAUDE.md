@@ -8,11 +8,21 @@ written down elsewhere and pointed at below; this is the procedure.
 Everything else is a recipe, a template one renders, or a library those three
 share.
 
-## Read the code before you change it
+## Which skills, and when
 
-**When a request means consulting the code here at all -- answering a question
-about it, tracking something down, or editing it -- invoke
-`perl-slop:reading-perl` first.**
+The perl-slop plugin's hooks hold you to the procedure.  They refuse an edit
+to Perl until `perl-slop:reading-perl` is loaded, and a commit of Perl until
+`data-perl`, `testing-perl` and `reviewing-perl` are, each since the last
+commit.  `.perl-slop.json` adds this repository's own: `writing-recipes`
+before an edit under `lib/Provisioner/Recipe/`, and `provisioning-recipes`
+before a commit that touches a recipe or a template.  A refusal names what is
+missing.  The sections below say why each one is there.
+
+One the hooks cannot see: load `perl-slop:reading-perl` before you answer a
+question about the code or track something down in it, not only before you
+edit it.
+
+## Read the code before you change it
 
 Most of what you will touch is older than the conversation about it, and the
 line that looks pointless is usually the scar left by something that went wrong
@@ -40,9 +50,6 @@ directory a domain's data was in.
 
 ## What a recipe takes belongs in its schema
 
-**When you are writing a recipe or changing what one takes, invoke the
-`writing-recipes` skill.**
-
 `args()` validates, defaults, coerces and documents, all of it for free, and the
 recurring mistake here is to do one of those jobs in perl instead -- where
 `bin/recipes` cannot show it and a reader cannot find it.  The skill is mostly
@@ -53,9 +60,9 @@ high, so it never applied on any guest that ran a recipe which listens.
 ## A recipe is verified on a guest
 
 `t/recipes.t` proves a template renders.  It says nothing about whether the
-package exists, the service starts, or the makefile target succeeds.  For any
-change under `lib/Provisioner/Recipe/` or `templates/`, invoke the
-`provisioning-recipes` skill and build one.
+package exists, the service starts, or the makefile target succeeds.  So a
+change under `lib/Provisioner/Recipe/` or `templates/` is built on a guest
+before it is committed, as the `provisioning-recipes` skill says.
 
 Tear it down when you are finished, always, including after a failure.  If a run
 ended without one, this finds what it left:
@@ -78,15 +85,9 @@ remove --force` is exactly the flag for throwing it away.
 
 ## Finishing a changeset
 
-Before you commit, in this order:
-
-1. **`perl-slop:data-perl`** -- is the data defined, coerced, validated and
-   scoped the way perl wants it to be.
-2. **`perl-slop:testing-perl`** -- does every behavior you added or changed
-   have a test, and is it the right kind.  Then run them.
-3. **`perl-slop:reviewing-perl`** -- read the whole diff back against it.  This
-   is the pass that catches the second copy of something the library already
-   does, the shelling out, and the comment that belongs in the commit message.
+Apply the three skills that the commit gate asks for in this order: data-perl,
+testing-perl, then reviewing-perl against the whole diff.  Loading a skill is
+not applying it.  The hook sees the first, and the review is still yours.
 
 Then the mechanical ones:
 
