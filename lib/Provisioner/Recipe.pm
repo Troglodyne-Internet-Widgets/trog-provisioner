@@ -136,11 +136,15 @@ which is copied to the guest whole, rather than into the fragment.
 
 =head3 Order
 
-The C<data> recipe runs first, and the rest in lexical order.  A recipe that
-genuinely has to come earlier says so with an C<order> in its configuration, but
-that is for things like repairing networking before anything needs it.  For
-"this needs that to exist first", use C<[% script_dir %]/queue_postrun_task>
-rather than ordering, which does not survive C<make -j>.
+The C<data> recipe runs first, and the rest in the order the depsolver settles:
+a recipe is placed ahead of anything it requires, because C<lastuniq> keeps the
+last mention of a dependency and each recipe that requires it names it again.
+
+There is no way to ask for a position.  A configuration key for it existed and
+did nothing -- wherever anything depended on the recipe it named, the depsolver
+placed that recipe and the key had no effect.  For "this needs that to exist
+first", use C<[% script_dir %]/queue_postrun_task>, or wait for what you need in
+your own fragment; both survive C<make -j>, and an ordering cannot.
 
 =head3 Where a template is looked for
 

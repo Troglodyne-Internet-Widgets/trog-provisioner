@@ -24,7 +24,8 @@ use Path::Tiny();
 Runs the needed installation steps for a tCMS installation inside of the
 install_dir.
 
-If you want the system to come up right away, it's a good idea to set the order of this higher than that of the tpsgi target.
+C<tpsgi> is placed after this recipe by the depsolver, which is what gets the
+checkout onto disk before anything tries to serve out of it.
 
 The checkout lives in C<tCMS/> under the domain's directory.  It gets there one
 of two ways and neither of them is yours to do: C<remote_files> brings the one

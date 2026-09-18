@@ -59,6 +59,26 @@ sub rate_limits {
     return ( 53 => 4096, '53/udp' => 4096 );
 }
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+Adds C<nostubresolver>.
+
+A guest running this server is the only thing that answers for its own zone, and
+the stub in front of it does not: lexicon walks the zone through the system
+resolver for C<--resolve-zone-name>, and step-ca validates dns-01 through it, so
+a guest left on the stub resolves its own name nowhere.
+
+L<Provisioner::Recipe::letsencrypt> asks for the same recipe when it is this
+server that answers its challenge.  Asking here as well is what covers a guest
+serving a zone without one.
+
+=cut
+
+sub required_recipes {
+    my ( $self, %opts ) = @_;
+    return ( nostubresolver => sub { return () }, $self->SUPER::required_recipes(%opts) );
+}
+
 sub args {
     return (
         type       => 'object',
