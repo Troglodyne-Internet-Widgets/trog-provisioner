@@ -8,8 +8,11 @@
 [% script_dir %]/cpan_install[% IF cpan_notest %] --notest[% END %][% FOR word IN step %] '[% word | mark_raw %]'[% END %]
 [% END -%]
 # perltidy and perlcritic configuration for agents outside the configured paths
-install -m 0755 perl.tidy.rc   /etc/perltidyrc
-install -m 0755 perl.critic.rc /etc/perlcriticrc
+install -m 0644 perl.tidy.rc   /etc/perltidyrc
+install -m 0644 perl.critic.rc /etc/perlcriticrc
+# The salvage can bring back a .perltidyrc that links to the critic
+# configuration.  Remove it, so that the link below replaces it.
+[ "$$(readlink '[% install_dir %]/[% domain %]/.perltidyrc')" = /etc/perlcriticrc ] && rm -f '[% install_dir %]/[% domain %]/.perltidyrc'; /bin/true
 # Does not replace an existing configuration
-ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perltidyrc; /bin/true
+ln -s /etc/perltidyrc [% install_dir %]/[% domain %]/.perltidyrc; /bin/true
 ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perlcriticrc; /bin/true

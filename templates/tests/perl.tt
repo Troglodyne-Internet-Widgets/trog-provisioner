@@ -49,6 +49,19 @@ ok(-f '/etc/profile.d/perl.sh', '/etc/profile.d/perl.sh is there');
 chomp( my $on_path = `bash -lc 'command -v perl' 2>/dev/null` );
 like($on_path, qr{^/opt/perl5/}, "a login shell gets the built perl first ($on_path)");
 
+# The editor configurations.  Every account on the guest reads them, and none
+# runs them.
+foreach my $rc (qw{/etc/perltidyrc /etc/perlcriticrc}) {
+    my @st = stat $rc;
+    ok(scalar @st, "$rc is there") or next;
+    is($st[2] & 07777, 0644, "and is mode 0644");
+}
+my $tidyrc = '[% install_dir %]/[% domain %]/.perltidyrc';
+SKIP: {
+    skip "$tidyrc is not a link", 1 unless -l $tidyrc;
+    is(readlink $tidyrc, '/etc/perltidyrc', "$tidyrc links to the tidy config");
+}
+
 # Nothing links tools into the bin directory of an account.
 ok(!-e "$home/bin/starman", "$home/bin holds no symlink farm");
 
