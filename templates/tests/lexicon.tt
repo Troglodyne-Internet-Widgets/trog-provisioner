@@ -1,0 +1,30 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# The client everything on the guest writes a record with.  Nothing installed it
+# unless letsencrypt happened to be on the guest, while pdns patched it and both
+# DNS recipes installed a shortcut that runs it.
+my $which = `command -v lexicon 2>/dev/null`;
+like($which, qr/\S/, 'lexicon is installed') or diag 'no lexicon on PATH';
+
+# The shortcut an operator reaches for, with the credentials already in it.
+my $shortcut = '/opt/lexicon/[% domain %]';
+
+ok(-f $shortcut, 'the lexicon shortcut is installed');
+ok(-x $shortcut, 'and can be run');
+
+# A guest built before this was a file has a directory here, holding one
+# shortcut per provider.  The rebuild takes it away rather than moving the new
+# file inside it.
+ok(!-d $shortcut, 'as a file, rather than the per-provider directory it used to be');
+
+my @st = stat $shortcut;
+is($st[4] // -1, 0, 'owned by root, since it carries the credentials') if @st;
+is(($st[2] // 0) & 07777, 0700, 'and readable by nobody else') if @st;
+
+my $text = do { local (@ARGV, $/) = $shortcut; <> } // '';
+like($text, qr/^export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN=/m, 'carrying the token lexicon reads');
+
+done_testing();

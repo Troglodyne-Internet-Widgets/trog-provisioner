@@ -87,10 +87,16 @@ my ($api_key) = $api =~ m/^api-key=(\S+)/m;
 ok($api_key && length($api_key) >= 32, 'the API is configured with a credential')
     or diag $api;
 
+my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]'; <> } // '';
 SKIP: {
     skip 'the API has no key to compare against', 1 unless $api_key;
 
-    my $shortcut = do { local (@ARGV, $/) = '/opt/lexicon/[% domain %]/pdns'; <> } // '';
+    # One shortcut per domain now, for whichever provider holds its zone -- so a
+    # guest running this server for a domain the registrar holds has one that
+    # talks to the registrar, and nothing to say about this key.
+    skip 'this domain writes its records through another provider', 1
+        unless $shortcut =~ m/^export LEXICON_POWERDNS_/m;
+
     my ($shortcut_key) = $shortcut =~ m/^export LEXICON_POWERDNS_AUTH_TOKEN="([^"]*)"/m;
     is($shortcut_key, $api_key, 'the lexicon shortcut presents the key the server runs with')
         or diag "shortcut has " . ($shortcut_key // '(none)');

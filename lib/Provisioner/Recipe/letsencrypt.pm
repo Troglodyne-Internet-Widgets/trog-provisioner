@@ -29,7 +29,8 @@ Configures lexicon to be able to update TXT records for your domain with your re
 
 Configures dehydrated to use lexicon to do DNS DCV w/ lexicon.
 
-Sets up convenience scripts in /opt/lexicon per domain to run lexicon manually:
+L<Provisioner::Recipe::lexicon> puts the client on the guest, and with it the
+per-domain shortcut for running it by hand:
 
     /opt/lexicon/my.domain.name list TXT
 
@@ -226,63 +227,6 @@ sub _directory_url {
     return "https://localhost:$port/acme/trog/directory";
 }
 
-# Which provider serves this domain, asked with what this run is configured
-# with.
-#
-# Provisioner::Cookbook answers about the configuration the environment names,
-# which is the same file bin/new_config was pointed at for every real
-# invocation -- bin/provision sets TROG_PROVISIONER_CONFIG and --recipes to one
-# directory, scratch guests included.  Handed to the resolver rather than left
-# for it to fetch, because a resolver that goes looking cannot be told which
-# configuration it is being asked about, and there is no answer it could give
-# for the two disagreeing that would not be a guess.
-sub _resolve_provider {
-    my (%opts) = @_;
-
-    my $host = Provisioner::Cookbook->host_of( $opts{domain} );
-
-    return Provisioner::DNSRecipe->implementation_for(
-        %opts,
-        configured      => Provisioner::Cookbook->domain_config( $opts{domain} ) // {},
-        host            => $host,
-        host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
-    );
-}
-
-# What to ask an implementation its credentials with: the configuration of that
-# recipe for this domain, which is its own block and not this one's -- falling
-# back to the machine's, since a domain layered onto another is served by what
-# that guest runs.
-#
-# Whatever the operator wrote there, and nothing else.  A credential nobody
-# configured is the implementation's to settle rather than this recipe's: see
-# Provisioner::Recipe::pdns/api_key_for.
-sub _provider_config {
-    my ( $provider, %params ) = @_;
-
-    my $server = Provisioner::Cookbook->host_of( $params{domain} ) // $params{domain};
-    my $conf   = Provisioner::Cookbook->domain_config( $params{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
-
-    return ( %{$conf}, domain => $params{domain} );
-}
-
-# The recipe implementing a provider, as a class.  Loaded rather than
-# instantiated: lexicon_credentials reads its arguments and nothing on the
-# object, and constructing one would want template_dirs that enrich has no
-# business knowing about.
-#
-# Which provider serves a domain is Provisioner::DNSRecipe/implementation_for;
-# this only turns that answer into the class that gives it.
-sub _implementation {
-    my ($provider) = @_;
-
-    my $class = eval { Provisioner::Cookbook->load($provider) };
-    die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n" unless $class;
-    die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n"                       unless $class->isa('Provisioner::DNSRecipe');
-
-    return $class;
-}
-
 sub args {
     return (
         type       => 'object',
@@ -315,7 +259,7 @@ sub enrich {
     die "registrar credentials belong to the registrar recipe now, not to _global, so nothing reads the ones set for $params{domain}.  Move the registrar block out of _base._global and into _base, where it configures Provisioner::Recipe::registrar for every domain that inherits it.\n"
       if ref $params{registrar} eq 'HASH' && !exists( Provisioner::Cookbook->domain_config( $params{domain} )->{registrar} );
 
-    my $provider = _resolve_provider(%params);
+    my $provider = Provisioner::DNSRecipe->provider_for(%params);
 
     # Which CA, and why it turns on the domain: see L</Which CA issues, and how a
     # reserved TLD gets one at all>.
@@ -326,29 +270,9 @@ sub enrich {
     # declared: a domain that named no preference still has one.
     $params{dns_preference} = $provider;
 
-    # What lexicon needs to reach whoever holds this zone, asked of the recipe
-    # that holds it rather than assembled here.  This used to spell powerdns's
-    # provider name, its empty username and its socket out in this block, which
-    # is three facts about a server another recipe configures -- and the socket
-    # was written down in two places.  See Provisioner::DNSRecipe.
-    my %creds = _implementation($provider)->lexicon_credentials( _provider_config( $provider, %params ) );
-
-    $params{registrar}          = { type => $creds{type}, user => $creds{user}, key => $creds{key} };
-    $params{extra_lexicon_vars} = $creds{extra};
-
-    # --resolve-zone-name rather than DELEGATED, and only for the local server.
-    #
-    # lexicon reduces a domain to its registrable name with tldextract before it
-    # asks for a zone.  A reserved TLD is not a public suffix, so <guest>.test
-    # collapsed to the zone "test", and DELEGATED was then composed back on top
-    # of that -- asking pdns for zones/<guest>.test.test, which is a 404, on
-    # every challenge.  Measured on a guest: with this flag lexicon finds the
-    # real zone, writes the record, and the authoritative server serves it back.
-    #
-    # Not for a registrar, where the domain is the zone and tldextract is right
-    # about it: the flag costs live DNS queries to work out something already
-    # known.
-    $params{lexicon_opts} = $creds{opts};
+    # Under the same name and in the same shape the shortcut renders from, so
+    # the two exports of one credential cannot drift again.
+    $params{lexicon} = { Provisioner::DNSRecipe->credentials_for(%params) };
 
     return %params;
 }
@@ -458,8 +382,17 @@ sub required_recipes {
     # eval because this runs before validation: a domain configured with no
     # provider at all is enrich's to reject, and reporting it here as well would
     # race two messages for one fault.
-    my $provider = eval { _resolve_provider(%opts) } // q{};
+    my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
     push( @required, nostubresolver => sub { return () } ) if $provider eq Provisioner::DNSRecipe->local_implementation();
+
+    # The client the hook writes the challenge record with.  Its package, its
+    # patches and the shortcut are one recipe's now; this used to install the
+    # package and leave the rest to whoever held the zone.
+    #
+    # Handed the provider this domain resolved to.  lexicon renders one shortcut,
+    # for whoever holds the zone, so it has the same tie to settle -- and the key
+    # that settles it is written in this recipe's block rather than in its own.
+    push( @required, lexicon => sub { return length $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
 
     return ( @required, $self->SUPER::required_recipes(%opts) );
 }

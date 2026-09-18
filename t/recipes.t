@@ -199,6 +199,15 @@ subtest 'no setting every recipe is handed carries a default' => sub {
     is_deeply( \@with, [], 'a global is what a run put there, never what a schema guessed' );
 };
 
+# Recipes that put nothing on the guest, and so have a fragment of neither kind.
+#
+# Named rather than inferred: a recipe is ordinarily a thing that installs
+# something, and one that lost its fragment by accident would otherwise go on
+# passing here.  registrar is the credentials for a zone somebody else holds --
+# what reaches the guest from it is installed by the recipes that read them,
+# lexicon's shortcut and letsencrypt's hook.
+my %NO_FRAGMENT = ( registrar => 'the credentials for a zone somebody else holds' );
+
 # Test that a recipe renders without error given %G merged with $extra.
 sub renders_ok {
     my ( $name, $extra, $desc ) = @_;
@@ -234,7 +243,7 @@ sub renders_ok {
             is( $res, undef, "$name->render_global() succeeds" );
             $has_template++;
         }
-        ok( $has_template, "Has either a global or domain specific template" );
+        ok( $has_template || $NO_FRAGMENT{$name}, $NO_FRAGMENT{$name} ? "$name installs nothing, being $NO_FRAGMENT{$name}" : 'Has either a global or domain specific template' );
     };
 }
 
@@ -1412,7 +1421,7 @@ subtest 'the lexicon shortcuts export the names lexicon actually reads' => sub {
     # option is --pdns-server, which the af-unix patch here teaches to take a
     # socket path.  The DCV hook had this right; the per-domain shortcut did
     # not, and nothing on a guest runs the shortcut, so nothing caught it.
-    my $short = Provisioner::Cookbook->load( 'pdns', distro => $DISTRO )->new(%PROV)->render_file( 'files/lexicon.shortcut.sh.tt', %G, %{ $required_config{pdns} } );
+    my $short = Provisioner::Cookbook->load( 'lexicon', distro => $DISTRO )->new(%PROV)->render_file( 'files/lexicon.shortcut.sh.tt', %G );
     like( $short, qr/^export[ ]LEXICON_POWERDNS_PDNS_SERVER=/m, 'the pdns shortcut names the socket option lexicon knows' );
     unlike( $short, qr/^export[ ]LEXICON_POWERDNS_SERVER=/m, 'rather than a spelling it resolves to nothing' );
 

@@ -43,8 +43,3 @@ chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/p
     it should be noticed. -%]
 systemctl restart pdns
 systemctl restart pdns-recursor
-# Setup lexicon shortcuts
-mkdir -p /opt/lexicon/[% domain %]; /bin/true
-mv lexicon-pdns.sh /opt/lexicon/[% domain %]/pdns
-chmod -R 0700 /opt/lexicon/[% domain %]
-chown -R root:root /opt/lexicon/[% domain %]

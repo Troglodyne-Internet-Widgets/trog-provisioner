@@ -82,7 +82,15 @@ subtest 'what pdns tells lexicon' => sub {
 };
 
 subtest 'the shortcut is rendered from that, and names what lexicon reads' => sub {
-    my $out = fresh('pdns')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $DOMAIN, api_key => 'an-api-key' );
+
+    # Through the lexicon recipe, which is what installs the shortcut: it asks
+    # the interface who holds this zone and renders whatever that answers.  The
+    # configuration is mocked so the token is one to assert on, rather than the
+    # one pdns mints for a server nobody configured a key for.
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return { pdns => { api_key => 'an-api-key' } } } );
+
+    my $out = fresh('lexicon')->render_file( 'files/lexicon.shortcut.sh.tt', domain => $DOMAIN );
 
     # lexicon builds an environment variable from provider plus option, so
     # --pdns-server is LEXICON_POWERDNS_PDNS_SERVER.  Its legacy fallback only

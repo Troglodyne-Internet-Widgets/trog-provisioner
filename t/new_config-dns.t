@@ -110,7 +110,11 @@ IPMAP
     };
 
     my $makefile = "$tmpdir/domains/$domain/Makefile";
-    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ) );
+
+    # The generated files as well as the makefile: a recipe that installs
+    # nothing has no target to assert on, and what it contributed is visible
+    # only in what somebody else rendered out of it.
+    return ( $err, ( -f $makefile ? File::Slurper::read_text($makefile) : undef ), "$tmpdir/domains/$domain" );
 }
 
 # Which recipes the generated makefile actually builds, as targets under the
@@ -211,7 +215,7 @@ subtest 'a reserved name resolves the interface to the server on the guest' => s
 };
 
 subtest 'a name somebody else holds resolves it to the registrar' => sub {
-    my ( $err, $makefile ) = generate(
+    my ( $err, $makefile, $dir ) = generate(
         $REMOTE,
         letsencrypt => undef,
         registrar   => { type => 'easydns', user => 'somebody', key => 'a-token' },
@@ -220,10 +224,14 @@ subtest 'a name somebody else holds resolves it to the registrar' => sub {
     is( $err, undef, 'the generation runs to the end' )   or diag $err;
     ok( defined $makefile, 'and a makefile was written' ) or return;
 
-    # The registrar recipe installs the /opt/lexicon shortcut for its provider,
-    # so it has to be on the guest -- letsencrypt declares a substitutable
-    # dependency and the depsolver turns that into this.
-    ok( builds( $makefile, 'registrar' ), 'the registrar recipe is built' );
+    # The registrar installs nothing of its own, so it has no target to find.
+    # What reaches the guest from it is the lexicon shortcut, rendered out of the
+    # credentials it holds -- which is what the dependency is for.
+    ok( builds( $makefile,  'lexicon' ), 'lexicon is built, being what carries those credentials onto the guest' );
+    ok( !builds( $makefile, 'pdns' ),    'and no server of our own, since somebody else holds the zone' );
+
+    my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
+    like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'and lexicon is pointed at the registrar that holds the zone' );
 };
 
 subtest 'a guest that could answer either way is refused until it says which' => sub {
@@ -240,7 +248,7 @@ subtest 'a guest that could answer either way is refused until it says which' =>
     # And settles when it does.  The preference is read from the configuration
     # of whichever recipe declared the dependency, which is where an operator
     # already writes it.
-    my ( $ok, $makefile ) = generate(
+    my ( $ok, $makefile, $dir ) = generate(
         $REMOTE,
         letsencrypt => { dns_preference => 'registrar' },
         registrar   => { type           => 'easydns', user => 'somebody', key => 'a-token' },
@@ -248,7 +256,14 @@ subtest 'a guest that could answer either way is refused until it says which' =>
     );
 
     is( $ok, undef, 'naming one lets it through' ) or diag $ok;
-    ok( builds( $makefile, 'registrar' ), 'and the one named is what gets built' );
+    ok( builds( $makefile, 'lexicon' ), 'and lexicon is built' );
+
+    # The tie has to be settled where the shortcut is rendered, not only in the
+    # recipe declaring the key: lexicon resolves the provider for itself, and on
+    # a guest configured both ways it has the same tie and nothing of its own to
+    # break it.  letsencrypt hands its answer down, and this is that arriving.
+    my $shortcut = -f "$dir/lexicon.sh" ? File::Slurper::read_text("$dir/lexicon.sh") : q{};
+    like( $shortcut, qr/^export[ ]LEXICON_EASYDNS_AUTH_TOKEN=/m, 'and the one named is what lexicon is pointed at' );
 };
 
 done_testing;

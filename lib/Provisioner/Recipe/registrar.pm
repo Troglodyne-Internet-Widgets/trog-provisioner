@@ -32,16 +32,15 @@ usually has one registrar.  A domain served by its own C<pdns> needs none, and a
 domain under a TLD RFC 2606 reserves can never use one -- no public registrar
 holds a zone for C<.test>.
 
-=head2 It installs almost nothing
+=head2 It installs nothing
 
 A registrar is somewhere else, so there is nothing here to configure and no
-service to start.  What the fragment does put on the guest is the convenience
-shortcut every provider gets, F</opt/lexicon/E<lt>domainE<gt>/E<lt>typeE<gt>>,
-so an operator can list and edit records by hand with the credentials already
-filled in.
+service to start.  This recipe is the credentials and C<lexicon_credentials>,
+which is what makes it one of the two answers to L<Provisioner::DNSRecipe>.
 
-The credentials themselves reach dehydrated through
-L<Provisioner::Recipe::letsencrypt>'s hook rather than through anything here.
+What is installed on the guest is installed by the recipes that read those:
+L<Provisioner::Recipe::lexicon>'s shortcut, and
+L<Provisioner::Recipe::letsencrypt>'s dehydrated hook.
 
 =cut
 
@@ -94,32 +93,17 @@ sub lexicon_credentials {
     );
 }
 
-=head2 %opts = $recipe->enrich(%opts)
+=head2 %required = $recipe->required_recipes(%opts)
+
+lexicon: a domain whose zone somebody else holds still has an operator who wants
+to edit it, and that shortcut is what they reach for.
 
 =cut
 
-sub enrich {
+sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    $opts{lexicon} = { $self->lexicon_credentials(%opts) };
-
-    return %opts;
-}
-
-=head2 %files = $recipe->template_files()
-
-=cut
-
-sub template_files {
-    return ( 'lexicon.shortcut.sh.tt' => 'lexicon.sh' );
-}
-
-=head2 @tests = $recipe->tests()
-
-=cut
-
-sub tests {
-    return qw{registrar.tt};
+    return ( lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
 }
 
 1;

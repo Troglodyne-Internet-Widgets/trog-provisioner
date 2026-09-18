@@ -61,7 +61,11 @@ sub rate_limits {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-Adds C<nostubresolver>.
+Adds C<nostubresolver> and C<lexicon>.
+
+L<Provisioner::Recipe::lexicon> is the client anything writes a record into this
+server's zone with, and what the patches this recipe used to carry are patches
+to.
 
 A guest running this server is the only thing that answers for its own zone, and
 the stub in front of it does not: lexicon walks the zone through the system
@@ -76,7 +80,7 @@ serving a zone without one.
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
-    return ( nostubresolver => sub { return () }, $self->SUPER::required_recipes(%opts) );
+    return ( nostubresolver => sub { return () }, lexicon => sub { return () }, $self->SUPER::required_recipes(%opts) );
 }
 
 sub args {
@@ -202,11 +206,6 @@ sub enrich {
 
     $opts{serial} = time;
 
-    # Under its own key rather than into registrar, which is the operator's and
-    # is what synczones writes its upstream section from.  Putting this there
-    # would have the guest describe itself as its own upstream.
-    $opts{lexicon} = { $self->lexicon_credentials(%opts) };
-
     return %opts;
 }
 
@@ -214,17 +213,14 @@ sub template_files {
     my ($self) = @_;
 
     return (
-        'pdns.zone.tt'                                 => 'zonefile',
-        'pdns.domain.tt'                               => 'pdns-domain.conf',
-        'pdns.global.tt'                               => 'pdns-global.conf',
-        'pdns.recursor.tt'                             => 'pdns-recursor-domain.conf',
-        'pdns.recursor.lua.tt'                         => 'pdns-recursor-domain.lua',
-        'pdns.rsyslog.tt'                              => '10-powerdns.conf',
-        'pdns.api.tt'                                  => 'pdns-api.conf',
-        'pdns.synczones.tt'                            => 'synczones.conf',
-        'lexicon.shortcut.sh.tt'                       => 'lexicon-pdns.sh',
-        'patches/lexicon-pdns-af-unix.patch'           => 'lexicon-pdns-af-unix.patch',
-        'patches/lexicon-arbitrary-record-types.patch' => 'lexicon-arbitrary-record-types.patch'
+        'pdns.zone.tt'         => 'zonefile',
+        'pdns.domain.tt'       => 'pdns-domain.conf',
+        'pdns.global.tt'       => 'pdns-global.conf',
+        'pdns.recursor.tt'     => 'pdns-recursor-domain.conf',
+        'pdns.recursor.lua.tt' => 'pdns-recursor-domain.lua',
+        'pdns.rsyslog.tt'      => '10-powerdns.conf',
+        'pdns.api.tt'          => 'pdns-api.conf',
+        'pdns.synczones.tt'    => 'synczones.conf',
     );
 }
 

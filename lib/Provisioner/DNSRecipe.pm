@@ -13,6 +13,7 @@ use parent qw{Provisioner::Recipe};
 use List::Util qw{any};
 use Scalar::Util();
 
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 
 =head1 NAME
@@ -46,12 +47,11 @@ other way, which is what an interface is for.
 
 A recipe that can answer such a challenge inherits from this and says what
 lexicon needs to reach it.  Everything that writes a record renders from that
-one answer: L<Provisioner::Recipe::letsencrypt>'s dehydrated hook, the
-per-domain shortcut under F</opt/lexicon>, and the upstream section of
-F</etc/synczones.conf>.  Before this they were three copies of the same
-knowledge, and they had already drifted -- the shortcut named an environment
-variable lexicon does not read, so it had never once been pointed at the API
-socket.
+one answer: L<Provisioner::Recipe::letsencrypt>'s dehydrated hook, and the
+per-domain shortcut L<Provisioner::Recipe::lexicon> installs.  Before this they
+were copies of the same knowledge, and they had already drifted -- the shortcut
+named an environment variable lexicon does not read, so it had never once been
+pointed at the API socket.
 
 =head2 It is a recipe in the ordinary way
 
@@ -224,6 +224,78 @@ sub implementation_for {
       if $local && $registrar;
 
     die "$domain has no DNS provider that could answer a dns-01 challenge: set registrar credentials for its zone, or add the $LOCAL_IMPLEMENTATION recipe so the guest serves the zone itself.\n";
+}
+
+=head2 $name = $recipe->provider_for(%opts)
+
+Which implementation serves C<$opts{domain}>, read out of the configuration this
+run was pointed at.
+
+C<implementation_for> with the three configurations fetched rather than handed
+over.  Use that one where a caller already holds them -- F<bin/new_config>
+resolving a substitutable dependency does -- and this one where it does not.
+
+=cut
+
+sub provider_for {
+    my ( $class, %opts ) = @_;
+
+    my $host = Provisioner::Cookbook->host_of( $opts{domain} );
+
+    return $class->implementation_for(
+        %opts,
+        configured      => Provisioner::Cookbook->domain_config( $opts{domain} ) // {},
+        host            => $host,
+        host_configured => ( defined $host ? Provisioner::Cookbook->domain_config($host) : undef ),
+    );
+}
+
+=head2 %credentials = $recipe->credentials_for(%opts)
+
+What lexicon needs to reach whoever holds C<$opts{domain}>'s zone: C<provider_for>,
+asked for its C<lexicon_credentials>.
+
+Dies naming the provider where a domain is configured with one this installation
+does not have, or one that cannot answer a challenge at all.
+
+=cut
+
+sub credentials_for {
+    my ( $class, %opts ) = @_;
+
+    my $provider = $class->provider_for(%opts);
+
+    return $class->_implementation($provider)->lexicon_credentials( _provider_config( $provider, %opts ) );
+}
+
+# The recipe implementing a provider, as a class.  Loaded rather than
+# instantiated: lexicon_credentials reads its arguments and nothing on the
+# object, and constructing one would want template_dirs a caller asking this has
+# no business knowing about.
+sub _implementation {
+    my ( $class, $provider ) = @_;
+
+    my $impl = eval { Provisioner::Cookbook->load($provider) };
+    die "$provider is not a recipe this installation has, so nothing can answer a dns-01 challenge through it.\n" unless $impl;
+    die "$provider cannot answer a dns-01 challenge: it is not a Provisioner::DNSRecipe.\n"                       unless $impl->isa('Provisioner::DNSRecipe');
+
+    return $impl;
+}
+
+# What to ask an implementation its credentials with: that recipe's own block for
+# this domain, falling back to the machine's, since a domain layered onto another
+# is served by what that guest runs.
+#
+# Whatever the operator wrote there and nothing else.  A credential nobody
+# configured is the implementation's to settle -- see
+# Provisioner::Recipe::pdns/api_key_for.
+sub _provider_config {
+    my ( $provider, %opts ) = @_;
+
+    my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
+    my $conf   = Provisioner::Cookbook->domain_config( $opts{domain} )->{$provider} // Provisioner::Cookbook->domain_config($server)->{$provider} // {};
+
+    return ( %{$conf}, domain => $opts{domain} );
 }
 
 # Whether a recipe appears in any of the configurations handed over: the
