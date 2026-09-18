@@ -21,36 +21,36 @@ use Provisioner::DNSRecipe();
 
 =head2 DESCRIPTION
 
-The client anything here writes a DNS record with.  Required by each recipe that
-runs it rather than configured by hand: L<Provisioner::Recipe::pdns> and
-L<Provisioner::Recipe::registrar> hold zones, and
-L<Provisioner::Recipe::letsencrypt>'s dehydrated hook answers a dns-01 challenge
-through it.
+This recipe installs lexicon, the client that every recipe here uses to write a
+DNS record.  It also applies two patches to lexicon and installs a shortcut for
+the domain.
 
-Three recipes owned a piece of it before.  letsencrypt installed the package,
-pdns applied the patches, and each DNS recipe installed a shortcut of its own --
-so a guest with pdns and no letsencrypt patched and invoked a client nothing had
-installed.
+You do not usually configure it yourself.  Each recipe that runs lexicon requires
+it.  L<Provisioner::Recipe::pdns> and L<Provisioner::Recipe::registrar> hold
+zones.  The dehydrated hook of L<Provisioner::Recipe::letsencrypt> answers a
+dns-01 challenge through lexicon.
 
 =head2 What it takes to reach a zone is not its business
 
-Which provider holds a domain's zone, and what lexicon authenticates to it with,
-is L<Provisioner::DNSRecipe/credentials_for>.  This renders what that answers.
+L<Provisioner::DNSRecipe/credentials_for> says which provider holds the zone of a
+domain, and which credentials lexicon uses for it.  This recipe renders that
+answer.
 
 =head2 The shortcut
 
-F</opt/lexicon/E<lt>domainE<gt>>, with the credentials already in it:
+The shortcut is F</opt/lexicon/E<lt>domainE<gt>>, and it contains the
+credentials:
 
     /opt/lexicon/my.domain.name list TXT
 
-A file rather than a directory holding one file per provider.  A domain has one
-zone and one provider holding it, so the provider in the path distinguished
-nothing -- and F<scripts/install_dkim_records> and letsencrypt's own SYNOPSIS
-had both always spelled it flat.
+It is a file, not a directory with one file for each provider.  A domain has one
+zone and one provider, so the path does not name the provider.
 
 =cut
 
 =head2 %schema = $recipe->args()
+
+Returns the schema.  C<bin/recipes> shows each field and its description.
 
 =cut
 
@@ -70,6 +70,11 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
+Returns C<%opts> with C<lexicon> added: the credentials that
+L<Provisioner::DNSRecipe/credentials_for> returns for the domain.  It dies when
+C<credentials_for> dies, for example when no provider or two providers can
+answer for the zone.
+
 =cut
 
 sub enrich {
@@ -82,6 +87,9 @@ sub enrich {
 
 =head2 %files = $recipe->template_files()
 
+Returns the shortcut template and the two patches, each mapped to the name of
+the file that it becomes.
+
 =cut
 
 sub template_files {
@@ -93,6 +101,8 @@ sub template_files {
 }
 
 =head2 @tests = $recipe->tests()
+
+Returns the guest test F<lexicon.tt>.
 
 =cut
 

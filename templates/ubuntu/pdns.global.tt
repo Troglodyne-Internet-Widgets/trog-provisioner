@@ -1,34 +1,32 @@
-# Grab up to date pdns.  Regrettably key servers are flaky, gotta retry over n over
+# Add the PowerDNS repository.  Key servers fail often, so each call retries.
 retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys CBC8B383
 retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys FD380FBB
 retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.com:80
-# A release train, not auth-master: master is PowerDNS's development branch and
-# it put 5.1.0~alpha1+master.380 on the guest.
+# A release train, not auth-master, which is the development branch.  See
+# repo_branch in Provisioner::Recipe::pdns.
 apt-add-repository http://repo.powerdns.com/ubuntu -p [% repo_branch %]
 apt-get update
 apt-get install -y pdns-server
-# Run on port 2500 so the recursor can run
+# Run on port 2500, because the recursor uses port 53
 mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
-[%# forward-zones-file, which is how the recursor takes a list of zones that
-    many things contribute to: one zone per line, zone=address:port.  Each
-    domain appends its own line in the per-domain target. -%]
+[%# forward-zones-file is how the recursor takes a list of zones from many
+    sources: one zone per line, zone=address:port.  Each domain appends its own
+    line in the per-domain target. -%]
 touch /etc/powerdns/forward-zones
 chown root:pdns /etc/powerdns/forward-zones; /bin/true
 chmod 0644 /etc/powerdns/forward-zones
 grep -q '^forward-zones-file=' /etc/powerdns/recursor.conf || echo 'forward-zones-file=/etc/powerdns/forward-zones' >> /etc/powerdns/recursor.conf
-[%# And whatever zones the recipe was configured with, in the same file. -%]
+[%# The forward_zones of the recipe go in the same file. -%]
 [% FOR zone IN forward_zones.keys().sort() %]
 grep -qxF '[% zone %]=[% forward_zones.$zone %]' /etc/powerdns/forward-zones || echo '[% zone %]=[% forward_zones.$zone %]' >> /etc/powerdns/forward-zones
 [% END -%]
-[%# The recursor validates DNSSEC, and an internal zone under a reserved TLD has
-    no chain to validate against -- so it answered SERVFAIL for the very zone it
-    was forwarding, while resolving the public internet perfectly well.  Nothing
-    said so: the failure surfaced as an ACME challenge that could not be seen.
+[%# The recursor validates DNSSEC, and an internal zone under a reserved TLD
+    has no chain to validate against.  So without an anchor, the recursor
+    answers SERVFAIL for the zone that it forwards.
 
-    A negative trust anchor turns validation off for that zone and nothing else.
-    Measured on a guest: the zone answers NOERROR afterwards and
-    dnssec-failed.org still SERVFAILs, which is the point of doing it per zone
-    rather than with dnssec=process-no-validate. -%]
+    A negative trust anchor turns off validation for that zone only.  This is
+    per zone, not dnssec=process-no-validate, so dnssec-failed.org still gets
+    SERVFAIL. -%]
 touch /etc/powerdns/recursor.lua
 chown root:pdns /etc/powerdns/recursor.lua; /bin/true
 chmod 0644 /etc/powerdns/recursor.lua
@@ -36,52 +34,36 @@ grep -q '^lua-config-file=' /etc/powerdns/recursor.conf || echo 'lua-config-file
 [% FOR zone IN forward_zones.keys().sort() %]
 grep -qF 'addNTA("[% zone %]"' /etc/powerdns/recursor.lua || echo 'addNTA("[% zone %]", "forwarded to [% forward_zones.$zone %]")' >> /etc/powerdns/recursor.lua
 [% END -%]
-# Configure the zone to be loaded into pdns
+# The sqlite backend, which holds the zones
 mv pdns-domain.conf /etc/powerdns/pdns.d/sqlite.conf
-# Set up the API so we can use lexicon
+# The API, which lexicon and synczones use
 mv pdns-api.conf /etc/powerdns/pdns.d/api.conf
-[%# Readable by pdns, which is not who the payload arrives owned by.  A file
-    moved out of it keeps the transfer user and its 0600, so pdns could not read
-    a line of its own configuration: it fell back to the packaged defaults,
-    bound 0.0.0.0:53 where the recursor already was, and exited on every
-    provision, unable to bind to the UDP socket.  api.conf carries the API key,
-    hence the group rather than the world. -%]
+[%# pdns must read these files, and a file moved out of the payload keeps the
+    transfer user and mode 0600.  If pdns cannot read them, it uses the
+    packaged defaults, binds 0.0.0.0:53 where the recursor is, and exits.
+    api.conf holds the API key, so the group can read, not everybody. -%]
 chown root:pdns /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
 chmod 0640 /etc/powerdns/pdns.d/00-global.conf /etc/powerdns/pdns.d/sqlite.conf /etc/powerdns/pdns.d/api.conf
 mv synczones.conf /etc/synczones.conf
 chown root:root /etc/synczones.conf
 chmod 0600 /etc/synczones.conf
-[%# The zone database belongs to the guest rather than to any one domain: a
-    single zones.db under /var/spool/powerdns holds every zone the machine
-    answers for, and each domain salvages that same host-wide tree.  So the
-    restore is done here, once, and not in the per-domain half -- where it could
-    never fire anyway, because by then the schema below has put a zones.db in
-    the destination and restore_state declines in front of content.
-    Which is also why it goes ahead of the schema rather than after it. -%]
-[%# Apply the schema, unless what came back already has one.  Unconditional was
-    right against a spool the package left empty and is an error against a
-    restored database: sqlite3 stops on the first table it is told to create
-    twice, and takes the target down with it. -%]
+[%# The data target restores the zones.db of the previous guest before this
+    runs.  See restores() in Provisioner::Recipe::pdns.  sqlite3 stops on a
+    table that already exists, and the target fails with it. -%]
 # Apply schema, to a database that does not already have one
 sqlite3 /var/spool/powerdns/zones.db 'SELECT 1 FROM domains LIMIT 1' >/dev/null 2>&1 || sqlite3 /var/spool/powerdns/zones.db < /usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql
-# Don't need no bind
+# Move the bind backend out of the way, because this recipe uses sqlite
 mkdir -p /etc/powerdns/config-available
 mv /etc/powerdns/pdns.d/bind.conf /etc/powerdns/config-available/bind.conf
-# Fix broken service configuration
+# Make the pdns unit run in its chroot
 [% script_dir %]/configure_pdns
 mkdir -p /var/spool/powerdns/run/pdns/; /bin/true
 chown -R pdns:pdns /var/spool/powerdns/run
 mv 10-powerdns.conf /etc/rsyslog.d/10-powerdns.conf
-[%# Here rather than queued.  post_install runs its queue one task at a time,
-    and letsencrypt queues its certificate fetcher before this recipe queues
-    anything -- so a fetcher needing the API socket and the zone was waiting on
-    a restart sitting behind it in the very queue it was blocking, and could
-    only ever time out.  Measured on a guest: the socket appeared at 02:57:25,
-    which is when the restart finally ran, long after the fetcher had failed.
-
-    configure_pdns has just rewritten the unit, so the reload belongs with it
-    rather than three targets later.  rsyslog is left queued: it is a drop-in
-    that nothing in the build reads back. -%]
+[%# Here, not in the postrun queue.  post_install runs its queue one task at a
+    time, and the letsencrypt certificate fetcher that needs pdns is ahead in
+    it.  configure_pdns rewrote the unit above, so the reload goes with it.
+    rsyslog stays queued, because nothing in the build reads its drop-in. -%]
 systemctl daemon-reload
 systemctl enable pdns
 systemctl enable pdns-recursor

@@ -1,18 +1,17 @@
 [%# The libvirt domain for a guest, rendered by Provisioner::Recipe::vm.
 
-    Everything conditional here was decided in that recipe by enrich(), against
-    what the libvirt and qemu on this hypervisor said they would take -- so this
-    writes what it is given and works nothing out.
+    enrich() in that recipe decides each condition here, from what libvirt and
+    qemu on this hypervisor take.  So this template writes what it gets and
+    works nothing out.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
-    string, and swallows the template as far as the next quote. -%]
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of a
+    string, and swallows the template up to the next quote. -%]
 <domain type='kvm'>
   <name>[% domain %]</name>
-[%# The identity of a domain that is already defined, on the rebuild that keeps
-    its disk.  libvirt binds a name to a uuid, and refuses to redefine a domain
-    it has under a different one -- so a rebuild that does not undefine first
-    has to hand back the uuid it was given.  Absent on a first build, where
-    there is no domain yet and libvirt mints one. -%]
+[%# The uuid of a domain that is already defined, for a rebuild that keeps its
+    disk.  libvirt binds a name to a uuid, and refuses to redefine a domain
+    under a different one.  So a rebuild that does not undefine first must give
+    back its uuid.  Absent on a first build, where libvirt makes one. -%]
 [% IF uuid -%]
   <uuid>[% uuid %]</uuid>
 [% END -%]
@@ -20,19 +19,19 @@
   <currentMemory unit='MiB'>[% memory %]</currentMemory>
   <vcpu placement='static'>[% cpus %]</vcpu>
 [% IF partition -%]
-[%# The systemd slice the guest is placed in.  libvirt writes /machine here
-      when nothing names one, so this is only ever a narrowing -- and it caps
-      nothing by itself: the limits are set on the slice with `systemctl
-      set-property`, once, by whoever owns the hypervisor.  Trog::HV::partition
-      is where it comes from and hypervisors.conf is where it is written. -%]
+[%# The systemd slice for the guest.  libvirt uses /machine when nothing
+      names one, so this only narrows it.  It caps nothing by itself.  The
+      owner of the hypervisor sets the limits on the slice once, with
+      `systemctl set-property`.  Trog::HV::partition reads it from
+      hypervisors.conf. -%]
   <resource>
     <partition>[% partition %]</partition>
   </resource>
 [% END -%]
 [% IF tuning.iothreads -%]
-[%# Threads qemu processes virtio-blk requests on: without any, submission
-      runs on the main loop in qemu, serialised against everything else that
-      loop is doing. -%]
+[%# Threads that qemu processes virtio-blk requests on.  Without one,
+      submission runs on the main loop of qemu, in series with all other work
+      on that loop. -%]
   <iothreads>[% tuning.iothreads %]</iothreads>
 [% END -%]
 
@@ -68,10 +67,10 @@
 
   <devices>
 [% FOR disk IN disks -%]
-[%# The disk belonging to the guest is named by volume rather than by
-        path, so the domain does not hardcode where the pool happens to live.
-        The backing store is baked into the qcow2 at creation; libvirt reports
-        it back but we do not declare it. -%]
+[%# The disk of the guest is named by volume, not by path, so the domain
+        does not hardcode where the pool is.  The qcow2 holds its backing store
+        from creation.  libvirt reports it back, but the domain does not
+        declare it. -%]
     <disk type='[% disk.type %]' device='disk'>
       <driver name='qemu' type='[% disk.format %]'[% IF tuning.cache %] cache='[% tuning.cache %]'[% END %][% IF tuning.io %] io='[% tuning.io %]'[% END %][% IF tuning.discard %] discard='unmap'[% END %][% IF tuning.detect_zeroes %] detect_zeroes='[% tuning.detect_zeroes %]'[% END %][% IF tuning.queues %] queues='[% tuning.queues %]'[% END %][% IF disk.discard_no_unref %] discard_no_unref='on'[% END %][% IF disk.iothread %] iothread='[% disk.iothread %]'[% END %][% IF disk.metadata_cache || disk.iothread_ids.size() %]>
 [% IF disk.metadata_cache -%]
@@ -140,10 +139,8 @@
     </interface>
 
 [% FOR fs IN filesystems -%]
-[%# virtiofs-better is `virtiofsd --inode-file-handles=mandatory`, without
-        which a busy share runs the daemon out of file handles.  The terraform
-        config asked for an open_files max here too and it never did anything:
-        libvirt has no such element, accepts the domain, and drops it. -%]
+[%# virtiofs-better is `virtiofsd --inode-file-handles=mandatory`.  Without
+        that option, a busy share runs the daemon out of file handles. -%]
     <filesystem type='mount' accessmode='passthrough'>
       <driver type='virtiofs' queue='1024'/>
       <binary path='/usr/libexec/virtiofs-better'/>
@@ -152,8 +149,8 @@
     </filesystem>
 [% END -%]
 [% IF tpm -%]
-[%# tpm-crb rather than tpm-tis: crb is the interface a TPM 2.0 is meant to
-        present, and what a current guest kernel looks for first. -%]
+[%# tpm-crb, not tpm-tis, because crb is the interface for a TPM 2.0.  A
+        current guest kernel looks for it first. -%]
     <tpm model='tpm-crb'>
       <backend type='emulator' version='2.0'/>
     </tpm>

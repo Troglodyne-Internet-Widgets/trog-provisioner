@@ -3,11 +3,11 @@
 # build_latest_perl.sh
 #
 # Build the latest perl into /opt/perl5 and give it cpanm, Module::Build and
-# Dist::Zilla.  What else goes into it is the perl recipe's cpan_deps, installed
-# by that recipe's target after this; scripts/cpan_install finds this perl as
-# the newest under /opt/perl5, and a person finds it through profile.d.
+# Dist::Zilla.  The target of the perl recipe installs its cpan_deps after this.
+# scripts/cpan_install finds this perl as the newest under /opt/perl5.  A person
+# finds it through profile.d.
 
-#XXX perlbrew = spooped when you run via clown-init
+# perlbrew fails under cloud-init without these.
 export SHELL='/bin/bash';
 export HOME='/root'
 export PERLBREW_ROOT='/root/perl5/perlbrew'
@@ -28,35 +28,31 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$LATEST_TARBALL
     cd src
     ./Configure -des -Dprefix=/opt/perl5/$NICE_PERL_NAME -Duseshrplib
-    # As many jobs as the guest has processors, not eight regardless.  A guest
-    # gets two by default, so -j8 put four times the work in flight as there
-    # was anything to run it on -- which on a build this size costs time rather
-    # than saving it.
+    # One job for each processor on the guest, which gets two by default.  More
+    # jobs than processors make a build of this size slower.
     JOBS=$(nproc 2>/dev/null || echo 2)
     make -j"$JOBS"
     make -j"$JOBS" install
 fi
 
-# Its cpanm, from the new perl's own CPAN client, since nothing else can install
-# one yet: -T so CPAN.pm skips the suite, and yes to answer its first-run
+# Install cpanm with the CPAN client of the new perl, because nothing else can
+# install it yet.  -T makes CPAN.pm skip the tests, and yes answers its first-run
 # configuration.
 #
-# cpanm and nothing else.  Measured on a guest: CPAN.pm two hundred
-# distributions into Dist::Zilla's tree lost a single fetch to "SSL connection
-# failed for cpan.org: SSL wants a read first", gave up, and took the build with
-# it.  cpanm is what every other install on a guest goes through, and it retries.
+# Install cpanm and nothing else this way.  CPAN.pm gives up on one failed fetch,
+# and cpanm retries.
 yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus || exit 1
 
-# What a distribution needing either cannot install for itself, through the one
-# thing on a guest that reaches CPAN.  Every run rather than only the first, so a
-# module added here reaches a guest whose perl is already built.
+# A distribution that needs one of these cannot install it for itself.
+# cpan_install is the one thing on a guest that gets modules from CPAN.  This runs
+# each time, so a module added here gets to a guest whose perl is already built.
 "$WD/cpan_install" --notest install Module::Build Dist::Zilla || exit 1
 
-# Where a person finds this perl.  Not where the build finds it: make runs its
-# recipe lines under a non-interactive sh out of an atd job, and systemd and
-# cron read no shell init either, so everything that installs into this perl
-# names it by path -- see scripts/cpan_install.  Rewritten every run, so a perl
-# built since is the one on the PATH.
+# Where a person finds this perl.  The build does not use it, because make runs
+# from an atd job under a non-interactive sh.  systemd and cron also read no
+# shell init.  So everything that installs into this perl names it by path (see
+# scripts/cpan_install).  This file is written again each run, so the newest perl
+# is on the PATH.
 cat > /etc/profile.d/perl.sh <<PROFILE
 PATH="/opt/perl5/$NICE_PERL_NAME/bin:\$PATH"
 PROFILE

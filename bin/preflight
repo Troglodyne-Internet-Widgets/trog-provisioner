@@ -32,16 +32,16 @@ preflight - say whether a throwaway guest can be built, before any time is spent
 
 =head1 DESCRIPTION
 
-Provisioning a guest takes minutes and touches a hypervisor.  Every check here
-is one that, if it fails, fails the whole run -- so they all happen up front,
-all of them run even after the first failure, and each one that fails says what
-to do about it.
+To provision a guest takes minutes and uses a hypervisor.  If one of these
+checks fails, the whole run fails.  So this program does all of them before the
+run.  It does every check, also after one fails, and each failure says what to
+do.
 
-Worth running against a hypervisor you have not built on before, or after
-changing anything about how you reach one.  The failures it catches are the ones
-that otherwise surface minutes in, as something that reads like an unrelated
-problem: a sudo prompt that hangs the run rather than failing it, a Sys::Virt
-that is a release out of step and so is missing a constant.
+Run it against a hypervisor that you did not build on before.  Also run it after
+you change how you connect to a hypervisor.  Without it, these failures occur
+minutes into a run and look like a different problem.  Two examples are a sudo
+prompt that stops the run and does not fail it, and a Sys::Virt of a different
+release that does not have a constant.
 
 Exits 0 when a run is worth starting and 1 when it is not.
 
@@ -51,11 +51,12 @@ Exits 0 when a run is worth starting and 1 when it is not.
 
 =item B<--connect> URI
 
-Check this hypervisor rather than whichever the fleet would pick.
+Check this hypervisor instead of the one that the fleet picks.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to the one under L<Trog::Config>.
+The fleet definition.  The default is the one in the configuration directory
+of L<Trog::Config>.
 
 =back
 
@@ -78,13 +79,8 @@ sub main {
 
     print "Hypervisor: " . $hv->uri . "\n\n";
 
-    # Every check runs even once one has failed: being told about the sudo and
-    # then, a fix later, about the missing xorriso is two round trips where one
-    # would do.
-    #
-    # Which questions are worth asking is the backend's to say -- see
-    # Trog::HV's PREFLIGHT section -- so this walks the list it gives rather
-    # than deciding from what kind of hypervisor it is.
+    # Every check runs, also after one fails, so one run reports all the fixes.
+    # The backend lists the checks.  See the PREFLIGHT section of Trog::HV.
     my @failed = grep { !$_->{ok} } map { report( %{ $hv->$_ } ) } $hv->preflight_checks;
 
     my @notes = grep { !$_->{ok} } map { $hv->$_ } $hv->preflight_notes;
@@ -107,22 +103,26 @@ sub main {
     return 1;
 }
 
-# Offer to fill in admin_authorized_keys from an online identity, when that is
-# what is missing and there is somebody there to ask.  ssh-import-id is what
-# fetches them, which is the same thing cloud-init used to do on every guest at
-# first boot -- done once here instead, against a file every guest is built from.
-#
-# Only ever at a terminal.  bin/preflight is run unattended by the provisioning
-# workflow, where a question has nowhere to be answered from, and a check that
-# blocks is worse than one that reports.
+=head2 $seeded = seed_admin_keys()
+
+If F<admin_authorized_keys> is missing, this offers to fill it in with
+ssh-import-id.  It asks for a service (C<gh> or C<lp>) and a name on that
+service.  Every guest gets its admin keys from this file.
+
+It asks only at a terminal.  The provisioning workflow runs bin/preflight with
+nobody to answer, and a question there stops the run.
+
+Returns 1 if ssh-import-id succeeded, and 0 in all other cases.
+
+=cut
+
 sub seed_admin_keys {
     my $path = Trog::Config->path('admin_authorized_keys');
     return 0 if -e $path;
 
     return 0 unless Trog::Local->interactive;
 
-    # The two ssh-import-id answers to, as a hash rather than a match: what the
-    # answer has to be one of is the thing worth writing down.
+    # The services that ssh-import-id accepts.
     my %offered = map { $_ => 1 } qw{gh lp};
 
     my $service = Trog::Utils::prompt('Seed it now? Which service [gh, lp, or empty to skip]:');
@@ -135,9 +135,7 @@ sub seed_admin_keys {
     my @cmd = ( 'ssh-import-id', '-o', $path, "$at:$who" );
     print 'Running ' . join( ' ', @cmd ) . "\n";
 
-    # Through the machine we are running on rather than a bare system(): it is
-    # how everything else here runs a command, and it is the half of this a test
-    # can stand in for.
+    # Trog::Local and not system(), so a test can replace it.
     return Trog::Local->new()->run_cmd(@cmd) == 0 ? 1 : 0;
 }
 
@@ -158,8 +156,13 @@ sub hypervisor {
     return $hv;
 }
 
-# The backends work out the verdict; this says it out loud as each arrives, so a
-# run reads as it goes rather than in one burst at the end.
+=head2 \%verdict = report(%verdict)
+
+Prints one line for a check as its result arrives, not all of them at the end.
+C<%verdict> has C<ok> and C<what>.  Returns C<%verdict> as a hash reference.
+
+=cut
+
 sub report {
     my (%verdict) = @_;
     printf "%s %s\n", ( $verdict{ok} ? '  ok  ' : 'FAILED' ), ( $verdict{what} // q{} );

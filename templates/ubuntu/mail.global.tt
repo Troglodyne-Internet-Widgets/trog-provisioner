@@ -2,23 +2,22 @@ mkdir -p /mail/scripts
 cp [% script_dir %]/dovecot_overquota /mail/scripts
 chown -R dovecot:dovecot /mail
 chmod -R 0775 /mail
-# The half of the mail stack's configuration that is about this guest rather
-# than about a domain, dropped into the fragment directories configd generates
-# postfix's and opendkim's files from.  Said once, here, because configd joins
-# list parameters across fragments -- and two domains each naming opendkim in
-# smtpd_milters would have postfix sign every message twice.
+# The half of the mail configuration that is about this guest, not about a
+# domain.  It goes into the fragment directories that configd makes the files
+# of postfix and opendkim from.  It is said once, here, because configd joins
+# list parameters across fragments.  If two domains each name opendkim in
+# smtpd_milters, postfix signs every message two times.
 #
-# The directories are made here as well as by `configd adopt`, with the modes
-# adopt would give them, because the makefile does not promise which of us runs
-# first.
+# This target makes the directories too, with the modes that `configd adopt`
+# gives them.  The makefile does not set which of the two runs first.
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d
 install -d -m 0755 -o root -g root /etc/postfix/master.cf.d
 install -d -m 0755 -o root -g root /etc/opendkim.conf.d
-# The dovecot account only exists on the guest, so its uid goes in here rather
-# than in the rendered template.
+# The dovecot account exists only on the guest, so its uid goes in here and
+# not in the rendered template.
 sed -i "s/%DOVECOT_UID%/$$(id -u dovecot)/g" main.cf.global
 install -m 0644 -o root -g root main.cf.global /etc/postfix/main.cf.d/40-mail
 install -m 0600 -o root -g root master.cf /etc/postfix/master.cf.d/40-mail
-# 0600 root:root, not opendkim's own: the fragments are read by configd running
-# as root out of ExecStartPre, and never by the daemon.
+# 0600 root:root, not the opendkim account.  configd reads the fragments as
+# root from ExecStartPre, and the daemon never reads them.
 install -m 0600 -o root -g root opendkim.conf /etc/opendkim.conf.d/40-mail

@@ -9,7 +9,7 @@ BINDIR=/bin /usr/bin /sbin /usr/sbin /usr/local/bin /root/bin
 LANGUAGE=en
 UPDATE_LANG="en"
 LOGFILE=/var/log/rkhunter.log
-# This ships logrotated, don't know why upstream doesn't set this high
+# logrotate rotates this log, so rkhunter appends to it.
 APPEND_LOG=1
 USE_SYSLOG=authpriv.warning
 COLOR_SET2=0

@@ -1,15 +1,13 @@
 #!/bin/bash
 
-[%# One shortcut for whichever recipe holds this zone, rendered from
-    Provisioner::DNSRecipe/lexicon_credentials.  pdns and the registrar reach
-    lexicon the same way -- a provider, a credential, and sometimes an endpoint
-    -- so there is one template rather than one per implementation, which is
-    how the two of them came to disagree about the endpoint variable in the
-    first place.
+[%# One shortcut for the recipe that holds this zone, rendered from what
+    Provisioner::DNSRecipe/lexicon_credentials returns.  pdns and the registrar
+    give lexicon the same things: a provider, a credential, and sometimes an
+    endpoint.  So one template serves both.
 
-    lexicon derives an environment variable from the provider name plus the
-    option name, so --pdns-server is PDNS_SERVER here with the provider
-    prefixed around it. -%]
+    lexicon makes the name of an environment variable from the provider name and
+    the option name.  So the option --pdns-server is PDNS_SERVER here, with the
+    LEXICON_ and provider prefix added. -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
 [% IF lexicon.user -%]
 export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"

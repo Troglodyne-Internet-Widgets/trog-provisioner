@@ -1,14 +1,14 @@
 [%# The mirror, over plain HTTP on port 80.
 
-    Port 80 and no TLS on purpose: the certificate this guest has is
-    self-signed, and apt will not fetch through one.  What makes that safe is
-    that the spool is a verbatim copy of the archive, signed indices included,
-    so apt verifies the distribution signature rather than trusting this host.
+    Port 80 and no TLS, on purpose.  The certificate of this guest is
+    self-signed, and apt does not fetch through one.  This is safe because the
+    spool is an exact copy of the archive, with the signed indices.  Thus apt
+    checks the signature of the distribution and does not trust this host.
 
-    server_name carries the address as well as the names.  A guest fetching
-    packages reaches this by address -- it runs cloud-init before it has a
-    resolver -- so the request arrives with a Host nginx would otherwise not
-    match, and would hand to whichever server is the default. -%]
+    server_name holds the address as well as the names.  A guest that fetches
+    packages runs cloud-init before it has a resolver, so it uses the address.
+    Without the address here, nginx does not match that Host.  It then gives
+    the request to the default server. -%]
 server {
     listen 80[% IF backlog %] backlog=[% backlog %][% END %];
 [% IF ipv6 -%]
@@ -27,8 +27,8 @@ server {
         tcp_nopush on;
     }
 
-[%# When the last sync finished, for anything that wants to know whether this
-    mirror is worth pointing at yet.  404 until the first one has. -%]
+[%# The time that the last sync finished, so a client can see if the mirror is
+    ready.  404 until the first sync finishes. -%]
     location = /mirror-status {
         alias [% spool %]/var/last_sync;
         default_type text/plain;

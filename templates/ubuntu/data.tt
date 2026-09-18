@@ -1,21 +1,20 @@
 mkdir -p [% install_dir %]/[% domain %]
-# We install the key to whatever user ran bin/provision from trog-provisioner.
-# This needs to be set up in your global config.
+# bin/provision adds the key of the guest to the authorized_keys of
+# transfer_user.  See Trog::Local.
 rsync -av -e 'ssh -p[% transfer_port %]' [% transfer_user %]@[% transfer_ip %]:[% data_source %]/[% domain %]/ [% install_dir %]/[% domain %]/
 chown -R [% user %]:[% admin_user %] [% install_dir %]/[% domain %]
 chmod -R 0750 [% install_dir %]/[% domain %]
-[%# And then put back whatever the recipes said they salvaged.  Here rather than
-    in each fragment: this is the same call fifteen times over, and the map it
-    walks is what every recipe depending on this one handed over through its
-    restores().  See Provisioner::Recipe::restores.
+[%# Put back the state that the recipes salvaged.  This is one loop, not a call
+    in the fragment of each recipe.  The restores() of each recipe fills in the
+    map.  See Provisioner::Recipe::restores.
 
-    After the rsync above, because that is what brings the salvage onto the
-    guest in the first place, and before any recipe target, because a recipe
-    that finds its state already in place is the whole point.
+    This comes after the rsync above, because the rsync brings the salvage onto
+    the guest.  It comes before every recipe target, so that each recipe finds
+    its state already in place.
 
-    restore_state declines on its own when there was nothing salvaged, when what
-    came down is empty, and when the destination already has state -- so this
-    can walk the whole map without asking any questions about any of it. -%]
+    restore_state does nothing when nothing was salvaged, when the salvage is
+    empty, or when the destination already has state.  So this loop does no
+    checks of its own. -%]
 [% FOR dest IN restores.keys().sort() %]
 [% script_dir %]/restore_state '[% restores.$dest.from %]' '[% dest %]'[% IF restores.$dest.owner %] '[% restores.$dest.owner %]'[% ELSE %] ''[% END %][% IF restores.$dest.mode %] '[% restores.$dest.mode %]'[% END %]
 [% END -%]

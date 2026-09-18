@@ -16,13 +16,8 @@ Provisioner::Recipe::Ubuntu::logshipper - Ubuntu's C<deps> for L<Provisioner::Re
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else logshipper does is in the recipe this
-inherits from.
-
-Named rather than assumed: the image ships rsyslog today, but this recipe is the
-only reason it has to be there now that the distro recipe no longer configures
-one.
+The image ships rsyslog today.  This recipe names it anyway, because the shipper
+needs rsyslog and must not depend on what the image happens to contain.
 
 =cut
 

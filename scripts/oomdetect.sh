@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Let you know when something gets whacked by oomkiller
+# Print a warning, which cron mails to you, when the OOM killer stops a process.
 
 IS_RPM=$(which rpm)
 

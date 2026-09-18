@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Let you know when a file managed by the packager changes
+# Report new changes to the files that the package manager installed.
 
 IS_RPM=$(which rpm)
 

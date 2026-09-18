@@ -1,6 +1,7 @@
 #!/bin/bash
-# Mirror public GitHub repositories to this gogs instance.
-# Skips repos already present. Safe to re-run.
+# Mirror the public GitHub repositories of each configured user and organization
+# to this gogs.  It skips a repository that is already here, so you can run it
+# again.
 
 set -uo pipefail
 

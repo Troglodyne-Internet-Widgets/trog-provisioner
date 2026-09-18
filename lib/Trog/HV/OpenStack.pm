@@ -27,7 +27,7 @@ Cinder disks
 
 =head1 SYNOPSIS
 
-    # Not built directly.  A hypervisors.conf block naming a cloud gets you one.
+    # You do not build one directly.  A hypervisors.conf block that names a cloud makes one.
     my $hv = Trog::HV->new(cloud => 'openstack', flavor => 'm1.medium');
 
     $hv->create_guest(name => 'vm.example.test', user_data => $cloud_config);
@@ -36,77 +36,70 @@ Cinder disks
 
 =head1 DESCRIPTION
 
-A cloud we build guests on by asking Nova, rather than a machine we build them
-on by asking libvirt.
+This backend builds guests on a cloud, through the Nova API.  The libvirt
+backend builds them on a machine, through libvirt.
 
-The words change with the thing underneath them, and the differences are not
-cosmetic:
+The terms change with the platform, and each difference changes what the
+backend can do:
 
 =over 4
 
-=item * A guest has a B<flavor>, not a disk size and a memory figure.  What
-sizes exist is the cloud's to say, and F<hypervisors.conf> names one.
+=item * A guest has a B<flavor>, not a disk size and a memory size.  The cloud
+sets which flavors exist, and F<hypervisors.conf> names one.
 
-=item * There is no B<storage pool>, and no path on a filesystem where a disk
-image sits.  A root disk comes from a Glance image, and anything else is a
-Cinder volume.
+=item * There is no B<storage pool>, and no disk image file on a filesystem.  A
+root disk comes from a Glance image.  Every other disk is a Cinder volume.
 
-=item * There is no B<cdrom>, so no C<cidata> ISO.  Nova takes the cloud-init
-payload as C<user_data> and hands it to the guest itself.
+=item * There is no B<cdrom>, so there is no C<cidata> ISO.  Nova takes the
+cloud-init payload as C<user_data> and gives it to the guest.
 
-=item * There is no B<NAT lease> to look up.  Neutron assigns the address, and
-a floating IP is what makes it reachable from outside.
+=item * There is no B<NAT lease> to look up.  Neutron assigns the address, and a
+floating IP makes the guest reachable from outside.
 
-=item * Most importantly, B<there is no hypervisor to get a shell on.>  There is
-an API endpoint.
+=item * Most important, B<there is no hypervisor to get a shell on.>  There is
+only an API endpoint.
 
 =back
 
-That last one is why C<is_local> is true here: there is no hypervisor filesystem
-to reach, so every file operation L<Trog::Machine> offers is a local one.
+The last point is why C<is_local> is true here.  There is no hypervisor
+filesystem, so every file operation that L<Trog::Machine> offers runs locally.
 
 =head2 The payload needs nothing special
 
-A guest fetches C<data.tar.gz> from L<Trog::Local> -- the machine running this
-tool -- rather than from its hypervisor, so there is no hypervisor in that
-arrangement to be missing.  A cloud guest fetches exactly as a libvirt one does,
-from the same place, with the key F<bin/provision> put in the same
-C<authorized_keys>.
+A guest fetches C<data.tar.gz> from L<Trog::Local>, the machine that runs this
+tool, and not from its hypervisor.  So a cloud guest fetches the same way that a
+libvirt guest does.  It uses the same source, and the key that F<bin/provision>
+put in the same C<authorized_keys>.
 
-What it does need is to be able to reach us, and that is a question about
-routing rather than about backends: L<Trog::Local/transfer_ips> works out which
-of our addresses it can, and F<bin/preflight> is where that is checked.
+The guest must be able to reach this machine.  That is a routing question, not
+a backend question.  L<Trog::Local/transfer_ips> finds which of our addresses
+the guest can reach, and F<bin/preflight> checks it.
 
 =head1 CLASS METHODS
 
 =cut
 
-# Where a cloud keeps the numbers this backend needs.
-#
-# Nova reports the allowance and the usage together, so both halves of
-# "will another guest fit" come from one request.  Cinder reports disk the same
-# way, and separately, because block storage has its own quota.
+# Cinder reports its quota in gigabytes.
 my $GB = 1024 * 1024 * 1024;
 
-# Stamped into every guest's Nova metadata, so a teardown can tell one of ours
-# from one somebody else built in the same project.
+# Written into the Nova metadata of every guest this tool builds, to mark the
+# guest as ours.
 our $MANAGED_BY = 'trog-provisioner';
 
-# How long to wait for a deleted server to actually go.
+# Seconds to wait for a deleted server to go.
 our $DELETE_TIMEOUT = 300;
 
-# How long to wait for a rebuilt one to come back.
+# Seconds to wait for a rebuilt server to become ACTIVE.
 our $REBUILD_TIMEOUT = 600;
 
-# The first compute microversion whose rebuild takes user_data.  Below it the
-# request cannot carry one, and a rebuild without one keeps the payload the
-# server was created with.
+# The first compute microversion whose rebuild takes user_data.  Without it, a
+# rebuild keeps the payload that the server was created with.
 our $REBUILD_MICROVERSION = '2.57';
 
 =head2 config_keys
 
-The F<hypervisors.conf> keys this backend reads.  C<cloud> is what marks a
-block as one of ours: it names an entry in F<clouds.yaml>.
+Returns the F<hypervisors.conf> keys that this backend reads.  C<cloud> marks a
+block as one for this backend.  It names an entry in F<clouds.yaml>.
 
 =cut
 
@@ -116,14 +109,14 @@ sub config_keys {
 
 =head2 build(%opts)
 
-Build one.  C<cloud> is required, because without it there is no way to know
-which cloud out of F<clouds.yaml> is meant, and guessing would be picking one of
-somebody's clouds at random.
+Returns a new backend object.  C<cloud> is required, because without it there
+is no way to know which cloud in F<clouds.yaml> to use.
 
-Nothing is contacted here.  Authentication happens when something first asks a
-question that needs answering, so that building the object -- which
-C<bin/new_config> does merely to read a path off it -- does not require a
-working credential.
+Dies when C<cloud> is not given.
+
+This does not contact the cloud.  Authentication happens at the first call that
+needs the API.  So C<bin/new_config> can build the object to read a path off it,
+without a working credential.
 
 =cut
 
@@ -140,19 +133,11 @@ sub build {
 
 =head2 is_local
 
-True, and not because the cloud is this machine.
+True, but not because the cloud is this machine.
 
-There is no hypervisor filesystem to reach, so the per-domain directory is on
-the machine running this, and the file operations that would have gone over SSH
-to a hypervisor are local ones.  See L</DESCRIPTION>.
-
-=head2 describe
-
-The cloud, for a diagnostic to name.
-
-=head2 cloud
-
-Which entry in F<clouds.yaml> this is.
+There is no hypervisor filesystem to reach.  So the directory for each domain is
+on the machine that runs this tool, and every file operation runs locally.  See
+L</DESCRIPTION>.
 
 =cut
 
@@ -160,24 +145,36 @@ sub is_local { return 1 }
 
 =head2 builds_by_api
 
-True.  A guest is created by asking Nova, so none of the libvirt XML this
-toolkit can generate is of any use here.
+True.  Nova creates the guest, so this backend uses none of the libvirt XML that
+this toolkit can generate.
 
 =head2 manages_addresses
 
-True.  Neutron allocates, and F<ipmap.cfg>'s pool has no part in it.
+True.  Neutron allocates the addresses, and the pool in F<ipmap.cfg> has no part
+in it.
 
 =cut
 
 sub builds_by_api     { return 1 }
 sub manages_addresses { return 1 }
+
+=head2 cloud
+
+Returns the name of the entry in F<clouds.yaml> that this object uses.
+
+=head2 describe
+
+Returns a name for the cloud, for a diagnostic message.
+
+=cut
+
 sub cloud    ($self) { return $self->{cloud} }
 sub describe ($self) { return 'the OpenStack cloud ' . $self->{cloud} }
 
 =head2 uri
 
-The Keystone endpoint, so that anything printing "where are we building this"
-has something true to print.
+Returns the Keystone endpoint, so that a message about where a guest is built
+has a correct value to show.
 
 =cut
 
@@ -188,9 +185,10 @@ sub uri {
 
 =head2 flavor, image, network, floating_network, availability_zone, security_group, keypair
 
-What F<hypervisors.conf> said to build guests with.  C<security_group> defaults
-to C<default>, which is the group every project has; the rest have no default,
-because there is no sensible guess at which image or flavor somebody meant.
+Return the values that F<hypervisors.conf> set for new guests.
+C<security_group> defaults to C<default>, which is the group that every project
+has.  The others have no default, because there is no safe guess for an image or
+a flavor.
 
 =cut
 
@@ -206,10 +204,11 @@ sub security_group    ($self) { return $self->{security_group} // 'default' }
 
 =head2 api
 
-The L<OpenStack::MetaAPI> this talks to, authenticated and kept.
+Returns the authenticated L<OpenStack::MetaAPI> object, and keeps it for later
+calls.
 
-Built on first use rather than in the constructor, so that an object nobody asks
-a cloud question of never needs a credential.
+It is built at first use and not in the constructor.  So an object that never
+calls the cloud never needs a credential.
 
 =cut
 
@@ -219,26 +218,25 @@ sub api {
 
     my $auth = Trog::OpenStack::Auth->from_cloud( $self->{cloud} );
 
-    # MetaAPI builds its own auth from constructor arguments unless it is handed
-    # one, and the one it builds cannot do application credentials.
+    # Without an auth object, MetaAPI builds its own, and that one cannot use
+    # application credentials.
     return $self->{_api} = OpenStack::MetaAPI->new( { auth => $auth } );
 }
 
 =head1 CAPACITY
 
-What the project is allowed and what it has already used, which is what a quota
-is.  L<Trog::HV> does the arithmetic; this only has to answer in the shape it
-reads.
+A quota is what the project is allowed and what it already uses.  L<Trog::HV>
+does the arithmetic.  This backend only returns the numbers in the form that
+L<Trog::HV> reads.
 
 =head2 cpu_overcommit
 
-1, always.
+Returns 1, always.
 
-A libvirt host is asked for its physical CPU count, and how many vCPUs per core
-is acceptable is our judgment to make.  A quota is not a physical count -- it
-is already the number of cores this project may run -- so there is nothing left
-to overcommit, and multiplying it by four would invent headroom the cloud will
-refuse to honor.
+On a libvirt host, the CPU count is physical, and we decide how many vCPUs per
+core are acceptable.  A quota is already the number of cores that the project
+can run.  So there is nothing to overcommit, and a larger ratio gives headroom
+that the cloud refuses.
 
 =cut
 
@@ -246,10 +244,10 @@ sub cpu_overcommit { return 1 }
 
 =head2 max_guests
 
-The instance quota, unless F<hypervisors.conf> set something lower.
+Returns the value from F<hypervisors.conf> if it is set, or the instance quota
+if it is not.
 
-Unlike a libvirt host, a cloud has an opinion about this, and it is the one that
-will be enforced whatever we think.
+The cloud enforces its instance quota, whatever this tool decides.
 
 =cut
 
@@ -261,11 +259,12 @@ sub max_guests {
 
 =head2 capacity
 
-As L<Trog::HV/capacity>, out of Nova's and Cinder's limits.
+As L<Trog::HV/capacity>.  Memory, cores and instances come from the Nova limits.
+Disk comes from the Cinder limits, because block storage has its own quota.
 
-C<memory_mb> and C<cpus> are the allowance rather than a physical count, which
-is the honest reading: what the project may have is the only number that
-constrains anything.  Cached for the life of the object, as libvirt's is.
+C<memory_mb> and C<cpus> are the quota, not a physical count.  The quota is the
+only number that limits the project.  The result is kept for the life of the
+object, as in the libvirt backend.
 
 =cut
 
@@ -295,22 +294,23 @@ sub capacity {
         disk_free        => $disk_total - $disk_used - $self->reserve_disk,
         guests           => $nova->{totalInstancesUsed} // 0,
 
-        # Not part of the shape Trog::HV reads; max_guests wants it.
+        # Not part of what Trog::HV reads.  max_guests uses it.
         guests_allowed => $nova->{maxTotalInstances} // 0,
     };
 }
 
 =head1 GUESTS
 
-A guest is a Nova server whose name is the domain name, which is the same
-identity libvirt uses for a domain.
+A guest is a Nova server whose name is the domain name.  libvirt uses the same
+name for a domain.
 
 =head2 server($name)
 
-The server called C<$name>, or nothing.
+Returns the server called C<$name>, or nothing.
 
-Dies if the cloud has more than one, rather than picking one: two servers
-answering to a domain name is a situation to be told about, not to guess at.
+Dies when C<$name> is empty.  Dies when the cloud has more than one server with
+that name, because two servers with one domain name is a problem to report, not
+to guess at.
 
 =cut
 
@@ -319,9 +319,8 @@ sub server {
 
     die "server() needs a name\n" unless $name;
 
-    # The route filters client side on an exact match, so this cannot pick up a
-    # guest that merely has $name as a prefix -- which the Nova API's own name
-    # filter, being a regex match, would.
+    # MetaAPI filters for an exact match on our side.  The Nova name filter is a
+    # regex, and also matches a guest whose name only starts with $name.
     my @found = grep { ref $_ } $self->api->servers( name => $name );
 
     die "The cloud has " . scalar(@found) . " servers called '$name'; refusing to guess which\n"
@@ -332,12 +331,12 @@ sub server {
 
 =head2 server_detail($name)
 
-The same guest, in full.
+Returns the full record of the server called C<$name>, or nothing.  Dies as
+L</server($name)> does.
 
-Nova's server I<list> returns only C<id>, C<name> and C<links> -- no status, no
-addresses, no metadata.  Anything that needs to know what a guest is actually
-doing has to ask for it by id, so this is the call that costs a second request,
-and the one those callers use.
+The Nova server I<list> returns only C<id>, C<name> and C<links>.  It gives no
+status, no addresses and no metadata.  To get those, this makes a second request
+by id.
 
 =cut
 
@@ -350,18 +349,12 @@ sub server_detail {
     return $self->api->server_from_uid( $summary->{id} );
 }
 
-=head2 domain_exists($name)
-
-Whether there is such a guest, in whatever state Nova has it.
-
-=cut
-
 =head2 guest_names
 
-Every server in the project, whatever built it.
+Returns the name of every server in the project, whatever built it.
 
-Not only the ones this tool made: an orphan sweep is asking "is anything still
-using this name", and a server somebody else created is still using it.
+An orphan sweep asks whether anything still uses a name.  A server that somebody
+else created still uses its name, so the list includes it.
 
 =cut
 
@@ -370,26 +363,35 @@ sub guest_names {
     return map { $_->{name} } grep { ref $_ } $self->api->servers();
 }
 
+=head2 domain_exists($name)
+
+Returns 1 if there is a guest called C<$name>, in any Nova state, and 0 if there
+is not.
+
+=cut
+
 sub domain_exists ( $self, $name ) { return defined $self->server($name) ? 1 : 0 }
 
 =head2 guest_ssh_ip($config, $lease)
 
-The address to reach a guest at: its floating IP.  C<$lease> is libvirt's and is
-ignored.
+Returns the IPv4 address to reach a guest at.  C<$config> is the configuration
+of the domain, or the domain name.  C<$lease> is for libvirt, and this backend
+ignores it.
 
-A fixed address on a tenant network only routes from inside that network, so
-unlike libvirt's NAT lease -- which at least works from the hypervisor -- it is
-no use to us at all.  Dies naming the guest when it has no floating IP, because
-the alternative is handing back an address that will silently never connect.
+A floating IP comes first.  If there is none, an address on an external network
+is used.  A fixed address on a tenant network only routes inside that network,
+so it is of no use.
+
+Dies when there is no such guest.  Dies with the name of the guest when it has
+no reachable address, and does not return an address that never connects.
 
 =cut
 
 sub guest_ssh_ip {
     my ( $self, $config, $_lease ) = @_;
 
-    # The second argument is libvirt's NAT lease, which means nothing here: a
-    # cloud allocates the address itself and the guest is found by name.  Taken
-    # and ignored so bin/provision can ask either backend the same way.
+    # The lease is taken and ignored, so bin/provision calls either backend the
+    # same way.
     my $name = ref $config ? $config->param('domain') : $config;
 
     my $server = $self->server_detail($name)
@@ -397,23 +399,19 @@ sub guest_ssh_ip {
 
     my @addresses = grep { _is_ipv4($_) } $self->_addresses($server);
 
-    # A floating IP is the usual way out of a tenant network, so where there is
-    # one it wins.
     my $floating = first { ( $_->{'OS-EXT-IPS:type'} // '' ) eq 'floating' } @addresses;
     return $floating->{addr} if $floating;
 
-    # But not every cloud has a tenant network to escape from.  Where the only
-    # network is external and shared, a guest on it is reachable at the address
-    # it was given, and Nova calls that address 'fixed' -- so insisting on a
-    # floating one would reject a guest that is answering perfectly well.
+    # Some clouds have only an external shared network.  Nova calls an address
+    # on it 'fixed', but the guest is reachable there.
     my $reachable = first { $self->_network_is_external( $_->{network} ) } @addresses;
     return $reachable->{addr} if $reachable;
 
     die "The guest '$name' has no address we can reach it at.\n" . "It is on " . ( join( ', ', map { "$_->{network} ($_->{addr})" } @addresses ) || 'no network' ) . ", none of which is external.\n" . "Set floating_network in hypervisors.conf so a routable address gets attached.\n";
 }
 
-# Nova reports addresses as a hash of network name => list of addresses, which
-# is one level of nesting more than any caller here cares about.
+# Nova gives a hash of network name to a list of addresses.  This flattens it to
+# one list, with the network name in each address.
 sub _addresses {
     my ( $self, $server ) = @_;
 
@@ -428,15 +426,12 @@ sub _addresses {
     } sort keys %$addresses;
 }
 
-# ssh would take either, but the rest of this toolkit deals in IPv4 -- 'ips' in
-# provision.conf is a list of them -- so handing back a v6 address would be
-# handing it somewhere that cannot hold it.
+# The rest of this toolkit uses IPv4 only.  The 'ips' in provision.conf is a
+# list of IPv4 addresses, so it cannot hold an IPv6 one.
 sub _is_ipv4 ($address) { return ( $address->{addr} // '' ) =~ m/\A\d+(?:[.]\d+){3}\z/ ? 1 : 0 }
 
-# Is this network one the outside world can route to?
-#
-# Cached, because guest_ssh_ip is asked repeatedly while waiting for a guest to
-# come up, and the answer cannot change underneath us in that time.
+# Whether the outside world can route to this network.  The answer is cached,
+# because guest_ssh_ip asks again and again while a guest starts.
 sub _network_is_external {
     my ( $self, $name ) = @_;
 
@@ -450,24 +445,23 @@ sub _network_is_external {
 
 =head1 SNAPSHOTS
 
-Nova snapshots a server into a Glance image.  Glance images are per project
-rather than per server, so the guest a snapshot belongs to has to be in its
-name; C<$domain@$snapshot> is that, and C<@> is a character no domain name and
-no libvirt snapshot name contains.
+Nova makes a snapshot of a server as a Glance image.  Glance images belong to
+the project, not to a server.  So the name of each snapshot image holds the
+guest name, as C<$domain@$snapshot>.  No domain name and no libvirt snapshot
+name contains C<@>.
 
 =head2 snapshot_names($domain)
 
-The snapshots taken of this guest, newest first.
+Returns the names of the snapshots of this guest, newest first.
 
 =cut
 
 sub snapshot_names {
     my ( $self, $domain ) = @_;
 
-    # Filtered at Glance rather than here: Nova stamps every snapshot it takes
-    # with image_type, so this asks for snapshots and not for the base images
-    # the project also holds.  Narrowing to one guest is the name prefix, and
-    # that Glance cannot do -- it matches a name exactly or not at all.
+    # Glance filters on image_type, which Nova sets on every snapshot, so base
+    # images do not come back.  Glance matches a name only exactly, so the
+    # prefix for one guest is filtered here.
     my @images =
       reverse sort { ( $a->{created_at} // '' ) cmp ( $b->{created_at} // '' ) }
       grep { ref $_ && index( $_->{name} // '', "$domain\@" ) == 0 } $self->api->list_images( image_type => 'snapshot' );
@@ -477,10 +471,10 @@ sub snapshot_names {
 
 =head2 snapshot_current_name($domain)
 
-The most recent snapshot of this guest.
+Returns the name of the newest snapshot of this guest.
 
-libvirt tracks which snapshot a domain is "on"; Glance has no such pointer, so
-this is the newest one by creation time, which is what the caller is after.
+libvirt records which snapshot a domain is on.  Glance has no such record, so
+this returns the newest snapshot by creation time.
 
 =cut
 
@@ -493,17 +487,12 @@ sub snapshot_current_name {
 
 =head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
 
-=head2 revert_snapshot($domain, $name)
+Takes a snapshot of the guest while it runs, and returns 1.  Dies when there is
+no such guest.
 
-Take one, and put the guest back on one.  Reverting is a Nova rebuild onto the
-snapshot's image, which keeps the server -- and so its addresses and its
-floating IP -- and replaces what is on its root disk.
-
-C<disk_only> is accepted and ignored.  It is the libvirt backend's distinction,
-where a snapshot carrying memory is the only kind a running domain will give up
-and the disk-only form means stopping the guest first.  Nova images a server
-while it runs and writes no memory either way, so there is nothing here for the
-option to select and nothing to be gained by stopping.
+C<disk_only> is accepted and ignored.  The libvirt backend uses it to choose
+between a snapshot with memory and one of the disk only.  Nova never saves
+memory, and does not need to stop the guest.
 
 =cut
 
@@ -517,13 +506,23 @@ sub create_snapshot {
     return 1;
 }
 
+=head2 revert_snapshot($domain, $name)
+
+Puts the guest back on a snapshot, and returns 1.  This is a Nova rebuild onto
+the snapshot image.  The server, its addresses and its floating IP stay.  The
+contents of the root disk change.
+
+Dies when there is no such guest, or no such snapshot.
+
+=cut
+
 sub revert_snapshot {
     my ( $self, $domain, $name ) = @_;
 
     my $server = $self->server($domain)
       or die "There is no guest called '$domain' to revert\n";
 
-    # By exact name, which Glance answers without enumerating anything.
+    # Glance finds an exact name without a list of every image.
     my $image = $self->api->image_from_name("$domain\@$name");
     $image = $image->[0] if ref $image eq 'ARRAY';
 
@@ -538,20 +537,25 @@ sub revert_snapshot {
 
 =head2 create_guest(%spec)
 
-Build a guest, and wait for Nova to call it C<ACTIVE> and give it a floating IP.
+Builds a guest, and waits until Nova reports it C<ACTIVE>.  If there is a
+C<floating_network>, it also attaches a floating IP from that network.
 
 C<name> is required.  C<flavor>, C<image>, C<network>, C<floating_network>,
-C<availability_zone>, C<security_group> and C<keypair> each default to what
-F<hypervisors.conf> said, so a caller normally passes only the name and the
+C<availability_zone>, C<security_group> and C<keypair> each default to the value
+in F<hypervisors.conf>.  So a caller usually passes only the name and the
 payload.
 
-C<user_data> is the cloud-init payload.  It goes to Nova as a field on the
-server, which is the whole of what replaces the C<cidata> ISO.
+C<user_data> is the cloud-init payload.  Nova takes it as a field on the server,
+in place of the C<cidata> ISO.
 
-Everything built this way is tagged in its Nova metadata as ours, so that a
-later teardown can tell a guest this tool made from one somebody else did.
+The Nova metadata of the guest gets C<managed_by> and C<domain>, on top of any
+C<metadata> that the caller passes.
 
-Returns the server, including C<floating_ip_address>.
+Returns the server.  It includes C<floating_ip_address> when a floating IP was
+attached.
+
+Dies when C<name>, C<flavor>, C<image> or C<network> has no value.  Dies when
+the server does not become C<ACTIVE>.
 
 =cut
 
@@ -561,13 +565,8 @@ sub create_guest {
     my $name = $spec{name};
     die "create_guest needs a name\n" unless $name;
 
-    # Say which one is missing and where it goes.  There is no guessing a flavor
-    # or an image: what exists is the cloud's to say.
-    #
-    # floating_network is not among them.  A cloud whose only network is
-    # external needs no floating IP, and demanding one here would make such a
-    # cloud unbuildable; guest_ssh_ip is where not having a reachable address
-    # actually becomes a problem, and it says so there.
+    # floating_network is not required.  A cloud whose only network is external
+    # needs no floating IP, and guest_ssh_ip reports a guest it cannot reach.
     foreach my $needed (qw{flavor image network}) {
         $spec{$needed} //= $self->{$needed};
         die "Building '$name' on " . $self->describe . " needs '$needed'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
@@ -599,21 +598,23 @@ sub create_guest {
 
 =head2 rebuild_guest($name, user_data => $seed)
 
-Put a fresh root disk from the image under a guest that already exists, with a
-new cloud-init payload, and wait for Nova to call it C<ACTIVE> again.
+Puts a new root disk from the image under a guest that exists, with a new
+cloud-init payload.  Then waits until Nova reports it C<ACTIVE> again.
 
-A rebuild keeps the server, and so its ports, its floating IP and any volume
-attached to it.  What it replaces is the root disk, which is also what
-rebuilding a libvirt guest replaces: its overlay is made again from the base
-image.  C<image> defaults to what F<hypervisors.conf> said, like
+A rebuild keeps the server, its ports, its floating IP and its attached volumes.
+It replaces the root disk, as a libvirt rebuild makes the overlay again from the
+base image.  C<image> defaults to the value in F<hypervisors.conf>, as in
 L</create_guest(%spec)>.
 
-The payload is the point.  It holds the key F<bin/provision> just let in, and a
-rebuild that kept the old one would bring the guest up locked against us -- so
-this asks Nova for the microversion that takes it, and a cloud too old to give
-that refuses the request rather than quietly rebuilding from the stale one.
+The payload holds the key that F<bin/provision> just added.  Without it, the
+guest starts with a payload that does not let us in.  So this asks Nova for the
+microversion that takes C<user_data>, and an older cloud refuses the request.
 
-Returns the server, in full.
+Returns the full server record.
+
+Dies when there is no such guest, no image, or no image with that name.  Dies
+when the server goes to C<ERROR>, or is not C<ACTIVE> after
+C<$REBUILD_TIMEOUT> seconds.
 
 =cut
 
@@ -636,7 +637,7 @@ sub rebuild_guest {
     return $self->_wait_for_active( $server->{id}, $name );
 }
 
-# Nova's rebuild wants an image id, and hypervisors.conf may well name one.
+# The Nova rebuild takes an image id, and hypervisors.conf can name the image.
 sub _image_id {
     my ( $self, $image ) = @_;
 
@@ -651,8 +652,8 @@ sub _image_id {
     return $found->{id};
 }
 
-# Nova, at a microversion.  MetaAPI's own post sends no version header, so Nova
-# answers it as 2.1 -- whose rebuild has no user_data to send.
+# A call to Nova at a microversion.  The post in MetaAPI sends no version
+# header, so Nova treats it as 2.1, whose rebuild takes no user_data.
 sub _nova {
     my ( $self, $method, $path, $body, $microversion ) = @_;
 
@@ -662,10 +663,8 @@ sub _nova {
     return $compute->client->call( $method, \%headers, $compute->root_uri($path), $body );
 }
 
-# Poll until Nova has finished with the server.  ACTIVE with a task still
-# running is a rebuild that has not started yet rather than one that has
-# finished, and ERROR will not change on its own, so it is said at once along
-# with whatever Nova said caused it.
+# Waits until Nova finishes with the server.  ACTIVE with a task still set is a
+# rebuild that did not start yet.  ERROR does not change, so it dies at once.
 sub _wait_for_active {
     my ( $self, $uid, $name, $timeout ) = @_;
 
@@ -694,12 +693,11 @@ sub _wait_for_active {
 
 =head2 guest_volumes($domain)
 
-Nothing, each for its own reason.  There is no machine to prepare: Nova builds
-the guest, and its disk comes from Glance rather than from a pool.  There is no
-seed to release: C<user_data> is a field on the server, not a drive in it.  And
-there are no volumes left to delete once a guest is gone, because the ones this
-tool made went with the server -- see L</annihilate_domain($name)>, which is where the
-decision about which of them were ours is made.
+Each does nothing, for its own reason.  There is no machine to prepare, because
+Nova builds the guest and its disk comes from Glance.  There is no seed to
+release, because C<user_data> is a field on the server, not a drive.  There are
+no volumes left after a guest is gone, because L</annihilate_domain($name)>
+deletes the ones that this tool made.
 
 =cut
 
@@ -709,19 +707,19 @@ sub guest_volumes { return () }
 
 =head2 annihilate_domain($name)
 
-Take the guest away, and everything it was costing money for.
+Deletes the guest, and the volumes that this tool made for it.
 
-Deleting the server releases its floating IP -- an address left allocated to
-nothing is billed exactly the same as one in use, and is the classic way a cloud
-bill grows without anybody deciding it should.
+A volume counts as ours when its name starts with C<$name->, which is how
+L</create_volume($domain, $purpose, size_gb =E<gt> $n)> names it.  This leaves
+every other volume alone, because a wrong guess destroys data.
 
-Volumes are deleted only when this tool named them, which it does as
-C<$domain-$purpose>.  A volume somebody else attached to the guest by hand is
-left alone: guessing wrong here destroys data, so the rule is narrow on purpose
-and the leftovers are named rather than removed.
+This does not delete the floating IP of the guest.
 
-Returns false when there was no such guest, which makes it safe to call on a
-name that may already be gone.
+Returns 0 when there was no such guest, so it is safe to call on a name that is
+already gone.  Returns 1 otherwise.
+
+Dies when the server is still there after C<$DELETE_TIMEOUT> seconds.  Warns,
+and continues, when a volume does not delete.
 
 =cut
 
@@ -735,10 +733,8 @@ sub annihilate_domain {
 
     $self->api->delete_server( $server->{id} );
 
-    # A volume attached to a server Nova has not finished deleting is still in
-    # use, and Cinder refuses to delete it.  So wait for the server to go before
-    # asking, rather than asking and reporting a failure that only meant "not
-    # yet".
+    # Cinder refuses to delete a volume while it is attached to a server that
+    # Nova has not finished deleting.
     $self->_wait_for_gone($name);
 
     foreach my $volume (@ours) {
@@ -749,9 +745,8 @@ sub annihilate_domain {
     return 1;
 }
 
-# Poll until the server is no longer there.  Nova's delete is asynchronous, and
-# the interesting failure -- it went to ERROR and stayed -- looks exactly like
-# slowness until the wait runs out, so this says which it was.
+# Waits until the server is gone.  A server stuck in ERROR looks slow until the
+# wait runs out, so the message says to check its status.
 sub _wait_for_gone {
     my ( $self, $name, $timeout ) = @_;
 
@@ -766,9 +761,12 @@ sub _wait_for_gone {
     die "The guest '$name' was still there ${timeout}s after being deleted.\n" . "Check its status: a server that has gone to ERROR will not delete on asking again.\n";
 }
 
-=head2 create_volume($domain, $purpose, size_gb => $n)
+=head2 create_volume($domain, $purpose, size_gb =E<gt> $n)
 
-A Cinder volume for a guest, named so that teardown can recognize it.
+Creates a Cinder volume called C<$domain-$purpose>, so that teardown can find
+it.  C<extra> is a hash of more fields for Cinder.  Returns what Cinder returns.
+
+Dies when C<size_gb> is not given.
 
 =cut
 
@@ -786,8 +784,7 @@ sub create_volume {
     );
 }
 
-# Cinder's list, flattened -- the route hands back a single hash when there is
-# one volume and a list when there are more.
+# MetaAPI returns a single volume for a list of one, and undef for an empty list.
 sub _volumes {
     my ($self) = @_;
     return grep { ref $_ } $self->api->volumes();
@@ -795,35 +792,33 @@ sub _volumes {
 
 =head1 WHAT THIS CANNOT DO
 
-libvirt nouns, which a cloud has no equivalent of.  Each dies naming itself,
-rather than returning an undef that would be carried somewhere else before
-failing -- a backend that quietly answers the wrong question is worse than one
-that refuses.
+These are libvirt terms that have no match on a cloud.  Each one dies with its
+own name.  It does not return undef, which a caller can carry somewhere else
+before it fails.
 
 =over 4
 
-=item * C<define_domain>, C<cloudinit_iso>, C<eject_cdrom>: a Nova server is not
-built from libvirt XML and takes its cloud-init as C<user_data>, so there is no
+=item * C<define_domain>, C<cloudinit_iso>, C<eject_cdrom>: Nova does not build
+a server from libvirt XML, and takes cloud-init as C<user_data>.  So there is no
 XML to define and no ISO to attach.  See L</create_guest(%spec)>.
 
 =item * C<pool_path>, C<pool_target>, C<nuke_pool>, C<base_image>,
-C<create_disk>: there is no storage pool and no path on a filesystem for a disk
-to live at.
+C<create_disk>: there is no storage pool, and no disk file on a filesystem.
 
 =item * C<lease_ip>, C<release_dhcp_lease>, C<guest_mac>, C<nic_slots>,
-C<nic_names>: Neutron assigns addresses and MACs, there is no NAT lease table to
-read and no PCI slot to pin one to -- and an interface name derived from a slot
-names a card this guest does not have.
+C<nic_names>: Neutron assigns addresses and MACs.  There is no NAT lease table
+to read, and no PCI slot to pin an interface to.  So there is no interface name
+to derive from a slot.
 
-=item * C<has_tpm>: a property of a flavor or an image here, not something to
-detect on a host.
+=item * C<has_tpm>: a TPM is a property of a flavor or an image here, not of a
+host.
 
 =back
 
 =cut
 
-# Named, so that the message says which call was made and what to do instead,
-# rather than "method not found on some object".
+# The message names the call and what to use instead, which "method not found"
+# does not.
 sub _no_such_thing {
     my ( $self, $method, $because ) = @_;
 
@@ -850,16 +845,21 @@ sub has_tpm            ( $self, @ ) { return $self->_no_such_thing( 'has_tpm',  
 
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
 
-What C<bin/preflight> asks of this backend, in order.
+Return the names of the checks and notes that C<bin/preflight> runs on this
+backend, in order.  See L<Trog::HV/PREFLIGHT>.
 
 =cut
 
 sub preflight_checks { return qw{check_reachable check_cloud_resources check_cloud_quota check_rsync check_transfer_ip check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
-# The cloud equivalent of "can we reach the hypervisor": whether the credential
-# in clouds.yaml gets us a token, and whether the catalog that comes back has
-# the three services a guest needs.  Everything below needs this to have worked.
+=head2 $result = $hv->check_reachable()
+
+Makes sure that the credential in F<clouds.yaml> gets a token, and that the
+catalog has compute, image and network.  The other checks need this to pass.
+
+=cut
+
 sub check_reachable {
     my ($self) = @_;
 
@@ -883,13 +883,15 @@ FIX
     return $self->_verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
 }
 
-# The same question check_transfer_ip asks, which a cloud cannot answer the same
-# way.  There, the guest's network is the hypervisor's NAT bridge and is known
-# before any guest exists; here the cloud allocates the address when it creates
-# the server, so there is nothing to ask the routing table about until there is
-# a guest -- and by then the seed naming the address has already been written.
-#
-# So it has to be given, and this is where being told that is cheap.
+=head2 $result = $hv->check_transfer_ip()
+
+Makes sure that F<ipmap.cfg> names a C<transfer_ip> in its C<[global]> section.
+A cloud assigns the guest address only when it creates the server, after the
+seed is written.  So the address cannot be found the way libvirt finds it.  See
+L<Trog::HV/PREFLIGHT>.
+
+=cut
+
 sub check_transfer_ip {
     my ($self) = @_;
 
@@ -916,9 +918,14 @@ It has to be an address of this machine that a guest on the cloud can reach.
 FIX
 }
 
-# Whether the flavor, image and network hypervisors.conf names are things this
-# cloud has.  Each is a name it has to recognize, and one wrong fails a provision
-# minutes in, with an error from the API rather than from us.
+=head2 $result = $hv->check_cloud_resources()
+
+Makes sure that the flavor, image and network in F<hypervisors.conf>, and the
+floating network if one is set, exist on this cloud.  A wrong name otherwise
+fails a provision minutes later, with an error from the API.
+
+=cut
+
 sub check_cloud_resources {
     my ($self) = @_;
 
@@ -958,8 +965,13 @@ FIX
     return $self->_verdict( 1, "Builds as $wanted{flavor} from $wanted{image} on $wanted{network}", q{} );
 }
 
-# Whether there is room for one more guest.  A quota is what a cloud has instead
-# of hardware, and running out of it is what will stop a provision.
+=head2 $result = $hv->check_cloud_quota()
+
+Makes sure that the quota has room for one more guest: an instance, memory,
+cores and disk.  On a cloud, the quota takes the place of hardware limits.
+
+=cut
+
 sub check_cloud_quota {
     my ($self) = @_;
 
@@ -994,14 +1006,12 @@ FIX
 
 =head2 clear_guest($domain)
 
-Nothing, and that is the point.
+Does nothing, and returns 1.
 
-The libvirt path deletes the domain and its disks before making them again,
-because that is what "rebuild" amounts to there.  Nova rebuilds the server it
-already has -- a fresh root disk from the image, with its ports, its floating IP
-and any attached volume surviving -- so clearing anything first would throw away
-the very things worth keeping, and make the scheduler find room for a server we
-already own.
+The libvirt backend deletes the domain and its disks before it builds them
+again.  Nova rebuilds the server that exists.  The ports, the floating IP and
+the attached volumes stay.  If this cleared the guest first, those would be
+lost, and the scheduler would have to find room for a new server.
 
 =cut
 
@@ -1009,15 +1019,13 @@ sub clear_guest { return 1 }
 
 =head2 rollback_possible($domain, %opts)
 
-Whether a snapshot taken now would still be there afterwards.  Here it is:
-C<create_snapshot> asks Glance for an image, and an image outlives the server it
-was taken of -- a rebuild replaces what is on the root disk and leaves the image
-alone.  So the only question is whether there is a server to snapshot.
+Returns 1 if a snapshot taken now survives the rebuild, and 0 if it does not.
+C<create_snapshot> makes a Glance image, and a rebuild leaves the image alone.
+So this only asks whether there is a server to snapshot.
 
-C<capacity> is accepted and ignored.  It is the libvirt backend's question,
-where the snapshot lives in the disk and a disk of a different size is a new
-file: nothing here is laid over a base image, and a flavor that changed would
-be a different server rather than the same one with a bigger disk.
+C<capacity> is accepted and ignored.  The libvirt backend uses it, because there
+the snapshot lives in the disk.  Here nothing sits over a base image, and a new
+flavor makes a different server.
 
 =cut
 
@@ -1029,12 +1037,16 @@ sub rollback_possible {
 
 =head2 $address = $hv->provision_guest($config, $seed, %opts)
 
-Ask the cloud for the guest and hand back the address it turned up at.
+Gets the guest from the cloud, and returns its address.  If the guest exists,
+this rebuilds it.  If not, this creates it.
 
-C<user_data> is the seed C<bin/provision> has already written; there is no XML
-to render and no lease to wait for, because Nova takes the seed directly and the
-address comes back with the server.  C<reuse> says to provision onto the guest
-that is already there rather than rebuilding it.
+C<$seed> holds the C<user-data> that C<bin/provision> already wrote.  There is
+no XML to render and no lease to wait for.  Nova takes the seed directly, and
+the address comes back with the server.  If C<reuse> is true and the guest
+exists, this provisions onto it without a rebuild.
+
+Dies as L</create_guest(%spec)>, L</rebuild_guest($name, user_data =E<gt>
+$seed)> and L</guest_ssh_ip($config, $lease)> do.
 
 =cut
 
@@ -1064,7 +1076,8 @@ sub provision_guest {
 
 =head2 $hv->would_provision($config, %opts)
 
-What the above would do, said rather than done.
+Prints what C<provision_guest> does, without doing it.  Returns the address of
+a guest that exists, or C<(not built)>.
 
 =cut
 
@@ -1082,11 +1095,11 @@ sub would_provision {
 
 =head1 SEE ALSO
 
-L<Trog::HV>, which chose this backend and does the placement arithmetic.
+L<Trog::HV>, which chooses this backend and does the placement arithmetic.
 
 L<Trog::OpenStack::Auth>, which authenticates it.
 
-L<Trog::HV::Libvirt>, the other one.
+L<Trog::HV::Libvirt>, the other backend.
 
 =cut
 

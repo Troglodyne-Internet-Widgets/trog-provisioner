@@ -23,9 +23,8 @@ use Trog::Credentials();
 use Trog::OpenStack::Config();
 use Trog::Secrets();
 
-# Loaded for its side effect, and named only as a string below: OpenStack::Client
-# takes the user agent as a class name and calls new() on it, so the class has to
-# already be there when it does.
+# Only a string below names this class, but it must be loaded, because
+# OpenStack::Client calls new() on that name.
 use Trog::OpenStack::UserAgent();    ## no critic (ProhibitUnusedImports)
 
 =head1 NAME
@@ -55,62 +54,63 @@ comes back
 
 =head1 DESCRIPTION
 
-L<OpenStack::Client::Auth::v3> authenticates one way: it puts
-C<methods =E<gt> ['password']> in the request and dies without a password.  An
-application credential has neither a username nor a password -- it is an id and
-a secret, issued by Keystone, scoped to a project when it was made -- so there
-is nothing to give it.
+L<OpenStack::Client::Auth::v3> authenticates in one way only.  It puts
+C<methods =E<gt> ['password']> in the request, and it dies without a password.
+An application credential has no username and no password.  It is an id and a
+secret that Keystone issues, for one project.  So the parent has nothing to
+send.
 
-This is that request instead.  Everything after the token is the parent's:
-C<service> resolves a service type against the catalog and hands back an
-L<OpenStack::Client> pointed at it, and C<services> lists what the catalog
-had.  Only C<token> is overridden, because a token restored from cache never
-had an HTTP response to read it out of.
+This module sends the application credential request instead.  After the token
+arrives, the parent does the work.  C<service> finds a service type in the
+catalog and returns an L<OpenStack::Client> for it.  C<services> lists the
+service types in the catalog.  This module replaces only C<token>.  See
+L</token>.
 
-=head2 On the token cache
+=head2 The token cache
 
-Authenticating is a round trip to Keystone, and every command that touches the
-cloud would otherwise start with one.
+Each command that uses the cloud has to authenticate, which is a round trip to
+Keystone.  The cache removes that round trip.
 
-The cached token is trusted until Keystone's own C<expires_at> says not to,
-less C<$EXPIRY_MARGIN>.  That is the difference between this and asking the
-cloud whether the token is still good: the answer is already in the token, so
-there is no probe request to make, and no window where a token that expires
-mid-run looked fine when we checked.
+The module uses a cached token until C<$EXPIRY_MARGIN> seconds before the
+C<expires_at> that Keystone put in it.  It does not ask the cloud whether the
+token is still good.  The token already holds the answer, so no extra request
+is necessary.  Also, a token cannot pass a check and then expire during the run.
 
-The cache is keyed on the endpoint and the credential id together, so a second
-cloud, or the same cloud with a rotated credential, does not read the first
-one's token.  The file holds a bearer credential and is written 0600 in a 0700
-directory.
+The cache key is the endpoint and the credential id together.  A second cloud,
+or the same cloud with a new credential, does not read the token of the first.
+The file holds a bearer credential.  Its mode is 0600, in a directory of mode
+0700.
 
 =head1 CLASS METHODS
 
 =cut
 
-# What we refuse to rely on the tail end of.  A provision takes minutes, and a
-# token with a minute left on it fails partway through instead of at the start,
-# which is a much worse way to find out.
+# Seconds before expiry that a cached token stops being used, because a
+# provision takes minutes and must not fail halfway through.
 our $EXPIRY_MARGIN = 300;
 
-=head2 from_cloud($name)
+=head2 from_cloud($name, %args)
 
-Authenticate against a cloud out of F<clouds.yaml>.  C<$name> is passed to
-L<Trog::OpenStack::Config/load>, so it defaults to C<$OS_CLOUD> or to the only
-cloud in the file.
+Authenticates against a cloud from F<clouds.yaml>, and returns a new object.
+C<$name> goes to L<Trog::OpenStack::Config/load>, so the default is
+C<$OS_CLOUD>, or the only cloud in the file.  C<%args> goes to C<new>, after
+the values from the file, so it overrides them.
 
-Dies naming the cloud when it is not configured for an application credential,
-rather than sending a request that cannot work.
+Dies with the name of the cloud when its C<auth_type> is not
+C<v3applicationcredential>.  It also dies for each reason that C<load> and
+C<new> die.
 
-The secret can live in F<secrets.kdbx> rather than in F<clouds.yaml>, written as
-a reference the way a recipe writes one:
+The secret can be in F<secrets.kdbx> instead of in F<clouds.yaml>.  Write it as
+a reference, in the same way that a recipe writes one:
 
     auth:
       application_credential_id: 0123abcd
       application_credential_secret: secret:openstack/credential/password
 
-It is looked up only if a token has to be asked for, so a run that finds one
-cached does not ask for the database's passphrase.  A run that does is asked
-once, as C<keepass>, which is the name everything else here asks for it by.
+The module looks up the secret only when it must ask Keystone for a token.  A
+run that finds a cached token does not ask for the passphrase of the database.
+Other runs ask for it one time, under the name C<keepass>.  Everything else in
+this repository uses that name for it too.
 
 =cut
 
@@ -137,18 +137,39 @@ sub from_cloud {
 
 =head2 new($endpoint, %args)
 
-Required: C<application_credential_id> and C<application_credential_secret>.
-The secret may be a code reference, called for it only if the cache cannot
-supply a token.
+Returns an object that holds a token, from the cache or from Keystone.
 
-Optional: C<region> and C<interface>, remembered so callers do not have to
-repeat them at every C<service> call; C<cache_dir>, and C<no_cache> to skip the
-cache entirely; and the C<package_ua>, C<package_request> and C<package_response>
-that L<OpenStack::Client> takes.
+C<application_credential_id> and C<application_credential_secret> are
+required.  The secret can be a code reference.  The module calls it only when
+the cache has no token to give.
 
-C<package_ua> defaults to L<Trog::OpenStack::UserAgent> rather than
-L<LWP::UserAgent>, because L<OpenStack::Client> would otherwise turn off TLS
-hostname verification for a connection we are about to send a token over.
+These are optional:
+
+=over 4
+
+=item *
+
+C<region> and C<interface>.  The object keeps them, and the methods C<region>
+and C<interface> return them.  C<service> does not use them.  The caller passes
+them to it.
+
+=item *
+
+C<cache_dir>, the directory of the cache.  C<no_cache> turns the cache off.
+
+=item *
+
+C<package_ua>, C<package_request> and C<package_response>, as
+L<OpenStack::Client> takes them.
+
+=back
+
+The default C<package_ua> is L<Trog::OpenStack::UserAgent>, not
+L<LWP::UserAgent>.  With L<LWP::UserAgent>, L<OpenStack::Client> turns off the
+TLS hostname check, and the token goes over that connection.
+
+Dies when C<$endpoint>, the id or the secret is missing.  Also dies when
+Keystone does not give a token and a service catalog.
 
 =cut
 
@@ -187,9 +208,14 @@ sub new {
     return $self;
 }
 
-# A secret: reference, as something to call for the secret when there is no
-# cached token.  Parsed now, so that a malformed one is an error on every run
-# rather than only on the ones whose token has expired.
+=head2 _from_keepass($reference)
+
+Returns a code reference that looks up the C<secret:> reference C<$reference>
+in F<secrets.kdbx>.  Dies at once when the reference is malformed, so the error
+comes on every run, not only when the token expires.
+
+=cut
+
 sub _from_keepass {
     my ($reference) = @_;
 
@@ -201,11 +227,16 @@ sub _from_keepass {
     };
 }
 
-# clouds.yaml files disagree about whether auth_url carries the identity
-# version: the one Horizon issues ends in /v3, and openstacksdk documents
-# auth_url both ways, so either can turn up.  Both have to end up at
-# /v3/auth/tokens, and OpenStack::Client builds its paths by joining onto the
-# endpoint.
+=head2 _identity_endpoint($endpoint)
+
+Returns C<$endpoint> with no trailing slash, and with C</v3> at the end.
+
+The C<auth_url> in a F<clouds.yaml> can end in C</v3> or not.  Horizon adds it,
+and C<openstacksdk> documents both forms.  L<OpenStack::Client> adds its paths to
+the end of the endpoint, and each form must get to C</v3/auth/tokens>.
+
+=cut
+
 sub _identity_endpoint {
     my ($endpoint) = @_;
 
@@ -218,14 +249,15 @@ sub _identity_endpoint {
 
 =head2 token
 
-The Keystone token, as C<X-Auth-Token> wants it.
+Returns the Keystone token, in the form that C<X-Auth-Token> takes.
 
-Overrides the parent, which reads it off the HTTP response headers.  A token
-that came out of the cache has no response behind it.
+This replaces the method of the parent, which reads the token from the headers
+of the HTTP response.  A token from the cache has no response.
 
 =head2 region, interface
 
-What was passed to the constructor, for callers assembling C<service> options.
+Return the values that went to C<new>, for a caller that makes the options
+for C<service>.
 
 =cut
 
@@ -233,7 +265,14 @@ sub token     ($self) { return $self->{token} }
 sub region    ($self) { return $self->{region} }
 sub interface ($self) { return $self->{interface} }
 
-# The one request this module exists to make.
+=head2 _authenticate($secret)
+
+Asks Keystone for a token with the application credential, and puts the token,
+its expiry and the catalog on the object.  Returns 1.  Dies when the request
+fails, or when the answer has no token or no catalog.
+
+=cut
+
 sub _authenticate {
     my ( $self, $secret ) = @_;
 
@@ -266,11 +305,10 @@ sub _authenticate {
         1;
     };
 
-    # The whole exchange is in there, not just the decode, because any part of
-    # it can be what fails and all of them need the same thing said about it.
-    # decode_json is the usual one -- it dies on a 4xx with the response body as
-    # the message -- and "401 Unauthorized" on its own does not distinguish a
-    # revoked credential from the wrong cloud, which have different fixes.
+    # Each step of the exchange can fail, and each failure must name the
+    # endpoint.  Usually decode_json fails, with the body of a 4xx as its
+    # message.  "401 Unauthorized" alone does not tell a revoked credential
+    # from the wrong cloud, and each has a different fix.
     die "Authenticating against $self->{endpoint} failed: $@" unless $ok;
 
     my $token = $response->header('X-Subject-Token');
@@ -294,8 +332,8 @@ sub _authenticate {
 
 =head2 cache_path
 
-The file this object's token is cached in, or nothing when there is nowhere to
-put it.
+Returns the path of the cache file for the token of this object.  Returns
+nothing when there is no directory for the cache.
 
 =cut
 
@@ -305,14 +343,19 @@ sub cache_path {
     my $dir = $self->{cache_dir} // _default_cache_dir();
     return unless $dir;
 
-    # Neither the endpoint nor the credential id belongs in a filename -- one
-    # has slashes in it and the other is a credential -- and both have to be in
-    # the key, so that a rotated credential or a moved endpoint does not read
-    # the token issued to the old one.
+    # A hash, because the endpoint has slashes and the id is a credential.
+    # See "The token cache" for why the key holds both.
     my $key = Digest::SHA::sha256_hex("$self->{endpoint}\0$self->{credential_id}");
 
     return "$dir/openstack-token-$key.json";
 }
+
+=head2 _default_cache_dir
+
+Returns F<trog-provisioner> under C<$XDG_CACHE_HOME>, or under F<$HOME/.cache>.
+Returns nothing when neither C<$XDG_CACHE_HOME> nor C<$HOME> is set.
+
+=cut
 
 sub _default_cache_dir {
     my $base = $ENV{XDG_CACHE_HOME};
@@ -322,7 +365,13 @@ sub _default_cache_dir {
     return "$base/trog-provisioner";
 }
 
-# Put a usable cached token on $self, and say whether there was one.
+=head2 _restore
+
+Puts a usable token from the cache on the object.  Returns 1 if there was
+one, and 0 if not.
+
+=cut
+
 sub _restore {
     my ($self) = @_;
 
@@ -331,9 +380,7 @@ sub _restore {
     my $path = $self->cache_path;
     return 0 unless defined $path;
 
-    # A cache that is missing, unreadable, truncated or from another version of
-    # this code is a cache miss and nothing worse.  It only ever costs us the
-    # round trip we were trying to save.
+    # A bad or missing cache file is a cache miss, and costs only a round trip.
     my $cached = eval { Cpanel::JSON::XS::decode_json( File::Slurper::read_binary($path) ) };
     return 0 unless ref $cached eq 'HASH';
 
@@ -346,24 +393,33 @@ sub _restore {
     return 1;
 }
 
-# Is this cache entry for the cloud we are talking to, and good for long enough
-# to be worth using?
+=head2 _looks_current($cached, $endpoint)
+
+Returns true if the cache entry C<$cached> has a token and a catalog, is for
+C<$endpoint>, and is good for more than C<$EXPIRY_MARGIN> seconds.
+
+=cut
+
 sub _looks_current {
     my ( $cached, $endpoint ) = @_;
 
     return 0 unless $cached->{token};
     return 0 unless ref $cached->{catalog} eq 'ARRAY' && @{ $cached->{catalog} };
 
-    # The endpoint is in the cache key already, so this is belt and braces --
-    # but a stale file under a colliding name would otherwise send a token to
-    # the wrong cloud, and that is worth two lines to rule out.
+    # The cache key holds the endpoint too, but a file with a colliding name
+    # must not send a token to the wrong cloud.
     return 0 unless ( $cached->{endpoint} // '' ) eq $endpoint;
 
     return _epoch_of( $cached->{expires_at} ) - $EXPIRY_MARGIN > time();
 }
 
-# Keystone's expires_at, as an epoch.  0 when it cannot be read, which reads as
-# "expired" everywhere this is used.
+=head2 _epoch_of($iso)
+
+Returns the C<expires_at> of Keystone, C<$iso>, as an epoch.  Returns 0 when it
+cannot read it, and each caller takes 0 as expired.
+
+=cut
+
 sub _epoch_of {
     my ($iso) = @_;
 
@@ -377,9 +433,14 @@ sub _epoch_of {
     return $parsed ? $parsed->epoch : 0;
 }
 
-# Write the token out for the next command to find.  Failing to cache is not an
-# error: it makes the next run slower and nothing else, so it must not take down
-# a provision that has otherwise authenticated fine.
+=head2 _store
+
+Writes the token to the cache for the next command.  Returns 1 if it wrote the
+file, and 0 if not.  It does not die, because a failure only makes the next run
+slower.
+
+=cut
+
 sub _store {
     my ($self) = @_;
 
@@ -401,9 +462,8 @@ sub _store {
         my ($dir) = $path =~ m{^(\N*)/[^/]+$};
         File::Path::make_path( $dir, { mode => 0o700 } );
 
-        # Atomically, because two provisions running at once would otherwise
-        # race to leave a half-written file that the next run has to treat as
-        # corrupt.
+        # Atomic, so that two provisions at the same time cannot leave a
+        # half-written file.
         File::Slurper::Temp::write_binary( $path, $encoded );
         chmod 0600, $path;
         1;
@@ -414,20 +474,21 @@ sub _store {
 
 =head1 REQUIREMENTS
 
-Handing this to L<OpenStack::MetaAPI> needs a version of it whose C<BUILDARGS>
-honors an C<auth> that was passed in.  Releases up to 0.003 rebuild it from
-their arguments unconditionally and throw away the object, which loses the
-credential this module exists to carry.  The check is one line:
+To give this object to L<OpenStack::MetaAPI>, you need a version whose
+C<BUILDARGS> keeps an C<auth> that you pass in.  Releases up to 0.003 always
+make a new one from their arguments, and discard this object and its
+credential.  This line tells you if your version keeps it:
 
     OpenStack::MetaAPI->new({auth => $auth})->auth == $auth
 
-Nothing here needs it; C<service> and C<services> work on their own.
+C<service> and C<services> do not need L<OpenStack::MetaAPI>.
 
 =head1 SEE ALSO
 
-L<Trog::OpenStack::Config>, which says where the credential came from.
+L<Trog::OpenStack::Config>, which reads the credential.
 
-L<Trog::OpenStack::UserAgent>, which is why the connection is verified.
+L<Trog::OpenStack::UserAgent>, which makes sure that the connection checks the
+certificate.
 
 L<OpenStack::Client::Auth::v3>, whose C<service> and C<services> this inherits.
 

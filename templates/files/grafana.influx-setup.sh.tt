@@ -1,12 +1,13 @@
 #!/bin/bash
 # Creates the metrics database and holds it to a retention.
 #
-# Telegraf creates a database it does not find, and the one it creates never
-# expires anything -- so on a collector taking the whole fleet syslog stream the
-# disk fills and nothing says why.  Provisioner::Recipe::grafana has the account.
+# Telegraf creates a database that it does not find, and that database never
+# expires anything.  On a collector that takes the syslog stream of the whole
+# fleet, the disk fills and nothing says why.  Provisioner::Recipe::grafana has
+# the account.
 #
-# Run from post_install rather than the makefile: influxd is started by the same
-# build and this has to wait for it.
+# Run as a postrun task, not from the makefile, because influxd starts in the
+# same build and this script must wait for it.
 
 set -euo pipefail
 
@@ -14,8 +15,8 @@ db='[% influx_database %]'
 retention='[% retention %]'
 influx='http://127.0.0.1:8086'
 
-# Polled rather than slept at: the wait is over when influxd answers, which on a
-# guest that has just installed it is a few seconds and on a loaded one is not.
+# Polled, not a fixed sleep, because influxd answers after a few seconds on a
+# fresh guest and much later on a loaded one.
 ready=''
 for _attempt in $(seq 1 120); do
     if curl -fsS "$influx/ping" >/dev/null 2>&1; then
@@ -30,9 +31,9 @@ if [ -z "$ready" ]; then
     exit 1
 fi
 
-# Two statements rather than CREATE DATABASE ... WITH DURATION, which errors on a
-# database that already exists with a different policy.  This pair is the same on
-# a fresh guest and on a rebuilt one.
+# Two statements, not CREATE DATABASE ... WITH DURATION, which fails on a
+# database that exists with a different policy.  This pair gives the same result
+# on a fresh guest and on a rebuilt one.
 curl -fsS -XPOST "$influx/query" \
     --data-urlencode "q=CREATE DATABASE \"$db\"" >/dev/null
 

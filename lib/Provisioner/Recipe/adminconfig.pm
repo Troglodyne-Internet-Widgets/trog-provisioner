@@ -27,9 +27,10 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-Set up the skel for the admin user specified in ipmap.cfg.
+Copies the C<skel> directory from this machine into the home of the admin user.
+The C<[global]> section of F<ipmap.cfg> names that user as C<admin_user>.
 
-Optionally add in packages for the administrator to use on the provisioned host.
+C<pkgs> is optional.  It lists packages to install on the guest for the admin.
 
 =cut
 
@@ -47,13 +48,14 @@ sub args {
     );
 }
 
-# The only deps() left in a generic recipe, and the only one that belongs in
-# one: these package names are the operator's own, out of their configuration,
-# rather than anything any distribution knows.  So there is nothing for a
-# distro variant of this recipe to say, whichever distribution it is for -- and
-# if the names an operator writes here turn out to need saying per
-# distribution, that is a change to what pkgs means and not to where this
-# lives.
+=head2 @pkgs = $recipe->deps(%opts)
+
+Returns the C<pkgs> in C<%opts>, or nothing.  The operator names these
+packages, so this generic recipe answers and no distro variant does.  See
+C<deps> in L<Provisioner::Recipe>.
+
+=cut
+
 sub deps {
     my ( $self, %opts ) = @_;
     return @{ $opts{pkgs} } if ref $opts{pkgs} eq 'ARRAY';

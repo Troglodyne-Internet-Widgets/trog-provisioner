@@ -14,8 +14,8 @@ use parent qw{Provisioner::Recipe};
 
 =head2 SYNOPSIS
 
-Nothing configures this.  Where a domain's files live and where what is shipped
-to it comes from are C<_global>'s to say, in recipes.yaml:
+This recipe takes no configuration.  C<_global> in recipes.yaml says where the
+files of a domain live on the guest, and where they come from:
 
     _base:
         _global:
@@ -30,27 +30,23 @@ and, optionally, in ipmap.cfg:
     transfer_user=whoever_runs_trog_provisioner
     transfer_ip=192.0.2.10
 
-Neither is required.  The guest fetches from the machine running this tool, as
-the account running it, at whichever of that machine's addresses a guest can
-reach -- and all three are worked out unless something here overrides them.  See
-L<Trog::Local>.
+Neither is required.  The guest fetches from the machine that runs this tool,
+as the account that runs it.  It uses an address of that machine that the guest
+can reach.  This tool finds all three, unless the configuration above overrides
+them.  See L<Trog::Local>.
 
-C<somedomain> above gets this recipe without asking for it, because C<deluged>
-has state to put back and depends on the thing that puts it there.
+C<somedomain> above gets this recipe without asking for it.  C<deluged> has
+state to put back, so it depends on this recipe.
 
 =head2 DESCRIPTION
 
-Schlep a domain's data onto the guest, and put back whatever the recipes
-salvaged off the last one.
+Copies the data of a domain onto the guest, and puts back the state that the
+recipes salvaged from the old guest.
 
-It reads C<install_dir> and C<data_source> and has no fields of its own.  They
-used to be this recipe's C<to> and C<from>, which meant every recipe that
-interpolates C<install_dir> -- nearly all of them -- depended on this one for a
-path rather than for anything it does.  Those two spellings are gone rather than
-deprecated: C<_global> is the only place either is read from, and a
-configuration still naming them under C<data> is refused rather than ignored.
+It reads C<install_dir> and C<data_source> from C<_global>, and has no fields
+of its own.  A configuration that gives C<data> a C<to> or a C<from> is refused.
 
-What it puts back, and where, comes from the recipes: see C<restores> in
+The recipes say what it puts back, and where.  See C<restores> in
 L<Provisioner::Recipe>.
 
 =cut
@@ -60,10 +56,9 @@ sub args {
         type       => "object",
         properties => {
 
-            # Where each recipe's salvaged state goes back, keyed on the
-            # destination.  Nobody writes this by hand: it is what every recipe
-            # depending on this one handed over through its restores(), the way
-            # ufw is handed rate_limits.  See Provisioner::Recipe::restores.
+            # Where the salvaged state of each recipe goes back, keyed on the
+            # destination.  The restores() of each recipe fills it in, so
+            # nobody writes it by hand.  See Provisioner::Recipe::restores.
             restores => {
                 type                 => 'object',
                 additionalProperties => {

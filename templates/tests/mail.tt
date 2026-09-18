@@ -4,10 +4,8 @@ use warnings;
 use Test::More;
 use File::Find ();
 
-# What the next fetch will find.  bin/new_config reads the guest as root now
-# (issue #76), so the mail store no longer needs to be group-readable by the
-# admin account the way it used to be; issue #98 took that back out, and the
-# fragment ends by handing the whole store to dovecot:dovecot instead.
+# What the next fetch finds.  The fragment gives the whole mail store to
+# dovecot:dovecot.
 my $store = '/mail/[% domain %]';
 my $dovecot_gid = (getgrnam('dovecot'))[2];
 ok(defined $dovecot_gid, 'dovecot has a group');
@@ -22,10 +20,8 @@ SKIP: {
     is($st[2] & 0007, 0, 'and is closed to everybody else on the guest');
 }
 
-# Every maildir and message underneath, since it is the whole tree a fetch
-# would walk. Not who can read them any more -- that stopped mattering to
-# anyone but dovecot and root -- just that nothing in the tree is open wider
-# than the top of it is.
+# Every maildir and message under the store, because a fetch walks the whole
+# tree.  Nothing in the tree is open wider than the top of it.
 my @exposed;
 File::Find::find({ no_chdir => 1, wanted => sub {
     my @f = lstat $File::Find::name or return;
@@ -35,15 +31,13 @@ File::Find::find({ no_chdir => 1, wanted => sub {
 is(scalar @exposed, 0, 'and nothing under the mail store is readable by anybody else')
     or diag join("\n", @exposed);
 
-# And the walk itself: the admin user can no longer do it.
+# And the walk itself: the admin user cannot do it.
 my $gripes = `sudo -u '[% admin_user %]' find '$store' -print 2>&1 >/dev/null`;
 isnt($gripes, '', 'the admin user can no longer walk the mail store');
 
-# The DKIM key, and the staged copy of it: /etc/opendkim belongs to opendkim,
-# and remote_files still names the staged copy rather than the original -- see
-# Provisioner::Recipe::mail for why. install_dkim_records looks for the copy at
-# exactly this path, and got /mail/keys/keys/<domain> instead once a second
-# domain was provisioned onto the guest.
+# The DKIM key, and the staged copy of it.  remote_files names the staged copy,
+# not the original.  Provisioner::Recipe::mail says why.  install_dkim_records
+# looks for the copy at exactly this path.
 ok(-s '/etc/opendkim/keys/[% domain %]/default.private', 'this domain has a DKIM signing key');
 ok(!-e '/mail/keys/keys', 'staged once, rather than into itself');
 SKIP: {
@@ -62,10 +56,10 @@ my $dovecot = `systemctl is-active dovecot 2>/dev/null`;
 chomp $dovecot;
 is($dovecot, 'active', 'dovecot is running');
 
-# What postfix makes of its configuration, which running says nothing about --
-# it keeps serving whatever it last accepted.
-# Warnings are ordinary here -- an unused parameter, a legacy setting -- and
-# only a fatal or an error means postfix will not work with what it was given.
+# What postfix makes of its configuration.  That it runs says nothing, because
+# it keeps the configuration it last accepted.  Warnings are normal here, for
+# example an unused parameter.  Only a fatal or an error means that postfix
+# does not work with its configuration.
 my $check = `postfix check 2>&1`;
 unlike($check, qr/^(?:postfix: )?(?:fatal|error):/mi, 'postfix accepts its configuration')
     or diag $check;
@@ -75,21 +69,19 @@ my $doveconf_out = `doveconf -n 2>&1 >/dev/null`;
 unlike($doveconf_out, qr/^(?:doveconf: )?(?:Fatal|Error):/mi, 'dovecot accepts its configuration')
     or diag $doveconf_out;
 
-# The aliases map, which newaliases builds from /etc/aliases.  A malformed line
-# there is one sendmail and postfix both refuse: this file was generated with an
-# undeclared user, so it carried a line beginning with a bare colon.
+# The aliases map, which newaliases builds from /etc/aliases.  sendmail and
+# postfix both refuse a line that starts with a bare colon.  An empty user
+# makes one.
 my $aliases = do { local (@ARGV, $/) = '/etc/aliases'; <> } // '';
 unlike($aliases, qr/^\s*:/m, 'no alias line begins with a colon') or diag $aliases;
 like($aliases, qr/^root:/m,  'root has an alias, so its mail goes somewhere');
 
 ok(-s '/etc/aliases.db', 'newaliases built the alias database');
 
-# The address classes, which is what a check_recipient_access table used to be
-# papering over.  postfix will not have a domain in two of them: local delivery
-# wins the tie, and mail for a virtual mailbox domain also listed in
-# mydestination stops reaching anybody's mailbox.  This guest's hostname is the
-# domain it hosts, so the package's own main.cf starts out with exactly that
-# overlap and the configuration has to take it back out again.
+# The address classes.  If a virtual mailbox domain is also in mydestination,
+# local delivery wins, and its mail reaches no mailbox.  The hostname of this
+# guest is the domain it hosts, so the main.cf of the package starts with that
+# overlap.  The configuration must remove it.
 my %local_domains = map { $_ => 1 } grep { length } split(m/[,\s]+/, `postconf -h mydestination 2>/dev/null` // '');
 my @virtual_domains = grep { length } split(m/[,\s]+/, `postconf -h virtual_mailbox_domains 2>/dev/null` // '');
 my @in_both = grep { $local_domains{$_} } @virtual_domains;
@@ -97,8 +89,8 @@ is(scalar @in_both, 0, 'no domain is both a local and a virtual mailbox domain')
     or diag "in both: @in_both";
 ok(scalar @virtual_domains, 'and there are virtual mailbox domains to have checked');
 
-# Every table main.cf names has to exist, or postfix logs an open failure and
-# the lookup quietly misses.  These are one per domain now, so there are several.
+# Every table that main.cf names must exist.  If not, postfix logs an open
+# failure and the lookup finds nothing.  Each domain has its own tables.
 foreach my $param (qw{virtual_mailbox_maps virtual_alias_maps smtpd_sender_login_maps}) {
     my @tables = grep { length } split(m/[,\s]+/, `postconf -h $param 2>/dev/null` // '');
     ok(scalar @tables, "$param names at least one table");
@@ -108,8 +100,8 @@ foreach my $param (qw{virtual_mailbox_maps virtual_alias_maps smtpd_sender_login
     }
 }
 
-# An authenticated user may only send as an address it owns, and the check has
-# to sit ahead of the permit that would otherwise end the list.
+# An authenticated user can send only as an address it owns.  The check must
+# come before the permit that ends the list.
 my $sender_list = `postconf -h smtpd_sender_restrictions 2>/dev/null` // '';
 my @sender_order = grep { length } split(m/[,\s]+/, $sender_list);
 my ($mismatch) = grep { $sender_order[$_] eq 'reject_authenticated_sender_login_mismatch' } 0 .. $#sender_order;
@@ -118,8 +110,8 @@ ok(defined $mismatch, 'authenticated senders are checked against smtpd_sender_lo
 ok(defined $sasl_permit && defined $mismatch && $mismatch < $sasl_permit,
    'ahead of the permit that would otherwise end the list') or diag $sender_list;
 
-# And the map answers for this domain's accounts, since an address it misses is
-# one its owner can no longer send from.
+# And the map answers for the accounts of this domain.  If it misses an
+# address, the owner cannot send from it.
 my $login_maps = `postconf -h smtpd_sender_login_maps 2>/dev/null` // '';
 chomp $login_maps;
 [% FOR name IN names.keys().sort() %]
@@ -130,11 +122,8 @@ SKIP: {
     is($owner, '[% name %]@[% domain %]', '[% name %]@[% domain %] owns its own address') or diag $owner;
 }
 [% END %]
-# The mailboxes the recipe asked doveadm to make.  doveadm looks an account up
-# in the passwd-file userdb, which is keyed on the full address, so the bare
-# local part the fragment used to pass was a user dovecot had never heard of:
-# "doveadm(bob): Error: User does not exist", exit 67, and the mail target died
-# there with every test below it unrun.
+# The mailboxes that the recipe told doveadm to make.  doveadm looks up an
+# account in the passwd-file userdb, which uses the full address as its key.
 [% FOR name IN names.keys().sort() %]
 [% IF names.$name.mailboxes.size() %]
 {

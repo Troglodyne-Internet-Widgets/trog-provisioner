@@ -6,57 +6,48 @@ use Test::More;
 ok(-f '/etc/dehydrated/domains.d/[% domain %].conf', 'dehydrated domain config exists');
 ok(-f '/etc/dehydrated/hooks/[% domain %].sh', 'dehydrated hook script exists');
 
-# The cert nginx and everything else reads.  The fetcher used to rm this pair
-# and relink to whatever dehydrated had produced -- so when dehydrated failed,
-# and it fails for any domain that cannot answer ACME, what was left was two
-# dangling symlinks and no service that terminates TLS would start.
+# The certificate that nginx and every other TLS service reads.  If this pair
+# is a dangling symlink, none of those services starts.
 foreach my $pem ('/etc/ssl/certs/[% domain %].pem', '/etc/ssl/private/[% domain %].pem') {
     ok(-e $pem, "$pem exists");
     ok(-s $pem, "$pem is readable and not empty")
         or diag("dangling symlink? " . (-l $pem ? readlink($pem) : 'not a symlink'));
 }
 
-# The hook has to be runnable, not merely present -- dehydrated calls it.
+# dehydrated calls the hook, so it must be executable, not only present.
 ok(-x '/etc/dehydrated/hooks/[% domain %].sh', 'the hook is executable');
 
-# The certificate covers the domain itself.  The ssl target used to name only
-# www and mail in the SAN, because the alias list it joined was never passed to
-# that template -- so the name almost everything asks for was the one name the
-# certificate did not carry.
+# The certificate covers the domain itself, which is the name that almost
+# every client asks for.
 my $san = `openssl x509 -noout -ext subjectAltName -in /etc/ssl/certs/[% domain %].pem 2>&1`;
 like($san, qr/DNS:\Q[% domain %]\E(?![\w.-])/, 'the certificate covers the domain itself')
     or diag $san;
 like($san, qr/DNS:www\.\Q[% domain %]\E/, 'and www');
 
-# And it parses at all, which a truncated or half-written pem does not.
+# A truncated or half-written pem does not parse.
 my $subject = `openssl x509 -noout -subject -in /etc/ssl/certs/[% domain %].pem 2>&1`;
 like($subject, qr/subject=/, 'the certificate parses') or diag $subject;
 
-# What the next rebuild will be able to salvage.  bin/new_config fetches the
-# certificate store as root now (issue #76), so none of this needs to be
-# readable by the admin account any more -- issue #98 took that back out.
-# dehydrated writes both the private keys and the account key 0600 root, and
-# nothing here widens that.  A guest rebuilt with certificates it has no keys
-# for still issues from scratch against the rate limit, and loses the
-# registration if the account key went too -- that risk is what the salvage
-# exists to avoid, not who else could read it on the guest.
+# What the next rebuild can salvage.  bin/new_config fetches the certificate
+# store as root, so the keys stay 0600 root.  Provisioner::Recipe::letsencrypt
+# has the whole account.
 #
-# The exit hook runs first, because it is what leaves the tree in the state the
+# Run the exit hook first, because it leaves the tree in the state that the
 # nightly renewal leaves it in.
 is(system('/etc/dehydrated/hooks/[% domain %].sh', 'exit_hook'), 0, 'the dehydrated exit hook runs');
 
-# /etc/dehydrated/accounts holds nothing but the account key, so the whole tree
-# is root-only now.  /var/lib/dehydrated/certs still has to be walkable, since
-# the certificates in it stay public.
+# /etc/dehydrated/accounts holds the ACME account and its key, so the whole
+# tree is root-only.  /var/lib/dehydrated/certs stays walkable, because the
+# certificates in it are public.
 my $accounts_gripe = `sudo -u '[% admin_user %]' find '/etc/dehydrated/accounts' -print 2>&1 >/dev/null`;
 isnt($accounts_gripe, '', 'the admin user can no longer walk the accounts tree');
 
 my $certs_gripe = `sudo -u '[% admin_user %]' find '/var/lib/dehydrated' -print 2>&1 >/dev/null`;
 is($certs_gripe, '', 'but can still walk the certificate tree, since the certificates in it are public');
 
-# And every key in there is root-only: not readable by the admin account, and
-# not by the rest of the guest either.  A guest that has never reached the CA
-# has none of these, which is the one case where there is nothing to say.
+# Only root can read each key: not the admin account, and not the rest of the
+# guest.  A guest that never reached the CA has no keys, so there is nothing to
+# test.
 my @keys = grep { -f $_ && !-l $_ } (
     glob('/var/lib/dehydrated/certs/*/priv*.pem'),
     glob('/etc/dehydrated/accounts/*/account_key.pem'),

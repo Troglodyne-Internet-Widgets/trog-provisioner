@@ -1,8 +1,7 @@
 client
-[%# Named rather than left to openvpn, which hands out tun0, tun1 and so on in
-    start order -- with two tunnels on a guest, nothing afterwards could say
-    which was which, and the recipe waits on this one by name.  dev-type is
-    explicit because openvpn otherwise infers it from the prefix. -%]
+[%# The device has a name so that the recipe can wait on it.  enrich() in
+    Provisioner::Recipe::openvpnclient says where the name comes from.  dev-type
+    is explicit because openvpn otherwise infers it from the prefix. -%]
 dev [% device %]
 dev-type tun
 proto [% proto %]

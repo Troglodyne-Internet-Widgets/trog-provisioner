@@ -1,25 +1,24 @@
-[%# One collector, one stream, one dashboard over it, so this is the global half
-    and runs once for the machine.
+[%# There is one collector, one stream and one dashboard.  So this is the
+    global half, and it runs once for the machine.
 
-    Everything installed here belongs to software the grafana recipe puts on the
-    guest -- telegraf reads the fragment, grafana reads the dashboard -- and
-    nothing here installs a package of its own.
+    The grafana recipe installs the software that uses these files.  Telegraf
+    reads the fragment, and grafana reads the dashboard.  This target installs
+    no package of its own.
 
-    This target runs BEFORE that one.  A dependency is ordered after the last
-    thing that dragged it in, so requiring grafana puts its target below this in
-    the makefile rather than above it.  Neither the telegraf account nor the
-    grafana account exists yet, which is why every path below is created and
-    owned by root: install -o telegraf against a user that is not there fails,
-    and takes the build with it.  Both services only ever read these files, so
-    root owning them costs nothing, and the grafana target chowns the dashboard
-    directory when it gets there. -%]
+    This target runs BEFORE the grafana target.  The makefile puts a dependency
+    after the last recipe that pulls it in.  So the grafana target comes below
+    this one.  The telegraf and grafana accounts do not exist yet.  That is why
+    root creates and owns each path below.  An install -o telegraf fails when
+    that user does not exist, and the build stops.  Both services only read
+    these files, so root can own them.  The grafana target later chowns the
+    dashboard directory. -%]
 install -d -m 0755 /etc/telegraf/telegraf.d
 install -o root -g root -m 0644 grafanasyslog_telegraf.conf /etc/telegraf/telegraf.d/60-grafanasyslog.conf
 install -d -m 0755 /var/lib/grafana/dashboards
 install -o root -g root -m 0644 grafanasyslog_dashboard.json /var/lib/grafana/dashboards/syslog.json
-[%# Telegraf has to be restarted to open the listener, and grafana does not,
-    because its dashboard provider rescans on the interval the grafana recipe
-    set.  Queued rather than run here for the same ordering reason: telegraf is
-    not installed until the target below this one. -%]
+[%# Telegraf must restart to open the listener.  Grafana does not, because its
+    dashboard provider scans again on the interval that the grafana recipe sets.
+    The restart is queued for the same order reason.  Telegraf is not installed
+    until the target below this one runs. -%]
 [% script_dir %]/queue_postrun_task systemctl restart telegraf
 echo 'grafanasyslog: the collector stream is parsed on 127.0.0.1:[% port %] and drawn on the Syslog dashboard.'

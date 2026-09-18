@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::imagemagick};
 
 Provisioner::Recipe::Ubuntu::imagemagick - Ubuntu's C<deps> for L<Provisioner::Recipe::imagemagick>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else imagemagick does is in the recipe this
-inherits from.
-
 =cut
 
 sub deps {

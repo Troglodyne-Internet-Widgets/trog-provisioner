@@ -10,8 +10,8 @@ use re '/aasx';
 
 use DBI();
 
-# Named so the dependency is declared and a missing driver fails here rather
-# than inside DBI->connect with a less obvious message.  Nothing calls it.
+# Named so that a missing driver fails here and not inside DBI->connect.
+# Nothing calls it.
 use DBD::SQLite();    ## no critic (ProhibitUnusedImports)
 use File::Slurper();
 
@@ -25,25 +25,28 @@ Trog::SQLite - a database handle with the schema already applied
 
 =head1 DESCRIPTION
 
-Lifted from tCMS, which has been running it for years, so that a database
-opened here behaves the way one opened there does.  The pragmas are the point:
-without WAL and a busy timeout, two provisions running at once meet
-C<database is locked> rather than waiting for each other.
+This code comes from tCMS, so a database opened here behaves the same as one
+opened there.  The pragmas make two provisions that run at the same time wait
+for each other.  Without WAL and a busy timeout, one of them gets
+C<database is locked>.
 
 =head2 dbh($schema, $dbname)
 
-A handle to C<$dbname>, with the DDL in C<$schema> applied first and the
-handle cached for the rest of the process.  C<$schema> may be omitted for a
-database somebody else set up.
+Returns a handle to C<$dbname>.  If you give C<$schema>, the DDL in that file is
+applied first.  Omit C<$schema> for a database that already has its schema.
 
-Dies if the schema cannot be read or applied.
+The handle is cached for the rest of the process.  A second call for the same
+C<$dbname> returns the cached handle and does not apply C<$schema> again.
 
-B<Do not call this during C<BEGIN>, or outside a sub.>  The handle must not
-outlive a fork, and the usual SQLite fork-safety concerns apply.
+Dies if the connection fails, if the schema cannot be read or applied, or if one
+of the pragmas fails.
+
+Do not call this during C<BEGIN> or outside a sub.  A handle must not outlive a
+fork, so a forked child calls C<forget> before it calls this.
 
 =cut
 
-# Different across forks, and consistent within them.
+# The handle cache, keyed by database file.  A forked child inherits it.
 my $dbh = {};
 
 sub dbh {
@@ -51,14 +54,12 @@ sub dbh {
     $dbh //= {};
     return $dbh->{$dbname} if $dbh->{$dbname};
 
-    # No touch first: DBI:SQLite creates the file on connect.  It also cannot
-    # simply be made unconditional, as that would bump mtime on a live database.
+    # No touch first, because DBD::SQLite creates the file on connect.
     my $db = DBI->connect( "dbi:SQLite:dbname=$dbname", q{}, q{}, { RaiseError => 1, PrintError => 0 } );
 
     if ($schema) {
 
-        # No pre-flight test: read_text dies with "Cannot open <path>: <errno>",
-        # which says more than the guard did and covers unreadable as well as absent.
+        # No test first, because read_text dies with the path and the errno.
         my $qq = File::Slurper::read_text($schema);
         $db->{sqlite_allow_multiple_statements} = 1;
         $db->do($qq) or die "Could not ensure database consistency: " . $db->errstr;
@@ -77,7 +78,8 @@ sub dbh {
 
 =head2 forget()
 
-Drop the cached handles.  Only tests should need this.
+Drops the cached handles and returns 1.  A forked child calls this so that it
+opens its own handle and does not use the handle of its parent.
 
 =cut
 

@@ -30,25 +30,38 @@ In recipes.yaml:
                 - "some.other.domain"
             key_file: "path/to/private_key_in_the_datadir"
 
-Would result in the rsync module 'database' being backed up to /backup/some.domain.name/mysql/$DAY, and so on for each target/domain.
+With this configuration, the guest copies the rsync module C<database> from some.domain.name into /backup/some.domain.name/$DATE/database every night.
+It does the same for each target on each host.
+$DATE is the date as C<date -I> prints it.
 
 =head2 DESCRIPTION
 
-When you have files on the host which need backing up, but aren't already covered by the provisioning process itself.
+Copies offsite the files that L<Provisioner::Recipe::backup> serves on each host.
+Pair it with that recipe to automate the backups.
 
-Pair with a VM using L<Provisioner::Recipe::backup> to fully automate backups.
+Each entry in C<hosts> is a host name, with an optional C<:PORT> for ssh.
+The port is 22 when you do not give one.
 
-Backups are implemented via SSH authorized key read-only restricted execution of rsyncd as root.
+Each entry in C<targets> is the name of an rsync module that the backup recipe serves, and the guest copies each one from every host.
+The recipe also adds a target for each path in the C<remote_files> of each recipe on this guest.
 
-Uses a backup and retention script for the configured host(s), backing up every day at midnight and pruning to 6mos every Friday noon.
+C<key_file> is the path of the private key, relative to the data directory of the domain.
+It is the private half of the key that the backup recipe authorizes on each host.
+If the file does not exist, the recipe dies with C<key_file defined in [backupdestination] must exist in ...>.
 
-TODO: make retention period configurable, etc
+A backup script runs every day at midnight.
+It copies each target into C<base_dir>/$HOST/$DATE/$TARGET, and hard-links the files that did not change to the copy of the day before.
+A retention script runs every Friday at noon and deletes each copy that is older than one month.
 
-Touches the file '/root/backup_in_progress' while running in case you want to use that to lock behaviors such as reboots to not disrupt backups.
+TODO: Make the retention period configurable.
 
-Logs backup output to /var/log/backups/$HOST.log, and rotates the logs.
+While a backup of a host runs, the script keeps the file /root/backup_in_progress_$HOST.
+A second backup of that host exits while the file exists.
+Other jobs can also use it, for example to hold off a reboot until the backup ends.
 
-You'll probably want to use a separate disk mounted as the base_dir via L<Provisioner::Recipe::mounts> to persist backups between deploys.
+The scripts log to /var/log/backups/$HOST.log, and logrotate rotates those logs weekly.
+
+To keep the backups when the guest is rebuilt, mount a separate disk at C<base_dir> with L<Provisioner::Recipe::mounts>.
 
 =cut
 

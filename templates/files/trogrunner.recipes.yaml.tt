@@ -1,10 +1,9 @@
-[%# The runner recipes.yaml, dumped whole by the yaml formatter.
+[%# The recipes.yaml of the runner, dumped whole by the yaml formatter.
 
-    A formatter rather than anything written here: a recipes.yaml is an
-    arbitrarily deep structure that a template has no business trying to indent
-    correctly, and Provisioner::Recipe::formatters is the hook for exactly this.
+    A recipes.yaml can be of any depth, and a template cannot indent that
+    correctly.  Provisioner::Recipe::formatters is the hook for this.
 
-    Every store: reference in it comes out as a secret: on the way through, so
-    what lands here names entries in the runner own keepass database and holds
-    no passwords.  See SECRETS IN recipes in Provisioner::Recipe::trogrunner. -%]
+    The formatter turns every store: reference into secret:.  So this file
+    names entries in the keepass database of the runner, and holds no
+    passwords.  See SECRETS IN recipes in Provisioner::Recipe::trogrunner. -%]
 [% recipes | yaml %]

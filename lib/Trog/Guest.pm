@@ -18,7 +18,7 @@ use Trog::Secrets();
 
 =head1 NAME
 
-Trog::Guest - a VM we have just built, and are now waiting on
+Trog::Guest - a VM that was just built, and the waits until it is ready
 
 =head1 SYNOPSIS
 
@@ -40,44 +40,41 @@ Trog::Guest - a VM we have just built, and are now waiting on
 
 =head1 DESCRIPTION
 
-The other end of the job from L<Trog::HV>: the machine we just asked a
-hypervisor to make.  Everything about reaching it -- the connection, running
-commands, getting files onto it -- is L<Trog::Machine>'s, and the same
-reasoning applies about not using sftp.  What is here is the waiting.
+The other end of the job from L<Trog::HV>.  A hypervisor makes the machine,
+and this class waits for it.  L<Trog::Machine> owns the connection, the
+commands and the file transfers, and says why none of them use sftp.
 
-A guest spends its first few minutes not being ready, in several distinct ways,
-and each of them needs a different question asked.  Those questions used to
-live as free subs in F<bin/provision> taking a bare L<Net::OpenSSH::More>
-handle, which meant F<bin/restore> had its own copy of the connecting half and
-neither could be tested without a VM.
+A new guest is not ready for its first few minutes, in several separate ways.
+Each way needs a different check, and each check is a method here.
 
 =head1 CLASS METHODS
 
 =head2 new(%opts)
 
-C<host> and C<user> are required, C<key_path> nearly always wanted, and C<name>
-is what to call this guest in messages.
+Takes C<host>, C<user>, C<key_path> and C<name>.  C<name> is what messages call
+this guest.  Dies when C<host> is missing.  The others are optional, but a
+connection nearly always needs C<user> and C<key_path>.
 
 =cut
 
-# How long to wait for things a guest does exactly once, on first boot.
+# How long to wait for things a guest does only once, on first boot.
 our $BOOT_TIMEOUT = 300;
 
-# Seconds between connection attempts, which is Net::OpenSSH::More's own
-# default.  Named here because wait_for_ssh divides the boot timeout by it.
+# Seconds between connection attempts, the default of Net::OpenSSH::More.
+# Named here because wait_for_ssh divides the boot timeout by it.
 our $SSH_RETRY_INTERVAL = 6;
 
-# The whole Makefile runs inside this one, not just the waiting: the first wait
-# is on the at queue, and the job sits there for as long as the build takes.
-# The longest of them is a domain that builds perl from source and installs
-# ninety-odd distributions after it, which takes about twenty minutes.
+# The whole Makefile runs inside this timeout, not only the waits.  The first
+# wait is on the at queue, and the job stays there for the whole build.  The
+# longest build installs perl from source and ninety-odd distributions after it.
+# It takes about twenty minutes.
 #
-# Trog::Machine::_unhang has to allow at least this long, or it decides a guest
-# that is still building has hung.
+# Trog::Machine::_unhang must allow at least this long, or it treats a guest
+# that is still building as hung.  It reads its limit from each command.
 our $SETUP_TIMEOUT = $ENV{TROG_SETUP_TIMEOUT} || '90m';
 
-# The build writes this as make exits, so it is there by the time the log is
-# closed; waiting the setup timeout for one that is missing just hangs.
+# The build writes the status file as make exits, so it exists when the log
+# closes.  A missing file does not come later, so a longer wait only hangs.
 our $STATUS_GRACE = '60s';
 
 sub new {
@@ -91,11 +88,13 @@ sub new {
 
 =head2 name
 
-What this guest is called, for messages.  Falls back to its address.
+Returns the name that messages use for this guest, or its address when it has
+no name.
 
 =head2 describe
 
-C<user@host>, or the name and address together when we have both.
+Returns C<name (user@host)> when the guest has a name, and C<user@host> when it
+does not.  With no C<user>, the address is only the host.
 
 =cut
 
@@ -111,13 +110,15 @@ sub describe {
 
 =head2 wait_for_ssh(%opts)
 
-Wait until we can actually SSH in, and return the guest.  C<timeout> seconds,
-default 300.
+Waits until an SSH connection to the guest opens, and returns the guest.  Takes
+C<timeout> in seconds, default 300.
 
-Two separate things have to be true, and checking only the first is how you get
-a confusing failure three steps later: the port has to be open, I<and> the
-connection has to succeed.  A VM that is listening but not yet accepting our key
-is not one we can do anything with.
+Two things must be true.  The port must be open, I<and> the connection must
+succeed.  A VM that listens but does not yet accept our key is of no use.  A
+check of the port alone gives a confusing failure three steps later.
+
+Dies when the port does not open within C<timeout>, or when the connection does
+not open in about the same time.
 
 =cut
 
@@ -129,17 +130,13 @@ sub wait_for_ssh {
     Net::EmptyPort::wait_port( { host => $self->ssh_host, port => 22, max_wait => $timeout } )
       or die 'SSH port on ' . $self->describe . " never came up after ${timeout}s\n";
 
-    # Opening it is the actual test; the port being up only means something is
-    # listening.  Given the same window as the port rather than the library's
-    # own minute: sshd answers long before cloud-init has finished writing
-    # authorized_keys, and ssh-import-id fetches some of those keys from GitHub,
-    # so a minute ran out on guests that were coming up perfectly well.
-    # That window is spent being refused, which is the one failure the library
-    # will not retry on its own: a guest still writing authorized_keys answers
-    # "Permission denied", and giving up on the first refusal is the right
-    # default everywhere else, since retrying one offers every key in the agent
-    # again and a host counting failed logins will ban you for it.  Here the
-    # refusal is the expected state of a machine that is still being built.
+    # The same window as the port, not the one minute of the library.  sshd
+    # answers long before cloud-init writes authorized_keys, and ssh-import-id
+    # fetches some of those keys from GitHub.  Until then the guest answers
+    # "Permission denied".  The library does not retry a refusal by default,
+    # because each retry offers every key in the agent again.  A host that
+    # counts failed logins bans you for that.  Here a refusal is the normal
+    # state of a machine that is still being built.
     $self->ssh(
         retry_interval        => $SSH_RETRY_INTERVAL,
         retry_max             => int( $timeout / $SSH_RETRY_INTERVAL ) || 1,
@@ -150,12 +147,18 @@ sub wait_for_ssh {
 
 =head2 wait_for_cloud_init($domain, %opts)
 
-Wait for cloud-init to finish, then check whether it is telling the truth.
+Waits for cloud-init to finish, then makes sure that it told the truth.
+C<$domain> defaults to L</name>.  Takes C<timeout>, default C<$SETUP_TIMEOUT>.
+Returns 1.
 
-C<cloud-init status --wait> can report success for a run in which individual
-modules failed, so afterwards we read the analysis and re-run whatever came
-back C<FAIL>.  Re-running means removing the semaphore first, since cloud-init
-will otherwise decline on the grounds that it has already done it.
+The wait ends when F</var/log/cloud-init-output.log> says C<Boot configuration
+complete.>  cloud-init can say that after a run in which some modules failed.
+So this then reads C<cloud-init analyze dump>, and runs again each module that
+came back C<FAIL>.  It first removes the semaphore of that module, because
+otherwise cloud-init does not run it a second time.
+
+Dies when the wait fails or times out, or when C<cloud-init analyze dump> does
+not return a JSON array.
 
 =cut
 
@@ -169,7 +172,6 @@ sub wait_for_cloud_init {
     print "Done!\n";
     die 'Cloud init reported failure on ' . $self->describe . ", investigate the machine\n" if $rc;
 
-    # See if we got a lying exit code above.
     my $raw    = $self->capture_cmd('sudo cloud-init analyze dump');
     my $parsed = eval { JSON::MaybeXS->new( utf8 => 1 )->decode($raw) };
     die "cloud-init analyze dump on " . $self->describe . " did not return a JSON array\n"
@@ -190,18 +192,31 @@ sub wait_for_cloud_init {
 
 =head2 wait_for_makefile($domain, %opts)
 
-Wait for the payload's Makefile to run, and return whether it succeeded.
+Waits for the Makefile of the payload to run, and returns true when make exited
+zero.  C<$domain> defaults to L</name>.  Takes C<timeout>, default
+C<$SETUP_TIMEOUT>.
 
-It is started by C<at>, so this is five waits and not one: the queue has to
-drain, the log has to appear, the log has to stop being written to, the queue
-has to drain again -- because the Makefile is entirely at liberty to queue more
-work of its own -- and then the status file has to appear, which F<setup.sh>
-writes as make exits -- briefly, since a file that is missing by then is not
-coming.
+C<at> starts the Makefile, so there are five waits, in this order:
 
-False unless make exited zero, a build that recorded nothing included.  The
-status is read from a file because C<make | tee> reports tee's exit code and
-never make's.
+=over 4
+
+=item * The at queue empties.
+
+=item * The log, F</var/log/$domain.setup.log>, appears.
+
+=item * No process has the log open.
+
+=item * The at queue empties again, because the Makefile can queue more jobs of
+its own.
+
+=item * The status file, F</var/log/$domain.setup.status>, appears.
+F<setup.sh> writes it as make exits, so this wait is only C<$STATUS_GRACE>.
+
+=back
+
+Returns false when make exited non-zero, and also when the build recorded no
+status.  The status comes from a file because C<make | tee> reports the exit
+code of tee, and never that of make.
 
 =cut
 
@@ -237,44 +252,37 @@ sub wait_for_makefile {
 
 =head1 THE KEY
 
-The private half of the key a guest is reached with used to sit in the domain
-directory as F<key.rsa>, mode 0600.  It is the credential for the machine it
-belongs to, so anything that could read that directory -- a process running as
-the same user, a stolen disk, a backup of F</opt/domains> -- had the way in to
-every guest.
+A guest is reached with an SSH key.  The private half is the credential for
+that machine, so it lives in the secret store and not in the domain directory.
+Anything that can read that directory can read a file in it: a process that runs
+as the same user, a stolen disk, a backup of F</opt/domains>.
 
-It lives in the secret store now.  What is here is the two halves of that: the
-provision that makes a key puts it there, and everything that needs to use one
-gets it back out.
+This section has the two halves of that.  The provision that makes a key puts it
+in the store, and everything that uses a key gets it back out.
 
 =head2 A domain keeps the key it has
 
 A key lasts as long as the domain does.
-L<Provisioner::Recipe::ubuntu/guest_keypair> mints one only for a domain with
-none, and has the reasoning.
+L<Provisioner::Recipe::ubuntu/guest_keypair> makes one only for a domain that
+has none, and gives the reasons.  C<seal_key> says why it overwrites the key in
+the store.
 
-C<seal_key> overwrites rather than going through L<Trog::Secrets/remember>,
-which keeps the first answer forever.  A key that has not changed re-seals to the
-same bytes; one that has -- a domain rebuilt from nothing, a key replaced by hand
--- has to land in the store rather than be ignored in favor of the old one.
+=head2 A key on disk still works
 
-=head2 A guest built before this still works
-
-C<key_path> hands back the file when there is one.  An installation whose domains
-have a F<key.rsa> on disk goes on using it, and each domain seals itself the next
-time it is provisioned -- there is nothing to migrate and no run to make first.
+C<key_path> returns the file when there is one.  A domain with a F<key.rsa> on
+disk continues to use it.  F<bin/new_config> seals that key the next time it
+generates the domain.  Nothing needs a migration, and no run is necessary first.
 
 =head2 They are the domain's, not a guest's
 
-Class methods taking a domain, rather than methods on a guest, because two of
-the callers have no guest to call one on: C<bin/new_config> seals at generate
-time, before the guest exists or has an address, and C<bin/guest_key> is handed
-a domain and nothing else.  C<new> refuses a guest with no host, so making these
-instance methods would mean inventing one.
+These are class methods that take a domain, not methods on a guest.  Two
+callers have no guest.  F<bin/new_config> seals the key before the guest exists
+or has an address, and F<bin/guest_key> gets only a domain.  C<new> refuses a
+guest with no host, so instance methods need an invented one.
 
 =head2 $ref = Trog::Guest->ref_for_key($domain)
 
-The reference the store keeps this domain's key under.
+Returns the reference under which the store keeps the key of this domain.
 
 =cut
 
@@ -282,14 +290,18 @@ sub ref_for_key { my ( undef, $domain ) = @_; return "secret:guests/$domain/pass
 
 =head2 Trog::Guest->seal_key($domain, $path)
 
-Put the private half at C<$path> into the store and take it off the disk.
+Puts the private key at C<$path> into the store, deletes the file, and returns
+1.  Returns 0 and changes nothing when the file cannot be read or is empty, or
+when the installation has no store.
 
-Overwrites what was there rather than keeping the first answer: a domain rebuilt
-from nothing, or a key replaced by hand, has one the store has not seen, and that
-is the one to hold.  A key that has not changed re-seals to the same bytes.
+It overwrites the key in the store, and does not use
+L<Trog::Secrets/remember>, which keeps the first answer forever.  A domain
+rebuilt from nothing, or a key replaced by hand, has a key the store has not
+seen.  The store must hold that one.  A key that did not change seals to the
+same bytes.
 
-The file goes only once the store has it, so a failure anywhere in here leaves
-the key where it was rather than nowhere.
+The file goes only after the store has the key.  If the password prompt or the
+store fails, this dies and the key stays on disk.
 
 =cut
 
@@ -301,9 +313,8 @@ sub seal_key {
 
     my $store = _store() or return 0;
 
-    # replace, not write.  write builds a new database out of what it is handed,
-    # which against the real store would leave it holding this key and nothing
-    # else -- every registrar credential and mail password in it gone.
+    # replace, not write.  write builds a new database from only what it gets,
+    # and so deletes every other secret in the store.
     Trog::Secrets->replace(
         $store,
         Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
@@ -316,23 +327,23 @@ sub seal_key {
 
 =head2 $path = Trog::Guest->key_path($domain, $on_disk)
 
-A path to this domain's private key that ssh can be pointed at, or undef when
-there is no key for it anywhere.
+Returns a path to the private key of this domain that ssh can use, or undef
+when there is no key for it anywhere.
 
-C<$on_disk> is where the key used to be kept, which the caller knows and this
-does not: asking L<Trog::HV> would drag L<Sys::Virt> into everything that wants
-to reach a guest, and where a domain directory is is L<Trog::HV>'s question
-rather than this one.  Given one that exists, that is the answer -- see
-L</A guest built before this still works>.
+C<$on_disk> is the path of a F<key.rsa> in the domain directory.  The caller
+knows that path, and this class does not.  To ask L<Trog::HV> loads
+L<Sys::Virt> into everything that connects to a guest.  Also, the location of a
+domain directory is a question for L<Trog::HV>.  If C<$on_disk> exists, it is
+the answer.  See L</A key on disk still works>.
 
-Otherwise the store's copy, written to a temporary file that belongs to this
-process and goes away with it.  Asked for twice in one run it is fetched once.
+Otherwise the key comes from the store.  It goes into a temporary file that this
+process owns, and the file goes away when the process exits.  A second call for
+the same domain in one run does not fetch it again.
 
-Undef rather than a die for a domain the store has never heard of: a first build
-has no key yet, and the callers already treat "no key" as "use the agent or the
-ssh config", which is a better answer than a path to nothing.  An installation
-with no store at all is answered without asking for a password, since there is
-nothing a password would open.
+Returns undef, and does not die, for a domain the store does not know or a store
+that cannot be read.  A first build has no key yet, and without a key the
+callers use the agent or the ssh configuration.  An installation with no store
+gets undef with no password prompt, because a password has nothing to open.
 
 =cut
 
@@ -356,9 +367,8 @@ sub key_path {
     };
     return undef unless $got{key};
 
-    # Kept in the hash as well as on disk: File::Temp removes the file when the
-    # object goes out of scope, so letting go of it would leave ssh pointed at a
-    # path that had just been unlinked.
+    # Keep the object in the hash.  File::Temp deletes the file when the object
+    # goes out of scope, and ssh then points at a path that no longer exists.
     my $tmp = File::Temp->new( TEMPLATE => "guest-key-$domain-XXXXXX", TMPDIR => 1 );
     chmod 0600, "$tmp";
     print {$tmp} $got{key} =~ m/\n\z/ ? $got{key} : "$got{key}\n";
@@ -368,11 +378,14 @@ sub key_path {
     return $materialised{$domain}{path};
 }
 
-# The store, or nothing, asked before any password is.  An installation with no
-# store cannot be holding a key, and asking for one would mean a prompt with
-# nothing behind it -- which in a run with nobody to type at is a wait rather
-# than a refusal.  bin/new_config reaches this on every generate, so that wait
-# was the whole suite.
+=head2 _store
+
+Returns the path of the secret store, or undef when the installation has none.
+Callers ask this before any password prompt.  With no store there is no key,
+and a prompt with nobody to answer it waits instead of failing.
+
+=cut
+
 sub _store {
     my $store = Trog::Config->path('secrets.kdbx');
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a store at all

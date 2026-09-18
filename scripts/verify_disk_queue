@@ -1,27 +1,26 @@
 #!/bin/bash
 # Usage: verify_disk_queue <scheduler> <read_ahead_kb> <sysfs queue dir>...
 #
-# What the udev rule asked for and what the kernel took are not the same thing.
-# A scheduler the running kernel has no module for is a write that fails, and
-# udev logs that somewhere nobody is looking -- so the guest ends up quietly on
-# a different scheduler than its configuration says, with nothing to say so.
+# Report each disk whose scheduler or read-ahead is not what the udev rule asked
+# for.  If the running kernel has no module for a scheduler, the write fails,
+# and only the udev log shows it.
 #
-# The rule file is correct either way and the next boot with a kernel that has
-# the scheduler will apply it, so a disagreement is reported and not fatal.
-# Exits 0 regardless; the provisioning test asserts the end state.
+# A difference is not fatal, because the next boot with a kernel that has the
+# scheduler applies the rule.  The script always exits 0.  The provisioning
+# test for diskqueue makes sure that the end state is correct.
 
 WANT_SCHEDULER="${1:?Usage: verify_disk_queue <scheduler> <read_ahead_kb> <queue dir>...}"
 WANT_READAHEAD="${2:?Usage: verify_disk_queue <scheduler> <read_ahead_kb> <queue dir>...}"
 shift 2
 
 for queue in "$@"; do
-    # An unmatched glob arrives as itself, and a partition has no queue of its
-    # own; either way there is nothing here to check.
+    # Skip an unmatched glob, which arrives as itself, and a partition, which
+    # has no queue of its own.
     [ -e "$queue/scheduler" ] || continue
     disk=$(basename "$(dirname "$queue")")
 
-    # The file reads `[none] mq-deadline` where the kernel offers a choice and
-    # `none` where it does not.  Both mean it took.
+    # The file reads `[none] mq-deadline` when the kernel offers a choice, and
+    # `none` when it does not.  Both forms mean that the kernel took it.
     scheduler=$(cat "$queue/scheduler")
     case "$scheduler" in
         *"[$WANT_SCHEDULER]"*) ;;

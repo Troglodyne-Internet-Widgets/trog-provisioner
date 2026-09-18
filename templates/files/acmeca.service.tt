@@ -8,9 +8,8 @@ Type=simple
 User=step-ca
 Group=step-ca
 Environment=STEPPATH=[% steppath %]
-[%# No --password-file: the intermediate key is written as a plain PEM, the way
-    the key of the fetch cache authority is.  Both are made by the provisioner and both
-    are secrets the guest already holds; a passphrase beside the key it unlocks
+[%# No --password-file.  The intermediate key is a plain PEM, like the key of
+    the fetch cache authority.  A passphrase next to the key that it unlocks
     protects nothing. -%]
 ExecStart=/usr/local/bin/step-ca [% steppath %]/config/ca.json
 Restart=on-failure

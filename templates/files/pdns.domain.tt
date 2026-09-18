@@ -1,4 +1,4 @@
 launch=gsqlite3
-# Inside the chroot: pdns_server runs with /var/spool/powerdns as its root,
-# so this is /var/spool/powerdns/zones.db seen from the host.
+# A path inside the chroot.  pdns_server runs with /var/spool/powerdns as its
+# root, so this is /var/spool/powerdns/zones.db on the host.
 gsqlite3-database=/zones.db

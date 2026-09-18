@@ -32,30 +32,33 @@ it answers.
 
 =head1 DESCRIPTION
 
-A recipe does not carry a password; it carries a note saying where one is:
+A recipe configuration must not carry a password.  It carries a reference that
+says where the password is:
 
     registrar:
         key: "secret:troglodyne/easydns_token/password"
 
-C<needed> finds every one of those, wherever it is nested.  C<lookup> resolves
-them against a KeePass database.  C<apply> puts the answers back where the notes
-were.  C<create> makes a database, which is what a test harness wants and what
-nothing else should.
+C<needed> finds each of those notes, at any depth.  C<lookup> resolves them
+against a KeePass database.  C<apply> puts the answers back where the notes
+were.  C<create> makes a new database, and only a test harness uses it.
 
 =head2 The syntax of a reference
 
-C<secret:GROUP/ENTRY/FIELD> -- a group in the database, an entry in that group,
-and a field on that entry, which is C<password> or C<username> in practice.
+A reference is C<secret:GROUP/ENTRY/FIELD>.  GROUP is a group in the database,
+ENTRY is an entry in that group, and FIELD is a field on that entry.  FIELD must
+be C<password> or C<username>, because the database drops other fields when it
+saves.
 
 =head1 CLASS METHODS
 
 =head2 needed($config)
 
-Every C<secret:> reference in a configuration, as a map of where it was to what
-it says.
+Returns each C<secret:> reference in C<$config> as a hash.  A key is the place
+of the reference, and its value is the reference.  Returns an empty list if
+C<$config> is not a hash reference.
 
-Where it was is a path of keys and array indices joined with C</>, which is what
-C<apply> reads to find its way back.
+The place is the path of hash keys and array indices to the reference, joined
+with C</>.  C<apply> reads this path to find the place again.
 
 =cut
 
@@ -67,8 +70,8 @@ sub needed {
     my @nodes = values %$config;
     my @paths = keys %$config;
 
-    # Breadth first with an explicit queue rather than recursion: a config is
-    # arbitrarily nested and this says plainly what it is doing.
+    # Breadth first with a queue, not recursion, because a configuration can
+    # nest to any depth.
     while (@nodes) {
         my $node = shift @nodes;
         my $path = shift @paths;
@@ -86,7 +89,7 @@ sub needed {
             $found{$path} = $node if defined $node && index( $node, 'secret:' ) == 0;
         }
 
-        # Anything else cannot be a reference.  It is YAML.
+        # No other type that YAML gives can be a reference.
     }
 
     return %found;
@@ -94,12 +97,13 @@ sub needed {
 
 =head2 lookup($file, $password, %needed)
 
-Resolve references against the database, as a map of the same paths to the
-values behind them.
+Resolves each reference in C<%needed> against the database in C<$file>.
+C<%needed> maps a key to a reference, as the return value of C<needed> does.
+Returns a hash of the same keys to their values.
 
-Dies naming the group, entry or field that was asked for and is not there,
-because a reference that resolves to nothing would otherwise arrive on a guest
-as an empty password.
+Dies if C<%needed> is empty, or if the database cannot be opened or unlocked.
+Also dies with the name of a group, entry or field that is not there.  Without
+this, a reference that resolves to nothing gets to a guest as an empty password.
 
 =cut
 
@@ -108,8 +112,8 @@ sub lookup {
 
     die "Nothing to look up.\n" unless %needed;
 
-    # Grouped so the database is walked once per group rather than once per
-    # reference.
+    # Grouped so that the database is searched once for each group, not once
+    # for each reference.
     my %by_group;
     foreach my $path ( keys %needed ) {
         my ( $group, $title, $field ) = $class->parse( $needed{$path} );
@@ -142,7 +146,10 @@ sub lookup {
 
 =head2 apply($config, %values)
 
-Put the answers back where the references were.
+Puts each value in C<%values>, which is what C<lookup> returns, back where its
+reference was in C<$config>.  Returns C<$config>.
+
+Dies if a path does not lead back to a place in C<$config>.
 
 =cut
 
@@ -153,9 +160,8 @@ sub apply {
         my @steps = split( m{/}, $path );
         my $leaf  = pop @steps;
 
-        # Walked rather than built into a string and eval'd, which is what this
-        # used to do.  The path comes out of somebody's configuration, and a key
-        # with a quote in it was a way to run whatever it liked.
+        # Walked, never built into a string and evaluated, because the path
+        # comes from a configuration file.
         my $at = $config;
         foreach my $step (@steps) {
             $at = looks_like_number($step) ? $at->[$step] : $at->{$step};
@@ -171,10 +177,11 @@ sub apply {
 
 =head2 create($file, $password, %value_by_ref)
 
-Make a database holding a value for each reference given.
+Makes a new database in C<$file> that holds a value for each reference in
+C<%value_by_ref>.  Returns C<$file>.
 
-For building a throwaway store to provision against.  What the values should be
-is the caller's business, not this module's.
+Use it to make a throwaway store to provision against.  The caller chooses the
+values.  Do not use it on a real store, because it replaces the whole file.
 
 =cut
 
@@ -200,16 +207,18 @@ sub create {
 
 =head2 remember($file, $password, %generator_by_ref)
 
-What each reference already holds, making and keeping one where it holds
-nothing.  The generator is a coderef, called only when the entry is missing.
+Returns a hash of each reference in C<%generator_by_ref> to its value.  A
+generator is a coderef.  If a reference holds nothing, this calls its generator
+and keeps the result in the database.  A reference that holds a value keeps
+that value, and its generator is not called.  Returns an empty list if
+C<%generator_by_ref> is empty.
 
-This is for a secret the provisioner owns rather than one an operator wrote
-down: a signing key, a shared secret between a guest and whatever authenticates
-against it.  Generated once and kept here, it survives the guest being rebuilt
-without ever being written into the domain directory -- which is where the data
-recipe would pick it up and carry it into every backup taken afterwards.
+Use it for a secret that the provisioner owns, such as a signing key.  The
+secret stays the same when the guest is rebuilt.  It is never written into the
+domain directory, where the data recipe would put it into each backup.
 
-Dies rather than overwrite: a reference that exists is answered, never replaced.
+Dies if the database cannot be opened or unlocked, or if a generator returns a
+false value.  Also dies if the database did not keep a new value.
 
 =cut
 
@@ -245,9 +254,8 @@ sub remember {
         $made{$ref}   = 1;
     }
 
-    # Only when there is something new to keep.  Saving rewrites the whole
-    # database, and a run that read but did not add has no business doing that
-    # to the file every other domain is also being provisioned out of.
+    # Save only when there is something new, because a save rewrites the store
+    # that every other domain also uses.
     return %values unless %made;
 
     $kdbx->save_db( $file, $password );
@@ -257,12 +265,20 @@ sub remember {
     return %values;
 }
 
-# What was written has to be readable, because the database keeps the fields it
-# knows about and quietly drops the rest -- a reference naming anything but
-# password or username stores nothing.  Left unchecked, the caller is handed the
-# secret it just made, the next run finds nothing and makes another, and a
-# secret that is supposed to outlive the guest rotates on every provision
-# instead.  So: read it back, and say so now rather than never.
+=head2 _confirm_kept($file, $password, \%values, \%made)
+
+Opens C<$file> again and makes sure that it holds the value in C<%values> for
+each reference in C<%made>.  Returns 1.  C<remember> calls it after a save.
+
+It catches a field that the database drops when it saves.  See
+L</The syntax of a reference>.  Without this check, a secret that must stay the
+same changes on each provision.
+
+Dies if the database cannot be opened or unlocked, or if a reference did not
+keep its value.
+
+=cut
+
 sub _confirm_kept {
     my ( $class, $file, $password, $values, $made ) = @_;
 
@@ -287,18 +303,17 @@ sub _confirm_kept {
 
 =head2 replace($file, $password, %value_by_ref)
 
-Set each reference to the value given, in the database that is already there.
+Sets each reference in C<%value_by_ref> to its value, in the database that is
+already in C<$file>.  It adds a group or entry that is not there.  Returns 1, or
+0 if C<%value_by_ref> is empty.
 
-The difference from C<write> is the whole point of it: C<write> builds a new
-database holding what it was handed, which is right for a throwaway store and
-catastrophic against a real one -- everything not passed in is simply not in the
-file afterwards.  This opens the store, sets the fields named, and leaves every
-other secret in it alone.
+Dies if the database cannot be opened or unlocked.
 
-The difference from C<remember> is that this overwrites.  C<remember> keeps
-whatever was there, which is right for a value that should be minted once; a
-guest key is rotated on every provision, so the store has to end up holding the
-current one.
+C<create> makes a new database that holds only what it gets.  This sub opens
+the store, sets the fields that you name, and does not change other secrets.
+
+C<remember> keeps a value that is already there.  This sub replaces it.  Use it
+for a value that changes on each provision, such as a guest key.
 
 =cut
 
@@ -327,7 +342,10 @@ sub replace {
 
 =head2 parse($reference)
 
-The group, entry and field a reference names.
+Returns the group, entry and field that C<$reference> names, as a list.
+
+Dies if C<$reference> does not start with C<secret:>, or if it does not name all
+three parts.
 
 =cut
 

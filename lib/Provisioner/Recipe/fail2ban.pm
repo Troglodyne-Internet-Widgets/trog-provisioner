@@ -21,9 +21,9 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-Sets up some fail2ban rules for your configured recipes.
-
-Currently very limited: it configures a jail for tpsgi and nothing else.
+Sets up a fail2ban jail for the domain.  The jail watches the tpsgi log of the
+domain, and bans a host that gets too many 4xx responses as an anonymous user.
+No other recipe gets a jail.
 
 =cut
 

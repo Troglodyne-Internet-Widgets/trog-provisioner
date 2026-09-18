@@ -1,13 +1,13 @@
-[%# The keys the runner authorizes on every guest it builds, one per line, in
-    the format sshd reads.
+[%# The keys that the runner authorizes on every guest it builds, one per
+    line, in the format that sshd reads.
 
-    Inherited from the keys this guest was built with unless the domain named
-    its own: a runner administers what it builds the way this installation
-    administers it.  Held as a file rather than as an identity for cloud-init to
-    resolve, which is why there is a template for it at all.
+    Unless the domain names its own keys, these are the keys that built this
+    guest.  So a runner administers its guests the same way as this
+    installation.  They are a file, not an identity for cloud-init to resolve,
+    so they need this template.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
-    string and swallows the template as far as the next quote. -%]
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
 [% FOR key IN config.admin_keys -%]
 [% key %]
 [% END -%]

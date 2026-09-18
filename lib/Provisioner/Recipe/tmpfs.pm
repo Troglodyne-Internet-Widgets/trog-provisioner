@@ -24,46 +24,38 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Installs a C<tmp.mount> unit so C</tmp> is a tmpfs rather than a directory on
-the root filesystem.
+Installs a C<tmp.mount> unit, so C</tmp> is a tmpfs and not a directory on the
+root filesystem.
 
-Debian and Ubuntu ship the unit in F</usr/share/systemd/> rather than
-F</usr/lib/systemd/system/>, which is their way of shipping it turned off:
-nothing can enable a unit systemd cannot see. So this writes its own into
-F</etc/systemd/system/tmp.mount>, which is also what makes the size
-configurable -- there is nowhere to put a drop-in for a unit that does not
-exist.
+Debian and Ubuntu put their unit in F</usr/share/systemd/> and not in
+F</usr/lib/systemd/system/>. That is how they ship it turned off, because
+systemd cannot enable a unit that it cannot see. So this recipe writes its own
+unit to F</etc/systemd/system/tmp.mount>. That is also what makes the size
+configurable. You cannot put a drop-in for a unit that does not exist.
 
-=head3 It mounts during the build, on purpose
+=head3 It mounts during the build
 
-The first cut of this enabled the unit and deliberately did not start it, on the
-theory that mounting over C</tmp> mid-provision was asking for trouble. That
-theory did not survive a guest: C<tmp.mount> is C<WantedBy=local-fs.target>, and
-the next C<systemctl restart> of anything with default dependencies re-pulls
-that target and mounts it. C<nostubresolver> restarting C<systemd-resolved> was
-what did it, from the middle of the postrun queue -- so "enabled but not
-started" is not a state a running system stays in.
+The recipe enables the unit and starts it, in its own makefile target. A unit
+that is enabled but not started does not stay that way. C<tmp.mount> is
+C<WantedBy=local-fs.target>. The next C<systemctl restart> of a service with
+default dependencies pulls that target in again, and that mounts it.
 
-Since it is going to mount either way, it mounts here: synchronously, from this
-recipe's own makefile target, where every recipe after it sees the same C</tmp>
-and a mount that fails fails the build rather than surfacing later.
+So the recipe mounts it at a known time. Every recipe after it sees the same
+C</tmp>, and a mount that fails also fails the build.
 
-What made the mid-provision mount dangerous was that the build ran out of
-C</tmp>. It does not any more -- F<setup.tmpl> unpacks the payload into
-F</var/tmp> -- so there is nothing under C</tmp> for this to cover over except
-whatever cloud-init and apt left behind, which is what C<systemd> means when it
-says B<Directory /tmp to mount over is not empty, mounting anyway>.
+The build payload is in F</var/tmp> (see F<templates/ubuntu/files/ubuntu.setup.sh.tt>),
+so the mount does not hide it. The mount hides only what cloud-init and apt
+left in C</tmp>. That is why systemd says B<Directory /tmp to mount over is not
+empty, mounting anyway>.
 
-Whatever that was stays on the root filesystem underneath the mount, unreachable
-and never added to again -- about 76K of socket directories and systemd's
-per-service private ones on the guest this was tested against. Every boot after
-this one mounts the tmpfs before anything writes to C</tmp>, so it does not
-accumulate. It is not worth an C<rm -rf /tmp/*> in a provisioning recipe to
-reclaim.
+Those files stay on the root filesystem under the mount, and nothing can reach
+them. On the test guest they were about 76K of sockets and private directories
+for systemd services. Every later boot mounts the tmpfs before anything writes
+to C</tmp>, so they do not grow. The recipe does not delete them.
 
 =head3 deps
 
-None. C<tmp.mount> is systemd's, and tmpfs is the kernel's.
+None. C<tmp.mount> comes from systemd, and tmpfs comes from the kernel.
 
 =head3 args
 
@@ -71,16 +63,17 @@ None. C<tmp.mount> is systemd's, and tmpfs is the kernel's.
 
 =item size
 
-How large the tmpfs may grow, in the syntax C<mount> takes for tmpfs: a
-percentage of RAM (C<50%>), or a size with a suffix (C<2G>, C<512M>), or plain
-bytes. Defaults to C<50%>, which is what systemd's own C<tmp.mount> ships.
+The largest size that the tmpfs can grow to, in the syntax that C<mount> takes
+for tmpfs. That is a percentage of RAM (C<50%>), a size with a suffix (C<2G>,
+C<512M>), or a number of bytes. The default is C<50%>, the same as the
+C<tmp.mount> that systemd ships.
 
-It is a ceiling rather than a reservation -- a tmpfs occupies what is written to
-it and no more -- so the cost of a generous number is that something filling
-C</tmp> can take that much memory, not that the guest starts with less.
+It is a limit, not a reservation. A tmpfs uses only the memory for what is
+written to it. So a large number does not take memory from the guest at boot.
+It lets a process that fills C</tmp> use that much memory.
 
-A percentage reaches the unit file doubled, as C<50%%>: C<Options=> is a setting
-systemd expands specifiers in, and a lone C<%> there is the start of one.
+A percentage goes into the unit file doubled, as C<50%%>. systemd expands
+specifiers in C<Options=>, and a single C<%> there starts one.
 
 =back
 
@@ -92,10 +85,8 @@ sub args {
         properties => {
             size => {
 
-                # What tmpfs itself accepts: a percentage of RAM, a number with
-                # a k/m/g suffix, or plain bytes.  Checked here because the
-                # failure is otherwise a mount that refuses at boot, on a guest
-                # nobody is watching, with /tmp quietly staying on the disk.
+                # Checked here because a bad size otherwise fails the mount at
+                # boot, and /tmp stays on the disk with nobody told.
                 type    => 'string',
                 pattern => '^[1-9][0-9]*(?:%|[kKmMgG])?$',
                 default => '50%',
@@ -107,9 +98,7 @@ sub args {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # systemd expands specifiers in Options=, where % begins one.  A literal
-    # percent is written %%, so `50%` has to reach the unit as `50%%` -- and a
-    # size given as 2G must not be mangled on the way.
+    # Options= takes a literal % as %%.  See size in the POD.
     ( $opts{unit_size} = $opts{size} ) =~ s/%/%%/;
 
     return %opts;

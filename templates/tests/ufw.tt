@@ -10,55 +10,37 @@ like($ufw_status, qr/active/i, 'ufw is active');
 my $rules = `ufw status verbose 2>/dev/null`;
 like($rules, qr/OpenSSH/, 'ssh is allowed at all') or diag $rules;
 
-# And not with ufw's own limit, which is six connections in thirty seconds.  A
-# provision opens far more than that, and so does anything that asks the guest a
-# question afterwards -- so the provisioner locked itself out of guests it had
-# just built, and every step after that failed as "connection refused" on an
-# address that had been working.  ssh is rate limited like every other port
-# here instead: by the hashlimit below, at whatever rate_limits says.
+# But not with ufw's own limit, which is six connections in thirty seconds.  A
+# provision opens far more than that.  The hashlimit below limits ssh like every
+# other port, at the rate in rate_limits.
 unlike($rules, qr/^\s*OpenSSH\s+LIMIT/mi, 'and not by ufw\'s six-in-thirty limit') or diag $rules;
 
-# Nor anything else.  A guest built before this stopped limiting profiles keeps
-# the limit through a re-provision unless it is deleted, because ufw keys a rule
-# on its action as well as its ports and the allow lands beside it rather than
-# over it.  The APT profile is the one that hurt: it covers 53, 80 and 443, so
-# six in thirty applied to DNS, and a machine that resolved a name twice could
-# not resolve one again for half a minute.
+# Nor any other profile.  ufw keys a rule on its action and its ports, so an
+# allow does not replace a limit that an older provision left.  setup-ufw-rules
+# deletes those limits.
 unlike($rules, qr/\bLIMIT\b/, 'nothing at all is on ufw\'s limit any more') or diag $rules;
 
-# ufw's limit is six connections in thirty seconds.  That is the right setting
-# for ssh and the wrong one for anything a browser talks to -- one page load
-# opens more than six -- and it was applied to every application profile there
-# was, so a site rate limited its own visitors off itself.
+# One page load opens more than the six connections that ufw's limit allows.
 foreach my $web (grep { m/nginx|apache/i } split m/\n/, `ufw app list 2>/dev/null`) {
     $web =~ s/^\s+|\s+$//g;
     next unless length $web;
     unlike($rules, qr/^\s*\Q$web\E\s+LIMIT/mi, "$web is not rate limited");
 }
 
-# The real rate limits.  ufw's own `limit` is six connections in thirty seconds,
-# which suits a person typing at an ssh prompt and nothing this builds -- it rate
-# limited real visitors off the site when it was applied to every application
-# profile, and it locked the provisioner out of guests when it was applied to
-# port 22, which is why 22 is overridden here rather than left to ufw.  So
-# setup-ufw-rules allows profiles and limits none of them, and these carry the
-# actual numbers.  They were rendered
-# into a ufw.user.rules that nothing installed, and could not have been: ufw owns
-# user.rules and rewrites it whenever a rule changes.
+# The real rate limits, which setup-ufw-ratelimits writes into before.rules.
+# That script says why they are there, and not in ufw's `limit` or user.rules.
 my $before = do { local (@ARGV, $/) = '/etc/ufw/before.rules'; <> } // '';
 
-# With the protocol, not just the port.  A rule against the wrong protocol
-# matches none of the service's traffic while before.rules still names the port
-# and reads as correct -- so an assertion on the port alone passes on a guest
-# where the limit does nothing.
+# With the protocol, not only the port.  A rule for the wrong protocol matches
+# none of the traffic, but before.rules still names the port.  So an assertion
+# on the port alone passes when the limit does nothing.
 my %limits = (
 [% FOR spec IN rate_limits.keys().sort() %]    '[% spec %]' => [% rate_limits.$spec %],
 [% END -%]
 );
 
-# ssh by name, rather than only through the loop below.  An assertion over the
-# set we were handed cannot notice a member missing from that set, which is
-# exactly how ssh went unlimited on every guest with a listening recipe.
+# ssh by name, not only through the loop below.  A loop over the limits that
+# this test gets cannot see a limit that is missing from them.
 like($before, qr/-p tcp --dport 22 .*--hashlimit-above \d+\/sec/,
     'ssh is rate limited, whatever else the guest listens on') or diag $before;
 
@@ -69,16 +51,10 @@ foreach my $spec (sort keys %limits) {
         "$proto port $port is rate limited at $limits{$spec} a second") or diag $before;
 }
 
-# An exemption has to sit in a chain of our own, and this is the assertion that
-# says so rather than saying a rule with the right words in it exists somewhere.
-#
-# RETURN leaves the chain it is in.  The last rule of ufw-before-input is the
-# jump to ufw-user-input, where every `ufw allow` lives -- so an exemption
-# appended to ufw-before-input returned past the allow rules, fell through to
-# ufw-reject-input, and was dropped by the default deny.  Naming an admin
-# network locked that network out of the guest entirely, and ESTABLISHED being
-# accepted higher up hid it: the connection that configured the firewall stayed
-# up, and only the next new one was refused.
+# An exemption must be in a chain of our own, not in ufw-before-input.
+# setup-ufw-ratelimits says why.  Ask iptables, because a working connection
+# proves nothing.  ESTABLISHED is accepted earlier in the chain, so an
+# exemption in the wrong chain refuses only new connections.
 my $before_chain = `iptables -S ufw-before-input 2>/dev/null`;
 
 unlike($before_chain, qr/^-A ufw-before-input -s \S+ -j RETURN/m,
@@ -92,32 +68,27 @@ like($before_chain, qr/-j trog-ratelimit\b.*-j ufw-user-input\b/s,
 my $limit_chain = `iptables -S trog-ratelimit 2>/dev/null`;
 
 [% FOR net IN admin_networks %]
-# Named as an admin network, so it is let past the limit rather than counted by
-# it -- which is what makes that setting mean anything now that ssh is limited
-# here rather than by ufw.
+# Named in admin_networks, so the limits let it through and do not count it.
 like($limit_chain, qr{-s \Q[% net %]\E(?:/32)? -j RETURN}, '[% net %] is exempt from the rate limits')
     or diag $limit_chain;
 [% END -%]
 
-# Once, however many times this guest has been provisioned.
+# Once, however many times the guest was provisioned.
 my $blocks = () = $before =~ m/^# BEGIN trog-provisioner rate limits$/gm;
 is($blocks, 1, 'the rate limit block appears exactly once');
 
-# And after the rules that accept loopback and established traffic, or it would
-# be counting both.
+# After the rules that accept loopback and established traffic, so that the
+# limits do not count that traffic.
 my ($lo) = $before =~ m/\A(.*?)-A ufw-before-input -i lo/s;
 unlike($lo // '', qr/BEGIN trog-provisioner rate limits/,
     'and comes after the loopback accept, not before it');
 
-# iptables has to accept the file, which is the question ufw restarting answers.
 my $active = `ufw status 2>/dev/null`;
 like($active, qr/Status:\s*active/, 'ufw is still active after the edit') or diag $active;
 
-# And "active" is not "loaded".  A before.rules that iptables-restore rejects
-# aborts the whole file -- every rule in it, including the loopback and
-# ESTABLISHED accepts -- and ufw goes on reporting itself active with a chain
-# that has one rule in it.  That is what `-m recent --hitcount` above 20 did
-# here, silently, for every guest built with it.
+# But "active" is not "loaded".  If iptables-restore rejects before.rules, it
+# loads no rule from the file, not even the loopback and ESTABLISHED accepts.
+# ufw still reports itself active, with one rule in the chain.
 my $reload = `ufw reload 2>&1`;
 unlike($reload, qr/Problem running|RULE_APPEND failed|iptables-restore/i,
     'before.rules is actually accepted by iptables, not merely present') or diag $reload;
@@ -126,8 +97,7 @@ my $chain = `iptables -L ufw-before-input -n 2>/dev/null`;
 like($chain, qr/^ACCEPT\s+\S+\s+--\s+0\.0\.0\.0\/0\s+0\.0\.0\.0\/0\s*$/m,
     'the loopback accept survived, so the chain really did load') or diag $chain;
 
-# The thing the above is really protecting: anything talking to a service on
-# this host over loopback.
+# What the loopback accept protects: a connection to a local service.
 my $loopback = system('timeout 5 bash -c "echo > /dev/tcp/127.0.0.1/22" 2>/dev/null');
 is($loopback, 0, 'a loopback connection to an open port is not dropped');
 

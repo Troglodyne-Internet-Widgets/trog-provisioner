@@ -1,7 +1,7 @@
 mv root.domain.crontab /etc/cron.d/[% domain %]
 chown root:root /etc/cron.d/[% domain %]
 chmod 0644 /etc/cron.d/[% domain %]
-# Obviously, don't use the same service user for each domain!
+# crontab -u replaces the whole crontab, so give each domain its own service user.
 [% IF user %]
 crontab -u [% user %] user.crontab
 [% END -%]

@@ -30,44 +30,43 @@ In recipes.yaml:
 
 Connects this host to an OpenVPN server as a client.
 
-Client certificates (ca.crt, client.crt, client.key, ta.key) must be
-pre-generated on the VPN server via easy-rsa and placed in cert_dir on the
-machine running this tool.  The recipe rsyncs them to the provisioned host as
-the C<transfer_user>, by address -- the same way the data recipe fetches a
-domain's payload, and for the same reason: this runs before the guest's DNS is
-any use.
+Make the client certificates (ca.crt, client.crt, client.key, ta.key) on the VPN
+server with easy-rsa first.  Put them in cert_dir on the machine that runs this
+tool.  The guest fetches them from that machine with rsync, as the
+C<transfer_user> and by address.  The data recipe fetches the payload of a domain
+the same way, for the same reason.  The DNS of the guest does not work yet when
+this runs.
 
-The tunnel comes up during provisioning rather than in the postrun, so it is
-there for anything that runs after this recipe's target.
+The tunnel comes up during the provision, not in the postrun.  So it is there
+for every target that runs after the target of this recipe.
 
-Which is not something a recipe can ask for: there is no way to name a position
-in the build, and requiring this one places it B<after> the recipe that asked.
-A recipe that cannot tolerate the tunnel being absent should wait for the
-interface in its own fragment, the way C<ssl.get_cert> waits for the server that
-answers its challenge.
+A recipe cannot ask for that order.  Nothing names a position in the build, and
+a recipe that requires this one puts it B<after> itself.  If a recipe cannot
+work without the tunnel, it must wait for the interface in its own fragment.
+C<ssl.get_cert> waits in the same way for the server that answers its challenge.
 
 =head3 Several tunnels on one guest
 
-A guest can hold two domains connecting to two different VPNs, and openvpn
-supports that directly: C<openvpn-client@> is a template unit, one instance per
-tunnel, each reading F</etc/openvpn/client/E<lt>nameE<gt>.conf>.
+A guest can hold two domains that connect to two different VPNs, and openvpn
+supports that directly.  C<openvpn-client@> is a template unit with one instance
+per tunnel.  Each instance reads F</etc/openvpn/client/E<lt>nameE<gt>.conf>.
 
-So everything here is named for the domain -- the instance, the configuration,
-the directory the certificates land in, the log, and the interface.  Two domains
-share nothing but the openvpn package, which is what lets this recipe sit on a
-machine with another of its kind when most of its neighbors cannot.
+So this recipe names everything for the domain: the instance, the configuration,
+the certificate directory, the log and the interface.  Two domains share only
+the openvpn package.  That is why this recipe can share a machine with another
+instance of itself, when most recipes cannot.
 
 =head3 Why nothing here is salvaged
 
-C<cert_dir> on the hypervisor is where these certificates are kept, and they are
-rsynced over the guest's copy on every run -- so a rebuilt guest needs nothing
-brought back off the last one.
+C<cert_dir> on the machine that runs this tool keeps these certificates.  Every
+run copies them over the copy on the guest.  So a rebuilt guest needs nothing
+from the guest before it.
 
-Which is the whole reason there is no C<remote_files> here.  Salvaging
-F</etc/openvpn/client> would take a client key, which the fetch cannot read
-anyway without a staged copy made for it, and put a second copy of it in the
-domain directory and in every backup taken of that.  The hypervisor already
-holds the only copy that has to exist.
+That is why this recipe declares no C<remote_files>.  A salvage of
+F</etc/openvpn/client> takes a client key, which the fetch cannot read without a
+staged copy made for it.  It also puts a second copy of that key in the domain
+directory and in every backup of that directory.  C<cert_dir> already holds the
+only copy that must exist.
 
 =cut
 
@@ -92,15 +91,18 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-C<device> comes from the domain.  Left to itself openvpn hands out C<tun0>,
-C<tun1> and so on in start order, which says nothing about which tunnel is which
-and leaves the fragment no name to wait on.
+Takes the options of the recipe and returns them with C<device> set.  If the
+domain names its own C<device>, it keeps it.  If not, the name comes from a hash
+of the domain.
 
-Hashed rather than spelled out, because an interface name stops at fifteen
-characters and a domain is routinely longer -- the same bargain
-L<Trog::HV::Libvirt/guest_mac> makes for a MAC address, and with the same two
-properties: one domain gets the same interface on every rebuild, and two domains
-do not collide.  A domain naming its own keeps it.
+Without a name, openvpn hands out C<tun0>, C<tun1> and so on in start order.
+Those names do not say which tunnel is which, and the fragment has no name to
+wait on.
+
+The name is a hash, not the domain, because the kernel limits an interface name
+to fifteen characters.  A domain is often longer.  L<Trog::HV::Libvirt/guest_mac>
+makes the same trade for a MAC address, with the same two properties.  One
+domain gets the same interface on every rebuild, and two domains do not collide.
 
 =cut
 

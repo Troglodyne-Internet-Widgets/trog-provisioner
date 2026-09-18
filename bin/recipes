@@ -2,7 +2,7 @@
 
 package Trog::Bin::Recipes;
 
-#ABSTRACT: List the recipes, or say what one of them takes.
+#ABSTRACT: List the recipes, or show what one recipe takes.
 
 use 5.041;
 
@@ -21,12 +21,12 @@ use Provisioner::Cookbook();
 
 =head1 NAME
 
-recipes - list the recipes, or say what one of them takes
+recipes - list the recipes, or show what one recipe takes
 
 =head1 SYNOPSIS
 
-    bin/recipes                 # every recipe, and what it is for
-    bin/recipes --json          # the same, for something other than a human
+    bin/recipes                 # each recipe and what it does
+    bin/recipes --json          # the same list, as JSON
     bin/recipes mariadb         # what mariadb takes, as JSON
 
 =head1 OPTIONS
@@ -35,27 +35,27 @@ recipes - list the recipes, or say what one of them takes
 
 =item B<--json>
 
-Print the listing as JSON rather than as a table.  A single recipe's schema is
-JSON either way -- that is what it is.
+Print the list as JSON, not as a table.  The schema of one recipe is always
+JSON.
 
 =item B<--scaffold>
 
-Instead of the schema, print the configuration F<bin/new_guest> would generate
-for this recipe: defaults where the recipe has them, C<CHANGEME> where it does
-not.
+Print the configuration that F<bin/new_guest> writes for this recipe, not the
+schema.  A field gets its default if the recipe has one, and C<CHANGEME> if it
+does not.
 
 =item B<--all>
 
-With C<--scaffold>, include the optional fields too.
+With C<--scaffold>, also include the optional fields.
 
 =back
 
 =head1 DESCRIPTION
 
-Every recipe declares what it accepts in C<args()>, an OpenAPIv3 object schema
-that the provisioner validates a domain's configuration against.  This prints
-it, so you can find out what to write in F<recipes.d/> without reading the
-recipe.
+Each recipe declares what it accepts in C<args()>.  This is an OpenAPIv3 object
+schema, and the provisioner validates the configuration of a domain against it.
+This command prints the schema.  You can then learn what to write in
+F<recipes.d/> without reading the recipe.
 
 =cut
 
@@ -83,14 +83,22 @@ sub main {
         -message => 'One recipe at a time'
     ) if @args;
 
-    # Dies naming the recipe and pointing at the listing, which is the whole
-    # reason to go through the Cookbook rather than requiring it here.
+    # The Cookbook dies with the recipe name and points at the list, so do not
+    # require the recipe here.
     my $spec = describe( $name, $scaffold, $all );
     print $encoder->encode($spec);
     return 0;
 }
 
-# What to print for one recipe: its schema, or the config we would write for it.
+=head2 describe($name, $scaffold, $all)
+
+Returns a hashref to print for the recipe C<$name>.  This is its schema, with
+the hosts it downloads from under C<x-fetch-hosts>.  If C<$scaffold> is true,
+it is the configuration that C<--scaffold> describes instead, and C<$all> adds
+the optional fields.  Dies if there is no recipe called C<$name>.
+
+=cut
+
 sub describe {
     my ( $name, $scaffold, $all ) = @_;
 
@@ -106,20 +114,24 @@ sub describe {
     my $class = Provisioner::Cookbook->load($name);
     my %spec  = Provisioner::Cookbook->spec($name);
 
-    # The hosts it downloads from, which a guest points at the fetch cache
-    # while it provisions.  Under x-, which is how OpenAPI marks what is not
-    # schema.
+    # A guest points these hosts at the fetch cache while it provisions.  The
+    # x- prefix is how OpenAPI marks a key that is not schema.
     #
-    # A guest is pointed at the cache through its /etc/hosts rather than
-    # through a recipe that manages that file, because the pointing lasts one
-    # build: scripts/fetch_via_cache puts the entries in before the makefile
-    # and takes them out after it, so nothing outlives the provision and there
-    # is no state for a recipe to own.
+    # The guest does this in /etc/hosts, not with a recipe that manages the
+    # file.  scripts/fetch_via_cache adds the entries before the makefile and
+    # removes them after it, so no state remains for a recipe to own.
     my @hosts = $class->fetch_hosts;
     $spec{'x-fetch-hosts'} = \@hosts if @hosts;
 
     return \%spec;
 }
+
+=head2 list($encoder, $json)
+
+Prints each recipe name with its abstract, as a table, or as JSON through
+C<$encoder> if C<$json> is true.  Returns 0.
+
+=cut
 
 sub list {
     my ( $encoder, $json ) = @_;

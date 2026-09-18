@@ -13,8 +13,8 @@ After=swap.target
 What=tmpfs
 Where=/tmp
 Type=tmpfs
-# size is doubled when it is a percentage: Options= is a setting systemd expands
-# specifiers in, and a lone % there begins one rather than meaning itself.
+# A percentage in size is doubled.  systemd expands specifiers in Options=, and
+# a single % there starts one.
 Options=mode=1777,strictatime,nosuid,nodev,size=[% unit_size %],nr_inodes=1m
 
 # Make 'systemctl enable tmp.mount' work:

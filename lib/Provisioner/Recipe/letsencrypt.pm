@@ -25,114 +25,118 @@ use Provisioner::Utils();
 
 =head2 DESCRIPTION
 
-Configures lexicon to be able to update TXT records for your domain with your registrar so you can do DNS DCV.
+This recipe configures lexicon to update the TXT records of your domain at your
+registrar, so that you can do DNS DCV (domain control validation).
 
-Configures dehydrated to use lexicon to do DNS DCV w/ lexicon.
+It configures dehydrated to do DNS DCV with lexicon.
 
-L<Provisioner::Recipe::lexicon> puts the client on the guest, and with it the
-per-domain shortcut for running it by hand:
+L<Provisioner::Recipe::lexicon> puts the client on the guest.  It also installs
+the per-domain shortcut to run the client by hand:
 
     /opt/lexicon/my.domain.name list TXT
 
-Also stashes a local copy of any provisioned certs so you don't violate ToS or get rate-limited from repeated redeploys of systems.
-Requires that the user running new_config has a key authorized as the admin user on the remote host.
+The recipe also keeps a local copy of each certificate that it provisions.  Then
+repeated redeploys do not break the terms of service or hit the rate limit.
+
+The user that runs new_config must have a key that is authorized for the admin
+user on the remote host.
 
 =head2 What the salvage needs to be able to read
 
-C<remote_files> names the two certificate directories and the account
-directory, and the certificates in them are no use on their own. A guest rebuilt
-with certificates it has no keys for issues again from scratch, which is what the
-salvage exists to avoid: it spends Let's Encrypt rate limit, and if the account
-key went missing with them it spends the registration as well -- the old
-certificates stay valid, but nothing can revoke them and the guest is a stranger
-to the CA again.
+C<remote_files> names the two certificate directories and the account directory.
+The certificates in them are of no use without their keys.  A guest that gets
+certificates back without their keys issues again from scratch, and the salvage
+exists to prevent that.  A new issue spends the rate limit of Let's Encrypt.  If
+the account key is also lost, it spends the registration too.  The old
+certificates stay valid, but nothing can revoke them, and the CA does not know
+the guest.
 
-dehydrated writes every private key it makes C<0600 root>, and the guest used to
-leave them readable by the admin account -- from when the fetch ran as that user
-and would otherwise return an empty directory and say nothing anybody reads.
-That was done in three places, one per moment a fresh key exists that nothing
-downstream has fixed up yet: the global fragment, right after
-C<dehydrated --register> writes the account key; C<get_cert> after the
-provision; and the C<exit_hook> in this domain's dehydrated hook after B<every>
-dehydrated run, because the nightly renewal writes a fresh private key and never
-goes near C<get_cert>.
+On the guest, the certificates are world readable, because they are public.
+dehydrated writes each private key and the account key as C<0600 root>.  The
+fetch reads the guest as root, so nothing here makes them wider.
 
-The fetch reads the guest as root now, so issue #98 took the widening back out
-of all three: what that leaves on the guest is certificates world readable,
-since they are public, and private keys and the account key back to
-C<0600 root>, readable by nobody the fetch is not. The consequence to know about
-is still the other end of the wire -- the keys land in the provisioner's data
-directory and in whatever backs it up, so that directory holds this domain's TLS
-private keys regardless of who could read them on the guest.
+Three places set these modes again, one for each moment that a new key exists:
 
-The account key goes back in the global fragment rather than this recipe's own,
-because the global one runs first and ends with C<dehydrated --register>: by the
-time the per-domain fragment runs there is an account in the destination
-already, and C<restore_state> will not write over one.
+=over 4
 
-That is the public CA's arrangement.  An account issued by a CA this guest runs
-itself is not put back at all -- see C<restores>.
+=item * The global fragment, after C<dehydrated --register> writes the account
+key.
+
+=item * C<get_cert>, after the provision.
+
+=item * The C<exit_hook> in the dehydrated hook of this domain, after B<every>
+dehydrated run.  The nightly renewal writes a new private key and does not run
+C<get_cert>.
+
+=back
+
+Know this about the other end of the fetch.  The keys land in the data directory
+of the provisioner and in whatever backs it up.  So that directory holds the TLS
+private keys of this domain.
+
+The C<data> target puts the account back before any recipe target runs.  So the
+account is in place before the global fragment runs C<dehydrated --register>,
+and C<restore_state> does not write over an account that is already there.
+
+This is how it works for the public CA.  An account that a CA on this guest
+issued does not go back at all.  See C<restores>.
 
 =head2 Which CA issues, and how a reserved TLD gets one at all
 
-C<ca> is a dehydrated preset name or the URL of a directory, and it defaults by
-the domain rather than to one value.  A name under a public suffix gets the
-public Let's Encrypt directory, which is what it has always been.  A name under
-a TLD RFC 2606 and RFC 6761 reserve -- C<.test>, C<.example>, C<.invalid>,
-C<.localhost> -- gets this fleet's own, because no public CA will issue for one:
-Let's Encrypt answers such an order with C<rejectedIdentifier>, I<Domain name
-does not end with a valid public suffix (TLD)>, and every provision of a
-C<.test> guest ended on it with a red makefile.
+C<ca> is a dehydrated preset name or the URL of a directory.  Its default
+depends on the domain, not on one value.  A name under a public suffix gets the
+public Let's Encrypt directory.  A name under a TLD that RFC 2606 and RFC 6761
+reserve gets the CA of this fleet.  These TLDs are C<.test>, C<.example>,
+C<.invalid> and C<.localhost>.  No public CA issues for them.  Let's Encrypt
+refuses such an order with C<rejectedIdentifier>, I<Domain name does not end
+with a valid public suffix (TLD)>.
 
-Defaulting there pulls in L<Provisioner::Recipe::acmeca>, which serves the CA,
-and through it L<Provisioner::Recipe::pdns>, which answers the C<dns-01>
-challenge on loopback.  pdns needs an C<api_key> that nobody configured, so this
-supplies one -- made once per domain and given to both, because lexicon
-authenticates with the same value pdns is configured with.  An operator who set
-an C<api_key> of their own keeps it and is handed nothing, since handing a
-second value for a field they had already written is the collision
+This default pulls in L<Provisioner::Recipe::acmeca>, which serves the CA.
+acmeca pulls in L<Provisioner::Recipe::pdns>, which answers the C<dns-01>
+challenge on loopback.  pdns needs an C<api_key> that nobody configured, so
+this recipe supplies one.  It makes one key for each guest and gives it to both
+pdns and lexicon, because lexicon authenticates with the value that pdns uses.
+If an operator set an C<api_key>, the operator keeps it and this recipe supplies
+nothing.  A second value for a field that the operator set is the conflict that
 C<resolve_conflict> dies on.
 
-B<And it is asked of the domain, not of the module list.>  A reserved TLD is
-served by the guest's own pdns, which this recipe requires through acmeca -- so
-that server is there whenever the name needs it, and asking whether it was
-present was asking a question with only one answer.  It was asked of C<modules>,
-which the depsolver adds to between C<required_recipes> and C<enrich>, so the
-two came to different answers about the same domain.
+B<The recipe asks this of the domain, not of the module list.>  The pdns on the
+guest serves a reserved TLD, and this recipe requires that server through
+acmeca.  So the server is always there when the name needs it.  Do not ask
+C<modules>.  The depsolver adds to it between C<required_recipes> and C<enrich>,
+so the two get different answers about the same domain.
 
 =head2 Which provider answers the challenge
 
-C<dns_preference> names it -- C<pdns> for the server this fleet runs on the
-guest, C<registrar> for whoever holds the domain's public zone -- and it is a
-tiebreaker rather than a setting.  Nothing needs it in the ordinary case: a name
-under a reserved TLD is always served locally, since no public registrar can
-hold a zone for one, and a domain configured with only one of the two uses that
-one.
+C<dns_preference> names the provider.  C<pdns> is the server that this fleet
+runs on the guest.  C<registrar> is the holder of the public zone of the domain.
+It is a tiebreaker, not a setting.  Usually nothing needs it.  A name under a
+reserved TLD always uses the local server, because no public registrar can hold
+a zone for it.  A domain configured with only one of the two uses that one.
 
-It earns its keep where a guest has both, which is a public name whose zone this
-fleet also serves.  The credentials inherited from C<_global> and the local
-server are each able to answer, they answer differently, and choosing on the
-domain's behalf would be a guess -- so a domain that configures both and names
-neither is refused rather than resolved.
+It matters when a guest has both, which is a public name whose zone this fleet
+also serves.  The registrar and the local server can each answer, and they
+answer differently.  A choice on behalf of the domain is a guess.  So the recipe
+refuses a domain that configures both and names neither.
 
-Two configurations are refused outright.  C<registrar> under a reserved TLD
-names a provider that could never answer for the name, and C<pdns> where no such
-server is configured names one that is not there.
+The recipe also refuses two configurations.  C<registrar> under a reserved TLD
+names a provider that can never answer for the name.  C<pdns> with no such
+server configured names a provider that is not there.
 
 =head2 What a guest served by our own CA can be issued for
 
-Names inside its own zone, and nothing else.
+It can get certificates for names inside its own zone, and for nothing else.
 
-L<Provisioner::Recipe::pdns> builds one zone per guest -- the domain itself --
-so C<www.> and C<mail.> sit inside it and are fine, while an alias outside it
-has nowhere for lexicon to write C<_acme-challenge> and no local server
-authoritative for it.  A cross-TLD alias is the visible case, but the rule is
-the zone and not the TLD: C<test.troglodyne.net> as an alias of
-C<dev.troglodyne.net> is out of zone as well.
+L<Provisioner::Recipe::pdns> builds one zone for each guest, which is the domain
+itself.  So C<www.> and C<mail.> are inside it and work.  An alias outside the
+zone has no place for lexicon to write C<_acme-challenge>, and no local server
+is authoritative for it.  A cross-TLD alias is the obvious case, but the rule is
+the zone and not the TLD.  C<test.troglodyne.net> as an alias of
+C<dev.troglodyne.net> is also out of the zone.
 
-The authority is not what limits this.  C<nameConstraints> takes a list, so one
-intermediate can permit several TLDs and leaves under each of them verify --
-measured, rather than assumed.  What cannot be arranged is the challenge.
+The CA does not set this limit.  C<nameConstraints> takes a list, so one
+intermediate can permit several TLDs, and the leaf certificates under each of
+them verify.  The challenge is the limit.
 
 =cut
 
@@ -153,16 +157,22 @@ sub datadirs {
     return ('.letsencrypt');
 }
 
-# dehydrated's own preset for the public Let's Encrypt directory, and what a
-# domain gets when it asks for no particular CA.
+# The dehydrated preset for the public Let's Encrypt directory.  A domain that
+# names no CA gets this one.
 our $DEFAULT_CA = 'letsencrypt';
 
-# The TLD when it is one only our own CA can issue for, and nothing otherwise.
-#
-# The list is Provisioner::DNSRecipe's: no public registrar holds a zone under
-# one of these, which is the same fact, for the same reason, as no public CA
-# issuing for a name beneath one.  A guest under one gets its certificate from
-# the fleet's own CA or it gets none.
+=head2 $tld = _reserved_tld($domain)
+
+Returns the TLD of C<$domain> if only our own CA can issue for it.  Otherwise
+returns nothing.
+
+The list of TLDs comes from L<Provisioner::DNSRecipe>.  No public registrar
+holds a zone under one of them, for the same reason that no public CA issues for
+a name under one.  So a guest under one gets its certificate from the CA of the
+fleet, or it gets none.
+
+=cut
+
 sub _reserved_tld {
     my ($domain) = @_;
 
@@ -171,19 +181,32 @@ sub _reserved_tld {
     return ( any { $_ eq $tld } Provisioner::DNSRecipe->reserved_tlds ) ? $tld : ();
 }
 
-# Whether this domain's CA is one of ours by default rather than by name: it is
-# under a TLD no public CA will issue for.  Read from raw options, because
-# required_recipes runs before validation, where an absent ca is still absent
-# rather than defaulted -- which is what tells a domain that chose the public CA
-# from one that said nothing.
+=head2 $bool = _auto_ca(%opts)
+
+Returns 1 if the CA of this domain is ours by default and not by name.  That is
+the case when C<ca> is not set and the domain is under a reserved TLD.
+Otherwise returns 0.
+
+It reads the raw options.  C<required_recipes> runs before validation, so an
+absent C<ca> is still absent and not defaulted.  That is how it tells a domain
+that chose the public CA from a domain that named none.
+
+=cut
+
 sub _auto_ca {
     my (%opts) = @_;
 
     return ( !defined $opts{ca} && _reserved_tld( $opts{domain} ) ) ? 1 : 0;
 }
 
-# Whether this domain wants a CA of ours built for it: it named something other
-# than the public preset, or it is under a TLD no public CA will issue for.
+=head2 $bool = _our_ca(%opts)
+
+Returns 1 if this domain needs a CA of ours built for it.  That is the case when
+it names a C<ca> other than C<$DEFAULT_CA>, or when C<_auto_ca> returns 1.
+Otherwise returns 0.
+
+=cut
+
 sub _our_ca {
     my (%opts) = @_;
 
@@ -191,17 +214,28 @@ sub _our_ca {
     return _auto_ca(%opts);
 }
 
-# Whether the CA issuing for this domain is rebuilt along with the guest, which
-# is a narrower question than the one above and is asked about the ACME account.
-#
-# acmeca runs on the guest, on loopback, and comes back on every provision with
-# an empty database and a freshly minted intermediate -- so an account it issued
-# last time names somebody it has never heard of.  Any other CA outlives the
-# guest, and that includes the ones that are neither Let's Encrypt nor ours:
-# buypass, zerossl, an internal CA on another machine.  Their accounts are this
-# installation's identity with a third party, kept deliberately, and discarding
-# one is both a rebuild that re-registers for nothing and, with Let's Encrypt, a
-# breach of their terms.
+=head2 $bool = _ca_rebuilt_with_guest(%opts)
+
+Returns 1 if a rebuild of the guest also rebuilds the CA that issues for this
+domain.  Otherwise returns 0.  C<restores> asks this to decide whether the ACME
+account goes back.  This is a narrower question than C<_our_ca>.
+
+The answer is 1 when C<ca> is not set and the domain is under a reserved TLD.
+It is also 1 when C<ca> is a URL whose host is C<localhost> or C<127.0.0.1>.
+
+acmeca runs on the guest, on loopback.  Each provision starts it with an empty
+database and a new intermediate.  So it does not know an account that it issued
+before, and every order on that account returns C<accountDoesNotExist>.
+
+Every other CA outlives the guest.  That includes a CA that is neither Let's
+Encrypt nor ours, such as C<buypass>, C<zerossl>, or an internal CA on another
+machine.  An account with one of them is the identity of this installation with
+a third party, and the recipe keeps it on purpose.  If the recipe drops it, the
+rebuild registers again for nothing.  With Let's Encrypt, that also breaks their
+terms.
+
+=cut
+
 sub _ca_rebuilt_with_guest {
     my (%opts) = @_;
 
@@ -213,10 +247,18 @@ sub _ca_rebuilt_with_guest {
     return ( $host eq 'localhost' || $host eq '127.0.0.1' ) ? 1 : 0;
 }
 
-# What acmeca answers on for this domain.  Read rather than dictated: handing a
-# port to a recipe the operator may also have configured is a conflict
-# Provisioner::Recipe::resolve_conflict would die on, naming a field they had
-# already set.
+=head2 $url = _directory_url($domain)
+
+Returns the URL of the ACME directory where acmeca answers for C<$domain>.  The
+port is the acmeca C<port> that the domain configured.  If the domain configured
+none, the port is the default from the acmeca schema.
+
+This reads the port and does not set it.  The operator can also configure the
+acmeca port, and C<Provisioner::Recipe::resolve_conflict> dies on a second value
+for a field that the operator set.
+
+=cut
+
 sub _directory_url {
     my ($domain) = @_;
 
@@ -252,56 +294,46 @@ sub enrich {
     die "prefer_local_dns is now dns_preference, which names the recipe that answers this domain's challenge rather than asserting a boolean: 'pdns' for the server on the guest, 'registrar' for whoever holds the public zone.\n"
       if exists $params{prefer_local_dns};
 
-    # registrar is its own recipe now, so credentials in _global reach nothing.
-    # Refused rather than ignored: a domain whose zone a registrar holds would
-    # otherwise resolve to no provider at all, or to the guest, and say nothing
-    # about the credentials it had been given.
+    # Nothing reads registrar credentials in _global.  Refuse them, because the
+    # domain otherwise resolves to no provider or to the guest without a word.
     die "registrar credentials belong to the registrar recipe now, not to _global, so nothing reads the ones set for $params{domain}.  Move the registrar block out of _base._global and into _base, where it configures Provisioner::Recipe::registrar for every domain that inherits it.\n"
       if ref $params{registrar} eq 'HASH' && !exists( Provisioner::Cookbook->domain_config( $params{domain} )->{registrar} );
 
     my $provider = Provisioner::DNSRecipe->provider_for(%params);
 
-    # Which CA, and why it turns on the domain: see L</Which CA issues, and how a
+    # The default CA depends on the domain: see L</Which CA issues, and how a
     # reserved TLD gets one at all>.
     $params{ca} = _directory_url( $params{domain} ) if _auto_ca(%params);
     $params{ca} //= $DEFAULT_CA;
 
-    # The provider the rest of the render is driven from, resolved rather than
-    # declared: a domain that named no preference still has one.
+    # The rest of the render uses the resolved provider, because a domain that
+    # names no preference still has one.
     $params{dns_preference} = $provider;
 
-    # Under the same name and in the same shape the shortcut renders from, so
-    # the two exports of one credential cannot drift again.
+    # The same name and structure that the shortcut renders from, so the two
+    # exports of one credential cannot drift apart.
     $params{lexicon} = { Provisioner::DNSRecipe->credentials_for(%params) };
 
     return %params;
 }
 
-# /etc/dehydrated/certs is not among these.  dehydrated is configured with
-# BASEDIR=/var/lib/dehydrated and writes its certificates under that, so the
-# /etc one is made, chowned, and never written to -- salvaging it fetched an
-# empty directory every run, and now that an empty salvage says so out loud it
-# would say so every run about a directory that is empty on purpose.
 sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The certificates, which a rebuild would otherwise ask for again -- into the
-    # rate limit.
+    # The certificates, so that a rebuild does not request them again against
+    # the rate limit.
     my %restores = ( "/var/lib/dehydrated/certs/$domain" => { from => "$install_dir/$domain/.letsencrypt/var-certs/$domain", owner => 'root:root' } );
 
-    # The ACME account is the identity the CA knows this guest by.  It is kept for
-    # every CA that outlives the guest -- Let's Encrypt above all, where
-    # re-registering each rebuild spends the registration and breaches their
-    # terms -- and dropped only for one rebuilt alongside it, where a restored
-    # account names somebody the new CA has never heard of and every order comes
-    # back accountDoesNotExist.  Measured on a rebuilt guest: registering afresh
-    # issued the certificate instead.
+    # The ACME account goes back only for a CA that outlives the guest.  See
+    # _ca_rebuilt_with_guest.
     return %restores if _ca_rebuilt_with_guest(%opts);
 
     return ( %restores, '/etc/dehydrated/accounts' => { from => "$install_dir/$domain/.letsencrypt/accounts", owner => 'root:root' } );
 }
 
+# Not /etc/dehydrated/certs.  dehydrated has BASEDIR=/var/lib/dehydrated, so it
+# never writes there, and an empty salvage raises a warning on every run.
 sub remote_files {
     return (
         '/var/lib/dehydrated/certs/' => '.letsencrypt/var-certs',
@@ -311,15 +343,34 @@ sub remote_files {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-The CA, when this domain names one of the fleet's own rather than a public
-preset.  Nothing is handed to it: what a CA is configured with is its own
-business, and the edge exists for the ordering rather than for the options.
+Returns the recipes that this one requires.  Each name comes with a sub that
+returns the options to give that recipe:
 
-That ordering is the whole point.  bin/new_config puts a required recipe after
-the last recipe that required it and before the postrun, and the fetcher this
-recipe queues asks the CA for a certificate during the postrun -- so declaring
-the dependency is what makes the CA answering by then a property of the build
-rather than a coincidence of where two recipes happen to sit in a list.
+=over 4
+
+=item * C<acmeca>, when this domain uses a CA of the fleet and not a public
+preset.
+
+=item * The local DNS recipe (C<pdns>), with an C<api_key>, when the CA is ours
+by default and nobody configured a key for the server.
+
+=item * C<Provisioner::DNSRecipe>, which bin/new_config resolves to whatever
+holds the zone of this domain.
+
+=item * C<nostubresolver>, when the local server answers the challenge.
+
+=item * C<lexicon>, with the resolved provider as its tiebreaker.
+
+=back
+
+It also returns what the base class requires.
+
+The recipe gives acmeca no options, because the configuration of a CA is its own
+business.  The acmeca edge exists for the order.  bin/new_config puts a required
+recipe after the last recipe that requires it and before the postrun.  The
+fetcher that this recipe queues asks the CA for a certificate during the
+postrun.  So the dependency makes sure that the CA answers by then.  It does not
+depend on where two recipes happen to sit in a list.
 
 =cut
 
@@ -328,17 +379,14 @@ sub required_recipes {
 
     my @required = _our_ca(%opts) ? ( acmeca => sub { return () } ) : ();
 
-    # acmeca requires pdns itself and hands it nothing, so the api_key it needs
-    # would have nowhere to come from on a guest nobody configured by hand.  Only
-    # when this recipe is the reason pdns is there, and only when the operator
-    # set no key of their own: handing one they had also written is the conflict
-    # resolve_conflict dies on.
+    # acmeca requires pdns and gives it no api_key.  Supply one only when this
+    # recipe is why pdns is there and the operator set none.  See L</Which CA
+    # issues, and how a reserved TLD gets one at all>.
     if ( _auto_ca(%opts) ) {
 
-        # The machine's domain rather than this one's: a single pdns serves the
-        # whole guest, so a domain layered onto another has to hand it the key
-        # that server is already running with.  Which machine that is is
-        # Provisioner::Cookbook/host_of, read out of _shared.
+        # The domain of the machine, not this one, because one pdns serves the
+        # whole guest and already runs with its key.  Provisioner::Cookbook/host_of
+        # finds the machine in _shared.
         my $server = Provisioner::Cookbook->host_of( $opts{domain} ) // $opts{domain};
         my $local  = Provisioner::DNSRecipe->local_implementation();
         my $class  = Provisioner::Cookbook->load($local);
@@ -346,53 +394,45 @@ sub required_recipes {
         my $configured = Provisioner::Cookbook->domain_config($server)->{$local}{api_key};
         unless ($configured) {
 
-            # Asked of the recipe that owns it rather than minted here, and
-            # asked now rather than left to enrich: this runs before validation,
-            # so nothing has enriched anything yet.  Both askings land on the
-            # same per-server value, which is what stops the server being
-            # configured with one key and told to expect another.
+            # Ask the recipe that owns the key, and ask now, because this runs
+            # before validation and enrich has not run yet.  Every call gets the
+            # same value for one server, so the server and its clients agree.
             my $token = $class->api_key_for($server);
             push( @required, $local => sub { return ( api_key => $token ) } );
         }
     }
 
-    # Whatever holds this domain's zone has to be on the guest: the registrar
-    # recipe installs the shortcut an operator reaches for, pdns installs the
-    # server itself.  Named as the interface rather than as either of them, so
-    # bin/new_config resolves it to whichever serves this domain -- see
-    # Provisioner::DNSRecipe and resolve_substitutable_dependency.
+    # The holder of the zone of this domain must be on the guest.  The registrar
+    # recipe installs the shortcut for the operator, and pdns installs the
+    # server.  The name is the interface, so bin/new_config resolves it to the
+    # one that serves this domain.  See Provisioner::DNSRecipe and
+    # resolve_substitutable_dependency.
     #
-    # Only where the branch above has not already asked for the local one.  Both
-    # would resolve to the same recipe under a reserved TLD, and %dep_recipes is
-    # keyed by recipe name, so the second would silently replace the first --
-    # dropping the minted api_key on whichever ordering `keys` happened to give.
+    # Skip it when the branch above already asked for the local recipe.  Under a
+    # reserved TLD both resolve to the same recipe, and %dep_recipes is keyed by
+    # recipe name.  So the second silently replaces the first, and the minted
+    # api_key is lost for some orders that `keys` returns.
     push( @required, 'Provisioner::DNSRecipe' => sub { return () } )
       unless any { $_ eq Provisioner::DNSRecipe->local_implementation() } @required;
 
-    # A guest that answers its own challenge has to be able to read back what it
-    # just wrote.  lexicon walks the zone for --resolve-zone-name through the
-    # system resolver, and step-ca validates dns-01 through it as well, so a
-    # guest left on systemd's stub resolves its own name nowhere.  Measured on a
-    # scratch guest: the walk fell all the way to the root, lexicon asked pdns
-    # for zones/. and got a 404, and every challenge failed while dig
-    # @127.0.0.1 answered for the zone perfectly well.  nostubresolver points
-    # the resolver at the server on the guest; it is invisible on a fleet whose
-    # _base gives every domain that recipe already.
+    # A guest that answers its own challenge must be able to read back what it
+    # wrote.  lexicon walks the zone for --resolve-zone-name through the system
+    # resolver, and step-ca validates dns-01 through it too.  On the systemd
+    # stub, the guest cannot resolve its own name.  nostubresolver points the
+    # resolver at the server on the guest.  It changes nothing on a fleet whose
+    # _base already gives every domain that recipe.
     #
-    # eval because this runs before validation: a domain configured with no
-    # provider at all is enrich's to reject, and reporting it here as well would
-    # race two messages for one fault.
+    # eval, because this runs before validation.  enrich rejects a domain with
+    # no provider, and a second report here races two messages for one fault.
     my $provider = eval { Provisioner::DNSRecipe->provider_for(%opts) } // q{};
     push( @required, nostubresolver => sub { return () } ) if $provider eq Provisioner::DNSRecipe->local_implementation();
 
-    # The client the hook writes the challenge record with.  Its package, its
-    # patches and the shortcut are one recipe's now; this used to install the
-    # package and leave the rest to whoever held the zone.
+    # lexicon is the client that the hook writes the challenge record with.
     #
-    # Handed the provider this domain resolved to.  lexicon renders one shortcut,
-    # for whoever holds the zone, so it has the same tie to settle -- and the key
-    # that settles it is written in this recipe's block rather than in its own.
-    push( @required, lexicon => sub { return length $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
+    # Give it the provider that this domain resolved to.  lexicon renders one
+    # shortcut, for the holder of the zone, so it has the same tie to settle.
+    # The key that settles it is in the block of this recipe, not of lexicon.
+    push( @required, lexicon => sub { return $provider ? ( Provisioner::DNSRecipe->tiebreaker_key => $provider ) : () } );
 
     return ( @required, $self->SUPER::required_recipes(%opts) );
 }

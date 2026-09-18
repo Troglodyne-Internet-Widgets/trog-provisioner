@@ -1,11 +1,9 @@
 #!/bin/bash
-# Run the work the recipes deferred, and say so when it does not work.
+# Run the work that the recipes deferred, and report each task that fails.
 #
-# This used to be `bash /root/post_install.sh`, which reports nothing: a service
-# that would not start printed its failure into the log and the provision still
-# exited 0.  Every task runs, because stopping at the first would leave later
-# recipes' deferred work undone, and the exit code is the answer at the end.
-# The queue, which is only ever anywhere else under test.
+# Every task runs, because a stop at the first failure leaves the deferred work
+# of later recipes undone.  The exit code gives the result at the end.
+# The queue.  Only a test puts it somewhere else.
 QUEUE=${POST_INSTALL_QUEUE:-/root/post_install.sh}
 
 [ -s "$QUEUE" ] || exit 0
@@ -14,15 +12,9 @@ rc=0
 while IFS= read -r task; do
     [ -n "$task" ] || continue
     echo "postrun: $task"
-    # stdin closed, or the task reads the queue.  This loop is fed the task list
-    # on stdin and bash -c inherits it, so anything that reads -- cpanm pulling
-    # a distribution's dependencies is the one that did it -- swallows every
-    # line after itself and the loop ends at end of input.  No error, no failed
-    # task, just deferred work that silently stops happening: on a tcms guest
-    # that was the service never being built or started, and ufw never being
-    # reloaded, so the firewall the guest ran was not the one configured for it.
-    #
-    # Deferred work has nowhere to read input from anyway.
+    # Close stdin.  The loop reads the queue on stdin and bash -c inherits it.
+    # A task that reads stdin, for example cpanm, then eats the rest of the
+    # queue, and no error shows.  Deferred work has no input to read.
     if ! bash -c "$task" < /dev/null; then
         echo "postrun FAILED: $task" >&2
         rc=1
@@ -31,16 +23,15 @@ done < "$QUEUE"
 
 [ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
 
-# Moved aside, because queue_postrun_task appends: a queue left here is one the
-# next makefile run works through again, on top of its own.
+# Move the queue aside, because queue_postrun_task appends to it.  If the queue
+# stays, the next makefile run does these tasks again on top of its own.
 #
-# After the loop, never before.  The loop reads the queue with `done < "$QUEUE"`
-# and the descriptor stays open across the rename, so what is running now runs
-# to the end of what it was given.
+# Do this after the loop, never before.  The loop reads the queue through
+# `done < "$QUEUE"`, and that descriptor stays open across the rename.
 #
-# Whatever the tasks did.  Leaving it in place on a failure would replay all of
-# it next time rather than retrying the part that failed; those lines are still
-# in the copy, and the exit code below is what carries the failure on.
+# Do this whatever the tasks did.  If the queue stays after a failure, the next
+# run replays all of it and does not retry only the failed part.  The failed
+# lines stay in the copy, and the exit code below reports the failure.
 mv -- "$QUEUE" "$QUEUE.ran_at_$(date +%Y%m%d-%H%M%S)"
 
 exit "$rc"

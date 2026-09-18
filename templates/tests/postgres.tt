@@ -16,11 +16,8 @@ if ($pg_hba && -f $pg_hba) {
     like($hba_content, qr/host all all 127\.0\.0\.1\/32 md5/, 'local TCP md5 auth configured');
 }
 
-# The version-matched packages.  PG_VERSION is a shell expansion in a make
-# recipe, and make ate the $ -- so this asked apt for `postgresql-client-`,
-# which is how apt spells "remove that package".  Nothing installed, nothing
-# complained, and the only clue was a line in the log saying it was not
-# installed so it was not removed.
+# The packages that match the server version.  If the global fragment gets an
+# empty version, apt removes these packages and reports no error.
 my $ver = `pg_config --version 2>/dev/null` || `psql --version 2>/dev/null`;
 my ($major) = $ver =~ m/(\d+)/;
 ok($major, 'postgres reports a version') or diag "got: $ver";
@@ -30,11 +27,8 @@ foreach my $pkg (map { "$_$major" } qw{postgresql- postgresql-client- postgresql
     like($installed, qr/Status: install ok installed/, "$pkg is installed");
 }
 
-# The round trip.  remote_files salvages /var/backups/postgres off the guest this
-# one replaces and the data recipe puts it back under the domain directory, and
-# for a long time nothing imported it: a rebuild came up holding the dumps an
-# operator had configured once and nothing that had happened since.  What follows
-# takes a real backup, throws a database away, and asks for it back.
+# The round trip: take a real backup, drop a database, and restore it from the
+# backup.  Provisioner::Recipe::postgres says how a rebuild uses this.
 ok(-x '/usr/local/sbin/postgres-backup.sh', 'the backup is installed');
 ok(-x '/usr/local/sbin/postgres-restore.sh', 'and so is the restore that reads what it wrote');
 
@@ -60,32 +54,28 @@ ok(scalar @dumps, 'and left a dump behind') or diag `ls -la /var/backups/postgre
 my $newest = $dumps[-1] // '';
 ok(-f "$newest/complete", 'which says it finished, since nothing will restore one that does not');
 
-# pg_dump writes the per-database dump itself, as the postgres user, into a
-# directory it makes 0700 -- and what salvages it is bin/new_config over sftp as
-# the admin user, with no sudo.  A dump only postgres can read is a rebuild that
-# comes up empty.
+# bin/new_config fetches the dump over sftp as the admin user, with no sudo.  If
+# only postgres can read it, the rebuild comes up empty.
 ok(-d "$newest/$probe", 'with the probe database dumped') or diag `ls -la $newest`;
 my $mode = (stat "$newest/$probe")[2] & 07777;
 ok(($mode & 0005) == 0005, 'and readable by something other than postgres')
     or diag sprintf('mode %04o', $mode);
 
-# The rebuild: the database is gone and the salvage is the only thing that knows
-# what was in it.
+# The rebuild: the database is gone, and only the salvage holds its data.
 psql("DROP DATABASE $probe");
 is(system('/usr/local/sbin/postgres-restore.sh /var/backups/postgres > /tmp/postgres-restore.log 2>&1'), 0, 'the restore runs')
     or diag `cat /tmp/postgres-restore.log`;
 is(psql('SELECT v FROM t', $probe), 'salvaged', 'and the database nothing else could have brought back is back');
 
-# And the half that makes it safe on a cluster that is still running: a database
-# that is there is not written over, however old or short the dump beside it is.
+# On a running cluster, the restore does not write over a database that exists,
+# whatever the age or size of the dump.
 psql("UPDATE t SET v='since the dump'", $probe);
 is(system('/usr/local/sbin/postgres-restore.sh /var/backups/postgres > /tmp/postgres-restore.log 2>&1'), 0, 'restoring again is not an error')
     or diag `cat /tmp/postgres-restore.log`;
 is(psql('SELECT v FROM t', $probe), 'since the dump', 'and it left the live database alone');
 
-# A dump with no `complete` in it is a backup that was interrupted, and half a
-# cluster restored is worse than none: it ends up holding databases, which is
-# what stops the next provision from trying again.
+# A dump with no `complete` in it is a backup that stopped before the end.  The
+# restore must skip it, because a later restore never writes over the database.
 my $half = '/tmp/half-a-dump';
 system("rm -rf $half && mkdir -p $half/20200101-000000");
 system("cp -a $newest/$probe $half/20200101-000000/$probe");

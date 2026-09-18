@@ -7,16 +7,15 @@ use warnings FATAL => 'all';
 
 use File::Basename qw{basename};
 
-# The command that installs a distribution's dependencies, with the directory
-# to be appended: cpan_install's installdeps, as admincode queues it, the way the
-# perl recipe installs every step it is handed.
+# The first argument is the directory that holds the repositories.  The rest is
+# the command that installs the dependencies of one directory, which gets the
+# directory appended.  admincode passes cpan_install's installdeps.
 my ( $REPO_BASEDIR, @INSTALLDEPS ) = @ARGV;
 
 die "Must pass repo basedir as first arg"                                     unless $REPO_BASEDIR;
 die "Must pass the command that installs a directory's dependencies after it" unless @INSTALLDEPS;
 
-# One level rather than a walk, so glob rather than opendir: * skips the dot
-# entries the readdir form had to filter out by hand.
+# One level only, so glob is enough, and * skips the dot entries.
 my @subdirs = grep { -d $_ } glob("$REPO_BASEDIR/*");
 
 my $had_failures = 0;
@@ -26,7 +25,7 @@ foreach my $REPO_DIR (@subdirs) {
 
     next unless -d "$repo_dirname/";
 
-    # TODO understand deps for dzil/MB
+    # TODO: install the dependencies of dzil and Module::Build distributions (#225).
     next unless -f "$repo_dirname/Makefile.PL";    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- which build system the repo has, not an access check
     system( @INSTALLDEPS, "$repo_dirname/" );
     my $rc = $? >> 8;

@@ -1,15 +1,15 @@
 [% script_dir %]/build_latest_perl.sh
-[%# What the recipes depending on this one install into it, in the order they
-    handed it over.  Here, and not deferred: this target runs after every one
-    of their fragments and before the postrun, which perldoc
-    Provisioner::Recipe::perl explains.  Raw, because a requirement like
-    Moo~>= 2.004 would otherwise reach cpan_install as html. -%]
+[%# What the recipes that depend on this one install into it, in the order
+    they handed it over.  It is here and not deferred, because this target runs
+    after all of their fragments and before the postrun.  perldoc
+    Provisioner::Recipe::perl explains this.  mark_raw, because otherwise a
+    requirement like Moo~>= 2.004 reaches cpan_install HTML-escaped. -%]
 [% FOR step IN cpan_steps -%]
 [% script_dir %]/cpan_install[% IF cpan_notest %] --notest[% END %][% FOR word IN step %] '[% word | mark_raw %]'[% END %]
 [% END -%]
-# Critic config for AIs outside of normally configured paths
+# perltidy and perlcritic configuration for agents outside the configured paths
 install -m 0755 perl.tidy.rc   /etc/perltidyrc
 install -m 0755 perl.critic.rc /etc/perlcriticrc
-# Won't overwrite existing configs
+# Does not replace an existing configuration
 ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perltidyrc; /bin/true
 ln -s /etc/perlcriticrc [% install_dir %]/[% domain %]/.perlcriticrc; /bin/true

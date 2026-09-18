@@ -24,41 +24,41 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Writes a udev rule setting the I/O scheduler and the readahead window on the
-guest's virtio disks, applies it to the disks already attached, and reads back
-what the kernel actually took.
+Writes a udev rule that sets the I/O scheduler and the readahead window on the
+virtio disks of the guest.  The recipe applies the rule to the disks that are
+already attached, and reads back the values that the kernel actually took.
 
-=head3 Why a guest should not be scheduling at all
+=head3 Why a guest must not schedule at all
 
-There is a queue on the guest and a queue on the hypervisor, and only one of
-them can see the device. Anything the guest reorders, merges or delays is work
-done against a virtual disk whose block addresses have no relationship to
-anything physical -- and then done again, properly, by the host, which knows
-where the platters or the flash actually are. The guest's version of it is pure
+The guest has a queue and the hypervisor has a queue, and only the hypervisor
+can see the device.  The block addresses of a virtual disk have no relation to
+the physical device.  So when the guest reorders, merges or delays a request,
+it does work that the host then does again, correctly.  The host knows where
+the platters or the flash actually are.  The work on the guest only adds
 latency.
 
-C<none> is the scheduler that does none of that: submit in order and let the
-layer that can see the hardware sort it out.
+C<none> is the scheduler that does none of that work.  It submits requests in
+order, and the layer that can see the hardware sorts them.
 
-Whether a guest was already doing that has no fixed answer, and the reason is
-worth knowing because it couples this recipe to the far side of the same disk.
+A guest can already be on C<none> or not.  The answer depends on the far side
+of the same disk, so this recipe is coupled to it.
 
-Ubuntu chooses no scheduler for a virtio disk. There is no udev rule for it --
-the only rule on the guest that mentions the setting is C<64-btrfs-zoned.rules>,
-for host-managed zoned devices, which a virtio-blk is not. So the choice is the
-kernel's own, and the kernel makes it from the number of hardware queues: one
-gets C<mq-deadline>, more than one gets nothing, which is C<none>.
+Ubuntu chooses no scheduler for a virtio disk.  No udev rule sets it.  The only
+rule on the guest that mentions the setting is C<64-btrfs-zoned.rules>, for
+host-managed zoned devices, and a virtio-blk is not one.  So the kernel makes
+the choice, from the number of hardware queues.  One queue gets
+C<mq-deadline>, and more than one gets no scheduler, which is C<none>.
 
-The number of hardware queues is the C<queues> attribute on the domain's disk.
-Measured on a guest, with this recipe's rule taken away and nothing else
-changed:
+The number of hardware queues is the C<queues> attribute on the disk of the
+domain.  These results come from a guest, with the rule of this recipe removed
+and nothing else changed:
 
 =over 4
 
 =item one virtqueue
 
-C<[mq-deadline]>, with C<rotational=1> -- an elevator seeking a disk that is not
-there.
+C<[mq-deadline]>, with C<rotational=1>.  This is an elevator that seeks on a
+disk that does not exist.
 
 =item four virtqueues
 
@@ -66,42 +66,49 @@ C<[none]>.
 
 =back
 
-Which means C<mongle_disk_tuning> asking for one virtqueue per vcpu already
-moves most guests off C<mq-deadline> before this recipe is anywhere near them --
-and that a guest set back to C<disk_queues: 1>, or built on a libvirt too old
-for the attribute at all (before 3.9), quietly goes back to an elevator. Every
-guest here was on one, until the domain started asking for more.
+So when the domain asks for one virtqueue per vcpu, most guests are already off
+C<mq-deadline> before this recipe runs.  A guest set back to
+C<disk_queues: 1> goes back to an elevator without a warning.  So does a guest
+on a libvirt older than 3.9, which does not have the attribute.
 
-So the scheduler line is a pin rather than the thing doing the moving, on a
-guest whose domain is current. It is still worth pinning: it makes the answer
-independent of a number set on the other side of the disk, and it says so when
-the kernel disagrees. The readahead below is the half that changes something on
-its own.
+So on a guest with a current domain, the scheduler line pins a value that is
+already there.  The pin makes the answer independent of a number that is set on
+the other side of the disk.  It also reports when the kernel disagrees.  The
+readahead setting is the part that changes something by itself.
 
 =head3 Readahead, and why the default here changes nothing
 
-C<read_ahead_kb> defaults to 128, which is also the kernel's default: this
-recipe writes the value it already had. That is deliberate. Readahead is the one
-setting on this list that cannot be reasoned out from the topology -- it is a
-guess about the workload, and a wrong guess in either direction costs something.
-Too little and a guest streaming a large file makes four times the round trips
-it needed. Too much and a guest doing small random reads pulls in pages it will
-never look at, evicting ones it would have.
+C<read_ahead_kb> defaults to 128, which is also the default of the kernel.  So
+by default this recipe writes the value that the disk already has, on purpose.
+Of the settings here, only readahead cannot follow from the topology.  It is a
+guess about the workload, and a wrong guess in either direction costs
+something:
 
-So the default states the kernel's own answer explicitly, and the guest that
-knows better changes one line. 512 is a reasonable number for anything
-sequential -- a media server, a backup target, a database doing table scans.
+=over 4
+
+=item * If it is too small, a guest that streams a large file makes four times
+the round trips that it needs.
+
+=item * If it is too large, a guest that does small random reads loads pages
+that it never uses, and evicts pages that it uses.
+
+=back
+
+So the default states the answer of the kernel explicitly, and a guest that
+knows better changes one line.  512 is a reasonable number for sequential
+work, for example a media server, a backup target, or a database that scans
+tables.
 
 =head3 Applied now, not just at the next boot
 
-A udev rule fires on C<add> and C<change>, and the guest's disks were added long
-before this file existed. So the recipe reloads the rules and triggers a change
-event across the block subsystem, which is what makes the setting true on the
-running guest as well as on the next one.
+A udev rule fires on C<add> and C<change> events.  The disks of the guest were
+added long before this file existed.  So the recipe reloads the rules and
+triggers a change event across the block subsystem.  That makes the setting
+true on the running guest, not only after the next boot.
 
 =head3 deps
 
-None. udev is systemd's and the queue attributes are the kernel's.
+None.  udev is part of systemd, and the queue attributes belong to the kernel.
 
 =head3 args
 
@@ -109,28 +116,28 @@ None. udev is systemd's and the queue attributes are the kernel's.
 
 =item scheduler
 
-What to pin the I/O scheduler to. Defaults to C<none>, which is what a guest
-wants unless it has a specific reason. C<mq-deadline>, C<bfq> and C<kyber> are
-the others a stock Ubuntu kernel has -- C<bfq> being the one worth knowing
-about, for a guest where interactive work has to survive alongside something
-doing bulk I/O.
+The I/O scheduler to pin.  Defaults to C<none>, which a guest wants unless it
+has a specific reason.  A stock Ubuntu kernel also has C<mq-deadline>, C<bfq>
+and C<kyber>.  C<bfq> is the useful one for a guest where interactive work must
+survive next to bulk I/O.
 
 =item read_ahead_kb
 
-The readahead window, in KiB. Defaults to 128, the kernel's own default.
+The readahead window, in KiB.  Defaults to 128, the default of the kernel.
 
 =item devices
 
-Which disks it applies to, as udev C<KERNEL> globs. Defaults to C<vd*>, which is
-every virtio-blk disk and therefore every disk L<Trog::HV> gives a guest.
+The disks that the rule applies to, as udev C<KERNEL> globs.  Defaults to
+C<vd*>, which is every virtio-blk disk, and so every disk that L<Trog::HV> gives
+a guest.
 
 =back
 
 =head2 SEE ALSO
 
-The other half of this lives on the hypervisor: C<mongle_disk_tuning> in
-F<bin/provision> is what decides the cache mode, the discard path, iothreads and
-virtqueues on the far side of the same disk.
+The other half of this is on the hypervisor.  L<Provisioner::Recipe::vm> sets
+the cache mode, the discard path, the iothreads and the virtqueues on the far
+side of the same disk.  Its C<disk_*> options change them.
 
 =cut
 
@@ -144,9 +151,9 @@ sub args {
                 default => 'none',
             },
 
-            # A ceiling rather than a target: the kernel clamps readahead to
-            # what the device and the memory pressure allow, and a number in the
-            # gigabytes is not refused, merely never reached.
+            # A ceiling, not a target.  The kernel clamps readahead to what the
+            # device and the memory pressure allow.  It accepts a number in the
+            # gigabytes, but never reaches it.
             read_ahead_kb => {
                 type    => 'integer',
                 minimum => 0,

@@ -33,13 +33,12 @@ use List::Util qw{any};
             libvirt_version: "10.0.0"
 
             config:
-                # Inherited from this guest's own when unset: admin_user,
-                # admin_email, admin_keys and gateway.
+                # If unset, admin_user, admin_email, admin_keys and gateway
+                # come from the configuration of this guest.
                 resolvers: "192.168.1.254, 1.1.1.1"
 
-                # The pool the runner hands addresses out of.  Without these it
-                # has none to give, and every guest it tries to build stops on
-                # "cannot auto-assign IP".
+                # The pool that the runner takes addresses from.  Without
+                # these, every guest it builds stops on "cannot auto-assign IP".
                 addresses: "192.168.1.180-192.168.1.199"
                 cidr:      "192.168.1.0/24"
 
@@ -52,8 +51,8 @@ use List::Util qw{any};
 
             hypervisor_access: least
 
-            # The runner's own recipes.yaml, dumped verbatim.  Secrets are
-            # written store: here, never secret: -- see L</SECRETS IN recipes>.
+            # The recipes.yaml of the runner, dumped as written.  Write
+            # secrets as store:, never as secret:.  See SECRETS IN recipes.
             recipes:
                 _base:
                     _global:
@@ -64,97 +63,94 @@ use List::Util qw{any};
 
 =head2 DESCRIPTION
 
-A guest that can build guests.  It gets a perl new enough to load this
-distribution, the CPAN modules that distribution declares, an
-F</etc/trog-provisioner> of its own, and -- when asked for one -- a key a
-hypervisor will let in.
+A guest that can build guests.  It gets a perl that can load this
+distribution, and the CPAN modules that the distribution declares.  It also
+gets its own F</etc/trog-provisioner>, and a key that a hypervisor accepts if
+you ask for one.
 
 The machine that I<runs> the provisioner is a guest like any other.
-F<bin/setup_provisioner> is about the machine that I<hosts> what gets built,
-which is a different machine and a different set of problems.
+F<bin/setup_provisioner> is about the machine that I<hosts> the guests, which
+is a different machine with different problems.
 
-The checkout is optional (C<checkout: 0>) because a runner that manages its own
-repositories -- a coding agent, say -- already has one, and a second copy under
-C<install_dir> is a second copy to get out of step.  Point C<deps_from> at
-whatever path it clones to instead and the dependencies still get installed.
+The checkout is optional (C<checkout: 0>).  A runner that manages its own
+repositories, such as a coding agent, already has one.  A second copy under
+C<install_dir> is a second copy to keep in step.  Point C<deps_from> at the
+path where it clones instead, and the dependencies still install.
 
 =head3 What it needs from the guest, and how long it takes
 
-Four vCPUs and 8GB, which is what this was measured on rather than what it was
-tuned to -- see issue #123, which is about
-measuring it properly -- the answer is probably "more, and the build should be
-doing less".
+The build was measured on four vCPUs and 8GB.  Nobody tuned these numbers.
+Issue #123 is about measuring the build properly.  The likely answer is more
+resources and a build that does less.
 
-A runner builds perl from source, installs the toolchain the C<perl> recipe
-puts on top of it, and only then starts on C<Sys::Virt>, C<Dist::Zilla> and the
-forty-odd distributions this one hands that recipe.  Most of the wall clock is
-those distributions, and their own test suites when C<cpan_notest> is off.  On four vCPUs that does not fit the ninety minutes C<Trog::Guest>
-allows a makefile and its whole postrun queue.
+A runner builds perl from source and installs the toolchain that the C<perl>
+recipe puts on it.  Only then does it start on C<Sys::Virt>, C<Dist::Zilla>
+and the forty-odd distributions that this recipe hands to the C<perl> recipe.
+Most of the time goes to those distributions, and to their test suites when
+C<cpan_notest> is off.  On four vCPUs, this does not fit in the ninety minutes
+that C<Trog::Guest> allows for a makefile and its whole postrun queue.
 
-So build one with the budget raised:
+So raise the time limit when you build one:
 
     TROG_SETUP_TIMEOUT=3h bin/provision runner.example.test
 
-Nothing breaks if you forget.  C<bin/provision> stops waiting and says so; the
-queue carries on regardless, because F<scripts/post_install> is run by C<atd>
-and not by anything on this end.  What you lose is the guest test result, which
-is the thing you provisioned it to see.
+If you forget, nothing breaks.  C<bin/provision> stops waiting and says so.
+The queue continues, because C<atd> runs F<scripts/post_install>, not anything
+on this end.  You lose the result of the guest test, which is the reason you
+provisioned the guest.
 
 =head3 SECRETS IN recipes
 
-The C<recipes> argument is the runner's whole F<recipes.yaml>, and it is a trap
-worth understanding before writing one.
+The C<recipes> argument is the whole F<recipes.yaml> of the runner.  Read this
+section before you write one.
 
 C<bin/new_config> resolves every C<secret:> reference in the I<whole>
-configuration before any recipe is constructed.  So a C<secret:> written inside
-C<recipes> is resolved on the way in, and this recipe would be handed the
-password itself -- which would then be dumped into the runner's
-F<recipes.yaml>, into its C<data.tar.gz>, onto the guest and into every backup
-taken of the domain, one level of indirection below anything that looks for
-plaintext.
+configuration before it constructs any recipe.  So it resolves a C<secret:>
+inside C<recipes> too, and this recipe gets the password itself.  The password
+then goes into the F<recipes.yaml> of the runner and into its C<data.tar.gz>.
+From there it goes onto the guest and into every backup of the domain, where
+nothing that looks for plaintext finds it.
 
-So write C<store:> instead.  Nothing resolves it, it arrives here as written,
-and L</enrich> turns it back into C<secret:> on the way out -- leaving the
-runner a F<recipes.yaml> full of references, exactly like a hand-written one.
-The runner resolves them against its own store, which is what C<store> is for.
+So write C<store:> instead.  Nothing resolves it, and it arrives here as
+written.  L</enrich> turns it back into C<secret:> on the way out.  The runner
+gets a F<recipes.yaml> full of references, the same as one written by hand.
+The runner resolves them against its own store, which C<store> supplies.
 
 =head3 QUOTAS
 
-A runner can build guests, and a guest costs disk, CPU and memory on somebody
-else's machine.  Nothing in libvirt will hold it to a budget: there is no
-accounting and no limit, and on the system URI every guest runs as
-C<libvirt-qemu> whoever defined it, so there is no UID for a disk quota to
-attach to either.
+A runner can build guests, and a guest uses disk, CPU and memory on the machine
+of another person.  Nothing in libvirt holds it to a budget.  There is no
+accounting and no limit.  On the system URI, every guest runs as
+C<libvirt-qemu>, whoever defined it, so a disk quota has no UID to attach to.
 
-What does work is written in the hypervisor blocks above and enforced by the
-kernel:
+What works is set in the hypervisor blocks above, and the kernel enforces it:
 
 =over 4
 
-=item * C<pool_path> and C<pool_name> together give the runner a storage pool
-of its own.  Put that path on a filesystem with a limit on it -- C<zfs create
--o quota=500G tank/vm-disks/runner> -- and the limit is real.  Name both:
-libvirt looks a pool up by name, so a path beside the name of a pool that
-already exists elsewhere is ignored and every volume lands in the existing one.
+=item * C<pool_path> and C<pool_name> together give the runner its own storage
+pool.  Put that path on a filesystem with a limit, for example C<zfs create -o
+quota=500G tank/vm-disks/runner>, and the limit is real.  Name both.  libvirt
+finds a pool by name.  If the name is of a pool that already exists elsewhere,
+libvirt ignores the path, and every volume goes into the existing pool.
 
-=item * C<partition> puts every guest the runner builds into one systemd slice,
-which the operator then caps once with C<systemctl set-property
+=item * C<partition> puts every guest that the runner builds into one systemd
+slice.  The operator then sets one cap on it with C<systemctl set-property
 machine-runner.slice CPUQuota=400%>.
 
-Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice full of virtual
-machines kills one rather than refusing the next, and the per-domain
-equivalent is worse -- libvirt's own documentation warns that
-C<< <memtune><hard_limit> >> gets guests OOM-killed.  What actually refuses a
-guest for want of memory is C<reserve_memory> in F<hypervisors.conf>, which
+Cap CPU and I/O there, not memory.  A C<MemoryMax> on a slice of virtual
+machines kills one of them, and does not refuse the next.  The per-domain
+equivalent is worse.  The libvirt documentation warns that
+C<< <memtune><hard_limit> >> gets guests OOM-killed.  C<reserve_memory> in
+F<hypervisors.conf> is what refuses a guest when memory is short, and it
 already exists.
 
 =back
 
-Both are limits a cooperating runner respects.  Neither stops it naming a
-different pool or partition: that takes libvirt's polkit access driver, which
-is off by default, and which is a change to the hypervisor rather than to this
-guest.  Say which of the two you have before telling anyone the runner is
-capped.
+A runner that cooperates respects both limits.  Neither stops a runner that
+names a different pool or partition.  That takes the polkit access driver of
+libvirt, which is off by default and is a change to the hypervisor, not to this
+guest.  Say which of the two you have before you tell anyone that the runner
+has a cap.
 
 =cut
 
@@ -164,36 +160,36 @@ my $REPO = 'https://github.com/Troglodyne-Internet-Widgets/trog-provisioner.git'
 
 =head3 required_recipes
 
-perl, and what goes into it from CPAN, handed over as its C<cpan_deps>.  In this
-order, and the order is the point:
+The C<perl> recipe, with what goes into it from CPAN as its C<cpan_deps>.  The
+order is important:
 
 =over 4
 
-=item * B<Sys::Virt, pinned>, before anything resolves dependencies.  Left to a
-dependency list, cpanm takes the newest, whose Makefile.PL wants a libvirt-dev
-far newer than this guest has -- and says so forty minutes into the build, in a
-message about pkg-config rather than about ordering.  Pinned to
-C<libvirt_version> when one is named, and otherwise to what pkg-config says the
-guest's libvirt is when the step runs, which is right whenever the runner and
-the hypervisor are on the same distribution.
+=item * B<Sys::Virt, pinned>, before anything resolves dependencies.  From a
+dependency list, cpanm takes the newest release.  Its Makefile.PL wants a
+libvirt-dev that is much newer than this guest has.  cpanm reports this forty
+minutes into the build, in a message about pkg-config, not about the order.
+The pin is to C<libvirt_version> if you set one.  If not, it is to the libvirt
+version that pkg-config reports on the guest when the step runs.  That is
+correct when the runner and the hypervisor use the same distribution.
 
-=item * B<What the checkout needs>, and what each of C<deps_from> needs, by
-dzil.  Dist::Zilla itself comes with the perl, so nothing here asks for it.
+=item * B<The dependencies of the checkout>, and of each path in C<deps_from>,
+from dzil.  Dist::Zilla itself comes with the perl, so nothing here asks for
+it.
 
 =back
 
-Worked out of what the dependency is handed, with this recipe's own schema
-defaults laid under it -- C<checkout_dir> has one, and the closure is handed the
-configuration raw.  The perl recipe validates what it is given.
+The closure gets the configuration without the schema defaults.  So it puts the
+defaults of this recipe under it, because C<checkout_dir> has one.  The perl
+recipe validates what it gets.
 
 =cut
 
 sub required_recipes {
     my ($self) = @_;
 
-    # perl is the whole of what a runner was missing: it builds
-    # /opt/perl5/$version and gives it cpanm, Module::Build and Dist::Zilla.
-    # Everything else here is CPAN or configuration.
+    # The perl recipe builds /opt/perl5/$version with cpanm, Module::Build and
+    # Dist::Zilla.  Everything else here is CPAN or configuration.
     return (
         perl => sub {
             my %opts = ( Provisioner::Cookbook->defaults('trogrunner'), @_ );
@@ -215,9 +211,10 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  A machine has one F</etc/trog-provisioner>, and here it is a symlink into
-this domain's directory -- so a second domain does not get a runner of its own,
-it repoints that link and takes the address pool in F<ips.db> with it.
+False.  A machine has one F</etc/trog-provisioner>, and here it is a symlink
+into the directory of this domain.  A second domain does not get its own
+runner.  It points that link at itself, and takes the address pool in
+F<ips.db> with it.
 
 =cut
 
@@ -229,35 +226,30 @@ sub args {
         properties => {
             checkout => { type => 'boolean', default => 1 },
 
-            # Relative to install_dir/domain, and never the domain directory
-            # itself: the service_user target creates that before the fragment
-            # runs, and git clone refuses a target that is not empty.
+            # Relative to install_dir/domain, and never the domain directory.
+            # service_user makes that first, and git clone refuses a target
+            # that is not empty.
             checkout_dir => { type => 'string', default => 'trog-provisioner' },
 
-            # HTTPS rather than ssh: a guest that has just been built has no key
-            # registered anywhere.
+            # HTTPS, not ssh, because a new guest has no key registered anywhere.
             repo_url    => { type => 'string', default => $REPO },
             repo_branch => { type => 'string', default => 'master' },
 
-            # Which Sys::Virt to pin.  Empty means ask the guest what its
-            # libvirt-dev is, which is right whenever the runner and the
-            # hypervisor are on the same distribution.
+            # Which Sys::Virt to pin.  Empty asks the guest for the version of
+            # its libvirt-dev.  See required_recipes.
             #
-            # Deliberately not a number: this recipe must not load Trog::HV to
-            # ask a hypervisor (see Provisioner::Recipe on why recipes do not),
-            # so anything written here would be a guess that goes stale.
+            # Not a number by default.  This recipe must not load Trog::HV to
+            # ask a hypervisor (see Provisioner::Recipe), so a number here is a
+            # guess that goes stale.
             libvirt_version => { type => 'string', default => q{} },
 
-            # Absolute paths to install the dzil dependencies of, for a checkout
-            # this recipe did not make.  Named by the operator rather than
-            # worked out from another recipe: a runner that manages its own
-            # repositories is the case this exists for, and only the person who
-            # configured that knows where they land.
+            # Absolute paths of checkouts that this recipe did not make, to
+            # install their dzil dependencies.  The operator names them, because
+            # only the operator knows where a runner clones its repositories.
             deps_from => { type => 'array', items => { type => 'string' }, default => [] },
 
-            # The runner's ipmap.cfg.  Defaults sit on the members rather than
-            # on config itself, or a domain that sets one member would lose the
-            # rest.
+            # The ipmap.cfg of the runner.  The defaults are on the members,
+            # not on config, so a domain that sets one member keeps the rest.
             config => {
                 type       => 'object',
                 default    => {},
@@ -283,9 +275,8 @@ sub args {
                 },
             },
 
-            # Empty is a legitimate answer and means the runner is its own
-            # hypervisor, which is what libvirt does when nothing says
-            # otherwise.
+            # Empty means that the runner is its own hypervisor, which is what
+            # libvirt does when nothing says otherwise.
             hypervisors => {
                 type                 => 'object',
                 default              => {},
@@ -311,9 +302,10 @@ sub args {
 
             recipes => { type => 'object', default => {} },
 
-            # A keepass database in this domain's data directory to install as
-            # the runner's own.  Empty is fine: bin/preflight wants ipmap.cfg,
-            # recipes.yaml and admin_authorized_keys, and nothing else.
+            # A keepass database in the data directory of this domain, to
+            # install as the store of the runner.  Empty is correct too, because
+            # bin/preflight wants only ipmap.cfg, recipes.yaml and
+            # admin_authorized_keys.
             store => { type => 'string', default => q{} },
 
             hypervisor_access  => { type => 'string',  enum    => [qw{none least full}], default => 'none' },
@@ -325,8 +317,7 @@ sub args {
 =head3 formatters
 
 C<yaml>, which dumps a structure and writes its C<store:> references back as
-C<secret:> on the way out.  See L</SECRETS IN recipes> for why the indirection
-exists.
+C<secret:>.  See L</SECRETS IN recipes> for the reason.
 
 =cut
 
@@ -338,45 +329,42 @@ sub formatters {
 
 =head3 enrich
 
-Fills the runner's identity in from the guest's, and works each hypervisor's URI
-apart into the host, user and port an C<ssh-keyscan> needs.
+Fills in the identity of the runner from the identity of the guest.  Splits the
+URI of each hypervisor into the host, user and port that C<ssh-keyscan> needs.
+Dies if C<checkout_dir> or C<store> is not a relative path under the domain
+directory, or if a hypervisor URI has no host or is remote without ssh.
 
 =cut
 
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The runner administers its guests as whoever administers this one, on the
-    # same network, unless it was told otherwise.  All four come out of the
-    # [global] block this guest was built from, so they are here.
+    # Unless told otherwise, the runner administers its guests as whoever
+    # administers this one, on the same network.  These come from the [global]
+    # block that built this guest.
     #
-    # These are not decoration: bin/new_config refuses to generate anything
-    # without admin_user, admin_gecos, admin_email, gateway and resolvers, or
-    # without keys in admin_authorized_keys -- so a runner that defaulted any of
-    # them to empty could not build a single guest.  Measured on one, which is
-    # how the missing two were found.
+    # bin/new_config refuses to generate anything without admin_user,
+    # admin_gecos, admin_email, gateway and resolvers, or without keys in
+    # admin_authorized_keys.  A runner with any of them empty cannot build a
+    # guest.
     $opts{config}{admin_user}  //= $opts{admin_user};
     $opts{config}{admin_email} //= $opts{admin_email};
 
-    # ||= rather than //=: the schema defaults both of these to empty rather
-    # than leaving them absent, so "nobody said" reaches here as an empty
-    # string, which //= would keep.
+    # ||=, not //=, because the schema defaults these two to an empty string,
+    # which //= keeps.
     $opts{config}{gateway} ||= $opts{gateway};
     $opts{config}{ip}      ||= $opts{main_ip};
 
-    # A list rather than a setting, so what nobody said is an empty list here
-    # instead of the empty string the two above test for.
+    # A list, so an unset value is an empty list, not an empty string.
     $opts{config}{admin_keys} = $opts{admin_keys}
       unless @{ $opts{config}{admin_keys} // [] };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );
 
-    # Both of these are written into a path under the domain directory, so an
-    # absolute one silently means somewhere else entirely: `store:
-    # /etc/trog-provisioner/secrets.kdbx` is the obvious thing to write and
-    # renders as /opt/domains/<domain>//etc/..., which fails as a missing file
-    # rather than as the mistake it is.
+    # Both go into a path under the domain directory, so an absolute path
+    # points somewhere else.  `store: /etc/trog-provisioner/secrets.kdbx`
+    # renders as /opt/domains/<domain>//etc/..., and fails as a missing file.
     _under_the_domain( $opts{checkout_dir}, 'checkout_dir' ) if $opts{checkout};
     _under_the_domain( $opts{store},        'store' )        if $opts{store};
 
@@ -385,9 +373,9 @@ sub enrich {
         my $parts = _ssh_parts( $block->{libvirt_uri} )
           or die "trogrunner: could not read a host out of the libvirt_uri for hypervisor '$name': $block->{libvirt_uri}\n";
 
-        # A remote hypervisor has to be reachable over ssh -- the runner needs
-        # its filesystem as well as its libvirt, which is Trog::HV's rule and
-        # not one worth discovering on the guest.
+        # Trog::HV needs the filesystem of a remote hypervisor as well as its
+        # libvirt, so the runner must reach it over ssh.  Find that out here,
+        # not on the guest.
         die "trogrunner: hypervisor '$name' is remote, so its libvirt_uri needs an ssh transport, e.g. qemu+ssh://user\@$parts->{host}/system\n"
           if $parts->{host} && !$parts->{ssh};
 
@@ -408,10 +396,14 @@ sub _under_the_domain {
     return 1;
 }
 
-# store:GROUP/TITLE/FIELD back to secret:GROUP/TITLE/FIELD, everywhere in the
-# structure.  See SECRETS IN recipes: the indirection exists so that
-# bin/new_config does not resolve these on the way in and dump the answers into
-# a file that ends up in every backup of this domain.
+=head3 $copy = _restore_refs($node)
+
+Returns a copy of C<$node> with every C<store:GROUP/TITLE/FIELD> string turned
+back into C<secret:GROUP/TITLE/FIELD>, at any depth.  See
+L</SECRETS IN recipes>.
+
+=cut
+
 sub _restore_refs {
     my ($node) = @_;
 
@@ -421,15 +413,23 @@ sub _restore_refs {
 
     return $node unless index( $node, 'store:' ) == 0;
 
-    # The same test Trog::Secrets::needed makes of a secret: reference, and for
-    # the same reason: a prefix, at the start, and nothing cleverer.
+    # The same test that Trog::Secrets::needed makes of a secret: reference, a
+    # prefix at the start and nothing more.
     return 'secret:' . substr( $node, length 'store:' );
 }
 
-# The ssh half of a libvirt connection URI.  URI knows nothing about the
-# driver+transport scheme and hands back something with no authority accessors,
-# so split it generically and re-parse the authority under a scheme it does
-# understand -- the same trick, and for the same reason, as Trog::HV::_parse_uri.
+=head3 $parts = _ssh_parts($uri)
+
+Returns the ssh half of a libvirt connection URI as a hash reference: C<ssh>
+(1 if the transport is ssh, else 0), C<host>, C<user> and C<port>.  Returns
+undef if C<$uri> is empty or has no scheme.
+
+URI does not know the driver+transport scheme, and returns an object that
+cannot give the host, user or port.  So this splits the URI generically, and
+parses the authority again under the ssh scheme.  Trog::HV::_parse_uri does the same.
+
+=cut
+
 sub _ssh_parts {
     my ($uri) = @_;
     return undef unless $uri;
@@ -450,17 +450,15 @@ sub _ssh_parts {
 
 =head3 %grant = Provisioner::Recipe::trogrunner->grant($block)
 
-What a domain's C<trogrunner> block asks for by way of hypervisor access:
-C<access>, C<restrict> and C<hypervisors>.  An empty list when it asks for
-none, which is the default and the usual answer.
+What the C<trogrunner> block of a domain asks for as hypervisor access:
+C<access>, C<restrict> and C<hypervisors>.  Returns an empty list if it asks
+for none, which is the default.
 
-Here rather than in F<bin/provision>, which is what acts on it, because the
-defaults are in C<args()> and a second copy of them in a script is a second copy
-to drift.  Reading them back out of the schema is what keeps there being one.
+This is here and not in F<bin/provision>, which acts on it, because the
+defaults are in C<args()>.  A second copy of them in a script can drift.
 
-Takes the block as written rather than a validated one: this is asked of a
-domain long after C<bin/new_config> ran, from a script that has a configuration
-and no recipe object.
+Takes the block as written, not a validated one.  A script asks this long after
+C<bin/new_config> ran, and it has a configuration but no recipe object.
 
 =cut
 
@@ -493,37 +491,35 @@ sub template_files {
 
 =head3 datadirs
 
-The configuration directory, made before the fragment runs and owned the way
-the rest of the domain is owned.
+The configuration directory, relative to install_dir/domain.  It exists before
+the fragment runs, with the same owner as the rest of the domain.  The fragment
+links the F</etc/trog-provisioner> of the guest to it.
 
-C<ips.db> is created in there the first time the runner assigns an address, and
-it is the runner's memory of which guest holds what.  A root-owned directory
-turns that into an unreadable SQLite error on the runner's first
-C<bin/new_config>; being under C<install_dir> is what gets the database
-salvaged onto the next rebuild.
+The runner creates C<ips.db> in there the first time it assigns an address.
+This database records which guest holds which address.  In a directory that
+root owns, the first C<bin/new_config> on the runner fails with a SQLite
+error.  Because it is under C<install_dir>, the next rebuild salvages the
+database.
 
 =cut
 
-# Relative to install_dir/domain, which is what datadirs takes -- the guest's
-# /etc/trog-provisioner is a symlink to this, made by the fragment.
 sub datadirs {
     return qw{etc/trog-provisioner};
 }
 
 =head3 guest_secrets
 
-The key a hypervisor is asked to trust, kept in the secret store rather than in
+The key that a hypervisor is asked to trust.  It is in the secret store, not in
 the domain directory.
 
-Declared whether or not C<hypervisor_access> was asked for, because this is a
-class method and has no way to ask -- L</remote_files> has the same constraint.
-That is not a hole: what the setting decides is whether C<bin/provision> writes
-the public half into anybody's F<authorized_keys>, and a private key sitting
-0600 on a guest no machine trusts opens nothing.
+This declares the key even if C<hypervisor_access> is not set, because this is
+a class method and cannot see it.  L</remote_files> has the same limit.  This
+is not a hole.  The setting decides whether C<bin/provision> writes the public
+half into an F<authorized_keys>.  A private key with mode 0600 on a guest that
+no machine trusts opens nothing.
 
-Keeping it in the store rather than making one per provision is what lets the
-grant survive a rebuild: the same key comes back, and the line the hypervisor
-already has still matches it.
+The key stays in the store, and is not made again on each provision.  So a
+rebuild gets the same key, and the line that the hypervisor has still matches.
 
 =cut
 
@@ -540,10 +536,16 @@ sub guest_secrets {
     );
 }
 
-# Provisioner::Utils::write_ssh_keypair, which is where the rewrap that makes
-# these readable by both OpenSSH and CryptX lives -- see its POD.  ed25519 for
-# the reason bin/preflight suggests it: short enough that an authorized_keys
-# line stays readable.
+=head3 $private_key = _hypervisor_key()
+
+Makes a new ed25519 key pair and returns the private key as text, without the
+last newline.  Provisioner::Utils::write_ssh_keypair makes the key so that
+OpenSSH and CryptX can both read it.  See its POD.  ed25519 keeps an
+authorized_keys line short enough to read, which is also why bin/preflight
+suggests it.
+
+=cut
+
 sub _hypervisor_key {
     my $dir  = File::Temp::tempdir( CLEANUP => 1 );
     my $path = "$dir/id_ed25519";
@@ -555,20 +557,19 @@ sub _hypervisor_key {
 
 =head3 remote_files
 
-The configuration directory and the checkout, salvaged off the guest being
+The configuration directory and the checkout, salvaged off the guest that is
 replaced.
 
-What is worth having out of the first is C<ips.db>, which the runner made the
-first time it assigned an address and which is the only record of which of its
-guests holds what.  Losing it hands the next guest an address something already
-has.
+The important file in the first is C<ips.db>.  The runner made it the first
+time it assigned an address, and it is the only record of which guest holds
+which address.  Without it, the next guest can get an address that something
+already has.
 
-The directory rather than that one file: C<bin/new_config> fetches these with
-C<get_dir>, so an entry here is a directory or it is an rsync that fails.
+The whole directory, not that one file, because C<bin/new_config> fetches
+these with C<get_dir>.  An entry that is not a directory makes rsync fail.
 
-Both unconditionally: this is a class method and cannot see C<checkout>, and
-salvaging a path that is not there has been quiet since the salvage gap was
-closed.
+Both paths are always returned, because this is a class method and cannot see
+C<checkout>.  A path that is not on the guest is not an error for the salvage.
 
 =cut
 
@@ -583,19 +584,16 @@ sub remote_files {
 
 =head3 remote_skip
 
-The private key, and the runner's own secret store.  A secret salvaged off a
-guest lands in the domain directory, and from there into C<data.tar.gz> and
-into every backup taken of it; keeping them here is the whole of what
-C<remote_skip> is for.
+The private key, and the secret store of the runner.  A secret salvaged off a
+guest goes into the domain directory, then into C<data.tar.gz> and every
+backup.  C<remote_skip> exists to prevent that.
 
-B<Not> the three configuration files, which are rendered afresh every
-provision and so are stale on the guest by definition.  Two reasons, and the
-second is the one that bites: the C<data> target unpacks the payload before any
-recipe fragment runs, so the rendered copy is installed over the salvaged one
-either way -- and a directory every file of which is skipped comes off the
-guest empty, which is indistinguishable from a fetch that failed.  The
-salvage-gap check refuses to rebuild over exactly that, so skipping them made
-every second provision stop.
+B<Not> the rendered configuration files, although each provision renders them
+again.  The C<data> target unpacks the payload before any recipe fragment
+runs, so the rendered copy replaces the salvaged one anyway.  And if every file
+in a directory is skipped, the directory comes off the guest empty.  That looks
+the same as a failed fetch, and the salvage-gap check refuses to rebuild over
+it.
 
 =cut
 
@@ -609,9 +607,10 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-GitHub, which serves the checkout this recipe clones.  The host of the default only: C<fetch_hosts> is asked of the class,
-without a configuration, so a C<repo_url> pointed somewhere else is not
-declared here and goes straight upstream.
+GitHub, which serves the checkout that this recipe clones.  Only the host of
+the default is declared, because C<fetch_hosts> is asked of the class without
+a configuration.  A C<repo_url> that points somewhere else goes directly
+upstream.
 
 =cut
 

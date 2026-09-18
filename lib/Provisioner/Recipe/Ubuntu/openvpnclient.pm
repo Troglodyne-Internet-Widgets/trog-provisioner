@@ -14,18 +14,11 @@ use parent qw{Provisioner::Recipe::openvpnclient};
 
 Provisioner::Recipe::Ubuntu::openvpnclient - Ubuntu's C<deps> for L<Provisioner::Recipe::openvpnclient>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else openvpnclient does is in the recipe this
-inherits from.
-
 =cut
 
 sub deps {
 
-    # It fetches its certificates over rsync, so it needs what does the
-    # fetching as much as it needs openvpn.
+    # The certificates arrive by rsync over ssh, so it needs both as well as openvpn.
     return qw{openvpn openssh-client rsync};
 }
 

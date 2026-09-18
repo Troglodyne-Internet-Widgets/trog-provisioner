@@ -23,50 +23,48 @@ In recipes.yaml:
             from: foo@bar.baz
             user_scripts:
                 - cmd: some_script.sh
-                  interval: "5 0 0 0 0"
-				  mailto: "whee@test.test"
-		    root_scripts:
-				...
+                  interval: "5 0 * * *"
+                  mailto: "whee@test.test"
+            root_scripts:
+                ...
 
-Set mailto to 'none' if you don't care about the output of a script; say nothing
-and it goes to the admin.
+If you do not want the output of a script, set its C<mailto> to C<none>.  If
+you do not set C<mailto>, the output goes to the admin.
 
-C<from>, and each C<mailto>, may be a bare local part or a whole address.  A
-local part gets this domain appended; an address is left alone.
+C<from> and each C<mailto> can be a local part alone or a whole address.  A
+local part gets this domain appended.  An address does not change.
 
 =head2 DESCRIPTION
 
-Sets up some root crons, and a cron for the service user.
+Sets up the cron jobs of root, and the cron jobs of the service user.
 
-Optionally set MAILFROM as the 'from' parameter.  It is the local part alone --
-C<cron> gives you C<cron@$domain> -- because the domain is appended for you.
+C<from> sets MAILFROM.  If you do not set it, no cron file sets MAILFROM.
 
-Root Crons:
+The cron jobs of root run:
 
     * SAR gathering
     * rkhunter
-    * Various log watchers (OOMs, SEGVs, root logins, new users, rsyslog drops)
+    * Log watchers (OOMs, SEGVs, root logins, new users, rsyslog drops,
+      outgoing ufw blocks)
     * scan for writes to packaged files
-    * running dehydrated if using the letsencrypt target
+    * dehydrated, if the domain uses the letsencrypt recipe
 
-Also runs all the configured root_scripts & user_scripts present in the service install dir's bin/ directory.
+They also run each configured C<root_scripts> entry, from a PATH that starts
+with C<script_dir>.  The service user runs each C<user_scripts> entry, from a
+PATH that starts with the C<bin/> directory of the service install dir.
 
 =cut
 
 =head3 %opts = $recipe->enrich(%opts)
 
-Work out what MAILFROM and each MAILTO should actually say.
+Sets what MAILFROM and each MAILTO say, and returns the options.
 
-Both are addresses by the time cron reads them, but a bare local part is the
-natural way to write one in a recipe -- C<from: cron> -- so anything that is not
-already an address gets this domain appended.  Anything that is one is left
-exactly as it stands, because appending to it would produce
+A local part in C<from> or C<mailto>, for example C<from: cron>, gets this
+domain appended.  An address does not change, because a second domain gives
 C<somebody@example.test@this.domain>.
 
-A script that says C<mailto: none> does not want its output, which cron spells
-as an empty MAILTO.  A script that says nothing at all has not been thought
-about, which is a different thing, and its output goes to the admin.  Those two
-used to be the wrong way round.
+C<mailto: none> becomes an empty MAILTO, which tells cron to send nothing.  A
+script with no C<mailto> sends its output to the admin.
 
 =cut
 
@@ -83,8 +81,8 @@ sub enrich {
     return %opts;
 }
 
-# Copied rather than edited in place: render_file runs once per template, and
-# the recipe config it is handed belongs to the caller.
+# Return a copy, because render_file calls enrich once per template and the
+# caller owns the recipe configuration.
 sub _with_mailto {
     my ( $script, $opts ) = @_;
     return $script unless ref $script eq 'HASH';
@@ -105,10 +103,7 @@ sub args {
         type       => 'object',
         properties => {
 
-            # A local part, not an address: the templates write
-            # MAILFROM="[% from %]@[% domain %]" and supply the domain
-            # themselves.  This was declared as an email, which asked for
-            # exactly the value that would render as user@host@domain.
+            # Not an email type: a local part is valid here, see enrich().
             from         => { type => 'string' },
             user_scripts => {
                 type  => 'array',

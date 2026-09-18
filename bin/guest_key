@@ -19,7 +19,7 @@ use Trog::HV();
 
 =head1 NAME
 
-guest_key - hand back the key a guest is reached with.
+guest_key - give out the key that opens a guest.
 
 =head1 USAGE
 
@@ -27,28 +27,29 @@ guest_key - hand back the key a guest is reached with.
 
 =head1 DESCRIPTION
 
-The private half of a guest's key lives in the secret store rather than in the
-domain directory -- see L<Trog::Guest>.  Everything that provisions, restores
-or asks a guest something gets it from there without being told to, so this is
-not needed for any of that.
+The private half of the key of a guest is in the secret store, not in the
+domain directory.  See L<Trog::Guest>.  The tools that provision, restore or
+query a guest get the key from the store without help, so they do not need
+this.
 
-It is for the times you want to be the one holding it: an ssh by hand, an rsync
-this tool does not do, a debugging session.
+Use it when you must hold the key yourself: for an ssh by hand, an rsync that
+this tool does not do, or a debugging session.
 
     bin/guest_key --out /tmp/vm.key vm.example.com
     ssh -i /tmp/vm.key admin@vm.example.com
 
-With no C<--out> the key is written to a private temporary file, and B<the path
-is printed rather than the key>.  That file belongs to this process and goes
-away when it exits -- so a command substitution is no use here.  The shell runs
-this to completion before ssh starts, and the path it captured has already been
-unlinked by then.  Without C<--out> this is for a caller that reads the path and
-opens it in the same process, which is what everything in lib/ does.
+Without C<--out>, it writes the key to a private temporary file and prints the
+path, not the key.  That file belongs to this process and is deleted when the
+process exits.  Thus a command substitution does not work.  The shell runs
+guest_key to the end before ssh starts, and by then the file is gone.  Without
+C<--out>, it is for a caller that reads the path and opens the file in the same
+process, as everything in lib/ does.  If the domain directory still has
+F<key.rsa>, it prints the path of that file instead.
 
-C<--out> writes it somewhere of your choosing and leaves it there.  That is a
-copy of the credential for the machine, back on a disk, which is the thing
-keeping it in the store avoids; it exists because sometimes that is what you
-need, and it says so on the way past.
+C<--out> writes the key to a path that you choose and keeps it there.  That puts
+a copy of the credential for the machine back on a disk, which the store is
+there to prevent.  The option exists because sometimes you need it, and a
+warning tells you so.
 
 =head1 OPTIONS
 
@@ -56,8 +57,8 @@ need, and it says so on the way past.
 
 =item B<--out> FILE
 
-Write the key here and keep it, rather than to a temporary file that goes away.
-Created 0600, and refused if something is already there.
+Write the key to FILE and keep it there, not in a temporary file.  The file
+gets mode 0600.  If FILE already exists, guest_key refuses.
 
 =back
 
@@ -76,8 +77,7 @@ sub main {
 
     my $domain = shift @args or pod2usage( -exitval => 2, -message => "Which domain?\n" );
 
-    # Where it used to be kept, which is still where it is for a domain that has
-    # not been provisioned since sealing.
+    # A domain not provisioned since its key was sealed still keeps it here.
     my $on_disk = Trog::HV->new()->domain_dir . "/$domain/key.rsa";
     my $path    = Trog::Guest->key_path( $domain, $on_disk );
 
@@ -86,8 +86,8 @@ sub main {
 
     return _print($path) unless defined $out;
 
-    # Refused rather than overwritten: the usual reason to find something here
-    # is that the last person to do this forgot to remove it.
+    # Refuse, do not overwrite: a file here is usually an old copy that nobody
+    # removed.
     die "$out is already there.  Move it aside, or pick another name.\n" if -e $out;
 
     File::Copy::copy( $path, $out ) or die "Could not write $out: $!\n";

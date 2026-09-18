@@ -7,10 +7,8 @@ ok(-d '[% install_dir %]/webmail.[% domain %]', 'roundcube directory exists');
 ok(-f '[% install_dir %]/webmail.[% domain %]/config/config.inc.php', 'roundcube config exists');
 ok(-f '/etc/nginx/sites-enabled/webmail.[% domain %].conf', 'roundcube nginx vhost exists');
 
-# The vhost file existing says nothing about nginx accepting it, and a failed
-# restart says only that it failed.  This guest could not start nginx at all:
-# server_names_hash_bucket_size was 64, which webmail.<domain> overflows once
-# the domain is any length, and the sentence saying so appears only here.
+# nginx can refuse a vhost file that exists.  A failed restart says only that it
+# failed, and nginx -t says why.
 my $check = `nginx -t 2>&1`;
 like($check, qr/test is successful/, 'nginx accepts the configuration') or diag $check;
 
@@ -18,10 +16,8 @@ my $status = `systemctl is-active nginx 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'and nginx is running');
 
-# php-fpm is what serves it, through the socket the vhost names.  The pool has
-# to be a .conf: php-fpm.conf includes pool.d/*.conf and nothing else, so this
-# was installed as a .ini, read by nobody, and no process ever ran for the
-# domain -- while a test that only asked whether the file was there passed.
+# php-fpm serves roundcube through the socket that the vhost names.  php-fpm.conf
+# includes only pool.d/*.conf, so the pool must be a .conf.
 my $pool = `ls /etc/php/*/fpm/pool.d/roundcube-[% domain %].conf 2>/dev/null`;
 ok($pool, 'the php-fpm pool for this domain is installed where php-fpm includes it') or diag $pool;
 ok(!glob('/etc/php/*/fpm/pool.d/roundcube-[% domain %].ini'),
@@ -32,32 +28,28 @@ my $conf = `cat /etc/php/*/fpm/pool.d/roundcube-[% domain %].conf 2>/dev/null`;
 like($conf, qr/^user\s*=\s*\S+/m,  'the pool names a user');
 like($conf, qr/^group\s*=\s*\S+/m, 'and a group');
 
-# Which is only worth anything if php-fpm went on to make the socket.  Without
-# the pool loaded there is no socket, and nginx answers every request to
-# webmail with a 502 naming a missing file rather than a missing pool.
+# The socket exists only if php-fpm loaded the pool.  Without it, nginx answers
+# every request to webmail with a 502 that names a missing file, not the pool.
 my $sock = '/var/run/roundcube-[% domain %].sock';
 ok(-S $sock, 'php-fpm created the socket the vhost proxies to')
     or diag `ls -l /var/run/roundcube-* /run/php/ 2>&1`;
 
-# The database has to be where the DSN says it is, because that is the only
-# place roundcube will look for it, and it is where the salvaged one is put
-# back.  Asserting both together is the point: a restore into some other
-# directory would leave the config pointing at an empty database.
+# Roundcube looks for the database only where the DSN points, and the salvaged
+# one goes back there.  So these two go together.  A restore into another
+# directory leaves the DSN pointing at an empty database.
 my $db = '[% install_dir %]/webmail.[% domain %]_data/roundcube.db';
 my $inc = do { local (@ARGV, $/) = '[% install_dir %]/webmail.[% domain %]/config/config.inc.php'; <> } // '';
 like($inc, qr{db_dsnw.*\Qsqlite://\E/*\Q$db\E}, 'the configured database is the one at that path') or diag $inc;
 ok(-s $db, 'and there is a database there');
 
-# With the schema in it, whether that came from sqlite.initial.sql on a first
-# build or off the previous guest on a rebuild.
+# The schema comes from sqlite.initial.sql on a first build, or from the
+# previous guest on a rebuild.
 my $tables = `sqlite3 '$db' "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('users','contacts','identities')" 2>&1` // '';
 chomp $tables;
 is($tables, '3', 'and roundcube tables in it') or diag $tables;
 
-# The pool runs as the domain's own user, and roundcube writes: the sqlite
-# database and its journal, the session and attachment temp files, and its own
-# log.  www-data owned all of it, so every one of those was refused -- an
-# install that comes up and cannot record anything.
+# The pool runs as the service user of the domain.  That user must write the
+# database and its journal, the session and attachment temp files, and the log.
 my ($pool_user) = $conf =~ m/^user\s*=\s*(\S+)/m;
 $pool_user //= '';
 foreach my $path ($db, '[% install_dir %]/webmail.[% domain %]_data',
@@ -67,18 +59,17 @@ foreach my $path ($db, '[% install_dir %]/webmail.[% domain %]_data',
         or diag `ls -ld '$path'`;
 }
 
-# And nginx gets an answer out of it.  A 502 here is the pool not being loaded;
-# anything else means php ran.
+# A 502 here means that the pool did not load.  Any other code means that php
+# ran.
 my $code = `curl -sk -o /dev/null -w '%{http_code}' -H 'Host: webmail.[% domain %]' https://127.0.0.1/ 2>/dev/null`;
 chomp $code;
 like($code, qr/^(?:200|30[0-9])$/, 'roundcube answers a request through nginx')
     or diag "HTTP $code from the webmail vhost";
 
-# restore_state removes the salvage once it has put it back, so one still lying
-# in the domain directory means it declined.  That is correct against a guest
-# that still has its own users, and wrong on a rebuild -- where it means the
-# contacts and identities came down off the old guest and got no further than
-# the domain directory.
+# restore_state removes the salvage after it puts it back.  So a salvage still in
+# the domain directory means that restore_state declined.  That is correct on a
+# guest that still has its own users.  On a rebuild, it means that the contacts
+# and identities of the old guest stopped in the domain directory.
 my $salvaged = '[% install_dir %]/[% domain %]/roundcube/roundcube.db';
 SKIP: {
     skip 'no previous guest was salvaged from', 1 unless -s $salvaged;

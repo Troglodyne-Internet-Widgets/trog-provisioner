@@ -1,58 +1,43 @@
 #!/bin/bash
-# Per-service connection rate limits, written into ufw's before.rules.
+# Write per-service connection rate limits into ufw's before.rules.
 #
-# Arguments are PORT=HITS pairs: the number of new connections a single source
-# may open to that port in a second before it is dropped, and EXEMPT=CIDR pairs
-# naming sources that are never dropped whatever they open.
+# Each argument is a PORT=HITS pair or an EXEMPT=CIDR pair.  HITS is the number
+# of new connections one source can open to PORT in a second.  If a source opens
+# more, the rule drops the connection.  A source in an EXEMPT network is never
+# dropped.
 #
-# PORT may carry a protocol as PORT/PROTO, spelled the way a ufw application
-# profile spells it.  A bare port means tcp, which is what every port named here
-# meant before the protocol could be said at all.
+# PORT can carry a protocol as PORT/PROTO, spelled the way a ufw application
+# profile spells it.  A bare port means tcp.
 #
-# The exemptions are what admin_networks means once ssh is limited here rather
-# than by ufw: somebody administering the guest goes as fast as they like, and
-# everybody else meets the limit.
+# The exemptions implement admin_networks.  A person who administers the guest
+# is not limited, and every other source meets the limit.
 #
-# ufw's own `limit` is six connections in thirty seconds, hardcoded.  That suits
-# a person typing at an ssh prompt now and again and nothing else here: it is
-# absurd for a web server, where it rate limited real visitors off the site when
-# it was applied to every application profile, and it is wrong on port 22 as
-# well, because ssh on this fleet is automation rather than a person -- it locked
-# the provisioner out of guests it had just built.  Which is why port 22 is
-# overridden here by default rather than left to ufw.  setup-ufw-rules therefore
-# allows profiles and limits none of them; these are the only limits.
+# ufw's own `limit` is six connections in thirty seconds, and ufw hardcodes it.
+# That is too low for a web server.  It is also too low for ssh on this fleet,
+# because automation opens the ssh connections, not a person.  So
+# setup-ufw-rules allows each profile and limits none of them.  The rules this script writes are the only limits.
 #
-# In before.rules with our own chain, not in user.rules: ufw owns user.rules and
-# rewrites it whenever a rule changes, and the ufw-user-limit chains it defines
-# there do not exist yet while before.rules is being read.
+# The rules go in before.rules, in a chain of our own, not in user.rules.  ufw
+# owns user.rules and rewrites it when a rule changes.  The ufw-user-limit
+# chains that ufw defines there do not exist yet when ufw reads before.rules.
 set -eu
 
 RULES=/etc/ufw/before.rules
 BEGIN='# BEGIN trog-provisioner rate limits'
 END='# END trog-provisioner rate limits'
 
-# Our own chain, jumped into from ufw-before-input, rather than rules appended
-# to ufw-before-input itself.
+# The limits go in a chain of our own, which ufw-before-input jumps into.
 #
-# This is what an exemption needs to be able to say "skip the limits" without
-# also saying "skip everything after them".  RETURN leaves the chain it is in,
-# and the last rule of ufw-before-input is the jump to ufw-user-input, where
-# every `ufw allow` lives -- so an exemption written directly into
-# ufw-before-input returned past the allow rules, fell through to
-# ufw-reject-input, and was dropped by the default deny.  Naming an admin
-# network locked that network out of the guest, which is the exact opposite of
-# what it is for, and it was invisible because ESTABLISHED is accepted earlier:
-# the connection that configured the firewall stayed up, and only the next new
-# one was refused.
-#
-# From inside a chain of our own, RETURN goes back to ufw-before-input and
-# carries on to ufw-user-input, which is what "not rate limited" was always
-# supposed to mean.
+# RETURN leaves the current chain.  The last rule of ufw-before-input jumps to
+# ufw-user-input, which holds every `ufw allow`.  An exemption in
+# ufw-before-input itself returns past those allow rules, and the default deny
+# drops the packet.  From our own chain, RETURN goes back to ufw-before-input,
+# which continues to ufw-user-input.
 CHAIN=trog-ratelimit
 
 [ -f "$RULES" ] || { echo "setup-ufw-ratelimits: no $RULES" >&2; exit 1; }
 
-# Take out whatever was put there last time, however many times.
+# Remove every block that an earlier run wrote.
 sed -i "\|^$BEGIN\$|,\|^$END\$|d" "$RULES"
 
 if [ "$#" -eq 0 ]; then
@@ -61,14 +46,14 @@ fi
 
 block="$BEGIN\n"
 
-# Declared, then jumped into, before anything is added to it: iptables-restore
-# reads this file in order and a jump to a chain it has not seen yet is an
-# error that aborts the whole table.
+# Declare the chain and jump into it before you add rules to it.
+# iptables-restore reads this file in order.  A jump to a chain that it has not
+# seen yet is an error, and the error aborts the whole table.
 block="$block:$CHAIN - [0:0]\n"
 block="$block-A ufw-before-input -j $CHAIN\n"
 
-# The exemptions first, because iptables takes the first rule that matches and
-# a source let past has to be let past before anything counts it.
+# Write the exemptions first.  iptables uses the first rule that matches, so an
+# exempt source must return before a limit counts it.
 for pair in "$@"; do
     case "$pair" in
         EXEMPT=*) ;;
@@ -91,30 +76,25 @@ for pair in "$@"; do
         */*) proto=${spec##*/} ;;
     esac
     echo "Rate limiting $proto port $port at $hits new connections a second"
-    # hashlimit rather than recent.  `-m recent --hitcount N` is capped by
-    # xt_recent's ip_pkt_list_tot, which is 20 by default -- so every limit here
-    # was rejected by iptables-restore with "RULE_APPEND failed (Invalid
-    # argument)", and because that aborts the whole file, the guest lost every
-    # rule in before.rules including the loopback and ESTABLISHED accepts.  ufw
-    # still reported itself active, so nothing said a word.
+    # hashlimit, not recent.  `-m recent --hitcount N` cannot go above
+    # xt_recent's ip_pkt_list_tot, which is 20 by default.  A rule over that
+    # cap makes iptables-restore reject all of before.rules.
     #
-    # hashlimit takes any rate, keeps its own per-source table, and says what it
-    # means: drop new connections to this port from a source going faster than
-    # this.  A separate table per port and protocol, or they share one another's
-    # counts -- 53/tcp and 53/udp are different services and each gets its own.
+    # hashlimit takes any rate and keeps its own table for each source.  Each
+    # port and protocol gets a separate table, or they share their counts.
+    # 53/tcp and 53/udp are different services.
     #
-    # ctstate NEW means something weaker for udp than for tcp: there is no
-    # handshake, so it is the first packet of a flow conntrack has not seen
-    # lately rather than a SYN.  That is still the thing worth counting -- a
-    # reflection flood is new flows -- but it is why a udp rate is not a tcp
-    # rate written twice.
+    # For udp, ctstate NEW is weaker than for tcp.  udp has no handshake, so NEW
+    # is the first packet of a flow that conntrack has not seen recently.  That
+    # is still the correct thing to count, because a reflection flood is new
+    # flows.  But a udp rate is not the same as a tcp rate.
     block="$block-A $CHAIN -p $proto --dport $port -m conntrack --ctstate NEW -m hashlimit --hashlimit-above $hits/sec --hashlimit-burst $hits --hashlimit-mode srcip --hashlimit-name trog$proto$port -j DROP\n"
 done
 block="$block$END"
 
-# At the end of the filter table, not the start of it.  These match new
-# connections, and ufw's own rules ahead of them accept loopback and anything
-# already established -- put first, this would count both.
+# Put the block at the end of the filter table, not at the start.  ufw's own
+# rules before it accept loopback and established traffic.  At the start, the
+# limits count both.
 awk -v b="$block" '
     /^\*filter/                  { infilter = 1 }
     infilter && /^COMMIT/        { print b; infilter = 0 }

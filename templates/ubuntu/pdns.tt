@@ -1,16 +1,10 @@
-[%# One line in forward-zones-file, not a config fragment in recursor.d.
-    That fragment said `forward-zones+=<domain>=...`, and the recursor refused
-    the whole file -- "could not be parsed" -- every time.  += needs a plain
-    forward-zones to append to, and giving it one in recursor.conf, ahead of
-    include-dir, did not help either: the documentation claims += for the main
-    configuration and says nothing about files pulled in by include-dir, and the
-    recursor agrees with the silence.
-    forward-zones-file is the mechanism meant for this -- one zone per line,
-    zone=address:port -- and every domain simply adds its line. -%]
-# Point the recursor at our domain, via the forward zones file
+[%# One line in forward-zones-file, not a fragment in recursor.d.  The
+    recursor refuses a file in recursor.d that uses `forward-zones+=`, and says
+    it "could not be parsed". -%]
+# Forward this domain to the authoritative server, through the forward zones file
 grep -qxF '[% domain %]=127.0.0.1:2500' /etc/powerdns/forward-zones 2>/dev/null     || cat pdns-recursor-domain.conf >> /etc/powerdns/forward-zones
 rm -f pdns-recursor-domain.conf
-[%# And the negative trust anchor for it: see the global fragment. -%]
+[%# The negative trust anchor for this domain.  See the global fragment. -%]
 grep -qF 'addNTA("[% domain %]"' /etc/powerdns/recursor.lua 2>/dev/null || cat pdns-recursor-domain.lua >> /etc/powerdns/recursor.lua
 rm -f pdns-recursor-domain.lua
 # Build the zone database
@@ -18,28 +12,24 @@ mkdir -p /var/spool/powerdns/[% domain %]; /bin/true
 # TODO do this via lexicon instead
 cp zonefile /var/spool/powerdns/[% domain %]/bind.zone
 zone2sql --gsqlite --zone=zonefile --zone-name=[% domain %] > /var/spool/powerdns/[% domain %]/zone.sql
-[%# Only load the zone into a database that does not already answer for it.  The
-    global half puts the previous guest zones.db back before this runs, and what
-    is in there is the live zone -- every record lexicon or DCV or somebody with
-    a shell added after the last provision.  Reloading the zonefile over it
-    would replace that with the handful of records this recipe knows about, and
-    it would not even get that far: zone2sql emits a plain insert into domains,
-    which the unique index on name refuses, so the target would fail outright.
-    A zone that is already there and needs changing is a job for lexicon. -%]
+[%# Load the zone only into a database that does not answer for it yet.  The
+    data target restores the zones.db of the previous guest before this runs,
+    and it holds the live zone.  A reload of the zonefile replaces every record
+    that lexicon, DCV or a person added after the last provision.  Also, zone2sql
+    emits a plain insert into domains,
+    which the unique index on name refuses, so the target fails.  Use lexicon
+    to change a zone that is already there. -%]
 sqlite3 /var/spool/powerdns/zones.db "SELECT id FROM domains WHERE name='[% domain %]'" | grep -q . || sqlite3 /var/spool/powerdns/zones.db < /var/spool/powerdns/[% domain %]/zone.sql
 chown -R pdns:pdns /var/spool/powerdns
 chmod -R 0775 /var/spool/powerdns
-[%# pdns binds its control socket and its API socket as root, before it chroots
-    and before it drops to setuid -- and root without CAP_DAC_OVERRIDE, which
-    the unit does not grant, cannot write into a directory owned by pdns with
-    nothing for other.  So root owns the two it has to create sockets in, and
-    pdns keeps them through the group. -%]
+[%# pdns binds its control socket and its API socket as root, before it
+    chroots and drops to setuid.  The unit does not grant CAP_DAC_OVERRIDE, so
+    root cannot write into a directory that pdns owns with no access for
+    other.  So root owns these directories, and pdns gets access through the
+    group. -%]
 chown root:pdns /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
 chmod 0775 /var/spool/powerdns /var/spool/powerdns/run /var/spool/powerdns/run/pdns
-[%# Started here rather than queued, for the reason the global fragment gives:
-    the postrun queue is sequential, and the fetcher that needs this server to
-    be answering is queued ahead of anything this recipe could add to it.  This
-    also means a pdns that will not start fails its own target, which is where
-    it should be noticed. -%]
+[%# Restart here, not in the postrun queue, for the reason in the global
+    fragment.  A pdns that does not start then fails its own target. -%]
 systemctl restart pdns
 systemctl restart pdns-recursor

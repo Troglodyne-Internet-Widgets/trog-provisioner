@@ -3,19 +3,15 @@
 [% IF dns_preference == 'pdns' -%]
 # Wait for the server that answers the challenge before asking for one.
 #
-# A backstop, not the fix: pdns starts in its own target and nostubresolver
-# restarts the resolver in its own, so this should fall through on the first
-# pass.  It used to be neither -- the restarts were queued in the postrun behind
-# this task, and post_install runs its queue one task at a time, so waiting here
-# could only ever time out.
+# This is a backstop.  pdns starts in its own target, and nostubresolver
+# restarts the resolver in its own target.  So the loop usually ends on the
+# first pass.
 #
-# Three checks, and the third is the one this used to be missing.  The socket
-# and the @127.0.0.1 SOA say the server is up and holds the zone.  The bare SOA
-# says the *system* resolver can see it -- which is the resolver lexicon walks
-# the zone with for --resolve-zone-name, and the one step-ca validates dns-01
-# through.  Measured on a guest: the first two passed while systemd's stub knew
-# nothing of a reserved TLD, so the walk fell all the way to the root, lexicon
-# asked pdns for zones/. and got a 404, and every challenge failed.
+# The socket and the SOA from @127.0.0.1 say that the server is up and holds
+# the zone.  The bare SOA says that the system resolver can see the zone.
+# lexicon walks the zone with that resolver for --resolve-zone-name, and
+# step-ca validates dns-01 through it.  If that resolver cannot see the zone,
+# lexicon asks pdns for zones/. and every challenge fails.
 for _ in $(seq 1 60); do
     [ -S /var/spool/powerdns/api.sock ] \
       && dig +short @127.0.0.1 [% domain %] SOA 2>/dev/null | grep -q . \
@@ -24,26 +20,19 @@ for _ in $(seq 1 60); do
     sleep 2
 done
 [% END -%]
-# Register with the CA this domain is configured for, if this guest has not
-# already.  The global fragment registers as well, but it runs before any
-# recipe's target -- so on a guest whose CA is one of its own recipes, that
-# happened while there was nothing listening yet.  dehydrated will not run
-# --cron for an account it never made, and registering twice is a no-op.
+# Register with the CA of this domain.  The global fragment registers too, but
+# it runs before the target of each recipe.  If the CA is a recipe on this
+# guest, nothing listens at that time.  dehydrated does not run --cron without
+# an account, and a second registration does nothing.
 dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --register --accept-terms; /bin/true
 
-#XXX it is VERY VERY BAD that the DOMAINS_D field does NOTHING WHATSOEVER!
+#XXX The DOMAINS_D field in the configuration has no effect.
 dehydrated --config /etc/dehydrated/domains.d/[% domain %].conf --cron
 fetched=$?
 
-# Only touch the symlinks if dehydrated actually produced something to point
-# them at.
-#
-# This used to rm the existing pair and relink unconditionally.  When dehydrated
-# fails -- no route to ACME, a rate limit, DNS that is not ready, or a domain
-# that was never going to validate -- that deleted the working self-signed cert
-# the ssl target made and left two dangling symlinks, and nginx will not start
-# without a certificate it can read.  A cert we could not renew is still better
-# than no cert at all.
+# Change the symlinks only if dehydrated made a certificate.  If dehydrated
+# fails, keep the certificate that is in place, because nginx does not start
+# without a certificate that it can read.
 live=/var/lib/dehydrated/certs/[% domain %]
 if [ -s "$live/fullchain.pem" ] && [ -s "$live/privkey.pem" ]; then
     echo "Fixing Symlinks to certs for [% domain %]..."
@@ -53,18 +42,9 @@ else
     echo "dehydrated left no certificate for [% domain %]; keeping the one already in place." >&2
 fi
 
-# Fix ownership and put the private material back where it belongs.
-#
-# The fetch reads the guest as root now (issue #76), so nothing here needs to be
-# readable by the admin account any more: issue #98 took that back out. A guest
-# rebuilt with certificates it has no keys for still re-issues from scratch,
-# spending rate limit and, if the account key went too, the registration -- that
-# risk is why this runs at all, not who could read the result.
-#
-# Certificates are public and stay world readable. The private keys and the
-# account key are back to 0600 root: readable by root, and by nobody else. The
-# keys were 0770 here once, which handed the group write on them for no reason
-# anybody needed.
+# Set the ownership and the modes of the certificates and the account.
+# Certificates are public and stay world readable.  The private keys and the
+# account key are 0600 root.  Provisioner::Recipe::letsencrypt says why.
 echo "Fixing cert/account ownership...";
 sudo chown -R root:root /etc/dehydrated/certs /etc/dehydrated/accounts /var/lib/dehydrated/certs
 sudo find /etc/dehydrated/certs /var/lib/dehydrated/certs -type d -exec chmod 0755 {} +

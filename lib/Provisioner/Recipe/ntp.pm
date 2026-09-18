@@ -17,7 +17,7 @@ use parent qw{Provisioner::Recipe};
     somedomain:
         ntp:
 
-Or with custom time servers and step threshold:
+Or with your own time servers and step threshold:
 
     somedomain:
         ntp:
@@ -30,15 +30,15 @@ Or with custom time servers and step threshold:
 
 =head2 DESCRIPTION
 
-Installs and configures chrony for NTP time synchronization.
+Installs chrony and configures it to keep the clock in time with NTP servers.
 
-By default uses the Debian/Ubuntu vendor NTP pools.  Override with
-a C<servers> list if you want to use your own NTP sources (e.g. local
-GPS-disciplined stratum-1, or a pool closer to your region).
+By default, chrony uses C<ntp.ubuntu.com> and the four C<pool.ntp.org> pools.
+To use your own time sources, give a C<servers> list.  Examples are a local
+stratum-1 server with a GPS receiver, or a pool closer to your region.
 
-C<makestep> controls when chrony is allowed to step the clock rather
-than slowly slew it.  The default C<"1.0 3"> means: step if the
-offset exceeds 1 second during the first 3 clock updates.
+C<makestep> tells chrony when it can step the clock instead of slewing it
+slowly.  The default C<"1.0 3"> means: step the clock if the offset is more
+than 1 second during the first 3 clock updates.
 
 =cut
 
@@ -69,10 +69,8 @@ sub template_files {
     return (
         'ntp.chrony.conf.tt' => 'chrony.conf',
 
-        # The ufw application profile that opens outbound 123/udp.  A bare
-        # `ufw allow` in the fragment does not survive the `ufw reset` that
-        # setup-ufw-rules opens with, and the ufw target runs after this
-        # one.
+        # The ufw application profile that opens outbound 123/udp.
+        # ntp.ufw.conf.tt says why it is a profile and not a rule.
         'ntp.ufw.conf.tt' => 'ntp_ufw.conf',
     );
 }

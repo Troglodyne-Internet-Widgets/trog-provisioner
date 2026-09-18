@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# This backup script runs as root on the remote.  As such, you'll want to authorize the key via a mechanism similar to that done in the 'backup' target.
+# Usage: backup.sh REMOTE BASEDIR KEYFILE PORT TARGET...
+# Connects to REMOTE as root with KEYFILE.  The backup recipe authorizes that key on REMOTE.
 
 REMOTE=$1
 shift
@@ -15,7 +16,7 @@ DATE=$(date -I)
 YESTERDAY=$(date -I --date '-1 day')
 BACKUPDIR=/$BASEDIR/$REMOTE
 
-# Semaphore
+# One backup of REMOTE at a time.
 [[ -f /root/backup_in_progress_$REMOTE ]] && logger --stderr "Another backup in progress, exiting" && exit 1;
 
 touch /root/backup_in_progress_$REMOTE

@@ -2,22 +2,21 @@
 # service type  private unpriv  chroot  wakeup  maxproc command + args
 #               (yes)   (yes)   (yes)   (never) (100)
 # ==========================================================================
-# This is a fragment: configd merges it over the master.cf the package shipped,
-# keyed on each service's name and its type together.  So a row here has to name
-# the same type the package's row does, or postfix ends up running both -- and
-# two queue managers arguing over one queue is not a subtle failure.  pickup and
-# qmgr are unix-domain rather than fifo for exactly that reason; postfix has
-# shipped them that way since 3.0 and the fifo spelling was ours alone.
+# This is a fragment.  configd merges it over the master.cf from the package,
+# with the name and the type of each service as the key.  So a row here must
+# name the same type as the row of the package.  If not, postfix runs both, and
+# two queue managers share one queue.  So pickup and qmgr are unix, not fifo.
 # Port 25, incoming untrusted mail only.
 smtp       inet  n       -       y       -       -       smtpd
   	-o smtpd_sasl_auth_enable=no
-# Port 587, incoming trusted mail only, skip dmarc checks & force starttls
+# Port 587, incoming trusted mail only.  No DMARC checks, and STARTTLS is
+# required.
 submission inet  n       -       y       -       -       smtpd
 	-o smtpd_tls_security_level=encrypt
   	-o smtpd_client_restrictions=permit_sasl_authenticated,reject
 	-o smtpd_milters=local:opendkim/opendkim.sock
 #628       inet  n       -       -       -       -       qmqpd
-# 465, encrypted incoming untrusted mail
+# Port 465, encrypted incoming untrusted mail.
 smtps      inet  n       -       y       -       -       smtpd
     -o smtpd_tls_wrappermode=yes
     -o smtpd_sasl_auth_enable=no
@@ -34,10 +33,11 @@ verify     unix  -       -       y       -       1       verify
 flush      unix  n       -       y       1000?   0       flush
 proxymap  unix  -       -       n       -       -       proxymap
 proxywrite unix -       -       n       -       1       proxymap
-# When relaying mail as backup MX, disable fallback_relay to avoid MX loops
+# If this guest relays mail as a backup MX, disable fallback_relay to prevent
+# MX loops.
 smtp       unix  -       -       y       -       -       smtp
 #       -o smtp_helo_timeout=5 -o smtp_connect_timeout=5
-# For sending stuff to relays
+# For mail sent to relays.
 relay      unix  -       -       y       -       -       smtp
     -o smtp_fallback_relay=
 showq      unix  n       -       y       -       -       showq
@@ -116,7 +116,7 @@ smtp-amavis unix -      -       n     -       2  smtp
   -o disable_dns_lookups=yes
   -o max_use=20
 
-# Also amavis XXX pretty sure this is massively overwrought
+# Also amavis.  XXX This probably has more settings than it needs.
 127.0.0.1:10025 inet n  -       n     -       -  smtpd
   -o content_filter=
   -o local_recipient_maps=

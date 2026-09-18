@@ -1,14 +1,12 @@
-[%# /var/tmp, which is where ubuntu.setup.sh untars the payload.  These two said
-    /tmp and so found nothing, every run, on every guest -- and the "; /bin/true"
-    after them meant the error was printed and then discarded, so lexicon went
-    unpatched and only failed later, deep in a dehydrated hook, with a
-    MissingSchema on the socket path it cannot use unpatched.
+[%# The patches are in /var/tmp, where ubuntu.setup.sh untars the payload.
 
-    Applied only when not already in: one of these went upstream, so a lexicon
-    that already has it is the expected case rather than a fault, and "git apply"
-    of an applied patch fails.  A patch that neither applies nor reverses says so
-    without stopping the build -- the guest test asks lexicon whether it can
-    reach the socket, which is the thing actually needed. -%]
+    A patch is applied only when it is not already in.  One of these patches is
+    upstream now, so a lexicon that already has it is normal.  "git apply" of an
+    applied patch fails.
+
+    A patch that does not apply or reverse prints a message and does not stop
+    the build.  The guest test asks lexicon if it can reach the socket, and that
+    is what matters. -%]
 [% FOR patch IN ['lexicon-pdns-af-unix', 'lexicon-arbitrary-record-types'] -%]
 cd / && { git apply --reverse --check /var/tmp/domainsetup_[% domain %]/[% patch %].patch >/dev/null 2>&1 && echo "[% patch %]: already applied"; } || git apply /var/tmp/domainsetup_[% domain %]/[% patch %].patch || echo "[% patch %]: WOULD NOT APPLY -- lexicon may be missing it; see templates/files/patches" >&2
 [% END -%]

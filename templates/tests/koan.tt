@@ -10,14 +10,8 @@ is($status, 'active', 'koan service is running');
 ok(-d '[% install_dir %]/[% domain %]/koan', 'koan repo directory exists');
 ok(-d '[% install_dir %]/[% domain %]/.venv', 'python virtualenv exists');
 
-# root, group the service user, mode 0640 -- which is what the recipe sets these
-# to at the end and what the comment at the top of it describes: the bot reads
-# its secrets, and does not get to rewrite them.
-#
-# They are installed with -o [% user %] first.  That used to be a hardcoded
-# `-o koan`, which is the account name only because the one domain running this
-# recipe happens to use it; any other got "install: invalid user 'koan'" and
-# lost the target there.
+# The recipe ends by setting these to root, group the service user, mode 0640.
+# The bot reads its secrets but cannot change them.
 foreach my $file (
     '[% install_dir %]/[% domain %]/koan/.env',
     '[% install_dir %]/[% domain %]/koan/instance/config.yaml',
@@ -30,27 +24,25 @@ foreach my $file (
 }
 
 [% IF messaging_provider == 'matrix' -%]
-# The matrix federation port, declared as a profile rather than allowed from
-# the fragment.  `default deny outgoing` blocks 8448, and a rule added here had
-# to outlive the ufw target -- which is why this used to be queued to postrun to
-# land after it.  A profile is what that target applies instead.
+# The matrix federation port.  templates/files/koan.ufw.conf.tt says why it is
+# a profile.
 my $profile = '/etc/ufw/applications.d/koan';
 ok(-f $profile, 'the matrix federation firewall profile was installed');
 
 SKIP: {
     skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
 
-    # A malformed profile is absent from the list rather than reported.
+    # ufw leaves a malformed profile out of the list and does not report it.
     my $apps = `ufw app list 2>&1`;
     like($apps, qr/^\s*koan-matrix\s*$/m, 'ufw lists it as an application') or diag $apps;
 
-    # Outbound is the direction this one is for: koan reaches out to a
-    # homeserver, it does not answer federation itself.
+    # Outbound, because koan connects to a homeserver and does not answer
+    # federation itself.
     my $status = `ufw status 2>/dev/null`;
     like($status, qr/koan-matrix.*\bALLOW OUT\b|\bALLOW OUT\b.*koan-matrix/m, 'and 8448 is allowed outbound') or diag $status;
 }
 [% ELSE -%]
-# Not a matrix bot, so nothing should have opened the federation port.
+# Not a matrix bot, so nothing opens the federation port.
 ok(!-e '/etc/ufw/applications.d/koan', 'no matrix firewall profile on a bot that does not speak matrix');
 [% END -%]
 

@@ -26,16 +26,34 @@ use parent qw{Provisioner::Recipe};
 =head2 DESCRIPTION
 
 Installs and configures Plex Media Server from the official Plex apt repository.
-Plex listens on port 32400 (TCP). A UFW application profile is registered so
-the firewall allows access, and also carries the ports Plex uses for local
-discovery: 1900/udp (SSDP, for DLNA clients), 32410/32412/32413/32414/udp
-(Plex GDM, local server/client discovery) and 32469/udp (the DLNA server).
-Without them the server is reachable by address but not discoverable, which
-is the more common way people actually notice a media server is broken.
+Plex listens on port 32400 (TCP).  The C<ufw> recipe installs an application
+profile for Plex, so the firewall lets clients connect.
+
+The profile also opens the ports that Plex uses for local discovery:
+
+=over 4
+
+=item *
+
+1900/udp is SSDP, which DLNA clients use to find the server.
+
+=item *
+
+32410, 32412, 32413 and 32414/udp are Plex GDM, which local servers and clients
+use to find each other.
+
+=item *
+
+32469/udp is the DLNA server.
+
+=back
+
+Without these ports, a client can reach the server by its address but cannot
+discover it.  People usually notice a broken media server this way.
 
 =head3 deps
 
-Returns system package dependencies needed before the recipe target runs.
+Returns the system packages that the recipe target needs before it runs.
 
 =over 1
 
@@ -47,50 +65,45 @@ Returns system package dependencies needed before the recipe target runs.
 
 =head3 remote_files
 
-Salvages C</var/lib/plexmediaserver/>, which is the library: the metadata Plex
-built by scanning, what everybody watched and how far into it they got, and the
-playlists.  The media itself lives on a mount and survives a rebuild without
-help, so what is actually at risk is everything the library remembered about it.
+Salvages C</var/lib/plexmediaserver/>, which is the library.  The library holds
+the metadata that Plex built when it scanned the media, the watch history of
+each user and the playlists.  The media is on a mount and survives a rebuild
+without help.  So the risk is that a rebuild loses what the library remembers.
 
-The fragment restores it before Plex is started again, having first cleared away
-the directory skeleton the package laid down -- and only when this guest has
-nothing under C<Metadata> of its own, so re-provisioning a guest that is still
-running keeps the library it has rather than the copy fetched off it minutes
-earlier.
+The fragment restores the library before it starts Plex again.  First it removes
+the directory skeleton that the package made.  It does this only when this
+guest has nothing under C<Metadata>.  So a new provision of a running guest
+keeps its own library, not the copy fetched off it minutes earlier.
 
-A restored library brings its own C<Preferences.xml>, which is why the fragment
-reads and modifies that file rather than writing a fresh one: the
-MachineIdentifier and the token saying this server is already claimed stay where
-they are, and only the certificate path and the configured account go over the
-top.  A rebuilt guest therefore comes back as the same server to Plex rather
-than as a new one waiting to be claimed, and C<claim_token> is wanted only by a
-server that has never been linked at all.
+A restored library brings its own C<Preferences.xml>.  So the fragment reads and
+changes that file, and does not write a new one.  The MachineIdentifier and the
+token that says the server is claimed stay as they are.  Only the certificate
+path and the account settings change.  A rebuilt guest thus comes back to Plex as
+the same server, not as a new one that waits for a claim.  Only a server that
+was never linked needs C<claim_token>.
 
-The directory used to be left owned C<plex:>I<admin_user> at 0750, from when the
-fetch ran as that user and a library Plex kept to itself came back empty without
-saying so.  The fetch reads the guest as root now (issue #76), so that is no
-longer needed, and issue #98 took it back out: the library is C<plex:plex>
-again, including C<Preferences.xml> once the recipe has finished writing into
-it.
+The fragment leaves the library owned by C<plex:plex>, and C<Preferences.xml>
+too.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # SUPER carries the ufw dependency that rate_limits above asks for; without
-    # it this override would quietly drop the limits on 32400.
+    # SUPER adds the ufw dependency that rate_limits below asks for.  Without it,
+    # this override drops the limits on 32400 and says nothing.
     return ( letsencrypt => sub { () }, $self->SUPER::required_recipes(%opts) );
 }
 
 sub rate_limits {
 
-    # One client streaming opens a handful; a household opens a few handfuls.
+    # One client that streams opens a few connections.  A household opens a few
+    # times that many.
     #
-    # The discovery ports (1900, 32410/32412/32413/32414, 32469) are not named
-    # here: broadcast discovery is nowhere near the volume to want a limit, and
-    # a household's clients announce themselves occasionally rather than by
-    # opening connections.
+    # The discovery ports (1900, 32410/32412/32413/32414, 32469) are not here.
+    # Discovery traffic is too small to need a limit.  The clients in a
+    # household announce themselves from time to time and do not open
+    # connections.
     return ( 32400 => 1024 );
 }
 
@@ -118,10 +131,8 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-The package signing key, which is a plain file fetch.
-
-Not C<repo.plex.tv>: that is the apt repository, and apt does not go through
-the cache.
+C<downloads.plex.tv>, which serves the package signing key, and C<repo.plex.tv>,
+the apt repository that the package comes from.
 
 =cut
 
@@ -131,8 +142,8 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-The apt repository as well as the key: repo.plex.tv is where the package comes
-from.
+The cache classes for the apt repository at C<repo.plex.tv>.  See C<apt_repo_classes>
+in L<Provisioner::Recipe>.
 
 =cut
 

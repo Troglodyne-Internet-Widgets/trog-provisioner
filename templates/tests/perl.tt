@@ -5,24 +5,19 @@ use Test::More;
 
 my $user = '[% user %]';
 
-# passwd, not install_dir/domain: build_latest_perl.sh symlinks into the home
-# directory of whoever this perl is for, and that is the domain directory only
-# when the domain names a service user.  When it does not, the account is the
-# admin and the home is under /home -- and this test looked in neither place,
-# it looked at a path it assumed.  Same reason nvm's test asks passwd.
+# Ask passwd.  The home is the domain directory only when the domain names a
+# service user, and otherwise it is the home of the admin under /home.
 chomp( my $home = `getent passwd $user | cut -d: -f6` );
 ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
-# The build itself, before anything that points at it.
+# Test the build first, before anything that points at it.
 my ($built) = glob('/opt/perl5/*/bin/perl');
 ok($built && -x $built, 'a perl was built under /opt/perl5');
 
 SKIP: {
     skip 'nothing built under /opt/perl5', 2 unless $built && -x $built;
 
-    # \$^V, escaped: unescaped it is interpolated by the perl running this test
-    # before the shell ever sees it, so both commands below printed the version
-    # of whatever ran the test and compared equal to each other.
+    # \$^V is escaped so that the perl running this test does not interpolate it.
     my $version = `$built -e 'print \$^V' 2>/dev/null`;
     like($version, qr/^v\d+\.\d+\.\d+$/, "the built perl reports a version ($version)");
 
@@ -31,9 +26,8 @@ SKIP: {
         or diag "built: $version  system: $system";
 }
 
-# What this perl comes with whatever else was asked of the recipe, and what
-# scripts/cpan_install goes through for every step it is handed.  Running, not
-# merely present: a build that half-worked leaves the file there.
+# The tools that this perl always gets, which scripts/cpan_install uses.  Each
+# one must run, because a build that half-worked leaves the file in place.
 SKIP: {
     skip 'nothing built under /opt/perl5', 3 unless $built && -x $built;
 
@@ -44,18 +38,18 @@ SKIP: {
             or diag "$tool said: $said";
     }
 
-    # Module::Build has no command of its own, so it is asked for by name.
+    # Module::Build has no command, so the test loads it by name.
     my $mb = `$built -MModule::Build -e 'print Module::Build->VERSION' 2>&1`;
     like($mb, qr/^\d/, 'and Module::Build is installed in it') or diag $mb;
 }
 
-# Where a person finds it.  Nothing in the build reads shell init -- make runs
-# under a non-interactive sh out of atd -- so this is for whoever logs in.
+# A person who logs in finds this perl through profile.d.  The build does not
+# read it, and perldoc Provisioner::Recipe::perl says why.
 ok(-f '/etc/profile.d/perl.sh', '/etc/profile.d/perl.sh is there');
 chomp( my $on_path = `bash -lc 'command -v perl' 2>/dev/null` );
 like($on_path, qr{^/opt/perl5/}, "a login shell gets the built perl first ($on_path)");
 
-# And nothing links tools into an account bin any more.
+# Nothing links tools into the bin directory of an account.
 ok(!-e "$home/bin/starman", "$home/bin holds no symlink farm");
 
 done_testing();

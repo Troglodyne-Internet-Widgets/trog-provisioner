@@ -8,18 +8,13 @@ chomp $status;
 is($status, 'active', 'redis-server is running');
 ok(-f '/etc/redis/redis.conf', 'redis config exists');
 
-# Running and answering are different questions, and only the second one is any
-# use to the things that depend on redis -- matrix asks for it by name.
-#
-# On the configured port.  redis-cli with no -p talks to 6379, so this asked the
-# default whatever the guest had been told to use, and a domain that moved redis
-# failed here while redis was up and answering perfectly well where it had been
-# put.
+# Running and answering are different questions.  What uses redis, such as the
+# matrix homeserver, needs it to answer.  redis-cli with no -p talks to 6379, so
+# name the configured port.
 my $ping = `redis-cli -p [% port %] ping 2>&1`;
 like($ping, qr/PONG/, 'redis answers on the port it was configured with') or diag $ping;
 
-# On the socket or address it was configured with, rather than wherever it
-# happened to come up.
+# Listening on the socket or port in its configuration, not wherever it came up.
 my $conf = do { local (@ARGV, $/) = '/etc/redis/redis.conf'; <> } // '';
 my ($port) = $conf =~ m/^port\s+(\d+)/m;
 SKIP: {
@@ -34,19 +29,17 @@ SKIP: {
     }
 }
 
-# The salvage half of remote_files. bin/new_config fetches /var/lib/redis as
-# root now (issue #76), so the package's own redis:redis 0750 is enough for the
-# fetch to read it -- and issue #98 took back the admin group and the setgid bit
-# that used to buy that when the fetch had neither. Ask for the package default,
-# not the widened one.
+# The salvage half of remote_files.  bin/new_config fetches /var/lib/redis as
+# root, so the package default of redis:redis 0750 is enough.  The directory
+# keeps that default: group redis and no setgid bit.
 my @dstat = stat '/var/lib/redis';
 is(scalar getgrgid($dstat[5] // -1), 'redis', 'the redis data directory is still group redis');
 ok(!($dstat[2] & 02000), 'and not setgid, since nothing needs the group carried onto new files')
     or diag sprintf('mode is %04o', $dstat[2] & 07777);
 
-# And the restore half.  What was salvaged lands in the domain directory, and
-# restore_state moves it out of there -- so anything still sitting in it while
-# redis started from nothing is a rebuild that quietly lost its keyspace.
+# The restore half.  The salvage lands in the domain directory, and
+# restore_state moves it out.  If salvage is still there and /var/lib/redis is
+# empty, the rebuild lost its keyspace.
 my $salvage = '[% install_dir %]/[% domain %]/redis';
 my @unrestored = glob("$salvage/*");
 SKIP: {
@@ -55,9 +48,8 @@ SKIP: {
         or diag "still sitting in $salvage: @unrestored";
 }
 
-# The firewall profile, under the name ufw will actually load: it skips a
-# section whose name is also a service name in /etc/services, and says so only
-# on stderr.  templates/files/redis.ufw.conf.tt has the account.
+# The firewall profile, under a name that ufw loads.  ufw skips a section whose
+# name is also in /etc/services.  templates/files/redis.ufw.conf.tt says more.
 my $profile = '/etc/ufw/applications.d/redis-server';
 ok(-f $profile, 'the redis firewall profile was installed');
 my $prof = do { local (@ARGV, $/) = $profile; <> } // '';
@@ -66,8 +58,8 @@ like($prof, qr/^ports=\Q[% port %]\E\/tcp$/m, 'and it names the port this guest 
 SKIP: {
     skip 'ufw is not installed on this guest', 2 unless -x '/usr/sbin/ufw';
 
-    # Listed is the whole assertion: a profile ufw declines to parse is simply
-    # not here, and says nothing else about itself.
+    # The listing is the whole assertion.  ufw does not list a profile that it
+    # skips, and it gives no other sign.
     my $apps = `ufw app list 2>&1`;
     like($apps, qr/^\s*redis-server\s*$/m, 'ufw lists it as an application') or diag $apps;
 

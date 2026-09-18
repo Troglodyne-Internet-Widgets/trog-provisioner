@@ -19,32 +19,35 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Downloads the latest perl, compiles it and slams it into /opt/perl5/$version
+This recipe downloads the latest perl, compiles it and installs it into
+/opt/perl5/$version.
 
-Writes F</etc/profile.d/perl.sh>, so a person logging in gets that perl first.
-Nothing in a build reads shell init -- make runs its recipe lines under a
-non-interactive sh out of an atd job, and systemd and cron read none either --
-so everything that installs into this perl finds it under F</opt/perl5>
-instead.
+It writes F</etc/profile.d/perl.sh>, so a person who logs in gets that perl
+first.  Nothing in a build reads shell init.  make runs its recipe lines under a
+non-interactive sh from an atd job, and systemd and cron read no shell init
+either.  So everything that installs into this perl finds it under
+F</opt/perl5>.
 
-Three modules come with it whatever else is asked of this recipe, installed by
-F<scripts/build_latest_perl.sh>: B<cpanm>, from the new perl's own C<cpan>
-because nothing else can install one yet, and then B<Module::Build> and
-B<Dist::Zilla> through cpanm, which a distribution needing either cannot install
-for itself.  Everything else is C<cpan_deps>.  Both go through
-F<scripts/cpan_install>, the one thing on a guest that reaches CPAN -- CPAN.pm
-is asked for nothing but the cpanm it bootstraps, having once given up on a
-fetch two hundred distributions into Dist::Zilla's tree.  It installs the
-release the mirror's own index names, rather than asking cpanmetadb, except
-where a version pin needs an older one.
+F<scripts/build_latest_perl.sh> always gives the perl three modules, whatever
+else a recipe asks for.  The C<cpan> of the new perl installs B<cpanm>, because
+nothing else can install it yet.  Then cpanm installs B<Module::Build> and
+B<Dist::Zilla>, because a distribution that needs either cannot install it for
+itself.  Everything else comes from C<cpan_deps>.
 
-TODO: allow specification of version.
+Those last two, and each step of C<cpan_deps>, go through
+F<scripts/cpan_install>.  That script is the one thing on a guest that gets
+modules from CPAN.  CPAN.pm installs cpanm and nothing else, and
+F<scripts/build_latest_perl.sh> says why.  cpan_install installs the release
+that the index of the mirror names, not the one that cpanmetadb names.  A
+version pin that needs an older release is the exception.
+
+TODO: let the configuration choose the version of perl (#222).
 
 =head2 What other recipes install into it
 
-A recipe that installs from CPAN depends on this one and hands its steps over as
-C<cpan_deps>.  tpsgi's, which is what its checkout says it needs, and the
-starman its service is started with:
+A recipe that installs from CPAN depends on this one and gives it the steps as
+C<cpan_deps>.  This is the example from tpsgi.  It installs Starman, which
+starts its service, and what its checkout says it needs:
 
     perl => sub {
         my (%opts) = @_;
@@ -56,46 +59,42 @@ starman its service is started with:
         );
     },
 
-C<bin/new_config> merges what every dependent hands over, each list after the
-one before, so this recipe is configured once with all of them; anything
+C<bin/new_config> merges the lists from every dependent, each list after the
+one before, so this recipe is configured once with all of them.  Anything
 written under C<perl> for the domain itself comes after those.  Each step is a
-hash naming one of four verbs, which are F<scripts/cpan_install>'s:
+hash that names one of four verbs, which are the verbs of
+F<scripts/cpan_install>:
 
     { install     => [ 'Dist::Zilla', 'Moo~>= 2.004', 'Sys::Virt@10.0.0' ] }
     { installdeps => '/opt/domains/example.test/tCMS' }
     { dzil        => '/opt/domains/example.test/checkout' }
     { pin         => { module => 'Sys::Virt', pkgconfig => 'libvirt' } }
 
-C<install> takes anything cpanm does in place of a module name; C<installdeps>
-is what the distribution in that directory says it needs; C<dzil> is what
-C<dzil authordeps> and then C<dzil listdeps> say is missing there; C<pin>
-installs its module at the version pkg-config reports for that package, asked
-when the step runs.
+F<scripts/cpan_install> says what each verb installs.
 
-The schema holds a step to that: one verb, nothing beside it, and no word with a
-quote, a dollar, a backtick, a backslash or a newline in it -- any of which would
-stop it reaching cpan_install as one word through a makefile line and the shell
-that runs it.
+The schema holds each step to one verb with nothing beside it.  No word can
+contain a quote, a dollar, a backtick, a backslash or a newline.  Any of those
+stops the word reaching cpan_install as one word, through a makefile line and
+the shell that runs it.
 
 =head2 When they are installed, and why then
 
-In this recipe's own target, straight after the perl is built, in the order
-they were handed over: there and then, rather than deferred.
+The target of this recipe installs them straight after it builds the perl, in
+the order they were handed over.  It does not defer them.
 
 That target runs after the fragment of every recipe that depends on this one,
 because C<bin/new_config> puts a required recipe after the last recipe that
-required it.  So a checkout a dependent's fragment makes is there to install
-from.  And it is finished before the deferred work starts, so a service a
-dependent starts in the postrun has its modules by then.  Deferred instead, they
-would be queued behind whatever those dependents had already queued, the
-service start included.
+requires it.  So a checkout that the fragment of a dependent makes is there to
+install from.  The target also finishes before the deferred work starts, so a
+service that a dependent starts in the postrun has its modules by then.
+If this recipe defers them, they go into the queue behind what those
+dependents already queued, which includes the service start.
 
-A step that fails stops the makefile, as a perl that fails to build does.
+If a step fails, the makefile stops, the same as when the perl fails to build.
 
 =cut
 
-# A word that reaches cpan_install whole, single-quoted in a makefile line: no
-# quote, dollar, backtick, backslash or newline.
+# A word that reaches cpan_install whole, single-quoted in a makefile line.
 my %WORD = ( type => 'string', pattern => q{\A[^'"$`\\\\\n]+\z} );
 
 my %STEP = (
@@ -121,9 +120,8 @@ sub args {
 
         properties => {
 
-            # No default: what goes in here is handed over by the recipes that
-            # depend on this one, and cpanm, Module::Build and Dist::Zilla are
-            # the build script's rather than a list anybody configures.
+            # Empty by default.  The recipes that depend on this one fill it,
+            # and the build script installs cpanm, Module::Build and Dist::Zilla.
             cpan_deps => {
                 type        => 'array',
                 default     => [],
@@ -142,8 +140,9 @@ sub args {
 
 =head2 %opts = $recipe->enrich(%opts)
 
-C<cpan_deps> as C<cpan_steps>: the words each step hands
-F<scripts/cpan_install> after C<--notest>.
+Returns C<%opts> with C<cpan_steps> added.  For each step of C<cpan_deps>, that
+holds the words that go to F<scripts/cpan_install> after the optional
+C<--notest>.
 
 =cut
 
@@ -177,11 +176,10 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-CPAN, which this recipe reaches three ways: perlbrew fetches the source of the
-perl it builds, that perl's own C<cpan> fetches the cpanm, Module::Build and
-Dist::Zilla it comes with, and cpanm fetches every C<cpan_deps> step after
-that -- MetaCPAN saying which release a version pin names, and the mirrors
-serving it.
+CPAN.  This recipe reaches it three ways.  perlbrew gets the source of the perl
+that it builds.  The C<cpan> of that perl gets cpanm.  cpanm gets Module::Build,
+Dist::Zilla and each C<cpan_deps> step.  MetaCPAN says which release a version
+pin names, and the mirrors serve it.
 
 =cut
 
@@ -191,9 +189,10 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-CPAN: the index and MetaCPAN's API say which release is current, and a
-distribution under F<authors/id> is named by version and never changes.
-CHECKSUMS is excluded -- it is rewritten whenever anything beside it is.
+CPAN.  The index and the MetaCPAN API say which release is current.  A
+distribution under F<authors/id> is named by its version and never changes.
+CHECKSUMS is excluded, because it is written again whenever anything beside it
+changes.
 
 =cut
 

@@ -1,29 +1,29 @@
-[%# The fetch cache: the hosts recipes download from, answered here under their
-    own names over TLS, fetched once and kept.  perldoc
-    Provisioner::Recipe::fetchcache has the account of why each of these is
-    set; this is what nginx has to be told.
+[%# The fetch cache.  It answers over TLS as the hosts that recipes download
+    from, fetches each file once and keeps it.  perldoc
+    Provisioner::Recipe::fetchcache says why each setting is as it is.
 
-    Everything above the server block is http context: files in sites-enabled
-    are included from inside it.
+    Everything above the server block is in the http context, because nginx
+    includes the files in sites-enabled from inside it.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
-    string and swallows the template as far as the next quote. -%]
+    Do not put an apostrophe in an Xslate comment.  The lexer reads it as the
+    start of a string and consumes the template up to the next quote. -%]
 proxy_cache_path [% store %] levels=1:2 keys_zone=fetchcache:64m max_size=[% max_size_gb %]g[% IF min_free_gb %] min_free=[% min_free_gb %]g[% END %] inactive=[% inactive %] use_temp_path=off;
 
 log_format fetchcache '$remote_addr [$time_local] $host "$request" $status $body_bytes_sent $upstream_cache_status $request_time "$upstream_addr"';
 
-[%# Whether a request is for a host this fetches from.  On most guests this is
-    the only server on 443, and so the default for any name at all: without
-    this a request naming some other host would be fetched from that host. -%]
+[%# Whether a request is for a host that this cache fetches from.  On most
+    guests this is the only server on 443, so it is the default for every name.
+    Without this map, the cache fetches a request for any other host from that
+    host. -%]
 map $host $fetchcache_allowed {
     "~^(?:[% allow_re %])$" 1;
     default 0;
 }
 
-[%# What kind of URL a request is, which decides how long a copy is kept: the
+[%# The kind of URL, which sets how long a copy stays fresh.  The map reads the
     host and the path together, as the guest sent them.  The first regex that
-    matches wins, so what is never kept comes first and the rest most specific
-    first. -%]
+    matches wins.  Thus what is never kept comes first, then the most specific
+    kinds. -%]
 map "$host$request_uri" $fetchcache_class {
     "~^(?:[% passthrough %])" pass;
 [% FOR class IN classes -%]
@@ -34,11 +34,10 @@ map "$host$request_uri" $fetchcache_class {
     default default;
 }
 
-[%# 80 as well as 443, and the same locations for both: a guest pointed here
-    by name reaches this on whatever port it asks, and cpanm asks CPAN over
-    plain http.  Upstream is fetched over https either way.  No backlog on
-    either: a mirror on 80 under the guest name sets it there, and nginx takes
-    that once a port. -%]
+[%# Port 80 as well as 443, with the same locations.  A guest pointed here by
+    name can ask on either port, and cpanm asks CPAN over plain http.  Upstream
+    is fetched over https in both cases.  No backlog on either port, because a
+    mirror on 80 sets it there and nginx takes it once for each port. -%]
 server {
     listen 80;
     listen 443 ssl;
@@ -57,36 +56,36 @@ server {
         return 421;
     }
 
-[%# The host a redirect is relative to: the one asked for, to begin with, and
-    whichever the last followed redirect went to after that. -%]
+[%# The host that a relative redirect is on.  At first it is the host that the
+    guest asked for.  After a redirect, it is the host of that redirect. -%]
     set $fetchcache_via $host;
 
-[%# Upstreams are looked up when they are fetched, which is what a variable in
-    proxy_pass means -- through real DNS, not the /etc/hosts of any guest.
-    IPv4 only, as apt is told on every guest, and only the servers enrich
-    kept: see Provisioner::Recipe::fetchcache. -%]
+[%# A variable in proxy_pass makes nginx look the upstream up when it fetches.
+    It uses real DNS, not the /etc/hosts of a guest.  IPv4 only, as apt is told
+    on every guest.  The servers are the ones that enrich kept, see
+    Provisioner::Recipe::fetchcache. -%]
     resolver [% resolvers.join(' ') %] ipv6=off;
     resolver_timeout 10s;
 
     proxy_cache fetchcache;
-[%# The URL the guest asked for, host and all, which is also the key a followed
-    redirect is kept under: neither $host nor $request_uri changes across the
-    rewrites and internal redirects below. -%]
+[%# The key is the URL that the guest asked for, with the host.  A followed
+    redirect is kept under the same key, because the rewrites and internal
+    redirects below change neither $host nor $request_uri. -%]
     proxy_cache_key $host$request_uri;
     proxy_cache_lock on;
     proxy_cache_revalidate on;
     proxy_cache_use_stale error timeout invalid_header updating http_403 http_404 http_429 http_500 http_502 http_503 http_504;
     proxy_connect_timeout 10s;
 
-[%# Upstream says private and no-cache about release assets, so its opinion is
-    ignored and the TTLs below are the only ones.  X-Accel-* too, which would
-    otherwise let an upstream steer this nginx. -%]
+[%# Upstream marks release assets private and no-cache, so the cache ignores
+    those headers and uses only the TTLs below.  It also ignores X-Accel-*, so
+    that an upstream cannot control this nginx. -%]
     proxy_ignore_headers Cache-Control Expires Set-Cookie Vary X-Accel-Expires X-Accel-Redirect X-Accel-Limit-Rate X-Accel-Buffering X-Accel-Charset;
     proxy_hide_header Set-Cookie;
 
-[%# Nothing kept is fetched as anybody in particular.  No Range, so what is
-    kept is always the whole file, and ranges are served out of it; no
-    Accept-Encoding, so what is kept is the file and not one encoding of it. -%]
+[%# Nothing that is kept is fetched as a particular user.  No Range, so the
+    cache keeps the whole file and serves ranges from it.  No Accept-Encoding,
+    so the cache keeps the file and not one encoding of it. -%]
     proxy_set_header Authorization "";
     proxy_set_header Cookie "";
     proxy_set_header Range "";
@@ -95,10 +94,10 @@ server {
     proxy_http_version 1.1;
     proxy_set_header Connection "";
 
-[%# Room for the response headers.  github.com sends five kilobytes of them, a
-    content-security-policy alone of three and a half, and the default buffer
-    of one page makes that a 502 before the redirect in it is ever read.  The
-    buffers have to be at least as large, or nginx refuses the arithmetic. -%]
+[%# Room for the response headers.  github.com sends five kilobytes of them,
+    and its content-security-policy alone is three and a half.  With the
+    default buffer of one page, that is a 502 before nginx reads the redirect.
+    The buffers must be at least as large, or nginx refuses the configuration. -%]
     proxy_buffer_size 16k;
     proxy_buffers 8 16k;
 
@@ -117,11 +116,10 @@ server {
         return 200 "ok\n";
     }
 
-[%# Every request goes out through the location for its kind.  Rewritten there
-    rather than matched, because a location sees only the path and a kind is a
-    fact about the host as well; what is sent upstream is $request_uri, which a
-    rewrite leaves as the guest sent it.  Nothing but GET and HEAD is kept,
-    whatever its URL. -%]
+[%# Every request goes out through the location for its kind.  A rewrite sends
+    it there, because a location matches only the path, and the kind also
+    depends on the host.  Upstream gets $request_uri, which a rewrite does not
+    change.  The cache keeps only GET and HEAD, whatever the URL. -%]
     location / {
         if ($request_method !~ "^(?:GET|HEAD)$") {
             rewrite ^ /.fetchcache/pass last;
@@ -134,20 +132,21 @@ server {
         internal;
         proxy_cache_valid 200 [% class.fresh %];
 [% IF class.no_stale -%]
-[%# Half of a pair from a different moment is a hash-sum mismatch, not an old
-    download, so this kind is refused rather than served when upstream is down. -%]
+[%# Never stale, because an apt index from a different moment than its pair
+    is a hash-sum mismatch.  See Provisioner::Recipe::fetchcache. -%]
         proxy_cache_use_stale off;
 [% END -%]
         error_page 301 302 303 307 308 = @follow_[% class.name %];
         proxy_pass https://$host$request_uri;
     }
 
-[%# A redirect, followed here rather than handed to the guest, and only to an
-    allowed upstream -- over https, whatever it said: www.cpan.org adds the
-    slash to a directory with an http:// Location, and perlbrew lists what
-    perls there are through one.  One naming no host is on the host that sent
-    it, which HTTP allows.  Read before the proxy_pass that replaces the
-    upstream it came from; recursive_error_pages lets a second hop through. -%]
+[%# Follow a redirect here, not on the guest, and only to an allowed upstream.
+    Always use https.  www.cpan.org gives an http:// Location when it adds the
+    slash to a directory, and perlbrew lists its perls through one.  A Location
+    with no host is on the host that sent it, which HTTP allows.
+
+    Read the Location before the proxy_pass replaces the upstream that sent it.
+    recursive_error_pages lets a second redirect through. -%]
     location @follow_[% class.name %] {
 [% IF class.no_stale -%]
         proxy_cache_use_stale off;
@@ -176,9 +175,10 @@ server {
     }
 
 [% END -%]
-[%# Never kept: passed upstream as it came, credentials and all, and its answer
-    passed back as it came, redirects included.  Its own proxy_set_header list,
-    since naming one here drops every one the server named. -%]
+[%# Never kept.  The request goes upstream as it came, with its credentials,
+    and the answer comes back as it came, with its redirects.  This location
+    has its own proxy_set_header list, because one here drops every one that
+    the server block names. -%]
     location = /.fetchcache/pass {
         internal;
         proxy_cache off;

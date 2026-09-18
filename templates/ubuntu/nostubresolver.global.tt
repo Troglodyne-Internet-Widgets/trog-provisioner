@@ -2,16 +2,10 @@ mkdir /etc/systemd/resolved.conf.d/; /bin/true
 cp 10-disable-stub-resolver.conf /etc/systemd/resolved.conf.d/
 chown -R systemd-resolve:systemd-resolve /etc/systemd/resolved.conf.d/
 chmod 0660 /etc/systemd/resolved.conf.d/10-disable-stub-resolver.conf
-[%# Here rather than queued.  post_install runs its queue one task at a time,
-    and letsencrypt queues its certificate fetcher before this recipe queues
-    anything -- so the resolver that fetcher depends on was restarted after the
-    fetcher had already run and failed.  Measured on a guest: the file above was
-    in place during the makefile, the restart ran fourth in the postrun, and the
-    fetcher ran second and asked lexicon to walk the zone through a stub that
-    could not see it, so pdns was asked for zones/. and answered 404.
+[%# Here, not queued.  post_install runs its queue in order, and letsencrypt
+    queues its certificate fetcher first.  That fetcher needs this resolver.
 
-    The same reasoning as pdns two targets earlier, and as tmpfs: a service that
-    something later in the build reads back belongs started where it is
-    configured, and one that will not start then fails its own target rather
-    than a deferred task nobody is watching. -%]
+    pdns and tmpfs do the same.  A service that a later step reads back starts
+    in the target that configures it.  If it does not start, its own target
+    fails. -%]
 systemctl restart systemd-resolved

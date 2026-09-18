@@ -15,60 +15,58 @@ use warnings FATAL => 'all';
 
 =head2 DESCRIPTION
 
-Idempotently edits C</etc/ufw/before.rules> so a VPN subnet is both forwarded
-and masqueraded, for each C<SUBNET> or C<SUBNET=INTERFACE> given.
+Edits C</etc/ufw/before.rules> so that the guest forwards and masquerades a VPN
+subnet, for each C<SUBNET> or C<SUBNET=INTERFACE> given.  A second run with the
+same arguments changes nothing.
 
-Two rules, not one, because either on its own routes nothing.  A packet from a
-VPN client traverses routing, then the filter FORWARD chain, and only then nat
-POSTROUTING -- so a MASQUERADE rule on a firewall whose forward policy is DROP
-is a correct rule nothing ever reaches.  Ubuntu ships C</etc/default/ufw> with
-C<DEFAULT_FORWARD_POLICY="DROP">, which is every guest here.  So this writes:
+It writes two rules, because either one alone routes nothing.  A packet from a
+VPN client goes through routing, then the filter FORWARD chain, and then nat
+POSTROUTING.  So if the forward policy is DROP, no packet gets to a MASQUERADE
+rule.  Ubuntu ships C</etc/default/ufw> with C<DEFAULT_FORWARD_POLICY="DROP">,
+and every guest here has that file.  So this writes:
 
 =over 4
 
-=item * C<*nat> POSTROUTING MASQUERADE, so a client's traffic leaves wearing the
-guest's address.
+=item * C<*nat> POSTROUTING MASQUERADE, so the traffic of a client leaves with
+the address of the guest.
 
-=item * C<*filter> C<ufw-before-forward> ACCEPTs for the subnet, so it gets that
-far.  Both directions: out of the subnet, and back into it for connections that
-are already established.
+=item * C<*filter> C<ufw-before-forward> ACCEPTs for the subnet, so the traffic
+gets that far.  One goes out of the subnet, and one comes back into it for
+connections that are already established.
 
 =back
 
-The forward accepts name the subnet rather than setting
-C<DEFAULT_FORWARD_POLICY="ACCEPT">, which would make the guest willing to route
-anything for anybody.  It is a VPN, not a router.
+The forward ACCEPTs name the subnet.  The script does not set
+C<DEFAULT_FORWARD_POLICY="ACCEPT">, because then the guest routes anything for
+anybody.  It is a VPN, not a router.
 
-If C<INTERFACE> is left off, the interface carrying the guest's default route is
-used.  That is asked of the guest at the moment the rule is written, because the
-name is a fact about the guest -- C<ens3>, C<enp1s0>, C<eth0> depending on how
-it booted -- and not something the configuration on the hypervisor can know.  A
-guest with no default route is one nobody can name an answer for, so that is an
-error rather than a rule quietly left out.
+If you do not give C<INTERFACE>, the script uses the interface of the default
+route of the guest.  It asks the guest when it writes the rule.  The name is a
+fact about the guest, for example C<ens3>, C<enp1s0> or C<eth0>, and the
+configuration on the hypervisor cannot know it.  If the guest has no default
+route, the script dies and does not skip the rule.
 
-ufw does not expose either kind of rule through its app rule mechanism, so this
-mirrors the C<setup-port-forwards> pattern: hand-edit C</etc/ufw/before.rules>
-between markers, so a re-run replaces what the last one wrote rather than adding
-to it, and a subnet that changed does not leave its old rules behind.  A
-MASQUERADE rule for one of the named subnets that is B<not> between the markers
-is removed as well, so a file that acquired one some other way does not end up
-holding two.  Masquerades for any other subnet are left alone.
+The app rules of ufw cannot express either kind of rule.  So, as
+C<setup-port-forwards> does, this script edits C</etc/ufw/before.rules> between
+markers.  A second run replaces what the first run wrote and does not add to
+it.  So a subnet that changed does not leave its old rules behind.  The script
+also removes a MASQUERADE rule for a named subnet that is B<not> between the
+markers, so the file does not hold two.  It leaves masquerades for other
+subnets alone.
 
-If the C<ufw> service is active, the rules are applied via C<ufw reload>.
+If the C<ufw> service is active, the script applies the rules with
+C<ufw reload>.
 
 =cut
 
-# The file ufw reads its own rules out of.  our, so that a test can point it at
-# something which is not the firewall of the machine running the test.
+# The file that ufw reads its rules from.  It is our, so a test can point it at
+# a file that is not the firewall of the test machine.
 our $FILE = '/etc/ufw/before.rules';
 
-# The MASQUERADE rules go in a chain of our own rather than straight into
+# The MASQUERADE rules go in a chain of our own and not straight into
 # POSTROUTING.  ufw reloads with `iptables-restore --noflush`, which flushes a
-# user chain the input declares and never flushes a built-in one -- so every
-# reload used to append another copy of a rule written as -A POSTROUTING, while
-# the same rule inside a declared chain is replaced.  Measured on a guest: six
-# identical MASQUERADE rules after a provision and two reloads, against one in
-# the chain however many times it is reloaded.
+# user chain that the input declares but never a built-in chain.  So each reload
+# adds another copy of a rule in POSTROUTING, but replaces a rule in our chain.
 our $NAT_CHAIN = 'trog-nat';
 
 my %MARKS = (
@@ -97,16 +95,14 @@ sub main {
         push( @subnets, $subnet );
         push( @nat,     "-A $NAT_CHAIN -s $subnet -o $iface -j MASQUERADE" );
 
-        # Not bound to the interface the way the MASQUERADE rule is: a client
-        # talking to another client on the same VPN is forwarded back out the
-        # tun device rather than out to the internet, and naming the egress
-        # interface here would drop exactly that.
+        # Not bound to the interface, as the MASQUERADE rule is.  Traffic from
+        # one client to another on the same VPN goes back out the tun device.
+        # A rule that names the egress interface drops that traffic.
         push( @filter, "-A ufw-before-forward -s $subnet -j ACCEPT" );
 
-        # The return path.  ufw's own before.rules accepts RELATED,ESTABLISHED
-        # for everything already, so this is narrower than what is there rather
-        # than additional to it -- and it is written so the pair reads as a
-        # pair, and still holds if that line ever stops being shipped.
+        # The return path.  The before.rules of ufw already accepts
+        # RELATED,ESTABLISHED for everything, so this rule adds nothing today.
+        # It keeps the pair complete if ufw stops shipping that line.
         push( @filter, "-A ufw-before-forward -d $subnet -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" );
     }
 
@@ -126,8 +122,16 @@ sub main {
     return 0;
 }
 
-# Apply immediately if ufw is already active.  Its own sub so that a test can
-# stop this reaching the firewall of whatever is running the test.
+=head1 FUNCTIONS
+
+=head2 _reload()
+
+Runs C<ufw reload> if ufw is active.  It warns and does not die if the reload
+fails.  It is a separate sub so that a test can stop it from reaching the
+firewall of the test machine.
+
+=cut
+
 sub _reload {
     my $status = qx{ufw status 2>/dev/null};
     return unless $status =~ m/Status:\s*active/;
@@ -136,16 +140,28 @@ sub _reload {
     return;
 }
 
-# Its own sub for the same reason: what the guest says, separate from what this
-# makes of it.
+=head2 $text = _default_routes()
+
+Returns the output of C<ip -4 route show default>.  It is a separate sub for
+the same reason as C<_reload>.
+
+=cut
+
 sub _default_routes {
     return qx{ip -4 route show default 2>/dev/null};
 }
 
-# The interface the default route leaves by.  There can be more than one default
-# route -- these guests have a NAT'd management interface and a bridged one --
-# and `ip route show default` lists them in the order the kernel would pick, so
-# the first is the one traffic actually takes.
+=head2 $iface = _default_iface()
+
+Returns the interface of the default route.  Dies if the guest has no default
+route.
+
+A guest can have more than one default route, for example a NAT management
+interface and a bridged one.  C<ip route show default> lists them in the order that the kernel picks
+them, so the first one is the route that traffic takes.
+
+=cut
+
 sub _default_iface {
     my ($route) = grep { m/\bdev\s+\S+/ } split( /\n/, _default_routes() );
     my ($iface) = ( $route // q{} ) =~ m{\bdev\s+(\S+)};
@@ -156,8 +172,14 @@ sub _default_iface {
     return $iface;
 }
 
-# The forward accepts, in the *filter table that ufw's own before.rules
-# declares.
+=head2 $text = _set_filter_rules($text, @rules)
+
+Returns C<$text> with the forward ACCEPTs of the last run replaced by
+C<@rules>, in the C<*filter> table that the before.rules of ufw declares.
+Dies if C<$text> has no C<*filter> table and C<@rules> is not empty.
+
+=cut
+
 sub _set_filter_rules {
     my ( $text, @rules ) = @_;
 
@@ -170,34 +192,40 @@ sub _set_filter_rules {
     return $placed;
 }
 
-# The MASQUERADE rules, in the *nat table -- which ufw does not ship, so it is
-# created here when it is not already there.  Only ever one *nat block: a table
-# declared twice is a file iptables-restore refuses outright, and that is ufw
-# failing to start rather than one rule going missing.
+=head2 $text = _set_nat_rules($text, \@subnets, @rules)
+
+Returns C<$text> with the MASQUERADE rules of the last run replaced by
+C<@rules>, in the C<*nat> table.  ufw does not ship a C<*nat> table, so this
+adds one if C<$text> has none.  It also removes each rule for a subnet in
+C<@subnets> that is straight in POSTROUTING.
+
+There is only ever one C<*nat> table.  iptables-restore refuses a table that is
+declared twice, and then ufw does not start.
+
+=cut
+
 sub _set_nat_rules {
     my ( $text, $subnets, @rules ) = @_;
 
     $text = _drop_block( $text, 'nat' );
 
-    # And any rule for the same subnet an older version of this wrote straight
-    # into POSTROUTING, which would otherwise sit beside the chain for the life
-    # of the guest.  Only the subnets named here, so a masquerade somebody added
-    # by hand for something else is not swept up with them.
+    # Only the named subnets, so a masquerade that somebody added by hand for
+    # another subnet stays.
     foreach my $subnet (@$subnets) {
         $text =~ s{^-A POSTROUTING -s \Q$subnet\E -o \S+ -j MASQUERADE\n}{}mg;
     }
 
     return $text unless @rules;
 
-    # The jump is the one thing that has to be in POSTROUTING, and it is written
-    # once whatever the subnets are.
+    # The jump is the only rule that must be in POSTROUTING, and there is one
+    # jump for all subnets.
     unshift( @rules, "-A POSTROUTING -j $NAT_CHAIN" );
 
     my $placed = _insert_before_commit( $text, 'nat', @rules );
     return _declare_chain($placed) if defined $placed;
 
-    # No *nat block to insert into; make one immediately before the *filter
-    # block, which is where a nat table has to be.
+    # There is no *nat block, so make one directly before the *filter block,
+    # which is where a nat table must go.
     my ( $begin, $end ) = @{ $MARKS{nat} };
     my $block = "*nat\n" . ":POSTROUTING ACCEPT [0:0]\n" . ":$NAT_CHAIN - [0:0]\n" . join( "\n", $begin, @rules, $end ) . "\n" . "COMMIT\n\n";
 
@@ -207,10 +235,19 @@ sub _set_nat_rules {
     return $text;
 }
 
-# iptables-restore reads a table top to bottom and refuses a rule naming a chain
-# it has not seen declared, so the declaration goes directly under *nat rather
-# than beside the rules before COMMIT.  Once: a chain declared twice in one
-# table is a file it refuses outright, which is ufw failing to start.
+=head2 $text = _declare_chain($text)
+
+Returns C<$text> with C<$NAT_CHAIN> declared directly under C<*nat>, if it is
+not declared already.
+
+iptables-restore reads a table from top to bottom and refuses a rule that names
+a chain it did not see declared.  So the declaration goes under C<*nat> and not
+next to the rules before COMMIT.  It goes in only once, because iptables-restore
+refuses a chain that is declared twice in one table, and then ufw does not
+start.
+
+=cut
+
 sub _declare_chain {
     my ($text) = @_;
 
@@ -220,7 +257,13 @@ sub _declare_chain {
     return $text;
 }
 
-# Whatever the last run wrote under this name, wherever in the file it left it.
+=head2 $text = _drop_block($text, $which)
+
+Returns C<$text> without the block that the last run wrote between the markers
+for C<$which> (C<nat> or C<filter>), wherever it is in the file.
+
+=cut
+
 sub _drop_block {
     my ( $text,  $which ) = @_;
     my ( $begin, $end )   = @{ $MARKS{$which} };
@@ -229,9 +272,15 @@ sub _drop_block {
     return $text;
 }
 
-# Our rules at the end of the named table rather than the start of it, so ufw's
-# own loopback, ICMP and conntrack rules are read first.  Undef when the file has
-# no such table, which is the caller's to decide what to do about.
+=head2 $text = _insert_before_commit($text, $table, @rules)
+
+Returns C<$text> with C<@rules> between the markers for C<$table>, directly
+before the COMMIT of that table.  The rules go at the end of the table, so the
+loopback, ICMP and conntrack rules of ufw come first.  Returns undef if C<$text>
+has no such table, and the caller decides what to do.
+
+=cut
+
 sub _insert_before_commit {
     my ( $text, $table, @rules ) = @_;
     my ( $begin, $end ) = @{ $MARKS{$table} };

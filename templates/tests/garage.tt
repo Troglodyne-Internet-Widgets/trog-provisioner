@@ -3,16 +3,14 @@ use strict;
 use warnings;
 use Test::More;
 
-# The binary is downloaded rather than packaged, so check it arrived before
-# anything else: the release used to be fetched from the GitHub mirror, which
-# has never published one, and every provision died on a 404 here.
+# The binary is downloaded, not packaged, so test first that it arrived.
 ok(-x '/usr/local/bin/garage', 'the garage binary is installed and executable');
 
 my $version = `/usr/local/bin/garage --version 2>/dev/null`;
 like($version, qr/\Q[% version %]\E/, 'and is the version this recipe pinned');
 
-# curl writes to .tmp and moves it into place; one left behind means the
-# download half-finished and the guest is running whatever was there before.
+# curl writes garage.tmp and then moves it into place.  If garage.tmp is still
+# there, the download stopped part way and the old binary still runs.
 ok(!-e '/usr/local/bin/garage.tmp', 'no half-downloaded binary left behind');
 
 my $status = `systemctl is-active garage 2>/dev/null`;
@@ -23,10 +21,8 @@ my $node_id = `garage node id -q 2>/dev/null`;
 chomp $node_id;
 ok($node_id, 'garage node id is available');
 
-# The layout is what makes a garage node able to store anything.  garage_init.sh
-# fed `layout assign` the whole <id>@<host>:<port> that `node id -q` prints,
-# which garage answers with "0 nodes match", so the node came up healthy with no
-# layout and every bucket operation after it failed.
+# Without a layout, a garage node cannot store anything, and every bucket
+# operation fails.
 my $layout = `garage layout show 2>&1`;
 like($layout, qr/\Q[% zone %]\E/, 'the node is assigned to zone [% zone %]') or diag $layout;
 
@@ -35,13 +31,9 @@ foreach my $bucket (qw{[% buckets.join(' ') %]}) {
     like($info, qr/Bucket:/, "bucket $bucket exists") or diag $info;
 }
 
-# Both halves of remote_files. bin/new_config fetches these as root now (issue
-# #76), so the package's own garage:garage 0750 is enough for the fetch to read
-# them -- and issue #98 took back the admin group and the setgid bit that used
-# to buy that when the fetch had neither.
-# The objects, and the snapshot of the metadata rather than the metadata itself:
-# LMDB writes db.lmdb 0600 whatever the directory says, so what garage is asked
-# to snapshot is what can be carried off the guest.
+# The two paths in remote_files: the objects, and the metadata snapshot.
+# bin/new_config fetches them as root, so garage:garage 0750 is enough, and
+# they need no other group and no setgid bit.
 my %garage_dirs = (
     data      => '[% data_dir || '/var/lib/garage/data' %]',
     snapshots => '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots',
@@ -55,10 +47,7 @@ foreach my $what (sort keys %garage_dirs) {
         or diag sprintf('%s is mode %04o', $dir, $st[2] & 07777);
 }
 
-# And the restore half.  restore_state moves the salvage out of the domain
-# directory once it has put it back, so anything still sitting there while
-# garage started from nothing is a rebuild that lost the objects.
-# What the snapshot is for: a database this node can actually be rebuilt onto.
+# A rebuilt node starts its database from the newest snapshot.
 ok(-d '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots', 'garage has been asked for a metadata snapshot');
 my @snaps = glob('[% metadata_dir || '/var/lib/garage/meta' %]/snapshots/*/');
 ok(scalar @snaps, 'and there is one to salvage') or diag `ls -la '[% metadata_dir || '/var/lib/garage/meta' %]/snapshots' 2>&1`;
@@ -67,8 +56,8 @@ ok(-x '/usr/local/sbin/garage-snapshot.sh', 'the snapshot script is installed');
 my $cron = do { local (@ARGV, $/) = '/etc/cron.d/garage-snapshot'; <> } // '';
 like($cron, qr{garage-snapshot\.sh}, 'and runs on a schedule, so the salvage is never older than a day');
 
-# Copying a live LMDB is what this exists to avoid, so the database itself must
-# not be what gets carried: it is 0600 and the fetch could not read it anyway.
+# The fetch takes the snapshot, never the live database.  This tests only that
+# the admin user cannot read the live database.
 my $live = '[% metadata_dir || '/var/lib/garage/meta' %]/db.lmdb';
 SKIP: {
     skip 'no db.lmdb yet', 1 unless -d $live;
@@ -76,6 +65,8 @@ SKIP: {
     isnt($denied, '', 'the live database is not readable by the fetch, which is why the snapshot exists');
 }
 
+# The restore half.  restore_state removes the salvage after it puts it back.
+# If the salvage is still there and garage started empty, the rebuild lost it.
 foreach my $what (sort keys %garage_dirs) {
     my $salvage = "[% install_dir %]/[% domain %]/garage/$what";
     my @unrestored = glob("$salvage/*");

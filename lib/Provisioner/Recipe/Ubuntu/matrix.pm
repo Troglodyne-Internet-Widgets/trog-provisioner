@@ -14,11 +14,12 @@ use parent qw{Provisioner::Recipe::matrix};
 
 Provisioner::Recipe::Ubuntu::matrix - Ubuntu's C<deps> for L<Provisioner::Recipe::matrix>.
 
-=head1 DESCRIPTION
+=head2 @pkgs = $recipe->deps()
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else matrix does is in the recipe this
-inherits from.
+The Python libraries of synapse, from the Ubuntu archive.  The synapse package
+itself, C<matrix-synapse-py3>, comes from the matrix.org repository.  The
+fragment installs it, because cloud-init installs these at first boot, before
+that repository is configured.
 
 =cut
 

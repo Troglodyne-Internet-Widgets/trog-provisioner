@@ -31,52 +31,53 @@ snapshot - take a snapshot of a provisioned VM
 
 =item B<--name> NAME
 
-What to call the snapshot.  Left to libvirt, which names it after the current
-time, if you don't say.
+The name of the snapshot.  If you do not give one, libvirt names it after the
+current time.
 
 =item B<--disk-only>
 
-Snapshot the disk alone, without the guest's memory.
+Take a snapshot of the disk only, without the memory of the guest.
 
-This B<stops the guest> to do it, because a disk-only snapshot is the only kind
-libvirt will take of a domain that is not running -- and it will not take one of
-a domain that is.  The guest is started again once the snapshot is done, if it
-was running when you asked, and it is started again whether libvirt took the
-snapshot or refused it.
+This option B<stops the guest>.  libvirt takes a disk-only snapshot of a domain
+only when the domain is not running.  If the guest was running, the command
+starts it again after the snapshot.  It does this also when libvirt refuses the
+snapshot.
 
-Worth the interruption when the memory is what you do not want: a full system
-snapshot writes the whole of the guest's RAM into the image, which is slow and
-large, and reverting to one resumes the guest mid-flight rather than booting it.
+Use this option when you do not want the memory.  A full system snapshot writes
+all of the RAM of the guest into the image, which is slow and large.  A revert
+to it resumes the guest where it stopped, and does not boot it.
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Skips the
-search described under C<--hvconf> and goes straight there.
+The libvirt connection string of the hypervisor that holds the domain.  With
+this option, the command does not do the search that C<--hvconf> describes.
 
 =item B<--domaindir> DIR
 
-Where the per-domain directories live.  Defaults to F</opt/domains>.  Only used
-to find F<hypervisors.conf>.
+The directory that holds one directory for each domain.  The default is
+F</opt/domains>.  The command gives it to the hypervisor, but a snapshot does
+not read from it.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
-When it exists, every hypervisor in it is asked whether it has this guest, and
-the one that does is the one we snapshot.
+The file that defines the fleet.  The default is
+F</etc/trog-provisioner/hypervisors.conf>.  If the file exists, the command asks
+each hypervisor in it for this guest.  It takes the snapshot on the hypervisor
+that has it.
 
 =back
 
 =head1 DESCRIPTION
 
-Takes an atomic snapshot and then checks that libvirt actually made one, by
-confirming the domain's current snapshot changed.  Dies if it didn't, since a
-snapshot command that quietly did nothing is worse than one that failed.
+Takes an atomic snapshot.  Then it makes sure that libvirt made one: the
+current snapshot of the domain must change.  If it does not change, the command
+dies.  A snapshot command that does nothing and says nothing is worse than one
+that fails.
 
-A running guest is snapshotted whole, memory and all, so reverting puts it back
-exactly as it was.  C<--disk-only> takes the disk by itself instead, which means
-stopping the guest first and starting it again when the snapshot is done.  A
-guest that is already off has no memory to capture, is snapshotted as it is, and
-is left as it was.
+The snapshot of a running guest includes its memory, so a revert puts the guest
+back as it was.  C<--disk-only> takes only the disk, and stops and starts the
+guest to do it.  A guest that is off has no memory to save.  The command takes
+its snapshot as it is, and leaves it off.
 
 =cut
 
@@ -104,8 +105,8 @@ sub main {
 
     my $before = $hv->snapshot_current_name($domain);
 
-    # Said before the snapshot rather than after it, because it is the guest
-    # going away that an operator wants warning of, and this can take a while.
+    # Print this before the snapshot, because the operator needs a warning that
+    # the guest stops, and the snapshot can take a long time.
     my $going_down = $disk_only ? "Stopping $domain for this: a disk-only snapshot is not one libvirt will take of a running guest.  It goes back the way it was found afterwards.\n" : q{};
     print "Creating snapshot for $domain...\n" . $going_down;
 

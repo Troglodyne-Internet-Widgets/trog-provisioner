@@ -14,11 +14,9 @@ use parent qw{Provisioner::Recipe::garage};
 
 Provisioner::Recipe::Ubuntu::garage - Ubuntu's C<deps> for L<Provisioner::Recipe::garage>.
 
-=head1 DESCRIPTION
+=head2 @pkgs = $recipe->deps()
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else garage does is in the recipe this
-inherits from.
+C<curl>, which downloads the garage binary, and C<liblmdb0>.
 
 =cut
 

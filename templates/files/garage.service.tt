@@ -11,9 +11,8 @@ ExecStart=/usr/local/bin/garage -c /etc/garage.toml server
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=[% nofile_limit %]
-# 0027 rather than the 0022 systemd would otherwise use, so what garage writes
-# under its data and metadata directories is readable by the garage group and by
-# nobody else -- narrower than the default regardless of who else can read it.
+# 0027, not the systemd default of 0022, so only the garage user and group can
+# read what garage writes.
 UMask=0027
 
 [Install]

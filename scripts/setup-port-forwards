@@ -1,11 +1,9 @@
 #!/bin/bash
-# Port forwards, written into ufw's before.rules as a *nat table.
+# Write the port forwards into the before.rules file of ufw, as a *nat table.
 #
-# Rewritten between two markers on each run, rather than inserted again.  This
-# used to sed a fresh *nat block in ahead of *filter every time, so a second
-# provision left two of them in the file -- and iptables-restore refuses a table
-# declared twice, which means ufw fails to start on a guest that was working
-# until it was provisioned again.
+# Each run rewrites the block between two markers and does not add a second one.
+# iptables-restore refuses a table that is declared twice, and then ufw fails to
+# start.
 set -eu
 
 RULES=/etc/ufw/before.rules
@@ -14,10 +12,10 @@ END='# END trog-provisioner port forwards'
 
 [ -f "$RULES" ] || { echo "setup-port-forwards: no $RULES" >&2; exit 1; }
 
-# Take out whatever was put there last time, however many times it was put.
+# Remove every block that an earlier run wrote.
 sed -i "\|^$BEGIN\$|,\|^$END\$|d" "$RULES"
 
-# No forwards is a valid answer, and by here the old block is gone.
+# No forwards is valid, and the old block is already gone.
 if [ "$#" -eq 0 ]; then
     exit 0
 fi
@@ -31,6 +29,6 @@ for portmap in "$@"; do
 done
 block="${block}COMMIT\n$END"
 
-# Ahead of the filter table, which is where a nat table has to be.
+# Put the block before the filter table, which is where a nat table must go.
 awk -v b="$block" '/^\*filter/ && !seen { print b; seen = 1 } { print }' "$RULES" > "$RULES.new"
 mv "$RULES.new" "$RULES"

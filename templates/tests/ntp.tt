@@ -7,29 +7,26 @@ my $status = `systemctl is-active chrony 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'chrony is running');
 
-# Not enough on its own: the recipe defers `systemctl restart chrony` to a
-# postrun task, so at this point chrony is still up on the packaged config and
-# would say "active" however broken ours is.  What we wrote is what to check.
+# This alone proves little.  The recipe defers `systemctl restart chrony` to a
+# postrun task.  So chrony still runs on the packaged configuration here, and
+# says "active" even when our file is broken.  Check the file that we wrote.
 ok(-f '/etc/chrony/chrony.conf', 'chrony config exists');
 
 my $conf = do { local (@ARGV, $/) = '/etc/chrony/chrony.conf'; <> } // '';
 
-# chronyd refuses to start on a directive with no argument after it, which is
-# what an unset default renders as.
+# chronyd refuses to start on a directive with no argument after it.  An unset
+# default renders as that.
 my @bare = grep { m/^\s*(makestep|pool|server|driftfile|maxupdateskew)\s*$/ } split m/\n/, $conf;
 is_deeply(\@bare, [], 'no directive was left without its argument')
     or diag "bare directives: @bare";
 
-# [ \t] rather than \s: \s matches a newline, so the arguments would happily
-# be found on the following line.
+# [ \t] and not \s: \s matches a newline, so it can find the arguments on the
+# next line.
 like($conf, qr/^[ \t]*makestep[ \t]+\S+[ \t]+\S+[ \t]*$/m, 'makestep has both of its arguments');
 ok(scalar(grep { m/^\s*(pool|server)\s+\S+/ } split m/\n/, $conf), 'at least one time source');
 
-# chrony ships /etc/chrony/conf.d and /etc/chrony/sources.d, and they are inert
-# unless chrony.conf says to read them.  This file used to overwrite the
-# vendor's confdir line out of existence, which left the guest with a conf.d
-# directory that looked like it worked and did nothing -- and meant anything
-# adding a time source had to edit a generated file.
+# chrony ships /etc/chrony/conf.d and /etc/chrony/sources.d, and ignores them
+# unless chrony.conf tells it to read them.
 foreach my $dir (qw{/etc/chrony/conf.d /etc/chrony/sources.d}) {
     ok(-d $dir, "$dir exists");
 }
@@ -38,11 +35,11 @@ my $chrony_conf = do { local (@ARGV, $/) = '/etc/chrony/chrony.conf'; <> } // ''
 like($chrony_conf, qr/^confdir \/etc\/chrony\/conf\.d$/m,   'chrony.conf reads its conf.d');
 like($chrony_conf, qr/^sourcedir \/etc\/chrony\/sources\.d$/m, 'and its sources.d');
 
-# And chrony has to accept the result, or the guest has no clock.
+# chrony must accept the result, or the guest has no clock.
 my $parsed = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
 unlike($parsed, qr/(?:error|cannot|invalid)/i, 'chronyd parses the config it was given') or diag $parsed;
 
-# The point of all of the above: a fragment dropped in is actually read.
+# The purpose of the checks above: chrony reads a fragment in conf.d.
 my $fragment = '/etc/chrony/conf.d/zzz-provisioner-selftest.conf';
 open(my $fh, '>', $fragment) or die "Could not write $fragment: $!";
 print {$fh} "maxdistance 3.0\n";
@@ -51,33 +48,29 @@ my $with = `chronyd -p -f /etc/chrony/chrony.conf 2>&1`;
 unlike($with, qr/(?:error|cannot|invalid)/i, 'and a fragment in conf.d is read without complaint') or diag $with;
 unlink $fragment;
 
-# Everything above proves chrony was handed a config it accepts -- not that
-# it can do anything with it.  A chrony blocked from reaching any of its
-# pools renders and starts exactly like one that can, and every assertion
-# above this line passes either way.  This asks chrony itself, not the file.
+# The checks above prove that chrony accepts its configuration, not that it
+# can use it.  A chrony that cannot reach any pool renders and starts the same
+# way as one that can.  So this asks chrony itself, not the file.
 #
-# Polled rather than slept on once: the postrun restart and the pool's own
-# resolution can both still be settling by the time this test starts, and
-# iburst's first burst is not guaranteed to land inside any single fixed
-# wait.  docs/APPROACH.md: no static sleep outside of a loop that checks
-# whether what it is waiting on is actually ready.
+# This polls instead of one fixed sleep.  The postrun restart and the name
+# resolution of the pool can still be settling when this test starts.  The
+# first burst of iburst can land after any fixed wait.  docs/APPROACH.md: no
+# static sleep outside of a loop that checks whether its target is ready.
 my ( $sources, @source_lines, $reached );
 for ( 1 .. 30 ) {
     $sources      = `chronyc -n sources 2>&1`;
     @source_lines = grep { m/^[\^=#]/ } split m/\n/, $sources;
 
-    # Reach is an 8-bit octal shift register of the last 8 poll results; 0
-    # means none of them got an answer.  A source can sit there unreached
-    # forever with 123/udp blocked, which is exactly the failure mode this
-    # guards -- so this checks for having been answered at all rather than
-    # for Leap status saying Normal.  A freshly booted guest may not have
-    # finished stepping to the source yet even once egress is open, and that
-    # is a real, separate thing this test is not claiming.
+    # Reach is an 8-bit octal shift register of the last 8 poll results.  0
+    # means that no poll got an answer.  With 123/udp blocked, a source stays
+    # at 0, and that is the failure this guards against.  So this looks for
+    # any answer, not for a Leap status of Normal.  A new guest can have egress
+    # and still not have stepped to the source.  This test makes no claim
+    # about that.
     $reached = grep {
         my @field = split ' ';
-        # oct(), not a string comparison against '0': chronyc pads this
-        # field, and a string ne would count "000" -- still nothing
-        # answered -- as a reach.
+        # oct(), not a string compare against '0': chronyc pads this field,
+        # and a string ne counts "000", which means no answer, as a reach.
         defined $field[4] && $field[4] =~ m/\A[0-7]+\z/ && oct( $field[4] ) != 0;
     } @source_lines;
     last if $reached;

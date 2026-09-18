@@ -1,7 +1,7 @@
-[%# A unix socket reaches nginx through an upstream, never through proxy_pass
-    directly: nginx refuses a proxy_pass with a URI part inside a named
-    location, and the socket form requires one.  One block per socket, at http
-    level, before any server block that names it. -%]
+[%# nginx reaches a unix socket through an upstream, never through proxy_pass
+    directly.  The socket form of proxy_pass needs a URI part, and nginx refuses
+    one inside a named location.  There is one block per socket, at http level,
+    before any server block that names it. -%]
 [% FOR upstream IN upstreams.keys().sort() %]
 upstream [% upstream %] {
     server unix:[% upstreams.$upstream %];
@@ -9,9 +9,8 @@ upstream [% upstream %] {
 [% END -%]
 [% FOR vhost in vhosts.keys() %]
 [% ssl = vhosts.$vhost.ssl ? 'ssl' : '' -%]
-[%# Per vhost, and ahead of ssl: a redirect vhost is a redirect vhost whatever
-    else it says.  This read ssl_redirect from the top level, where callers do
-    not put it -- they set it on the vhost, as deluged does for port 80. -%]
+[%# ssl_redirect is set per vhost and wins over ssl.  A redirect vhost only
+    redirects, whatever else it sets. -%]
 [% IF vhosts.$vhost.ssl_redirect %]
 server {
     listen [% vhost %][% IF backlog %] backlog=[% backlog %][% END %];
@@ -20,11 +19,8 @@ server {
     [% END -%]
     server_tokens off;
 
-[%# Space separated, and no www of its own: server_name is a space separated
-    list, so joining with a comma made a server name with a comma stuck to it
-    that matches nothing, and new_config already appends www and mail to
-    the aliases of every domain -- so naming www here as well made nginx report a
-    conflicting server name and ignore the second one. -%]
+[%# server_name is a list separated by spaces.  It has no www of its own,
+    because new_config adds www and mail to the aliases of every domain. -%]
     server_name [% domain %] [% full_aliases.join(' ') %];
     return 301 https://$host$request_uri;
 }
@@ -32,12 +28,8 @@ server {
 [% auth_statics = vhosts.$vhost.auth_statics -%]
 [% auth_uri     = vhosts.$vhost.auth_uri -%]
 [% proxy_uri    = vhosts.$vhost.proxy_uri -%]
-[%# Relative: every use below is under install_dir/domain already.  No default:
-    a vhost serves files only if the recipe behind it said where they are.  It
-    used to fall back to www/, which is where a tpsgi application keeps them and
-    nowhere a gogs or a synapse has anything at all -- so a pure proxy got a root
-    that did not exist, and nginx logged stat() ... failed (13: Permission
-    denied) on it for every request it went on to proxy correctly anyway. -%]
+[%# Relative, because every use below is under install_dir/domain.  There is
+    no default.  A vhost serves files only if its recipe says where they are. -%]
 [% static_dir   = vhosts.$vhost.static_dir -%]
 [% public_dir   = vhosts.$vhost.public_dir %]
 [% nocache_prefix = vhosts.$vhost.nocache_prefix -%]
@@ -47,11 +39,7 @@ server {
     listen [::]:[% vhost %] [% ssl %][% IF backlog %] backlog=[% backlog %][% END %];
     [% END -%]
 
-[%# Space separated, and no www of its own: server_name is a space separated
-    list, so joining with a comma made a server name with a comma stuck to it
-    that matches nothing, and new_config already appends www and mail to
-    the aliases of every domain -- so naming www here as well made nginx report a
-    conflicting server name and ignore the second one. -%]
+[%# Spaces and no www, as in the redirect vhost above. -%]
     server_name [% domain %] [% full_aliases.join(' ') %];
 
     ssl_certificate     /etc/ssl/certs/[% domain %].pem;
@@ -113,11 +101,9 @@ server {
     }
     [% END -%]
 
-[%# Named only when something falls back to it.  With no statics there is
-    nothing to fall through from, so this becomes the only location on the vhost
-    rather than the end of a try_files chain -- and nginx refuses a proxy_pass
-    with a URI part in a named location, which is why the socket form goes
-    through an upstream either way. -%]
+[%# Named only when a try_files chain falls back to it.  Without static_dir,
+    it is the only location on the vhost.  The upstreams at the top of this file
+    say why a socket does not go into proxy_pass here. -%]
     location [% IF static_dir %]@default[% ELSE %]/[% END %] {
         proxy_pass [% proxy_uri %];
         proxy_buffering off;

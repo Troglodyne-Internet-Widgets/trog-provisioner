@@ -1,12 +1,12 @@
 [%# cloud-init user-data for a guest, rendered by Provisioner::Recipe::ubuntu.
 
-    The structure of the document is here; every value that is not a fixed literal
-    goes through the yaml filter, which is YAML::XS doing the quoting.  That is
-    deliberate -- these carry an operator account names, GECOS fields and a
-    contact address, and one of them holding a colon or an apostrophe would
-    otherwise produce a file cloud-init rejects and a guest that never boots.
+    This template holds the structure of the document.  Every value that is not
+    a fixed literal goes through the yaml filter, so YAML::XS does the quoting.
+    The values carry account names, GECOS fields and a contact address.  One
+    that holds an unquoted colon or apostrophe makes a file that cloud-init
+    rejects, and the guest never boots.
 
-    No apostrophes in an Xslate comment: the lexer reads one as opening a
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of a
     string and swallows the template as far as the next quote. -%]
 #cloud-config
 fqdn: [% domain | yaml %]
@@ -18,17 +18,16 @@ package_upgrade: true
 packages:
 [% packages | yaml %]
 
-[%# A configured mirror first and the archive after it, so a guest still builds
-    when the mirror is behind, incomplete or down -- the mirrorlist below is
-    what puts them in that order.
+[%# A configured mirror comes first and the archive after it, so a guest still
+    builds when the mirror is behind, incomplete or down.  The mirrorlist below
+    sets that order.
 
-    With no mirror configured, none of this is emitted and the guest uses
-    whatever sources the image shipped with, which is a per-region archive
-    cloud-init picked.  Redirecting that at a list of the archive and nothing
-    else would be a longer way of saying the same thing and a worse one.
+    With no mirror configured, none of this is emitted.  The guest then uses the
+    sources in the image, which point at a regional archive that cloud-init
+    picked.  A list of only the main archive adds nothing and loses that choice.
 
-    conf is outside the condition and has to stay there: apt with no keys under
-    it is an empty mapping, which is not the same document. -%]
+    conf must stay outside the condition.  apt with no keys under it is an empty
+    mapping, which is a different document. -%]
 apt:
 [% IF mirror_uri -%]
   primary:
@@ -58,9 +57,8 @@ apt:
 users:
 [% users | yaml %]
 
-[%# Everything here is deferred except the mirrorlist, which apt needs before
-    the packages above are installed rather than after -- and which is only
-    written at all when a mirror is configured. -%]
+[%# Everything here is deferred except the mirrorlist.  apt needs it before it
+    installs the packages above.  It is only written when a mirror is configured. -%]
 write_files:
   - path: /root/.ssh/id_rsa
     owner: root:root
@@ -81,7 +79,7 @@ write_files:
     content: |
 [% setup_script | indent %]
 [% IF mirror_uri -%]
-[%# Tabs, not spaces: this is apt mirror+file format and it is tab separated. -%]
+[%# Tabs, not spaces: the apt mirror+file format separates fields with tabs. -%]
   - path: /etc/apt/mirrorlist
     owner: root:root
     permissions: '0644'
@@ -92,7 +90,7 @@ write_files:
       http://security.ubuntu.com/ubuntu	priority:3
 [% END -%]
 
-[%# Last, and in this order: root mail has to go somewhere before anything the
-    setup script runs can fail and try to report it. -%]
+[%# Last, and in this order.  Root mail must have a destination before the setup
+    script runs anything that can fail and report it. -%]
 runcmd:
 [% runcmd | yaml %]

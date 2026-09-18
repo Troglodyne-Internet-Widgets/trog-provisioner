@@ -1,6 +1,6 @@
 package Provisioner::Recipe::nginx;
 
-#ABSTRACT: Set up nginx on the server.
+#ABSTRACT: Install nginx and its global configuration.
 
 use 5.041;
 
@@ -20,19 +20,19 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Setup nginx on the server.
+Install nginx, set the kernel backlog and worker_connections to C<backlog>, and
+install the global configuration of nginx.
 
 =head2 USE AS DEPENDENCY
 
-In general it is best to use this as a dependency to other nginx recipes.
+Use this recipe as a dependency of other nginx recipes, not on its own.
 
 =cut
 
 sub rate_limits {
 
-    # What a browser does to one origin on a single page load is dozens of
-    # connections, and a shared NAT multiplies that by everyone behind it.  A
-    # thousand a second from one address is not a visitor.
+    # One page load opens dozens of connections to one origin, and a shared NAT
+    # multiplies that by each user behind it.  A thousand a second is not a visitor.
     return ( 80 => 1024, 443 => 1024 );
 }
 
@@ -41,10 +41,8 @@ sub args {
         properties => {
             backlog => { type => 'integer', default => 32768, minimum => 0 },
 
-            # Room for the longest server_name there can be.  A domain name
-            # is at most 253 characters, so 256 -- the next multiple of the
-            # cache line nginx wants this aligned to -- always fits and never
-            # needs thinking about again.
+            # A domain name is at most 253 characters.  256 is the next multiple
+            # of the cache line size, which nginx aligns this value to.
             server_names_hash_bucket_size => { type => 'integer', default => 256, minimum => 32 },
         },
     );
@@ -57,7 +55,7 @@ sub template_files {
         'nginx.global.conf.tt' => 'nginx.global.conf',
         'nginx.sysctl.conf.tt' => 'nginx.sysctl.conf',
 
-        #XXX TODO this needs to be in the MAIN target, NOT here
+        #XXX TODO: remove this, because bin/new_config copies openssl.conf over it (#221).
         'openssl.tt' => 'openssl.conf',
     );
 }

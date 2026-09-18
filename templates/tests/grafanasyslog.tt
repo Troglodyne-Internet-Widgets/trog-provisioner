@@ -10,11 +10,11 @@ my $influx     = 'http://127.0.0.1:8086';
 
 subtest 'telegraf is listening for the forwarded stream' => sub {
 
-    # ss -lntu rather than -lnt: asked for tcp alone ss prints no Netid column,
-    # so every row begins LISTEN and a pattern anchored on tcp matches nothing --
-    # failing the like below and passing the unlike beneath it for free.
+    # ss -lntu, not -lnt.  With tcp alone, ss prints no Netid column, so each
+    # row starts with LISTEN and a pattern that starts with tcp matches nothing.
+    # The like below then fails, and the unlike passes without a real test.
     #
-    # Polled as well, since telegraf is restarted from a postrun task.
+    # The loop polls because a postrun task restarts telegraf.
     my $listening = q{};
     foreach ( 1 .. 30 ) {
         $listening = `ss -lntu 2>/dev/null`;
@@ -34,37 +34,36 @@ subtest 'the dashboard is in place, and names the datasource that exists' => sub
 
     my $body = do { open( my $fh, '<', $file ) or die $!; local $/; <$fh> };
 
-    # Valid JSON, because grafana skips a dashboard it cannot parse with one
-    # line in its log and goes on serving happily with nothing on it.
+    # If grafana cannot parse a dashboard, it writes one log line, skips it,
+    # and continues to serve without it.
     my $json = eval { JSON::PP->new->decode($body) };
     ok( $json, 'and is JSON grafana can read' ) or do { diag $@; return };
 
     is( $json->{title}, 'Syslog', 'it is the syslog dashboard' );
 
-    # The substitution that has to have happened: an exported dashboard refers
-    # to ${DS_INFLUXDB}, and grafana replaces nothing when loading from a file,
-    # so a panel left holding the placeholder draws "Datasource not found".
+    # An exported dashboard refers to ${DS_INFLUXDB}.  Grafana replaces nothing
+    # when it loads from a file, so a panel with the placeholder shows
+    # "Datasource not found".
     unlike( $body, qr/\$\{DS_/, 'with no unsubstituted datasource placeholder left in it' );
     like( $body, qr/\Q"$datasource"\E/, "and naming the $datasource datasource" );
 };
 
-# The whole path on one machine: a message over the collector port, through its
-# ruleset, out of the forward, into telegraf, and into influxdb as the syslog
-# measurement the dashboard reads.
+# The full path on one machine.  A message goes to the collector port, through
+# its ruleset and out of the forward.  Then it goes into telegraf, and into
+# influxdb as the syslog measurement that the dashboard reads.
 subtest 'a message sent to the collector arrives in influxdb as syslog' => sub {
 
-    # The collector's port is read out of its own configuration rather than
-    # assumed to be 514.  It is configurable at that end, and this test knowing
-    # better than the file is how it would pass on a collector that was moved.
+    # Read the port from the configuration of the collector, and do not assume
+    # 514.  The port is configurable, so a hardcoded value can test the wrong
+    # port.
     my $conf_file = '/etc/rsyslog.d/09-logcollector.conf';
     ok( -f $conf_file, "$conf_file is there to read the port from" ) or return;
     my $conf = do { open( my $fh, '<', $conf_file ) or die $!; local $/; <$fh> };
     my ($cport) = $conf =~ m/input\(type="im(?:tcp|udp)"\s+port="(\d+)"/;
     ok( $cport, 'and says which port the collector listens on' ) or return;
 
-    # Which database is grafana's to name, so it is discovered rather than
-    # hardcoded here -- two copies of that name is how this would go green
-    # against a guest storing nothing.
+    # The grafana recipe names the database, so find it here.  A second copy of
+    # the name can let this test pass on a guest that stores nothing.
     my $dbs = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
     my @dbs = $dbs =~ m/\["([^"]+)"\]/g;
     ok( scalar @dbs, 'influxdb has a database to look in' ) or do { diag $dbs; return };
@@ -72,8 +71,8 @@ subtest 'a message sent to the collector arrives in influxdb as syslog' => sub {
     my $marker = "grafanasyslog-selftest-$$-" . time;
     system( 'logger', '-n', '127.0.0.1', '-P', $cport, '-T', '-t', 'grafanasyslog-test', $marker );
 
-    # rsyslog forwards asynchronously and telegraf flushes on an interval, so a
-    # bare check races a guest that is working perfectly well.
+    # rsyslog forwards asynchronously and telegraf flushes on an interval.  So a
+    # check without a poll can fail on a guest that works correctly.
     my $found = q{};
     foreach ( 1 .. 24 ) {
         foreach my $db (@dbs) {
@@ -94,9 +93,9 @@ subtest 'a message sent to the collector arrives in influxdb as syslog' => sub {
 
 subtest 'the tags the dashboard groups by are the tags that arrived' => sub {
 
-    # The dashboard's three variables are SHOW TAG VALUES on these, so a stream
-    # parsed without them draws empty dropdowns and no data -- which is what
-    # forwarding RFC3164 instead of RFC5424 looks like from the outside.
+    # The three variables of the dashboard are SHOW TAG VALUES on these tags.
+    # If the stream arrives without them, the dropdowns are empty and there is
+    # no data.  A forward in RFC3164, not RFC5424, looks like that.
     my $dbs = `curl -fsS -G $influx/query --data-urlencode 'q=SHOW DATABASES' 2>&1`;
     my @dbs = $dbs =~ m/\["([^"]+)"\]/g;
 

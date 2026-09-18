@@ -19,7 +19,7 @@ use parent qw{Provisioner::Recipe};
             ldap_uri: ldaps://ldap.example.test
             base_dn: dc=example,dc=test
 
-Or with a bind DN for authenticated searches:
+Or with a bind DN, so that searches authenticate:
 
     somedomain:
         sssd:
@@ -33,8 +33,9 @@ Or with a bind DN for authenticated searches:
 Installs and configures SSSD with the C<ldap> identity provider so that LDAP
 users can authenticate on this host.
 
-Configures NSS and PAM to use SSSD for user/group lookups and authentication.
-Home directories are created automatically on first login via C<pam_mkhomedir>.
+Configures NSS and PAM to use SSSD to look up users and groups and to
+authenticate them.  C<pam_mkhomedir> makes the home directory of a user at the
+first login.
 
 Set C<ldap_uri> to the LDAPS URI of your LDAP server (from the C<ldap> recipe).
 

@@ -1,17 +1,9 @@
-[%# Rendered by this recipe rather than by ufw.  It used to live under ufw and
-    name the port and protocol variables, which ufw has never been told: what a
-    recipe hands it is rate_limits and nothing else, so both rendered empty and
-    the profile came out as
+[%# This recipe renders this profile, not ufw.  ufw gets only rate_limits, so
+    it does not know the port or the protocol.
 
-        ports=/
-
-    on every guest -- something ufw lists and no rule anybody can use.  The port
-    and the protocol are configured here, so the profile naming them belongs
-    here too.
-
-    The section name stays OpenVPN.  /etc/services has openvpn in lower case and
-    the check ufw makes is case sensitive, so this one is accepted where a
-    lower-case name would be skipped. -%]
+    The section name is OpenVPN.  ufw skips a profile whose name is in
+    /etc/services, and /etc/services has openvpn in lower case.  The test is
+    case sensitive, so ufw accepts this name. -%]
 [OpenVPN]
 title=OpenVPN
 description=OpenVPN server, on the port and protocol this domain configured

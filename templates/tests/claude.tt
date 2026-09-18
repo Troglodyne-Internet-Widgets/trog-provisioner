@@ -3,8 +3,8 @@ use warnings;
 
 use Test::More;
 
-# Core, so a freshly provisioned guest has it.  Nothing here installs an XS
-# JSON, and this file runs on the guest rather than on the provisioner.
+# JSON::PP is core, so every guest has it.  This file runs on the guest, and
+# nothing installs an XS JSON there.
 use JSON::PP;
 
 ok(qx{which claude}, "claude installed");
@@ -12,19 +12,16 @@ ok(qx{which claude}, "claude installed");
 my $settings_path = '[% install_dir %]/[% domain %]/.claude/settings.json';
 my $settings = do { local (@ARGV, $/) = $settings_path; <> } // '';
 
-# No early exit here.  Bailing out emits a plan and exits 0, so a guest missing
-# this file would report a passing run.
+# Do not exit early here.  An early exit prints a plan and exits 0, so a guest
+# without this file reports a pass.
 ok(length $settings, 'the settings file is installed');
 
 my $conf = eval { decode_json($settings) };
 ok($conf, 'and it is valid JSON') or diag $settings;
 
-# Every enabled plugin has to name a marketplace this same file declares.  This
-# shipped enabling "perl-sloppin@Troglodyne-Internet-Widgets" -- a plugin that
-# nothing publishes, from a marketplace named nowhere else in the file -- so it
-# loaded nothing, quietly, on every guest built with this recipe.  The unit test
-# reads what was rendered; this reads what was installed, which is the half that
-# catches the fragment putting it somewhere else.
+# Every enabled plugin must name a marketplace that this file declares.  If it
+# does not, the plugin loads nothing and says nothing.  The unit test reads the
+# rendered file, and this test reads the installed one.
 SKIP: {
     skip 'settings did not parse', 1 unless $conf;
     my %declared = map { $_ => 1 } keys %{ $conf->{extraKnownMarketplaces} // {} };

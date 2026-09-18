@@ -1,33 +1,30 @@
-# chrony.conf - managed by provisioner, do not edit by hand
+# The provisioner generates chrony.conf.  Do not edit it by hand.
 [% FOR server IN servers %]
 pool [% server %] iburst
 [% END -%]
 
-# Allow stepping the clock on startup (rather than slewing) when offset is large
+# Step the clock at startup, instead of slewing it, when the offset is large
 makestep [% makestep %]
 
-# Record the rate at which the system clock gains/loses time
+# The file that records how fast the system clock gains or loses time
 driftfile /var/lib/chrony/chrony.drift
 
-# Log tracking, measurements, and statistics to files
+# The directory for the log files of chrony
 logdir /var/log/chrony
 
-# Enable NTP kernel synchronization
+# Let the kernel copy the system time to the real-time clock (RTC)
 rtcsync
 
-# Reduce clock error spikes from bad samples
+# Ignore a source whose root distance is more than 1.5 seconds
 maxdistance 1.5
 
-# Stop operating as an NTP server (client-only mode)
+# Client only: do not serve NTP to other hosts
 port 0
 
-# chrony's own conf.d, which the package ships and this file was overwriting
-# out of existence.  The directories are there on any chrony 4.0 or newer;
-# without these two lines they sit empty and unread, and anything wanting to add
-# a time source or a setting has to edit this generated file -- which the next
-# provision overwrites.
+# Read the conf.d and sources.d directories that the chrony package ships.
+# They exist on chrony 4.0 and newer, and chrony ignores them without these
+# two lines.  Put a time source or a setting there, not in this file.
 #
-# Read last on purpose: a fragment is meant to be able to override what is
-# above it.
+# These lines come last, so that a fragment can override the lines above.
 confdir /etc/chrony/conf.d
 sourcedir /etc/chrony/sources.d

@@ -5,35 +5,29 @@ use Test::More;
 
 my $dir = '[% install_dir %]/[% domain %]/tCMS';
 
-# This used to name a tcms_dir that no recipe, module or template ever set, so
-# it rendered empty: the assertion became -d on the domain directory with a
-# trailing slash, and passed whether tCMS had been checked out or not.
 ok(-d $dir, 'the tCMS checkout is there');
 ok(-d "$dir/.git", 'and is a git checkout');
 
-# What cpan_install runs to install the application's dependencies: it finds its
-# perl as the newest under /opt/perl5, which is where the perl recipe built one.
-# Missing, the build fails in the perl recipe's target.
+# scripts/cpan_install installs the dependencies of tCMS with this cpanm.  It
+# uses the newest perl under /opt/perl5, where the perl recipe built one.
 my ($cpanm) = reverse sort glob('/opt/perl5/*/bin/cpanm');
 ok($cpanm && -x $cpanm, 'the cpanm the perl recipe installed is there');
 
-# And it runs.  Being there is not the same thing: nvm's node was installed and
-# could not start for want of a shared library, and every check that asked where
-# it was rather than what it did passed regardless.
+# A cpanm that is there can still fail to start, so run it.
 my $cpanm_version = `$cpanm --version 2>&1`;
 like($cpanm_version, qr/cpanm|App::cpanminus/i, 'and it runs') or diag $cpanm_version;
 
-# git refuses to operate in a checkout owned by another account, and the service
-# user is not the admin.
 my ($perl) = reverse sort glob('/opt/perl5/*/bin/perl');
 
-# The modules the checkout needs that build against a system library, each of
-# which stopped the perl target when its package was missing.
+# The modules of the checkout that build against a system library.  The Ubuntu
+# deps of tcms carry what each one builds against.
 foreach my $module (qw{Sys::Virt Imager::File::PNG Trog::TOTP}) {
     my $loaded = `$perl -M$module -e 1 2>&1`;
     is($?, 0, "$module loads in the perl the recipe built") or diag $loaded;
 }
 
+# git refuses to work in a checkout that another account owns, and the service
+# user is not the admin.
 my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;
 like($safe, qr{\Q$dir\E}, 'the checkout is registered as a git safe.directory') or diag $safe;
 

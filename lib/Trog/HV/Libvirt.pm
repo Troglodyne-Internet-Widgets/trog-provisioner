@@ -20,13 +20,12 @@ use File::Slurper();
 use Cpanel::JSON::XS();
 use Provisioner::Cookbook();
 
-# The snapshot a rebuild puts a kept disk back to: the empty overlay it was the
-# moment it was made.  Declared up here because the two ends of that are far
-# apart -- create_disk takes it, clear_guest reverts to it -- and a file-scoped
-# my is invisible to anything above the line it is written on.
+# The snapshot of a new, empty overlay, which a rebuild that keeps the disk
+# reverts to.  create_disk takes it and clear_guest reverts to it.  It is
+# declared at the top because a file-scoped my is not visible above its line.
 my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
-# What clone_guest_disk names a copy, and what backup_volumes knows one by.
+# The suffix that clone_guest_disk gives a copy, and that backup_volumes finds.
 my $BACKUP_SUFFIX = '.bak-qcow2';
 
 =head1 NAME
@@ -44,17 +43,15 @@ a qemu host
 
 =head1 DESCRIPTION
 
-A hypervisor we reach by a libvirt connection URI.  Everything here goes through
-L<Sys::Virt>, which speaks every transport a URI can name and needs no shell to
-do it -- there is no shelling out to C<virsh>, and no assumption that the
-hypervisor's libvirt is reachable any way other than the URI we were given.
+This backend reaches a hypervisor by a libvirt connection URI.  All libvirt
+calls go through L<Sys::Virt>, as L</LIBVIRT> describes.
 
-What is I<not> here is in L<Trog::HV>: the singleton, the per-domain directory,
-and the placement arithmetic, none of which is particular to libvirt.
+L<Trog::HV> holds what is not specific to libvirt: the singleton, the directory
+for each domain, and the placement arithmetic.
 
-Two things about this backend are load-bearing above it.  The hypervisor is a
-machine we can get a shell on, and its storage is a libvirt pool on that
-machine's filesystem.  A backend without either cannot be a drop-in for this one.
+The code above this backend depends on two facts.  The hypervisor is a machine
+that we can get a shell on.  Its storage is a libvirt pool on the filesystem of
+that machine.  A backend without both of these cannot replace this one.
 
 =head1 CLASS METHODS
 
@@ -62,13 +59,13 @@ machine's filesystem.  A backend without either cannot be a drop-in for this one
 
 our $DEFAULT_URI = 'qemu:///system';
 
-# Transports over which we can also get a shell on the HV.
+# The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
 =head2 config_keys
 
-The F<hypervisors.conf> keys this backend reads, and the constructor options
-they land in.  C<libvirt_uri> is what marks a block as one of ours.
+Returns the pairs of constructor option and F<hypervisors.conf> key that this
+backend reads.  A block with C<libvirt_uri> in it is a block for this backend.
 
 =cut
 
@@ -81,12 +78,14 @@ sub config_keys {
 
 =head2 build(%given)
 
-Build one.  Called by L<Trog::HV/candidate>, which has already decided this is
-the backend the options are asking for.
+Returns a new object for this backend.  L<Trog::HV/candidate> calls it after it
+selects this backend for the options.
 
-The URI defaults to C<qemu:///system>, and C<explicit> records whether it was
-actually asked for -- when it was not, we let libvirt resolve its own default
-connection exactly as C<virsh> with no C<-c> would.
+C<uri> defaults to C<qemu:///system>.  See L</explicit> for what the default
+changes.
+
+Dies if the URI does not parse.  Also dies if the hypervisor is remote and the
+transport gives no shell, because files and bridge detection need one.
 
 =cut
 
@@ -107,21 +106,18 @@ sub build {
         %$parsed,
     }, $class;
 
-    # A remote hypervisor we can't get a shell on is only half usable, and the
-    # half that's missing (files, bridge detection) isn't optional.  Say so now
-    # rather than three minutes into a provision run.
+    # Fail now, not three minutes into a provision.
     die "The hypervisor at $uri is remote, but its transport gives us no shell.\n" . "Use an ssh transport instead, e.g. qemu+ssh://root\@" . ( $self->{host} // 'hypervisor' ) . "/system, so we can reach its filesystem.\n"
       if !$self->is_local && !defined $self->ssh_host;
 
     return $self;
 }
 
-# A libvirt connection URI is a URI: driver[+transport]://[user@][host][:port]/path
+# A libvirt connection URI has the form driver[+transport]://[user@][host][:port]/path.
 #
-# L<URI> knows nothing about the driver+transport scheme, so it hands back a
-# URI::_foreign with no authority accessors.  Split it generically instead and
-# re-parse the authority under a scheme URI does understand, which gets us
-# userinfo, bracketed IPv6 and ports without a regex of our own.
+# URI does not know the driver+transport scheme, so it returns a URI::_foreign
+# with no authority accessors.  We split the URI and parse the authority again
+# as ssh.  That gives user, bracketed IPv6 and port without our own regex.
 sub _parse_uri {
     my ($uri) = @_;
 
@@ -147,17 +143,17 @@ sub _parse_uri {
 
 =head2 uri
 
-The libvirt connection URI, defaulted to C<qemu:///system>.
+The libvirt connection URI.  The default is C<qemu:///system>.
 
 =head2 explicit
 
-Whether the URI was actually asked for, as opposed to defaulted.  When it
-wasn't, we let libvirt resolve its own default connection exactly as C<virsh>
-with no C<-c> would.
+True when the caller gave a URI, false when the URI is the default.  When it is
+false, libvirt selects its own default connection, as C<virsh> does with no
+C<-c>.  L<Trog::HV/explicit> says what callers do with it.
 
 =head2 is_local
 
-True when the hypervisor is this very machine, i.e. the historical behavior.
+True when the hypervisor is the machine that runs this code.
 
 =cut
 
@@ -168,12 +164,16 @@ sub is_local {
     return !defined $self->{host};
 }
 
-=head2 ssh_host, ssh_user, ssh_port, ssh_target
+=head2 ssh_host
 
-Where to ssh to in order to run something on the hypervisor, all inferred from
-the connection URI.  C<ssh_host> is undef when the transport can't give us a
-shell, which C<new> refuses to build in the first place.  C<ssh_port> falls back
-to 22, the way any other ssh client would.
+The host to ssh to when a command must run on the hypervisor.  It comes from the
+connection URI.  Undef when the hypervisor is local, or when the transport gives
+no shell, which C<build> refuses.  L<Trog::Machine> has C<ssh_user>,
+C<ssh_port> and C<ssh_target>.
+
+=head2 describe
+
+What to call the hypervisor in a message: "the hypervisor at" and the URI.
 
 =cut
 
@@ -181,8 +181,8 @@ sub ssh_host {
     my ($self) = @_;
     return undef unless defined $self->{host};
 
-    # A bare qemu://host/system speaks libvirt's native remote transport, but
-    # that still tunnels over ssh by default, so treat it as ssh-able too.
+    # A bare qemu://host/system uses the native remote transport of libvirt,
+    # which also goes over ssh by default.
     return $self->{host} if !defined $self->{transport} || $SSH_TRANSPORT{ $self->{transport} };
     return undef;
 }
@@ -193,29 +193,27 @@ sub describe ($self) { return 'the hypervisor at ' . $self->uri }
 
 =head2 pool_path
 
-Where the storage pool keeps its volumes, asked of libvirt rather than assumed:
-we delete things out of this path, and a pool somebody made somewhere else is
-not a reason to be wrong about it.  Falls back to F</opt/terraform/disks>, which
-is where the volumes on a hypervisor built by the old tool actually are.
+The directory where the storage pool keeps its volumes.  The configured
+C<pool_path> wins.  If there is none, the method asks libvirt with
+C<pool_target>, because this code deletes files from that path.  If libvirt has
+no such pool, the result is F</opt/terraform/disks>, where existing hypervisors
+keep their volumes.
 
 =head2 pool_name
 
-Which storage pool this hypervisor's guests are built in.  C<tf_disks> unless
-F<hypervisors.conf> says otherwise.
+The name of the storage pool for the guests on this hypervisor.  The default is
+C<tf_disks>, and F<hypervisors.conf> can change it.
 
-Configurable because it is the only way C<pool_path> can mean anything: libvirt
-looks a pool up by name, so a path given beside the name of a pool that already
-exists somewhere else is ignored, silently, and every volume lands where the
-existing pool points.  Giving a hypervisor its own pool -- on a filesystem with
-a quota on it, which is the only quota libvirt guests can be held to -- is
-naming both.
+libvirt finds a pool by its name.  If a pool of that name already exists, libvirt
+ignores C<pool_path> and puts every volume where that pool points.  So to give
+a hypervisor its own pool, set both keys.  A pool on a filesystem with a quota is
+the only quota that applies to libvirt guests.
 
 =head2 partition
 
-The cgroup partition its guests are placed in, or undef for libvirt's own
-default of C</machine>.  Sets nothing: it puts every guest built here in one
-systemd slice, which is where an operator can then cap CPU and I/O for the lot
-of them at once.
+The cgroup partition for the guests on this hypervisor, or undef for the libvirt
+default of C</machine>.  It sets no limit.  It puts every guest built here in
+one systemd slice, where an operator can limit CPU and I/O for all of them.
 
 =cut
 
@@ -231,8 +229,8 @@ sub pool_path {
 
 =head2 pool_target($name)
 
-Where an existing storage pool keeps its volumes, straight out of libvirt, or
-undef if there is no such pool to ask about.
+The target directory that libvirt has for the pool C<$name>, or undef when
+there is no such pool.  C<$name> defaults to L</pool_name>.
 
 =cut
 
@@ -252,13 +250,14 @@ sub pool_target {
 
 =head1 LIBVIRT
 
-All of this goes through L<Sys::Virt>, which talks the connection URI's
-transport itself.  There is no shelling out to C<virsh> and no assumption that
-the hypervisor's libvirt is reachable any way other than the URI we were given.
+All libvirt calls go through L<Sys::Virt>, which uses the transport of the
+connection URI itself.  This code does not run C<virsh>.  It reaches libvirt
+only by the URI it was given.
 
 =head2 vmm
 
-The L<Sys::Virt> connection, opened on first use and kept.
+The L<Sys::Virt> connection.  The first call opens it and later calls return the
+same one.  Dies if libvirt does not accept the connection.
 
 =cut
 
@@ -266,32 +265,25 @@ sub vmm {
     my ($self) = @_;
     return $self->{vmm} if $self->{vmm};
 
-    # An unasked-for URI means "whatever libvirt would pick", which is what
-    # virsh with no -c did before any of this was configurable.
+    # An empty URI lets libvirt select its default, as virsh does with no -c.
     my $uri = $self->explicit ? $self->uri : '';
     $self->{vmm} = eval { Sys::Virt->new( uri => $uri, readonly => 0 ) }
       or die "Could not connect to libvirt at " . $self->uri . ": $@\n";
     return $self->{vmm};
 }
 
-# Domain lookups throw when the domain is simply absent, which is not an error
-# anywhere we ask.  Opening the connection happens outside the eval, so a
-# hypervisor we can't reach at all doesn't get reported as "no such domain".
+# A domain lookup dies when there is no such domain, which is not an error for
+# any caller here.  The connection opens outside the eval, so a hypervisor that
+# we cannot reach does not look like "no such domain".
 sub _domain {
     my ( $self, $name ) = @_;
     my $vmm = $self->vmm;
     return eval { $vmm->get_domain_by_name($name) };
 }
 
-=head2 domain_exists($name)
-
-Whether libvirt has a domain of that name, running or not.
-
-=cut
-
 =head2 guest_names
 
-Every domain libvirt knows about here, defined or running.
+The names of all domains that libvirt has here, running or not.
 
 =cut
 
@@ -300,26 +292,22 @@ sub guest_names {
     return map { $_->get_name } $self->vmm->list_all_domains();
 }
 
-sub domain_exists ( $self, $name ) { return defined $self->_domain($name) ? 1 : 0 }
+=head2 domain_exists($name)
 
-=head2 annihilate_domain($name)
-
-Stop and undefine a domain, nvram and all, and don't complain if it was already
-gone or already off.  Which is
-the only reason we do.
-
-Returns true if there was something there to remove.
+Returns 1 if libvirt has a domain of that name, running or not, and 0 if not.
 
 =cut
 
+sub domain_exists ( $self, $name ) { return defined $self->_domain($name) ? 1 : 0 }
+
 =head2 stop_domain($name)
 
-Stop a domain, leaving it defined.  Says whether there was one to stop.
+Stops a domain and leaves it defined.  Returns 1 if the domain exists, and 0 if
+it does not.  Dies if libvirt cannot stop it.
 
-Separate from C<annihilate_domain> because keeping a guest's disk across a
-rebuild means stopping the guest without undefining it: qemu-img writes the
-image directly, and qemu holding it open is how one gets corrupted rather than
-reverted.
+A rebuild that keeps the disk of a guest stops the guest but does not undefine
+it.  qemu-img then writes the image directly, and the image gets corrupted if
+qemu has it open.
 
 =cut
 
@@ -334,8 +322,9 @@ sub stop_domain {
 
 =head2 start_domain($name)
 
-Start a domain that is defined but not running.  Says whether there was one to
-start; one that is already running is nothing to do.
+Starts a domain that is defined but not running.  Returns 1 if the domain
+exists, and 0 if it does not.  A domain that is already running stays as it is.
+Dies if libvirt cannot start it.
 
 =cut
 
@@ -350,14 +339,13 @@ sub start_domain {
 
 =head2 domain_uuid($name)
 
-The uuid libvirt has for this domain, or undef when it has no such domain.
+The uuid that libvirt has for this domain, or undef when there is no such
+domain.
 
-Wanted by the rebuild that keeps a guest's disk.  That one deliberately does not
-undefine the domain -- undefining discards libvirt's record of its snapshots,
-which is the thing being preserved -- and libvirt binds a name to a uuid and
-refuses to redefine a domain it already has under a different one.  So the XML
-written for the rebuild carries the uuid the domain already has, and a first
-build carries none and lets libvirt mint one.
+A rebuild that keeps the disk does not undefine the domain, because that
+discards the libvirt record of its snapshots.  libvirt refuses to define a name
+again under a different uuid.  So the XML for that rebuild carries the existing
+uuid.  A first build carries none, and libvirt makes one.
 
 =cut
 
@@ -367,6 +355,14 @@ sub domain_uuid {
 
     return eval { $domain->get_uuid_string() };
 }
+
+=head2 annihilate_domain($name)
+
+Stops and undefines a domain, with its nvram and its snapshot metadata.  A domain
+that is already off is not an error.  Returns 1 if there was a domain to remove,
+and 0 if not.  Dies if libvirt cannot undefine it.
+
+=cut
 
 sub annihilate_domain {
     my ( $self, $name ) = @_;
@@ -378,7 +374,7 @@ sub annihilate_domain {
         1;
     } or do {
 
-        # Older libvirt without nvram support for this domain type.
+        # An older libvirt, without nvram support for this domain type.
         eval { $domain->undefine(); 1 } or do {
             die "Could not undefine $name: $@";
         };
@@ -388,17 +384,25 @@ sub annihilate_domain {
 
 =head2 lease_ip($network, %opts)
 
-The address libvirt has leased on C<$network>, usually C<default>.
+The address that libvirt leased on C<$network>, usually C<default>, or undef
+when no lease matches.
 
-Pass C<mac> and it asks dnsmasq for that interface's lease and nothing else,
-which is exact.  Pass C<hostname> and it matches on what the guest called
-itself, which is a substring match and can be fooled: a guest named
-C<vm.example.test> matches a lease belonging to C<sub.vm.example.test>.  Prefer
-the MAC; C<guest_mac> exists so there always is one.
+=over 4
 
-Where several leases match, the one that expires last, which is the one granted
-or renewed most recently.  A MAC can hold several: a guest rebuilt under the same
-name gets a new address while its old lease stays on file until it runs out.
+=item * C<mac>: only the lease of that interface.  dnsmasq filters on it, so the
+match is exact.
+
+=item * C<hostname>: leases whose hostname contains this string.  The guest
+C<vm.example.test> also matches a lease of C<sub.vm.example.test>.  Use the MAC
+when you can.  C<guest_mac> always gives one.
+
+=item * C<exclude>: an address to skip.
+
+=back
+
+When several leases match, the result is the one that expires last.  That is
+the most recent lease.  One MAC can hold several leases, because a rebuilt
+guest gets a new address and the old lease stays until it expires.
 
 =cut
 
@@ -410,9 +414,9 @@ sub lease_ip {
 
 =head2 @ips = lease_ips($network, %opts)
 
-Every address leased on C<$network> that matches, newest first, taking the same
-options as C<lease_ip>.  For when all of them are wanted: the leases a rebuilt
-guest's predecessors left behind, to release.
+Every matching address leased on C<$network>, newest first.  It takes the same
+options as C<lease_ip>.  An empty list when there is no such network.  Use it
+to find the old leases of a rebuilt guest, to release them.
 
 =cut
 
@@ -422,8 +426,7 @@ sub lease_ips {
     my $vmm = $self->vmm;
     my $net = eval { $vmm->get_network_by_name($network) } or return ();
 
-    # get_dhcp_leases filters by MAC on the far side, so with one we ask a
-    # precise question rather than sifting the answer.
+    # get_dhcp_leases filters by MAC on the hypervisor.
     my @leases = eval { $net->get_dhcp_leases( $opts{mac} ) };
 
     my @ips;
@@ -440,12 +443,13 @@ sub lease_ips {
 
 =head2 release_dhcp_lease($ip, $bridge)
 
-Drop a stale lease so the table doesn't fill up and gum everything else.
+Removes a stale lease, so that the lease table does not fill up.  C<$bridge>
+defaults to L</virbr_device>.  Returns 1 if the release worked.  Returns 0 if
+it failed, if C<$ip> is empty, or if there is no lease helper.
 
-This is the one libvirt operation we still shell out for: libvirt exposes DHCP
-leases read-only (C<virNetworkGetDHCPLeases> has no counterpart that deletes
-one), so releasing a lease means poking dnsmasq through libvirt's own lease
-helper on the hypervisor.
+This is the only libvirt operation that runs a command.  libvirt gives DHCP
+leases read-only, and C<virNetworkGetDHCPLeases> has no delete operation.  So
+this runs the libvirt lease helper on the hypervisor, as root.
 
 =cut
 
@@ -465,13 +469,13 @@ sub release_dhcp_lease {
 
 =head2 eject_cdrom($domain, $target)
 
-Yank the cloud-init ISO back out, so the guest doesn't try to boot it again on
-its next start.  C<$target> defaults to C<sda>, which is where the domain XML
-puts it.
+Removes the cloud-init ISO from the drive, so that the guest does not boot it
+again.  C<$target> defaults to C<sda>, where the domain XML puts it.  Returns 1
+on success.  Returns 0, with a warning, if it fails or there is no such domain.
 
-Call this only once the guest says cloud-init has finished.  The seed has to
-stay in the drive for as long as cloud-init might want to read it; taking it
-out earlier leaves the guest with no user, no keys and no netplan.
+Call this only after the guest says that cloud-init is finished.  The seed must
+stay in the drive while cloud-init can read it.  If you remove it earlier, the
+guest gets no user, no keys and no netplan.
 
 =cut
 
@@ -490,17 +494,18 @@ sub eject_cdrom {
 
 =head2 nuke_pool($name)
 
-Tear a storage pool down completely -- stop it, delete its contents, forget it
--- and remove its directory from the hypervisor.  For a pool that has got
-itself into a state nothing else will get it out of.
+Removes the pool directory from the hypervisor, then stops, deletes and
+undefines the storage pool C<$name>.  Use it for a pool in a state that nothing
+else can repair.  Returns 1 if libvirt had the pool, and 0 if not.  A step that
+fails gives a warning.
 
 =cut
 
 sub nuke_pool {
     my ( $self, $name ) = @_;
 
-    # The directory goes first: pool-delete on a pool whose backing store is
-    # already gone is a no-op, but the reverse leaves files libvirt still owns.
+    # The directory goes first.  pool-delete does nothing when the directory is
+    # gone, but the other order leaves files that libvirt still owns.
     $self->run_sudo( qw{rm -rf}, $self->pool_path );
 
     my $vmm  = $self->vmm;
@@ -518,20 +523,15 @@ sub nuke_pool {
 
 =head1 BUILDING THINGS
 
-Everything terraform used to do, done against libvirt directly.
-
-Terraform was never a good fit here.  Its model was that it owned the world and
-can rebuild it; ours is that the hypervisor owns the world and we add one guest
-to it.  Reconciling those cost a state file per hypervisor, import blocks for
-things it did not create, C<ignore_changes> for attributes the provider would
-not report back, and a provider that cannot import a volume at all.  Defining
-the XML ourselves is less code than the machinery that was holding terraform's
-opinion at bay.
+The pool, its volumes, the cloud-init seed and the domain, made through libvirt.
+The hypervisor owns what is on it, and this code adds one guest to it.
 
 =head2 pool($name)
 
-The storage pool object, made if it is not there yet: defined, started, and set
-to start with the host.  C<$name> defaults to L</pool_name>.
+The storage pool object.  If the pool does not exist, this defines it, builds
+it and sets it to start with the host.  It also starts a pool that is not
+running.  C<$name> defaults to L</pool_name>.  Dies if libvirt cannot build or
+start the pool.
 
 =cut
 
@@ -569,11 +569,13 @@ XML
 
 =head2 volume($name, $pool)
 
-A volume by name, or undef when the pool has no such volume.
+The volume C<$name> in the pool C<$pool>, or undef when there is no such
+volume.  C<$pool> defaults to L</pool_name>.
 
 =head2 volume_path($name, $pool)
 
-Where that volume's file actually is, which is what a domain's disk needs.
+The path of the file of that volume, or undef when there is no such volume.  A
+disk in the domain XML needs this path.
 
 =cut
 
@@ -590,12 +592,15 @@ sub volume_path {
 
 =head2 base_image($url, $name)
 
-The base image every guest's disk is layered on, downloaded onto the
-hypervisor if it is not there yet.  Returns its path.
+Returns the path of the base image under the disk of each guest.  If the pool has
+no volume C<$name>, this downloads C<$url> to the hypervisor first.  C<$name>
+defaults to C<baseimage-qcow2>.  Dies if there is no image and no URL, or if
+the download fails.
 
-The download is the one thing here libvirt cannot do for us -- it has no notion
-of fetching a URL -- so it is a curl on the far side, into the pool directory,
-followed by a refresh so libvirt notices.
+libvirt cannot fetch a URL.  So this runs curl on the hypervisor, into the pool
+directory, and then refreshes the pool.  curl runs without sudo on purpose.  If
+this account cannot write to the pool directory, the pool is misconfigured, and
+sudo hides that.
 
 =cut
 
@@ -612,8 +617,8 @@ sub base_image {
     $path = $self->pool_path . "/$name";
     print "Fetching the base image from $url\n";
 
-    # To a partial name first: a half-downloaded file that libvirt has already
-    # noticed is worse than no file at all.
+    # Download to a partial name first, because a half-downloaded file that
+    # libvirt already sees is worse than no file.
     my $partial = "$path.partial";
     $self->run_cmd( qw{curl -fL --retry 3 -o}, $partial, $url ) == 0
       or die "Could not fetch $url onto " . $self->describe . "\n";
@@ -626,14 +631,17 @@ sub base_image {
 
 =head2 create_disk($name, %opts)
 
-A qcow2 volume backed by the base image, made if it is not already there.
-C<backing> is the path to lay it over and C<capacity> its size in bytes.
-Returns the path.
+Makes a qcow2 volume over the base image, if the volume does not exist, and
+returns its path.  C<backing> is the path of the backing image.  C<capacity> is
+the size in bytes.  Dies if there is no C<capacity>.
 
-How it is laid out inside comes from C<qcow2_tuning>, which is where the
-reasoning lives.  Nothing it decides is retrofittable: cluster size and
-subcluster allocation are properties of the image as created, so a disk that
-already exists is left exactly as it is -- it is a guest's filesystem.
+C<qcow2_tuning> sets the layout, and explains it.  The cluster size and the
+subcluster allocation are fixed when the image is made.  So this does not
+change a disk that already exists, which holds the filesystem of a guest.
+
+It also takes the C<trog-pristine> snapshot of the new, empty disk.  If that
+fails, it gives a warning.  A rebuild then deletes the disk, and
+C<rollback_possible> says no.
 
 =cut
 
@@ -675,17 +683,10 @@ sub create_disk {
 </volume>
 XML
 
-    # The state a rebuild puts this disk back to, taken while it is still the
-    # empty overlay it was just made as.  There is no later moment when the disk
-    # is in that state to be snapshotted.
+    # Take the pristine snapshot now, because the overlay is never empty again.
     #
-    # A warning rather than a failure: a disk without one is a disk that rebuilds
-    # the old way, by being deleted, which is what every guest did before this.
-    # rollback_possible looks for it and says no, so nothing downstream promises
-    # a rollback that is not there.
-    #
-    # No `; 1` inside the eval: qemu-img refusing the disk is a false return
-    # rather than an exception, so the block has to catch both.
+    # No `; 1` inside the eval.  qemu-img refusing the disk is a false return,
+    # not an exception, so the block must catch both.
     eval { $self->snapshot_disk( $name, $PRISTINE_SNAPSHOT ) } or do {
         warn "Could not take the $PRISTINE_SNAPSHOT snapshot of $name on " . $self->describe . ": " . ( $@ || "qemu-img would not take it.\n" ) . "This guest rebuilds by deleting its disk, and cannot be rolled back.\n";
     };
@@ -695,12 +696,14 @@ XML
 
 =head2 delete_volume($name, $pool)
 
-Remove a volume, and say whether there was one to remove.
+Removes a volume.  Returns 1 if it did.  Returns 0 if there was no such volume,
+or, with a warning, if libvirt cannot delete it.
 
 =head2 refresh_pool($name)
 
-Make libvirt look at the pool directory again, for when something has appeared
-in it that libvirt did not put there.
+Makes libvirt read the pool directory again.  Use it after something other than
+libvirt adds a file there.  C<$name> defaults to L</pool_name>.  Returns 1, and
+dies if the refresh fails.
 
 =cut
 
@@ -721,11 +724,10 @@ sub refresh_pool {
 
 =head2 cloudinit_iso($domain, %files)
 
-Build the cloud-init seed ISO on the hypervisor and put it in the pool.
-
-C<%files> are the NoCloud file names and their contents -- C<user-data>,
-C<meta-data>, C<network-config>.  The volume label has to be C<cidata> or
-cloud-init will not look at it.
+Makes the cloud-init seed ISO on the hypervisor, in the pool, and returns its
+path.  C<%files> maps each NoCloud file name to its contents: C<user-data>,
+C<meta-data> and C<network-config>.  Dies if a file cannot be written or the ISO
+cannot be made.
 
 =cut
 
@@ -745,7 +747,7 @@ sub cloudinit_iso {
     my $maker = $self->iso_maker;
     print "Building the cloud-init seed for $domain with $maker\n";
 
-    # -volid cidata is not decoration: NoCloud finds its seed by that label.
+    # -volid cidata is necessary, because NoCloud finds its seed by that label.
     my @cmd = $maker eq 'xorriso' ? ( $maker, '-as', 'mkisofs' ) : ($maker);
     my $rc  = $self->run_cmd(
         @cmd, qw{-output}, $path, qw{-volid cidata -joliet -rock},
@@ -761,7 +763,8 @@ sub cloudinit_iso {
 
 =head2 iso_maker
 
-Whichever of C<xorriso>, C<genisoimage> or C<mkisofs> the hypervisor has.
+The first of C<xorriso>, C<genisoimage> or C<mkisofs> that the hypervisor has.
+Dies if it has none of them.
 
 =cut
 
@@ -779,8 +782,9 @@ sub iso_maker {
 
 =head2 define_domain($xml, %opts)
 
-Define a domain from XML and start it.  Set C<autostart> to have it come back
-with the host, which is what every guest here wants.
+Defines a domain from XML, starts it, and returns the domain object.
+C<autostart> sets it to start with the host, and defaults to true.  Dies if
+libvirt cannot set the domain to start with the host, or cannot start it.
 
 =cut
 
@@ -794,9 +798,8 @@ sub define_domain {
         };
     }
 
-    # By name, which means a lookup that can come back empty where the handle
-    # above cannot.  Defining a domain libvirt then cannot find is not something
-    # to hand back as though it had started.
+    # start_domain looks the domain up by name, and that lookup can find
+    # nothing.  A domain that did not start must not return as if it did.
     $self->start_domain( $domain->get_name() )
       or die 'Could not start ' . $domain->get_name() . ": libvirt has no such domain, having just defined it\n";
 
@@ -807,47 +810,43 @@ sub define_domain {
 
 =head2 guest_mac($domain, $index)
 
-A MAC address for one of a guest's interfaces, derived from its name so that it
-is the same every time.
+The MAC address for interface C<$index> of a guest.  C<$index> defaults to 0.
+The address comes from the domain name, so it is the same on every build.
 
-Letting libvirt generate them means a rebuilt guest arrives with new MACs: it
-takes a new DHCP lease while the old one sits in the table until it expires,
-and any network configuration that matched on a name rather than an address
-has to guess which interface is which.  Deriving them removes both problems --
-the lease is the same lease, and the configuration can say exactly which
-interface it means.
+When libvirt makes the MACs, a rebuilt guest gets new ones.  It then gets a new
+DHCP lease, and the old lease stays until it expires.  A network configuration
+then cannot tell which interface is which.  A fixed MAC keeps the lease and
+names the interface exactly.
 
-C<52:54:00> is the QEMU/KVM prefix; the rest is the first three bytes of a
-digest of the domain and the interface index.  Three bytes is not a lot, so
-two guests colliding is possible in principle -- at a few thousand of them.
+C<52:54:00> is the QEMU/KVM prefix.  The other three bytes come from a digest of
+the domain and the interface index.  Two guests can get the same MAC, but that
+becomes likely only with a few thousand guests.
 
 =head2 nic_slots
 
-Which PCI slots the two interfaces sit in, in order.  Pinned rather than left to
-allocation order, because systemd names a PCI NIC after its hotplug slot: left
-alone, the names move whenever the device list does.
+The PCI slots of the two interfaces, in order.  systemd names a PCI NIC after
+its hotplug slot.  So fixed slots keep the names the same when the device list
+changes.
 
 =head2 nic_prefix
 
-What a guest here calls a PCI network interface, before the slot number.
+The start of the name that a guest here gives a PCI network interface, before
+the slot number.
 
-A property of the machine type rather than of the guest, which is why it is
-asked of the hypervisor rather than assumed by whatever is writing a network
-configuration.  The domain XML asks for i440fx, where systemd's predictable
-naming gives C<ensN> for a device in hotplug slot N.  Another topology gives
-another scheme -- C<enpNsM> is the common one, and some emulated models are
-stranger still -- so a hypervisor that builds its guests differently overrides
-this.
+The name depends on the machine type, not on the guest, so the hypervisor gives
+it.  The domain XML asks for i440fx.  There, the predictable naming of systemd
+gives C<ensN> for a device in hotplug slot N.  Other machine types give other
+names, most often C<enpNsM>.  A hypervisor that builds its guests differently
+overrides this.
 
 =head2 nic_names
 
-The names a guest's two interfaces end up with, NAT first.
+The names that the two interfaces of a guest get, NAT first.
 
-A prediction rather than a decision: cloud-init matches each interface on its
-MAC, which is the one thing about it we choose and the guest cannot disagree
-with, and renames it to the name it was given.  So a guest whose kernel names
-things some other way still gets the right configuration on the right card, and
-this is only what they are called afterwards.
+This is a prediction.  cloud-init finds each interface by its MAC, which we
+choose, and gives it the name in the configuration.  So each interface gets the
+correct configuration even when the kernel names it differently.  This method
+gives the name after cloud-init renames it.
 
 =cut
 
@@ -872,40 +871,9 @@ sub nic_names {
 
 =head2 snapshot_names($domain)
 
-Every snapshot the domain has, oldest first.  libvirt hands them back in no
-particular order, so they get sorted by creation time here -- C<restore
---latest> and C<--oldest> mean nothing otherwise.
-
-=head2 snapshot_current_name($domain)
-
-The name of the domain's current snapshot, or undef if it has none.
-
-=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
-
-Take an atomic snapshot and say whether it took.  C<$name> may be undef, in
-which case libvirt names it after the current time.
-
-A running guest gets a B<full system> snapshot: its memory goes into the qcow2
-beside the disk, so reverting puts it back mid-flight rather than booting it.
-That is the only kind libvirt will take of a domain that is up.
-
-C<disk_only> takes the guest B<down> first and snapshots the disk alone, then
-puts it back the way it was found: running again if it was running, still off if
-it was not, and either way whether the snapshot succeeded or was refused.  No
-memory means a far smaller and faster snapshot, and a revert that boots rather
-than resumes.
-
-C<leave_down> keeps it down afterwards.  That is for the caller which is about
-to take the guest apart anyway, and would otherwise be starting it only to stop
-it again.
-
-A guest that is already off has no memory to capture, so it gets the disk-only
-form whether or not it was asked for.
-
-=head2 revert_snapshot($domain, $name)
-
-Revert to a named snapshot and leave the domain running.  Returns true on
-success.
+The names of all snapshots of the domain, oldest first.  An empty list when
+there is no such domain.  libvirt returns them in no fixed order, so this sorts
+them by creation time.  C<bin/restore --latest> and C<--oldest> need that order.
 
 =cut
 
@@ -922,14 +890,20 @@ sub snapshot_names {
       grep { $_->{name} } @dated;
 }
 
-# <creationTime> is seconds since the epoch.  A snapshot without one sorts to
-# the front, which is where an unknown age belongs.
+# <creationTime> is seconds since the epoch.  A snapshot without one sorts
+# first, as the oldest.
 sub _snapshot_created {
     my ($snap)    = @_;
     my $xml       = eval { $snap->get_xml_description() } // '';
     my ($created) = $xml =~ m{<creationTime>(\d+)</creationTime>};
     return $created // 0;
 }
+
+=head2 snapshot_current_name($domain)
+
+The name of the current snapshot of the domain, or undef if it has none.
+
+=cut
 
 sub snapshot_current_name {
     my ( $self, $name ) = @_;
@@ -938,17 +912,39 @@ sub snapshot_current_name {
     return $snap->get_name();
 }
 
+=head2 create_snapshot($domain, $name, disk_only =E<gt> $bool, leave_down =E<gt> $bool)
+
+Takes an atomic snapshot.  Returns 1 if libvirt took it, and 0, with a warning,
+if not.  If C<$name> is undef, libvirt names the snapshot after the current
+time.  Dies if there is no such domain.
+
+A running guest gets a B<full system> snapshot.  Its memory goes into the qcow2
+with the disk, so a revert resumes the guest and does not boot it.  libvirt
+takes only this kind of snapshot of a running domain.
+
+C<disk_only> stops the guest first and takes a snapshot of the disk only.  Then
+it starts the guest again if it was running, also when the snapshot fails.  A
+snapshot with no memory is smaller and faster, and a revert to it boots the
+guest.
+
+C<leave_down> keeps the guest stopped after a C<disk_only> snapshot.  It is for
+a caller that is about to take the guest apart.
+
+A guest that is already off has no memory, so it always gets a snapshot of the
+disk only.
+
+=cut
+
 sub create_snapshot {
     my ( $self, $name, $snapname, %opts ) = @_;
     my $domain = $self->_domain($name) or die "No such domain $name on " . $self->uri . "\n";
 
     # libvirt takes a full system snapshot of a running guest, or a disk-only
-    # one of a stopped guest, and nothing else.  Anything else is error 84,
-    # "live snapshot creation is supported only during full system snapshots".
+    # snapshot of a stopped guest, and no other kind.  Any other request is error
+    # 84, "live snapshot creation is supported only during full system snapshots".
     my $live = !$opts{disk_only} && $domain->is_active();
 
-    # Settled before the stop below, because stopping is what changes it: a
-    # guest found running goes back up, and one found off stays off.
+    # Set before the stop below, because the stop changes is_active.
     my $resume = $opts{disk_only} && !$opts{leave_down} && $domain->is_active();
 
     $self->stop_domain($name) if $opts{disk_only};
@@ -956,26 +952,33 @@ sub create_snapshot {
     my $xml = '<domainsnapshot>';
     $xml .= '<name>' . _xml_escape($snapname) . '</name>' if $snapname;
 
-    # This element is what libvirt reads to tell the two apart: without it the
-    # request is a disk-only one.
+    # libvirt reads this element to tell the two kinds apart.  Without it, the
+    # request is for the disk only.
     $xml .= "<memory snapshot='internal'/>" if $live;
     $xml .= '</domainsnapshot>';
 
-    # CREATE_LIVE does not mean "snapshot a guest that is running".  It asks
-    # libvirt not to pause one while it writes the memory out, and libvirt will
-    # only agree to that when the memory goes somewhere outside the disk.  This
-    # one keeps it inside, so the flag would make the request invalid.
+    # No CREATE_LIVE.  That flag tells libvirt not to pause the guest while it
+    # writes the memory, which it allows only for memory outside the disk.  Here
+    # the memory goes inside the disk, so the flag makes the request invalid.
     my $flags = Sys::Virt::DomainSnapshot::CREATE_ATOMIC();
 
     my $ok = eval { $domain->create_snapshot( $xml, $flags ); 1 };
     warn "Snapshot of $name failed: $@" unless $ok;
 
-    # Whatever happened above.  A snapshot libvirt refused is not a reason to
-    # leave a guest switched off that was running when we were handed it.
+    # Also after a failed snapshot, because a failure is no reason to leave a
+    # running guest stopped.
     $self->start_domain($name) if $resume;
 
     return $ok ? 1 : 0;
 }
+
+=head2 revert_snapshot($domain, $name)
+
+Reverts the domain to the snapshot C<$name> and leaves it running.  Returns 1 on
+success.  Returns 0 if there is no such domain or snapshot, or, with a warning,
+if the revert fails.
+
+=cut
 
 sub revert_snapshot {
     my ( $self, $name, $snapname ) = @_;
@@ -997,41 +1000,24 @@ sub _xml_escape {
 
 =head1 HYPERVISOR FACTS
 
-The network layout the guest templates need.  Each is autodetected on the
-hypervisor unless the config pinned it, because C<brctl show | tail -n1> guesses
-wrong often enough to be worth overriding.
-
-=head2 bridge_device
-
-The outbound bridge the guest's public interface attaches to.
-
-=head2 virbr_device
-
-The libvirt NAT bridge.
-
-=head2 virbr_ip
-
-The hypervisor's address on that NAT bridge, which is what the guest scp's from
-and ships its logs to.
+What the hypervisor has and what it can do: its TPM, its libvirt and qemu
+versions, its disk features, its storage pool and its network bridges.  Each
+answer is cached for the life of the object.
 
 =head2 has_tpm
 
-Whether guests built here should be given a TPM.
+True when guests built here get a TPM.
 
-Both halves have to be true.  C<swtpm> has to be installed, because the guest's
-TPM is emulated -- a process per domain, and libvirt cannot start one that is not
-there.  And the hypervisor has to have a real TPM of its own, which is the part
-that is not obvious.
+Two conditions must both be true.  First, C<swtpm> must be installed.  The TPM
+of the guest is emulated by one C<swtpm> process for each domain, and libvirt
+cannot start a program that is not there.  Second, the hypervisor must have a
+real TPM of its own.
 
-An emulated TPM keeps its state in a file on the hypervisor.  A guest that seals
-a key to it has sealed that key to a file sitting next to its own disk image,
-which is not sealing it to anything: whoever takes the disk takes the TPM with
-it.  That is worth having where the hypervisor's own disk is protected by
-hardware, and worth nothing where it is not -- and offering a guest a TPM that
-cannot keep a secret is worse than offering none, because something on the guest
-will use it and believe it.
-
-So: hardware here, or nothing there.
+An emulated TPM keeps its state in a file on the hypervisor, next to the disk
+image of the guest.  A person who takes the disk can also take that file.  So
+the emulated TPM protects a key only when the disk of the hypervisor is
+protected by hardware.  A TPM that cannot keep a secret is worse than no TPM,
+because software on the guest uses it and trusts it.
 
 =cut
 
@@ -1039,27 +1025,24 @@ sub has_tpm {
     my ($self) = @_;
     return $self->{has_tpm} if defined $self->{has_tpm};
 
-    # tpmrm0 rather than tpm0: the resource manager is what anything on a modern
-    # kernel actually opens, and its absence on a machine that has tpm0 means the
-    # kernel did not bring the TPM up properly anyway.
+    # tpmrm0, not tpm0, because software on a current kernel opens the resource
+    # manager.  A machine with tpm0 and no tpmrm0 has a TPM that the kernel did
+    # not start correctly.
     my $answer = $self->capture_cmd(q{test -c /dev/tpmrm0 && command -v swtpm > /dev/null && echo yes});
     chomp $answer if defined $answer;
 
     return $self->{has_tpm} = ( ( $answer // '' ) eq 'yes' ) ? 1 : 0;
 }
 
-=head2 libvirt_version
+=head2 libvirt_version, qemu_version
 
-=head2 qemu_version
+The libvirt and qemu versions of the hypervisor, as libvirt encodes a version:
+C<major * 1_000_000 + minor * 1_000 + release>.  Both come from the connection,
+so each hypervisor gives its own versions.
 
-What the hypervisor is running, encoded the way libvirt encodes a version:
-C<major * 1_000_000 + minor * 1_000 + release>.  Both are asked of the
-connection rather than of this machine, so a remote hypervisor answers for
-itself and a fleet of mixed vintages gets a different answer per machine.
-
-Zero when the connection will not say.  Every capability check below reads that
-as "assume not", so a hypervisor we cannot interrogate gets the plain domain it
-would have got before any of this, rather than XML it may refuse.
+Zero when the connection does not give a version.  Every capability check below
+then answers no.  So a hypervisor that does not answer gets a plain domain, and
+not XML that it can refuse.
 
 =cut
 
@@ -1073,18 +1056,16 @@ sub qemu_version {
     return $self->{qemu_version} //= eval { $self->vmm->get_version() } || 0;
 }
 
-# Every disk tuning knob we know how to emit, and what it takes to accept one.
+# Each disk tuning setting that we can write, and the versions that accept it.
 #
-# The numbers are the ones libvirt's own formatdomain and formatstorage
-# documentation gives for that attribute -- so this table can be checked against
-# the documentation rather than against a changelog, and a wrong entry is a
-# thing somebody can look up.
+# The versions are the ones that the libvirt formatdomain and formatstorage
+# documentation gives for each attribute.  You can compare each entry with that
+# documentation.
 #
-# libvirt and qemu are asked separately because they are separate failures.
-# XML libvirt cannot parse is a domain that will not define, and we find out at
-# once.  XML libvirt parses and passes to a qemu that has no such feature is a
-# domain that defines and then will not start, which is found out later and
-# somewhere less convenient.
+# libvirt and qemu are separate checks because they fail in different ways.  If
+# libvirt cannot parse the XML, the domain does not define, and we know at once.
+# If libvirt parses it and qemu does not have the feature, the domain defines
+# but does not start, and we know only later.
 my %DISK_FEATURE = (
     io_uring         => { libvirt => '6.3.0', qemu => '5.0.0' },
     discard          => { libvirt => '1.0.6' },
@@ -1102,14 +1083,14 @@ my %DISK_FEATURE = (
 
 =head2 supports($feature)
 
-Whether this hypervisor will take one of the disk tuning knobs named in
-C<%DISK_FEATURE> above.  Memoised, since a build asks the same handful of
-questions once per disk.
+Returns 1 if this hypervisor accepts the disk tuning setting C<$feature>, and 0
+if not.  The names are the keys of C<%DISK_FEATURE> in the source.  Dies for any
+other name.  The answer is cached, because a build asks the same questions for
+each disk.
 
-C<cache> is not in the table: every libvirt that can define a domain at all
-takes it, so there is nothing to check.  Whether the pool's filesystem can serve
-the mode being asked for is a different question, and C<pool_fstype> is the one
-that answers it.
+C<cache> is not in the table, because every libvirt accepts it.  Whether the
+filesystem of the pool can do a given cache mode is a different question.
+L</pool_takes_direct_io> answers it.
 
 =cut
 
@@ -1120,9 +1101,8 @@ sub supports {
     return $self->{supports}{$feature} //= $self->_meets($needs);
 }
 
-# In this order on purpose: the qemu-img probe costs a command on the far side,
-# and there is no point paying for it to find out that the libvirt in front of
-# it would not have passed the option along anyway.
+# In this order on purpose.  The qemu-img probe runs a command on the
+# hypervisor, which is not necessary if libvirt is too old for the option.
 sub _meets {
     my ( $self, $needs ) = @_;
 
@@ -1132,31 +1112,29 @@ sub _meets {
     return 1;
 }
 
-# libvirt's own encoding, so the versions quoted from its documentation can be
-# compared against what the connection reports without converting either.
+# Encodes a dotted version the way libvirt does, so that it compares directly
+# with what the connection reports.
 sub _version_number {
     my ($version) = @_;
 
-    # A character class rather than an escape: split takes a pattern whatever it
-    # is handed, so '.' here would split on every character, and m/\./ is a
-    # simple substring match as far as perlcritic is concerned.
+    # A character class, not an escape.  split always takes a pattern, so '.'
+    # splits on every character, and perlcritic calls m/\./ a substring match.
     my ( $major, $minor, $release ) = split( m/[.]/, $version );
     return ( $major * 1_000_000 ) + ( $minor * 1_000 ) + ( $release // 0 );
 }
 
 =head2 qemu_img_options
 
-The qcow2 creation options this hypervisor's C<qemu-img> understands, as a set.
+The qcow2 creation options that C<qemu-img> on this hypervisor knows, as a
+hashref with each option name as a key.
 
-libvirt makes qcow2 volumes by running C<qemu-img create>, and hands it whatever
-the volume XML asked for.  An option this qemu has never heard of is therefore a
-volume that fails to create, not a volume that quietly comes back without the
-feature -- and the volume XML has been able to carry these for longer than qemu
-has implemented them, so the libvirt version does not answer the question on its
-own.
+libvirt makes a qcow2 volume with C<qemu-img create> and passes it the options
+from the volume XML.  If qemu does not know an option, the volume is not made.
+The volume XML accepted some of these options before qemu had them.  So the
+libvirt version alone does not answer the question.
 
-An empty set when there is no qemu-img to ask, which reads as "none of them" and
-gets the disk made the way it was made before.
+An empty hashref when qemu-img does not answer.  Then the disk gets none of the
+optional features.
 
 =cut
 
@@ -1164,7 +1142,7 @@ sub qemu_img_options {
     my ($self) = @_;
     return $self->{qemu_img_options} if $self->{qemu_img_options};
 
-    # -o help lists the options for the format and exits; it wants no filename.
+    # -o help lists the options for the format and exits.  It needs no filename.
     my $help    = $self->capture_cmd('qemu-img create -f qcow2 -o help 2>/dev/null') // '';
     my %options = map { $_ => 1 } ( $help =~ m/^\s+(\w+)=/gm );
 
@@ -1176,12 +1154,10 @@ sub qemu_img_options {
 
 =head2 pool_fstype
 
-The filesystem the storage pool sits on, as C<stat -f> names it.
-
-Which matters here for one thing: whether C<cache='none'> can work.  That mode
-opens the disk image C<O_DIRECT>, and on a filesystem with no O_DIRECT the open
-fails -- so the domain defines cleanly and then refuses to start, which is the
-worst place to find out.
+The type of the filesystem under the storage pool, as C<stat -f> names it, or
+an empty string when C<stat> does not answer.  It names the filesystem in the
+message when the pool does not take O_DIRECT, and tells ZFS apart.
+L</pool_takes_direct_io> decides the cache mode.
 
 =cut
 
@@ -1189,9 +1165,8 @@ sub pool_fstype {
     my ($self) = @_;
     return $self->{pool_fstype} if defined $self->{pool_fstype};
 
-    # Single-quoted rather than handed to run(): capture() takes a shell string
-    # by contract, and a pool path is the one thing here that came from a
-    # configuration file rather than from us.
+    # Quoted by hand, because capture_cmd takes a shell string and the pool path
+    # can come from a configuration file.
     ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
 
     my $type = $self->capture_cmd("stat -f -c %T '$quoted' 2>/dev/null") // '';
@@ -1202,21 +1177,18 @@ sub pool_fstype {
 
 =head2 pool_takes_direct_io
 
-Whether a file in the storage pool can be opened C<O_DIRECT> and written to,
-which is the whole of what C<cache='none'> needs of a filesystem.
+Returns 1 if a file in the storage pool can be opened C<O_DIRECT> and written
+to, and 0 if not.  That is all that C<cache='none'> needs from a filesystem.
+Without it, the domain defines but does not start.
 
-Asked of the filesystem rather than worked out from its name, because the name
-does not answer it and a list of names that supposedly do was wrong about every
-entry on it.  tmpfs takes an O_DIRECT write on a current kernel.  ZFS grew real
-Direct I/O in OpenZFS 2.3, where it is then subject to the pool's feature flags
-and to the dataset's own C<direct> property -- so not even the version settles
-that one, and a table here would be a stale copy of three things that move on
-somebody else's schedule.
+The method asks the filesystem, because the filesystem name does not give the
+answer.  tmpfs takes an O_DIRECT write on a current kernel.  ZFS has Direct I/O
+from OpenZFS 2.3, but the feature flags of the pool and the C<direct> property
+of the dataset also control it.
 
-A 4K direct write into the pool directory is the same open qemu is about to do,
-and it answers for all of the above and for whatever the pool is on next.  Not
-sudo, for the same reason C<base_image> is not: a pool directory this user
-cannot write to is one the base image could never have been downloaded into.
+So the method writes 4K with O_DIRECT into the pool directory, which is the same
+open that qemu does.  It runs without sudo, for the reason that C<base_image>
+gives.
 
 =cut
 
@@ -1226,10 +1198,9 @@ sub pool_takes_direct_io {
 
     my $probe = $self->pool_path . "/.odirect-probe.$$";
 
-    # dd rather than perl: this is the one machine in the fleet we have not
-    # asked to have anything installed on, and coreutils is not a dependency
-    # the way an interpreter would be.  It opens with O_DIRECT and writes a
-    # block, so a filesystem that refuses either one fails here.
+    # dd, not perl, because we ask for nothing to be installed on the
+    # hypervisor, and coreutils is always there.  It fails if the filesystem
+    # refuses the O_DIRECT open or the write.
     my $taken = $self->run_cmd(
         'sh', '-c',
         'dd if=/dev/zero of="$1" bs=4096 count=1 oflag=direct >/dev/null 2>&1; status=$?; rm -f "$1"; exit $status',
@@ -1241,12 +1212,11 @@ sub pool_takes_direct_io {
 
 =head2 zfs_version
 
-The OpenZFS release this hypervisor is running, or undef where there is no ZFS.
+The OpenZFS version on this hypervisor, or undef when there is no ZFS.
 
-Only ever used to say something useful in the message when a pool on ZFS turns
-out not to take an O_DIRECT write: Direct I/O arrived in 2.3, so the version is
-the difference between "upgrade and this gets faster" and "this pool is
-configured not to".
+It is used only in the message for a ZFS pool that refuses an O_DIRECT write.
+Direct I/O arrived in 2.3, so the version tells the operator to upgrade, or to
+change the configuration of the pool.
 
 =cut
 
@@ -1260,50 +1230,44 @@ sub zfs_version {
     return $self->{zfs_version} = $version ? $version : undef;
 }
 
-# qemu's default cluster, and the one worth moving to on a disk large enough to
-# have outgrown the metadata cache.
+# The default qemu cluster size, and the size for a disk too large for the
+# metadata cache.
 my $QCOW2_DEFAULT_CLUSTER = 64 * 1024;
 my $QCOW2_LARGE_CLUSTER   = 1024 * 1024;
 
-# What qemu will spend on qcow2 metadata by default, and the most we are willing
-# to ask it to spend instead.  Both are per running domain and both are host
-# memory, which is memory Trog::Hypervisors is not counting.
+# The default qemu memory for qcow2 metadata, and the most that we ask for.  Both
+# are for each running domain, in host memory that Trog::Hypervisors does not
+# count.
 my $QCOW2_METADATA_DEFAULT = 32 * 1024 * 1024;
 my $QCOW2_METADATA_CAP     = 256 * 1024 * 1024;
 
-# Above this the default metadata cache stops covering the whole image.  See
-# qcow2_tuning for where the number comes from.
+# Above this size, the default metadata cache does not cover the whole image.
+# qcow2_tuning gives the arithmetic.
 my $QCOW2_LARGE_DISK = 128 * 1024 * 1024 * 1024;
 
 =head2 qcow2_tuning($capacity)
 
-How a qcow2 of this size should be laid out on this hypervisor: the cluster size
-to make it with, whether it gets subcluster allocation, and how much metadata
-cache the domain should ask for.  Returns those three as a hash, with anything
-we have no opinion about left out.
+The layout for a qcow2 of C<$capacity> bytes on this hypervisor.  Returns a hash
+with C<extended_l2> (subcluster allocation, 1 or 0), and C<cluster_size> and
+C<metadata_cache> in bytes when they differ from the qemu defaults.
 
-Two facts decide it, and they pull against each other.
+Two facts decide the layout, and they conflict.
 
-The first is that every guest disk here is an overlay on the shared base image,
-and without C<extended_l2> the smallest thing an overlay can allocate is a whole
-cluster.  A 4K write into a 64K hole means reading 64K out of the backing file,
-merging, and writing 64K back -- for the life of the disk, on every guest,
-because every guest is an overlay.  Subclusters cut the allocation unit to a
-32nd of a cluster and the read-modify-write goes with it.  So it is on wherever
-qemu will take it: it is the single biggest thing available to a layout like
-ours, and it costs nothing to have.
+First, every guest disk here is an overlay on the shared base image.  Without
+C<extended_l2>, an overlay allocates a whole cluster at a time.  A 4K write into
+an empty 64K cluster reads 64K from the backing file and writes 64K back.
+Subclusters make the unit of allocation a 32nd of a cluster, which stops most of
+that.  So C<extended_l2> is on wherever qemu accepts it.
 
-The second is that it is not free after all, at size.  An extended L2 entry is
-twice the width, so the metadata cache covers half as much image -- qemu's
-default 32 MiB reaches 256 GiB of image at the default 64 KiB cluster, and
-128 GiB once entries are doubled.  Past that, random I/O starts paying for L2
-reads that used to be cached, which is exactly the workload the subclusters were
-bought for.
+Second, an extended L2 entry is twice as wide, so the metadata cache covers half
+as much of the image.  The default qemu cache of 32 MiB covers 256 GiB at the
+default 64 KiB cluster, and 128 GiB with extended entries.  Above that, random
+I/O must read L2 tables from the disk.
 
-Larger clusters buy the coverage back, sixteenfold at 1 MiB, for a coarser
-allocation unit -- 32 KiB subclusters rather than 2 KiB.  That is a trade worth
-making only on a disk big enough to need it, so it is made only there, and the
-metadata cache is raised on top for the rare disk that outgrows even that.
+A 1 MiB cluster covers 16 times as much, but its subclusters are 32 KiB, not
+2 KiB.  So only a disk larger than 128 GiB gets the large cluster.  A disk that
+still needs more cache gets a larger metadata cache, up to 256 MiB.  Each of
+the three applies only where L</supports($feature)> says the hypervisor takes it.
 
 =cut
 
@@ -1312,7 +1276,7 @@ sub qcow2_tuning {
 
     my %tuning = ( extended_l2 => $self->supports('extended_l2') ? 1 : 0 );
 
-    # One L2 entry per cluster, twice as wide when it also carries the
+    # One L2 entry for each cluster, twice as wide when it also holds the
     # subcluster allocation bitmap.
     my $entry = $tuning{extended_l2} ? 16 : 8;
 
@@ -1330,17 +1294,14 @@ sub qcow2_tuning {
 
 =head2 $hv->disk_reusable($domain, $capacity)
 
-Whether this guest's disk can be kept across a rebuild rather than thrown away
-and made again.  True only when there is one, it is already the size being asked
-for, and it was laid out the way C<qcow2_tuning> would lay one out now.
+Returns 1 if a rebuild can keep the disk of this guest, and 0 if it must make
+a new one.  The answer is 1 only when the disk exists, has C<$capacity> bytes,
+and has the layout that C<qcow2_tuning> gives now.
 
-The size is the obvious half.  The layout is the half that bites quietly:
-C<create_disk> says that cluster size and subcluster allocation are properties
-of the image as created and cannot be retrofitted, and C<qcow2_tuning> decides
-both from the capacity B<and> from what this hypervisor supports.  So a
-hypervisor whose qemu grew C<extended_l2> between two builds would want a layout
-the existing image does not have, and keeping that image would pin the guest to
-the old one for as long as it lives, without saying so.
+The layout is part of the question because the image cannot change it later.
+C<qcow2_tuning> uses both the capacity and what the hypervisor supports.  If qemu
+got C<extended_l2> after the last build, the old image does not have it.
+Keeping that image keeps the old layout for the life of the guest.
 
 =cut
 
@@ -1352,9 +1313,7 @@ sub disk_reusable {
     my $info   = eval { $volume->get_info() }   or return 0;
     return 0 unless ( $info->{capacity} // 0 ) == $capacity;
 
-    # What it was made with, against what it would be made with now.  Asked of
-    # the image rather than remembered, because nothing here writes down how a
-    # disk was laid out and the image is the only thing that knows.
+    # Read from the image, because nothing here records the layout of a disk.
     my %wanted = $self->qcow2_tuning($capacity);
     my $has    = $self->disk_layout("$domain-qcow2") or return 0;
 
@@ -1365,13 +1324,12 @@ sub disk_reusable {
 
 =head2 $hv->rollback_possible($domain, capacity =E<gt> $bytes)
 
-Whether a snapshot taken now would still be there after the rebuild.
+Returns 1 if a snapshot taken now still exists after the rebuild, and 0 if not.
 
-Here that is the same question as whether the disk can be kept, because a
-libvirt snapshot lives inside the qcow2 it was taken of: keep the file and the
-snapshot keeps; delete it and the snapshot goes with it, however recently it was
-taken.  A guest with no disk yet -- a first build -- answers no, which is right
-for a different reason: there is nothing to go back to.
+A libvirt snapshot is inside the qcow2 of the guest.  So the snapshot survives
+only if the rebuild keeps the disk, which C<disk_reusable> decides.  The disk
+must also hold the C<trog-pristine> snapshot for the rebuild to revert to.  A
+first build has no guest to go back to, so the answer is 0.
 
 =cut
 
@@ -1381,25 +1339,23 @@ sub rollback_possible {
     return 0 unless $self->domain_exists($domain);
     return 0 unless $self->disk_reusable( $domain, $opts{capacity} );
 
-    # And that there is something to put the disk back to.  A guest built before
-    # any of this has a perfectly reusable disk with no pristine snapshot in it,
-    # and reverting to a snapshot that is not there fails in the middle of the
-    # rebuild -- after the rollback point has been taken and announced, which is
-    # the worst moment available to discover it.
+    # Some reusable disks have no pristine snapshot.  Without this check, the
+    # revert fails in the middle of the rebuild, after the rollback point is
+    # taken and announced.
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
 }
 
 =head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
 
-Whether rebuilding this domain would take the guest apart.
+Returns 1 if a rebuild of this domain takes the guest apart, and 0 if not.
 
-True when there is a guest and its disk cannot be kept at C<capacity>:
-C<clear_guest> then undefines the domain and deletes the disk.  A first build,
-and a rebuild that can keep the disk it has, answer false.
+The answer is 1 when the guest exists and its disk cannot be kept at
+C<capacity>.  C<clear_guest> then undefines the domain and deletes the disk.  A
+first build, and a rebuild that can keep the disk, give 0.
 
-Not the negation of C<rollback_possible>, which is also false for a reusable
-disk with no C<trog-pristine> snapshot to go back to -- the state every guest
-built before that existed is in, and too many to stop for.
+This is not the opposite of C<rollback_possible>.  A reusable disk with no
+C<trog-pristine> snapshot gives 0 from both, and the rebuild deletes that disk
+without asking.  Many guests have such a disk, too many to stop the rebuild for.
 
 =cut
 
@@ -1412,18 +1368,18 @@ sub rebuild_destroys_guest {
 
 =head2 $hv->clone_guest_disk($domain)
 
-Copy this guest's disk aside as C<$domain.bak-qcow2>, and say where it landed.
+Copies the disk of this guest to the volume C<$domain.bak-qcow2>, and returns
+the path of the copy.  If that volume already exists, this keeps it and returns
+its path.
 
-The guest is stopped first: a qcow2 copied while qemu is writing into it is a
-copy of a moment that never existed.  The copy is a volume and nothing else --
-no domain, no address, and no backing store, so it neither boots nor depends on
-the base image this guest was laid over.
+It stops the guest first, because a copy of a qcow2 that qemu is writing to is
+not consistent.  The copy is only a volume, with no domain, no address and no
+backing store.  So it cannot boot, and it does not need the base image.
 
-Nothing removes it afterwards, C<guest_volumes> not naming it, and one already
-there is kept rather than written over.
+Nothing removes the copy later, because C<guest_volumes> does not name it.
 
-Undef when there is no disk to copy.  A copy that was attempted and failed dies
-instead, the caller rebuilding over the disk on the strength of this.
+Returns undef when there is no disk to copy.  Dies if the copy fails, because
+the caller rebuilds over the disk when this returns.
 
 =cut
 
@@ -1456,19 +1412,20 @@ XML
 
 =head2 $hv->backup_volumes
 
-Every disk in the pool that C<clone_guest_disk> put there, by name.
+The names of all volumes in the pool that C<clone_guest_disk> made, sorted.
+Dies if libvirt cannot list the pool.
 
-The suffix is this backend's to know.  A caller sweeping them up asks for the
-list rather than matching on the name itself.
+Only this backend knows the suffix of a copy.  So a caller asks for this list
+and does not match names itself.
 
 =cut
 
 sub backup_volumes {
     my ($self) = @_;
 
-    # Nothing caught, the volume names included: EPERM on a pool is not a
-    # smaller answer than an empty one, and a caller handed the short list
-    # sweeps fewer copies than exist.  list_volumes is an RPC per volume.
+    # No eval, also around the volume names.  An empty list after EPERM makes a
+    # caller remove fewer copies than exist.  list_all_volumes, not list_volumes,
+    # which makes one RPC for each volume.
     my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
 
     return @names;
@@ -1476,20 +1433,20 @@ sub backup_volumes {
 
 =head2 $hv->disk_layout($volume)
 
-The cluster size and subcluster allocation of an existing qcow2, as a hashref,
-or undef when qemu-img could not be asked.
+The layout of an existing qcow2 volume, as a hashref with C<cluster_size> in
+bytes and C<extended_l2> as 1 or 0.  Undef when there is no such volume or
+qemu-img does not answer.
 
 =cut
 
 sub disk_layout {
     my ( $self, $name ) = @_;
 
-    # sudo, and -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
-    # an unprivileged qemu-img cannot open it at all; and this is only ever
-    # asked about a guest that is running, whose qemu holds a write lock, so
-    # without -U it cannot open it either.  Either failure returns empty, which
-    # a caller reads as "no snapshots" rather than as an error -- which is why
-    # the errors are left where they can be seen.
+    # sudo, -U, and no 2>/dev/null.  The disk is 0600 libvirt-qemu:kvm, so
+    # qemu-img needs root to open it.  The guest can be running, and its qemu
+    # holds a write lock, so qemu-img also needs -U.  Either failure returns
+    # undef, which disk_reusable reads as a disk that cannot be kept.  So the
+    # errors stay visible.
     my $path = $self->volume_path($name) or return undef;
     my $json = $self->capture_cmd("sudo qemu-img info -U --output=json '$path'") // q{};
     my $info = eval { Cpanel::JSON::XS::decode_json($json) } or return undef;
@@ -1503,13 +1460,12 @@ sub disk_layout {
 
 =head2 $hv->snapshot_disk($volume, $name)
 
-Take an internal qcow2 snapshot of a volume with no domain involved, and say
-whether it took.
+Takes an internal qcow2 snapshot C<$name> of a volume, with no domain.  Returns
+1 if qemu-img took it, and 0 if not.  Dies if there is no such volume.
 
-C<create_snapshot> is libvirt asking a domain to snapshot itself; this is
-qemu-img asking the file.  The difference is what makes a snapshot possible
-before the guest exists at all, which is where C<pristine> has to be taken --
-there is no domain to ask until the disk it boots from is already there.
+C<create_snapshot> asks libvirt to take a snapshot of a domain.  This asks
+qemu-img to take one of the file.  So it works before the domain exists, which
+is when C<create_disk> takes C<trog-pristine>.
 
 =cut
 
@@ -1518,28 +1474,26 @@ sub snapshot_disk {
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to snapshot\n";
 
-    # As root, because the disk is not ours: libvirt makes it 0600
-    # libvirt-qemu:kvm, and qemu-img without sudo answers "Permission denied"
-    # and a non-zero exit -- which is a snapshot not taken, and nothing said.
+    # As root, because libvirt makes the disk 0600 libvirt-qemu:kvm.  Without
+    # sudo, qemu-img fails with "Permission denied" and no snapshot.
     return $self->run_sudo( qw{qemu-img snapshot -c}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->revert_disk($volume, $name)
 
-Put a volume back to one of its own internal snapshots, leaving its others where
-they are.  The domain must not be running: qemu-img writes the file directly,
-and qemu holding it open is how an image gets corrupted rather than reverted.
+Reverts a volume to its internal snapshot C<$name>.  Returns 1 if qemu-img
+reverted it, and 0 if not.  Dies if there is no such volume.
 
-Deliberately without the C<-U> that C<disk_layout> and C<disk_snapshot_names>
-pass.  That flag forces a share past qemu's write lock, which is safe for
-reading a running guest's disk and is the opposite of safe for writing to one:
-it is the difference between asking an image a question and editing it behind
-the back of the process that has it open.  C<snapshot_disk> is the same, and
-needs no flag for a different reason -- it runs before the domain exists.
+The domain must not be running.  qemu-img writes the file directly, and the
+image gets corrupted if qemu has it open.
 
-The whole design rests on what a revert leaves behind: every other snapshot is
-still listed, still something the disk can be put back to, and the backing file
-survives.
+This does not use the C<-U> of C<disk_layout> and C<disk_snapshot_names>.  That
+flag goes past the write lock of qemu.  That is safe for a read of the disk of a
+running guest, but not for a write.  C<snapshot_disk> also needs no C<-U>,
+because it runs before the domain exists.
+
+After a revert, every other snapshot is still listed and can still be reverted
+to, and the backing file stays.  The rebuild that keeps a disk depends on this.
 
 =cut
 
@@ -1548,33 +1502,51 @@ sub revert_disk {
 
     my $path = $self->volume_path($name) or die "There is no volume $name on " . $self->describe . " to revert\n";
 
-    # As root, for the reason snapshot_disk is: the disk belongs to
-    # libvirt-qemu.  It matters more here, where a revert that quietly did
-    # nothing would leave the new guest booting the old guest's filesystem.
+    # As root, for the reason that snapshot_disk gives.  A revert that fails
+    # without a word leaves the new guest on the filesystem of the old one.
     return $self->run_sudo( qw{qemu-img snapshot -a}, $snapname, $path ) == 0 ? 1 : 0;
 }
 
 =head2 $hv->disk_snapshot_names($volume)
 
-Every internal snapshot in a volume, in the order qemu-img lists them.
+The names of all internal snapshots in a volume, in the order that qemu-img
+lists them.  An empty list when there is no such volume or no snapshot.
 
 =cut
 
 sub disk_snapshot_names {
     my ( $self, $name ) = @_;
 
-    # sudo and -U for the reasons disk_layout gives, and they matter most here:
-    # this is what rollback_possible asks, about a guest that is running, and an
-    # empty answer from a disk it could not open is indistinguishable from a
-    # disk with no snapshots in it.  That is the whole feature declining to
-    # engage, for a reason nothing prints.
+    # sudo and -U, for the reasons that disk_layout gives.  rollback_possible
+    # asks this about a running guest.  If qemu-img cannot open the disk, the
+    # answer is "no snapshots", and no rollback happens.
     my $path = $self->volume_path($name) or return ();
     my $said = $self->capture_cmd("sudo qemu-img snapshot -l -U '$path'") // q{};
 
-    # The header names the columns; every line after it starts with a numeric
-    # id and carries the tag second.
+    # After the header, each line starts with a numeric id, and the tag is the
+    # second field.
     return map { ( split q{ }, $_ )[1] } grep { m/\A \s* \d+ \s+ \S/ } split m/\n/, $said;
 }
+
+=head2 bridge_device
+
+The outbound bridge for the public interface of a guest.
+
+=head2 virbr_device
+
+The libvirt NAT bridge.
+
+=head2 virbr_ip
+
+The address of the hypervisor on the NAT bridge.  The guest fetches its files
+from this address and sends its logs to it.
+
+The templates for a guest need these three values.  Each one comes from the
+configuration if it is set there.  If not, the method reads it from C<brctl>
+or C<ip> on the hypervisor, and dies if it finds nothing.  The C<brctl> guess
+is sometimes wrong, so set the value when it is.
+
+=cut
 
 sub bridge_device {
     my ($self) = @_;
@@ -1615,19 +1587,19 @@ sub virbr_ip {
 
 =head1 CAPACITY
 
-What the hypervisor has, what its guests have already been promised, and
-whether one more will fit.  All of it comes from libvirt, so it is what the
-hypervisor actually believes rather than what a config file claimed a year ago.
+What the hypervisor has and what its guests already have.  L<Trog::HV> uses
+this to decide if one more guest fits.  All of it comes from libvirt, not from a
+configuration file.
 
-Memory is counted as I<committed> rather than I<used>: a guest that has been
-promised 8G is holding 8G against us even while it idles at 400M.  Overcommit
-memory and the OOM killer eventually picks one of your VMs.  CPUs are the other
-way round -- overcommitting cores is normal and expected -- so those are
-measured against C<cpu_overcommit> times the physical count.
+Memory counts as I<committed>, not I<used>.  A guest with 8G holds 8G, also when
+it uses only 400M.  If the guests have more memory than the host, the OOM killer
+eventually stops a guest.  More vCPUs than CPUs is normal.  So the CPU limit is C<cpu_overcommit>
+times the number of physical CPUs.
 
 =head2 capacity
 
-A snapshot of the hypervisor, cached for the life of the object:
+The state of the hypervisor, as a hashref.  The first call reads it, and later
+calls return the same one:
 
     memory_mb        physical memory
     memory_committed committed to guests, running or not
@@ -1639,8 +1611,8 @@ A snapshot of the hypervisor, cached for the life of the object:
     disk_free        free bytes in the storage pool, after the reserve
     guests           how many domains it knows about
 
-Dies if libvirt cannot be reached, since a hypervisor we cannot ask about is
-not one we should be placing guests on.
+Dies if libvirt does not answer, because a guest must not go on a hypervisor
+that cannot give these values.
 
 =cut
 
@@ -1655,8 +1627,7 @@ sub capacity {
     foreach my $domain (@domains) {
         my $info = eval { $domain->get_info() } or next;
 
-        # maxMem is what the guest may grow into, and is what we have to hold
-        # against the host whether or not it is using it yet.
+        # maxMem is the most memory the guest can use, so it counts in full.
         $memory_committed += ( $info->{maxMem}    // 0 ) / 1024;
         $cpus_committed   += ( $info->{nrVirtCpu} // 0 ) if eval { $domain->is_active() };
     }
@@ -1680,8 +1651,8 @@ sub capacity {
 
 =head2 pool_free($name)
 
-Free bytes in the storage pool, or 0 when there isn't one yet -- a pool
-nothing has built yet has no space in it, which is the honest answer.
+The free bytes in the storage pool C<$name>, or 0 when there is no such pool.
+C<$name> defaults to L</pool_name>.
 
 =cut
 
@@ -1699,9 +1670,10 @@ sub pool_free {
 
 =head2 prepare_host($virtiofs)
 
-The storage pool's directory, which a hypervisor may not have yet, and
-F<virtiofs-better> in F</usr/libexec>.  That one runs as part of the qemu
-process, so it has to land on the hypervisor, not on us.
+Makes the directory of the storage pool, and installs C<$virtiofs> as
+F</usr/libexec/virtiofs-better> if it is not there.  That program runs in the
+qemu process, so it must be on the hypervisor.  Returns 1.  Dies if either step
+fails.
 
 =cut
 
@@ -1722,12 +1694,13 @@ sub prepare_host {
 
 =head2 release_seed($domain)
 
-Eject the cloud-init ISO, which is only so the guest does not boot off it next
-time.  See L</eject_cdrom($domain, $target)> for why this waits on cloud-init.
+Removes the cloud-init ISO from the guest.  See
+L</eject_cdrom($domain, $target)>, which also says why this waits for cloud-init.
 
 =head2 guest_volumes($domain)
 
-The guest's own overlay and its seed, those of them there are.
+The names of the overlay disk and the seed ISO of the guest, for those that
+exist.
 
 =cut
 
@@ -1740,11 +1713,12 @@ sub guest_volumes {
 
 =head2 guest_ssh_ip($config, $lease_ip)
 
-Which address I<we> use to SSH into a guest.
+The address that I<this machine> uses to SSH into a guest.
 
-On a local hypervisor the libvirt NAT lease is reachable and always was.  On a
-remote one it isn't -- it only routes from the hypervisor itself -- so we need
-the guest's bridged static address instead, and there is no way to guess it.
+On a local hypervisor, that is C<$lease_ip>, the libvirt NAT lease.  On a remote
+hypervisor, the NAT lease routes only from the hypervisor.  So the result is the
+first address in C<ips> in the configuration, the bridged static address of the
+guest.  Dies if C<ips> is not set.
 
 =cut
 
@@ -1760,12 +1734,19 @@ sub guest_ssh_ip {
 
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
 
-What C<bin/preflight> asks of this backend, in order.
+The names of the checks and notes that C<bin/preflight> runs on this backend, in
+order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 
 =cut
 
 sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_fetch_sources check_libvirt check_sys_virt_in_step check_pool_writable check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
+
+=head2 $result = $hv->check_reachable()
+
+Passes on a local hypervisor, or when C<whoami> runs over ssh on a remote one.
+
+=cut
 
 sub check_reachable {
     my ($self) = @_;
@@ -1784,15 +1765,18 @@ key already trusted there; nothing here can answer a password prompt.
 FIX
 }
 
-# A guest fetches its payload from this machine, over ssh, so it has to have an
-# address of ours to fetch from.  Which of ours depends on how this machine is
-# attached to the hypervisor's networks, and on a workstation that is not on any
-# of them there is no answer -- which is the whole run failing at the guest's
-# first target rather than here, so it is worth a question up front.
-#
-# This asks the routing table, which cannot see a firewall in between or a route
-# that only works one way.  It says there is an address to try, not that the
-# guest will get through on it.
+=head2 $result = $hv->check_transfer_ip()
+
+Passes when this machine has an address that a guest on the NAT bridge can
+fetch its payload from, over ssh.  Without one, the run fails at the first
+target on the guest, so this asks first.
+
+It asks the routing table, which cannot see a firewall or a route that works in
+one direction only.  So a pass means that there is an address to try, not that
+the guest can reach it.
+
+=cut
+
 sub check_transfer_ip {
     my ($self) = @_;
 
@@ -1818,12 +1802,20 @@ section of ipmap.cfg:
 FIX
 }
 
-# The lease helper is the whole of what a provision still needs root on a
-# hypervisor for, bar a one-off install of virtiofs-better and bin/nuke_pool.
-# So "no sudo" and "exactly enough sudo" are different answers, and `sudo -n
-# true` cannot tell them apart -- it fails for the second as loudly as for the
-# first, and the fix it then prints is a standing grant of root that was not
-# needed.
+=head2 $result = $hv->check_passwordless_sudo()
+
+Passes when the ssh user has passwordless sudo, for everything or only for the
+lease helper.  Fails, with the commands that give the grant, when it has neither.
+
+A grant for the lease helper alone is enough to build a guest.  The other root
+steps are the first install of F<virtiofs-better>, C<bin/nuke_pool>, and the
+C<qemu-img> calls for the C<trog-pristine> snapshot and its revert.  Without
+those, a guest builds, but a rebuild cannot keep its disk.  C<sudo -n true>
+fails for the narrow grant too, so this also asks C<sudo -n -l> about the lease
+helper.
+
+=cut
+
 my $LEASE_HELPER = '/usr/lib/libvirt/libvirt_leaseshelper';
 
 sub check_passwordless_sudo {
@@ -1837,9 +1829,7 @@ sub check_passwordless_sudo {
         return $self->_verdict( 1, 'Passwordless sudo',                 q{} );
     }
 
-    # Narrowed rather than absent: enough for a provision, not enough for
-    # bin/nuke_pool, which is the correct shape for a grant handed to something
-    # that builds guests unattended.
+    # A narrow grant is correct for an account that builds guests unattended.
     return $self->_verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
 bin/nuke_pool will not work for this account, which is deliberate at this
 level.  Widen the grant if you need it.
@@ -1881,19 +1871,16 @@ FIX
 
 =head2 $result = $hv->check_pool_writable()
 
-Whether the storage pool directory takes a write from the account a run drives
-the hypervisor as.
+Passes when the ssh user can write a file to the storage pool directory.
 
-After C<check_libvirt>, because C<pool_path> may have to ask libvirt where the
-pool is before there is anything to write to.
+It runs after C<check_libvirt>, because C<pool_path> can need libvirt to find
+the pool.
 
-This is a question every other check can answer yes to while the hypervisor
-still cannot build a thing.  The base image is fetched with a plain C<curl> into
-this directory and deliberately not with sudo -- see C<base_image> -- so a pool
-the run cannot write to fails minutes into a provision, on a download, naming
-the URL rather than the permissions.  C<pool_takes_direct_io> puts its own probe
-here for the same reason, and answers the wrong question when the write itself
-is what is refused.
+All other checks can pass while the hypervisor still cannot build a guest.
+C<base_image> downloads into this directory without sudo.  So a pool that the
+run cannot write to fails minutes into a provision, with an error about the URL
+and not the permissions.  C<pool_takes_direct_io> also writes here, and gives a
+wrong answer when the write itself is refused.
 
 =cut
 
@@ -1908,8 +1895,7 @@ this hypervisor has, or pool_path has to say outright where it is:
     virsh pool-list --all
 FIX
 
-    # The same probe-and-remove as pool_takes_direct_io, without the O_DIRECT:
-    # this asks only whether a file can be made here at all.
+    # The probe of pool_takes_direct_io, without O_DIRECT.
     my $probe = "$path/.writable-probe.$$";
     return $self->_verdict( 1, "Storage pool $path takes a write", q{} )
       if $self->run_cmd( 'sh', '-c', 'touch "$1" 2>/dev/null && rm -f "$1"', 'sh', $probe ) == 0;
@@ -1929,6 +1915,13 @@ from the filesystem, so set it there too or the next pool-build puts it back:
 FIX
 }
 
+=head2 $result = $hv->check_iso_builder()
+
+Passes when the hypervisor has a program that makes the seed ISO.  See
+L</iso_maker>.
+
+=cut
+
 sub check_iso_builder {
     my ($self) = @_;
 
@@ -1943,6 +1936,12 @@ it:
 FIX
 }
 
+=head2 $result = $hv->check_libvirt()
+
+Passes when libvirt answers on the connection URI.
+
+=cut
+
 sub check_libvirt {
     my ($self) = @_;
 
@@ -1956,11 +1955,18 @@ is in the libvirt group.
 FIX
 }
 
-# Sys::Virt is released in lockstep with libvirt and binds the API of the
-# release it was built against.  Talk to a daemon from a different one and the
-# failures are not "version mismatch": they are a constant that is not exported,
-# or a call the far side does not implement, surfacing as an error about
-# whatever was being attempted at the time.
+=head2 $result = $hv->check_sys_virt_in_step()
+
+Passes when the major and minor version of the local L<Sys::Virt> are the same
+as those of libvirt on the hypervisor.
+
+Each Sys::Virt release follows a libvirt release and binds its API.  With a
+different libvirt, the error does not say "version mismatch".  It is a missing
+constant or a call that the hypervisor does not implement, in an error about
+some other operation.
+
+=cut
+
 sub check_sys_virt_in_step {
     my ($self) = @_;
 
@@ -1996,6 +2002,13 @@ that does not match the local libvirt-dev will not build.
 FIX
 }
 
+=head2 $result = $hv->note_libguestfs()
+
+Passes when the hypervisor has C<virt-cat>, C<virt-ls> or C<virt-edit>, which
+can read the disk of a guest that does not boot.
+
+=cut
+
 sub note_libguestfs {
     my ($self) = @_;
 
@@ -2014,11 +2027,14 @@ GRUB with timed keystrokes.
 FIX
 }
 
-# A hypervisor with a TPM of its own can give its guests emulated ones worth
-# having, and swtpm is what emulates them.  Only worth saying where there is
-# hardware to make it mean something: on a machine with no TPM, installing swtpm
-# would buy a guest a TPM sealed to a file next to its disk image, which is why
-# bin/provision does not give it one.  Nothing to fix there, so nothing said.
+=head2 $result = $hv->note_swtpm()
+
+Fails when the hypervisor has a TPM and no C<swtpm>.  Passes on a hypervisor
+with no TPM, because L</has_tpm> gives its guests no TPM whether or not
+C<swtpm> is installed.
+
+=cut
+
 sub note_swtpm {
     my ($self) = @_;
 
@@ -2034,35 +2050,35 @@ vault key.  Without it they are built without one and do without.
 FIX
 }
 
-# What the guests built here can actually be held to, which is a question worth
-# asking before handing an unattended runner a key.
-#
-# Nothing in libvirt counts what anybody has allocated, and on the system URI
-# every guest runs as libvirt-qemu whoever defined it, so there is no UID for a
-# disk quota to attach to.  The pool being on a filesystem with a limit is the
-# only thing that makes one real -- and a pool whose capacity is the whole
-# filesystem is a pool that can fill the hypervisor root.
-#
-# A note rather than a check: this is what every hypervisor looks like today,
-# and refusing to build anything over it would be wrong.
+=head2 $result = $hv->note_pool_quota()
+
+Fails when the storage pool is as large as its filesystem, which means that no
+quota limits it.  Passes when there is no pool yet.
+
+libvirt does not count what anyone allocates.  On the system URI, every guest
+runs as libvirt-qemu, so a disk quota has no UID to apply to.  Only a filesystem
+with a limit under the pool limits the guests.  Without one, the pool can fill
+the root filesystem of the hypervisor.  This is a note and not a check, because
+most hypervisors have no such limit.
+
+=cut
+
 sub note_pool_quota {
     my ($self) = @_;
 
-    # Asked of libvirt directly rather than through Trog::HV::pool, which
-    # defines and starts a pool it cannot find.  A check that builds something
-    # is not a check.
+    # Not through pool(), which defines and starts a pool it cannot find.  A
+    # check must not build anything.
     my $name = $self->pool_name;
     my $info = eval { $self->vmm->get_storage_pool_by_name($name)->get_info() } or return { ok => 1 };
 
-    # -B1 without -P, which df refuses alongside --output; the last line is the
-    # mount, and its second field is the size in bytes.
+    # The last line is the mount, and with -B1 its second field is the size in
+    # bytes.
     my $path    = $self->pool_path;
     my $said    = eval { $self->capture_cmd("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
     my ($bytes) = $said =~ m/\A\S+\s+(\d+)\s/;
 
-    # Within a gigabyte of the filesystem it sits on means it is not a limit,
-    # it is the filesystem -- the pool is a directory, and libvirt reports what
-    # statvfs says about whatever it is mounted on.
+    # The pool is a directory, and libvirt reports the statvfs size of its
+    # filesystem.  A size within a gigabyte of the filesystem is no limit.
     return { ok => 1 }
       if !defined $bytes || abs( $bytes - ( $info->{capacity} // 0 ) ) >= 1_073_741_824;
 
@@ -2089,17 +2105,25 @@ QUOTAS in Provisioner::Recipe::trogrunner.
 FIX
 }
 
-# Is anything keeping the logs the fleet produces?
-#
-# Two things worth saying.  A collector built and nothing shipping to it is the
-# more annoying: the sink exists and every guest is still talking to itself.
-# Leftover drop-ins on the hypervisor are the upgrade case -- provisioning used
-# to write one per guest there, for a listener that on most installations was
-# never opened.
-#
-# Reads the configuration, and asks the hypervisor only what it already has a
-# connection for.  It does not ask the ip pool anything: that would have a
-# read-only command create ips.db.
+=head2 $result = $hv->note_log_destination()
+
+Says whether anything keeps the logs of the guests.  It fails in two cases:
+
+=over 4
+
+=item * The hypervisor still has rsyslog drop-ins named F<10-DOMAIN.conf> for
+known domains.  Old versions of this tool wrote them, and nothing uses them now.
+
+=item * A domain runs C<logcollector>, and no domain runs C<logshipper>.
+
+=back
+
+It reads the configuration and uses the existing connection to the hypervisor.
+It does not ask the IP pool, because that makes a read-only command create
+F<ips.db>.
+
+=cut
+
 sub note_log_destination {
     my ($self) = @_;
 
@@ -2113,17 +2137,16 @@ sub note_log_destination {
         $collectors{$domain} = 1 if exists $recipes->{logcollector};
     }
 
-    # What provisioning used to write, for a listener it never opened.  Only the
-    # per-domain ones this tool made: everything else in there is the
-    # distribution's or another recipe's.
+    # Only the drop-ins for known domains.  Every other file there belongs to
+    # the distribution or to another recipe.
     my %known = map       { $_ => 1 } @domains;
     my @stale = sort grep { $known{$_} }
       map { m/\A10-(\N+)[.]conf\z/ ? $1 : () } eval { $self->list_dir('/etc/rsyslog.d') };
 
     if (@stale) {
 
-        # Comma-joined with no spaces on purpose: that is a brace expansion the
-        # operator can paste, and one with spaces in it is not.
+        # Commas and no spaces, so that the operator can paste the brace
+        # expansion.
         my $braces = join( ',',  @stale );
         my $listed = join( "\n", map { "    $_" } @stale );
         my $where  = $self->describe;
@@ -2159,9 +2182,8 @@ Nothing depends on that recipe, and a guest that does not run it ships nowhere.
 FIX
 }
 
-# libvirt packs its version into one integer: major * 1000000 + minor * 1000 +
-# release.  Named apart from libvirt_version above, which asks the connection
-# what it is running rather than spelling out an answer already in hand.
+# Turns a packed libvirt version, major * 1000000 + minor * 1000 + release, into
+# dotted form.  libvirt_version is a different method, which asks the connection.
 sub _version_string {
     my ($packed) = @_;
     return sprintf '%d.%d.%d', int( $packed / 1000000 ), int( $packed / 1000 ) % 1000, $packed % 1000;
@@ -2169,19 +2191,24 @@ sub _version_string {
 
 =head2 clear_guest($domain)
 
-Whatever is already answering to this name, gone: the domain, both of its
-volumes, and the addresses its MAC still holds.
+Removes what uses this domain name before a new build, and returns 1.
 
-A domain about to be defined cannot share a name with one that exists, and its
-disk is a fresh overlay on the base image -- keeping the old one would hand the
-new guest the old one's filesystem.
+=over 4
 
-The leases matter for a subtler reason.  A rebuilt guest keeps its MAC, which is
-derived from its name, but it is a new DHCP client, so dnsmasq gives it a new
-address and keeps the old lease on file until it expires.  Left there, every
-rebuild holds one more address out of the NAT range, and the wait in
-C<provision_guest> finds the old lease already in the table and stops before the
-new guest has asked for anything.
+=item * With C<keep_disk>, it stops the domain and reverts its disk to
+C<trog-pristine>.  It dies if the revert fails.
+
+=item * Without C<keep_disk>, it undefines the domain and deletes its disk.
+The new disk is a new overlay, so the new guest does not get the old filesystem.
+
+=back
+
+In both cases, it deletes the seed ISO and releases each lease of the NAT MAC.
+
+A rebuilt guest keeps its MAC, which comes from its name.  But it is a new DHCP
+client, so dnsmasq gives it a new address and keeps the old lease.  Without the
+release, each rebuild holds one more address in the NAT range.  Also, the wait
+in C<provision_guest> finds the old lease and stops before the new guest asks.
 
 =cut
 
@@ -2190,10 +2217,9 @@ sub clear_guest {
 
     if ( $opts{keep_disk} ) {
 
-        # Stopped rather than undefined: undefining takes libvirt's snapshot
-        # metadata with it (annihilate_domain asks for exactly that), and then
-        # the snapshot taken a moment ago is still in the file but invisible to
-        # anything that asks the domain about it -- bin/restore included.
+        # Stopped, not undefined.  Undefining removes the libvirt snapshot
+        # metadata, as annihilate_domain asks.  The new snapshot then stays in
+        # the file, but the domain, and bin/restore, cannot see it.
         print "Keeping the disk for $domain, and putting it back to $PRISTINE_SNAPSHOT\n";
         $self->stop_domain($domain);
         $self->revert_disk( "$domain-qcow2", $PRISTINE_SNAPSHOT )
@@ -2208,8 +2234,7 @@ sub clear_guest {
         $self->delete_volume("$domain-qcow2");
     }
 
-    # The seed goes either way.  It is rewritten every provision, and a guest
-    # that booted from the last one is a guest configured for the last one.
+    # The seed goes in both cases, because each provision writes a new one.
     $self->delete_volume("$domain-cloudinit.iso");
 
     $self->release_dhcp_lease($_) for $self->lease_ips( 'default', mac => $self->guest_mac( $domain, 0 ) );
@@ -2219,14 +2244,16 @@ sub clear_guest {
 
 =head2 $address = $hv->provision_guest($config, $seed, %opts)
 
-The guest itself: its disks and cloud-init seed, the XML that names them, and
-the domain defined and started from it.  Hands back the address it asked for.
+Makes the guest: its disks and cloud-init seed, the domain XML, and the domain,
+defined and started.  Returns the address that the guest leased on the NAT
+network.  Dies if no lease appears within about 30 seconds.
 
-C<settings> is the domain's configuration as a plain hash -- C<bin/provision>
-reads that out of F<provision.conf>, so nothing here has to know what
-L<Config::Simple> is.  L<Provisioner::Recipe::vm> takes one for the same reason:
-its other caller, C<bin/new_config>, has a domain's recipe configuration and no
-such object.
+C<$seed> is a hashref of the three NoCloud files, for
+L</cloudinit_iso($domain, %files)>.
+C<settings> is the configuration of the domain as a plain hash, which
+C<bin/provision> reads from F<provision.conf>.  So this code does not need
+L<Config::Simple>.  L<Provisioner::Recipe::vm> takes a hash for the same reason,
+because its other caller, C<bin/new_config>, has no such object.
 
 =cut
 
@@ -2243,32 +2270,27 @@ sub provision_guest {
         hv            => $self,
     );
 
-    # The disks, the base image and the seed ISO, before the XML that names them
-    # by path: there is no rendering it without making them first.
+    # The disks, the base image and the seed ISO come first, because the XML
+    # names them by path.
     my %storage = $vm->create_storage( %settings, domain => $domain, seed => $seed );
 
-    # Read before the XML is written, and only ever found on the rebuild that
-    # kept the disk: that one leaves the domain defined, and libvirt refuses to
-    # redefine a domain it has under a uuid other than the one it gave it.
-    # Undef on a first build, where the template leaves the element out.
+    # Only a rebuild that kept the disk finds a uuid.  See domain_uuid.  On a
+    # first build it is undef, and the template leaves the element out.
     my $uuid = $self->domain_uuid($domain);
 
-    # Only what vm declares, out of everything provision.conf says: the rest of
-    # that file is for bin/provision and the guest's first boot, and the recipe
-    # refuses a key it has no use for.
+    # Only the keys that vm declares.  The rest of provision.conf is for
+    # bin/provision and the first boot, and the recipe refuses unknown keys.
     $vm->generate_files( $dir, $vm->takes(%settings), %storage, domain => $domain, ( defined $uuid ? ( uuid => $uuid ) : () ) );
 
     my $file = "$dir/domain.xml";
-    print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two announcements rather than one message: this one closes out generate_files, the next opens define_domain
+    print "Wrote $file\n";    ## no critic (InputOutput::ProhibitRepeatedPrints) -- two messages, because this one ends generate_files and the next one starts define_domain
 
     print "Defining and starting $domain...\n";
     $self->define_domain( File::Slurper::read_text($file) );
 
-    # clear_guest released the leases this MAC held, so the one that appears is
-    # this guest asking for it.  Unless the release could not be done -- no lease
-    # helper on the hypervisor says so as it happens -- in which case this can
-    # find the old one; either way it finds an address and does not establish
-    # that anything is running at it.  wait_for_ssh does that.
+    # clear_guest released the old leases of this MAC, so a lease that appears
+    # is from this guest.  If the release failed, with a warning, this can find
+    # an old lease.  wait_for_ssh makes sure that the guest is running.
     print "Looking up the address for $domain...";
     my $nat_mac = $self->guest_mac( $domain, 0 );
     my $address = q{};
@@ -2287,7 +2309,8 @@ sub provision_guest {
 
 =head2 $hv->would_provision($config, %opts)
 
-What the two above would do, said rather than done.
+Prints the plan for C<clear_guest> and C<provision_guest>, and does not carry
+it out.  Returns the current NAT lease of the guest, or C<bogus> when it has none.
 
 =cut
 

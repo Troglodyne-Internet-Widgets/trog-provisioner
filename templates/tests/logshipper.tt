@@ -6,13 +6,10 @@ use IO::Socket::INET();
 
 # The point of this file is the connection test below.
 #
-# A destination that is not listening and one that is look identical from the
-# guest: rsyslog queues, retries, suspends the action and discards the messages
-# without logging a word about any of it.  That is how the arrangement this
-# replaced went years without anyone noticing it had never once worked -- every
-# guest shipping everything at a hypervisor with nothing bound to the port.
-#
-# So this asks the question that was never asked.
+# From the guest, a destination that listens and one that does not look the
+# same.  rsyslog queues, retries, suspends the action and discards the messages.
+# It logs nothing about any of it.  Provisioner::Recipe::logshipper has the
+# whole account.
 
 my $target   = '[% target %]';
 my $port     = '[% port %]';
@@ -31,9 +28,9 @@ subtest 'the forwarder is installed and says where it is sending' => sub {
 
 subtest 'rsyslog accepts the configuration' => sub {
 
-    # -N1 parses everything under /etc/rsyslog.d without starting anything, so
-    # this catches a directive this distribution's rsyslog does not know -- which
-    # otherwise shows up as a service that will not start, long after the build.
+    # -N1 parses everything under /etc/rsyslog.d and starts nothing.  So this
+    # catches a directive that the rsyslog of this distribution does not know.
+    # Otherwise that shows up as a service that does not start, after the build.
     my $out = `rsyslogd -N1 2>&1`;
     unlike( $out, qr/error|could not|unknown|invalid/i, 'rsyslogd -N1 finds nothing to complain about' )
       or diag $out;
@@ -42,9 +39,9 @@ subtest 'rsyslog accepts the configuration' => sub {
 subtest 'and something is actually listening at the other end' => sub {
 [% IF protocol == 'udp' %]
 
-    # UDP cannot answer this question: there is no handshake, so a socket to a
-    # dead port succeeds and tells you nothing.  Saying that is worth more than
-    # an assertion that cannot fail.
+    # UDP cannot answer this question.  There is no handshake, so a socket to a
+    # dead port succeeds and tells you nothing.  A note that says so is better
+    # than an assertion that cannot fail.
     ok( 1, 'nothing to connect to over UDP; this guest cannot tell whether the destination exists' );
     diag "protocol is udp, so delivery is unverifiable from here -- use tcp if you want this checked";
 [% ELSE %]
@@ -57,9 +54,9 @@ subtest 'and something is actually listening at the other end' => sub {
 [% ELSE %]
 subtest 'a guest that is its own destination forwards nothing' => sub {
 
-    # The natural way to turn this on for a fleet is one _base block, which
-    # necessarily covers the collector too.  Forwarding to its own listener is a
-    # loop, so the recipe installs nothing at all here.
+    # The usual way to turn this on for a fleet is one _base block, and that
+    # block also covers the collector.  Forwarding to its own listener makes a
+    # loop, so the recipe installs nothing here.
     ok( !-f $conf, "no forwarder at $conf" );
 };
 [% END %]

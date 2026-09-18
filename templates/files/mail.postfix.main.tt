@@ -1,38 +1,28 @@
 # main.cf for [% domain %], as a fragment.
 #
-# One domain's half of main.cf.  configd merges every file in
-# /etc/postfix/main.cf.d when postfix starts or reloads: 00-original is what the
-# guest arrived with, 40-mail is the guest's own mail stack, and this is what
-# this domain adds.  The list parameters here -- mydestination,
-# virtual_mailbox_domains, masquerade_domains, header_checks -- are joined
-# across fragments rather than replaced, which is what lets a second domain be
-# provisioned onto this guest without the first one's mail quietly stopping
-# being delivered.
+# The half of main.cf for one domain.  configd merges every file in
+# /etc/postfix/main.cf.d when postfix starts or reloads.  00-original is what
+# the guest arrived with, 40-mail is the mail stack of the guest, and this file
+# is what this domain adds.  configd joins the list parameters here
+# (virtual_mailbox_domains, masquerade_domains and the table parameters) across
+# fragments.  So a second domain on this guest does not stop the mail of the
+# first.
 #
-# These comments stay in this file.  They do not reach the generated main.cf,
-# because a comment describes the setting under it and once several fragments
-# have merged there may no longer be one.
+# These comments do not go into the generated main.cf.  After a merge, the
+# setting under a comment can be a different one.
 mydomain = [% domain %]
 myhostname = mail.[% domain %]
 myorigin = $mydomain
 masquerade_domains = [% domain %][% FOREACH alias IN full_aliases.sort() %] [% alias %][% END %]
 
-# Only the domain itself, and nothing added to mydestination.
-#
-# www. and mail. used to be in both mydestination and virtual_mailbox_domains,
-# which postfix's own VIRTUAL_README says never to do: "NEVER list a virtual
-# MAILBOX domain name as a mydestination domain!"  A domain in two address
-# classes has no defined answer to "who are the valid recipients here", and the
-# check_recipient_access table that used to be in smtpd_recipient_restrictions
-# existed to paper over it -- at the cost of being one file two domains fought
-# over.  With the overlap gone postfix rejects mail to an alias name by itself,
-# and mail for a name this guest does not host never reaches the question.
+# Only the domain itself, and nothing added to mydestination.  A domain must
+# not be in two address classes.  Provisioner::Recipe::mail has the whole
+# account.
 virtual_mailbox_domains = [% domain %]
 
-# This domain's lookup tables.  Each of these parameters is a list postfix
-# searches in order and configd joins across fragments, so every domain names
-# its own file and none of them overwrite each other -- which is what the shared
-# /etc/postfix/virtual/maps used to do every time a second domain was built.
+# The lookup tables of this domain.  postfix searches each of these lists in
+# order, and configd joins them across fragments.  So each domain names its
+# own files.
 virtual_mailbox_maps = hash:/etc/postfix/domains/[% domain %]/virtual_maps
 virtual_alias_maps = hash:/etc/postfix/domains/[% domain %]/virtual_aliases
 transport_maps = hash:/etc/postfix/domains/[% domain %]/transport_maps
@@ -40,14 +30,13 @@ sender_dependent_relayhost_maps = hash:/etc/postfix/domains/[% domain %]/sdd_rel
 smtpd_sender_login_maps = hash:/etc/postfix/domains/[% domain %]/sender_login
 header_checks = regexp:/etc/postfix/domains/[% domain %]/header_checks
 
-# Sometimes when you are behind NAT this can trip you up -- not all routers are
-# created equal.  Generally you will want to set this on if in a DC.  That's
-# because you don't get put on RBLs for sending from multiple IPs.
+# Behind NAT, this setting can cause problems, because routers differ.  In a
+# data center, set it, so that mail from more than one IP does not put you on
+# an RBL.
 [% IF bind_mainip %]
 smtp_bind_address = [% main_ip %]
 [% END %]
-# SSL.  Not a list: a second domain provisioned onto this guest replaces these
-# rather than adding to them, because postfix has one certificate for the
-# smtpd it answers on and cannot have two.
+# SSL.  These are not lists.  A second domain on this guest replaces them,
+# because postfix has one certificate for its smtpd.
 smtpd_tls_cert_file = /etc/ssl/certs/[% domain %].pem
 smtpd_tls_key_file = /etc/ssl/private/[% domain %].pem

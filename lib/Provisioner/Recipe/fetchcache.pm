@@ -1,6 +1,6 @@
 package Provisioner::Recipe::fetchcache;
 
-#ABSTRACT: Keep what the fleet downloads, so a provision does not wait on upstream, or stop when it fails.
+#ABSTRACT: Keep what the fleet downloads, so a provision does not wait on upstream, or stop when upstream fails.
 
 use 5.041;
 
@@ -22,14 +22,14 @@ use Trog::Config();
 =head1 NAME
 
 Provisioner::Recipe::fetchcache - a pull-through cache for what guests download
-while they provision, so an upstream outage stops being a failed build.
+while they provision, so an upstream outage does not fail a build.
 
 =head1 SYNOPSIS
 
     fetchcache.test:
         fetchcache: {}
 
-and then point the fleet at it:
+Then point the fleet at it:
 
     _base:
         _global:
@@ -37,142 +37,179 @@ and then point the fleet at it:
 
 =head1 DESCRIPTION
 
-An nginx that answers for the hosts recipes download from -- C<www.cpan.org>,
-C<github.com>, C<codeload.github.com> -- fetches from the real ones on a guest's
-behalf, and keeps what it fetched.
+This recipe builds an nginx that answers for the hosts that recipes download
+from, for example C<www.cpan.org>, C<github.com> and C<codeload.github.com>.  It
+fetches from the real hosts for a guest, and it keeps what it fetched.
 
-A guest reaches it by those names.  While a guest provisions, each host its
-recipes list in C<fetch_hosts> is pointed at the cache in its F</etc/hosts>, and
-the authority the cache's certificate is signed by is in its trust store; both
-are taken back out once its deferred work is done.  So nothing that downloads has
-to know there is a cache -- a URL in a template, cpanm, git and pip all fetch
-C<https://github.com/...> as written, and are answered from here -- and a host
-no recipe named goes straight upstream as it always did.  See C<fetch_hosts> in
-L<Provisioner::Recipe>, C<cache> in L<Provisioner::DistroRecipe>, and
-F<scripts/fetch_via_cache>, which is the guest's half.
+A guest reaches the cache by those host names.  While a guest provisions, its
+F</etc/hosts> points each host in the C<fetch_hosts> of its recipes at the cache.
+Its trust store also holds the authority that signs the certificate of the cache.
+Both come out again when the deferred work of the guest is done.
 
-A host is pointed at the cache only if the cache answers for it when the guest
-starts, asked by that name over TLS at C</fetchcache-status>.  So a cache that
-is down, or that does not fetch from a host some recipe names, costs a build
-nothing.  One that dies partway through a build does: what was pointed at it
-stays pointed at it until the build ends.
+Thus nothing that downloads has to know about the cache.  A URL in a template,
+cpanm, git and pip all fetch C<https://github.com/...> as written, and the cache
+answers.  A host that no recipe names goes straight upstream.  See
+C<fetch_hosts> in L<Provisioner::Recipe>, C<cache> in
+L<Provisioner::DistroRecipe>, and F<scripts/fetch_via_cache>, which is the half
+that runs on the guest.
+
+A guest points a host at the cache only if the cache answers for that host when
+the guest starts.  The guest asks by that name, over TLS, at
+C</fetchcache-status>.  Thus a cache that is down costs a build nothing.  The
+same is true of a cache that does not fetch from a host that some recipe names.
+A cache that stops partway through a build is different.  What the guest pointed
+at it stays pointed at it until the build ends.
 
 =head2 Pull-through, and stale rather than failing
 
-Nothing is fetched until a guest asks for it, and what has been fetched is kept
-until the store runs out of room -- see L</When it runs out of room>.  When
-upstream fails -- an error, a timeout, or a 403, 404, 429 or 5xx -- a copy the
-cache already has is served instead, however old.  That is the point of it:
-GitHub answering 503 for an hour is an hour of builds that did not notice.
+The cache fetches nothing until a guest asks for it.  It keeps what it fetched
+until the store runs out of room, see L</When it runs out of room>.  If upstream
+fails, the cache serves the copy it has, however old.  A failure is an error, a
+timeout, or a 403, 404, 429 or 5xx.  Thus when GitHub answers 503 for an hour,
+the builds of that hour do not notice.  An apt index is the exception, see
+L</Four kinds of URL, and one it does not keep>.
 
-A 404 is on that list on purpose.  CPAN moves superseded releases off to BackPAN
-and a project can delete a release, and a pinned build still wants the version
-it was pinned to.  The cache keeps every version it has ever handed out.
+A 404 is on that list on purpose.  CPAN moves superseded releases to BackPAN,
+and a project can delete a release.  A pinned build still wants the version it
+is pinned to.  The cache keeps every version that it ever served.
 
-=head2 Three kinds of URL, and one it does not keep
+=head2 Four kinds of URL, and one it does not keep
 
-How long a copy is used before upstream is asked again depends on what the URL
-is, which the recipe knows from the host and the path -- see C<classes>:
+The kind of a URL sets how long the cache uses a copy before it asks upstream
+again.  The recipe finds the kind from the host and the path, see C<classes>:
 
 =over 4
 
-=item * B<index> -- what says which version is current: CPAN's C<modules/>,
-MetaCPAN's API, GitHub's API, and a C<releases/latest> link.  C<fresh_index>,
-ten minutes by default, so a new release is picked up the same afternoon.
+=item * C<aptindex>: the indexes of an apt repository.  C<fresh_apt_index>,
+five minutes by default.  The cache never serves one stale.  An index is half of
+a pair, and a pair from two different moments stops apt with a hash-sum mismatch.
 
-=item * B<immutable> -- what a version number or a commit names, and so never
-changes: CPAN's C<authors/id/>, a GitHub release asset or a commit archive,
-garage's and ImageMagick's release downloads.  C<fresh_immutable>, a year.  A
-branch archive is not one of these: C<archive/refs/heads/> moves.
+=item * B<index>: a URL that says which version is current.  Examples are the
+C<modules/> of CPAN, the API of MetaCPAN, the API of GitHub, and a
+C<releases/latest> link.  C<fresh_index>, ten minutes by default, so the cache
+sees a new release on the same afternoon.
 
-=item * B<default> -- anything else on an allowed host.  C<fresh_default>, an
+=item * B<immutable>: a URL that a version number or a commit names, and which
+thus never changes.  Examples are the C<authors/id/> of CPAN, a GitHub release
+asset or commit archive, and the release downloads of garage and ImageMagick.
+C<fresh_immutable>, a year.  A branch archive is not immutable, because
+C<archive/refs/heads/> moves.
+
+=item * B<default>: any other URL on an allowed host.  C<fresh_default>, an
 hour.
 
 =back
 
-Only a C<200> is kept.  Upstream's own C<Cache-Control> is ignored, because
-GitHub marks every release asset C<private> and would otherwise never be cached
-at all.
+The cache keeps only a C<200>.  It ignores the C<Cache-Control> of upstream,
+because GitHub marks every release asset C<private>.  If the cache obeys that,
+it never keeps a release asset.
 
-A copy that is no longer fresh is not thrown away: upstream is asked whether it
-has changed, with the copy's C<ETag> or C<Last-Modified>, and a C<304> keeps it.
-So a year's freshness for what never changes costs one small request a year,
-and an upstream that is down or has dropped the file gets the copy served
-instead.
+The cache does not discard a copy that is no longer fresh.  It asks upstream if
+the file changed, with the C<ETag> or C<Last-Modified> of the copy, and a C<304>
+keeps the copy.  Thus a year of freshness costs one small request a year.  If
+upstream is down or no longer has the file, the cache serves the copy.
 
-What is B<never kept> is passed upstream as it came, credentials and all, and
-its answer passed back: a request that is not a C<GET> or C<HEAD>, and git's
-smart-HTTP ref advertisement (C<$PASSTHROUGH>), which says where each branch is
-now.  So a C<git clone> from a host some recipe named still works, and still
-clones what is there today.
+The cache B<never keeps> two kinds of request.  It passes them upstream as they
+came, with their credentials, and passes the answer back:
+
+=over 4
+
+=item * A request that is not a C<GET> or C<HEAD>.
+
+=item * The smart-HTTP ref advertisement of git (C<$PASSTHROUGH>), which says
+where each branch is now.
+
+=back
+
+Thus a C<git clone> from a host that a recipe names still works, and it clones
+what is there today.
 
 =head2 When it runs out of room
 
-Nothing is removed for its age: C<inactive> defaults to a hundred years, so a
-copy nobody has asked for in a long time is still there for the build that
-finally does.  Those are the ones that matter most -- a guest rebuilt a year on,
-pinned to a Sys::Virt or a garage upstream has since moved to BackPAN or
-deleted -- and nothing can fetch them back.
+The cache removes nothing because of its age.  C<inactive> is a hundred years by
+default.  Thus a copy that nobody asked for in a long time is still there for
+the build that asks for it.  Those copies matter most, because nothing can fetch
+them again.  An example is a guest that is rebuilt a year later and is pinned to
+a Sys::Virt or garage release that upstream moved to BackPAN or deleted.
 
-What removes anything is room.  When the store passes C<max_size_gb>, or the
-disk it is on has less than C<min_free_gb> free, nginx's cache manager removes
-the least recently used copies until it is back under.  Least recently used
-rather than first in, first out: the oldest copy is often the old pinned
-version every build still asks for, and first-in-first-out would throw that
-away first.  C<max_size_gb> is enforced lazily and can be briefly exceeded,
-which is what C<min_free_gb> is there for: the store is on the guest's root
-disk.
+Only lack of room removes a copy.  The cache manager of nginx removes the least
+recently used copies in two cases.  One is when the store is larger than
+C<max_size_gb>.  The other is when the disk of the store has less than
+C<min_free_gb> free.  It removes copies until the store is below the limit again.
+
+The order is least recently used, not first in, first out.  The oldest copy is
+often an old pinned version that every build still asks for.  First in, first
+out discards that copy first.
+
+nginx enforces C<max_size_gb> lazily, so the store can briefly be larger.
+C<min_free_gb> is for that case, because the store is on the root disk of the
+guest.
 
 =head2 Redirects are followed here
 
-A GitHub release asset is a redirect to a signed URL on another host that stops
-working within minutes, so a guest handed the redirect would cache nothing
-useful.  The cache follows it instead, and keeps the body under the URL the guest
-asked for.  It follows only to a host in C<upstreams>, and only over https;
-anything else is a C<502>.
+A GitHub release asset is a redirect to a signed URL on another host.  That URL
+stops working within minutes, so a guest that gets the redirect caches
+nothing useful.  Thus the cache follows the redirect itself.  It keeps the body
+under the URL that the guest asked for.  It follows a redirect only to a host in
+C<upstreams>, and only over https.  Any other redirect gets a C<502>.
 
 =head2 The certificate, and who signs it
 
-The cache presents one certificate naming every host it fetches from, signed by
-an authority this installation makes the first time it needs one and keeps in
-its configuration directory beside F<ips.db>, as F<fetchcache-ca.crt> and
-F<fetchcache-ca.key> -- see L<Trog::Config>.  C<bin/new_config> signs a new
-certificate each time it configures the cache, and hands the authority's
-certificate, never its key, to every guest that provisions through it.
+The cache presents one certificate that names every host it fetches from.  An
+authority signs that certificate.  This installation makes the authority the
+first time it needs one.  It keeps the authority in its configuration directory
+beside F<ips.db>, as F<fetchcache-ca.crt> and F<fetchcache-ca.key>, see
+L<Trog::Config>.
 
-That authority can vouch for any name at all, which is why a guest trusts it
-only while it provisions, and why its key never leaves the machine that runs the
-provisioner.  Delete both files to replace it: the next configuration makes a
-new one, which the cache and each guest take up when they are next built.  A
-scratch configuration has an authority of its own.
+C<bin/new_config> signs a new certificate each time it configures the cache.  It
+gives the certificate of the authority to every guest that provisions through
+the cache.  It never gives out the key of the authority.
+
+The authority can vouch for any name at all.  Thus a guest trusts it only while
+the guest provisions, and its key never leaves the machine that runs the
+provisioner.  To replace the authority, delete both files.  The next
+configuration makes a new one.  The cache and each guest use the new authority
+when they are next built.  A scratch configuration has its own authority.
 
 =head2 What a guest has to trust
 
-A guest provisioning through the cache takes what it serves for upstream's, so
-the cache is a trust point: what it serves is what gets built.  What keeps that
-narrow is that it only fetches from C<upstreams>, over TLS it verifies against
-the system's certificate authorities, and never forwards a guest's
-C<Authorization> or C<Cookie> with anything it keeps -- so nothing it keeps was
-fetched as anybody in particular.
+A guest that provisions through the cache uses what the cache serves in place
+of what upstream serves.  Thus the cache is a trust point: what it serves is
+what gets built.  Three rules keep that trust narrow:
+
+=over 4
+
+=item * The cache fetches only from C<upstreams>.
+
+=item * It fetches over TLS, which it verifies against the certificate
+authorities of the system.
+
+=item * It never forwards the C<Authorization> or C<Cookie> of a guest with a
+request whose answer it keeps.  Thus nothing that it keeps was fetched as a
+particular user.
+
+=back
 
 =head2 Sharing a port with a package mirror
 
-It listens on 443 and on 80 -- a guest pointed at it by name asks on whatever
-port it likes, and cpanm asks CPAN over plain http -- and answers only to the
-names of the hosts it fetches from.  Upstream is fetched over https whichever
-port the guest asked on.
+The cache listens on 443 and on 80.  A guest that is pointed at it by name can
+ask on either port, and cpanm asks CPAN over plain http.  The cache answers only
+to the names of the hosts it fetches from.  It fetches from upstream over https,
+whichever port the guest asked on.
 
-That it answers by name and not by address is what lets it B<coexist> with an
-L<Provisioner::Recipe::aptmirror> on one guest, neither being told about the
-other: nginx routes a port between servers by name, and fetchcache leaves 80's
-C<backlog>, which nginx takes once a port, to the mirror.  Worth knowing about,
-rather than recommended.  A mirror is there to be a mirror, and a cache is all
-that a provision needs to be quick and to survive a bad day upstream, so most
-installations should keep them apart.
+The cache answers by name and not by address.  Thus it can B<coexist> with a
+L<Provisioner::Recipe::aptmirror> on one guest, and neither recipe has to know
+about the other.  nginx routes a port to a server by name.  nginx takes the
+C<backlog> of a port only once, and fetchcache leaves the C<backlog> of port 80
+to the mirror.
 
-Nothing else is answered.  A guest reaching one of those hosts on another port
-while it provisions -- git over ssh to C<github.com> -- reaches the cache
-instead, and fails.
+This arrangement is possible, but it is not recommended.  A mirror is there to
+be a mirror.  A cache is all that a provision needs to be quick and to survive a
+bad day upstream.  Keep the two on separate guests in most installations.
+
+The cache answers nothing else.  A guest that reaches one of those hosts on
+another port while it provisions reaches the cache and fails.  An example is git
+over ssh to C<github.com>.
 
     mirrors.test:
         aptmirror:
@@ -186,18 +223,19 @@ instead, and fails.
 
 =head2 Seeing what it did
 
-Every response carries C<X-Cache-Status> -- C<MISS>, C<HIT>, C<STALE>,
-C<UPDATING>, C<EXPIRED>, C<REVALIDATED> -- and F</var/log/nginx/fetchcache.log>
-records the same for every request, with the host it was for.  To ask it
-something from anywhere, name the host and give its address:
+Every response has an C<X-Cache-Status> header.  Its values are C<MISS>,
+C<HIT>, C<STALE>, C<UPDATING>, C<EXPIRED> and C<REVALIDATED>.
+F</var/log/nginx/fetchcache.log> records the same value for every request, with
+the host of the request.  To ask the cache something from any machine, name the
+host and give the address of the cache:
 
     curl -skI --resolve www.cpan.org:443:<cache address> \
         https://www.cpan.org/modules/02packages.details.txt.gz
 
-(C<-k>, because only a guest that is provisioning trusts the authority.)
+Use C<-k>, because only a guest that is provisioning trusts the authority.
 
-Nothing requires it.  A fleet with no cache configured downloads straight from
-upstream, as it always has.
+The fleet does not need a cache.  A fleet with no cache configured downloads
+straight from upstream.
 
 =head1 METHODS
 
@@ -205,17 +243,21 @@ upstream, as it always has.
 
 =over 4
 
-=item * C<upstreams> -- the hosts it will fetch from, each true or false.  The
-defaults are every host a recipe names in C<fetch_hosts>, each on; naming
-another adds it, and naming one of the defaults false turns it off.
+=item * C<upstreams>: the hosts that the cache fetches from, each true or false.
+The defaults are every host that a recipe names in C<fetch_hosts>, each true.
+Name another host to add it.  Set a default host to false to turn it off.
 
-=item * C<store>, C<max_size_gb>, C<min_free_gb>, C<inactive> -- where copies are
-kept, how much of the disk they may take, how much of it to leave free, and how
-long one nobody asks for survives.  See L</When it runs out of room>.
+=item * C<store>, C<max_size_gb>, C<min_free_gb>, C<inactive>: where the cache
+keeps copies, how much of the disk they can use, how much of the disk to leave
+free, and how long a copy that nobody asks for stays.  See
+L</When it runs out of room>.
 
-=item * C<fresh_index>, C<fresh_immutable>, C<fresh_default> -- how long a copy
-of each kind is used before upstream is asked again.  In nginx's units:
-C<10m>, C<1h>, C<365d>.
+=item * C<fresh_apt_index>, C<fresh_index>, C<fresh_immutable>,
+C<fresh_default>: how long the cache uses a copy of each kind before it asks
+upstream again.  See L</Four kinds of URL, and one it does not keep>.  The
+values use the units of nginx, for example C<10m>, C<1h> and C<365d>.
+
+=item * C<ipv6>: listen on IPv6 as well as IPv4.  True by default.
 
 =back
 
@@ -227,16 +269,15 @@ sub args {
         type       => 'object',
         properties => {
 
-            # On the members rather than on the map, so that an operator adding
-            # one host keeps all of these.
+            # The defaults are on the members and not on the map, so that an
+            # operator who adds one host keeps all of the defaults.
             upstreams => {
                 type    => 'object',
                 default => {},
 
-                # What every recipe names by default, and what the domains this
-                # installation actually configures will reach: a koan pointed at
-                # a gitea of its own is a host this cache has to answer for, and
-                # asking the class alone never saw it.
+                # The hosts that every recipe names by default, and the hosts that
+                # the configured domains reach.  A koan pointed at its own gitea is
+                # a host that the class alone does not name.
                 properties           => { map { $_ => { type => 'boolean', default => 1 } } List::Util::uniq( sort Provisioner::Cookbook->fetch_hosts, Provisioner::Cookbook->configured_fetch_hosts ) },
                 additionalProperties => { type => 'boolean' },
                 description          => 'Hosts the cache will fetch from, each true or false.  The defaults are every host a recipe names in fetch_hosts; naming another adds it, and naming a default false removes it.',
@@ -299,24 +340,36 @@ sub args {
 
 =head2 @classes = $recipe->classes()
 
-The kinds of URL, most specific first: C<index> for one saying which version is
-current, C<immutable> for one a version or a commit names, and C<default> for
-whatever the other two did not take.  Each is a C<name>, the C<args> key saying
-how fresh a copy of that kind stays, and a C<pattern> matched against
-C<HOST/PATH>.
+Returns the kinds of URL, most specific first.  Each is a hash of three keys:
 
-The patterns are not held here.  Each recipe declares its own in
-C<cache_classes> -- see L<Provisioner::Recipe> -- and this is the union of them,
-so a recipe gaining an upstream is not a reason to edit the cache.  What stays
-here is C<default>, which belongs to no recipe, and C<$PASSTHROUGH>.
+=over 4
+
+=item * C<name>: C<aptindex>, C<index>, C<immutable> or C<default>.  See
+L</Four kinds of URL, and one it does not keep>.
+
+=item * C<fresh>: the C<args> key that sets how long a copy of that kind stays
+fresh.
+
+=item * C<pattern>: a regex that is matched against C<HOST/PATH>.  C<default>
+has none, because it takes every URL that the others do not take.
+
+=back
+
+C<aptindex> also has C<no_stale>, which is true.  A kind that no recipe declares
+a pattern for is left out.
+
+This module does not hold the patterns.  Each recipe declares its own in
+C<cache_classes>, see L<Provisioner::Recipe>.  This method returns the union of
+them.  Thus a recipe that gets a new upstream does not need an edit to the
+cache.  This module holds only C<default>, which belongs to no recipe, and
+C<$PASSTHROUGH>.
 
 =cut
 
 our @CLASS_ORDER = (
 
-    # First, and the only one that refuses to be served stale: an apt index is
-    # half of a pair, and half of a pair from a different moment is a hash-sum
-    # mismatch rather than an old download.
+    # First, and the only kind that is never served stale: an apt index is half
+    # of a pair, and a pair from two moments is a hash-sum mismatch.
     { name => 'aptindex',  fresh => 'fresh_apt_index', no_stale => 1 },
     { name => 'index',     fresh => 'fresh_index' },
     { name => 'immutable', fresh => 'fresh_immutable' },
@@ -328,9 +381,8 @@ sub classes {
     my %pattern;
     push( @{ $pattern{ $_->{class} } }, $_->{pattern} ) for Provisioner::Cookbook->cache_classes;
 
-    # Sorted and once each: two recipes downloading from one upstream describe it
-    # the same way, and the vhost this renders into should not change because the
-    # recipes were loaded in a different order.
+    # Sorted and unique, so that the rendered vhost does not change with the
+    # order in which the recipes load.
     my @classes = map {
         my @patterns = List::Util::uniq( sort @{ $pattern{ $_->{name} } // [] } );
         @patterns ? { %$_, pattern => join( '|', @patterns ) } : ();
@@ -341,8 +393,9 @@ sub classes {
 
 =head2 $PASSTHROUGH
 
-The pattern of what is never kept, matched the same way and ahead of the
-classes: git's smart-HTTP ref advertisement.
+The pattern of the URLs that the cache never keeps: the smart-HTTP ref
+advertisement of git.  It is matched in the same way as the classes, and before
+them.
 
 =cut
 
@@ -350,9 +403,9 @@ our $PASSTHROUGH = '[^/]+/.+/info/refs\?service=git-';
 
 =head2 %required = $recipe->required_recipes()
 
-C<nginx>, which is what fetches and serves.  C<ufw> arrives behind it, with
-nginx's limit on 443, and the nginx profile it allows is what lets the cache
-reach 443 upstream.
+Returns C<nginx>, which fetches and serves.  C<nginx> brings C<ufw>, with the
+rate limit of nginx on 443.  The nginx profile that ufw allows also lets the
+cache connect to 443 upstream.
 
 =cut
 
@@ -370,7 +423,8 @@ sub template_files {
 
 =head2 @written = $recipe->generate_files($output_dir, %vars)
 
-The vhost, and the certificate it presents: see C<certify>.
+Writes the vhost and the certificate that it presents, see C<certify>.  Returns
+the names of the files that it wrote.
 
 =cut
 
@@ -390,29 +444,40 @@ sub tests { return ('fetchcache.tt') }
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Turns C<upstreams> into C<allow>, the hosts that are on, and C<allow_re>, the
-same as a regex alternation; the URL classes into C<classes>, each with the
-freshness configured for it; and hands the template C<$PASSTHROUGH>.
+Adds these keys to C<%opts> and returns it:
 
-Dies on a host that is not a plain DNS name, because it is written into the
-vhost as a regex and into a certificate, and on an empty list, which would be a
-cache that fetches nothing.
+=over 4
 
-C<resolvers> are the fleet's, less any loopback or IPv6 address, and it dies if
-none are left: nginx looks an upstream up when it fetches, and has to be given
-servers it can reach.
+=item * C<allow>: the hosts in C<upstreams> that are true, sorted.
 
-Loopback is right on a guest running the pdns recursor and is nothing on this
-one -- nginx rotates through the list, so every few lookups was a refused
-connection.  C<bin/new_config> refuses an installation that names it, and
-C<nostubresolver> puts it in front for the guest it belongs to, so this strips
-what reaches a cache built from an C<ipmap.cfg> written elsewhere: a runner
-writes its own, and C<Provisioner::Recipe::trogrunner> defaults that to
-C<1.1.1.1, 8.8.8.8>.
+=item * C<allow_re>: the same hosts, as a regex alternation.
 
-Not systemd-resolved's stub instead, which would fail over properly: the
-C<nostubresolver> recipe turns it off on these guests.  And IPv6 because nginx
-is told C<ipv6=off>, as apt is told to use IPv4.
+=item * C<classes>: the result of C<classes>, with each C<fresh> replaced by the
+duration configured for it.
+
+=item * C<passthrough>: C<$PASSTHROUGH>, for the template.
+
+=back
+
+It also replaces C<resolvers> with the resolvers of the fleet, less every
+loopback and IPv6 address.  nginx looks an upstream up when it fetches, so it
+needs servers that it can reach.
+
+Dies if no host in C<upstreams> is true, because that cache fetches nothing.
+Dies if a host is not a plain DNS name, because the vhost uses it in a regex and
+the certificate names it.  Dies if no resolvers are left.
+
+Loopback is correct on a guest that runs the pdns recursor, and nothing listens
+there on this guest.  nginx rotates through its resolvers, so a loopback
+resolver refuses some of the lookups.  C<bin/new_config> refuses an installation
+that names loopback, and C<nostubresolver> puts it first on the guest that needs
+it.  This strips loopback from an F<ipmap.cfg> that was written elsewhere.  For
+example, a runner writes its own, and L<Provisioner::Recipe::trogrunner> defaults
+its resolvers to C<1.1.1.1, 8.8.8.8>.
+
+The stub of systemd-resolved fails over correctly, but this does not use it,
+because the C<nostubresolver> recipe turns it off on these guests.  IPv6 goes
+because nginx is told C<ipv6=off>, as apt is told to use IPv4.
 
 =cut
 
@@ -422,10 +487,8 @@ sub enrich {
     my @allow = sort grep { $opts{upstreams}{$_} } keys %{ $opts{upstreams} };
     die "fetchcache has no upstreams turned on, so it would fetch nothing.\n" unless @allow;
 
-    # is_domain rather than a regex of our own: it refuses a scheme, a path, a
-    # space and a leading or trailing dash, and it checks the top-level domain,
-    # which a hand-rolled pattern here did not.  Note that last part -- a host
-    # under a made-up TLD is refused now, where the pattern took it.
+    # is_domain also checks the top-level domain, so it refuses a host under a
+    # made-up TLD.
     my @bad = grep { !Data::Validate::Domain::is_domain($_) } @allow;
     die "fetchcache upstreams must be plain host names; these are not: @bad\n" if @bad;
 
@@ -448,9 +511,9 @@ sub enrich {
 
 =head2 $paths = Provisioner::Recipe::fetchcache->authority()
 
-The authority the cache's certificate is signed by, as a hash of C<cert> and
-C<key>, the paths of the two files.  Made the first time anything asks, and
-kept; see L</The certificate, and who signs it>.
+Returns the authority that signs the certificate of the cache, as a hash
+reference of C<cert> and C<key>, the paths of the two files.  If the files are
+not there, it makes them first.  See L</The certificate, and who signs it>.
 
 =cut
 
@@ -475,7 +538,7 @@ sub authority {
         key       => IO::Socket::SSL::Utils::KEY_create_ec('prime256v1'),
     );
 
-    # The key first: the pair is only taken as made once both are there.
+    # The key first, because the pair counts as made only when both files exist.
     Provisioner::Utils::write_pem( $paths{key},  IO::Socket::SSL::Utils::PEM_key2string($key),   0600 );
     Provisioner::Utils::write_pem( $paths{cert}, IO::Socket::SSL::Utils::PEM_cert2string($cert), 0644 );
 
@@ -487,10 +550,13 @@ sub authority {
 
 =head2 @written = $recipe->certify($output_dir, @hosts)
 
-Sign a certificate naming C<@hosts> with the C<authority>, and write it into
-C<$output_dir> as F<fetchcache.crt>, with the authority's after it, and its key
-as F<fetchcache.key>.  Signed afresh each time, and good for a little over a
-year, which is as long as a client will take one for.
+Signs a certificate that names C<@hosts> with the C<authority>.  Writes it into
+C<$output_dir> as F<fetchcache.crt>, followed by the certificate of the
+authority, and writes its key as F<fetchcache.key>.  Returns the names of the
+two files.
+
+It signs a new certificate at each call.  The certificate is good for 397 days,
+which is the longest that clients accept.
 
 =cut
 

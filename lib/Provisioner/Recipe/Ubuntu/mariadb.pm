@@ -14,21 +14,14 @@ use parent qw{Provisioner::Recipe::mariadb};
 
 Provisioner::Recipe::Ubuntu::mariadb - Ubuntu's C<deps> for L<Provisioner::Recipe::mariadb>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else mariadb does is in the recipe this
-inherits from.
-
 =cut
 
 sub deps {
 
-    # The mariadb packages are deliberately absent: cloud-init installs
-    # deps before the makefile runs, so naming them here would install
-    # Ubuntu's and leave the pin to downgrade them.  install_mariadb.sh
-    # takes the set from the pinned repository instead.  pigz is the backup
-    # script's.
+    # No mariadb packages here.  Cloud-init installs deps before the makefile
+    # runs, so it installs the Ubuntu packages before the pin exists.
+    # install_mariadb.sh installs them from the pinned repository.  The backup
+    # script uses pigz.
     return qw{pigz};
 }
 

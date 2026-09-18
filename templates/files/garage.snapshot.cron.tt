@@ -1,4 +1,4 @@
-# Garage metadata snapshot - 1:15 AM daily
+# Take a snapshot of the garage metadata every day at 1:15 AM.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 15 1 * * * root /usr/local/sbin/garage-snapshot.sh >> /var/log/garage-snapshot.log 2>&1

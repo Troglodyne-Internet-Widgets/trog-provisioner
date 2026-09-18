@@ -48,26 +48,28 @@ Revert to the named snapshot.
 
 =item B<--domaindir> DIR
 
-Where the per-domain directories live.  Defaults to F</opt/domains>.
+The directory that holds one directory for each domain.  The default is
+F</opt/domains>.
 
 =item B<--connect> URI
 
-The libvirt connection string of the hypervisor holding the domain.  Skips the
-search described under C<--hvconf> and goes straight there.
+The libvirt connection string of the hypervisor that holds the domain.  With
+this option, the command does not do the search that C<--hvconf> describes.
 
 =item B<--hvconf> FILE
 
-The fleet definition.  Defaults to F</etc/trog-provisioner/hypervisors.conf>.
-When it exists, every hypervisor in it is asked whether it has this guest, and
-the one that does is the one we revert.
+The file that defines the fleet.  The default is
+F</etc/trog-provisioner/hypervisors.conf>.  If the file exists, the command asks
+each hypervisor in it for this guest.  It reverts the guest on the hypervisor
+that has it.
 
 =back
 
 =head1 DESCRIPTION
 
-Reverts the domain and leaves it running, then waits until it can actually SSH
-in at the address F<provision.conf> gives for it, so a revert that produced an
-unreachable VM is reported as a failure rather than a success.
+Reverts the domain and leaves it running.  Then it waits until SSH connects at
+the address that F<provision.conf> gives for the domain.  Thus a revert that
+gives a VM you cannot reach is a failure, not a success.
 
 =cut
 
@@ -95,10 +97,8 @@ sub main {
         -message => 'Pass exactly one of --latest, --oldest or --name'
     ) unless $modes == 1;
 
-    # We need to know which hypervisor to ask about snapshots before we ask.
-    # With a fleet configured that is whichever one has the guest; without one
-    # it is whatever provision.conf says, so peek at that now.  The file being
-    # mandatory is enforced further down, where it always was.
+    # Without a fleet, provision.conf names the hypervisor, so read it now.  A
+    # missing file is not an error here.  The die after the revert catches it.
     $domain_dir //= Trog::HV->default_domain_dir;
     my $cfile = "$domain_dir/$domain/provision.conf";
     my $hv    = Trog::Hypervisors->find(

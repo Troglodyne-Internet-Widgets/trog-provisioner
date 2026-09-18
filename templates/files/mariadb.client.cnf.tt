@@ -1,9 +1,8 @@
 # Client credentials with full access to the database, for root and the admin.
 #
-# Every section a client might read, and each one naming the socket: --defaults-file
-# replaces the defaults rather than adding to them, so a file used that way has
-# to carry everything the client needs to connect.  Recipes outside this
-# repository point --defaults-file here.
+# One section for each client that reads this file, and each names the socket.
+# Recipes outside this repository point --defaults-file here.  That option
+# replaces the defaults, so the file must hold everything a client needs.
 [client]
 socket = /run/mysqld/mysqld.sock
 user = root

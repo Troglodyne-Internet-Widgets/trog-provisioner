@@ -1,17 +1,15 @@
-# Who may put what in MAIL FROM, for [% domain %].
+# Who can put what in MAIL FROM, for [% domain %].
 #
-# smtpd_sender_login_maps, enforced by reject_authenticated_sender_login_mismatch
-# in smtpd_sender_restrictions.  An authenticated client whose MAIL FROM address
-# is not owned by its SASL login name is rejected -- and an address missing from
-# here has no owner at all, so it is rejected too.  That is why this is built
-# from the accounts and the aliases together rather than by hand.
+# smtpd_sender_login_maps.  reject_authenticated_sender_login_mismatch in
+# smtpd_sender_restrictions enforces it.  postfix rejects an authenticated
+# client if its SASL login name does not own the MAIL FROM address.  It also
+# rejects an address that is not here, because nobody owns it.  So the recipe
+# makes this file from the accounts and the aliases together.
 #
-# The login name is the full address: that is what the dovecot passwd file this
-# pairs with is keyed on.
+# The login name is the full address, because the dovecot passwd file uses it
+# as its key.
 #
-# Unauthenticated senders are not checked against this.  They come in on port 25
-# claiming to be anybody, and deciding what to do about that is DMARC's job, not
-# a table's.
+# This table does not apply to unauthenticated senders.  DMARC deals with them.
 [% FOR login IN sender_logins %]
 [% login.address %] [% login.owner %]
 [%- END %]

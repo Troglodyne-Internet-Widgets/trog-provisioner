@@ -14,11 +14,10 @@ use parent qw{Provisioner::Recipe::gogs};
 
 Provisioner::Recipe::Ubuntu::gogs - Ubuntu's C<deps> for L<Provisioner::Recipe::gogs>.
 
-=head1 DESCRIPTION
+=head2 @pkgs = $recipe->deps()
 
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else gogs does is in the recipe this
-inherits from.
+C<git>, which gogs runs to serve repositories, and C<curl>, which the
+fragment and the setup and mirror scripts use.
 
 =cut
 

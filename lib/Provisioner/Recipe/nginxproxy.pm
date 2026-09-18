@@ -14,20 +14,21 @@ use parent qw{Provisioner::Recipe};
 
 =head2 SYNOPSIS
 
-Flat (new) interface  proxy_uri and static_dir at top level:
+The flat interface puts proxy_uri and static_dir at the top level:
 
     somedomain:
         nginxproxy:
             proxy_uri:  run/app.sock
             static_dir: www/static
 
-This automatically generates vhosts: port 80 redirects to HTTPS, port 443
-proxies to the given socket with statics served from static_dir.
+This makes two vhosts.  Port 80 redirects to HTTPS.  Port 443 proxies to the
+socket and serves static files from static_dir.
 
-Nested (vhosts) interface  full control over per-port configuration:
+The nested interface gives you full control of each port:
 
     somedomain:
         nginxproxy:
+            ipv6: false
             vhosts:
                 443:
                     proxy_uri: path/to/socket/in/install_dir, or an http://uri
@@ -36,54 +37,61 @@ Nested (vhosts) interface  full control over per-port configuration:
                     nocache_prefix: /secure
                     auth_statics: /seekrit
                     auth_uri: /ihazcookie
-                    ipv6: false
                     ssl: true
                 80:
                     ssl_redirect: true
 
 =head2 DESCRIPTION
 
-Sets up reverse proxy rules for the primary application to be deployed.
+Sets up reverse proxy rules for the main application of the domain.
 
-The idea here is to support aggressive caching of the outputs of the proxied application.
-This is implemented through a try_files directive:
+The vhost caches the output of the proxied application aggressively.  A
+try_files directive does this:
 
-    try_files $url $url.html $url/index.html @default
+    try_files $uri $uri.html $uri/index.html @default
 
-You can set the name of the 'uncached' route to your application (nocache_prefix),
-which is useful if you have necessarily dynamic pages.
-Your application will have to strip that part of the route and then route as normal.
+nginx serves a file that exists and sends everything else to the application.
 
-Alternatively, you can use the nocache_prefix as a way to serve at multiple odd endpoints by providing an appropriate location directive nginx will understand.
-Example from the matrix recipe:
-    nocache_prefix => '~ (_matrix|_synapse)/client'
+nocache_prefix names a route that always goes to your application.  Use it for
+pages that must be dynamic.  Your application must strip that part of the route
+and then route as usual.
 
-In that case we still serve statics as exact matches, but not .html/.htm versions.
-This way all your routes (e.g. /foo) can be dynamic while static assets (e.g. styles/foo.css) will
-still be served by nginx.
+nocache_prefix can also be any location that nginx accepts, to send several
+endpoints to the application.  The matrix recipe uses this:
 
-It is up to your application to cull/regenerate/never generate .html versions of your routes when appropriate.
+    nocache_prefix => '^~ /(_matrix|_synapse/client)/'
 
-A vhost serves files only if it was told where they are.  With no static_dir
-there is no C<root> and no C<try_files>: the vhost proxies everything, which is
-what a reverse proxy in front of gogs or synapse actually wants.  It used to
-fall back to C<www/> -- where a tpsgi application keeps its statics and where a
-pure proxy has nothing at all -- so nginx was given a root that need not exist
-and logged a failed C<stat()> on every request it then proxied correctly anyway.
-A recipe that does serve files says so, the way tpsgi does.
+Under that location, nginx still serves a static file that matches exactly, but
+not its .html version.  So every route (for example /foo) can be dynamic, while
+nginx still serves static assets such as styles/foo.css.
 
-You can also guard a folder for statics behind auth via the auth_statics and auth_uri mechanism.
-The auth_uri should return 200 in the event the user is sufficiently authenticated (see nginx's L<auth_request|https://nginx.org/en/docs/http/ngx_http_auth_request_module.html>)
+Your application must remove, regenerate or never write .html versions of its
+routes, as each case requires.
 
-You can do auto-redirects to HTTPS via the ssl_redirect flag for non-ssl ports.
+A vhost serves files only if a recipe tells it where they are.  With no
+static_dir, the vhost has no C<root> and no C<try_files>, and it proxies
+everything.  A reverse proxy in front of gogs or synapse wants this.  A recipe
+that serves files sets static_dir, as tpsgi does.
 
-Supports connection upgrades to websocket, and does not use proxy buffering so comet requests & other streams are possible as well.
+auth_statics and auth_uri put a folder of static files behind authentication.
+Both need static_dir as well.  auth_uri must return 200 when the user is
+authenticated.  See the nginx
+L<auth_request|https://nginx.org/en/docs/http/ngx_http_auth_request_module.html>
+module.
 
-The public_dir field is for providing the same functionality as the nginxdirindex recipe.
+On a port without SSL, ssl_redirect redirects every request to HTTPS.
+
+The vhost passes websocket connection upgrades through.  It turns proxy
+buffering off, so long polling requests and other streams also work.
+
+public_dir gives the same directory index as the nginxdirindex recipe.
+
+ipv6 is a top-level setting, and it applies to every vhost.
 
 =head2 USE AS DEPENDENCY
 
-In general it is best to use this as a dependency to other recipes.  See tpsgi & tcms recipes for examples.
+Usually another recipe requires this one.  See the tpsgi and tcms recipes for
+examples.
 
 =cut
 
@@ -110,49 +118,79 @@ sub args {
                         public_dir     => { type => 'string' },
                         nocache_prefix => { type => 'string' },
 
-                        # No default: a vhost is either the redirect or the
-                        # thing redirected to, and defaulting both this and ssl
-                        # to true made every vhost claim to be both.
+                        # No default for this or ssl: a vhost is either the
+                        # redirect or the target of it, so each recipe says which.
                         ssl_redirect => { type => 'boolean' },
 
-                        # No default here either, for the same reason: this one
-                        # was left defaulting to true, so a port 80 vhost that
-                        # asked for neither -- tcms and tpsgi both do -- came
-                        # out as `listen 80 ssl` and spoke TLS on the plain HTTP
-                        # port.  Every recipe that wants it says so.
                         ssl => { type => 'boolean' },
                     },
                 },
             },
 
-            # The flat interface, which enrich turns into the pair of vhosts the
-            # SYNOPSIS describes.  Declared here as well as inside vhosts
-            # because a domain says one or the other, and a key the schema does
-            # not name is one bin/recipes cannot print.
+            # The flat interface, which enrich turns into the two vhosts in the
+            # SYNOPSIS.  The schema names these so that bin/recipes prints them.
             proxy_uri  => { type => 'string', description => 'Where to send what this domain does not serve from disk: a socket path under the install directory, or an http:// URI.  Generates a port 80 vhost redirecting to HTTPS and a 443 vhost proxying here, so it is the whole configuration for the usual arrangement.  Use vhosts instead to say anything more.' },
             static_dir => { type => 'string', description => 'Files served straight from disk, as a path under the install directory.  Goes into the generated 443 vhost alongside proxy_uri; see that field for when to use vhosts instead.' },
 
             ipv6 => { type => 'boolean', default => 1 },
 
-            # Declared here as well as in the nginx recipe, because each recipe
-            # renders with its own configuration and nothing else: the split in
-            # 5756b44 moved this to nginx and left the templates here using it,
-            # so it has rendered as `backlog=` -- which nginx refuses -- ever
-            # since.  It has to match nginx's, since somaxconn is set from that
-            # and must be at least this.
+            # Also declared in the nginx recipe, because each recipe renders
+            # with only its own configuration.  Keep the two equal: somaxconn
+            # comes from the nginx value and must be at least this one.
             backlog => { type => 'integer', default => 32768, minimum => 0 },
         },
     );
 }
 
+=head2 %opts = $recipe->enrich(%opts)
+
+Returns %opts ready for the templates.
+
+=over 4
+
+=item *
+
+If vhosts is not set and proxy_uri or static_dir is, it makes vhosts from them
+as the SYNOPSIS describes.
+
+=item *
+
+In each vhost that is not a redirect, a proxy_uri that does not start with
+C<http> is a socket path under the install directory of the domain.  enrich
+replaces it with C<http://> and the name of an upstream, and puts each upstream
+in the C<upstreams> hash, name to socket path.
+
+=item *
+
+C<serves_static> is 1 if any vhost has a static_dir, and 0 if none has.
+
+=item *
+
+C<traverse_dirs> lists every directory between the domain root and each
+static_dir, without static_dir itself.
+
+=back
+
+Dies if a vhost that is not a redirect has no proxy_uri.
+
+nginx refuses a socket inline in proxy_pass in every form.  With the URI part
+that the socket form needs, inside a named location, it says:
+
+    "proxy_pass" cannot have URI part in location given by regular
+    expression, or inside named location, or inside "if" statement
+
+Without the colon that ends the socket path, it says:
+
+    no closing ":" in unix domain socket
+
+An upstream has no URI part, so neither error applies.
+
+=cut
+
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # The flat interface: proxy_uri and static_dir at the top level, which the
-    # SYNOPSIS says generates 80 redirecting to HTTPS and 443 proxying.  Nothing
-    # was generating them, and the whole template is a loop over vhosts -- so a
-    # domain configured this way rendered an empty vhost file and served
-    # nothing.  Both domains using it in production are configured this way.
+    # The template loops over vhosts, so make them for the flat interface.
     if ( !$opts{vhosts} && ( $opts{proxy_uri} || $opts{static_dir} ) ) {
         my $ipv6 = $opts{ipv6} // 1;
         $opts{vhosts} = {
@@ -168,19 +206,8 @@ sub enrich {
 
     if ( $opts{vhosts} && ref $opts{vhosts} eq 'HASH' ) {
 
-        # A proxy_uri that is not a URL is a unix socket, and those go through
-        # an upstream block rather than into proxy_pass directly.
-        #
-        # There is no spelling of a socket that works inline here.  nginx wants
-        # http://unix:<path>:<uri>, the socket path terminated by a colon with
-        # the URI after it -- and it refuses a proxy_pass carrying a URI part
-        # inside a named location, which is exactly where this is used:
-        #
-        #   "proxy_pass" cannot have URI part in location given by regular
-        #   expression, or inside named location, or inside "if" statement
-        #
-        # Leaving the colon off instead gets "no closing ":" in unix domain
-        # socket".  An upstream has no URI part at all, so neither applies.
+        # A socket goes through an upstream because nginx refuses it inline.
+        # The POD for enrich has the two errors.
         my %upstreams;
         foreach my $key ( keys %{ $opts{vhosts} } ) {
             next unless $key =~ m/\d+/;
@@ -191,9 +218,8 @@ sub enrich {
             die "Must set proxy_uri in [nginxproxy] section" if !$uri;
             next                                             if $uri =~ m/^http/;
 
-            # Named for the socket, so that two vhosts sharing one -- 80 and 443
-            # both proxying to the same app, which is the usual arrangement --
-            # declare one upstream between them rather than two of the same.
+            # Named for the socket, so that vhosts which share one socket share
+            # one upstream.
             my $socket = "$opts{install_dir}/$opts{domain}/$uri";
             ( my $name = "sock_$socket" ) =~ s/\W/_/g;
 
@@ -202,19 +228,8 @@ sub enrich {
         }
         $opts{upstreams} = \%upstreams;
 
-        # Whether any vhost actually serves files, and every directory between
-        # the domain root and a declared static_dir short of static_dir itself.
-        # Both matter because data leaves the domain directory 0750
-        # user:admin_user, which shuts www-data out of it regardless of
-        # whether the domain has any docroot for it to read -- a pure proxy
-        # has nothing under there nginx ever opens, so granting it traversal
-        # would be exposure with nothing to show for it.  And tpsgi declares
-        # www/static, where www is not a fiction this recipe invents: data's
-        # rsync brings it down already populated whenever the domain has
-        # content checked in, left 0750 the same as everything else, which
-        # shuts www-data out one level further in than the domain root alone.
-        # static_dir gets its own group and setgid below and needs nothing
-        # here; this is only the directories strictly above it.
+        # The directories that www-data must traverse to reach each static_dir.
+        # templates/ubuntu/nginxproxy.tt says why they need o+x.
         my $serves_static;
         my %traverse;
         foreach my $vopts ( values %{ $opts{vhosts} } ) {

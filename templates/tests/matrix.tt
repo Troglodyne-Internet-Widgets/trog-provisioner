@@ -8,96 +8,72 @@ chomp $status;
 is($status, 'active', 'matrix-synapse is running');
 ok(-f '/etc/matrix-synapse/homeserver.yaml', 'homeserver.yaml is where synapse reads it');
 
-# Everything template_files generates, checked where the recipe puts it.  This
-# used to copy a matrix.nginx.conf that template_files does not generate, so the
-# target died and took the rest of the build with it -- and then checked for the
-# yaml files somewhere the recipe has never written them.
+# Each file that template_files generates, where the recipe puts it.
 ok(-f '/etc/matrix-synapse/log.yaml', 'log.yaml is there too');
 
-# Both are copied into /etc/matrix-synapse, which is where synapse looks.  This
-# checked install_dir/domain for them -- a path the recipe never writes -- and
-# had simply never run this far, because the package install above it had been
-# failing for want of a repository.
 ok(-f '/etc/nginx/sites-enabled/admin.matrix.[% domain %].conf', 'the admin vhost was installed');
 
-# And something behind it.  The admin interface is downloaded from a GitHub
-# release, and synapse-admin was renamed to ketesa -- the old asset URL is a
-# 404, so the vhost was being served an empty directory.
+# And something behind it.  The admin interface comes from a GitHub release,
+# and a download that fails leaves the vhost an empty directory.
 ok(-s '[% install_dir %]/admin.matrix.[% domain %]/index.html',
     'the admin interface was downloaded and extracted');
 ok(-f '[% install_dir %]/[% domain %]/www/matrix.index.html', 'the chat index page was installed');
 
-# The domain's own vhost belongs to nginxproxy, which this recipe requires
-# rather than writing one of its own beside it.
+# The vhost of the domain belongs to nginxproxy.  This recipe requires
+# nginxproxy, and does not write a vhost of its own next to it.
 ok(-f '/etc/nginx/sites-enabled/[% domain %].conf', 'nginxproxy wrote the domain vhost');
 ok(!-e '/etc/nginx/sites-enabled/matrix.[% domain %].conf',
     'and matrix did not write a competing one');
 
-# The index page lists the channels the recipe was given.  Its loop said chan
-# and its body said channel, so every entry rendered as #@domain.
+# The index page lists the channels that the recipe was given.
 my $index = do { local (@ARGV, $/) = '[% install_dir %]/[% domain %]/www/matrix.index.html'; <> } // '';
 unlike($index, qr/^\s*#\@/m, 'no channel was listed without its name') or diag $index;
 [% FOREACH chan IN channels %]
 like($index, qr/#\Q[% chan %]\E\@/, 'channel [% chan %] is listed');
 [% END %]
 
-# The packages the recipe asks for.  Nothing fails when one of these does not
-# exist -- the name is simply never installed -- so python3-pillow sat in the
-# list for as long as it did without anybody noticing it is python3-pil here.
+# Some of the packages that the recipe asks for.  A package name that does not
+# exist makes nothing fail.  It is only never installed.
 foreach my $pkg (qw{matrix-synapse-py3 python3-pil python3-attr}) {
-    # dpkg -s rather than dpkg-query -f: a ${Status} format string is a Perl
-    # variable inside backticks long before dpkg ever sees it.
+    # dpkg -s, not dpkg-query -f, because Perl interpolates a ${Status} format
+    # string inside backticks before dpkg sees it.
     my $installed = `dpkg -s $pkg 2>/dev/null`;
     like($installed, qr/Status: install ok installed/, "$pkg is installed");
 }
 
-# synapse comes from matrix.org, not from Ubuntu.  Both its packages sat in
-# deps -- the list cloud-init installs at first boot, with no such repository
-# configured -- so they were never installed and nothing said so.
+# synapse comes from the matrix.org repository, not from Ubuntu.
 ok(-f '/etc/apt/sources.list.d/matrix-org.list', 'the matrix.org repository is configured');
 ok(-s '/usr/share/keyrings/matrix-org-archive-keyring.gpg', 'and its signing key is installed');
 
-# The admin registration script.  It used to be written by a heredoc in the
-# Makefile, where it could not work: every recipe line runs in its own shell, so
-# the heredoc had no body and the lines meant to be the script were run as
-# commands until one of them was a `for` loop and the build stopped.
+# The admin registration script, installed as a file and valid shell.
 ok(-x '[% script_dir %]/matrix_register_admin.sh', 'the register-admin script is installed');
 my $syntax = `bash -n [% script_dir %]/matrix_register_admin.sh 2>&1`;
 is($syntax, '', 'and is a valid shell script') or diag $syntax;
 
-# What the last guest was carrying, put where synapse reads it.  homeserver.db
-# is every room, message and account; homeserver.signing.key is the identity the
-# rest of the federation knows this server by.  new_config fetches both into the
-# domain directory, and until something moved them back out again a rebuilt
-# guest came up empty and introduced itself to everybody as a stranger.
+# The salvage of the last guest, put back where synapse reads it.  homeserver.db
+# holds every room, message and account.
 my $live     = '[% install_dir %]/matrix.[% domain %]';
 my $salvaged = '[% install_dir %]/[% domain %]/matrix';
 
-# Synapse makes this on first start, which is queued as a postrun task, so on a
-# guest that has never run it there is nothing here yet.  What matters is that
-# a salvaged one was put back where the config names -- checked just below.
+# Synapse makes the database on first start, which is a postrun task.  So a new
+# guest has no database yet.  The loop below checks a salvaged one.
 SKIP: {
     skip 'synapse has not been started yet, so it has made no database', 1 unless -e "$live/homeserver.db";
     ok(-s "$live/homeserver.db", 'the database is at the path homeserver.yaml names');
 }
 ok(-d "$live/media",         'and the media store is beside it');
 
-# restore_state leaves the copy alone when the destination already has state --
-# re-provisioning a guest that is still running, whose own state is the real one
-# and whose fetch may well have been partial.  What it must never do is leave it
-# there with nothing at the live path.
+# restore_state does not copy over a destination that already holds state.  An
+# example is a live guest that is provisioned again, whose fetch can be partial.
+# But the salvage must never stay in the domain directory with nothing at the
+# live path.
 foreach my $piece (qw{homeserver.db homeserver.signing.key}) {
     next unless -e "$salvaged/$piece";
     ok(-s "$live/$piece", "the salvaged $piece is on the guest, not stranded in the domain directory");
 }
 
-# Under synapse's own configuration directory rather than the domain directory.
-# bin/provision places these before the makefile runs, and the fragment restores
-# this domain's salvage into the domain directory -- which restore_state declines
-# to do once anything is sitting in it, so a secret placed there stopped the
-# media store coming back.  The domain directory is also what the data recipe
-# carries to the hypervisor and into every backup, which is the last place a
-# secret held in the store should be.
+# Under /etc/matrix-synapse, not the domain directory.  guest_secrets in
+# Provisioner::Recipe::matrix says why.
 my $signing_key = '/etc/matrix-synapse/homeserver.signing.key';
 my $reg_secret  = '/etc/matrix-synapse/registration.shared.secret';
 
@@ -117,15 +93,15 @@ foreach my $secret ($signing_key, $reg_secret) {
 my $keyline = do { local (@ARGV, $/) = $signing_key; <> } // '';
 like($keyline, qr/\Aed25519 \S+ \S+/, 'the key is the one the store handed over, in the format synapse reads');
 
-# The config has to name them, or synapse makes its own and the federation meets
-# a stranger after every rebuild.
+# homeserver.yaml must name these paths, so that synapse uses the secrets from
+# the store.
 my $hs = do { local (@ARGV, $/) = '/etc/matrix-synapse/homeserver.yaml'; <> } // '';
 like($hs, qr{^signing_key_path:\s*\Q$signing_key\E$}m, 'and homeserver.yaml reads it from there');
 like($hs, qr{^registration_shared_secret_path:\s*\Q$reg_secret\E$}m, 'as it does the registration secret');
 unlike($hs, qr/^registration_shared_secret:/m, 'with no copy of the secret written into the config itself');
 
-# The other half of that bargain: neither is in the domain directory, so nothing
-# salvages one and a rebuild gets the same identity from the store.
+# Neither secret is in the domain directory or the salvage.  So a rebuild gets
+# its identity from the store, not from a backup.
 foreach my $stray (qw{homeserver.signing.key registration.shared.secret}) {
     ok(!-e "$live/$stray", "no copy of $stray was left in the domain directory for a backup to pick up");
     ok(!-e "[% install_dir %]/[% domain %]/matrix/$stray", "nor in the salvage");

@@ -23,93 +23,86 @@ Trog::Credentials - passwords handed to a run that has nobody to ask.
 
 =head1 DESCRIPTION
 
-This tool asks for two passwords it cannot store: the passphrase to the secrets
-database, and the sudo password on the hypervisor when the login there has not
-been given passwordless sudo.  Asking works when a person is sitting in front of
-it.  It does not work at all when something else is driving -- tCMS's reprovision
-button, a cron, a CI job -- because those have no terminal to ask at, and the
-run dies several minutes in on a prompt nobody will ever see.
+This tool asks for two passwords that it cannot store.  One is the passphrase
+of the secrets database.  The other is the sudo password on the hypervisor, when
+the login there does not have passwordless sudo.
 
-So they can be given up front instead, on standard input, before anything runs:
+A prompt works when a person is at the terminal.  It does not work when
+something else drives the run, for example the reprovision button of tCMS, a
+cron job or a CI job.  Those have no terminal.  So the run dies several minutes
+in, on a prompt that nobody sees.
+
+Instead, the caller can give them on standard input, before anything runs:
 
     keepass: correct horse battery staple
     sudo: hunter2
 
-One C<name: value> per line, read until a blank line or end of input.  Order does
-not matter, names do; nothing else here reads standard input, so nothing is
-competing for it.
+Each line is C<name: value>.  Reading stops at a blank line or at the end of
+input.  The order does not matter, but the names do.  Nothing else here reads
+standard input, so nothing competes for it.
 
-The names are matched exactly, and an unknown one is an error rather than
-something to ignore -- a misspelled C<keypass> that quietly meant "prompt for it"
-is a run that hangs, which is the thing this exists to prevent.
+The names must match exactly.  An unknown name is an error, and is not ignored.
+A misspelled C<keypass> that silently meant "prompt for it" makes a run that
+hangs, and a hang is what this module prevents.
 
-Whitespace around the value is kept, since a password may legitimately have some,
-and a value may be empty.
+Whitespace around the value stays, because a password can contain some.  A
+value can be empty.
 
 =head2 WHY STANDARD INPUT
 
-It is the one channel that is neither the process table, the environment, nor a
-file.  An argument is world readable for as long as the process lives, the
-environment is readable by anything that can read C</proc> as the same user and
-is inherited by every child, and a file has to be created, chmodded and deleted
-without anything going wrong in between.  A pipe is none of that: the writer
-holds one end, this process holds the other, and it exists for as long as the two
-are talking.
+Standard input is the one channel that is not the process table, the
+environment or a file.  Everybody can read an argument while the process lives.
+Anything that can read C</proc> as the same user can read the environment, and
+every child inherits it.  A file must be created, given its mode and deleted,
+with no failure between those steps.  A pipe has none of these problems.  The
+writer holds one end, this process holds the other, and it exists only while
+the two talk.
 
 =head2 IT HAS TO BE ASKED FOR
 
-Nothing here reads anything until something calls C<load>, which is what
-C<bin/provision --credentials> and C<bin/new_config --credentials> do.
+Nothing here reads anything until something calls C<load>.
+C<bin/provision --credentials> and C<bin/new_config --credentials> do that.
 
-That is deliberate, and it was not the first design.  Reading standard input
-whenever it did not look like a terminal seemed obvious and is a trap: a caller
-that is not a terminal, did not intend to hand anything over, and never closes
-its end -- a test harness, anything run from a daemon -- blocks here forever on a
-read that will never return.  Which is the same hang, moved earlier, and the
-whole point of this module is not hanging.  So it is asked for or it does not
-happen.
+A read that nobody asked for can hang.  Some callers are not a terminal, have
+nothing to give, and never close their end, for example a test harness or a
+daemon.  A read from such a caller never returns.  That is the same hang that
+this module prevents, only earlier in the run.
 
-A name that was not given falls back to asking, so handing in the sudo password
-and typing the passphrase is a thing you can do -- provided somebody is there to
-type it.
+If a name was not given, the run asks for it.  So you can give the sudo password
+in the block and type the passphrase, if a person is present to type it.
 
 =head1 CLASS METHODS
 
 =cut
 
-# Names a caller may ask for.  An allowlist rather than free text: a typo in the
-# block should say so at the top of the run, not silently become a prompt in the
-# middle of one.
+# The names a caller can give.  See DESCRIPTION for why an unknown name dies.
 our %KNOWN = map { $_ => 1 } qw{keepass sudo};
 
 our %CREDENTIAL;
 
-# Where prompt asks when it is told to ask at the terminal.  A variable so that
-# a test can point it at a file rather than at whoever is running prove.
+# Where prompt asks when told to use the terminal.  A test points it at a file.
 our $TERMINAL = '/dev/tty';
 
 =head2 prompt($message, $name, %opts)
 
-The password, asked for if this run has not already been given it.
+Returns the password.  It asks for the password only if this run does not
+already have it.  Every password this tool asks for comes through here,
+including the sudo password that L<Trog::Machine> needs.
 
-Here rather than in L<Trog::Secrets>, which is where it used to live: what this
-does is get a credential, which is what this module is for.  L<Trog::Machine>
-wants the same thing when sudo on the far side turns out to need a password,
-and one way of asking is better than two.
+C<$name> says which password this is, and must be a name in C<%KNOWN>.  With a
+name, a run that has no terminal can give the password in advance, and this
+returns it with no prompt.  Without a name, it always asks.
 
-C<$name> says which password this is, and is what makes it answerable without
-asking -- a run driven by something with no terminal hands its passwords in up
-front, and this returns one of those rather than prompting.  Leave the name out
-and it always asks, which is what you want for something there is no name for.
+It asks on standard input, or at the terminal that is connected to it.  The
+option C<terminal> makes it ask at F</dev/tty> instead.  Use that when standard
+input is already in use.  For example, C<bin/add_secret --stdin> reads the
+secret from standard input, so nothing is left there to answer a prompt.
 
-It is asked on standard input, or at the terminal that is on it.  C<terminal>
-asks at F</dev/tty> instead, for a caller whose standard input is already
-spoken for -- C<bin/add_secret --stdin> reads the secret itself from there, and
-leaves nothing behind it to answer a prompt with.  That dies if there is no
-terminal to open.
+An empty answer is a valid answer.
 
-An empty answer is an answer.  Input that ends before one is given is not, and
-dies rather than handing back nothing as though it were a password.
+Dies if the input ends before an answer, and does not return an empty password.
+Dies if C<terminal> is set and it cannot open the terminal.  Dies after it asks
+if C<$name> is not a known name.
 
 =cut
 
@@ -122,11 +115,9 @@ sub prompt {
 
     my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
 
-    # -echo masks what is typed, this being a password.
     my $answer = Trog::Utils::prompt( $message, -echo => '*', @at );
 
-    # False in boolean context only when no line arrived at all; an empty line
-    # is true.
+    # The answer is false only when no line arrived.  An empty line is true.
     die "Nothing was typed for $what: its input ended before an answer.\n" unless $answer;
 
     my $typed = "$answer";
@@ -135,7 +126,7 @@ sub prompt {
     return $typed;
 }
 
-# One end of the terminal, opened with $mode, for IO::Prompter to ask at.
+# Opens the terminal with $mode, for IO::Prompter to ask at.
 sub _terminal {
     my ( $mode, $what ) = @_;
     open( my $fh, $mode, $TERMINAL ) or die "Cannot ask for $what at a terminal: $TERMINAL: $!\n" . "Standard input is already spoken for, so it has to be typed there.\n";
@@ -144,13 +135,15 @@ sub _terminal {
 
 =head2 remember($name, $value)
 
-Keep something that was typed rather than handed in, so that the next thing in
-the same run wanting it does not ask again.
+Keeps a credential that a person typed, so that the rest of the run does not
+ask for it again.
 
-A provision resolves the store twice -- once to fill in the C<secret:> notes in
-a configuration, once to put the files a recipe reads but must not generate on
-the guest -- and asking twice is worse than a nuisance: the usual caller pipes
-the answer in, and a pipe answers once.
+A provision reads the store two times.  The first fills in the C<secret:> notes
+of a configuration.  The second puts on the guest the files that a recipe reads
+but must not generate.  A second prompt is worse than a nuisance, because the
+usual caller pipes the answer in, and a pipe answers once.
+
+Returns 1.  Dies if C<$name> is not a known name.
 
 =cut
 
@@ -166,7 +159,7 @@ sub remember {
 
 =head2 get($name)
 
-The credential, or undef if it was not given.
+Returns the credential, or undef if it was not given.
 
 =cut
 
@@ -177,8 +170,8 @@ sub get {
 
 =head2 have($name)
 
-Whether it was given, without reading it.  C<get> on an empty value and C<get> on
-a missing one both look the same otherwise.
+Returns 1 if the credential was given, and 0 if not, without reading it.  In a
+boolean test, C<get> is false for an empty value and for a missing one.
 
 =cut
 
@@ -189,24 +182,26 @@ sub have {
 
 =head2 load($fh)
 
-Read the block.  C<$fh> defaults to standard input; pass one in tests.
+Reads the block.  C<$fh> defaults to standard input.  A test passes its own
+handle.
 
-B<This is what C<--credentials> is.>  C<bin/provision --credentials> and
-C<bin/new_config --credentials> call it once, before anything that could want a
-password, and nothing else does -- see IT HAS TO BE ASKED FOR.
+This is what C<--credentials> does.  C<bin/provision --credentials> and
+C<bin/new_config --credentials> call it once, before anything that can want a
+password.  Nothing else calls it.  See L</IT HAS TO BE ASKED FOR>.
 
-It is not a slower C<prompt>.  C<prompt> gets one credential at the moment
-something wants it, and on a pipe that means whichever line arrives next.  This
-takes several at once, each named, so the order they are asked for in does not
-matter -- which is the whole point for a run with no terminal that needs both
-the store passphrase and a sudo password and cannot know which will be wanted
-first.  That is what makes it worth piping a block rather than a bare password:
+C<prompt> gets one credential when something wants it, and on a pipe that is
+the next line that arrives.  C<load> takes several credentials at once, each
+with a name, so the order of the requests does not matter.  A run with no
+terminal can need the passphrase of the store and a sudo password.  It cannot
+know which it needs first.  So pipe a block, not a bare password:
 
     printf 'keepass: %s\nsudo: %s\n\n' "$STORE_PASS" "$SUDO_PASS" \
         | bin/provision --credentials some.domain
 
-Everything it reads goes where C<prompt> looks first, so a password given here
-is one nothing asks about again.
+C<prompt> looks first at what this reads, so nothing asks again for a password
+given here.
+
+Returns 1.  Dies if a line is not C<name: value>, or if a name is not known.
 
 =cut
 
@@ -233,7 +228,7 @@ sub load {
 
 =head2 forget()
 
-Drop everything read.  Only tests should need this.
+Drops every credential that C<load> or C<remember> kept.  Only tests need this.
 
 =cut
 
@@ -244,7 +239,7 @@ sub forget {
 
 =head1 SEE ALSO
 
-L<Trog::Secrets>, which asks for the passphrase.
+L<Trog::Secrets>, which opens the store with the passphrase.
 
 L<Trog::Machine>, which asks for the sudo password.
 

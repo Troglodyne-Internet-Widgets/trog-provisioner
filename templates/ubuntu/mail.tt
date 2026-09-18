@@ -1,13 +1,8 @@
 # Housekeeping.
 #
-# 2750, dovecot:dovecot, before dovecot has ever looked in here: dovecot copies
-# the mode and the group of the nearest existing parent onto every maildir and
-# every message file it creates, so what this line sets is what decides whether
-# the rebuild after the next one still has any mail to salvage. This used to be
-# grouped to the admin user instead, from when the fetch was an sftp session as
-# that user with no sudo and a maildir it could not enter came back empty
-# without saying so. The fetch reads the guest as root now (issue #76), so
-# issue #98 took that back out.
+# 2750, dovecot:dovecot, before dovecot uses the directory.  dovecot copies the
+# mode and the group of the nearest parent onto every maildir and message file
+# that it makes.  Provisioner::Recipe::mail has the whole account.
 install -d -m 2750 -o dovecot -g dovecot /mail/[% domain %]
 # opendkim
 mkdir -p /etc/opendkim/keys/[% domain %]
@@ -15,51 +10,33 @@ mv TrustedHosts /etc/opendkim
 mv SigningTable /etc/opendkim
 mv KeyTable /etc/opendkim
 mv InternalHosts /etc/opendkim
-# The signing key the last guest used, or a new one.
-#
-# `mv .../.mail/keys/*` could not tell a first build from a fetch that read
-# nothing, so an unreadable salvage looked exactly like having nothing to
-# restore and the key below was quietly regenerated -- which is every signature
-# this domain ever sent failing to verify.  restore_state says which of the two
-# it was.
-#
-# This domain's key rather than everything that was under /etc/opendkim/keys: a
-# guest hosting two domains has both in the salvage, and each domain's fragment
-# puts its own back.
+# The signing key that the last guest used, or a new one.  The data target
+# restores the key of this domain before this target runs.  If there is no
+# key, make one.
 [ ! -f /etc/opendkim/keys/[% domain %]/default.private ] && opendkim-genkey -D /etc/opendkim/keys/[% domain %] -d [% domain %] -s default; /bin/true
 chown -R opendkim:opendkim /etc/opendkim/
 chmod -R 0755 /etc/opendkim
 sudo chmod 0600 /etc/opendkim/keys/[% domain %]/*
-# Stash a copy in /mail for the fetch to read.
+# Put a copy in /mail for the fetch to read.  remote_files names this copy,
+# not /etc/opendkim/keys.  Provisioner::Recipe::mail says why.
 #
-# /etc/opendkim belongs to opendkim, and the fetch reads the guest as root now
-# (issue #76) so it could read that directly -- pointing remote_files at
-# /etc/opendkim/keys instead of this staged copy is a bigger change than #98
-# asks for, so the staging stays; only the ownership below, which existed
-# purely for the old unprivileged fetch, goes.
-#
-# The trailing dot matters: `cp -r /etc/opendkim/keys /mail/keys` copies the
-# directory *into* /mail/keys once /mail/keys exists, which is what the second
-# domain provisioned onto a guest got.  install_dkim_records looks for
-# /mail/keys/<domain>/default.private, found /mail/keys/keys/<domain> instead,
-# and published no DKIM record for that domain at all.
+# The trailing dot is necessary.  If /mail/keys exists, `cp -r
+# /etc/opendkim/keys /mail/keys` copies the directory into /mail/keys/keys.
+# install_dkim_records looks for /mail/keys/<domain>/default.private.
 mkdir -p /mail/keys
 cp -r /etc/opendkim/keys/. /mail/keys/
-# root:root rather than the admin user -- from when the fetch had no sudo and
-# needed the group to read it; issue #98 took that back out.
 chown -R root:root /mail/keys
-# 0700 and 0600 regardless: a private key sitting outside the daemon that owns
-# it, on its way into the provisioner data directory and from there into
-# whatever backs that up.
+# 0700 and 0600, because this is a private key outside the daemon that owns
+# it.  The fetch also copies it into the data directory of the provisioner.
 find /mail/keys -type d -exec chmod 0700 {} +
 find /mail/keys -type f -exec chmod 0600 {} +
 mkdir /var/spool/postfix/opendkim
 chown opendkim:postfix /var/spool/postfix/opendkim
 chmod 0770 /var/spool/postfix/opendkim
 [% script_dir %]/queue_postrun_task systemctl restart opendkim
-# opendmarc.  Its configuration is the one here that really is per domain --
-# AuthservID and the failure report addresses name it -- so it goes in as this
-# domain's fragment rather than by overwriting the file.
+# opendmarc.  AuthservID and the failure report addresses name the domain.  So
+# its configuration goes in as the fragment of this domain, and does not
+# replace the file.
 mkdir -p /etc/opendmarc
 mv ignore.hosts /etc/opendmarc
 chown -R opendmarc:opendmarc /etc/opendmarc/
@@ -69,41 +46,28 @@ mkdir /var/spool/postfix/opendmarc
 chown opendmarc:postfix /var/spool/postfix/opendmarc
 chmod 0770 /var/spool/postfix/opendmarc
 [% script_dir %]/queue_postrun_task systemctl restart opendmarc
-# update DNS records IFF we have a dns server locally
+# Update the DNS records, if this guest runs a DNS server.
 [% script_dir %]/queue_postrun_task [% script_dir %]/install_dkim_records [% domain %] /mail/[% domain %]/default.private
 # dovecot
-# First, remove all the worse-than-useless foo in conf.d
+# First, move the packaged conf.d out of the way.
 mv /etc/dovecot/conf.d /etc/dovecot/conf-available
 mkdir -p /etc/dovecot/conf.d
 mv dovecot.conf /etc/dovecot/conf.d/00-dovecot.conf
 mv dovecot.domain.conf /etc/dovecot/conf.d/10-[% domain %].conf
-# The mailboxes the last guest had, put back before anything else goes into
-# this directory.  restore_state declines when the destination already has
-# something in it, and that check is the whole of what stands between a fetch
-# that came back partial and a live mail store -- so it has to run while the
-# store is still empty, which means ahead of the generated passwd file.
-#
-# It also declines when the salvage is empty, which is what the maildirs of a
-# guest whose store the fetch could not read look like.  `mv .../mailnames/*`
-# could tell neither of those from a first build, and left the dotfiles behind
-# into the bargain.
-#
-# The salvaged passwd file is kept beside the mailboxes as passwd.old rather
-# than restored, because the accounts come from the recipe.
+# The accounts come from the recipe, so keep the salvaged passwd file as
+# passwd.old.  The data target restored the mailboxes before this target ran.
 # TODO make the old one take precedence via configuration
 test -f [% install_dir %]/[% domain %]/mailnames/passwd && mv [% install_dir %]/[% domain %]/mailnames/passwd [% install_dir %]/[% domain %]/mailnames/passwd.old; /bin/true
 sed -i "s/%REPLACEME%/$$(id -u dovecot)/gm" mailpasswd
 mv mailpasswd /mail/[% domain %]/passwd
-[%# Readable by dovecot here rather than only in the sweep at the bottom of this
-    target.  It arrives out of the payload as 0600, owned by the account that
-    shipped it, and dovecot auth reads it as the dovecot account -- so every
-    lookup answered "open(...passwd) failed: Permission denied" right up until
-    the chown at the end, which is well past the one thing in this target that
-    asks for a lookup. -%]
+[%# Give the file to dovecot here, not only in the sweep at the end of this
+    target.  It arrives as 0600, owned by the account that shipped it.
+    dovecot auth reads it as the dovecot account, and doveadm below does a
+    lookup. -%]
 chown dovecot:dovecot /mail/[% domain %]/passwd
 chmod 0640 /mail/[% domain %]/passwd
 [% script_dir %]/queue_postrun_task systemctl restart dovecot
-# amvavisd-new
+# amavisd-new
 mv 50-user /etc/amavis/conf.d/
 chown root:root /etc/amavis/conf.d/50-user
 [% script_dir %]/queue_postrun_task systemctl restart amavis
@@ -112,14 +76,9 @@ mv aliases /etc/aliases
 chown root:root /etc/aliases
 chown root:root /etc/aliases.db
 newaliases
-# This domain's lookup tables, in a directory of its own.
-#
-# Every one of these used to be a single file at a fixed path that each domain
-# overwrote in turn, so a guest hosting two domains delivered mail for whichever
-# one provisioned last and rejected the other's -- the same failure adopting
-# main.cf was meant to end, one level down.  main.cf names these per domain now
-# and postfix searches the list in order, so a second domain adds tables rather
-# than replacing them.
+# The lookup tables of this domain, in a directory of their own.  main.cf
+# names them for each domain, and postfix searches the list in order.  So a
+# second domain adds tables and does not replace them.
 install -d -m 0755 -o root -g root /etc/postfix/domains
 install -d -m 0755 -o root -g root /etc/postfix/domains/[% domain %]
 install -m 0600 -o root -g root virtual_maps    /etc/postfix/domains/[% domain %]/virtual_maps
@@ -134,21 +93,20 @@ postmap /etc/postfix/domains/[% domain %]/virtual_aliases
 postmap /etc/postfix/domains/[% domain %]/transport_maps
 postmap /etc/postfix/domains/[% domain %]/sdd_relay_maps
 postmap /etc/postfix/domains/[% domain %]/sender_login
-# main.cf, as this domain's fragment rather than as a run of `postconf -e`.
-# postconf sets a parameter; it cannot add to one, so provisioning a second
-# domain onto this guest used to replace the first domain's mydestination and
-# quietly stop delivering its mail.  configd merges the fragments instead, and
-# the parameters that are lists come out as lists.  The guest's own half of
-# main.cf is 40-mail, written by the global fragment.
+# main.cf, as the fragment of this domain, not as a run of `postconf -e`.
+# postconf sets a parameter and cannot add to one.  configd merges the
+# fragments, so list parameters stay lists.  The global fragment writes 40-mail,
+# the half of main.cf that is about the guest.
 install -d -m 0755 -o root -g root /etc/postfix/main.cf.d
 install -m 0644 -o root -g root main.cf.domain /etc/postfix/main.cf.d/50-[% domain %]
 # postmap makes the .db as restrictive as the source it read, and the daemons
 # that open these are not root.
 chmod 0644 /etc/postfix/domains/[% domain %]/*.db
-# Fix postfix's dumbass resolver copy grabbing a broken out of the box config (thank you systemd-resolved)
+# Give the postfix chroot the real resolv.conf.  Its own copy gets the broken
+# default configuration from systemd-resolved.
 [% script_dir %]/queue_postrun_task "cat /etc/resolv.conf > /var/spool/postfix/resolv.conf"
 [% script_dir %]/queue_postrun_task systemctl restart postfix
-# Setup autodiscover URIs
+# Set up the autodiscover URIs.
 mkdir -p '[% install_dir %]/autodiscover.[% domain %]/autodiscover'; /bin/true
 mv autodiscover.xml '[% install_dir %]/autodiscover.[% domain %]/autodiscover/'
 chown -R www-data:www-data  '[% install_dir %]/autodiscover.[% domain %]'
@@ -157,45 +115,26 @@ chmod -R 0770 '[% install_dir %]/autodiscover.[% domain %]'
 mv autodiscover_vhost /etc/nginx/sites-enabled/autodiscover.[% domain %].conf
 [% script_dir %]/queue_postrun_task systemctl reload nginx
 [%- END %]
-# Setup mailboxes and sieve scripts for the various users
-[%# doveadm takes the account the way dovecot knows it, which is the full
-    address: the passwd-file userdb this pairs with is keyed on
-    <local part>@<domain>, so a bare local part is a user dovecot has never
-    heard of.  `doveadm mailbox create -u bob` answered
-    "doveadm(bob): Error: User doesn.t exist" and exited 67, which took the
-    whole mail target down with it and left the guest with no tests run at all.
-
-    sievec, not sievc.  Nothing had ever reached that line, because the guard
-    ahead of it only fires for a domain whose salvage brought a sieve script
-    back. -%]
-[%# doveadm does not read the configuration, it asks the auth process that is
-    already running -- and that one came up with the packaged configuration,
-    before either dovecot.conf above was installed.  The restart of dovecot this
-    target asks for is queued to postrun, which is long after the loop below, so
-    what answered every lookup here was the userdb of a dovecot that had never
-    been told about this domain: "User doesn.t exist", exit 67, target dead.
-    Restarted here instead, and queued as well, since the sweep at the bottom
-    changes the store again. -%]
+# Set up the mailboxes and sieve scripts for each user.
+[%# doveadm takes the full address, <local part>@<domain>, because the
+    passwd-file userdb uses it as its key. -%]
+[%# doveadm does not read the configuration.  It asks the running auth
+    process, which started with the packaged configuration.  The queued restart
+    runs after this loop, so restart dovecot here too. -%]
 systemctl restart dovecot
 [% FOR name IN names.keys() %]
 test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && ln -s "/mail/[% domain %]/[% name %]/[% name %].sieve" "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
 test -f "/mail/[% domain %]/[% name %]/[% name %].sieve" && sudo -u dovecot sievec "/mail/[% domain %]/[% name %]/.dovecot.sieve"; /bin/true
 [% FOR box IN names.$name.mailboxes %]
-[%# Asked for rather than made unconditionally: a rebuild restores this
-    account.s maildirs before this line, and creating a mailbox that is already
-    there is "Mailbox already exists" and exit 65 -- so the guest that had mail
-    to salvage is exactly the one this used to kill. -%]
+[%# Make the mailbox only if it is not there.  A rebuild restores the maildirs
+    of this account first, and a second create fails with exit 65. -%]
 doveadm mailbox status -u [% name %]@[% domain %] messages [% box %] > /dev/null 2>&1 || doveadm mailbox create -u [% name %]@[% domain %] [% box %]
 [% END -%]
 [% END -%]
-# The same thing the housekeeping at the top said, said again now that doveadm
-# has made the mailboxes and the store has grown since.  This used to end
-# `chown -R dovecot:dovecot`, and dovecot keeps its maildirs to itself: the next
-# fetch read nothing, said nothing, and the mail survived one rebuild and not
-# two -- which is what widened it to the admin group. The fetch reads the guest
-# as root now (issue #76), so issue #98 put dovecot:dovecot back.
+# The same modes as the housekeeping at the top, again, because doveadm made
+# more of the store since then.
 chown -R dovecot:dovecot /mail/[% domain %]
 find /mail/[% domain %] -type d -exec chmod 2750 {} +
 find /mail/[% domain %] -type f -exec chmod 0640 {} +
-# Set up mail cron to run sa-learn etc
+# Set up the mail cron jobs, which run sa-learn.
 install -m 0644 -o root -g root mailcron /etc/cron.d/[% domain %]-mailcron

@@ -1,6 +1,6 @@
 package Provisioner::Cookbook;
 
-#ABSTRACT: What recipes there are, what each takes, and what a config for them looks like.
+#ABSTRACT: What recipes there are, what each takes, and what a configuration for them looks like.
 
 use 5.041;
 
@@ -24,7 +24,7 @@ use Trog::Config();
 =head1 NAME
 
 Provisioner::Cookbook - what recipes there are, what each takes, and what a
-configuration for them looks like before anybody has filled it in.
+configuration for them looks like before anybody fills it in.
 
 =head1 SYNOPSIS
 
@@ -40,24 +40,22 @@ configuration for them looks like before anybody has filled it in.
 =head1 DESCRIPTION
 
 Every recipe declares what it takes in C<args()>, an OpenAPIv3 object schema.
-That is enough to answer three questions without running anything: which
-recipes exist, what each one will accept, and what the smallest configuration
-that could possibly work looks like.
+From those declarations alone, this module answers three questions: which recipes
+exist, what each one accepts, and what the smallest working configuration is.
 
-F<bin/recipes> answers the first two and F<bin/new_guest> the third; both are
-this module with a command line attached.
+F<bin/recipes> answers the first two and F<bin/new_guest> answers the third.
+Both are this module with a command line.
 
-Not to be confused with L<Provisioner::Recipe>, which is what a recipe is.
-This is the shelf they sit on -- and it deliberately does not live under
-F<Provisioner/Recipe/>, because everything there is discovered and loaded as a
-recipe.
+L<Provisioner::Recipe> defines what a recipe is.  This module lists the
+recipes.  It is not under F<Provisioner/Recipe/>, because the code discovers
+and loads everything there as a recipe.
 
 =head1 CLASS METHODS
 
 =head2 recipe_dir
 
-Where the recipe modules are, found relative to this file so that it is the
-same answer from a checkout and from an installed dist.
+Returns the directory that holds the recipe modules.  It is found relative to
+this file, so a checkout and an installed dist give the same answer.
 
 =cut
 
@@ -65,8 +63,8 @@ sub recipe_dir { return File::Basename::dirname(__FILE__) . '/Recipe' }
 
 =head2 template_dir
 
-Where the templates are, found relative to this file for the same reason
-C<recipe_dir> is.
+Returns the template directory.  It is found relative to this file, for the
+same reason as C<recipe_dir>.
 
 =cut
 
@@ -74,17 +72,18 @@ sub template_dir { return Cwd::abs_path( File::Basename::dirname(__FILE__) . '/.
 
 =head2 template_dirs($distro, @libdirs)
 
-The template search path for a build, in the order a renderer should try it.
+Returns an array reference of the template search path for a build, in the
+order that a renderer tries it.
 
-A distribution's own directory comes before the generic one, so
-F<templates/ubuntu/nginx.tt> wins over F<templates/nginx.tt> by being found
-first -- which is the whole mechanism, and needs no code that knows about it.
-Every fragment is written against apt and systemd today and so lives under
-F<ubuntu/>; F<templates/> holds what is genuinely shared, which is
-F<makefile.tt> and most of F<files/> and F<tests/>.
+The directory for a distribution comes before the generic one.  So
+F<templates/ubuntu/nginx.tt> wins over F<templates/nginx.tt>, because the
+renderer finds it first.  No other code knows about this order.  Every fragment
+today is written for apt and systemd, so it lives under F<ubuntu/>.
+F<templates/> holds what is truly shared: F<makefile.tt> and most of F<files/>
+and F<tests/>.
 
-The same for each vendor F<libdir>, after the checkout, since a vendor recipe
-adds to what ships here rather than overruling it.
+Each vendor F<libdir> comes after the checkout, in the same pattern.  A vendor
+recipe adds to what ships here and does not override it.
 
 =cut
 
@@ -97,11 +96,11 @@ sub template_dirs {
 
 =head2 names
 
-Every recipe you can ask a domain to be built with, sorted.
+Returns, sorted, the name of every recipe that a domain can be built with.
+Dies if the recipe directory does not exist.
 
-Not quite every module under F<Recipe/>: the two that direct a build rather than
-taking part in it are left out, since neither is something to write under a
-domain.  See C<directors>.
+This leaves out the recipes that direct a build and do not take part in it,
+because nobody writes one under a domain.  See C<directors>.
 
 =cut
 
@@ -118,11 +117,11 @@ sub names {
 
 =head2 fetch_hosts
 
-Every host any recipe names in C<fetch_hosts>, sorted and once each: what
-L<Provisioner::Recipe::fetchcache> fetches from unless it is told otherwise.
+Returns every host that any recipe names in C<fetch_hosts>, sorted and without
+duplicates.  L<Provisioner::Recipe::fetchcache> uses these hosts by default.
 
-Loads every recipe to ask it, which C<names> deliberately does not, and asks
-once a process: the answer is a fact about the code.
+This loads every recipe, which C<names> does not.  It asks once per process,
+because the answer is a fact about the code.
 
 =cut
 
@@ -135,22 +134,22 @@ sub fetch_hosts {
 
 =head2 configured_fetch_hosts
 
-Every host the domains this installation is configured with will actually
-download from: each domain's recipes asked C<fetch_hosts> with that domain's own
-configuration, rather than asked of the class with none.
+Returns every host that the configured domains of this installation download
+from, sorted and without duplicates.  Each recipe of a domain is asked
+C<fetch_hosts> with the configuration of that domain.
 
-C<fetch_hosts> above cannot answer this.  It is asked of the class, so a recipe
-whose upstream is configured -- koan's and trogrunner's C<repo_url>, admincode's
-C<api_url> -- can only name the host its default points at.  A guest gets the
-configured one, because C<bin/new_config> asks with the configuration in hand;
-what needed this is the cache, which builds its certificate and its
-C<server_name> from a list that had no configuration behind it and so did not
-answer for a host only somebody's F<recipes.d> entry names.
+C<fetch_hosts> above cannot give this answer, because it asks the class with no
+configuration.  So a recipe with a configured upstream names only its default
+host.  Examples are C<repo_url> in koan and trogrunner, and C<api_url> in
+admincode.  The C<upstreams> of L<Provisioner::Recipe::fetchcache> default to this
+list together with C<fetch_hosts>.  So the cache also answers for a host that
+only a F<recipes.d> entry names.
 
-Not memoized here on purpose: C<configuration> already remembers each file it
-read, keyed by path, and a second cache with a different lifetime is how the
-first one goes stale under a test that points C<TROG_PROVISIONER_CONFIG>
-somewhere else.
+Dies if a recipe cannot say which hosts a domain fetches from.
+
+This method does not cache its answer.  C<configuration> already remembers
+each file by path.  A second cache with a different lifetime goes stale under a
+test that points C<TROG_PROVISIONER_CONFIG> at a different place.
 
 =cut
 
@@ -160,14 +159,14 @@ sub configured_fetch_hosts {
     my $conf = $class->configuration();
     my @hosts;
 
-    # _base is what every domain gets rather than a guest of its own.
+    # _base holds what every domain gets, and it is not a guest of its own.
     foreach my $domain ( grep { $_ ne '_base' } sort keys %$conf ) {
         my $config = $class->domain_config( $domain, $conf );
 
         foreach my $recipe ( sort keys %$config ) {
 
-            # A configuration naming a recipe this installation does not have is
-            # somebody else's error to report, not a reason to fetch nothing.
+            # Other code reports a recipe that this installation does not have.
+            # Here it is not a reason to fetch nothing.
             next unless $class->has($recipe);
             eval { push( @hosts, $class->load($recipe)->fetch_hosts( %{ $config->{$recipe} // {} } ) ); 1 } or do {
                 die "The $recipe recipe could not say which hosts $domain fetches from: $@";
@@ -180,11 +179,12 @@ sub configured_fetch_hosts {
 
 =head2 cache_classes
 
-Every cache class any recipe declares, as C<{ class =E<gt> ..., pattern =E<gt>
-... }>: what L<Provisioner::Recipe::fetchcache> keeps for how long.  Asked of
-every recipe rather than of the ones a domain uses, for the reason
-C<fetch_hosts> is -- the cache serves a fleet and cannot depend on any one
-domain.
+Returns every cache class that any recipe declares, as a list of C<{ class
+=E<gt> ..., pattern =E<gt> ... }>.  L<Provisioner::Recipe::fetchcache> uses
+them to decide how long it keeps a file.
+
+This asks every recipe, not only the recipes of one domain, because the cache
+serves the whole fleet.  It asks once per process.
 
 =cut
 
@@ -197,26 +197,23 @@ sub cache_classes {
 
 =head2 implementations($interface)
 
-The recipes that implement an interface -- the ones whose class C<isa> it --
-sorted.  C<Provisioner::DNSRecipe> has two, C<pdns> and C<registrar>.
+Returns, sorted, the recipes whose class C<isa> C<$interface>.  For example,
+C<Provisioner::DNSRecipe> has two: C<pdns> and C<registrar>.
 
-Loads every recipe to ask, which C<names> deliberately does not, and asks once a
-process for each interface: which classes inherit from what is a fact about the
-code rather than about a configuration.
+This loads every recipe, which C<names> does not.  It asks once per process for
+each interface, because inheritance is a fact about the code.
 
-This is what lets C<bin/new_config> resolve a substitutable dependency.  A
-recipe can say it needs something that can answer a dns-01 challenge without
-naming the one that happens to exist.
+C<resolve_substitutable_dependency> uses this.  With it, a recipe can ask for
+something that answers a dns-01 challenge without naming the recipe that does
+it.
 
 =cut
 
 sub implementations {
     my ( $class, $interface ) = @_;
 
-    # names() and directors() together: names deliberately leaves out the
-    # recipes that direct a build, and those implement interfaces too -- every
-    # Provisioner::DistroRecipe there is, is one.  Asked of names alone this
-    # answered "nothing implements that" for a real interface.
+    # Directors too, because names() leaves them out, and every
+    # Provisioner::DistroRecipe is a director.
     state %by_interface;
     $by_interface{$interface} //= [
         sort grep {
@@ -229,17 +226,17 @@ sub implementations {
 
 =head2 directors
 
-The recipes that direct a build instead of running in one: C<vm>, and the
-distro recipe for every distribution there is a namespace for.
+Returns the recipes that direct a build and do not run in one: C<vm>, and the
+distro recipe of each distribution that has a namespace.
 
-They are recipes in every way that counts -- they declare C<args>, they are
-configured out of F<recipes.yaml>, C<bin/recipes> will print their schema -- but
-naming one under a domain would be as odd as naming the hypervisor there, so
-C<names> does not offer them.  C<has> and C<load> still answer for them.
+They are recipes in all other ways.  They declare C<args>, F<recipes.yaml>
+configures them, and C<bin/recipes> prints their schema.  But nobody names one
+under a domain, just as nobody names the hypervisor there.  So C<names> leaves
+them out.  C<has> and C<load> still answer for them.
 
-Answered by name rather than by asking each module its C<is_module>, because
-C<names> deliberately loads nothing: that is the whole reason C<abstract> reads
-the file instead.  C<t/recipes.t> holds the two answers against each other.
+The list comes from names, not from C<is_module> on each module, because
+C<names> loads nothing.  C<abstract> reads the file for the same reason.
+C<t/recipes.t> makes sure that the two answers agree.
 
 =cut
 
@@ -250,13 +247,13 @@ sub directors {
 
 =head2 distros
 
-The distributions there are recipes for, lowercased -- the C<distro> a domain's
-C<_global> may name.
+Returns, sorted and in lower case, the distributions that have recipes.  These
+are the values that C<distro> in the C<_global> block of a domain can take.
 
-One per capitalized subdirectory of the recipe directory: C<Recipe/Ubuntu/>
-holds Ubuntu's specializations, and C<Recipe/ubuntu.pm> is the distro recipe
-itself.  Read off the directory rather than listed, so adding a distribution is
-adding files.
+There is one for each subdirectory of the recipe directory.  C<Recipe/Ubuntu/>
+holds the specializations for Ubuntu, and C<Recipe/ubuntu.pm> is the distro
+recipe itself.  The list comes from the directory, so to add a distribution you
+add files.
 
 =cut
 
@@ -268,7 +265,8 @@ sub distros {
 
 =head2 has($name)
 
-Whether there is a recipe by that name.
+Returns true if there is a recipe named C<$name>.  A name that is not a single
+word is never a recipe.
 
 =cut
 
@@ -282,23 +280,24 @@ sub has {
 
 =head2 load($name, %opts)
 
-Load the recipe and hand back its class name.  Dies naming the recipe, and
-saying what there is instead, because a typo here is the likeliest reason to
-be calling it.
+Loads the recipe C<$name> and returns its class name.
 
-C<distro> asks for that distribution's specialization of the recipe --
-C<Provisioner::Recipe::Ubuntu::nginx> rather than C<Provisioner::Recipe::nginx>
--- and is how the package names for a build get chosen.  A recipe with no
-specialization for that distribution comes back as itself, which is right: most
-recipes install nothing, and a shared C<deps> is a shared C<deps>.
+Dies if there is no recipe by that name, and points to C<bin/recipes> for the
+list.  A typo is the likeliest reason for a bad name.  Also dies if the module
+does not inherit from L<Provisioner::Recipe>.
 
-B<Absence is the only thing that falls back.>  The subclass is looked for on
-disk and then C<require>d outright, so a subclass that does not compile takes
-the run down.  Wrapping that in an C<eval> and falling back on failure would
-turn a typo in F<Ubuntu/mail.pm> into a guest with no postfix on it and nothing
-said about why -- and the same goes for a subclass that forgot its C<parent>,
-which is what the second C<isa> catches: it would otherwise inherit the base
-class's empty C<deps> and install nothing, quietly.
+C<distro> asks for the specialization of the recipe for that distribution, for
+example C<Provisioner::Recipe::Ubuntu::nginx> in place of
+C<Provisioner::Recipe::nginx>.  This is how a build chooses its package names.
+A recipe with no specialization for that distribution comes back as itself.
+Most recipes install nothing, and a shared C<deps> stays shared.
+
+Only a missing specialization falls back to the recipe itself.  If the file
+exists, this C<require>s it with no C<eval>, so a specialization that does not
+compile stops the run.  With a fallback, a typo in F<Ubuntu/mail.pm> gives a
+guest without postfix, and nothing says why.  For the same reason, this dies if
+the specialization does not inherit from the recipe.  Otherwise a subclass that
+forgot its C<parent> inherits an empty C<deps> and quietly installs nothing.
 
 =cut
 
@@ -331,9 +330,11 @@ sub load {
 
 =head2 abstract($name)
 
-The one-line description off the recipe's C<#ABSTRACT> line, or undef.  Read
-out of the file rather than loaded, so listing every recipe costs one readdir
-and 42 opens instead of 42 module loads.
+Returns the one-line description from the C<#ABSTRACT> line of the recipe, or
+undef if there is none.  Dies if it cannot close the file.
+
+It reads the file and does not load the module.  So a list of every recipe
+costs one open for each recipe and no module loads.
 
 =cut
 
@@ -354,19 +355,21 @@ sub abstract {
 
 =head2 spec($name, %opts)
 
-The recipe's C<args()>, as a hash.
+Returns the C<args()> schema of the recipe C<$name>, as a hash.  Dies as
+C<load> does.
 
-C<args()> is an instance method -- C<validate> calls it as one -- and a recipe
-is within its rights to compute a default off C<$self>, so this calls it on an
-object rather than on the class name.  C<%opts> become that object's fields;
-C<output_dir> defaults to a scratch directory, because at least one recipe
-generates a secret and writes it there as a side effect of being asked what it
-takes.  Describing a recipe should not leave anything behind in whatever
-directory you happened to be standing in.
+C<args()> is an instance method, and C<validate> calls it on an object.  A
+recipe can compute a default from C<$self>.  So this calls C<args()> on an
+object and not on the class name.  C<%opts> become the fields of that object.
 
-Worth knowing: a recipe may do real work here.  The garage recipe asks GitHub
-for the current release to use as its version default, so C<spec('garage')>
-makes a network request and takes as long as that does.
+C<output_dir> defaults to one scratch directory for the process, which is
+removed at exit.  At least one recipe generates a secret and writes it there
+when it is asked what it takes.  A description of a recipe must not leave files
+in the current directory.
+
+A recipe can do real work here.  The garage recipe asks GitHub for the current
+release to use as its version default.  So C<spec('garage')> makes a network
+request and takes as long as that request.
 
 =cut
 
@@ -383,17 +386,14 @@ sub spec {
 
 =head2 properties($spec)
 
-The properties of an object schema.
+Returns the C<properties> hash of an object schema, or an empty hash if
+C<$spec> has none.
 
-Only C<properties>, which is what OpenAPIv3 calls it and what the validator
-reads.  Seven recipes used to spell it C<parameters>, which the validator
-ignores -- so those fields were not being checked at all.  They are fixed, and
-t/recipes.t will not let another one in.
-
-Reading both was tempting and would have been wrong: a scaffold that offers
-fields the validator does not look at is telling you the recipe accepts
-something it will not actually check.  Better to agree with the validator and
-have the misspelling show up as an empty schema.
+It reads only C<properties>, which is the name that OpenAPIv3 uses and that the
+validator reads.  A schema that spells it C<parameters> gets an empty hash
+here.  A scaffold that offered those fields claims that the recipe checks
+something that it does not check.  F<t/Provisioner-Cookbook.t> fails on any
+recipe that spells it C<parameters>.
 
 =cut
 
@@ -405,15 +405,16 @@ sub properties {
 
 =head2 defaults($name, %opts)
 
-What a recipe's schema declares as defaults, as a hash of field to value.
+Returns the defaults that the schema of recipe C<$name> declares, as a hash of
+field to value.  C<%opts> go to C<spec>.
 
-For the callers that have to fill a field in themselves rather than letting the
-validator do it -- C<bin/new_config> writing F<provision.conf>, C<bin/new_guest>
-writing a domain block -- so that the number they write is the one the recipe
-would have used and not a second opinion about it.
+This is for a caller that fills in a field itself and does not let the
+validator do it.  C<bin/new_config> writes F<provision.conf>, and
+C<bin/new_guest> writes a domain block.  With this, the value that they write is
+the value that the recipe uses.
 
-Only the top level, and only fields that declare one.  A nested default belongs
-to the object it is declared in and is the validator's to apply; see
+It returns only top-level fields that declare a default.  A nested default
+belongs to the object that declares it, and the validator applies it.  See
 L<Provisioner::Recipe/args>.
 
 =cut
@@ -427,10 +428,12 @@ sub defaults {
 
 =head2 PLACEHOLDER
 
-What goes in a field the recipe requires and has no default for.  It is a
-string on purpose, and an obvious one: a required boolean filled in with a
-plausible-looking C<0> would provision quietly and wrongly, where this stops
-at validation and says which key it was.
+Returns the value for a required field that has no default: the string
+C<CHANGEME>.
+
+It is an obvious string on purpose.  A required boolean filled in with a
+plausible C<0> provisions quietly and wrongly.  This string fails validation of
+a boolean, and the error names the key.
 
 =cut
 
@@ -438,26 +441,28 @@ sub PLACEHOLDER { return 'CHANGEME' }
 
 =head2 scaffold($name, %opts)
 
-The smallest configuration for a recipe that could work, and a list of the
-paths in it that still need a human.
+Returns the smallest configuration for recipe C<$name> that can work, and a
+list of the dotted paths in it that a person still has to fill in.  Dies as
+C<spec> does.
 
     my ($config, @todo) = Provisioner::Cookbook->scaffold('mariadb');
 
-Required fields get their default if the recipe has one and a placeholder if
-it does not.  Everything else is left out, so the recipe's own defaults keep
-applying rather than being frozen into a file the day it was generated.
+A required field gets its default if the recipe has one, and C<PLACEHOLDER> if
+not.  Other fields are left out, so the defaults of the recipe keep applying and
+are not frozen into the generated file.
 
-C<all> includes the optional fields too, defaults where there are defaults --
-the full menu, for when you are going to edit it anyway.
+C<all> also includes the optional fields, with their defaults where they have
+them.  Use it when you intend to edit the full list anyway.
 
-C<provided> is configuration that is already coming from somewhere else -- the
-C<_base> block of F<recipes.yaml>, usually.  Those fields are left out and are
-not reported as needing anything, because there is nothing to fill in: asking
-for a value that is already supplied is how a generated file grows fields
-nobody meant to pin.
+C<provided> is configuration that comes from somewhere else, usually the
+C<_base> block of F<recipes.yaml>.  Its fields are left out and are not
+reported as missing.  A request for a value that is already supplied makes a
+generated file pin fields that nobody meant to pin.
 
-Returns undef for a recipe that needs nothing, which is how the config files
-already spell it: a bare C<nosnap:> with nothing under it.
+C<output_dir> goes to C<spec>.
+
+The configuration is undef for a recipe that needs nothing.  The configuration
+files spell that as a bare C<nosnap:> with nothing under it.
 
 =cut
 
@@ -486,9 +491,8 @@ sub _scaffold_object {
 
         next if exists $provided->{$key};
 
-        # Nothing an operator writes: a readOnly field is answered by whatever
-        # builds the guest, so offering one to fill in would be asking for a
-        # value that gets overwritten.
+        # The build fills in a readOnly field, so an operator writes nothing
+        # there.
         next if $prop->{readOnly};
 
         my $wanted = $required{$key} || $opts->{all};
@@ -516,9 +520,8 @@ sub _scaffold_value {
 
     if ( $type eq 'object' ) {
 
-        # An object with declared properties gets scaffolded from them; one that
-        # is only additionalProperties has nothing to scaffold, so it is left
-        # out rather than guessed at.
+        # An object with only additionalProperties has nothing to scaffold, so
+        # it is left out.
         my ( $sub, @todo ) = $class->_scaffold_object( $prop, $path, $opts );
         return ( undef, () ) unless %$sub;
         return ( $sub,  @todo );
@@ -535,32 +538,33 @@ sub _scaffold_value {
 
 =head2 scaffold_dependencies(\@named, %opts)
 
-The blocks a domain needs for recipes nobody named, and the paths in them that
-still want a human.
+Returns a hash reference of the blocks that a domain needs for recipes that
+nobody named, and the dotted paths in them that a person still has to fill in.
 
     my ( $blocks, @todo ) = Provisioner::Cookbook->scaffold_dependencies( ['grafanasyslog'] );
 
 C<scaffold> answers for one recipe, and C<bin/new_guest> asks it about each
-recipe on the command line -- which is not the set the guest is built from.
-C<bin/new_config> closes that set over C<required_recipes>, so a recipe nobody
-named arrives with required fields of its own.  Usually the recipe that asked
-for it supplies them.  Where it cannot, somebody has to be told: C<grafana>
-wants an C<admin_password>, and a password is not a thing a depending recipe can
-choose on an operator's behalf, so without this the report says there is nothing
-to fill in and C<bin/new_config> refuses once a guest is already going up.
+recipe on its command line.  That is not the full set that the guest is built
+from.  C<bin/new_config> adds each dependency from C<required_recipes>, so a
+recipe that nobody named can arrive with required fields of its own.  The
+recipe that asked for it usually supplies them.  When it cannot, a person must
+know.  For example, C<grafana> wants an C<admin_password>, and a dependent
+recipe cannot choose a password for the operator.  Without this, the report
+says that there is nothing to fill in.  Then C<bin/new_config> refuses the
+configuration when the guest is already going up.
 
-Only dependencies that still want something come back.  The depsolver adds the
-recipe either way, so a block here is somewhere to put a value rather than a
-request for the recipe.
+Only dependencies that still want a value come back.  The depsolver adds the
+recipe either way, so a block here is a place to put a value, not a request for
+the recipe.
 
-Two things it will not guess at.  A key naming an interface rather than a recipe
-is resolved by the depsolver against the domain's configuration, which is not
-available here.  And C<bin/new_config> hands a C<required_recipes> sub the
-requiring recipe's own options, so one called without them may die -- C<tcms>
-builds a path out of C<install_dir> and C<domain> -- and a sub that died has
-said nothing about what it supplies.  A placeholder standing in front of a field
-the recipe that asked for it would have filled is worse than no placeholder at
-all, so that dependency is left alone.
+C<base> is the C<_base> block and C<global_config> is the C<_global> block, as
+F<recipes.yaml> lays them out.  C<domain> is required, as in
+C<resolve_dependencies>.  C<all> and C<output_dir> go to C<scaffold>.
+
+A key that names an interface is resolved against the C<base> blocks of the
+named recipes only, because the full configuration of the domain is not
+available here.  Dies as C<resolve_dependencies> does, which includes a
+C<required_recipes> sub that cannot answer without the global configuration.
 
 =cut
 
@@ -571,13 +575,10 @@ sub scaffold_dependencies {
     my $global = ref $opts{global_config} eq 'HASH' ? $opts{global_config} : {};
     my $distro = $global->{distro} // 'ubuntu';
 
-    # What a recipe is built with, worked out here rather than asked of the
-    # caller: bin/new_guest has no business knowing which packager a
-    # distribution uses, and a caller that guessed would be a second answer to a
-    # question this module already has one for.
-    # One for the process, the way spec() takes one: a recipe is instantiated
-    # with somewhere to write, nothing here writes, and a directory per call
-    # would be a directory per call left behind.
+    # Worked out here and not asked of the caller, because bin/new_guest does
+    # not know which packager a distribution uses.
+    # One scratch directory for the process, as in spec(), because nothing here
+    # writes to it.
     state $scratch;
     my %provisioner = (
         distro          => $distro,
@@ -586,8 +587,8 @@ sub scaffold_dependencies {
         output_dir      => $opts{output_dir} // ( $scratch //= File::Temp::tempdir( CLEANUP => 1 ) ),
     );
 
-    # One entry per named recipe, which is what the walk merges each
-    # dependency's contributions into.
+    # One entry for each named recipe.  The walk merges what each dependency
+    # contributes into these.
     my %domain_conf = map { $_ => clone( $base->{$_} // {} ) } @$named;
 
     my ( $modules, $builders ) = $class->resolve_dependencies(
@@ -599,7 +600,7 @@ sub scaffold_dependencies {
         domain        => $opts{domain},
     );
 
-    # Named by the caller, who has scaffolded them already.
+    # The caller already scaffolded the recipes it named.
     my %named = map { $_ => 1 } @$named;
 
     my ( %blocks, @todo );
@@ -624,12 +625,14 @@ sub scaffold_dependencies {
 
 =head2 placeholders_in($config, $path)
 
-Every place in a configuration that is still a placeholder, as dotted paths.
+Returns every place in C<$config> that still holds C<PLACEHOLDER>, as dotted
+paths, with a list item as C<[n]>.  C<$path> is the prefix for those paths, and
+is empty by default.
 
-A placeholder is a perfectly good string, so nothing downstream would object to
-one: C<root_pw: CHANGEME> validates, provisions, and gives you a database whose
-root password is CHANGEME.  Somebody therefore has to look, and this is what
-they look with.
+A placeholder is a valid string, so nothing downstream rejects it.
+C<root_pw: CHANGEME> validates, provisions, and gives a database whose root
+password is CHANGEME.  So a person must look, and this method finds what to
+look at.
 
 =cut
 
@@ -653,29 +656,35 @@ sub placeholders_in {
 
 =head2 resolve_substitutable_dependency(%args)
 
-Which recipe satisfies a substitutable dependency: one naming an interface that
-any of several recipes could answer for, rather than naming a recipe outright.
+Returns the recipe that satisfies a substitutable dependency.  A substitutable
+dependency names an interface that several recipes can answer for, not a
+recipe.
 
-The interface decides -- this asks it, rather than working it out again.  Two
-answers to one question is how the gates this replaced came to disagree, so the
-rules live in one place and both callers, here and the recipe rendering its own
-templates, put the same question to it.
+The interface decides, through its C<implementation_for>.  This method asks it
+and does not work out the answer again.  Both callers, this one and a recipe
+that renders its own templates, ask the interface.  So the rules stay in one
+place.
 
-What this adds is the part the interface cannot know: that the answer has to be
-a recipe this installation actually has, and one that implements what was asked
-for.  A configuration naming something else is a typo, and saying so beats
-loading it and finding out three targets later.
+This method adds what the interface cannot know.  The answer must be a recipe
+that this installation has, and that implements the interface.  A
+configuration that names another recipe is a typo, and this says so before
+anything loads it.
 
-C<interface> is the interface that was named, and C<domain> the domain naming it.
+C<interface> is the interface that was named.  C<domain> is the domain that
+names it, and it is required.
 
-C<domain_conf> is what the domain itself is configured with.  C<host_conf> is
-what the machine it is layered onto is, and C<host> names that machine so a
-refusal can say which guest it looked at -- both of those undef for a domain
-with a guest of its own.
+C<domain_conf> is the configuration of the domain itself.  C<host_conf> is the
+configuration of the machine that the domain is layered onto.  C<host> names
+that machine, so a refusal can say which guest it looked at.  Both are undef
+for a domain with a guest of its own.
 
 C<requiring_conf> is the configuration of the recipe that declared the
-dependency: the interface names the key holding a preference and reads it from
-there, so a domain settles a tie where it already writes it.
+dependency.  The interface names the key that holds a preference, and reads it
+from there.  So a domain settles a tie in the block where it already configures
+that recipe.
+
+Dies if C<domain> is missing, if the interface does not load, if no recipe
+implements it, or if the interface chooses a recipe that does not implement it.
 
 =cut
 
@@ -683,21 +692,19 @@ sub resolve_substitutable_dependency {
     my ( $class, %args ) = @_;
     my ( $interface, $domain_conf, $host_conf, $requiring_conf, $domain, $host ) = @args{qw{interface domain_conf host_conf requiring_conf domain host}};
 
-    # For the same reason resolve_dependencies requires it: all three refusals
-    # below open with it, and one that cannot name the domain is not worth much.
+    # Every refusal below names the domain.
     die "resolve_substitutable_dependency needs the domain asking; pass one.\n" unless $domain;
 
-    # It arrives as text out of required_recipes, so nothing has loaded it and
-    # every method call below would be "perhaps you forgot to load".
+    # The name comes from required_recipes as text, so nothing loaded the
+    # interface yet.
     my $path = $interface =~ s{::}{/}gr;
     eval { require "$path.pm"; 1 } or die "$domain depends on $interface, which will not load: $@";    ## no critic (Modules::RequireBarewordIncludes)
 
     my @known = $class->implementations($interface);
     die "$domain depends on $interface, which no recipe here implements.\n" unless @known;
 
-    # The configuration this run was pointed at, not the installation's: they
-    # are the same thing for a fleet provision and different for every scratch
-    # one, and the resolver has no way to tell which it is being asked about.
+    # Pass the configuration of this run, not of the installation.  The two
+    # differ for every scratch run, and the resolver cannot tell which is meant.
     my $chosen = $interface->implementation_for(
         %{ $requiring_conf // {} },
         domain          => $domain,
@@ -714,8 +721,8 @@ sub resolve_substitutable_dependency {
 
 =head2 resolve_dependencies(%args)
 
-Close a domain's module list over what its recipes require, and configure what
-that drags in.
+Adds to the module list of a domain everything that its recipes require, and
+configures what that adds.
 
     my ( $modules, $builders ) = Provisioner::Cookbook->resolve_dependencies(
         modules       => [ $distro_name, sort keys %{ $conf->{$domain} } ],
@@ -726,44 +733,46 @@ that drags in.
         domain        => $domain,
     );
 
-A recipe says what it needs in C<required_recipes>, and what it needs may need
-something in turn, so the list is walked as it grows rather than iterated once.
-Each dependency is added, configured out of whatever the recipes depending on it
-asked for, and C<reconcile>d where two of them wanted different things.
+A recipe names what it needs in C<required_recipes>, and each dependency can
+need more.  So the list is walked while it grows, not once.  Each dependency is
+added and configured from what the recipes that depend on it asked for.  Where
+two of them asked for different values, the dependency C<reconcile>s them.
 
-What comes back is the expanded list and the builders instantiated along the
-way, which reusing is the caller's responsibility rather than loading every
-recipe a second time.  C<domain_conf> is written into: a dependency's
-configuration ends up the merge of what the domain wrote and what each dependent
-handed it.
+Returns an array reference of the expanded list, and a hash reference of the
+builders that it made, keyed by recipe name.  Reuse the builders, so that
+nothing loads every recipe a second time.  C<domain_conf> changes in place.
+The configuration of each dependency becomes the merge of what the domain wrote
+and what each dependent gave it.
 
-The list comes back in the order the build wants it.  A dependency is named
-again every time something requires it, and the last of those is the one that
-counts -- it has to run after everything that dragged it in -- so the list is
-C<lastuniq>'d before it is returned.  Which entries are modules at all is
-L<Provisioner::Recipe/is_module>, and that is the caller's to filter.
+The list comes back in build order.  A dependency is added again each time
+something requires it.  The last mention counts, because the dependency must
+run after everything that requires it.  So the list goes through C<lastuniq>
+before it returns.  L<Provisioner::Recipe/is_module> says which entries are
+modules, and the caller filters them.
 
-C<domain> is required.  Getting this far without knowing which domain is being
-provisioned is not a thing to paper over with a default: a caller with no real
-one has a bogus one to supply and a reason to think about why.
+C<domain> is required, and this dies without it.  Do not cover a missing domain
+with a default.  A caller with no real domain must knowingly supply a made-up
+one.
+
+C<host_conf> and C<host> go to C<resolve_substitutable_dependency>.
 
 =head3 Two sources, on purpose
 
-Dependencies are composed from the base class's C<required_recipes> as well as
-the recipe's own, and the base class's is called explicitly rather than through
-the recipe.  What the base class decides every recipe owes -- C<ufw> its rate
-limits, C<data> its restores -- is not something an override should be able to
-drop by forgetting to chain to C<SUPER>, and six of them do exactly that.
+The dependencies come from the C<required_recipes> of the base class and from
+the C<required_recipes> of the recipe.  This calls the base class version
+directly, not through the recipe.  The base class decides what every recipe
+owes: C<ufw> its rate limits, and C<data> its restores.  An override that does
+not call C<SUPER> must not drop those, and many overrides do not call it.
 
 =head3 When a recipe cannot say what it wants
 
-A C<required_recipes> sub is handed the global configuration and the requiring
-recipe's own, and reaches into both: C<tcms> builds a path out of C<install_dir>
-and C<domain>.  Called without them it dies, and what it says on the way out is
-about a path rather than about a configuration.  So this names the recipe that
-could not answer and what it was asked about.  That configuration comes from C<_global>
-in F<recipes.yaml>, and a caller that has not got them has a file to fix rather
-than a dependency to skip.
+A C<required_recipes> sub gets the global configuration and the configuration
+of the requiring recipe, and reads both.  For example, C<tcms> builds a path
+from C<install_dir> and C<domain>.  Without them it dies, and its message is
+about a path, not about a configuration.  So this dies with a message that
+names the recipe that did not answer and the dependency it was asked about.
+That configuration comes from C<_global> in F<recipes.yaml>.  A caller without
+it has a file to fix, not a dependency to skip.
 
 =cut
 
@@ -776,43 +785,38 @@ sub resolve_dependencies {
     my $distro        = $args{distro};
     my $provisioner   = $args{provisioner} // {};
 
-    # Required.  Every refusal below opens with it, and depsolving without
-    # knowing which domain is being provisioned is not a state to carry on from.
+    # Every refusal below names the domain.
     my $domain = $args{domain}
       or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
 
     my $depmod_conf = {};
     my %builders;
 
-    # Each recipe's configuration as the domain wrote it, taken on its first
-    # visit.  A recipe other recipes depend on is visited once for each of
-    # them, and what they handed it has to be merged into what the domain
-    # wrote each time -- merged into the last visit's result instead, a list
-    # they handed it came out once per visit.
+    # The configuration of each recipe as the domain wrote it, taken on the
+    # first visit.  A recipe is visited once for each recipe that depends on
+    # it, and each visit merges into this copy.  Hash::Merge appends lists, so a
+    # merge into the result of the previous visit repeats a list once per visit.
     my %as_written;
 
-    # A C-style loop is the only one that recomputes the array's extents every
-    # iteration, and so the only way to iterate recursively in perl: what a
-    # recipe requires may require something itself, and lands on this list while
-    # it is being walked.
+    # A C-style loop reads the length of @modules on each pass, so it also
+    # visits the dependencies that the walk pushes onto the list.  A foreach
+    # must not see its array change.
     for ( my $i = 0; $i < scalar(@modules); $i++ ) {
         my $module  = $modules[$i];
         my $builder = $builders{$module} //= $class->load( $module, distro => $distro )->new(%$provisioner);
 
         my $pconf = $domain_conf->{$module} // {};
 
-        # The base's own answer first, then the recipe's.  See L</Two sources, on purpose>.
+        # The base class first, then the recipe.  See L</Two sources, on purpose>.
         my %dep_recipes = (
             Provisioner::Recipe::required_recipes( $builder, %$global_config, %$pconf ),
             $builder->required_recipes( %$global_config, %$pconf ),
         );
         foreach my $required ( keys(%dep_recipes) ) {
 
-            # A dependency may be substitutable -- naming an interface several
-            # recipes could answer for -- and this is where it becomes one of
-            # them: has() takes \w+ and nothing else, so the name has to be
-            # resolved before anything below tries to load it or put it in the
-            # module list.
+            # A substitutable dependency names an interface.  Resolve it to a
+            # recipe here, because has() accepts only \w+, and the code below
+            # loads the name and puts it in the module list.
             if ( index( $required, '::' ) >= 0 ) {
                 my $chosen = $class->resolve_substitutable_dependency(
                     interface      => $required,
@@ -829,7 +833,8 @@ sub resolve_dependencies {
 
             my $manual_args = delete $pconf->{$required} // {};
 
-            # See about autocomputing the options if possible.
+            # A sub computes the options for the dependency.  Options that the
+            # domain wrote for it take precedence.
             my %depargs;
             if ( ref $dep_recipes{$required} eq 'CODE' ) {
                 my $said;
@@ -840,25 +845,24 @@ sub resolve_dependencies {
             }
             my %cur_args = %$manual_args ? ( $required => $manual_args ) : ( $required => \%depargs );
 
-            # Every time something names it.  The duplicates are the point: the
-            # last mention is the one lastuniq keeps, which is what puts a
-            # dependency after everything that dragged it in.
+            # Push it each time something names it.  lastuniq keeps the last
+            # mention, which puts a dependency after everything that requires it.
             push( @modules, $required );
             $depmod_conf = $class->_dep_merger->merge( $depmod_conf, \%cur_args );
 
-            # Hash::Merge picks a side where two dependents disagree.  The recipe
-            # being depended on is the only thing that knows whether either side
-            # is right, so it gets asked -- and dies if it does not know.
+            # Hash::Merge picks a side where two dependents disagree.  Only the
+            # required recipe knows which side is right, so it is asked, and it
+            # dies if it does not know.
             $class->load( $required, distro => $distro )->reconcile( $depmod_conf->{$required}, $cur_args{$required} );
         }
 
-        # Merge the configuration provided by all things depending on this.
+        # Merge in what every dependent asked of this recipe.
         $as_written{$module} //= clone($pconf);
         if ( $depmod_conf->{$module} ) {
             $domain_conf->{$module} = $class->_dep_merger->merge( $depmod_conf->{$module}, $as_written{$module} );
 
-            # Same on this side of it: what an operator wrote for this recipe is
-            # held against what the recipes depending on it asked for.
+            # Also compare what the operator wrote for this recipe with what
+            # its dependents asked for.
             $builder->reconcile( $domain_conf->{$module}, $_ ) for ( $depmod_conf->{$module}, $as_written{$module} );
         }
     }
@@ -866,54 +870,45 @@ sub resolve_dependencies {
     return ( [ Provisioner::Utils::lastuniq(@modules) ], \%builders );
 }
 
-# Two merges, wanting opposite things, so two mergers.
+# Two merges that want opposite things, so two mergers.  Each is an object, so
+# a process-wide Hash::Merge behavior set elsewhere cannot change it.
 #
-# Named rather than inherited: bin/new_config sets Hash::Merge's process-wide
-# behavior, so the functional interface means one thing inside that script and
-# the default anywhere else.
+# _base holds defaults and a domain overrides them, so that merge keeps the
+# right.  See domain_config().
 #
-# _base is a base of defaults and a domain overrides it, so that merge takes the
-# right.  It took the left until this was fixed, which meant a domain could not
-# override anything _base named -- see the account in domain_config.
-#
-# The file merge keeps the left, and that one is deliberate: a domain's own file
-# adds to what recipes.yaml says rather than overruling it.  See configuration().
+# The file merge keeps the left on purpose.  The file of a domain adds to
+# recipes.yaml and does not override it.  See configuration().
 sub _base_merger { state $merger = Hash::Merge->new('RIGHT_PRECEDENT');   return $merger }
 sub _file_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
-# The depsolver's, for the two merges that accumulate what several recipes asked
-# of a shared dependency.
+# The merger of the depsolver, for the two merges that collect what several
+# recipes ask of a shared dependency.  An object, for the reason above.
 #
-# The left is kept on purpose: these build up a dependency's options one
-# requester at a time, and where two of them genuinely disagree it is reconcile
-# that settles it, having been shown both sides.
-#
-# An object rather than the process-wide behavior.  bin/new_config set that
-# globally and called Hash::Merge::merge, which worked only because it was the
-# only caller -- and a second set_behavior naming the other precedence once sat
-# under that line and silently undid it, which is what inverted _base for
-# everything.  Nothing can undo this one from a distance.
+# It keeps the left on purpose.  These merges build the options of a dependency
+# one requester at a time.  Where two requesters disagree, reconcile sees both
+# sides and settles it.
 sub _dep_merger { state $merger = Hash::Merge->new('STORAGE_PRECEDENT'); return $merger }
 
 =head2 configuration($path)
 
-The recipe configuration an installation is running on: F<recipes.yaml> with
-every F<recipes.d/*.yaml> beside it merged into it, keyed by domain.  C<$path>
-defaults to the F<recipes.yaml> in L<Trog::Config>'s directory, and an absent
-one is an empty configuration rather than an error.
+Returns the recipe configuration of an installation as a hash reference, keyed
+by domain.  It is F<recipes.yaml>, with each F<recipes.d/*.yaml> next to it
+merged in.  C<$path> defaults to the F<recipes.yaml> in the directory of
+L<Trog::Config>.  If that file does not exist, this returns an empty
+configuration.  Dies if a file is not valid YAML.
 
-A domain's own file adds to what the main file says rather than overruling it:
-a key both of them carry keeps the value F<recipes.yaml> gave it.  C<_base> and
-C<_shared> are dropped from the per-domain files outright, since what every
-guest gets is not something one guest gets to say.
+The file of a domain adds to the main file and does not override it.  Where
+both files set a key, the value from F<recipes.yaml> stays.  This ignores
+C<_base> and C<_shared> in the files of a domain, because one guest does not
+decide what every guest gets.
 
-Read once per file and remembered, on the grounds that nobody edits the
-configuration underneath a command that is already running on it.
+It reads each file once and remembers the result.  Nobody edits the
+configuration under a command that is already running on it.
 
 =cut
 
-# Keyed by resolved path: a run that reads two installations gets two answers,
-# and one that reads the same file twice does the work once.
+# Keyed by resolved path, so two installations give two answers, and a second
+# read of one file does no work.
 my %CONFIGURATION;
 
 sub configuration {
@@ -953,22 +948,18 @@ sub configuration {
 
 =head2 remember($path, $conf)
 
-Seat C<$conf> as the configuration for C<$path>, so everything that asks for it
-afterwards is answered with this one.
+Stores a copy of C<$conf> as the configuration for C<$path>.  After this, every
+request for that configuration gets this copy.  C<$path> defaults as in
+C<configuration>.
 
-There is exactly one caller and one reason.  C<bin/new_config> reads the
-configuration, clones it, and resolves every C<secret:> reference into the
-clone -- so the copy remembered here still says C<secret:group/entry/field>
-where the clone says the password.  A recipe reading a sibling's configuration
-through C<domain_config> got the reference, and rendered it into the file that
-was supposed to authenticate with it.  Measured: a domain whose registrar
-credentials are a secret reference exported
-C<LEXICON_EASYDNS_AUTH_TOKEN="secret:g/e/password"> into its dehydrated hook,
-while the same run configured the server with the real one.
+It has one caller, for one reason.  C<bin/new_config> reads the configuration,
+clones it, and resolves every C<secret:> reference in the clone.  The copy that
+C<configuration> remembers still says C<secret:group/entry/field>.  Without
+this, a recipe that reads the configuration of a sibling through
+C<domain_config> gets the reference and not the secret.
 
-Keyed the way C<configuration> keys, so the two cannot disagree about which
-file they are talking about, and cleared by C<forget> like anything else it
-remembers.
+It keys by path in the same way as C<configuration>, so both agree on the file.
+C<forget> clears it.
 
 =cut
 
@@ -977,44 +968,34 @@ sub remember {
 
     my $key = Cwd::abs_path( $path // Trog::Config->path('recipes.yaml') );
 
-    # A copy, because the caller goes on using theirs.  bin/new_config seats the
-    # configuration it resolved and then folds _base into the domain it is
-    # building and deletes _base outright -- and holding its reference meant
-    # every later reader lost the inheritance.  Not visibly for the domain being
-    # built, whose _base was folded in a line earlier, but for every other one:
-    # a domain layered onto another asks about its host, and got a host with
-    # nothing _base gave it.
+    # A copy, because the caller keeps using its own.  bin/new_config deletes
+    # _base from its copy, and every other domain still needs _base.
     return $CONFIGURATION{$key} = clone($conf);
 }
 
 =head2 domain_config($domain, $conf)
 
-Everything one domain is configured with: its own entry with the C<_base> entry
-folded into it, which is what a recipe's options are read out of.  With no
-domain, C<_base> alone -- what a domain gets when it says nothing itself.
+Returns everything that one domain is configured with, as a hash reference: its
+own entry with the C<_base> entry merged in.  Recipes read their options from
+this.  With no C<$domain>, returns C<_base> alone, which is what a domain gets
+when it says nothing itself.
 
-C<$conf> is a configuration to work from, defaulting to C<configuration()>.  A
-caller that has already done something to one -- resolved the C<secret:>
-references in it, say -- passes it, so that work is not thrown away and the two
-of you cannot end up merging the same file differently.  What comes back is a
-copy, so fold it, delete out of it, hand it to a recipe.
+C<$conf> is the configuration to work from, and defaults to C<configuration()>.
+A caller that already changed one passes it, for example after it resolved the
+C<secret:> references.  Then that work stays, and the caller and this method
+cannot merge the same file in different ways.  The return value is a copy, so
+the caller can change it freely.
 
-A domain overrides what C<_base> says: C<_base> is a base of defaults, and a
-domain naming the same field gets its own value.  Nested objects merge key by
-key, so a domain saying one thing about a recipe keeps everything else C<_base>
-said about it.  B<Lists concatenate rather than replace> -- a domain adding to a
-list C<_base> names gets both, which is what every C<Hash::Merge> behavior does
-and is worth knowing before putting a list in C<_base>.
+A domain overrides C<_base>.  Where both name the same field, the value of the
+domain wins.  Nested objects merge key by key, so a domain that sets one thing
+for a recipe keeps everything else that C<_base> says about that recipe.
 
-That is a correction.  Until it was made this merge took C<_base>'s side, so a
-domain could not override anything C<_base> named and the value it wrote was
-discarded without a word.  Both C<set_behavior> calls arrived together in
-C<027e1cf>, which meant to make inheritance deeper and inverted it instead: the
-first said the domain wins, and the second, being process-wide, said the
-opposite.
+Lists concatenate and do not replace.  A domain that adds to a list in
+C<_base> gets both lists.  Every C<Hash::Merge> behavior does this, so know it
+before you put a list in C<_base>.
 
-C<_global> is not part of it.  It says what the guest is rather than what a
-recipe takes, and it has always merged this way round -- see C<global_config>.
+C<_global> is not in the result.  It says what the guest is, not what a recipe
+takes.  See C<global_config>.
 
 =cut
 
@@ -1032,22 +1013,22 @@ sub domain_config {
 
 =head2 host_of($domain, $conf)
 
-The domain whose guest holds C<$domain>, where it is layered onto another, and
-nothing where it has a machine of its own.  That arrangement is C<_shared>: a
-host, and the domains built onto it.
+Returns the domain whose guest holds C<$domain>, if C<$domain> is layered onto
+another.  Returns nothing if it has a machine of its own, or if C<$domain> is
+undef.  C<_shared> holds that arrangement: each host, and the domains built
+onto it.
 
-Asked rather than handed down from recipe to recipe.  A guest runs one of each
-service between all the domains on it, so a recipe reading what a sibling is
-configured with -- the credential the DNS server runs with, the zone it holds --
-has to ask about the machine rather than about the domain, and this is what
-names it.
+Recipes ask for this, and nothing passes it from recipe to recipe.  A guest
+runs one of each service for all the domains on it.  So a recipe that reads the
+configuration of a sibling asks about the machine, not the domain.  Examples
+are the credential of the DNS server and the zone it holds.
 
-C<$conf> is a configuration to work from, defaulting to C<configuration()>; see
-C<domain_config> for when a caller passes one.
+C<$conf> is the configuration to work from, and defaults to C<configuration()>.
+See C<domain_config> for when a caller passes one.
 
-Ask it in scalar context.  Where a domain has a machine of its own this returns
-nothing rather than undef, which in a list vanishes instead of becoming one --
-so C<< is( host_of($d), undef ) >> compares the wrong pair of arguments.
+Call it in scalar context.  For a domain with its own machine, this returns an
+empty list and not undef.  In a list, the empty list disappears.  So
+C<< is( host_of($d), undef ) >> compares the wrong arguments.
 
 =cut
 
@@ -1069,12 +1050,12 @@ sub host_of {
 
 =head2 global_config($domain, $conf)
 
-The C<_global> block a domain is built with: what C<_base> says, with the
-domain's own on top.
+Returns the C<_global> block that a domain is built with, as a new hash
+reference.  It is the C<_global> block of C<_base> with the keys of the domain
+on top, merged one level deep.  C<$conf> is as in C<domain_config>.
 
-C<_global> is what several recipes share rather than what any one of them owns,
-which is why it is merged separately from the recipes themselves -- see
-C<domain_config>, which deliberately leaves it out.
+C<_global> holds what several recipes share, not what one recipe owns.  So it
+merges apart from the recipes, and C<domain_config> leaves it out.
 
 =cut
 
@@ -1090,14 +1071,10 @@ sub global_config {
 
 =head2 install_dir($domain, $conf)
 
-Where a domain's files live on the guest.
-
-This is C<_global>'s to say, not the C<data> recipe's.  It used to be read out
-of C<data>'s C<to> field, which meant every recipe interpolating C<install_dir>
-depended on the data recipe for the path rather than for anything data does --
-and that is what kept data from being an ordinary recipe.
-
-Falls back to F</opt/domains> for a configuration that says nothing.
+Returns the directory on the guest where the files of a domain live.  It comes
+from C<_global>, not from the C<data> recipe, so a recipe that uses
+C<install_dir> does not depend on C<data>.  Returns F</opt/domains> if the
+configuration says nothing.
 
 =cut
 
@@ -1112,15 +1089,13 @@ sub install_dir {
 
 =head2 data_source($domain, $conf)
 
-Where the hypervisor keeps what gets shipped to the guest.
+Returns the directory on the hypervisor that holds what gets shipped to the
+guest.  It comes from C<_global>, like C<install_dir>.
 
-The other half of the same move: C<_global>'s to say.
-
-B<No default.>  Unlike C<install_dir>, which is a path to render into a
-configuration and harmless to guess at, this one is what the teardown sweeps --
-so a configuration that says nothing has to come back undef and mean "nothing
-to sweep", rather than pointing something destructive at a directory nobody
-named.
+This has no default.  A guess for C<install_dir> is harmless, because it is only
+a path in a rendered configuration.  But the teardown deletes what is under the
+data source.  So if the configuration says nothing, this returns undef, which
+means that there is nothing to sweep.
 
 =cut
 
@@ -1135,12 +1110,13 @@ sub data_source {
 
 =head2 data_dir($domain, $conf)
 
-The domain's own directory under the data source.  C<bin/new_config> makes the
-recipes' datadirs in it, writes whatever it fetched off the last guest into it,
-and ships it to the hypervisor for the guest to pull its payload out of; the
-teardown in the provisioning-recipes skill is what takes it away again.
+Returns the directory of the domain under the data source.  Returns undef if
+C<$domain> is empty or if nothing names the data source.
 
-Undef when nothing says where the data source is.
+C<bin/new_config> makes the data directories of the recipes in it, and writes
+into it what it fetched from the last guest.  Then it ships the directory to
+the hypervisor, and the guest pulls its payload from it.
+C<bin/destroy --purge-data> removes it.
 
 =cut
 
@@ -1156,8 +1132,8 @@ sub data_dir {
 
 =head2 forget()
 
-Drop what C<configuration> remembers.  For a test that writes a configuration,
-reads it, and writes it again.
+Clears what C<configuration> and C<remember> hold, and returns 1.  A test uses it
+to write a configuration, read it, and write it again.
 
 =cut
 

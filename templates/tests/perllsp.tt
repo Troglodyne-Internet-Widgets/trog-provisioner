@@ -12,7 +12,7 @@ like($nav, qr/perlnavigator-server/, 'perlnavigator-server installed globally vi
 ok(-d "$home/.vim/pack/lsp/start", 'vim-lsp pack directory exists');
 ok(-f "$home/.vim/perllsp.vim", 'perllsp.vim vimrc snippet installed');
 
-# Each plugin unpacked, and at the commit it was pinned to.
+# Each plugin is unpacked, at the commit that it is pinned to.
 [% FOR plugin IN plugins -%]
 {
     my $dir = "$home/.vim/pack/lsp/start/[% plugin.dir %]";

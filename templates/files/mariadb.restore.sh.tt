@@ -1,45 +1,40 @@
 #!/bin/bash
 
-# Put a salvaged MariaDB dump into a server that has just been built.
+# Put a salvaged MariaDB dump into a server that was just built.
 #
 #     mariadb-restore.sh <salvaged dump directory>
 #
-# The directory is what remote_files brought back: /var/backups/mysql off the
-# guest this one replaces, laid out by mariadb-backup.sh as
-# <timestamp>/<database>/<table>.sql.gz with the views, routines and grants
-# beside them.
+# The directory is what remote_files fetched: /var/backups/mysql from the guest
+# that this one replaces.  mariadb-backup.sh lays it out as
+# <timestamp>/<database>/<table>.sql.gz, with the views, routines and grants
+# beside the tables.
 #
-# What it will not do is the important half.  scripts/restore_state declines a
-# destination that already has state in it, for the reason Provisioner::Recipe
-# gives under restore_state.  A database has the same problem and takes the same
-# answer, one level down: this creates a database that is not there and never
-# writes into one that is.  A rebuilt server has none of them and gets all of it;
-# a live one has all of them and gets nothing.
+# This script creates a database that is not there, and never writes into one
+# that is.  scripts/restore_state follows the same rule for files.  See
+# "Naming a path is not enough" in Provisioner::Recipe.  A rebuilt server has
+# none of the databases and gets all of them.  A live server has all of them and
+# gets nothing.
 set -euo pipefail
 shopt -s nullglob
 
 SALVAGED="${1:?usage: mariadb-restore.sh <salvaged dump directory>}"
 
-# The accounts this server made for itself, which the last guest's are not
-# allowed to replace.  root's password is configuration -- install_mariadb.sh
-# has just set it from root_pw and the recipe has written it into three .my.cnf
-# files -- so a salvaged GRANT putting the old hash back would leave every one of
-# them claiming a password the server no longer has.
+# The accounts that this server made for itself.  The accounts of the last
+# guest do not replace them.  install_mariadb.sh set the root password from
+# root_pw, and the .my.cnf files for root and the admin hold it.  A salvaged
+# GRANT for root puts the old hash back, and those files stop working.
 OURS='root|mariadb\.sys|mysql'
 
-# The system databases, and the last guest's copy of the privilege tables.  What
-# is worth keeping out of mysql is the application accounts and what they may do,
-# and that comes back from grants.sql.gz below -- rather than by writing another
-# machine's global_priv over the one that was just secured, which is how a guest
-# ends up with a root nobody has the password for.
+# The system databases, and the copy of the privilege tables from the last
+# guest.  The application accounts come back from grants.sql.gz below.  Restoring
+# the global_priv of another machine over this one leaves a root password that
+# nobody knows.
 SKIP='mysql|information_schema|performance_schema|sys'
 
-# The last thing mariadb-backup.sh writes is `complete`, so a directory without
-# one is a backup that was interrupted -- or one taken before the backup learned
-# to say, which is the same amount of knowledge about it.  Restoring half a
-# database is worse than restoring none: it leaves the server holding data, and
-# holding data is exactly what stops the next provision from trying again.  An
-# operator who knows an older dump is whole says so by touching the file.
+# The last thing mariadb-backup.sh writes is `complete`.  A directory without it
+# is a backup that nobody knows to be whole.  Half a database restored is worse
+# than none.  The server then holds data, and so the next provision does not try
+# again.  If an operator knows that a dump is whole, they touch the file.
 newest_finished_dump() {
     local dumps=( "$SALVAGED"/*/ )
     local i
@@ -52,8 +47,8 @@ newest_finished_dump() {
     return 1
 }
 
-# information_schema rather than SHOW DATABASES LIKE: an underscore is a LIKE
-# wildcard, and a fair few of these names have one in them.
+# information_schema, not SHOW DATABASES LIKE.  An underscore is a LIKE
+# wildcard, and many of these names contain one.
 database_exists() {
     [ -n "$(mariadb -sN -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$1'")" ]
 }
@@ -79,8 +74,8 @@ for dbdir in "$DUMP"/*/; do
     mariadb -e "CREATE DATABASE \`$db\`"
 
     # Tables first, then the views that select from them, then the routines that
-    # call both.  A table at a time is safe because every file mariadb-dump
-    # writes carries its own FOREIGN_KEY_CHECKS=0 header.
+    # call both.  One table at a time is safe, because each file from
+    # mariadb-dump sets FOREIGN_KEY_CHECKS=0 itself.
     for table in "$dbdir"*.sql.gz; do
         case "${table##*/}" in
             views.sql.gz | routines.sql.gz | grants.sql.gz ) continue ;;
@@ -101,13 +96,12 @@ if [ "$restored" -eq 0 ]; then
     exit 0
 fi
 
-# The accounts last, because a grant names a database that has to exist by then.
-# One file, whichever comes first: mariadb-dump --system=users writes every
-# account there is whichever database it was pointed at, so the per-database
-# copies are all the same list.  The file carries that database as well as the
-# accounts, which is why only the account statements are taken out of it -- they
-# are one to a line, which is what makes a line filter honest here.  A grep that
-# matches nothing exits 1, and finding no accounts to restore is not a failure.
+# The accounts go last, because a grant names a database that must exist.
+# mariadb-dump --system=users writes every account, whatever database it dumps.
+# So each per-database copy holds the same list, and one file is enough.  The
+# file also holds that database, so only the account statements are taken.
+# Each statement is on one line, so a line filter is sufficient.  A grep that
+# matches nothing exits 1, and no accounts to restore is not a failure.
 GRANTS="$(find "$DUMP" -mindepth 2 -maxdepth 2 -name grants.sql.gz -print -quit)"
 if [ -n "$GRANTS" ]; then
     echo "mariadb-restore.sh: restoring the accounts out of $GRANTS"

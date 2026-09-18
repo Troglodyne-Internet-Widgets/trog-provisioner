@@ -7,8 +7,8 @@ my $store = '[% store %]';
 my @hosts = qw{[% allow.join(' ') %]};
 my $chain = '/etc/ssl/certs/fetchcache.pem';
 
-# Asked by name, as a guest asks once its /etc/hosts points the name here: it is
-# the only way to find out that nginx and the certificate answer to that name.
+# Ask by name, as a guest does when its /etc/hosts points the name here.  Only
+# that shows that nginx and the certificate answer to the name.
 sub ask {
     my ( $host, $path, @curl ) = @_;
     my $out = `curl -s -o /dev/null -D - --max-time 60 --resolve '$host:443:127.0.0.1' @curl 'https://$host$path' 2>/dev/null`;
@@ -32,13 +32,13 @@ foreach my $host (@hosts) {
 }
 is( ( ask( 'not-an-upstream.test', '/anything', '-k' ) )[0], '421', 'and fetches nothing for a host it was not given' );
 
-# Plain http too, which is how cpanm asks CPAN.
+# Plain http too, because cpanm asks CPAN over it.
 my $plain = `curl -s -o /dev/null -w '%{http_code}' --max-time 30 --resolve '$hosts[0]:80:127.0.0.1' 'http://$hosts[0]/fetchcache-status' 2>/dev/null`;
 is( $plain, '200', "and it answers to $hosts[0] over plain http" );
 
-# Through the cache for real, once: this is what proves the resolver, the
-# upstream TLS verification and the egress, none of which a configuration test
-# can.  A CPAN index, which every CPAN install through the cache asks for anyway.
+# One real fetch through the cache.  Only this tests the resolver, the TLS
+# verification of upstream and the egress.  It fetches a CPAN index, which every
+# CPAN install through the cache asks for.
 SKIP: {
     skip 'www.cpan.org is not one of its upstreams', 2 unless grep { $_ eq 'www.cpan.org' } @hosts;
 
@@ -47,10 +47,8 @@ SKIP: {
     like( $status, qr/\A(?:MISS|HIT|EXPIRED|REVALIDATED|STALE|UPDATING)\z/, "and says what the cache did about it ($status)" );
 }
 
-# A clone is two requests and both must pass through uncached: the ref
-# advertisement, and then a POST of the wants.  Nothing exercised either, and
-# the recipes that clone are the ones that had no fetch_hosts -- so whether a
-# clone met the cache at all depended on which other recipe shared the guest.
+# A clone is two requests, and both must pass through uncached.  The first is
+# the ref advertisement, and the second is a POST of the wants.
 SKIP: {
     skip 'github.com is not one of its upstreams', 3 unless grep { $_ eq 'github.com' } @hosts;
 
@@ -59,7 +57,7 @@ SKIP: {
     is( $code, '200', 'the ref advertisement comes back through it' );
     is( $status, 'none', 'and is not cached, so a clone gets what is there now' );
 
-    # The POST half, which takes the other branch of the request-method test.
+    # The POST takes the other branch of the test on the request method.
     my $post = `curl -s -o /dev/null -w '%{http_code}' --max-time 60 --resolve 'github.com:443:127.0.0.1' --cacert '$chain' -X POST -H 'Content-Type: application/x-git-upload-pack-request' --data-binary '' 'https://github.com$repo/git-upload-pack' 2>/dev/null`;
     isnt( $post, '421', "a POST is passed upstream rather than refused ($post)" );
 }

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Let you know when something outblocked
+# Print a warning, which cron mails to you, when ufw blocks an outgoing port
+# that it did not block before.
 
 IS_RPM=$(which rpm)
 

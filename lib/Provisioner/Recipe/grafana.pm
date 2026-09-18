@@ -23,51 +23,50 @@ Provisioner::Recipe::grafana - dashboards, and the metrics store behind them.
 
 =head1 DESCRIPTION
 
-Installs the three halves of a metrics stack on one guest: C<telegraf> collects,
-C<influxdb> stores, and C<grafana> draws.  Nothing here decides what is
-collected -- telegraf reads F</etc/telegraf/telegraf.d>, and a recipe wanting
-something in the database writes a fragment there.
-L<Provisioner::Recipe::grafanasyslog> is the one that does.
+Installs the three parts of a metrics stack on one guest: C<telegraf> collects,
+C<influxdb> stores, and C<grafana> draws.  This recipe does not decide what
+telegraf collects.  Telegraf reads F</etc/telegraf/telegraf.d>, and a recipe that
+wants something in the database writes a fragment there.
+L<Provisioner::Recipe::grafanasyslog> is one recipe that does.
 
 =head2 InfluxDB 1.x, and why that is not an accident
 
-C<influxdb> in noble is 1.6.7, which speaks InfluxQL rather than Flux.  That is
-the version this wants: the published dashboards for host and syslog metrics are
-written against InfluxQL, and 2.x would mean porting every query in them.  It is
-also the only one of the three that comes from the distribution.
+C<influxdb> in noble is 1.6.7, which speaks InfluxQL, not Flux.  This recipe
+wants that version.  The published dashboards for host and syslog metrics use
+InfluxQL, and with 2.x every query in them needs a port.  It is also the only one
+of the three that comes from the distribution.
 
 =head2 Two archives, because neither package exists here
 
-C<telegraf> and C<grafana> are in no Ubuntu component at all -- C<apt-cache
-policy> reports no candidate for either -- so each comes from its vendor's
-archive, added the way C<matrix>, C<plexmediaserver> and C<admincode> add theirs.
-Only C<influxdb> can be a C<deps> entry, because C<deps> is installed by
-cloud-init at first boot, before any of this has configured an archive.
+No Ubuntu component has C<telegraf> or C<grafana>, and C<apt-cache policy>
+reports no candidate for either.  So each comes from the archive of its vendor,
+added the way C<matrix>, C<plexmediaserver> and C<admincode> add theirs.  Only
+C<influxdb> can be a C<deps> entry.  Cloud-init installs C<deps> at first boot,
+before this recipe configures an archive.
 
 =head2 It answers on loopback rather than on a socket
 
-C<grafana> listens on C<127.0.0.1> and nginx proxies to it, which is what
-L<Provisioner::Recipe::gogs> does and for the same reason.  A unix socket would
-be the usual preference here, and the obstacle is ownership rather than taste:
-grafana runs as its packaged C<grafana> account, nginx as C<www-data>, and a
-socket under C<install_dir> sits below a directory the C<data> target leaves
-C<0750> owned by the service user -- so it takes a three-way arrangement of
-group membership and a recursive chmod to do what a loopback port does with
-none.  Nothing outside the guest can reach the port: it is bound to loopback, so
-there is no firewall profile here and nothing to open.
+C<grafana> listens on C<127.0.0.1> and nginx proxies to it.
+L<Provisioner::Recipe::gogs> does the same, for the same reason.  Here a unix
+socket is the usual preference, and the obstacle is ownership, not taste.
+Grafana runs as its packaged C<grafana> account and nginx runs as C<www-data>.
+A socket under C<install_dir> is below a directory that the C<data> target
+leaves C<0750> and owned by the service user.  So a socket needs group
+membership across three accounts and a recursive chmod.  A loopback port needs
+neither.  Nothing outside the guest can reach the port, so this recipe has no
+firewall profile and opens nothing.
 
 =head2 The dashboards survive a rebuild because they are not kept
 
-Nothing here is in C<remote_files>, and that is deliberate for the dashboards:
-they are provisioned from files in F</etc/grafana/provisioning>, so a rebuilt
-guest draws the same ones without anything having been carried over.  What a
-rebuild does lose is the measurements themselves and anything an operator made
-by hand in the UI.
+Nothing here is in C<remote_files>, and that is deliberate for the dashboards.
+Grafana provisions them from files in F</etc/grafana/provisioning>, so a rebuilt
+guest draws the same ones and nothing is carried over.  A rebuild loses the
+measurements and anything that an operator made by hand in the UI.
 
-Keeping those is for the recipe that depends on this one.  It is what knows what
-it put in the database and whether losing it matters, so it names what it wants
-carried over in its own C<remote_files> rather than this recipe salvaging a
-database on everybody's behalf.
+The recipe that depends on this one keeps those if it wants them.  That recipe
+knows what it put in the database and whether a loss matters.  So it names what
+to carry over in its own C<remote_files>, and this recipe does not salvage a
+database for every recipe that uses it.
 
 =cut
 
@@ -75,16 +74,16 @@ database on everybody's behalf.
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-nginx, in front: grafana answers on loopback and something has to serve the
-domain.
+Returns C<nginxproxy>, in front.  Grafana answers on loopback, and something
+must serve the domain.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # Defaulted here as well as in args, because required_recipes is asked
-    # before anything has been validated.
+    # Defaulted here as well as in args, because required_recipes runs before
+    # validation.
     my $port = $opts{port} // 3000;
     my $ipv6 = $opts{ipv6} // 1;
 
@@ -106,10 +105,9 @@ sub required_recipes {
 
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One grafana, one influxd and one telegraf on the machine, each with a
-single configuration file and no C<conf.d> between them that would let a second
-domain say anything without overwriting what the first said.  C<root_url> names
-one domain as well.
+False.  The machine has one grafana, one influxd and one telegraf.  This recipe
+writes each of their configuration files to a fixed path, so a second domain
+overwrites what the first wrote.  C<root_url> also names one domain.
 
 =cut
 
@@ -120,27 +118,27 @@ sub is_multi_tenant { return 0 }
 =over 4
 
 =item * C<admin_password> -- B<required>, no default.  Grafana ships with
-C<admin>/C<admin> and asks for a new one at the first login, which is a prompt
-nobody is standing at on a provisioned guest -- so the account would keep the
-password its own documentation publishes, on a vhost facing the internet.
+C<admin>/C<admin> and asks for a new password at the first login.  Nobody is at
+that prompt on a provisioned guest.  So the account keeps the password that the
+grafana documentation publishes, on a vhost that faces the internet.
 
-=item * C<grafana_admin> -- the administrator's account name.  Not C<admin_user>,
-which is the guest's administrator and something else entirely.
+=item * C<grafana_admin> -- the account name of the grafana administrator.  It is
+not C<admin_user>, which is the administrator of the guest.
 
-=item * C<port> -- the loopback port grafana answers on, and what nginx is
-pointed at.  See L</It answers on loopback rather than on a socket>.
+=item * C<port> -- the loopback port that grafana answers on and nginx proxies
+to.  See L</It answers on loopback rather than on a socket>.
 
 =item * C<influx_database> -- the database telegraf writes to and grafana reads.
 
-=item * C<datasource_name> -- what the datasource is called in grafana.  A
-dashboard refers to its datasource by name, so
-L<Provisioner::Recipe::grafanasyslog> substitutes this exact string into the
-dashboard it installs; C<t/recipes.t> pins the two together.
+=item * C<datasource_name> -- the name of the datasource in grafana.  A dashboard
+refers to its datasource by name.  So L<Provisioner::Recipe::grafanasyslog> puts
+this exact string into the dashboard it installs, and C<t/recipes.t> makes sure
+that the two agree.
 
-=item * C<retention> -- how long a measurement is kept, as an InfluxDB duration.
-The database is created with this before telegraf first writes, because telegraf
-creates a missing one with no expiry at all -- and a syslog firehose with no
-expiry is a disk that fills.
+=item * C<retention> -- how long InfluxDB keeps a measurement, as an InfluxDB
+duration.  The setup script creates the database with this retention.  Telegraf
+creates a missing database with no expiry, and a syslog firehose with no expiry
+fills the disk.
 
 =back
 
@@ -203,21 +201,19 @@ sub template_files {
         'grafana.datasource.tt'   => 'grafana_datasource.yaml',
         'grafana.dashboards.tt'   => 'grafana_dashboards.yaml',
 
-        # Telegraf ships no output at all, so without this it collects the host
-        # metrics its own sample turns on and drops every one of them.
+        # Telegraf ships with no output, so without this it drops all it collects.
         'grafana.telegraf.tt' => 'grafana_telegraf.conf',
 
-        # Waits for influxd and then creates the database with its retention.
-        # A script rather than fragment lines because it polls, and a makefile
-        # fragment runs each line in a shell of its own.
+        # A script, not fragment lines, because it polls influxd and a makefile
+        # fragment runs each line in its own shell.
         'grafana.influx-setup.sh.tt' => 'grafana_influx_setup.sh',
     );
 }
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-The two vendor archives.  C<influxdb> is not here: it comes from the
-distribution's own mirror, which every guest already reaches.
+The two vendor archives.  C<influxdb> is not here, because it comes from the
+mirror of the distribution, which every guest already reaches.
 
 =cut
 

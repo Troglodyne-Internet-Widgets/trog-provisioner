@@ -16,57 +16,63 @@ use Provisioner::Utils();
 
 =head2 SYNOPSIS
 
-    admincode:
-        basedir: 'Code'
-		repos_from:
-			- api_url: https://wherever/api/
-			  token: my_token
-			  entities:
-			      - my_github_user
-            	  - my_github_org
-				  ...
+In recipes.yaml:
+
+    somedomain:
+        admincode:
+            basedir: 'Code'
+            repos_from:
+                - api_url: https://wherever/api/
+                  token: my_token
+                  repos_for:
+                      - my_github_user
+                      - my_github_org
+            extra_pkgs:
+                - build-essential
 
 =head2 DESCRIPTION
 
-Sets a domain's admin account up for working in: the packages a person needs at
-a shell, and a checkout of every repository the accounts in C<repos_from> can
-see, cloned into C<basedir> under the admin's home.
+Sets up the admin account of a domain for work at a shell.  It installs C<gh>,
+C<git> and the C<extra_pkgs>.  It clones every repository that each entity in
+C<repos_for> owns on the git server at C<api_url>.
+
+The clones go into C<basedir> under the directory of the domain.  If the admin
+user is not the service user, a link named C<basedir> in the home of the admin
+points to them.  If the link name exists already, the recipe leaves it alone.
+
+L<Pithub> talks to the server, so gogs or any other server with a compatible
+API also works.  F<scripts/repos_for> clones each repository as the admin user
+over https.  Then it sets the origin to the ssh URL, so the admin can push.
+
+The purpose is to set up a developer or an agent with all of their repositories
+in one step.  Supply the global git configuration of the admin through the
+C<skel> of L<Provisioner::Recipe::adminconfig>.
+
+If the C<perl> recipe is enabled, the CPAN dependencies of each repository that
+has a F<Makefile.PL> are installed, and its tests are run.  So this recipe can
+smoke your own personal PAN.  If your repositories need system packages, list
+them in C<extra_pkgs>.
 
 =head2 Cloning while the fetch cache is in front of it
 
-C<repos_for> asks each C<api_url> what repositories an account has and clones
-each one, trying C<clone_url> first and falling back to C<ssh_url>.  Two things
-about that are worth knowing before it surprises somebody.
+F<scripts/repos_for> asks each C<api_url> for the repositories of an entity.
+It clones each one from C<clone_url> first, and from C<ssh_url> if that fails.
 
-It runs B<during> the provision, from this recipe's own target, which is inside
-the window where C<scripts/fetch_via_cache> has pointed every host in
-C<fetch_hosts> at the cache.  An https clone is served through the cache and
-works -- git's ref advertisement and its upload-pack POST both pass through
-uncached, which C<templates/tests/fetchcache.tt> checks.
+This happens B<during> the provision, from the target of this recipe.  At that
+time, C<scripts/fetch_via_cache> points every host in C<fetch_hosts> at the
+cache.  An https clone goes through the cache and works.  git sends its ref
+advertisement and its upload-pack POST through without caching them.
+C<templates/tests/fetchcache.tt> tests this.
 
-The ssh fallback cannot be.  F</etc/hosts> redirects every port for a host, and
-the cache listens on 80 and 443, so an C<ssh_url> for a host the cache answers
-for has nothing to connect to until the entries come back out at the end of the
-build.  In practice this is the fallback doing its job -- gogs hands out ssh
-addresses and nothing else, and a gogs host is not one any recipe names -- but
-an https clone that fails transiently against a cached host will not be rescued
-by the fallback the way it would be on a guest with no cache.
+The ssh fallback cannot go through the cache.  F</etc/hosts> sends every port
+for a host to the cache, and the cache listens only on 80 and 443.  So an
+C<ssh_url> for a host that the cache answers for has nothing to connect to.
+The entries leave F</etc/hosts> at the end of the build.
 
-
-Clones all the repos owned by the specified entities known to the git server.
-Also symlink to the admin user's $HOME as $basedir.
-
-Uses L<Pithub> as the backend so should work with gogs or any other server w/ compatible API.
-
-Does all of the clones read-only as the admin user, and then swaps out the origin for an r/w SSH origin.
-
-Idea here is to set a developer or agent up in one step by cloning the many repos they need.
-Setup your global git configuration via the skel mechanism in 'adminconfig'.
-
-In the event the repo has a Makefile.PL we will attempt to install its' CPAN deps if the perl target is enabled.
-In so doing we can use this recipe as part of smoking your own personal PAN.
-
-If your repos have binary deps, add them to the list of deps you can install in the adminconfig recipe.
+Usually the fallback is for gogs, which gives only ssh addresses, and no recipe
+names a gogs host.  But if an https clone fails for a short time against a
+cached host, the fallback does not recover it.  On a guest with no cache, it
+does.
 
 =cut
 
@@ -106,15 +112,14 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts(%opts)
 
-Each C<api_url> this domain is configured to ask, since C<repos_from> is where
-the repositories come from, and C<cli.github.com> for the C<gh> signing key,
-which is a plain file fetch.
+Returns C<cli.github.com>, for the signing key of C<gh>, and the host of each
+C<api_url> in C<repos_from>.
 
-Not the hosts it then clones from: those come back from that API as
-C<clone_url>, so nothing here can know them before it has asked.  On a guest
-where they turn out to be a host the cache answers for, the clone is served
-through it, which is the arrangement working rather than a problem -- see the
-caveat in the DESCRIPTION about the SSH fallback.
+The hosts that the clones come from are not in the list.  The API gives them
+as C<clone_url>, so this method cannot know them in advance.  If one of them is
+a host that the cache answers for, the clone goes through the cache.  That is
+correct.  See L</Cloning while the fetch cache is in front of it> for the ssh
+fallback.
 
 =cut
 
@@ -126,8 +131,9 @@ sub fetch_hosts {
 
 =head2 @classes = $recipe->cache_classes()
 
-The C<gh> apt repository.  The API this asks for repositories is not here: it
-answers per account and per token, which is not a thing to keep.
+Returns the classes for the apt repository of C<gh>.  The repository API is
+not in it, because each answer is for one account and one token, and the cache
+must not keep it.
 
 =cut
 

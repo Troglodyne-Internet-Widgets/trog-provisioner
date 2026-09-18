@@ -20,17 +20,20 @@ use parent qw{Provisioner::DNSRecipe};
 
 =head2 DESCRIPTION
 
-Set up powerdns resolver, and install a sensible set of records for your chosen recipe(s).
+Sets up the PowerDNS authoritative server and recursor, and installs a set of
+records for the recipes of the domain.  templates/files/pdns.zone.tt lists the
+records.
 
-See templates/files/pdns.zone.tt for what is set up.
+The purpose is simple DNS delegation of subdomains to provisioned machines.
 
-The idea here is to allow simple DNS delegation of subdomains to provisioned machines.
+The server uses the sqlite backend.
 
-Uses the sqlite backend.
+C<extra_records> names one plain text file that holds a zonefile fragment.  The
+recipe appends it to the zone.  A relative path is relative to the directory of
+the domain in the data source.
 
-Appends arbitrary records specified as extra_records: plain text files, each a zonefile fragment.  Relative to the datadir if not absolute path.
-
-Sets up the recursor in the event you want to point your resolver at it for fast resolves and to mitigate DNS rate-limiting by RBLs.
+The recursor lets you point a resolver at this guest for fast answers.  It also
+reduces the DNS rate limiting that RBLs apply.
 
 =cut
 
@@ -41,21 +44,18 @@ use Crypt::PRNG();
 
 use Provisioner::Cookbook();
 
-# Where pdns binds its API, inside the chroot.  Named here because this recipe
-# is what puts it there: the unit, the configuration and every client that talks
-# to it read this one value.
+# The API socket as the host sees it.  pdns binds /api.sock inside its chroot,
+# which is this path from outside.
 our $API_SOCKET = '/var/spool/powerdns/api.sock';
 
 sub rate_limits {
 
-    # A resolver asks over UDP and asks often; a recursor in front of this one
-    # asks on behalf of everybody behind it.  Set high enough that only a
+    # A resolver asks over udp and asks often, and a recursor in front of this
+    # server asks for everybody behind it.  The limit is high enough that only a
     # reflection flood reaches it.
     #
-    # Both protocols, and udp is the one that matters: it is what a resolver
-    # asks over and what a reflection flood arrives on.  tcp is named too
-    # because a zone transfer and any answer too large for a datagram go that
-    # way, and an unlimited half is the half that gets used.
+    # tcp is limited too, because a zone transfer and a large answer use it.
+    # An unlimited protocol is the one that a flood uses.
     return ( 53 => 4096, '53/udp' => 4096 );
 }
 
@@ -63,18 +63,17 @@ sub rate_limits {
 
 Adds C<nostubresolver> and C<lexicon>.
 
-L<Provisioner::Recipe::lexicon> is the client anything writes a record into this
-server's zone with, and what the patches this recipe used to carry are patches
-to.
+L<Provisioner::Recipe::lexicon> is the client that writes records into the zone
+of this server.
 
-A guest running this server is the only thing that answers for its own zone, and
-the stub in front of it does not: lexicon walks the zone through the system
-resolver for C<--resolve-zone-name>, and step-ca validates dns-01 through it, so
-a guest left on the stub resolves its own name nowhere.
+This server is the only thing that answers for the zone of the guest, and the
+systemd stub resolver does not ask it.  lexicon looks up the zone through the
+system resolver for C<--resolve-zone-name>, and step-ca validates dns-01 through
+it.  So on the stub, the guest cannot resolve its own name.
 
-L<Provisioner::Recipe::letsencrypt> asks for the same recipe when it is this
-server that answers its challenge.  Asking here as well is what covers a guest
-serving a zone without one.
+L<Provisioner::Recipe::letsencrypt> requires C<nostubresolver> when this server
+answers its challenge.  This recipe requires it too, for a guest that serves a
+zone without letsencrypt.
 
 =cut
 
@@ -94,10 +93,10 @@ sub args {
             },
             extra_records => { type => 'string' },
 
-            # Whoever holds the public zone this guest syncs up to, as the
-            # registrar recipe's own three fields.  The operator's to set: this
-            # guest's own credentials go under lexicon, and putting them here
-            # would have it name itself as its own upstream.
+            # The provider that holds the public zone that this guest syncs to,
+            # in the three fields of the registrar recipe.  The operator sets
+            # it.  The credentials of this guest go under lexicon, because here
+            # they name this guest as its own upstream.
             registrar => {
                 type       => 'object',
                 properties => {
@@ -107,17 +106,12 @@ sub args {
                 },
             },
 
-            # Which repo.powerdns.com train to install from.  This asked for
-            # auth-master, which is the development branch: guests came up with
-            # 5.1.0~alpha1+master.380 on them.  A release train, so an upgrade
-            # is a decision rather than whatever landed on master that morning.
-            # auth-51, not auth-49: the API is configured on a unix socket --
-            # deliberately, there is a lexicon patch in this repository for
-            # talking to one -- and webserver-address only accepts a socket path
-            # from PowerDNS 5.0.0 onwards.  On 4.9 pdns_server refuses to start
-            # at all, with "Unable to convert presentation address".  This
-            # recipe used auth-master, which was 5.1.0~alpha and had the
-            # feature; auth-51 is the released form of the same thing.
+            # The repo.powerdns.com release train to install from.  A release,
+            # not auth-master, which is the development branch.  The API is on a
+            # unix socket, and lexicon-pdns-af-unix.patch lets lexicon use it.
+            # webserver-address takes a socket path only from PowerDNS 5.0.0.
+            # On 4.9, pdns_server does not start and says "Unable to convert
+            # presentation address".
             repo_branch => {
                 type    => 'string', default => 'auth-51',
                 pattern => '^auth-[0-9]+$'
@@ -131,23 +125,21 @@ sub args {
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-The API on the loopback socket, which is how anything on this guest writes a
-record into the zone this server holds.  See L<Provisioner::DNSRecipe>.
+The credentials for the API on the unix socket of this server.  Anything on
+this guest writes a record into the zone of this server through that API.  See
+L<Provisioner::DNSRecipe> for the keys that come back.
 
-C<--resolve-zone-name> because lexicon reduces a name to its registrable form
-with tldextract before asking for a zone, and a reserved TLD is not a public
-suffix -- so it asked for the zone "test" and got a 404.
+C<opts> is C<--resolve-zone-name>, because lexicon reduces a name to its
+registrable form with tldextract before it asks for a zone.  A reserved TLD is
+not a public suffix, so without the flag lexicon asks for the zone "test" and
+gets a 404.
 
 =cut
 
 sub lexicon_credentials {
     my ( $self, %opts ) = @_;
 
-    # Settled here rather than taken on trust.  enrich has put the key in opts
-    # by the time this recipe renders its own templates, but letsencrypt asks
-    # this as a class method to render its hook -- nothing has enriched
-    # anything on that path, and taking $opts{api_key} on faith rendered an
-    # empty token into the file dehydrated executes.
+    # letsencrypt calls this as a class method, on a path where enrich does not run.
     my $key =
         $opts{api_key}
       ? $opts{api_key}
@@ -164,14 +156,16 @@ sub lexicon_credentials {
 
 =head2 $key = $recipe->api_key_for($domain)
 
-The credential this server runs with, for the guest C<$domain> holds it on.
+Returns the API key of the pdns server on the guest that holds C<$domain>.
 
-An operator who set one owns it.  Otherwise it is made here -- once per server,
-because the API config, the dehydrated hook and the lexicon shortcut all have to
-present the same value, and a second one is a 401 rather than a warning.  The
-server belongs to a guest rather than to a domain, so a domain layered onto
-another is answered with the key that machine's server already runs with -- which
-this works out from L<Provisioner::Cookbook/host_of> rather than being told.
+If an operator set C<api_key> for that server, it returns that value.  If not,
+it makes one random key per server and returns that key on each call.  The API
+configuration, the dehydrated hook and the lexicon shortcut must present the
+same key, because a different key gets a 401.
+
+The server belongs to a guest, not to a domain.  For a domain that is layered
+onto another guest, L<Provisioner::Cookbook/host_of> finds that guest, and the
+method returns the key of its server.
 
 =cut
 
@@ -190,10 +184,6 @@ sub api_key_for {
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    # Minted here rather than by whoever needed it first.  It used to be
-    # letsencrypt's, under a second name in _global, which meant the credential
-    # for this API reached every recipe on the guest and was owned by none of
-    # them.
     $opts{api_key} = $self->api_key_for( $opts{domain} )
       unless $opts{api_key};
 
@@ -228,32 +218,26 @@ sub restores {
     my ( $self,        %opts )   = @_;
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
-    # The whole spool, because the chroot is what pdns opens everything relative
-    # to.  0775 because the chroot needs the group in.
+    # The whole spool, because pdns opens everything relative to its chroot.
+    # 0775, because the pdns group needs to write in the chroot.
     return ( '/var/spool/powerdns' => { from => "$install_dir/$domain/pdns", owner => 'pdns:pdns', mode => '0775' } );
 }
 
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
     return (
-        # The sqlite database holding every zone record the guest answers for,
-        # which after provisioning is not what the zonefile said: lexicon writes
-        # the DCV records into it, and so does anybody adding a record by hand.
-        # A rebuilt guest that started from the zonefile again would answer with
-        # the handful of records this recipe knows about and nothing else.
+        # The sqlite database that holds every zone record of the guest.  After
+        # a provision it differs from the zonefile, because lexicon writes the
+        # DCV records into it, and people add records by hand.  A rebuild that
+        # starts from the zonefile loses them.
         #
-        # The whole spool comes down, not just zones.db, because the chroot is
-        # what pdns opens everything relative to.  The global fragment puts it
-        # back -- one zones.db serves every domain on the guest, so restoring it
-        # is a fact about the machine rather than about a domain, and it has to
-        # happen before the schema is applied or there would already be a
-        # database in the way.
+        # The whole spool comes down, because pdns opens everything relative to
+        # its chroot.  The data target puts it back through restores, before
+        # the global fragment applies the schema.
         #
-        # Which leaves one hole worth knowing about: the global half runs for
-        # whichever domain reaches it first, so a guest hosting several and
-        # rebuilt starting from a domain that never had a previous guest gets an
-        # empty database, and the other salvages sit unrestored in their domain
-        # directories.  The guest test says so when it happens.
+        # One zones.db serves every domain on the guest, so only one salvage
+        # can go back.  The salvages of the other domains stay in their domain
+        # directories, and the guest test reports it.
         '/var/spool/powerdns/' => 'pdns/',
     );
 }

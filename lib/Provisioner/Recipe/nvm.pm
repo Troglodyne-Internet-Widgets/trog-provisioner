@@ -1,6 +1,6 @@
 package Provisioner::Recipe::nvm;
 
-#ABSTRACT: Install nvm and the latest LTS node for the configured user.
+#ABSTRACT: Install nvm and the latest node for the configured user.
 
 use 5.041;
 
@@ -17,7 +17,7 @@ use parent qw{Provisioner::Recipe};
     somedomain:
         nvm:
 
-    # Or with explicit user and nvm version:
+    # Or with a user and an nvm version:
     somedomain:
         nvm:
             user: someuser
@@ -25,38 +25,39 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Installs L<nvm|https://nvm.sh> (Node Version Manager) for the configured user,
-installs the latest LTS Node.js via C<nvm install node>, and appends
-C<nvm use node> to the user's C<~/.bashrc> so that node is active in every
-login shell.
+Installs L<nvm|https://nvm.sh> (Node Version Manager) for the configured user.
+Then it installs the latest Node.js with C<nvm install node> and makes it the
+default alias.  It appends the nvm loader and C<nvm use node> to the
+C<~/.bashrc> of the user, so node is active in every interactive shell.
 
-Also exports C<NODE_PATH> in that same C<~/.bashrc>, pointing at the active
-node version's global C<node_modules> directory (derived from C<NVM_BIN>, so it
-follows version switches).  Without this, C<require()> of anything installed
-with C<npm -g> fails to resolve.
+The same C<~/.bashrc> exports C<NODE_PATH>.  It points at the global
+C<node_modules> directory of the active node version.  It comes from
+C<NVM_BIN>, so it follows a version switch.  Without it, C<require()> cannot
+find a module installed with C<npm -g>.
 
-Installation is idempotent  re-provisioning a host with nvm already installed
-will update the nvm installation in place and leave the node version unchanged.
+You can run the recipe again on a host that has nvm.  The install script then
+updates nvm in place.  C<nvm install node> installs a newer node only if one
+was released.
 
 =head3 deps
 
-Requires C<curl> to download the nvm install script.
+L<Provisioner::Recipe::Ubuntu::nvm> lists the packages.
 
-=head3 validate
+=head3 args
 
-No required fields.  Optional:
+No field is required.  Optional:
 
 =over 4
 
 =item user
 
-The system user for whom nvm will be installed.  Defaults to C<admin_user>
-(the global admin user configured for the domain).
+The system user that gets nvm.  The default is C<admin_user>, the admin user
+configured for the domain.
 
 =item nvm_version
 
-The nvm release tag to install (e.g. C<v0.40.3>).  Defaults to C<v0.40.3>.
-Check L<https://github.com/nvm-sh/nvm/releases> for available versions.
+The nvm release tag to install.  The default is C<v0.40.3>.
+L<https://github.com/nvm-sh/nvm/releases> lists the available versions.
 
 =back
 
@@ -66,7 +67,7 @@ sub args {
     return (
         properties => {
 
-            # TODO fetch latest version automatically
+            # TODO: fetch the latest version automatically
             nvm_version => { type => 'string', default => 'v0.40.3' },
         },
     );
@@ -78,11 +79,10 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-The installer, and where nvm then gets node from.
+The host of the nvm installer, and the host that nvm gets node from.
 
-nodejs.org is named here and nowhere else: C<nvm install node> fetches it
-itself, so nothing in this recipe writes that URL down and nothing reading the
-templates would find it.
+Only this list names nodejs.org.  C<nvm install node> fetches from it, so no
+template in this recipe contains that URL.
 
 =cut
 

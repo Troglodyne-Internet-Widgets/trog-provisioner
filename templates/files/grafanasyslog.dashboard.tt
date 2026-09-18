@@ -1,15 +1,18 @@
-[%# Dashboard 12433 from grafana.com, "Syslog", which draws exactly what a
-    telegraf syslog input writes: the measurement is syslog, the fields are
-    severity_code and message, and the three variables at the top read the
+[%# Dashboard 12433 from grafana.com, "Syslog".  It draws what a telegraf
+    syslog input writes.  The measurement is syslog, and the fields are
+    severity_code and message.  The three variables at the top read the
     hostname, appname and severity tags.
 
-    Three changes from what grafana.com serves.  Its __inputs block is gone and
-    the ${DS_INFLUXDB} placeholders it went with are the datasource name --
-    grafana substitutes neither when it loads a dashboard from a file, so a
-    verbatim copy renders every panel as "Datasource not found".  __requires is
-    gone with it, being advice to a human importing this by hand.  And the
-    numeric id is dropped in favour of a uid, so reprovisioning updates this
-    dashboard rather than colliding with whatever holds that id. -%]
+    This copy has three changes from the one on grafana.com:
+
+    - The __inputs block is removed, and the datasource name replaces each
+      ${DS_INFLUXDB} placeholder.  Grafana replaces neither when it loads a
+      dashboard from a file.  A copy without this change shows
+      "Datasource not found" in each panel.
+    - The __requires block is removed.  It is advice for a person who imports
+      the dashboard by hand.
+    - A uid replaces the numeric id.  So a new provision updates this dashboard
+      and does not collide with a dashboard that has the same id. -%]
 {
   "annotations": {
     "list": [

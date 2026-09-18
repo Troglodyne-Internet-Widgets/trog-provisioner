@@ -1,14 +1,13 @@
 #!/bin/bash
 
-# ATD script to actually do what we need to get set up.
+# atd runs this script to set up the guest.
 #
-# Rendered by Provisioner::Recipe::ubuntu and carried onto the guest inside
-# cloud-init's write_files, which is why it is not in the payload it fetches.
+# Provisioner::Recipe::ubuntu renders it, and cloud-init carries it onto the
+# guest in write_files.  So it is not in the payload that it fetches.
 
-# Wait until clown-init is done
 cloud-init status --wait
 
-# Make sure we can SSH to whoever is holding this guest's payload
+# Let root connect with SSH to the host that holds the payload of this guest.
 cat > /root/.ssh/config << EOF
 Host *
 Compression yes
@@ -21,15 +20,10 @@ User root
 EOF
 chmod 0600 /root/.ssh/config
 
-# Transfer over the data.
-#
-# /var/tmp, not /tmp.  A recipe may put /tmp on a tmpfs while this is running --
-# that is what the tmpfs recipe does -- and mounting over /tmp would take the
-# payload and this script's own working directory with it: make carries on,
-# because its cwd is a directory it already holds open, but the tarball and the
-# build tree are then unreachable by path and the rm below silently removes
-# nothing.  /var/tmp is where the FHS puts a working directory that has to
-# outlive that sort of thing anyway.
+# Copy the payload into /var/tmp, not /tmp.  The tmpfs recipe mounts a tmpfs
+# over /tmp while this script runs, and the mount hides the tarball and the
+# build tree.  make continues in the directory it holds open, but the rm below
+# then removes nothing.
 scp -P [% transfer_port %] -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null [% transfer_user %]\@[% transfer_ip %]:[% payload_dir %]/[% domain %]/data.tar.gz /var/tmp
 
 cd /var/tmp
@@ -38,9 +32,9 @@ tar -zxf data.tar.gz -C /var/tmp/domainsetup_[% domain %]
 
 cd /var/tmp/domainsetup_[% domain %]
 
-# Run the makefile.  Braces rather than PIPESTATUS, because at(1) runs this
-# under dash: the status has to be taken in make's own shell, since the
-# pipeline's own exit code is tee's and always 0.
+# Run the makefile.  The pipeline exits with the status of tee, which is
+# always 0, so the braces record the status of make.  PIPESTATUS does not work
+# here, because at(1) runs this script under dash.
 rm -f /var/log/[% domain %].setup.status
 { make 2>&1; echo $? > /var/log/[% domain %].setup.status; } | tee /var/log/[% domain %].setup.log
 

@@ -12,7 +12,7 @@ use Socket();
 
 =head1 NAME
 
-Trog::Local - this machine, as something a guest can fetch from
+Trog::Local - this machine, the one that a guest fetches its payload from
 
 =head1 SYNOPSIS
 
@@ -25,27 +25,23 @@ Trog::Local - this machine, as something a guest can fetch from
 
 =head1 DESCRIPTION
 
-The machine running this tool.  L<Trog::HV> is the hypervisor and L<Trog::Guest>
-is the VM; this is the third one in the conversation, and it is where a guest's
-payload lives -- the domain directory it scps its tarball out of, and the data
-directory it rsyncs.
+This is the machine that runs this tool.  L<Trog::HV> is the hypervisor, and
+L<Trog::Guest> is the virtual machine.  This machine is the third one.  It holds
+the payload of a guest: the domain directory and the data directory.  The guest
+copies both from here.
 
-Everything about being reachable -- the transfer user, its C<authorized_keys>,
-the sshd port -- is L<Trog::Machine>'s, and answers here without an SSH
-connection because C<is_local> is true and each of those degrades to a local
-filesystem or C<IPC::Run3> call.  What is added here is the question only this
-machine can answer: which of our addresses a guest can reach us at.
+L<Trog::Machine> supplies the transfer user, its C<authorized_keys> and the sshd
+port.  Here, C<is_local> is true, so each of those is a local filesystem call or
+an C<IPC::Run3> call, and no SSH connection opens.  This class adds one question
+that only this machine can answer: at which of our addresses can a guest reach
+us?
 
 =head1 CLASS METHODS
 
 =head2 new
 
-A singleton, and takes nothing.  There is one machine we are running on, and
-everything that asks for it wants the same one.
-
-=head2 forget
-
-Drop the singleton, so the next C<new> builds a fresh one.  For tests.
+Takes nothing and returns the one object for this machine.  Each call returns
+the same object, because there is only one machine that we run on.
 
 =cut
 
@@ -56,6 +52,13 @@ sub new {
     return $INSTANCE //= $class->SUPER::new();
 }
 
+=head2 forget
+
+Discards the object, so the next call to C<new> makes a new one.  Tests use it.
+Returns 1.
+
+=cut
+
 sub forget {
     undef $INSTANCE;
     return 1;
@@ -65,11 +68,11 @@ sub forget {
 
 =head2 is_local
 
-True, which is the whole point of this class.
+Returns 1.  This is the purpose of this class.
 
 =head2 describe
 
-What to call us in an error message.
+Returns the name for this machine in an error message.
 
 =cut
 
@@ -78,9 +81,9 @@ sub describe { return 'this machine' }
 
 =head2 interactive
 
-Whether there is anybody there to answer a question.  A prompt with nothing to
-answer it does not fail, it hangs until something else kills the run, so callers
-ask this before asking anything else.
+Returns 1 if a person can answer a prompt, and 0 if not.  A prompt that nobody
+answers does not fail.  It stops the run until something else kills it.  So a
+caller asks this before it prompts.
 
 =cut
 
@@ -93,43 +96,31 @@ sub interactive {
 
 =head2 transfer_ips(@towards)
 
-Every address of ours that reaches a guest, in the order C<@towards> asked
-about and without repeats.  Empty when none of them routes anywhere.
+Returns each of our addresses that reaches a guest.  The list is in the order of
+C<@towards>, with no repeats.  It is empty when no address in C<@towards> has a
+route.  Dies when C<@towards> is empty.
 
-C<@towards> is the addresses that guest will have.  A guest has more than one
-and they are on different networks: the static address it is configured with,
-and the lease it takes off the hypervisor's NAT bridge.  Which of them we share
-with it is not knowable from here -- a workstation may sit on the bridge, on
-the static subnet, on both, or reach one through a router -- and we may well
-answer for more than one, from a different address each time.
+C<@towards> holds the addresses of the guest.  A guest has more than one, on
+different networks: its static address, and the lease that it gets from the NAT
+bridge of the hypervisor.  From here, we cannot know which of these networks we
+share with the guest.  A workstation can be on the bridge, on the static subnet,
+on both, or reach one through a router.  We can also reach more than one, from a
+different address each time.
 
-All of them, rather than the first, because more than one is the truth.  A
-guest is fetched from over one of these and administered over another: which
-one depends on whether its hypervisor is us, and the firewall on the guest has
-to expect every address we might arrive from rather than the one we happened to
-pick for the payload.  See C<admin_networks> in L<Provisioner::Recipe::ufw>.
+It returns all of them, not only the first.  The guest fetches its payload over
+one address, and we administer it over another.  Which one depends on whether we
+are its hypervisor.  So the firewall on the guest must accept each address that
+we can come from.  See C<admin_networks> in L<Provisioner::Recipe::ufw>.
 
-Asked of the kernel rather than worked out from a list of interfaces.  A
-connected UDP socket picks the source address the routing table would use for a
-real connection, which is the same answer the guest's traffic will get and is
-right for the case where we reach a network through a router rather than by
-being on it.  Nothing is sent; C<connect> on a datagram socket only fixes the
-peer.
+The kernel supplies the answer, not a list of interfaces.  A connected UDP
+socket gets the source address that the routing table uses for a real
+connection.  The traffic of the guest gets the same answer.  This is also
+correct when we reach a network through a router.  No packet goes out, because
+C<connect> on a datagram socket only sets the peer.
 
-Which is also its limit.  Routing is not symmetric and a firewall in between
-says nothing to a socket in here, so these are what to try rather than a
-promise that the guest will get through.  F<bin/preflight> is where that is
-checked.
-
-=head2 transfer_ip(@towards)
-
-The first of C<transfer_ips>, or undef when there is none.  What a guest is
-told to fetch its payload from, which has to be a single address because the
-rsync in the template names one.
-
-Put the guest's own address first when asking: it is the address we ssh to on a
-remote hypervisor, so the answer is then both where the guest fetches from and
-where it sees us coming from.
+This is also the limit.  Routing is not symmetric, and a socket here cannot see
+a firewall between us and the guest.  So these are addresses to try, not a
+promise that the guest can connect.  F<bin/preflight> makes sure of that.
 
 =cut
 
@@ -143,16 +134,16 @@ sub transfer_ips {
     foreach my $towards (@towards) {
         next unless $towards;
 
-        # A cidr is a network rather than something to connect to, and the
-        # addresses a domain is configured with are written as one.
+        # The configuration writes each address of a domain as a CIDR, which
+        # is a network and not something to connect to.
         ( my $peer = $towards ) =~ s{/\N*\z}{};
 
         my $packed = Socket::inet_aton($peer) or next;
 
         socket( my $sock, Socket::AF_INET(), Socket::SOCK_DGRAM(), 0 ) or next;
 
-        # The port is arbitrary and never used.  Discard is as good as anything
-        # and says plainly that nothing is going anywhere.
+        # No packet goes to this port.  Port 9 is discard, which tells the
+        # reader so.
         unless ( connect( $sock, Socket::pack_sockaddr_in( 9, $packed ) ) ) {
             close($sock) or die "Could not close the socket towards $peer: $!\n";
             next;
@@ -165,14 +156,26 @@ sub transfer_ips {
         my ( undef, $address ) = Socket::unpack_sockaddr_in($me);
         my $ours = Socket::inet_ntoa($address);
 
-        # Two of the guest's addresses can be reached from one of ours, and a
-        # firewall rule per duplicate is noise in somebody's before.rules.
+        # One of our addresses can reach two addresses of the guest.  A
+        # duplicate here becomes a duplicate firewall rule in before.rules.
         next if $seen{$ours}++;
         push( @ours, $ours );
     }
 
     return @ours;
 }
+
+=head2 transfer_ip(@towards)
+
+Returns the first address from C<transfer_ips>, or undef when there is none.
+The guest fetches its payload from this address.  It is one address, because
+the rsync in the template names one.
+
+Put the address of the guest first in C<@towards>.  On a remote hypervisor, we
+connect to the guest with ssh at that address.  The answer is then the address
+the guest fetches from, and also the address that it sees us come from.
+
+=cut
 
 sub transfer_ip {
     my ( $self, @towards ) = @_;

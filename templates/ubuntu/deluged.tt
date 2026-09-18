@@ -1,46 +1,32 @@
-# Create torrent storage directory - readable by nginx (www-data)
+# The torrent storage directory, which nginx (www-data) must be able to read.
 mkdir -p [% install_dir %]/[% domain %]/torrents
 chown debian-deluged:www-data [% install_dir %]/[% domain %]/torrents
 chmod 0750 [% install_dir %]/[% domain %]/torrents
-# Deploy deluged core config before first start so download_location is set
+# Install the core configuration before the first start, so that download_location is set.
 mkdir -p /var/lib/deluged/config
 if [ ! -f /var/lib/deluged/config/core.conf ]; then \
     mv deluged_core.conf /var/lib/deluged/config/core.conf; \
     chown root:debian-deluged /var/lib/deluged/config/core.conf; \
     chmod 0640 /var/lib/deluged/config/core.conf; \
 fi
-[%# The torrent state off the last guest, put back before the daemon starts.
-    Provisioner::Recipe::deluged, "What survives a rebuild", says what is in
-    there and why the rest of the config directory is not.
-
-    The directory is made here because deluged has not started yet to make it,
-    and because restore_state fills an existing empty directory rather than
-    nesting the copy inside it.  A destination that already has torrents in it
-    is a guest that is still running, and it keeps what it has. -%]
+[%# The torrent state.  On a rebuild, the data target puts the salvage back
+    before this target runs.  "What survives a rebuild" in
+    Provisioner::Recipe::deluged says what is in it.  On a first build, nothing
+    makes the directory until deluged starts, so make it here. -%]
 mkdir -p /var/lib/deluged/config/state
 chown -R debian-deluged:debian-deluged /var/lib/deluged/config
-[%# The path down to the state used to be opened to the admin user here as
-    well, because the salvage was an sftp session as that user with no sudo: a
-    tree owned debian-deluged:debian-deluged was one it could neither list nor
-    walk into, and what came back was an empty directory and no complaint. The
-    fetch reads the guest as root now, so a tree debian-deluged keeps to itself
-    comes off it whatever the group says; issue #98 took the widening back out,
-    which leaves the chown above -- debian-deluged:debian-deluged, no admin
-    group -- as the whole of it. -%]
-[%# Spelled out per type rather than with u=rwX,g=rX.  A capital X sets execute
-    on a directory, or on anything that already has it -- and the data target
-    lands the whole domain directory 0750, so every restored file arrives with
-    the bit set and keeps it, and torrent state comes back executable.  A first
-    build never shows this, since what deluged writes itself has no execute bit
-    for X to preserve. -%]
+[%# One mode per type, not u=rwX,g=rX.  A capital X keeps an execute bit that
+    a file already has.  The data target lands the whole domain directory 0750,
+    so every restored file arrives executable, and X keeps that bit.  A first
+    build does not show this, because the files that deluged writes have no
+    execute bit. -%]
 find /var/lib/deluged/config/state -type d -exec chmod 0750 {} +
 find /var/lib/deluged/config/state -type f -exec chmod 0640 {} +
-# Enable and queue service starts
 systemctl enable deluged
 systemctl enable deluge-web
 [% script_dir %]/queue_postrun_task systemctl start deluged
 [% script_dir %]/queue_postrun_task systemctl start deluge-web
-# UFW application profile for BitTorrent ports
+# The UFW application profile for the BitTorrent ports.
 mv deluged_ufw.conf /etc/ufw/applications.d/deluged
 chown root:root /etc/ufw/applications.d/deluged
 chmod 0644 /etc/ufw/applications.d/deluged

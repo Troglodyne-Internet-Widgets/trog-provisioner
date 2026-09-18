@@ -23,29 +23,31 @@ use Provisioner::IPPool();
 
     assign_ip [--ipmap=file] DOMAIN
 
-Print the static address C<DOMAIN> holds, assigning it the first free one in
-the pool if it does not have one yet.  Dies if the pool is exhausted or has not
-been configured.
+Print the static address that C<DOMAIN> holds.  If it holds none, assign it
+the first free address in the pool and print that.
 
-Idempotent: a domain that already has an address is answered with it, and
-nothing is written.  So this is safe to call from a script that does not know
-whether the domain has been provisioned before.
+A static address is on the subnet of the primary bridge of the hypervisor, the
+network that it shares with other machines.  It is not an address on the NAT
+network of libvirt.  F<docs/NETWORK.md> describes the network model.
+
+If the domain already holds an address, this prints it and writes nothing.  So
+a script can call this when it does not know if the domain was provisioned.
 
     $ bin/assign_ip staging.troglodyne.net
     192.168.1.48
 
-C<bin/new_config> calls the same code, so a provision assigns its own address
-and there is nothing to do by hand.  This is for the times you want to know the
-answer before provisioning, or want to reserve one for something the
-provisioner is not going to build.
+This dies when F<ipmap.cfg> cannot be read, when it has no C<[ip_pool]>, or when
+the pool has no free address.  It also dies if a hypervisor does not answer
+before the database has a record of its guests.
 
-=head2 WHY THIS IS NOT A FILE
+C<bin/new_config> calls the same code, so a provision assigns its own address.
+Use this to learn the address before you provision, or to reserve one for a
+machine that the provisioner does not build.
 
-Assignments live in F<ips.db> beside the rest of the configuration, and the
-choosing and the recording are one transaction.  Two of these running at once
-cannot pick the same address: the second waits for the first, then looks again
-and finds it taken.  The C<[ips]> section of F<ipmap.cfg> could not do that --
-both runs read the same free address and the second write won.
+=head2 WHERE ASSIGNMENTS ARE KEPT
+
+Assignments are in F<ips.db> in the configuration directory.  Two runs at the
+same time cannot choose the same address.  L<Provisioner::IPPool> tells how.
 
 =cut
 
@@ -66,9 +68,8 @@ sub main {
     die "$Config::Simple::errstr\n" unless $c;
     my $pool = $c->param( -block => 'ip_pool' ) // {};
 
-    # Seeded from the hypervisors the first time anything asks, so the first
-    # assignment on a fleet that has never had a database does not hand out an
-    # address a guest is already using.
+    # Seed from the hypervisors first, so a new database does not give out an
+    # address that a guest already uses.
     Provisioner::IPPool::ensure_seeded($pool);
 
     print Provisioner::IPPool::assign( $domain, $pool ) . "\n";

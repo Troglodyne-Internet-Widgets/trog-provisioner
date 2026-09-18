@@ -1,16 +1,14 @@
-[%# Every argument quoted, so one that renders empty stays an argument rather
-    than shifting the ones after it along.  The last of them is where the dumps
-    salvaged off the guest this one replaces landed, which the installer needs
-    to know about only so that the seed schema stands aside for them. -%]
+[%# Every argument is quoted, so one that renders empty stays an argument and
+    does not shift the others.  The last is where the salvaged dumps landed.
+    The installer reads it only to skip the seed schema when a dump exists. -%]
 [% script_dir %]/install_mariadb.sh "[% version %]" "mariadb-provisioner.cnf" "secure_installation.sql" "[% install_dir %]/[% domain %]/[% dumpfile %]" "[% install_dir %]/[% domain %]/mysql"
-# The other half of the round trip remote_files exists for.  Installed as well
-# as run: a restore that went wrong is a thing an operator wants to be able to
-# do again by hand, against whichever dump they choose.
+# The other half of the round trip for remote_files.  Installed as well as run,
+# so that an operator can run the restore again by hand, against any dump.
 install -m 0750 mariadb-restore.sh /usr/local/sbin/mariadb-restore.sh
 /usr/local/sbin/mariadb-restore.sh "[% install_dir %]/[% domain %]/mysql"
-# Clients read ~/.my.cnf without being told to, and recipes outside this repo
-# point --defaults-file at one.  Homes by getent rather than ~name: the service
-# user's is the domain directory, not /home.
+# Home directories come from getent, not ~name.  The home of the service user
+# is the domain directory, not /home.  Provisioner::Recipe::mariadb explains the
+# files.
 install -m 0600 -o root -g root mariadb-client.cnf /root/.my.cnf
 install -m 0600 -o [% admin_user %] -g "$$(id -gn [% admin_user %])" mariadb-client.cnf "$$(getent passwd [% admin_user %] | cut -d: -f6)/.my.cnf"
 [% IF user != admin_user -%]

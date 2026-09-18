@@ -15,8 +15,8 @@ use MIME::Base64 qw{encode_base64};
 use Data::Validate::Email();
 use URI();
 
-# Named as strings in the dispatch table below, never as code, so nothing static
-# can see that loading them is the whole point.
+# A static check cannot see these used.  The dispatch table below names the
+# Crypt::PK classes as strings, and the rest are called by their full names.
 ## no critic (ProhibitUnusedImports)
 use Crypt::PK::Ed25519();
 use Net::SSH::Perl::Key();
@@ -26,15 +26,13 @@ use Crypt::PK::ECC();
 use Crypt::PK::RSA();
 ## use critic
 
-# Helpers used across various modules
-
 =head1 NAME
 
 Provisioner::Utils - Odds and ends the recipes and the generator both need.
 
 =head2 DESCRIPTION
 
-Provisioner::Recipe helpers.
+Helpers that the recipes and the modules around them share.
 
 =cut
 
@@ -42,9 +40,10 @@ Provisioner::Recipe helpers.
 
 =head3 already_required($module)
 
-Avoid double-require sub redefinitions.
+Returns 1 if a key of C<%INC> contains C<$module>, and 0 if none does.  Pass
+the path form that C<%INC> uses, for example C<Provisioner/Recipe/backup.pm>.
 
-Returns BOOLEAN.
+A caller uses this to skip a second C<require> that redefines subs.
 
 =cut
 
@@ -59,12 +58,11 @@ sub already_required {
 
 The names of the plain files directly in C<$dir>, sorted, with no leading path.
 
-Top level only, and no directories: every caller here is reading a flat
-directory -- the recipes, the scripts that get packed into a domain -- and a
-nested file is not one of the things they are looking for.
+It lists the top level only, and no directories.  Every caller reads a flat
+directory, for example the recipes or the scripts packed into a domain.
 
-Returns nothing for a directory that is not there or cannot be read, which is
-the same answer as one holding nothing and is what every caller wants.
+Returns an empty list for a directory that does not exist or that it cannot
+read.  Every caller treats that the same as an empty directory.
 
 =cut
 
@@ -79,9 +77,8 @@ sub files_in {
             wanted   => sub {
                 my $path = $File::Find::name;
 
-                # Everything below the top is pruned rather than walked: these
-                # are flat directories and walking one that is not would be a
-                # different question than the caller asked.
+                # Prune each directory below the top, because the caller asks
+                # about the top level only.
                 ## no critic (ValuesAndExpressions::ProhibitFiletest_d, ValuesAndExpressions::ProhibitFiletest_f)
                 if ( -d $path ) {
                     $File::Find::prune = 1 unless $path eq $dir;
@@ -102,16 +99,16 @@ sub files_in {
 
 =head3 coerce_arrayref($value)
 
-C<$value> as an arrayref, whatever it arrived as.
+Returns C<$value> as an arrayref.
 
-C<Config::Simple> hands back a bare string for a single-valued key and an
-arrayref for a comma separated one, and a recipe's configuration is written by
-hand -- so the same field is a list in one domain and a string in the next.
-Everything downstream wants a list.
+C<Config::Simple> returns a plain string for a key with one value, and an
+arrayref for a key with values separated by commas.  A person writes the
+configuration of a recipe by hand.  So the same field is a list in one domain
+and a string in the next.
 
-An absent value and one that is present and empty both come back as an empty
-list.  C<Config::Simple> tells those apart -- a missing key is undef, a bare
-C<key=> is the empty string -- and nothing that asks this cares.
+An absent value and an empty value both return an empty arrayref.
+C<Config::Simple> returns undef for a missing key and the empty string for
+C<key=>, but no caller needs that difference.
 
 =cut
 
@@ -126,9 +123,9 @@ sub coerce_arrayref {
 
 The names of the directories directly in C<$dir>, sorted, with no leading path.
 
-C<files_in>'s other half, and the same rules: top level only, and nothing for a
-directory that is not there.  Both prune rather than walk, because the question
-is what is I<in> a directory rather than what is under it.
+The companion of C<files_in>, with the same rules: the top level only, and an
+empty list for a directory that does not exist.  Both prune instead of walk,
+because the question is what is I<in> a directory, not what is under it.
 
 =cut
 
@@ -159,7 +156,8 @@ sub dirs_in {
 
 =head3 lastuniq(@array)
 
-List::Util::uniq, but with the last occurrence's order preserved instead of the first.
+Like C<List::Util::uniq>, but each value keeps the position of its last
+occurrence, not its first.
 
 Returns ARRAY.
 
@@ -178,15 +176,15 @@ sub lastuniq {
 
 =head3 qualify_address($value, $domain)
 
-A local part becomes an address in C<$domain>; an address is left exactly as it
-stands.
+Adds C<$domain> to a local part to make an address.  An address stays exactly
+as it is.
 
-Two recipes need this and it is easy to get wrong in the direction that only
-shows up in a mail log: appending the domain to something that is already an
-address gives C<somebody@example.test@this.domain>, which postfix and cron both
-accept and neither delivers.
+Two recipes use this.  The mistake it prevents shows only in a mail log.  If you
+add the domain to an address, you get C<somebody@example.test@this.domain>.
+Postfix and cron both accept that, and neither delivers it.
 
-Returns STRING, or C<$value> unchanged when there is nothing to qualify it with.
+Returns STRING.  Returns C<$value> unchanged if C<$value> or C<$domain> is
+empty.
 
 =cut
 
@@ -199,37 +197,17 @@ sub qualify_address {
     return "$value\@$domain";
 }
 
-=head3 ($kind, $value) = fleet_address($name, %opts)
-
-What a name for another machine in this installation -- a package mirror, a log
-destination, a fetch cache -- turns out to be, for the guest about to use it.
-C<%opts> takes C<domain>, the guest asking, and C<ipmap>, the ip pool's
-assignments.
-
-One of five answers:
-
-    none     the name is empty                          value ''
-    url      it has a scheme, and is used as written    value the name
-    self     it is the guest asking                     value ''
-    address  the pool assigns it an address             value the address
-    unknown  none of those                              value the name
-
-What C<unknown> means is the caller's to decide, and the callers differ for a
-reason.  Something cloud-init uses runs before the guest has DNS, so a name is no
-use to it and it has to die; something used from the makefile, by which time the
-guest has resolvers, can fall back to the name.
-
-=cut
-
 =head3 host_of($url)
 
-The host a URL names, or nothing if it names none.  An scp-style git address --
-C<git@github.com:o/r.git> -- counts as one, since that is the form gogs hands
-out for a repository.
+Returns the host that a URL names, or nothing if it names none.  The host of a
+URL comes back in lower case.
 
-Recipes whose upstream is configured ask this of a C<repo_url> or an C<api_url>
-to say which host they will actually reach, so it can be declared in
-C<fetch_hosts> and pointed at the fetch cache.
+An scp-style git address, for example C<git@github.com:o/r.git>, counts as a
+URL, because gogs gives that form for a repository.
+
+A recipe with a configured upstream passes its C<repo_url> or C<api_url> here.
+The answer is the host it connects to, which it declares in C<fetch_hosts> so
+that the fetch cache serves it.
 
 =cut
 
@@ -238,12 +216,10 @@ sub host_of {
 
     return unless $url;
 
-    # Matched here rather than handed to URI, because prepending a scheme does
-    # not turn an scp address into a URL: a colon after the host opens a port in
-    # a URL and separates the path in scp syntax.  So ssh://git@github.com:o/r.git
-    # parses to the host "github.com:o", and ssh://git@github.com:22/r.git reads
-    # 22 as the port and drops it from the path.  Handed the address as written,
-    # URI returns a URI::_generic, which has no host method at all.
+    # Match an scp address here, because URI cannot parse one.  With a scheme
+    # added, the colon after the host reads as a port, and
+    # ssh://git@github.com:o/r.git gives the host "github.com:o".  Without a
+    # scheme, URI returns a URI::_generic, which has no host method.
     my ($scp_host) = $url =~ m{\A[^/\s]+\@([[:alnum:]][[:alnum:].-]*):};
     return $scp_host if defined $scp_host;
 
@@ -251,14 +227,35 @@ sub host_of {
     return $host ? lc $host : ();
 }
 
+=head3 ($kind, $value) = fleet_address($name, %opts)
+
+Says what C<$name> is for the guest that uses it.  C<$name> names another
+machine of this installation, for example a package mirror, a log destination
+or a fetch cache.  C<%opts> takes C<domain>, the guest that asks, and C<ipmap>,
+the assignments of the ip pool.
+
+Returns one of five pairs:
+
+    none     the name is empty                          value ''
+    url      it has a scheme, and is used as written    value the name
+    self     it is the guest asking                     value ''
+    address  the pool assigns it an address             value the address
+    unknown  none of those                              value the name
+
+The caller decides what C<unknown> means, and the callers differ for a reason.
+Cloud-init runs before the guest has DNS, so a caller for cloud-init cannot use
+a name and dies.  The makefile runs after the guest has resolvers, so a caller
+there can use the name.
+
+=cut
+
 sub fleet_address {
     my ( $name, %opts ) = @_;
 
     return ( none => q{} ) unless $name;
 
-    # The scheme, rather than counting dots: aptmirror.example.test and
-    # mirror.example.test are both dotted, and only one of them says how to get
-    # there.
+    # Look for a scheme, not for dots.  A host name has dots too, and only a
+    # scheme says how to connect.
     return ( url => $name ) if $name =~ m{\A[[:alpha:]][[:alnum:]+.-]*://};
 
     return ( self => q{} ) if $name eq ( $opts{domain} // q{} );
@@ -271,13 +268,12 @@ sub fleet_address {
 
 =head3 tld_of($domain)
 
-The last label of C<$domain>, or nothing if it has none.
+Returns the last label of C<$domain>, or nothing if C<$domain> has no dot.
 
-Lives here rather than in either recipe that wants it: L<Provisioner::Recipe::letsencrypt>
-decides from it whether a name is one a public CA could ever issue for, and
-L<Provisioner::Recipe::acmeca> constrains its intermediate to it.  Those two must
-not work the answer out differently, and neither has any business loading the
-other to agree.
+It is here so that every caller gets the same answer, and no caller loads
+another to agree.  L<Provisioner::Recipe::letsencrypt> uses it to decide if a
+public CA can issue for a name.  L<Provisioner::Recipe::acmeca> limits its
+intermediate to it.  L<Provisioner::DNSRecipe> uses it to find a reserved TLD.
 
 =cut
 
@@ -292,13 +288,13 @@ sub tld_of {
 
 =head3 write_pem($path, $pem, $mode)
 
-Write a PEM -- a certificate, a key, or several of them concatenated -- to
-C<$path> and set its mode, dying if the mode cannot be set.
+Writes a PEM to C<$path> and sets its mode.  The PEM is a certificate, a key,
+or several of them joined.  Dies if it cannot set the mode.
 
-Through L<File::Slurper::Temp>, so nothing ever reads a half-written key: what
-is incomplete is a temporary file, and the rename that puts it in place is
-atomic.  The mode is applied to the file after that rename, so C<$path> holds
-whatever mode the temporary was made with until the C<chmod> lands.
+It writes through L<File::Slurper::Temp>, so no reader sees a partial key.  The
+partial file is a temporary file, and the rename that puts it in place is
+atomic.  The mode changes after the rename, so C<$path> has the mode of the
+temporary file until the C<chmod> completes.
 
 =cut
 
@@ -310,33 +306,7 @@ sub write_pem {
     return;
 }
 
-=head3 write_ssh_keypair($path, $type, $bits, $comment)
-
-Make an ssh keypair and write both halves: the private key to C<$path> and the
-public one to C<$path.pub>, in the form C<ssh-keygen> would have written them.
-
-C<$type> is a L<Net::SSH::Perl::Key> type -- C<RSA>, C<Ed25519>, C<ECDSA> --
-and C<$bits> is ignored by the types that have only one size.  The key is
-always passphrase-less: nothing here runs with somebody there to type one in.
-
-Returns the public half, without its trailing newline.
-
-B<Ed25519 private keys are rewrapped on the way out, and that is not
-cosmetic.>  L<Net::SSH::Perl::Key::Ed25519/write_private> encodes the body with
-C<Crypt::Misc::encode_b64>, which never wraps, so it emits the whole payload on
-one line -- every other key type in that distribution hands PEM generation to
-CryptX and comes out at 64 columns.  OpenSSH reads the unwrapped form quite
-happily; CryptX refuses it as C<pem_decode_openssh failed: Invalid input
-packet>, which means C<ssh_pubkey_from_private> below cannot read back a key this
-module just wrote.  RFC 7468 puts the limit at 64, so the strict reader is the
-correct one.
-
-Reported upstream as L<briandfoy/net-ssh-perl#76|https://github.com/briandfoy/net-ssh-perl/issues/76>;
-the rewrap goes when there is a release with the fix in it.
-
-=cut
-
-# PEM at 64 columns, which is what RFC 7468 asks for.
+# Wraps the body of a PEM at 64 columns, as RFC 7468 requires.
 sub _rewrap_pem {
     my ($pem) = @_;
 
@@ -346,6 +316,33 @@ sub _rewrap_pem {
     $body =~ s/\s//g;
     return join( "\n", $head, ( $body =~ m/(\N{1,64})/g ), $tail ) . "\n";
 }
+
+=head3 write_ssh_keypair($path, $type, $bits, $comment)
+
+Makes an ssh keypair and writes both halves.  The private key goes to C<$path>
+and the public key to C<$path.pub>, in the format that C<ssh-keygen> writes.
+
+C<$type> is a L<Net::SSH::Perl::Key> type: C<RSA>, C<Ed25519> or C<ECDSA>.
+Types with only one size ignore C<$bits>.  The key never has a passphrase,
+because nobody is present to type one.
+
+Returns the public half, without its trailing newline.
+
+The private key is rewrapped at 64 columns, and Ed25519 needs that.
+L<Net::SSH::Perl::Key::Ed25519/write_private> encodes the body with
+C<Crypt::Misc::encode_b64>, which never wraps.  So it writes the whole payload
+on one line.  The other key types of that distribution use CryptX for the PEM,
+and those come out at 64 columns.
+
+OpenSSH reads the unwrapped form, but CryptX refuses it with
+C<pem_decode_openssh failed: Invalid input packet>.  Without the rewrap,
+C<ssh_pubkey_from_private> below cannot read a key that this module wrote.  RFC
+7468 sets the limit at 64, so the strict reader is correct.
+
+This is reported upstream as L<briandfoy/net-ssh-perl#76|https://github.com/briandfoy/net-ssh-perl/issues/76>.
+Remove the rewrap when a release has the fix.
+
+=cut
 
 sub write_ssh_keypair {
     my ( $path, $type, $bits, $comment ) = @_;
@@ -362,31 +359,17 @@ sub write_ssh_keypair {
     return $public;
 }
 
-=head3 ssh_pubkey_from_private($path)
-
-Derive the OpenSSH public key for the private key stored at $path, equivalent to
-C<ssh-keygen -y -f $path> but without shelling out.  RSA, Ed25519 and ECDSA
-(nistp256/nistp384/nistp521) keys are supported, in both the classic PEM and the
-newer OPENSSH private key containers.
-
-The key must not be passphrase-protected; the provisioner runs unattended, so an
-encrypted key is fatal rather than an interactive prompt.
-
-Returns STRING of the form "$type $base64", with no trailing comment or newline.
-
-=cut
-
-# libtomcrypt curve names to the names OpenSSH puts on the wire
+# Maps the curve names of libtomcrypt to the names that OpenSSH puts on the wire.
 my %ECC_CURVES = (
     secp256r1 => 'nistp256',
     secp384r1 => 'nistp384',
     secp521r1 => 'nistp521',
 );
 
-# An OpenSSH public key blob is a run of length-prefixed fields.  A 'string' is
-# a 32bit big-endian length followed by that many bytes; an 'mpint' is the same,
-# but holding a minimal-length big-endian integer which gets a leading zero byte
-# when its high bit is set (so it isn't read back as negative).
+# An OpenSSH public key blob is a run of fields, each with a length in front.  A
+# 'string' is a 32-bit big-endian length, then that many bytes.  An 'mpint' is
+# the same, but holds a big-endian integer of minimal length.  That integer gets
+# a leading zero byte when its high bit is set, so it does not read as negative.
 sub _sshstr ($string) { return pack( 'N/a*', $string ) }
 
 sub _mpint {
@@ -415,16 +398,34 @@ sub _blob_ecc {
     my $nist  = $ECC_CURVES{ lc($curve) } or die "Unsupported ECDSA curve '$curve'";
     my $type  = "ecdsa-sha2-$nist";
 
-    # export_key_raw() hands back the uncompressed point, which is what OpenSSH wants
+    # export_key_raw() returns the uncompressed point, which is the form OpenSSH needs.
     return ( $type, _sshstr($type) . _sshstr($nist) . _sshstr( $pk->export_key_raw('public') ) );
 }
 
-# CryptX has no way to sniff the key type, so try each importer in turn
+# CryptX cannot detect the key type, so each importer is tried in turn.
 my @IMPORTERS = (
     [ 'Crypt::PK::Ed25519', \&_blob_ed25519 ],
     [ 'Crypt::PK::ECC',     \&_blob_ecc ],
     [ 'Crypt::PK::RSA',     \&_blob_rsa ],
 );
+
+=head3 ssh_pubkey_from_private($path)
+
+Derives the OpenSSH public key for the private key at C<$path>.  The result is
+the same as C<ssh-keygen -y -f $path>, without a shell command.  It supports
+RSA, Ed25519 and ECDSA (nistp256/nistp384/nistp521) keys.  It reads the classic
+PEM container and the newer OPENSSH container.
+
+The key must not have a passphrase.  The provisioner runs with nobody present,
+so an encrypted key is fatal, not a prompt.
+
+Returns STRING of the form "$type $base64", with no comment and no trailing
+newline.
+
+Dies if no importer can read the key, and gives the error of each importer.
+Also dies on an ECDSA curve that is not in that list.
+
+=cut
 
 sub ssh_pubkey_from_private {
     my ($path) = @_;

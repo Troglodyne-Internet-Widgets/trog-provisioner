@@ -23,7 +23,8 @@ use Provisioner::IPPool;
 
     list_ip_pool [--ipmap=file] [--available] [--assigned] [--json]
 
-Display static IP pool status: which IPs are assigned to VMs, which are available.
+Shows the status of the static IP pool.  It lists the IPs that are assigned to
+guests and the IPs that are available.
 
 =head2 ipmap.cfg format
 
@@ -36,10 +37,11 @@ Add an [ip_pool] section to your ipmap.cfg:
     ; OR specify one or more CIDR blocks (space-separated)
     ; cidr = 192.168.1.0/24 10.0.0.0/28
 
-Both keys may coexist; addresses are merged with CIDR expansion.
+You can use both keys.  The pool is the addresses list and the addresses of
+each CIDR block together.
 
-Assigned IPs are read from the [ips] section and cross-referenced to show
-which pool IPs are still available for new VMs.
+The assigned IPs come from the address database of L<Provisioner::IPPool>.  An
+IP in the pool that is not in the database is available for a new guest.
 
 =cut
 
@@ -57,7 +59,7 @@ sub main {
         'json'      => \$json,
     );
 
-    # Just give us everything if nothing is passed
+    # Without --assigned or --available, show both.
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
 
     my $c = Config::Simple->new($cfile);
@@ -66,9 +68,8 @@ sub main {
 
     unless ( keys %$pool ) {
 
-        # Configuration guidance rather than a diagnostic: whoever is reading
-        # this is being told what to type, and a file and line from inside this
-        # script is not the part they need.
+        # This tells the reader what to type, so a file and line number from
+        # warn do not help them.
         ## no critic (ProhibitPrintSTDERR)
         print {*STDERR} <<"GUIDANCE";
 No [ip_pool] section found in $cfile
@@ -94,10 +95,9 @@ GUIDANCE
         return 1;
     }
 
-    # Out of the database rather than the [ips] section of the file: two runs
-    # cannot share a file, and this is the same record bin/new_config assigns
-    # from.  Seeded from the hypervisors on the first call, so a fleet that has
-    # never had one gets a true answer rather than an empty pool.
+    # The database is the record that bin/new_config assigns from.  The first
+    # call fills it from the hypervisors, so an empty database does not show
+    # every IP as available.
     Provisioner::IPPool::ensure_seeded($pool);
     my %assigned = %{ Provisioner::IPPool::taken() };
 
@@ -128,10 +128,7 @@ GUIDANCE
         print "Pool exhausted:  no IPs available.\n";
     }
 
-    # Explicit, because this is what the process exits with.  Falling off the
-    # end returns whatever the last statement evaluated to, which for the
-    # branch above is nothing -- so a successful listing exited on undef and
-    # said "Use of uninitialized value in exit".
+    # This is the exit status of the process, so it must be explicit.
     return 0;
 }
 

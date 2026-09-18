@@ -1,4 +1,4 @@
-# User / PW db
+# User and password database
 userdb {
     driver = passwd-file
     args = /mail/[% domain %]/passwd

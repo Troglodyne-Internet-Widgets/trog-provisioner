@@ -24,63 +24,75 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-Installs and configures Redis from the standard distribution packages.
-Defaults to binding on 127.0.0.1 (local only). Set bind to a routable
-address and add the ufw recipe to expose the port.
+Installs and configures Redis from the packages of the distribution.  By
+default it binds to 127.0.0.1, so only the guest can connect.  To expose the
+port, set C<bind> to a routable address and add the ufw recipe.
 
-Optional parameters:
-- bind: IP to listen on (default: 127.0.0.1)
-- port: port number (default: 6379)
-- requirepass: authentication password
-- maxmemory: memory limit e.g. C<256mb>, C<1gb>
-- maxmemory_policy: eviction policy when maxmemory is hit (default: noeviction)
-- save: set to 0 to disable RDB persistence (pure cache mode)
+All parameters are optional:
 
-Configuration goes in as a fragment under C</etc/redis/redis.conf.d>, which
-C<configd> merges into C<redis.conf> every time redis-server starts or reloads.
-The package's own C<redis.conf> becomes C<00-original> and keeps applying
-wherever nothing above says otherwise, so anything this recipe has no opinion
-about is still whatever Debian chose rather than absent. The C<configd> recipe
-is pulled in for that; see L<Provisioner::Recipe::configd>.
+=over 4
+
+=item C<bind>
+
+The IP address to listen on.  The default is 127.0.0.1.
+
+=item C<port>
+
+The port number.  The default is 6379.
+
+=item C<requirepass>
+
+The password that clients authenticate with.
+
+=item C<maxmemory>
+
+The memory limit, for example C<256mb> or C<1gb>.
+
+=item C<maxmemory_policy>
+
+The eviction policy when redis reaches C<maxmemory>.  The default is
+C<noeviction>.
+
+=item C<save>
+
+Set it to 0 to turn off RDB persistence, for a pure cache.
+
+=back
+
+The configuration goes in as a fragment under C</etc/redis/redis.conf.d>.
+C<configd> merges the fragments into C<redis.conf> each time redis-server
+starts or reloads.  The C<redis.conf> of the package becomes C<00-original>.
+It still applies wherever no later fragment sets a value.  So each setting that
+this recipe does not set keeps the value that Debian chose.  This recipe pulls
+in the C<configd> recipe for this.  See L<Provisioner::Recipe::configd>.
 
 =head2 Surviving a rebuild
 
-C</var/lib/redis> is salvaged off a running guest and put back on the one that
-replaces it, so a redis holding anything more than a cache comes up with the
-keyspace it had rather than an empty one.
+bin/new_config salvages C</var/lib/redis> from a running guest, and the fragment
+puts it back on the guest that replaces it.  So a redis that holds more than a
+cache comes up with its keyspace, not an empty one.
 
-That used to cost something worth saying out loud: the fetch ran as the admin
-user with no sudo, so the package's own C<redis:redis> 0750 directory came back
-empty and said nothing about it, and the fragment bought the salvage by handing
-the directory its group and setting the setgid bit so files redis wrote
-afterwards kept it -- the keyspace readable from then on by whoever held the
-admin account, in the data directory and in any backup taken of it.
+The fetch reads the guest as root.  So the package default for the directory,
+C<redis:redis> 0750, is enough, and the fragment keeps it.  C<restore_state>
+leaves what it moves owned by the user that ran the fetch, not by redis.  So
+the fragment changes the owner back to C<redis:redis>.
 
-The fetch reads the guest as root now (issue #76), so a directory redis keeps to
-itself comes off it whatever the group says, and issue #98 took the widening
-back out: the directory is C<redis:redis> again, no admin group and no setgid.
-C<restore_state> still lands what it moves in owned by whoever ran the fetch
-locally rather than by redis, so the fragment still chowns it back to
-C<redis:redis> afterwards -- that part was never about the fetch's privileges. A
-guest where redis is only a cache pays none of this and should say C<save: 0>,
-which turns persistence off and leaves nothing to salvage.
+If redis is only a cache on a guest, set C<save: 0>.  That turns persistence off
+and leaves nothing to salvage.
 
-Putting it back is the fiddly end.  redis is installed and started by cloud-init
-long before any fragment runs, so it owns the destination before there is
-anything to restore into it; the fragment stops it, works out whether what is
-there is real state or the empty snapshot the stop just wrote, and restarts it
-afterwards.  C<templates/redis.global.tt> says how, at length.
+The restore is the difficult part.  cloud-init installs and starts redis before
+any fragment runs.  So the fragment stops redis and then finds out whether the
+directory holds real state.  The alternative is the empty snapshot that the stop
+wrote.  After the restore, the fragment starts redis again.
+C<templates/ubuntu/redis.global.tt> has the details.
 
 =cut
 
 sub required_recipes {
     my ( $self, %opts ) = @_;
 
-    # redis.conf has no conf.d, and its `include` is not one: the included file
-    # has to be named from the file doing the including, and a glob is a fatal
-    # error.  configd generates redis.conf from a fragment directory instead,
-    # which is what leaves the distribution's own redis.conf in place underneath
-    # what this recipe decided.
+    # redis has no conf.d, so configd makes redis.conf from a fragment
+    # directory.  templates/ubuntu/redis.global.tt says why.
     return (
         configd => sub { return ( languages => ['redis'] ) },
         $self->SUPER::required_recipes(%opts),
@@ -90,12 +102,8 @@ sub required_recipes {
 sub rate_limits {
     my ( $self, %opts ) = @_;
 
-    # Clients hold connections open rather than opening one per operation, so
-    # even a busy application opens few a second.
-    #
-    # On the configured port, not on 6379.  This named the default outright, so
-    # a guest that moved redis had the limit applied to a port nothing was
-    # listening on and none at all on the port it had actually been given.
+    # Clients keep connections open and do not open one per operation.  So even
+    # a busy application opens few connections each second.
     return ( ( $opts{port} // 6379 ) => 512 );
 }
 
@@ -125,9 +133,8 @@ sub template_files {
     return (
         'redis.conf.tt' => 'redis.conf',
 
-        # The ufw application profile for the port this guest configured.  It
-        # lived under ufw, where the port is not knowable: a recipe hands ufw
-        # its rate_limits and nothing else.
+        # The ufw application profile for the configured port.  It is here
+        # because a recipe gives ufw only its rate_limits, not its port.
         'redis.ufw.conf.tt' => 'redis_ufw.conf',
     );
 }
@@ -135,12 +142,9 @@ sub template_files {
 sub remote_files {
     my ( $self, $install_dir, $domain ) = @_;
 
-    # The RDB and the AOF: whatever redis was being used for beyond a cache, and
-    # the only thing about a redis guest that cannot be built again out of the
-    # configuration.  Naming it here is half the job and the half that is
-    # invisible when the other half is missing -- see the long comment in
-    # templates/redis.global.tt, which is what puts the contents back on a guest
-    # that has just been rebuilt.
+    # The RDB and the AOF.  They are the only part of a redis guest that the
+    # configuration cannot build again.  This names them for the salvage.
+    # templates/ubuntu/redis.global.tt puts them back on a rebuilt guest.
     return (
         '/var/lib/redis/' => 'redis/',
     );

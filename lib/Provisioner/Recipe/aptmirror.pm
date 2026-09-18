@@ -13,7 +13,7 @@ use parent qw{Provisioner::Recipe};
 =head1 NAME
 
 Provisioner::Recipe::aptmirror - a guest that holds a copy of the archive, so
-every other guest stops fetching the same packages over the internet.
+the other guests do not fetch the same packages over the internet.
 
 =head1 SYNOPSIS
 
@@ -24,7 +24,7 @@ every other guest stops fetching the same packages over the internet.
             releases: [noble]
             pockets:  ['', '-updates', '-security']
 
-and then, once it has synced, point the fleet at it:
+When the first sync is complete, point the fleet at the mirror:
 
     _base:
         _global:
@@ -32,33 +32,33 @@ and then, once it has synced, point the fleet at it:
 
 =head1 DESCRIPTION
 
-Installs C<apt-mirror>, configures it for the releases and components asked for,
-serves the result over HTTP, and refreshes it on a schedule.  What a guest does
-with that is L<Provisioner::DistroRecipe>'s C<mirror>, which is the other half
-and is configured separately.
+This recipe installs C<apt-mirror> and configures it for the releases and
+components you name.  It serves the copy over HTTP and refreshes it on a
+schedule.  The C<mirror> argument of L<Provisioner::DistroRecipe> is the other
+half.  It tells a guest to use the mirror, and you configure it separately.
 
 =head2 Nothing depends on this
 
-No recipe puts C<aptmirror> in its C<required_recipes>, and none should.  A
-mirror is an optimization an installation opts into by naming this recipe for
-one domain; making anything require it would drag a mirror host into every
-guest's dependency graph and turn "I would like to build a web server" into "I
-would like to build a web server and several hundred gigabytes of Ubuntu".
+No recipe puts C<aptmirror> in its C<required_recipes>, and no recipe must.  A
+mirror is an optimization.  An installation opts into it when it names this
+recipe for one domain.  If another recipe required it, every guest that uses
+that recipe also needs a mirror host with several hundred gigabytes of Ubuntu.
 
-The relationship runs the other way and through configuration: a guest names a
-mirror, and the mirror does not know who its guests are.
+The relation goes the other way, through the configuration.  A guest names a
+mirror, and the mirror does not know its guests.
 
 =head2 It wants a guest of its own
 
-Two reasons, neither fatal but both worth knowing before putting this beside
-something else.  Its vhost answers for the guest's B<address> as well as its
-name, because a guest fetching packages has an address and not yet a resolver --
-so it takes requests that would otherwise go unmatched.  And it is sized for an
-archive, so it will fill any disk it shares.
+There are two reasons.  Neither one is fatal.  First, the vhost answers for the
+B<address> of the guest as well as its name.  A guest that fetches packages has
+an address but no resolver yet.  Thus the vhost takes requests that no other
+server matches.  Second, the guest is sized for an archive, and the archive
+fills any disk that it shares.
 
 =head2 How big
 
-Measured against a real mirror rather than estimated, for C<noble> on amd64:
+These sizes come from a real mirror of C<noble> on amd64.  They are not
+estimates:
 
     noble             main    8.3 GB
     noble-updates     main   65.2 GB
@@ -69,107 +69,108 @@ Measured against a real mirror rather than estimated, for C<noble> on amd64:
 
     everything: all components, all architectures, with sources     927 GB
 
-C<sources> is off by default and is most of the difference between a mirror that
-fits on an ordinary disk and one that does not.  The C<vm> recipe's C<size>
-defaults to 40 GB, which is not enough for any of the above, so a mirror host
-has to say how big it is -- and the guest test refuses to pass on a disk that
-obviously cannot hold one.  See C<require_free_gb>.
+C<sources> is off by default.  It is most of the difference between a mirror
+that fits on an ordinary disk and one that does not.  The C<size> of the C<vm>
+recipe defaults to 40 GB, which is too small for any row above.  Thus a mirror
+host must set its own size.  The guest test fails on a disk that clearly cannot
+hold a mirror.  See C<require_free_gb>.
 
 =head2 Seeding from a mirror you already have
 
-C<upstream> defaults to the distribution's archive, but pointing it at another
-mirror is far faster -- a LAN copy against the internet, which measured here as
-roughly 1.85 GB/s against 24 MB/s.  It works because a mirror is a byte-for-byte
-copy: the same C<InRelease>, C<Release>, C<Release.gpg> and C<Packages.gz> the
-archive serves, so nothing can tell the difference.
+C<upstream> defaults to the archive of the distribution.  Another mirror is much
+faster.  A copy on the LAN measured about 1.85 GB/s here, and the internet
+measured 24 MB/s.  This works because a mirror is a byte-for-byte copy.  It
+serves the same C<InRelease>, C<Release>, C<Release.gpg> and C<Packages.gz> as
+the archive, so no client can tell the difference.
 
-B<It is a one-way door for a given spool.>  C<apt-mirror> stores under
-C<< <spool>/mirror/<upstream host><path> >>, so changing C<upstream> later does
-not move the tree -- it starts a second one beside it and downloads everything
-again.  Seed from the fast thing and stay there, or take the slow first sync.
+For a given spool, you cannot go back.  C<apt-mirror> stores under
+C<< <spool>/mirror/<upstream host><path> >>.  If you change C<upstream> later,
+it does not move the tree.  It starts a second tree next to the first and
+downloads everything again.  Seed from the fast source and keep it, or accept a
+slow first sync.
 
 =head2 The first sync does not block the build
 
-A full mirror is hours and hundreds of gigabytes, and C<bin/provision> allows
-ninety minutes for the makefile and the deferred work together.  So the sync is
-a systemd unit and the fragment starts it with C<--no-block>: the makefile
-finishes, the guest's tests run, the provision completes, and the sync carries
-on afterwards.
+A full mirror takes hours and hundreds of gigabytes.  C<bin/provision> waits at
+most ninety minutes for the makefile and the deferred work.  Thus the sync is a
+systemd unit, and the fragment starts it with C<--no-block>.  The makefile
+finishes, the tests of the guest run, the provision completes, and the sync
+continues after it.
 
-Which means B<a fresh mirror host is empty and that is not a fault>.  Four ways
-to see where it got to, from furthest away in:
+As a result, B<a new mirror host is empty, and that is not a fault>.  Here
+are four ways to see its progress, from the most distant to the nearest:
 
 =over 4
 
-=item * C<< curl http://<mirror>/mirror-status >> -- the timestamp of the last
-completed sync, and a 404 while the first one is still running.
+=item * C<< curl http://<mirror>/mirror-status >> gives the time of the last
+complete sync.  It gives a 404 while the first sync runs.
 
 =item * C<journalctl -u apt-mirror -f> on the guest.
 
-=item * The provision log, which carries the lines the fragment printed.
+=item * The provision log, which holds the lines that the fragment printed.
 
-=item * Nothing points at it until somebody configures C<mirror> and
-re-provisions, so no guest is ever silently moved onto an unfinished mirror.
+=item * Nothing uses the mirror until somebody configures C<mirror> and
+provisions again.  Thus no guest moves onto an unfinished mirror without notice.
 
 =back
 
-The unit is also the only definition of "sync": the makefile, the cron and an
-operator all start the same one, and systemd will not run two at once, so a
-refresh landing during a long sync queues instead of running a second
-C<apt-mirror> over one spool.
+The unit is the only definition of "sync".  The makefile, the cron and an
+operator all start the same unit.  systemd does not run two copies at once.
+Thus a refresh that starts during a long sync waits in the queue.  It does not
+run a second C<apt-mirror> over the same spool.
 
-=head2 What is deliberately not here
+=head2 What is not here, on purpose
 
-B<No C<remote_files>, no C<restores>, no C<datadirs>.>  Salvage lands under the
-domain's data directory and from there into C<data.tar.gz> and every backup
-taken of it; this is hundreds of gigabytes of files that exist on the archive
-and are re-fetchable by definition.  A rebuilt mirror syncs again, which is the
-right answer.
+B<No C<remote_files>, no C<restores>, no C<datadirs>.>  Salvage goes into the
+data directory of the domain.  From there it goes into C<data.tar.gz> and into
+every backup of it.  This mirror is hundreds of gigabytes of files that the
+archive holds and that a new sync can fetch again.  Thus a rebuilt mirror syncs
+again.
 
-For the same reason the spool is B<outside> C<install_dir>, which is the one
-place this tree breaks that convention on purpose: the C<data> target chowns and
-chmods C<< install_dir/<domain> >> recursively on every provision, and doing
-that to a few million files would add hours to every build.
+For the same reason, the spool is B<outside> C<install_dir>.  It is the one
+place where this tree breaks that convention on purpose.  The C<data> target
+applies chown and chmod to C<< install_dir/<domain> >> recursively on every
+provision.  On a few million files, that adds hours to every build.
 
 =head1 METHODS
 
-=head2 %args = $recipe->args()
-
-=over 4
-
-=item * C<releases> -- B<required>, and deliberately without a default.  Which
-releases to mirror is not something to guess at when the guess costs a few
-hundred gigabytes of the wrong thing, and a default here would mean this recipe
-knowing which distribution it is on, which is the distro recipe's job.
-
-=item * C<pockets> -- defaults to the release itself plus C<-updates>,
-C<-security> and C<-backports>.  Security is in the default because a mirror
-that silently lacks it is exactly the sort of quiet tax this recipe exists to
-remove.
-
-=item * C<require_free_gb> -- how much free space the guest test insists on.
-Defaults to 50, which is not a real mirror's worth: it is chosen so that a guest
-left on the C<vm> recipe's 40 GB default fails immediately, since a 40 GB disk
-cannot have 50 GB free.  A deliberately small mirror still passes.
-
-=back
-
-=cut
-
 =head2 $bool = $recipe->is_multi_tenant()
 
-False.  One mirror on the machine: one F</etc/apt/mirror.list>, one unit and one
-cron entry, each installed to a fixed path, and the releases it carries are this
-domain's argument.  Two domains naming different ones would not both be served
--- whichever was built first would decide, and the other would be pointed at a
-mirror of something it never asked for.
+False.  A machine holds one mirror: one F</etc/apt/mirror.list>, one unit and
+one cron entry, each at a fixed path.  The releases it carries are an argument
+of this domain.  If two domains name different releases, the first one built
+decides.  The other domain then gets a mirror of releases it did not ask for.
 
-The vhost is not the difficulty; that one is named for the domain already, so
-each gets its own.  What they would be sharing is the mirror behind it.
+The vhost is not the problem, because its name comes from the domain.  Each
+domain gets its own vhost.  The mirror behind them is what they share.
 
 =cut
 
 sub is_multi_tenant { return 0 }
+
+=head2 %args = $recipe->args()
+
+C<bin/recipes aptmirror> shows each argument, its default and its description.
+Three of them have reasons that the descriptions do not give:
+
+=over 4
+
+=item * C<releases> is B<required>, and has no default on purpose.  A wrong
+guess costs a few hundred gigabytes of the wrong releases.  Also, a default
+here means that this recipe knows its distribution, which is the job of the
+distro recipe.
+
+=item * C<pockets> includes C<-security> by default.  A mirror without it
+fails quietly, and this recipe exists to remove costs of that kind.
+
+=item * C<require_free_gb> defaults to 50, which is not the size of a real
+mirror.  A 40 GB disk cannot have 50 GB free.  Thus a guest left on the 40 GB
+default of the C<vm> recipe fails at once.  A small mirror on purpose still
+passes.
+
+=back
+
+=cut
 
 sub args {
     return (
@@ -254,8 +255,8 @@ sub args {
 
 =head2 %required = $recipe->required_recipes()
 
-C<nginx>, which is what serves the copy.  C<ufw> arrives behind it, since nginx
-declares the rate limits for 80 and 443.
+C<nginx>, which serves the copy.  C<ufw> comes in through nginx, because nginx
+declares rate limits for ports 80 and 443.
 
 =cut
 
@@ -285,11 +286,12 @@ sub tests { return ('aptmirror.tt') }
 
 =head2 %opts = $recipe->enrich(%opts)
 
-Works out where the copy will land and which suites it covers.
+Adds C<upstream_host>, C<mirror_root> and C<suites> to C<%opts>, and returns
+them.  Dies when C<upstream> is not a URL with a path.
 
-C<apt-mirror> lays a spool out as C<< <spool>/mirror/<upstream host><path> >>,
-so the directory nginx serves cannot be written down -- it follows from
-C<upstream>, and the vhost and the fragment both have to name the same one.
+C<apt-mirror> puts a spool at C<< <spool>/mirror/<upstream host><path> >>.
+Thus the directory that nginx serves comes from C<upstream>, and a fixed path
+cannot replace it.  The vhost and the fragment must both use C<mirror_root>.
 
 =cut
 
@@ -304,8 +306,8 @@ sub enrich {
     $opts{upstream_host} = $host;
     $opts{mirror_root}   = "$opts{spool}/mirror/$host$path";
 
-    # Every release crossed with every pocket, which is what apt-mirror wants a
-    # line for and what the guest test counts.
+    # Every release with every pocket: apt-mirror wants a line for each, and the
+    # guest test counts them.
     $opts{suites} = [
         map {
             my $release = $_;

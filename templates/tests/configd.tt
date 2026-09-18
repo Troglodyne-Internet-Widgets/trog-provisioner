@@ -3,10 +3,9 @@ use strict;
 use warnings;
 use Test::More;
 
-# That configd is installed, and installed against the perl that will actually
-# be running it.  It runs from an ExecStartPre, so it stands between a service
-# and starting: pointed at /opt/perl5's perl, which has none of this installed,
-# every service it wraps fails to start with "Can't locate Configd.pm".
+# Configd must be installed for the system perl.  It runs from an
+# ExecStartPre.  Under the perl in /opt/perl5, every service that it wraps
+# fails to start with "Can't locate Configd.pm".
 ok(-x '/usr/bin/configd', 'configd is at the path the generated drop-ins name');
 
 my $shebang = q{};
@@ -25,9 +24,8 @@ my $known = `/usr/bin/configd languages 2>&1`;
 subtest '[% language %]' => sub {
     like($known, qr/^[% language %]$/m, 'configd knows this language') or diag $known;
 
-    # Non-zero from status is how it says the service is not wrapped, which is
-    # the difference between the fragments being configuration and being a
-    # directory of files nothing reads.
+    # status exits non-zero when the service is not wrapped.  Then nothing reads
+    # the fragments.
     my $status = `/usr/bin/configd status [% language %] 2>&1`;
     is($? >> 8, 0, 'its service is wrapped') or diag $status;
     unlike($status, qr/NOT adopted/, 'every file it manages is adopted') or diag $status;

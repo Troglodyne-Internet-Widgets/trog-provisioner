@@ -1,8 +1,6 @@
 port = 40404
-[%# Told nothing, rsyncd hands its messages back down the ssh connection to
-    whoever asked for them and keeps none here, so the machine being copied off
-    had no record of a module that failed to open or a transfer that stopped
-    halfway.  Rotated by /etc/logrotate.d/rsyncd-backup. -%]
+[%# Without a log file, rsyncd sends its messages down the ssh connection and
+    keeps none here.  Provisioner::Recipe::backup has the whole account. -%]
 log file = /var/log/rsyncd/[% domain %].log
 [% FOR target IN targets.keys().sort() %]
 [[% target %]]
@@ -12,10 +10,8 @@ list = no
 path = [% targets.$target %]
 uid = root
 gid = root
-[%# exclude, singular.  rsyncd has no parameter called excludes: it is not one
-    of the module parameters at all, and rsyncd neither honors nor complains
-    about it -- so every pattern written here was served to the client instead.
-    Checked against a real rsyncd rather than against the manual. -%]
+[%# exclude, singular.  rsyncd silently ignores an unknown parameter such as
+    excludes, so the patterns under it have no effect. -%]
 [% IF excludes.$target %]
 exclude = [% excludes.$target %]
 [% END -%]

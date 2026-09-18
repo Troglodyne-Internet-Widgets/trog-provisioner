@@ -21,12 +21,43 @@ use Getopt::Long qw{GetOptionsFromArray};
 
 =head2 DESCRIPTION
 
-Synchronize DNS zone files with DNS providers using lexicon.
+Make the records at one or more DNS providers match one or more zonefiles.
+The script uses the lexicon command to list, create, update and delete the
+records.
+
+=head2 OPTIONS
+
+=over 4
+
+=item --driver NAME
+
+The lexicon provider to sync to, for example C<powerdns>.  Give it one time for
+each provider.  At least one is required.
+
+=item --config FILE
+
+A L<Config::Simple> file with one block for each driver.  A block can set
+C<auth_username>, C<auth_token> and C<server>.  The default is
+F</etc/synczones.conf>.
+
+=item --dryrun
+
+Print each create, update and delete command and do not run it.  The script
+still runs the list commands.
+
+=item --quiet
+
+Do not print progress.  C<--dryrun> still prints its commands.
+
+=back
+
+The script dies if you give no zonefile or no driver, if a zonefile does not
+exist, or if a lexicon command fails.
 
 =cut
 
-# Not exhaustive, just what we know how to do.
-# See zonediff() for why, lots of jiggly stuff here.
+# The record types that zonediff() knows how to compare.  The list is not
+# complete.
 my @record_types = qw{SOA A AAAA MX CNAME TXT SRV CAA};
 
 my %d2o = (
@@ -71,10 +102,10 @@ sub main {
             push( @preamble, '--auth-token=' . qq{'$dconf{"$driver.auth_token"}'} )       if $dconf{"$driver.auth_token"};
             push( @preamble, qw{--output=JSON} );
 
-            # Some drivers, like powerdns, plesk etc require a server address
+            # A driver that needs a server address takes it with the option
+            # that %d2o names.
             push( @preamble, "--$d2o{$driver}=" . qq{'$dconf{"$driver.server"}'} ) if $dconf{"$driver.server"};
 
-            # Now, let's figure out if we have to do anything.
             my $lexicon = join( ' ', @preamble );
             foreach my $type (@record_types) {
                 my $listcmd = "$lexicon list $origin $type";
@@ -119,6 +150,23 @@ sub main {
 
 exit main(@ARGV) unless caller;
 
+=head2 zonediff
+
+    my %crud = zonediff( \@records_from_zonefile, \@records_at_provider );
+
+Takes the zonefile records of one type, as L<Net::DNS::RR> objects, and the
+provider records of that type, as the hashes that C<lexicon list> returns.
+Both array references are changed: the first is emptied.
+
+Returns a list of three pairs, C<update>, C<create> and C<delete>, each an array
+reference.  An C<update> or C<create> item is a hash with C<content>, C<name>,
+C<id> and C<ttl>.  A C<delete> item is a provider record.
+
+An SOA record is updated in place.  Every other type is deleted and created.
+Dies with "Cannot attempt to do two updates" when a third SOA record comes.
+
+=cut
+
 sub zonediff {
     my ( $zones_from_file, $zones_actual ) = @_;
 
@@ -129,12 +177,9 @@ sub zonediff {
         my $raw = $to_sync->plain;
         my $update_id;
 
-        # Build plain form(s): the record as it arrived, that plus a trailing
-        # dot, that in quotes, and that with its quotes taken off -- because a
-        # provider may hand back any of them for what the zonefile renders one
-        # way.  /r on the last: without it the substitution answers with how
-        # many quotes it removed rather than the string, and strips them from
-        # content before the three above are built from it.
+        # Render each provider record four ways: as it arrived, with a trailing
+        # dot, in quotes, and without quotes.  A provider can return any of
+        # them for one zonefile record.  The /r leaves content as it arrived.
         @$zones_actual = map {
             my $s     = $_;
             my $dquot = $_->{content} =~ s/"//gr;
@@ -145,34 +190,31 @@ sub zonediff {
             $s
         } @$zones_actual;
 
-        # Scan for the zone: one pass per record the provider has, each one
-        # rotated to the back when it is not the one being looked for.  0 .. N
-        # is one pass more than there are records, so a zone the provider holds
-        # nothing for shifted an empty list and compared against undef.
+        # Look at each provider record one time.  A record that does not match
+        # goes to the back of the list.
         for ( 1 .. scalar(@$zones_actual) ) {
             my $pmatch = shift @$zones_actual;
 
-            # The provider identifier for this name and type, whether or not the
-            # content still matches.  An update is issued with --identifier, and
-            # the only place that could be learned was the branch below -- which
-            # returns without issuing anything, so every update carried undef.
+            # An update needs the provider identifier for this name and type,
+            # and the content does not have to match.
             $update_id //= $pmatch->{id}
               if lc( $pmatch->{name} ) eq lc( $to_sync->owner ) && uc( $pmatch->{type} ) eq uc( $to_sync->type );
 
-            # If we find the zone, throw it away, nothing to do.
+            # The provider already has this record, so there is nothing to do.
             if ( any { $_ eq $raw } ( $pmatch->{plain}, $pmatch->{pdot}, $pmatch->{pquot}, $pmatch->{dquot} ) ) {
                 $update_id = $pmatch->{id};
                 next OUTER;
             }
 
-            # Slam it back on the stack otherwise.
             push( @$zones_actual, $pmatch );
         }
 
-        # You can have many of most types of records, but not these two.
+        # A zone has exactly one SOA, so it gets an update.  NS is not in
+        # @record_types, so zonediff never sees it.
         my $do_update = any { $to_sync->type eq $_ } qw{SOA NS};
 
-        # If we have any zones from the remote left we need to delete them in favor of creating the new ones.
+        # For any other type, delete the provider records that did not match
+        # and create the record from the zonefile.
         push( @to_delete, @$zones_actual ) unless $do_update;
         my $ref2push = $do_update ? \@to_update : \@to_create;
 

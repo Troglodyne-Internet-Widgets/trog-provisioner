@@ -14,10 +14,29 @@ use Pithub;
 
 my $USAGE = "usage: repos_for [--reset] API_URL ENTITY [ENTITY ...] < token_file\n";
 
-# Where the answers from an api_url are kept between runs.  JSON::PP rather than
-# JSON: this runs on a guest's system perl, and the admincode recipe installs
-# libpithub-perl and git and nothing else, while JSON::PP has been core since
-# the 5.014 this declares.
+=head1 NAME
+
+repos_for - clone every repository that an API lists for each entity
+
+=head1 SYNOPSIS
+
+    repos_for [--reset] API_URL ENTITY [ENTITY ...] < token_file
+
+The API token comes on stdin.  C<--reset> discards the cache and asks the API
+again.
+
+=head1 FUNCTIONS
+
+=head2 $path = cache_file()
+
+Returns the path of the file that keeps the answers from an api_url between
+runs.
+
+=cut
+
+# JSON::PP and not JSON, because this runs on the system perl of a guest.  The
+# admincode recipe installs only libpithub-perl and git, and JSON::PP is core
+# since 5.014.
 sub cache_file { return "$ENV{HOME}/.repos_for.json" }
 
 sub main {
@@ -29,8 +48,7 @@ sub main {
     my ( $api_url, @entities ) = @args;
     die $USAGE unless $api_url && @entities;
 
-    # On stdin rather than in argv, where ps shows it to anyone on the guest for
-    # as long as the clones take.
+    # From stdin and not argv, because ps shows argv to every user on the guest.
     my $token = <STDIN>;    ## no critic (InputOutput::ProhibitExplicitStdin) -- <> reads the files named in argv, and argv here holds the url and the entities
     chomp $token if defined $token;
     die "No API token on stdin.\n" unless $token;
@@ -41,16 +59,13 @@ sub main {
     my $fetched = 0;
     foreach my $entity (@entities) {
 
-        # Keyed by the entity asked for as well as by the url.  Keyed by the url
-        # alone, a second entity was answered out of the first one's entry --
-        # which holds nothing of theirs -- and so cloned nothing at all, while
-        # the recipe's target still succeeded.
+        # Key by the entity as well as by the url, so each entity gets its own
+        # answer.
         next if exists $cache->{$api_url}{$entity};
 
-        # Recorded before the rows, so that an entity the api answered with
-        # nothing is still an entity that was asked.  Without it the guard above
-        # never fires for one, and nothing downstream can tell "has no
-        # repositories" from "was never fetched for".
+        # Record the entity before its rows, so an entity with no repositories
+        # still counts as fetched.  Without this, the guard above cannot tell
+        # "has no repositories" from "never fetched".
         $cache->{$api_url}{$entity} //= {};
 
         foreach my $row ( repos_of( $api_url, $entity, $token ) ) {
@@ -76,9 +91,14 @@ sub main {
     return $failures ? 1 : 0;
 }
 
-# What an api_url says an entity has, as rows.  A named sub for the same reason
-# run() is one: it is the other thing here that reaches outside the process, so
-# a test stands in for it rather than for Pithub's own chain of objects.
+=head2 @rows = repos_of($api_url, $entity, $token)
+
+Returns the repositories that C<$api_url> lists for C<$entity>, as the rows
+that Pithub gives back, from every page.  It is a named sub for the same reason
+as C<run>: a test replaces it and does not have to mock Pithub.
+
+=cut
+
 sub repos_of {
     my ( $api_url, $entity, $token ) = @_;
 
@@ -99,20 +119,30 @@ sub repos_of {
     return @rows;
 }
 
-# One repository, into the current directory.  Answers with how many things went
-# wrong rather than dying, so one repository nobody can reach does not take the
-# rest of them down with it.
+=head2 $failures = clone($repo, $robj)
+
+Clones one repository into the directory C<$repo> under the current directory.
+C<$robj> is its cache entry, with C<clone_url> and C<ssh_url>.  It clones over
+https and sets the origin to the ssh url.  If that clone fails, it clones over
+ssh.
+
+Returns the number of failures, 0 or 1, and does not die.  So one repository
+that nobody can reach does not stop the others.  A C<$repo> that is not a plain
+directory name is a failure.  A C<$repo> directory that exists already is left
+alone and returns 0, because somebody can have work in it.
+
+=cut
+
 sub clone {
     my ( $repo, $robj ) = @_;
 
-    # The name comes back from the API and is used as a path below, so it has to
-    # be one ordinary directory component and nothing else.
+    # The name comes from the API and becomes a path, so it must be one plain
+    # directory name.
     unless ( $repo =~ m{\A\w[\w.-]*\z}a ) {
         warn "Skipping '$repo': not a plain directory name\n";
         return 1;
     }
 
-    # Already there is left alone, deliberately: somebody may have work in it.
     return 0 if -d $repo;
 
     print "Cloning $repo...\n";
@@ -122,13 +152,19 @@ sub clone {
         return run( qw{git remote set-url origin}, $robj->{ssh_url} ) ? 0 : 1;
     }
 
-    # The admin may have a key in their skel where https is refused.  A clone
-    # over ssh already has the origin the rewrite above would give it.
+    # The admin can have a key in their skel for a host that refuses https.  A
+    # clone over ssh already has the ssh origin.
     print "Retrying $repo over ssh...\n";
     return run( qw{git clone}, $robj->{ssh_url}, $repo ) ? 0 : 1;
 }
 
-# system(), as something a test can stand in for.  True when it succeeded.
+=head2 $ok = run(@cmd)
+
+Runs C<@cmd> with C<system()>.  Returns 1 when the command exits 0, and 0 if not.
+It is a named sub so that a test can replace it.
+
+=cut
+
 sub run {
     my @cmd = @_;
 
@@ -138,14 +174,14 @@ sub run {
 sub read_cache {
     my ($path) = @_;
 
-    return {} unless -f $path;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a cache at all, its absence being the ordinary first run
+    return {} unless -f $path;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is a cache at all, because no cache is the normal first run
 
     open my $fh, '<', $path or die "Cannot read $path: $!\n";
     my $json = do { local $/; <$fh> };
     close $fh or die "Cannot close $path: $!\n";
 
-    # A cache that will not parse is a cache we do not have.  It holds answers
-    # from an API, so throwing it away costs a round trip and nothing else.
+    # A cache that does not parse counts as no cache.  It holds only API answers,
+    # so its loss costs one round trip.
     my $cache = eval { JSON::PP->new->utf8->decode($json) };
 
     return ref $cache eq 'HASH' ? $cache : {};

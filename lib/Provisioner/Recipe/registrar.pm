@@ -22,29 +22,32 @@ use parent qw{Provisioner::DNSRecipe};
 
 =head2 DESCRIPTION
 
-Whoever holds the public zone for a domain, so dehydrated can write an
-C<_acme-challenge> record into it.  One of the two implementations of
-L<Provisioner::DNSRecipe>; the other is L<Provisioner::Recipe::pdns>, which is
-the same job done by the guest itself.
+The registrar holds the public zone of a domain, so dehydrated can write an
+C<_acme-challenge> record into it.  This is one of the two implementations of
+L<Provisioner::DNSRecipe>.  The other is L<Provisioner::Recipe::pdns>, where the
+guest does the same job.
 
-Ordinarily written once in C<_base> and inherited by every domain, since a fleet
-usually has one registrar.  A domain served by its own C<pdns> needs none, and a
-domain under a TLD RFC 2606 reserves can never use one -- no public registrar
-holds a zone for C<.test>.
+You usually write it once in C<_base>, and every domain inherits it, because a
+fleet usually has one registrar.  A domain that its own C<pdns> serves needs
+none.  A domain under a TLD that RFC 2606 reserves cannot use one, because no
+public registrar holds a zone for C<.test>.
 
 =head2 It installs nothing
 
-A registrar is somewhere else, so there is nothing here to configure and no
-service to start.  This recipe is the credentials and C<lexicon_credentials>,
-which is what makes it one of the two answers to L<Provisioner::DNSRecipe>.
+A registrar is an external service, so this recipe configures nothing and
+starts no service.  It supplies the credentials and C<lexicon_credentials>.
+That makes it one of the two answers to L<Provisioner::DNSRecipe>.
 
-What is installed on the guest is installed by the recipes that read those:
-L<Provisioner::Recipe::lexicon>'s shortcut, and
-L<Provisioner::Recipe::letsencrypt>'s dehydrated hook.
+The recipes that read those install what the guest needs: the shortcut of
+L<Provisioner::Recipe::lexicon>, and the dehydrated hook of
+L<Provisioner::Recipe::letsencrypt>.
 
 =cut
 
 =head2 %schema = $recipe->args()
+
+Returns the schema of the configuration.  The C<description> of each key
+documents it.
 
 =cut
 
@@ -73,11 +76,14 @@ sub args {
 
 =head2 %credentials = $recipe->lexicon_credentials(%opts)
 
-What the operator configured, which is all there is to say: a registrar is
-reached over the internet with a credential and nothing else.  No endpoint,
-because lexicon already knows where its providers live, and no flags -- the
-domain is its own zone here, so C<--resolve-zone-name> would spend live queries
-working out something already known.
+Returns C<type>, C<user> and C<key> as the operator configured them, with an
+empty string for an unset C<user> or C<key>.  C<opts> is empty and C<extra> is
+an empty list.
+
+A registrar needs only a credential.  lexicon already knows where each of its
+providers is, so there is no endpoint.  There are no flags, because the domain
+is its own zone here.  C<--resolve-zone-name> spends live queries to find a
+zone that is already known.
 
 =cut
 
@@ -95,8 +101,8 @@ sub lexicon_credentials {
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-lexicon: a domain whose zone somebody else holds still has an operator who wants
-to edit it, and that shortcut is what they reach for.
+Returns lexicon.  An operator still edits a zone that a registrar holds, and
+the lexicon shortcut is the tool for that.
 
 =cut
 
