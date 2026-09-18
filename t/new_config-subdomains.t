@@ -160,9 +160,9 @@ subtest 'a web server brings www with it' => sub {
 
 subtest 'a name belonging to a dependency is added as well' => sub {
 
-    # roundcube is served at webmail. and requires nginx, which serves www.
-    # Asking what recipes.d names would find only webmail: the list has to be
-    # the one the depsolver settled on.
+    # roundcube is served at webmail. and requires nginx, which serves www, and
+    # mail, which serves mail.  Asking what recipes.d names would find only
+    # webmail: the list has to be the one the depsolver settled on.
     my ( $err, $makefile ) = generate( 'mail.test', roundcube => { version => '1.6.0' } );
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 
@@ -170,6 +170,11 @@ subtest 'a name belonging to a dependency is added as well' => sub {
     ok( ( grep { $_ eq 'webmail.mail.test' } @names ), 'webmail is there, which nothing used to give it' )
       or diag explain \@names;
     ok( ( grep { $_ eq 'www.mail.test' } @names ), 'and www, which arrived with the nginx roundcube requires' )
+      or diag explain \@names;
+
+    # config.inc.php names mail.$domain for IMAP and submission, so the recipe
+    # that answers there has to be on the guest rather than assumed.
+    ok( ( grep { $_ eq 'mail.mail.test' } @names ), 'and mail, which roundcube requires for the host its IMAP settings name' )
       or diag explain \@names;
 };
 
