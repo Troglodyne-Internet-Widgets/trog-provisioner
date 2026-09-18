@@ -463,9 +463,10 @@ sub _store {
         File::Path::make_path( $dir, { mode => 0o700 } );
 
         # Atomic, so that two provisions at the same time cannot leave a
-        # half-written file.
+        # half-written file.  The temporary file is 0600 from the start, so no
+        # other user can read the token at any point.
+        local $File::Slurper::Temp::FILE_TEMP_PERMS = 0o600;
         File::Slurper::Temp::write_binary( $path, $encoded );
-        chmod 0600, $path;
         1;
     };
 

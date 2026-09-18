@@ -26,6 +26,14 @@ use FindBin::libs;
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
+
+# A chmod that fails on demand, installed before the module under test compiles
+# so that its calls reach this one.
+my $chmod_fails = 0;
+
+BEGIN {
+    *CORE::GLOBAL::chmod = sub { return $chmod_fails ? 0 : CORE::chmod(@_) }
+}
 use Trog::OpenStack::Auth();
 
 # Stands in for OpenStack::Client::Response.  Only the two things the code under
@@ -211,6 +219,21 @@ subtest 'the cached token is not left readable' => sub {
     is sprintf( '%04o', ( stat $dir )[2] & 0o7777 ),  '0700', 'and the directory it is in';
 
     ok index( $path, 'cred-id' ) < 0, 'and the credential id is not in the filename';
+};
+
+subtest 'the cached token is never readable, even where chmod fails' => sub {
+    my $dir = fresh();
+
+    # A cache file somebody left readable, rewritten where chmod does nothing.
+    my $auth = Trog::OpenStack::Auth->new( 'https://keystone.example.net:5000/v3', @CREDS, cache_dir => $dir );
+    my $path = $auth->cache_path;
+    CORE::chmod( 0o644, $path ) or die "Cannot chmod $path: $!";
+
+    $chmod_fails = 1;
+    $auth->_store();
+    $chmod_fails = 0;
+
+    is sprintf( '%04o', ( stat $path )[2] & 0o7777 ), '0600', 'the token is written 0600, not given that mode afterwards';
 };
 
 subtest 'a token near the end of its life is not used' => sub {
