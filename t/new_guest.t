@@ -168,11 +168,24 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
 
     is_deeply( Trog::Bin::NewGuest::base_config(), {}, 'no recipes.yaml at all is not an error' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nnot a hash of what we want\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nsome.test.test:\n  ntp:\n" );
+    Provisioner::Cookbook->forget();
     is_deeply( Trog::Bin::NewGuest::base_config(), {}, 'nor is one with no _base' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  ntp:\n    pool: base.pool\n" );
-    is_deeply( Trog::Bin::NewGuest::base_config(), { ntp => { pool => 'base.pool' } }, 'and it reads' );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  ntp:\n    pool: base.pool\n  _global:\n    data_source: /bogus/data\n" );
+    Provisioner::Cookbook->forget();
+    is_deeply(
+        Trog::Bin::NewGuest::base_config(),
+        { ntp => { pool => 'base.pool' }, _global => { data_source => '/bogus/data' } },
+        'and it reads, _global and all'
+    );
+
+    # A domain file cannot say what every guest gets.
+    mkdir("$dir/recipes.d") or die "Could not make $dir/recipes.d: $!";
+    File::Slurper::Temp::write_text( "$dir/recipes.d/other.test.test.yaml", "---\n_base:\n  ufw:\n" );
+    Provisioner::Cookbook->forget();
+    ok( !exists Trog::Bin::NewGuest::base_config()->{ufw}, 'and _base in recipes.d is not part of it' );
+    Provisioner::Cookbook->forget();
 };
 
 # --- End to end --------------------------------------------------------------

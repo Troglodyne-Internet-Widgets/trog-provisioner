@@ -16,7 +16,6 @@ use Data::Validate::Domain();
 use File::Basename();
 use File::Path qw{make_path};
 use List::Util qw{any};
-use File::Slurper();
 use File::Slurper::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
@@ -197,23 +196,21 @@ sub unique {
 
 =head2 \%base = base_config()
 
-Returns the C<_base> block of F<recipes.yaml>.  Every domain gets the values in
-C<_base> unless it sets them itself, so the new file does not repeat them.
-Returns an empty hash when the file is missing, does not parse, or has no
-C<_base> block.
+Returns the C<_base> block of F<recipes.yaml>, with its C<_global>, as
+L<Provisioner::Cookbook> reads it.  Every domain gets the values in C<_base>
+unless it sets them itself, so the new file does not repeat them.  Returns an
+empty hash when the file is missing or has no C<_base> block.  Dies if the file
+does not parse.
 
 =cut
 
 sub base_config {
-    my $path = Trog::Config->path('recipes.yaml');
+    my $conf   = Provisioner::Cookbook->configuration();
+    my $base   = Provisioner::Cookbook->domain_config( undef, $conf );
+    my $global = Provisioner::Cookbook->global_config( undef, $conf );
 
-    my $text = eval { File::Slurper::read_binary($path) };
-    return {} unless defined $text;
-
-    my $config = eval { YAML::XS::Load($text) };
-    return {} unless ref $config eq 'HASH' && ref $config->{_base} eq 'HASH';
-
-    return $config->{_base};
+    $base->{_global} = $global if %$global;
+    return $base;
 }
 
 =head2 ($config, @todo) = build($hostname, \@recipes, \%opts)
