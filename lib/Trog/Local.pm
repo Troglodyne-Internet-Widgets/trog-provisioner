@@ -76,6 +76,19 @@ What to call us in an error message.
 sub is_local { return 1 }
 sub describe { return 'this machine' }
 
+=head2 interactive
+
+Whether there is anybody there to answer a question.  A prompt with nothing to
+answer it does not fail, it hangs until something else kills the run, so callers
+ask this before asking anything else.
+
+=cut
+
+sub interactive {
+    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether there is anybody to ask is exactly what this decides
+    return ( -t *STDIN && -t *STDOUT ) ? 1 : 0;
+}
+
 =head1 REACHABILITY
 
 =head2 transfer_ips(@towards)

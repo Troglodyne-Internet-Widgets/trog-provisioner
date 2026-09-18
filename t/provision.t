@@ -55,12 +55,15 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 # --- The interface lives in POD, and pod2usage prints it ----------------------
 subtest 'the POD documents the interface' => sub {
     my $synopsis = _pod_section( $script, 'SYNOPSIS|OPTIONS' );
-    like( $synopsis, qr/--connect/,   'POD documents --connect' );
-    like( $synopsis, qr/--domaindir/, 'POD documents --domaindir' );
-    like( $synopsis, qr/--existing/,  'POD documents --existing' );
-    like( $synopsis, qr/--dryrun/,    'POD documents --dryrun' );
-    like( $synopsis, qr/--no-config/, 'POD documents --no-config' );
-    like( $synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument' );
+    like( $synopsis, qr/--connect/,                'POD documents --connect' );
+    like( $synopsis, qr/--domaindir/,              'POD documents --domaindir' );
+    like( $synopsis, qr/--existing/,               'POD documents --existing' );
+    like( $synopsis, qr/--dryrun/,                 'POD documents --dryrun' );
+    like( $synopsis, qr/--no-config/,              'POD documents --no-config' );
+    like( $synopsis, qr/--clone-on-nonreusable/,   'POD documents --clone-on-nonreusable' );
+    like( $synopsis, qr/--destroy-on-nonreusable/, 'POD documents --destroy-on-nonreusable' );
+    like( $synopsis, qr/--die-on-nonreusable/,     'POD documents --die-on-nonreusable' );
+    like( $synopsis, qr/DOMAIN/,                   'POD documents the DOMAIN argument' );
 };
 
 # pod2usage exits rather than dying, so this has to be a real run.
@@ -72,10 +75,22 @@ subtest 'no domain exits with the usage' => sub {
     like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 };
 
+# A real run, since pod2usage exits rather than dying.  Safe: the refusal comes
+# before any credential is asked for.
+subtest 'the nonreusable options say different things, so only one is taken' => sub {
+    my $out = q{};
+    IPC::Run3::run3( [ $^X, $script, qw{--clone-on-nonreusable --destroy-on-nonreusable --die-on-nonreusable vm.test} ], \undef, \$out, \$out );
+
+    isnt( $?, 0, 'passing more than one exits non-zero' );
+    like( $out, qr/say[ ]different[ ]things/, 'saying why' );
+    like( $out, qr/Usage:/,                   'and printing the usage out of the POD' );
+};
+
 # --- The hypervisor comes off the config, and --connect beats it -------------
 #
 # Run main() as far as the hypervisor being built and then stop it, so we can
 # see what it decided without letting it near a real libvirt or a real ssh.
+
 subtest 'main() resolves the hypervisor before it touches anything' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     mkdir "$dir/vm.example.test";
@@ -378,31 +393,34 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     # and one an earlier rebuild left behind.  Measured on hydra: a rebuilt
     # guest keeps its MAC and still gets a new address, and dnsmasq keeps the
     # old lease until it expires.
-    $hv->redefine( domain_exists        => sub { 1 } );
-    $hv->redefine( domain_uuid          => sub { '35341952-6f2b-457a-a882-80f6c47e2d2c' } );
-    $hv->redefine( annihilate_domain    => sub { push( @applied, 'annihilate_domain' ); 1 } );
-    $hv->redefine( lease_ips            => sub { qw{192.168.122.97 192.168.122.96} } );
-    $hv->redefine( release_dhcp_lease   => sub { push( @applied, "release $_[1]" ); 1 } );
-    $hv->redefine( define_domain        => sub { push( @applied, 'define_domain' ); 1 } );
-    $hv->redefine( delete_volume        => sub { 1 } );
-    $hv->redefine( pool                 => sub { 1 } );
-    $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
-    $hv->redefine( create_disk          => sub { '/bogus/pool/vm.test-qcow2' } );
-    $hv->redefine( bridge_device        => sub { 'br0' } );
-    $hv->redefine( has_tpm              => sub { 0 } );
-    $hv->redefine( guest_mac            => sub { '52:54:00:aa:bb:cc' } );
-    $hv->redefine( lease_ip             => sub { '192.168.122.98' } );
-    $hv->redefine( is_local             => sub { 1 } );
-    $hv->redefine( describe             => sub { 'the hypervisor' } );
-    $hv->redefine( virbr_ip             => sub { '192.168.122.1' } );
-    $hv->redefine( libvirt_version      => sub { 10_000_000 } );
-    $hv->redefine( qemu_version         => sub { 9_000_000 } );
-    $hv->redefine( pool_takes_direct_io => sub { 1 } );
-    $hv->redefine( pool_fstype          => sub { 'ext4' } );
-    $hv->redefine( write_text           => sub { 1 } );
-    $hv->redefine( put_file             => sub { 1 } );
-    $hv->redefine( run_sudo             => sub { 0 } );
-    $hv->redefine( cloudinit_iso        => sub { '/bogus/pool/seed.iso' } );
+    $hv->redefine( domain_exists => sub { 1 } );
+
+    # About leases, not about whether the rebuild may destroy the guest.
+    $hv->redefine( rebuild_destroys_guest => sub { 0 } );
+    $hv->redefine( domain_uuid            => sub { '35341952-6f2b-457a-a882-80f6c47e2d2c' } );
+    $hv->redefine( annihilate_domain      => sub { push( @applied, 'annihilate_domain' ); 1 } );
+    $hv->redefine( lease_ips              => sub { qw{192.168.122.97 192.168.122.96} } );
+    $hv->redefine( release_dhcp_lease     => sub { push( @applied, "release $_[1]" ); 1 } );
+    $hv->redefine( define_domain          => sub { push( @applied, 'define_domain' ); 1 } );
+    $hv->redefine( delete_volume          => sub { 1 } );
+    $hv->redefine( pool                   => sub { 1 } );
+    $hv->redefine( base_image             => sub { '/bogus/pool/baseimage-qcow2' } );
+    $hv->redefine( create_disk            => sub { '/bogus/pool/vm.test-qcow2' } );
+    $hv->redefine( bridge_device          => sub { 'br0' } );
+    $hv->redefine( has_tpm                => sub { 0 } );
+    $hv->redefine( guest_mac              => sub { '52:54:00:aa:bb:cc' } );
+    $hv->redefine( lease_ip               => sub { '192.168.122.98' } );
+    $hv->redefine( is_local               => sub { 1 } );
+    $hv->redefine( describe               => sub { 'the hypervisor' } );
+    $hv->redefine( virbr_ip               => sub { '192.168.122.1' } );
+    $hv->redefine( libvirt_version        => sub { 10_000_000 } );
+    $hv->redefine( qemu_version           => sub { 9_000_000 } );
+    $hv->redefine( pool_takes_direct_io   => sub { 1 } );
+    $hv->redefine( pool_fstype            => sub { 'ext4' } );
+    $hv->redefine( write_text             => sub { 1 } );
+    $hv->redefine( put_file               => sub { 1 } );
+    $hv->redefine( run_sudo               => sub { 0 } );
+    $hv->redefine( cloudinit_iso          => sub { '/bogus/pool/seed.iso' } );
     $loc->redefine( append_line => sub { 1 } );
 
     my $dir = tempdir( CLEANUP => 1 );
@@ -433,7 +451,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
 sub rebuild_answering {
     my (%answers) = @_;
 
-    my %seen = ( snapshots => [], cleared => {}, asked => [], uuid_asked => 0 );
+    my %seen = ( snapshots => [], cleared => {}, asked => [], cloned => [], uuid_asked => 0 );
     my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
     my $loc  = Test::MockModule->new('Trog::Local');
 
@@ -458,7 +476,19 @@ sub rebuild_answering {
     );
     $hv->redefine( clear_guest => sub { my ( undef, undef, %o ) = @_; %{ $seen{cleared} } = %o; return 1 } );
 
-    $hv->redefine( domain_exists        => sub { 1 } );
+    $hv->redefine( domain_exists => sub { 1 } );
+
+    # Off unless a case asks for it, or every subtest about something else stops
+    # to ask too.
+    $hv->redefine( rebuild_destroys_guest => sub { $answers{destroys} ? 1 : 0 } );
+
+    # Undef is a copy that did not happen, which the caller must not rebuild over.
+    $hv->redefine(
+        clone_guest_disk => sub {
+            push @{ $seen{cloned} }, $_[1];
+            return $answers{clone_fails} ? undef : '/bogus/pool/vm.test.bak-qcow2';
+        }
+    );
     $hv->redefine( define_domain        => sub { 1 } );
     $hv->redefine( pool                 => sub { 1 } );
     $hv->redefine( base_image           => sub { '/bogus/pool/baseimage-qcow2' } );
@@ -494,7 +524,7 @@ sub rebuild_answering {
         )
     );
 
-    my $said = capture_stdout { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test' ) };
+    my $said = capture_stdout { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', nonreusable => $answers{nonreusable} ) };
     return ( $said, \%seen );
 }
 
@@ -532,6 +562,56 @@ subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by
     is_deeply( $seen->{snapshots}, [], 'nothing was snapshotted, so nothing stopped the guest for one either' );
     is( $seen->{cleared}{keep_disk}, q{}, 'and the disk goes, the way it always did' );
     unlike( $said, qr{bin/restore}, 'with no rollback offered that would not be there' );
+};
+
+subtest 'a rebuild that would destroy the guest stops, unless it is told not to' => sub {
+
+    # Nothing answers under prove, so this falls to the no-tty rule rather than
+    # to a prompt.
+    my $refused = exception { rebuild_answering( rollback_possible => 0, destroys => 1 ) };
+    like( $refused, qr/Refusing[ ]to[ ]rebuild[ ]vm[.]test/, 'with nobody there to ask, it refuses rather than asking' );
+    like( $refused, qr/--destroy-on-nonreusable/,            'and names the way past it' );
+
+    my ( $said, $seen ) = rebuild_answering(
+        rollback_possible => 0,
+        destroys          => 1,
+        nonreusable       => $Trog::Bin::Provisioner::NONREUSABLE{destroy},
+    );
+    like( $said, qr/Rebuilding[ ]vm[.]test[ ]destroys[ ]it/, 'told to destroy it, it says so out loud first' );
+    is( $seen->{cleared}{keep_disk}, q{}, 'and goes on to clear the guest, which is what being told that means' );
+
+    my $stopped = exception {
+        rebuild_answering(
+            rollback_possible => 0,
+            destroys          => 1,
+            nonreusable       => $Trog::Bin::Provisioner::NONREUSABLE{stop},
+        );
+    };
+    like( $stopped, qr/Refusing[ ]to[ ]rebuild/, 'and told to refuse, it refuses without asking anybody' );
+};
+
+subtest 'asked to copy the disk aside, it copies before it destroys' => sub {
+    my ( $said, $seen ) = rebuild_answering(
+        rollback_possible => 0,
+        destroys          => 1,
+        nonreusable       => $Trog::Bin::Provisioner::NONREUSABLE{clone},
+    );
+
+    is_deeply( $seen->{cloned}, ['vm.test'], 'the backend was asked to copy the disk aside' );
+    like( $said, qr/Copied[ ]vm[.]test's[ ]disk[ ]aside/, 'and says where the copy went' );
+    like( $said, qr/nothing[ ]removes[ ]that/,            'and that nothing will clean it up for them' );
+    is( $seen->{cleared}{keep_disk}, q{}, 'and only then is the guest cleared' );
+
+    # A copy that did not happen must not be rebuilt over.
+    my $refused = exception {
+        rebuild_answering(
+            rollback_possible => 0,
+            destroys          => 1,
+            clone_fails       => 1,
+            nonreusable       => $Trog::Bin::Provisioner::NONREUSABLE{clone},
+        );
+    };
+    like( $refused, qr/Could[ ]not[ ]copy[ ]vm[.]test's[ ]disk[ ]aside/, 'a copy that failed stops the rebuild' );
 };
 
 subtest 'a domain directory with no recipes is built as it stands' => sub {

@@ -84,9 +84,23 @@ Only C<.test>, which RFC 2606 reserves: nothing real is named under it, and
 every real domain's data sits in the same directory.  The two exclusions are
 the rest of the safety of it, so neither is inferred and neither may be
 unavailable: a name a hypervisor still has is a live guest however old its
-directory looks, a name the configuration carries is one somebody means to build
-again, and a hypervisor that will not say what it has stops the sweep rather than
-being counted as holding nothing.
+directory looks, and a name the configuration carries is one somebody means to
+build again.
+
+A hypervisor that will not say what guests it has takes the run down rather than
+being counted as holding none: its guests are exactly the names that would then
+look like orphans.
+
+=item B<--backups>
+
+Sweep rather than destroy one domain: every disk that
+C<bin/provision --clone-on-nonreusable> copied aside, on each hypervisor in the
+fleet.  Takes no domain.  Pair it with C<--dryrun> first; it names every copy and
+says which machine holds it.
+
+A copy is a volume rather than a domain, so nothing else in the toolkit removes
+one -- and this spares nothing, not even a copy whose guest is still running.
+C<sweep_backups> has why, and why that is not the bargain C<--orphans> makes.
 
 =item B<--dryrun>
 
@@ -107,19 +121,21 @@ sub main {
 
     umask 0022;
 
-    my ( $purge, $purge_data, $orphans, $dryrun, $uri, $domain_dir, $hvconf );
+    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $uri, $domain_dir, $hvconf );
     GetOptionsFromArray(
         \@args,
         'domaindir=s' => \$domain_dir,
         'purge'       => \$purge,
         'purge-data'  => \$purge_data,
         'orphans'     => \$orphans,
+        'backups'     => \$backups,
         'dryrun'      => \$dryrun,
         'connect=s'   => \$uri,
         'hvconf=s'    => \$hvconf,
     );
 
     return sweep_orphans( $uri, $hvconf, $dryrun ) if $orphans;
+    return sweep_backups( $uri, $hvconf, $dryrun ) if $backups;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
@@ -422,12 +438,69 @@ sub purge_data_dir {
     return;
 }
 
+=head2 sweep_backups($uri, $hvconf, $dryrun)
+
+Take away the disks C<bin/provision --clone-on-nonreusable> copied aside.
+
+Nothing else ever will: a copy is deliberately not one of the volumes
+C<guest_volumes> names, so destroying the guest it came from leaves it standing.
+
+All of them, rather than the ones whose guest has gone.  C<sweep_orphans>'
+exclusion cannot be borrowed: a copy outliving its guest is the case where it is
+the only thing left.  What guards this instead is that it looks at nothing but
+copies, names every one before any goes, and removes none under C<$dryrun>.
+
+A backend that makes no such copies reports none.  A pool that cannot be read
+throws, and nothing here catches it.
+
+=cut
+
+sub sweep_backups {
+    my ( $uri, $hvconf, $dryrun ) = @_;
+
+    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
+
+    my %found;
+    foreach my $hv (@hvs) {
+        push @{ $found{$_} }, $hv for $hv->backup_volumes;
+    }
+
+    my @copies = sort keys %found;
+    unless (@copies) {
+        print "No disks have been copied aside anywhere in the fleet.\n";
+        return 0;
+    }
+
+    my $count = scalar @copies;
+    print "$count " . ( $count == 1 ? 'disk' : 'disks' ) . " copied aside, and nothing has taken them away:\n";
+    foreach my $name (@copies) {
+        print "  $name (" . join( ', ', map { $_->is_local ? 'here' : ( $_->name // $_->describe ) } @{ $found{$name} } ) . ")\n";
+    }
+
+    if ($dryrun) {
+        print "[DRY RUN] None of it removed.\n";
+        return 0;
+    }
+
+    # delete_volume warns and answers false for one it could not take, so count
+    # what went rather than what was asked to go.
+    my $removed = 0;
+    foreach my $name (@copies) {
+        $removed++ for grep { $_ } map { $_->delete_volume($name) } @{ $found{$name} };
+    }
+
+    print "Removed $removed of " . scalar(@copies) . " copies.\n";
+    return $removed == scalar(@copies) ? 0 : 1;
+}
+
 =head2 sweep_orphans($uri, $hvconf, $dryrun)
 
 What C<--orphans> does: every C<.test> directory under C<sweep_roots> that no
 hypervisor in the fleet has a guest for and no recipe configuration names, here
-and on each of them.  Non-zero when a hypervisor could not be asked, or there was
-nowhere to look.
+and on each of them.  Non-zero when there was nowhere to look.
+
+A hypervisor that cannot say what guests it holds takes the run down rather than
+being counted as holding none.
 
 =cut
 
@@ -436,21 +509,13 @@ sub sweep_orphans {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
-    # Every guest anywhere in the fleet.  A hypervisor that cannot be asked stops
-    # the sweep rather than being skipped: the guests it holds are exactly the
-    # ones that would then look like orphans.
-    #
-    # Asked of the hypervisor rather than of libvirt, because not every
-    # hypervisor has one -- a cloud answers this out of Nova, and asking it for a
-    # domain list stopped the sweep for the whole fleet.
+    # Every guest anywhere in the fleet, asked of the hypervisor rather than of
+    # libvirt, because not every hypervisor has one -- a cloud answers this out
+    # of Nova, and asking it for a domain list stopped the sweep for the whole
+    # fleet.
     my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
     foreach my $hv (@hvs) {
-        my @names = eval { $hv->guest_names };
-        if ($@) {
-            warn 'Could not ask ' . $hv->describe . " what guests it has, so nothing is swept:\n$@";
-            return 1;
-        }
-        $spoken_for{$_} = 1 for @names;
+        $spoken_for{$_} = 1 for $hv->guest_names;
     }
 
     my @roots = sweep_roots(@hvs) or return 1;

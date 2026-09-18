@@ -485,6 +485,39 @@ sub snapshot_before_rebuild {
     return $self->create_snapshot( $domain, $name, disk_only => 1, leave_down => 1 ) ? $name : undef;
 }
 
+=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+
+Whether rebuilding this domain would take the existing guest apart rather than
+building over it.  C<capacity> is the size the build asks for.
+
+False here: a backend that replaces a server's root disk in place keeps the
+server and its addresses, so there is nothing to lose.  libvirt overrides it.
+What to do about a true answer is F<bin/provision>'s.
+
+=cut
+
+sub rebuild_destroys_guest { return 0 }
+
+=head2 $hv->clone_guest_disk($domain)
+
+Copy a guest's disk aside before a rebuild destroys it; where the copy landed,
+or undef.  Undef here, and nothing asks: only a backend answering true above has
+a guest to copy aside.
+
+=cut
+
+sub clone_guest_disk { return }
+
+=head2 $hv->backup_volumes
+
+The disks C<clone_guest_disk> left behind, by name.  Empty here, for the same
+reason.  Asked rather than worked out by the caller, so the name a copy is given
+stays the backend's business.
+
+=cut
+
+sub backup_volumes { return () }
+
 =head1 PLACEMENT
 
 Whether one more guest will fit, and which hypervisor it fits on best.

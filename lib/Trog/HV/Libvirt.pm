@@ -26,6 +26,9 @@ use Provisioner::Cookbook();
 # my is invisible to anything above the line it is written on.
 my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
+# What clone_guest_disk names a copy, and what backup_volumes knows one by.
+my $BACKUP_SUFFIX = '.bak-qcow2';
+
 =head1 NAME
 
 Trog::HV::Libvirt - the libvirt backend: domains, storage pools and the facts of
@@ -1384,6 +1387,91 @@ sub rollback_possible {
     # rebuild -- after the rollback point has been taken and announced, which is
     # the worst moment available to discover it.
     return ( grep { $_ eq $PRISTINE_SNAPSHOT } $self->disk_snapshot_names("$domain-qcow2") ) ? 1 : 0;
+}
+
+=head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
+
+Whether rebuilding this domain would take the guest apart.
+
+True when there is a guest and its disk cannot be kept at C<capacity>:
+C<clear_guest> then undefines the domain and deletes the disk.  A first build,
+and a rebuild that can keep the disk it has, answer false.
+
+Not the negation of C<rollback_possible>, which is also false for a reusable
+disk with no C<trog-pristine> snapshot to go back to -- the state every guest
+built before that existed is in, and too many to stop for.
+
+=cut
+
+sub rebuild_destroys_guest {
+    my ( $self, $domain, %opts ) = @_;
+
+    return 0 unless $self->domain_exists($domain);
+    return $self->disk_reusable( $domain, $opts{capacity} ) ? 0 : 1;
+}
+
+=head2 $hv->clone_guest_disk($domain)
+
+Copy this guest's disk aside as C<$domain.bak-qcow2>, and say where it landed.
+
+The guest is stopped first: a qcow2 copied while qemu is writing into it is a
+copy of a moment that never existed.  The copy is a volume and nothing else --
+no domain, no address, and no backing store, so it neither boots nor depends on
+the base image this guest was laid over.
+
+Nothing removes it afterwards, C<guest_volumes> not naming it, and one already
+there is kept rather than written over.
+
+Undef when there is no disk to copy.  A copy that was attempted and failed dies
+instead, the caller rebuilding over the disk on the strength of this.
+
+=cut
+
+sub clone_guest_disk {
+    my ( $self, $domain ) = @_;
+
+    my $source = $self->volume("$domain-qcow2") or return;
+    my $info   = $source->get_info();
+    my $name   = "$domain$BACKUP_SUFFIX";
+
+    if ( my $existing = $self->volume_path($name) ) {
+        print "$name is in the pool already; keeping that rather than writing over it.\n";
+        return $existing;
+    }
+
+    $self->stop_domain($domain);
+
+    print "Copying $domain's disk aside as $name\n";
+
+    my $clone = $self->pool->clone_volume( <<"XML", $source );
+<volume>
+  <name>@{[ _xml_escape($name) ]}</name>
+  <capacity unit='bytes'>$info->{capacity}</capacity>
+  <target><format type='qcow2'/></target>
+</volume>
+XML
+
+    return $clone->get_path();
+}
+
+=head2 $hv->backup_volumes
+
+Every disk in the pool that C<clone_guest_disk> put there, by name.
+
+The suffix is this backend's to know.  A caller sweeping them up asks for the
+list rather than matching on the name itself.
+
+=cut
+
+sub backup_volumes {
+    my ($self) = @_;
+
+    # Nothing caught, the volume names included: EPERM on a pool is not a
+    # smaller answer than an empty one, and a caller handed the short list
+    # sweeps fewer copies than exist.  list_volumes is an RPC per volume.
+    my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
+
+    return @names;
 }
 
 =head2 $hv->disk_layout($volume)

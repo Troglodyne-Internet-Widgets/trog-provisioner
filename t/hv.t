@@ -1055,6 +1055,73 @@ subtest 'a running guest is snapshotted whole, and only disk_only takes it down'
     ok( !( $seen[0]{flags} & Sys::Virt::DomainSnapshot::CREATE_LIVE() ), 'and no LIVE, there being neither a guest to leave running nor memory to write' );
 };
 
+subtest 'the disk is copied aside as a volume of its own, with the guest stopped' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my @did;
+    my $pool = FakeBuildPool->new( [] );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( volume      => sub { FakeBuildVolume->new( '/opt/terraform/disks/vm.test-qcow2', 42949672960 ) } );
+    $mock->redefine( volume_path => sub { undef } );
+    $mock->redefine( pool        => sub { $pool } );
+    $mock->redefine( stop_domain => sub { push @did, 'stop_domain'; return 1 } );
+
+    my $path = quietly( sub { $hv->clone_guest_disk('vm.test') } );
+
+    is( $path,   '/opt/terraform/disks/vm.test.bak-qcow2', 'the copy is a volume of its own, named for the guest it came from' );
+    is( $did[0], 'stop_domain',                            'and the guest was stopped before it was read, a live qcow2 copying torn' );
+
+    my ($cloned) = $pool->cloned;
+    like( $cloned->{xml}, qr{<name>vm[.]test[.]bak-qcow2</name>}, 'libvirt was asked for that name' );
+
+    # The claim the POD makes: a copy depending on the base image stops working
+    # the day somebody prunes it.
+    unlike( $cloned->{xml}, qr/backingStore/, 'and for a volume standing on its own, with no backing store declared' );
+
+    # Rebuilding twice is when writing over the older copy takes the wanted one.
+    @did = ();
+    $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test.bak-qcow2' } );
+    my $kept = quietly( sub { $hv->clone_guest_disk('vm.test') } );
+    is( $kept, '/opt/terraform/disks/vm.test.bak-qcow2', 'a copy that is there already is handed back' );
+    is_deeply( \@did, [], 'without stopping the guest or copying over it' );
+
+    $mock->redefine( volume_path => sub { undef } );
+    $mock->redefine( volume      => sub { undef } );
+    is( quietly( sub { $hv->clone_guest_disk('vm.test') } ), undef, 'and a guest with no disk has none to copy' );
+
+    # A refusal must not read as "there was nothing to copy": the caller rebuilds
+    # over the disk on the strength of a copy having been made.
+    $mock->redefine( volume => sub { FakeBuildVolume->new( '/opt/terraform/disks/vm.test-qcow2', 42949672960 ) } );
+    $mock->redefine( pool   => sub { FakeBuildPool->new( [], refuse => 1 ) } );
+
+    like(
+        exception {
+            quietly( sub { $hv->clone_guest_disk('vm.test') } )
+        },
+        qr/libvirt[ ]would[ ]not[ ]copy[ ]it/,
+        'a copy libvirt would not make dies, rather than answering undef like a guest with no disk'
+    );
+};
+
+subtest 'a rebuild that cannot keep the disk is one that destroys the guest' => sub {
+    my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { 1 } );
+    $mock->redefine( disk_reusable => sub { 0 } );
+
+    ok( $hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'a guest whose disk cannot be kept is one the rebuild takes apart' );
+
+    $mock->redefine( disk_reusable => sub { 1 } );
+    ok( !$hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'and one whose disk can be kept is built over instead' );
+
+    # A first build has nothing to lose, and stopping to ask about one would
+    # stop every new domain there is.
+    $mock->redefine( domain_exists => sub { 0 } );
+    $mock->redefine( disk_reusable => sub { 0 } );
+    ok( !$hv->rebuild_destroys_guest( 'vm.test', capacity => 42949672960 ), 'and a domain that is not there yet has nothing to destroy' );
+};
+
 subtest 'starting a domain leaves it running' => sub {
     my $hv = fresh( uri => 'qemu+ssh://root@hv/system' );
 
@@ -1250,11 +1317,21 @@ subtest 'the base image is fetched once' => sub {
 
     package FakeBuildPool;
 
-    sub new { my ( $class, $created ) = @_; return bless { created => $created }, $class }
+    sub new { my ( $class, $created, %opts ) = @_; return bless { created => $created, %opts }, $class }
 
     sub create_volume {
         my ( $self, $xml ) = @_;
         push @{ $self->{created} }, $xml;
+        my ($name) = $xml =~ m{<name>([^<]+)</name>};
+        return FakeBuildVolume->new("/opt/terraform/disks/$name");
+    }
+
+    sub cloned ($self) { return @{ $self->{cloned} // [] } }
+
+    sub clone_volume {
+        my ( $self, $xml, $source ) = @_;
+        die "libvirt would not copy it\n" if $self->{refuse};
+        push @{ $self->{cloned} }, { xml => $xml, from => $source };
         my ($name) = $xml =~ m{<name>([^<]+)</name>};
         return FakeBuildVolume->new("/opt/terraform/disks/$name");
     }
@@ -1264,8 +1341,9 @@ subtest 'the base image is fetched once' => sub {
 
     package FakeBuildVolume;
 
-    sub new              { my ( $class, $path ) = @_; return bless { path => $path }, $class }
+    sub new { my ( $class, $path, $capacity ) = @_; return bless { path => $path, capacity => $capacity }, $class }
     sub get_path ($self) { return $self->{path} }
+    sub get_info ($self) { return { capacity => $self->{capacity} // 42949672960 } }
 }
 
 sub quietly {
