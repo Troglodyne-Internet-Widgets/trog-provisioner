@@ -262,6 +262,14 @@ sub release_ip {
     return 1;
 }
 
+=head2 destroy_vm($domain, $dryrun)
+
+Stop and undefine the domain on the current hypervisor.  Says so and does
+nothing when the hypervisor has no such domain.  Dies when the domain will not
+stop or will not undefine.
+
+=cut
+
 sub destroy_vm {
     my ( $domain, $dryrun ) = @_;
 
@@ -276,6 +284,14 @@ sub destroy_vm {
     return;
 }
 
+=head2 destroy_disks($domain, $dryrun)
+
+Delete the volumes of the domain on the current hypervisor.  The base image and
+the storage pool are shared, so they stay.  A volume that will not go gives a
+warning, and the others still go.
+
+=cut
+
 sub destroy_disks {
     my ( $domain, $dryrun ) = @_;
     my $hv = Trog::HV->new();
@@ -286,6 +302,17 @@ sub destroy_disks {
     }
     return;
 }
+
+=head2 remove_authorized_key($domain, $dryrun)
+
+Take the public key of the domain out of the authorized_keys file of this
+machine.  The key is the F<key.rsa.pub> in the domain directory.  Does nothing
+when that file or the authorized_keys file is not there.
+
+Dies, and changes nothing, when the authorized_keys file cannot be read, or when
+the key is on more than one line of it.
+
+=cut
 
 sub remove_authorized_key {
     my ( $domain, $dryrun ) = @_;
@@ -392,6 +419,13 @@ sub remove_runner_key {
 
     return;
 }
+
+=head2 purge_domain_dir($domain, $dryrun)
+
+Delete the directory of the domain under the domain directory of this machine.
+Says so and does nothing when it is not there.
+
+=cut
 
 sub purge_domain_dir {
     my ( $domain, $dryrun ) = @_;
