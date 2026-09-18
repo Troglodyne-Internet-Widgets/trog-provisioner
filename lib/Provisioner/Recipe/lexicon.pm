@@ -61,7 +61,8 @@ sub args {
             dns_preference => {
                 type        => 'string',
                 enum        => [qw{pdns registrar}],
-                description => 'Which recipe holds this zone, where the guest has more than one that could.  The same tiebreaker L<Provisioner::Recipe::letsencrypt> takes, declared here because this recipe resolves the provider itself to render the shortcut -- letsencrypt hands its own answer down, so an operator still writes it in one place.',
+                description =>
+                  'Which recipe holds this zone, where the guest has more than one that could.  The same tiebreaker Provisioner::Recipe::letsencrypt takes, and a guest running that needs nothing here: it resolves the provider and hands the answer down.  Set it here for a guest that has both a server of its own and registrar credentials and does not run letsencrypt -- pdns and registrar each require this recipe without saying which of them holds the zone, so there is nothing else to settle the tie and the build stops until somebody does.',
             },
         },
     );

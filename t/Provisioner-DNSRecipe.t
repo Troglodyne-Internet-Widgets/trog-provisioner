@@ -105,6 +105,35 @@ subtest 'the shortcut is rendered from that, and names what lexicon reads' => su
     like( $out, qr{^lexicon[ ]--resolve-zone-name[ ]powerdns[ ]}m, 'invoked with the flag the provider needs' );
 };
 
+subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => sub {
+
+    # letsencrypt resolves the provider and hands it down through
+    # required_recipes, so a guest running it needs nothing under lexicon.  pdns
+    # and registrar each require lexicon and hand it nothing, so a guest with
+    # both of them and no letsencrypt has the same tie and nobody to settle it.
+    # That is the case this key exists for, and the one the schema description
+    # used to tell an operator they would never meet.
+    my $conf = Test::MockModule->new('Provisioner::Cookbook');
+    $conf->redefine( domain_config => sub { return { pdns => { api_key => 'a-key' }, registrar => { type => 'easydns', key => 'a-token' } } } );
+    $conf->redefine( host_of       => sub { return undef } );
+
+    # Public, because a reserved TLD has only ever one candidate and so no tie.
+    my %common = ( domain => 'tie.troglodyne.net', install_dir => '/opt/domains', admin_user => 'doge' );
+
+    like(
+        exception { fresh('lexicon')->validate(%common) },
+        qr/dns_preference/,
+        'with nobody to settle it, the tie is refused rather than guessed at'
+    );
+
+    # A fresh recipe per case: validated() memoises onto the object.
+    my %by_local = fresh('lexicon')->validate( %common, dns_preference => 'pdns' );
+    is( $by_local{lexicon}{type}, 'powerdns', 'and naming the local server here settles it' );
+
+    my %by_registrar = fresh('lexicon')->validate( %common, dns_preference => 'registrar' );
+    is( $by_registrar{lexicon}{type}, 'easydns', 'as does naming the registrar' );
+};
+
 subtest 'the operator registrar is left alone, so synczones still has an upstream' => sub {
 
     # synczones writes /etc/synczones.conf out of registrar, which is whoever
