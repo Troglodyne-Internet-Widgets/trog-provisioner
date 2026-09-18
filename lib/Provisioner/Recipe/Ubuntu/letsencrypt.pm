@@ -23,7 +23,7 @@ inherits from.
 =cut
 
 sub deps {
-    return qw{certbot lexicon dehydrated};
+    return qw{certbot dehydrated};
 }
 
 1;

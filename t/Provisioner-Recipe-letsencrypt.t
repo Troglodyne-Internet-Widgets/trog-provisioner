@@ -127,7 +127,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     my %handed = $required{pdns}->();
     my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'doge' );
     ok( length $handed{api_key}, 'pdns is handed an api key' );
-    is( $handed{api_key}, $opts{registrar}{key}, 'and the hook is given the same one' );
+    is( $handed{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
 
     # The token reaching the file dehydrated executes, which is the thing that
     # actually failed: every other consumer had it and agreed, while the hook
@@ -308,9 +308,9 @@ YAML
     # Length first, and not merely equality: two empty strings are equal, so an
     # absent credential would satisfy the comparison below while rendering a
     # hook that authenticates with nothing.
-    ok( length( $host{registrar}{key} // q{} ) >= 32, 'the machine has a token' );
-    is( $tenant{registrar}{key}, $host{registrar}{key}, 'a domain on it presents that one' );
-    isnt( $alone{registrar}{key}, $host{registrar}{key}, 'while a domain with a machine of its own gets its own' );
+    ok( length( $host{lexicon}{key} // q{} ) >= 32, 'the machine has a token' );
+    is( $tenant{lexicon}{key}, $host{lexicon}{key}, 'a domain on it presents that one' );
+    isnt( $alone{lexicon}{key}, $host{lexicon}{key}, 'while a domain with a machine of its own gets its own' );
 
     # The hook is only half of it.  required_recipes hands pdns its api_key on a
     # separate path, and fixing the hook alone left the server configured with
@@ -423,7 +423,7 @@ subtest 'a guest that could answer either way is asked which' => sub {
     # The tiebreaker decides the hook as well as the answer: the local server is
     # reached over a unix socket lexicon has to be pointed at.
     my %local = _fresh()->enrich( %both, dns_preference => 'pdns' );
-    is( $local{registrar}{type}, 'powerdns', 'and the local server is what lexicon is given' );
+    is( $local{lexicon}{type}, 'powerdns', 'and the local server is what lexicon is given' );
 };
 
 Test::NoWarnings::had_no_warnings();

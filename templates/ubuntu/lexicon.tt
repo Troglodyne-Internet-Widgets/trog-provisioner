@@ -1,0 +1,12 @@
+[%# One shortcut per domain, rendered from whichever recipe holds the zone for
+    it -- Provisioner::DNSRecipe/credentials_for.  pdns and the registrar each
+    installed one of their own before, which with a path this recipe now spells
+    flat would be two recipes writing one file under make -j. -%]
+mkdir -p /opt/lexicon; /bin/true
+[%# A guest built before this was a file has a directory of the same name, with
+    one shortcut per provider inside it: mv onto that puts the file in it rather
+    than replacing it. -%]
+rm -rf /opt/lexicon/[% domain %]
+mv lexicon.sh /opt/lexicon/[% domain %]
+chmod 0700 /opt/lexicon/[% domain %]
+chown root:root /opt/lexicon/[% domain %]

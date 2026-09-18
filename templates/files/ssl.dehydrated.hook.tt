@@ -9,20 +9,20 @@ set -u
 set -o pipefail
 
 export PROVIDER_UPDATE_DELAY=${PROVIDER_UPDATE_DELAY:-"30"}
-[% IF registrar.type -%]
-export PROVIDER="[% registrar.type %]"
-[% IF registrar.user -%]
-export LEXICON_[% registrar.type.upper() %]_AUTH_USERNAME="[% registrar.user %]"
+[%# The same credential, under the same name and in the same shape, as the
+    shortcut templates/files/lexicon.shortcut.sh.tt exports -- both rendered
+    from Provisioner::DNSRecipe/credentials_for.  This said "registrar", which
+    for a guest serving its own zone named powerdns. -%]
+[% IF lexicon.type -%]
+export PROVIDER="[% lexicon.type %]"
+[% IF lexicon.user -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_USERNAME="[% lexicon.user %]"
 [% END -%]
-[% IF registrar.key -%]
-export LEXICON_[% registrar.type.upper() %]_AUTH_TOKEN="[% registrar.key %]"
+[% IF lexicon.key -%]
+export LEXICON_[% lexicon.type.upper() %]_AUTH_TOKEN="[% lexicon.key %]"
 [% END -%]
-[% FOREACH lv IN extra_lexicon_vars -%]
-[% IF lv.global %]
-export LEXICON_[% lv.key %]="[% lv.value %]"
-[% ELSE -%]
-export LEXICON_[% registrar.type.upper() %]_[% lv.key %]="[% lv.value %]"
-[% END -%]
+[% FOREACH lv IN lexicon.extra -%]
+export LEXICON_[% lexicon.type.upper() %]_[% lv.key %]="[% lv.value %]"
 [% END -%]
 [% END -%]
 function deploy_challenge {
@@ -32,7 +32,7 @@ function deploy_challenge {
 
         echo "deploy_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon [% IF lexicon_opts %][% lexicon_opts %] [% END %]$PROVIDER create ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
+        lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER create ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
         --content="${TOKEN_VALUE}"
     done
 
@@ -68,7 +68,7 @@ function clean_challenge {
 
         echo "clean_challenge called: ${DOMAIN}, ${TOKEN_FILENAME}, ${TOKEN_VALUE}"
 
-        lexicon [% IF lexicon_opts %][% lexicon_opts %] [% END %]$PROVIDER delete ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
+        lexicon [% IF lexicon.opts %][% lexicon.opts %] [% END %]$PROVIDER delete ${DOMAIN} TXT --name="_acme-challenge.${DOMAIN}." \
         --content="${TOKEN_VALUE}"
     done
 

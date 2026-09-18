@@ -684,7 +684,13 @@ sub required_recipes {
     # recipe that depends on the thing which puts it there.  data walks what
     # every dependent handed it, rather than each fragment calling restore_state
     # for itself.
-    my %restores = $self->restores(%opts);
+    # Only where there is a domain to restore into.  Provisioner::Cookbook asks
+    # this at scaffold time with the global configuration and no domain, and a
+    # restores() that interpolates one -- letsencrypt and pdns both do -- dies on
+    # the undef rather than answering, taking bin/new_guest down with it.  There
+    # is nothing to declare a dependency about in that case anyway: a salvage
+    # goes back into a domain, and the question was asked without one.
+    my %restores = defined $opts{domain} ? $self->restores(%opts) : ();
     push( @required, data => sub { return ( restores => \%restores ) } ) if %restores;
 
     return @required;
