@@ -81,7 +81,7 @@ sub args {
         required   => [qw{routers}],
         properties => {
             basedir => { type => 'string' },
-            routers => { type => 'array', items => { type => 'string' }, default => [] },
+            routers => { type => 'array', items => { type => 'string' } },
         },
     );
 }

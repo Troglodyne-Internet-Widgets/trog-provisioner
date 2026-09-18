@@ -440,9 +440,10 @@ rejects_missing(
     'matrix rejects missing admin_password'
 );
 
-rejects_missing( 'ldap', {}, 'admin_password', 'ldap rejects missing admin_password' );
-rejects_missing( 'sssd', { base_dn  => 'dc=test,dc=test' },           'ldap_uri', 'sssd rejects missing ldap_uri' );
-rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',  'sssd rejects missing base_dn' );
+rejects_missing( 'ldap',  {},                                          'admin_password', 'ldap rejects missing admin_password' );
+rejects_missing( 'tpsgi', {},                                          'routers',        'tpsgi rejects missing routers' );
+rejects_missing( 'sssd',  { base_dn => 'dc=test,dc=test' },            'ldap_uri',       'sssd rejects missing ldap_uri' );
+rejects_missing( 'sssd',  { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',        'sssd rejects missing base_dn' );
 
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints

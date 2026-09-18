@@ -13,7 +13,7 @@ ln -s [% install_dir %]/[% domain %]/service/tpsgi.service /usr/lib/systemd/syst
     checkout, for build_service.  The task finds that perl when it runs,
     because the perl does not exist yet when this line is queued.  The
     backslash keeps the substitution out of the shell that queues the line. -%]
-[% script_dir %]/queue_postrun_task "PATH=\$$(ls -d /opt/perl5/*/bin 2>/dev/null | tail -n1):[% install_dir %]/[% domain %]/bin:$$PATH build_service [% domain %] [% extra_env %]"
+[% script_dir %]/queue_postrun_task "PATH=\$$(ls -d /opt/perl5/*/bin 2>/dev/null | tail -n1):[% install_dir %]/[% domain %]/bin:$$PATH build_service [% domain %]"
 [% script_dir %]/queue_postrun_task systemctl daemon-reload
 [% script_dir %]/queue_postrun_task systemctl enable [% domain %]
 [% script_dir %]/queue_postrun_task systemctl start [% domain %]
