@@ -10,8 +10,6 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
-use Provisioner::DNSRecipe();
-
 =head1 Provisioner::Recipe::dnsrecords
 
 =head2 SYNOPSIS
@@ -25,10 +23,19 @@ Put this guest on the map: an C<A> record for the domain at the address it was
 built with, and a C<CNAME> for each of its aliases.  Written through lexicon, to
 whichever recipe holds the zone -- see L<Provisioner::DNSRecipe/credentials_for>.
 
-L<Provisioner::Recipe::pdns> already does this for a guest that serves its own
-zone: it builds the whole thing from F<templates/files/pdns.zone.tt>.  What was
-missing is the other case, where somebody else holds the zone and the records
-had to be added by hand.
+=head2 It runs for a guest that serves its own zone as well
+
+L<Provisioner::Recipe::pdns> writes these records once, out of
+F<templates/files/pdns.zone.tt>, and only into a database that does not already
+answer for the domain.  So a rebuilt guest keeps whatever its restored
+F<zones.db> held, and an address that changed between builds is never corrected
+by anything.  pdns says as much where it declines to reload the zone:
+
+    A zone that is already there and needs changing is a job for lexicon.
+
+This is that job.  On a first build there is nothing to do -- the record pdns
+wrote is the record this would write, so it sends nothing -- and on a rebuild it
+is what puts the new address where the zone can serve it.
 
 =head2 What it publishes, and what it leaves alone
 
@@ -52,15 +59,16 @@ RFC 1918 address.  It goes up as it stands: a zone holding internal addresses fo
 internal names is ordinary practice, and it is the address the thing asking is
 going to need.
 
-A hypervisor that allocates addresses itself -- a cloud -- leaves C<main_ip>
-empty at generate time, and there is then nothing to publish.  The fragment is
-empty in that case rather than guessing.
-
 =head2 Where it does not run
 
-A guest whose zone is served by L<Provisioner::Recipe::pdns> already has these
-records, built from the zonefile, so this stays out of the way: the fragment is
-empty wherever the provider holding the zone is the local one.
+Where there is no address to publish.  A hypervisor that allocates addresses
+itself -- a cloud -- leaves C<main_ip> empty at generate time, so the fragment is
+empty rather than guessing at one.
+
+Which provider holds the zone decides nothing here.  It used to: this stayed out
+of the way wherever that was the guest's own pdns, on the grounds that the
+zonefile had already written the same records.  True of a first build and false
+of every one after it, for the reason above.
 
 =cut
 
@@ -71,10 +79,7 @@ empty wherever the provider holding the zone is the local one.
 sub enrich {
     my ( $self, %opts ) = @_;
 
-    my $provider = Provisioner::DNSRecipe->provider_for(%opts);
-    my $address  = $opts{main_ip} // q{};
-
-    $opts{publish_records} = ( $provider ne Provisioner::DNSRecipe->local_implementation() && $address ) ? 1 : 0;
+    $opts{publish_records} = $opts{main_ip} ? 1 : 0;
 
     return %opts;
 }

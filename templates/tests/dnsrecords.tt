@@ -10,10 +10,9 @@ my $shortcut = '/opt/lexicon/[% domain %]';
 ok(-x $shortcut, 'the lexicon shortcut is installed, since that is what carries the credential');
 
 [% IF publish_records %]
-# Somebody else holds this zone, so the records went up through them.  Asked of
-# the provider rather than of a resolver: what is under test is that they were
-# published, and a resolver would answer out of its cache for as long as the
-# record it had before this lives.
+# Asked of the provider rather than of a resolver: what is under test is that
+# the records were published, and a resolver would answer out of its cache for
+# as long as whatever it held before this lives.
 my $a_records = `$shortcut list A --output=JSON 2>&1`;
 like($a_records, qr/\[/, 'the provider answered with a list of A records') or diag $a_records;
 like($a_records, qr/\Q[% main_ip %]\E/, 'holding the address this guest was built with') or diag $a_records;
@@ -21,13 +20,12 @@ like($a_records, qr/\Q[% main_ip %]\E/, 'holding the address this guest was buil
 my $cnames = `$shortcut list CNAME --output=JSON 2>&1`;
 like($cnames, qr/\[/, 'and with a list of CNAMEs') or diag $cnames;
 [% FOREACH alias IN full_aliases.sort() %]
-like($cnames, qr/\Q[% alias %]\E/, '[% alias %] is published') or diag $cnames;
+like($cnames, qr/"name": "\Q[% alias %]\E"/, '[% alias %] is published under exactly that name') or diag $cnames;
 [% END -%]
 [% ELSE %]
-# Either the guest serves its own zone -- where the pdns recipe builds every one
-# of these records out of the zonefile -- or the hypervisor allocates the address
-# and there was none to publish at the time the makefile was written.
-ok(1, 'this domain publishes nothing, so nothing was published');
+# The hypervisor allocates the address here, so there was none to publish at the
+# time the makefile was written.
+ok(1, 'this domain has no address of its own to publish, so nothing was');
 [% END -%]
 
 done_testing();
