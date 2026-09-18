@@ -90,14 +90,9 @@ domain that has no guest yet, so a new machine never needs it.
 Copy the guest's disk aside as C<DOMAIN.bak-qcow2> before the rebuild destroys
 it, and then rebuild.
 
-A disk and nothing else: no domain is defined for the copy, it takes no address
-out of the pool, and nothing starts it.  It is there so that what was on the
-guest is still somewhere, and a copy that booted would be a second machine
-answering to the first one's name.
-
-Nothing removes it afterwards, F<bin/destroy> included.  That is deliberate --
-it is the copy of a machine somebody was about to lose -- so deleting it when you
-no longer want it is yours to do.
+A disk and nothing else: no domain is defined for the copy, it takes no address,
+and nothing starts it.  Nothing removes it afterwards either, F<bin/destroy>
+included -- C<bin/destroy --backups> sweeps them when you want them gone.
 
 A rebuild that cannot make the copy does not go ahead.
 
@@ -107,15 +102,12 @@ Mutually exclusive with the other two.
 
 Rebuild the guest even though rebuilding it destroys it.
 
-A rebuild normally keeps the guest's disk, and takes a rollback point inside it
-first.  When the size or layout this build asks for is not what the disk was
-built with, the disk cannot be kept: the domain is undefined, the disk is
-deleted, and everything on the guest goes with them.
+A rebuild normally keeps the guest's disk.  Where the size or layout this build
+asks for is not what the disk was built with it cannot be kept: the domain is
+undefined and the disk deleted.  Without this, that stops and asks -- or refuses
+outright where there is no terminal to ask at.
 
-Without this, that stops and asks -- or refuses outright where there is no
-terminal, since a prompt nothing can answer hangs a run rather than failing it.
-
-Mutually exclusive with C<--die-on-nonreusable>.
+Mutually exclusive with the other two.
 
 =item B<--die-on-nonreusable>
 
@@ -124,7 +116,7 @@ Refuse such a rebuild rather than asking about it.
 What happens anyway when nobody is there to ask; pass it to say so on purpose,
 and to be certain of it somewhere a terminal might exist.
 
-Mutually exclusive with C<--destroy-on-nonreusable>.
+Mutually exclusive with the other two.
 
 =item B<--recipes> FILE
 
@@ -395,9 +387,8 @@ sub _public_half {
 }
 
 # What to do about a rebuild that would destroy the guest, as the
-# --*-on-nonreusable options set it.  `ask` is not a fourth thing to do: it is
-# the absence of an answer, which an operator supplies when there is one to ask
-# and which a run with nobody to ask resolves to `stop`.
+# --*-on-nonreusable options set it.  `ask` is the absence of an answer rather
+# than a fourth thing to do.
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,
@@ -700,8 +691,7 @@ sub choose_hypervisor {
     return $hv;
 }
 
-# Asked only where somebody is there to answer.  Through Trog::Utils, which is
-# where the reason IO::Prompter cannot simply be called is written down.
+# Asked only where somebody is there to answer.
 sub ask_about_nonreusable {
     my ($domain) = @_;
 
@@ -709,8 +699,7 @@ sub ask_about_nonreusable {
 
     my $answer = Trog::Utils::prompt('Copy the disk aside first, destroy it and rebuild, or stop? [copy/destroy/stop]:');
 
-    # Anything that is not one of the words goes the safe way, an empty answer
-    # included: this is the question where a slip costs somebody their guest.
+    # Anything but the two words goes the safe way, empty included.
     return $NONREUSABLE{clone}   if ( lc "$answer" ) eq 'copy';
     return $NONREUSABLE{destroy} if ( lc "$answer" ) eq 'destroy';
     return $NONREUSABLE{stop};
@@ -747,24 +736,17 @@ sub provision_domain (%args) {
 
     my %settings = _settings($config);
 
-    # Whether this rebuild takes the guest apart rather than building over it.
-    # On libvirt that is a disk which cannot be kept at the size being asked
-    # for; a backend that replaces a server's root disk in place never says yes,
-    # so this never stops a cloud build.
     if ( $hv->rebuild_destroys_guest( $domain, capacity => $settings{size} ) ) {
         my $behavior = $nonreusable // $NONREUSABLE{ask};
 
-        # With nobody there, refusing beats asking.  A prompt that cannot be
-        # answered does not fail the run, it hangs it until something else gives
-        # up -- and this one is run from make and from agents.
+        # A prompt nobody can answer hangs the run rather than failing it, and
+        # this is run from make and from agents.
         $behavior = Trog::Local->interactive ? ask_about_nonreusable($domain) : $NONREUSABLE{stop}
           if $behavior == $NONREUSABLE{ask};
 
         die "Refusing to rebuild $domain: it is already there, and its disk cannot be kept at the size this build asks for.\n" . "Rebuilding would destroy the guest and everything on it.\n" . "Pass --clone-on-nonreusable to copy the disk aside first, or --destroy-on-nonreusable to do it anyway.\n"
           if $behavior == $NONREUSABLE{stop};
 
-        # A copy that was asked for and did not happen is not a thing to rebuild
-        # over: the whole point of asking was to still have the disk afterwards.
         if ( $behavior == $NONREUSABLE{clone} ) {
             my $copy = $hv->clone_guest_disk($domain)
               or die "Could not copy $domain's disk aside, so nothing here will rebuild over it.\n";

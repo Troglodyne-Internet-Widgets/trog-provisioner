@@ -122,8 +122,7 @@ sub prompt {
 
     my @at = $opts{terminal} ? ( -in => _terminal( '<', $what ), -out => _terminal( '>>', $what ) ) : ();
 
-    # Through Trog::Utils, which is where the reason IO::Prompter cannot simply
-    # be called lives.  -echo masks what is typed, this being a password.
+    # -echo masks what is typed, this being a password.
     my $answer = Trog::Utils::prompt( $message, -echo => '*', @at );
 
     # False in boolean context only when no line arrived at all; an empty line

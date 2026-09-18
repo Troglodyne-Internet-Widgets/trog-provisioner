@@ -75,9 +75,8 @@ subtest 'no domain exits with the usage' => sub {
     like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
 };
 
-# A real run, since pod2usage exits rather than dying.  Safe to run for real:
-# the refusal is the first thing after the options are read, before a credential
-# is asked for or a domain is taken off the arguments.
+# A real run, since pod2usage exits rather than dying.  Safe: the refusal comes
+# before any credential is asked for.
 subtest 'the nonreusable options say different things, so only one is taken' => sub {
     my $out = q{};
     IPC::Run3::run3( [ $^X, $script, qw{--clone-on-nonreusable --destroy-on-nonreusable --die-on-nonreusable vm.test} ], \undef, \$out, \$out );
@@ -396,8 +395,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     # old lease until it expires.
     $hv->redefine( domain_exists => sub { 1 } );
 
-    # This one is about leases rather than about whether the rebuild is allowed
-    # to destroy the guest, so it answers the way a reusable disk does.
+    # About leases, not about whether the rebuild may destroy the guest.
     $hv->redefine( rebuild_destroys_guest => sub { 0 } );
     $hv->redefine( domain_uuid            => sub { '35341952-6f2b-457a-a882-80f6c47e2d2c' } );
     $hv->redefine( annihilate_domain      => sub { push( @applied, 'annihilate_domain' ); 1 } );
@@ -480,9 +478,8 @@ sub rebuild_answering {
 
     $hv->redefine( domain_exists => sub { 1 } );
 
-    # Off unless a case asks for it.  A rebuild that would take the guest apart
-    # stops to ask, and every subtest here that is about something else would
-    # stop with it.
+    # Off unless a case asks for it, or every subtest about something else stops
+    # to ask too.
     $hv->redefine( rebuild_destroys_guest => sub { $answers{destroys} ? 1 : 0 } );
 
     # Undef is a copy that did not happen, which the caller must not rebuild over.
@@ -569,10 +566,8 @@ subtest 'a rebuild that cannot be rolled back is not snapshotted, and says so by
 
 subtest 'a rebuild that would destroy the guest stops, unless it is told not to' => sub {
 
-    # Nothing is there to answer under prove, so this falls to the no-tty rule
-    # rather than to a prompt.  Refusing beats hanging on a question that has
-    # nowhere to be answered from, which is the failure the option set exists
-    # to avoid.
+    # Nothing answers under prove, so this falls to the no-tty rule rather than
+    # to a prompt.
     my $refused = exception { rebuild_answering( rollback_possible => 0, destroys => 1 ) };
     like( $refused, qr/Refusing[ ]to[ ]rebuild[ ]vm[.]test/, 'with nobody there to ask, it refuses rather than asking' );
     like( $refused, qr/--destroy-on-nonreusable/,            'and names the way past it' );
@@ -607,8 +602,7 @@ subtest 'asked to copy the disk aside, it copies before it destroys' => sub {
     like( $said, qr/nothing[ ]removes[ ]that/,            'and that nothing will clean it up for them' );
     is( $seen->{cleared}{keep_disk}, q{}, 'and only then is the guest cleared' );
 
-    # The case where getting this wrong costs somebody the disk they asked to
-    # keep: a copy that did not happen must not be rebuilt over.
+    # A copy that did not happen must not be rebuilt over.
     my $refused = exception {
         rebuild_answering(
             rollback_possible => 0,

@@ -25,9 +25,8 @@ use Trog::Utils();
 
 subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
 
-    # The whole reason this sub exists.  IO::Prompter reads from *ARGV, so a
-    # program with arguments -- every one of these has a domain -- sends it off
-    # to open a file named after one and dies before anybody is asked anything.
+    # The whole reason this sub exists: IO::Prompter reads from *ARGV, so a
+    # program with arguments dies opening a file named after one.
     my ( @saw_args, @asked );
     my $mock = Test::MockModule->new('IO::Prompter');
     $mock->redefine(
@@ -44,16 +43,14 @@ subtest 'a prompt is asked with nothing left in @ARGV for it to open' => sub {
     is( Trog::Utils::prompt('Which one?'), 'what was typed', 'hands back what was typed' );
     is( $saw_args[0],                      0,                'and IO::Prompter saw no arguments to go opening a file named after' );
 
-    # local, so the caller's own arguments are still there afterwards -- a
-    # program that read @ARGV after asking a question would otherwise find it
-    # emptied under it.
+    # local, so a program reading @ARGV after asking does not find it emptied.
     is_deeply( \@ARGV, [qw{vm.example.test --dryrun}], 'which are put back when the call returns' );
 
     is( $asked[0]{message}, 'Which one?', 'the message reaches IO::Prompter' );
     is_deeply( $asked[0]{opts}, {}, 'and nothing is added to it that the caller did not ask for' );
 
-    # What Trog::Credentials needs of it: a masked answer, and somewhere other
-    # than standard input to ask at.
+    # What Trog::Credentials needs: a masked answer, asked somewhere other than
+    # standard input.
     Trog::Utils::prompt( 'Secret?', -echo => '*', -in => \*STDIN );
     is( $asked[1]{opts}{-echo}, '*', 'options reach IO::Prompter untouched' );
     ok( exists $asked[1]{opts}{-in}, 'including the handle to ask at' );

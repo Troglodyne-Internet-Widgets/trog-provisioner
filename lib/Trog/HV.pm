@@ -487,20 +487,12 @@ sub snapshot_before_rebuild {
 
 =head2 $hv->rebuild_destroys_guest($domain, capacity =E<gt> $bytes)
 
-Whether rebuilding this domain would take the existing guest apart, rather than
-building over it.
+Whether rebuilding this domain would take the existing guest apart rather than
+building over it.  C<capacity> is the size the build asks for.
 
-False here, and that is the right answer for a backend that rebuilds a server in
-place: the root disk is replaced from an image, the server keeps its identity and
-its addresses, and there is nothing to lose that the rebuild was not asked to
-replace.  C<clear_guest> on such a backend has nothing to clear.
-
-libvirt overrides it, because there a rebuild that cannot keep the disk deletes
-the disk and undefines the domain.  C<capacity> is the size being asked for, and
-is what decides whether the disk it has can be kept.
-
-What a caller does with a true answer is a policy question -- ask, refuse, or go
-ahead -- and F<bin/provision> owns that rather than this.
+False here: a backend that replaces a server's root disk in place keeps the
+server and its addresses, so there is nothing to lose.  libvirt overrides it.
+What to do about a true answer is F<bin/provision>'s.
 
 =cut
 
@@ -508,12 +500,9 @@ sub rebuild_destroys_guest { return 0 }
 
 =head2 $hv->clone_guest_disk($domain)
 
-Copy a guest's disk aside before a rebuild destroys it, and say where the copy
-landed.
-
-Undef here, and nothing asks: only a backend which answers yes to
-C<rebuild_destroys_guest> has a guest to copy aside, and one that replaces a
-server's root disk in place never does.
+Copy a guest's disk aside before a rebuild destroys it; where the copy landed,
+or undef.  Undef here, and nothing asks: only a backend answering true above has
+a guest to copy aside.
 
 =cut
 
@@ -521,15 +510,9 @@ sub clone_guest_disk { return }
 
 =head2 $hv->backup_volumes
 
-The disks copied aside by C<clone_guest_disk> that are still here, by name.
-
-Empty here, and that is the whole answer for a backend which never makes one:
-only a backend that reports C<rebuild_destroys_guest> ever copies a disk aside,
-and one that rebuilds a server in place never does.
-
-Asked rather than worked out by the caller, so the name a copy is given stays a
-fact of the backend that gives it rather than a pattern spelled out again
-wherever somebody wants to sweep them up.
+The disks C<clone_guest_disk> left behind, by name.  Empty here, for the same
+reason.  Asked rather than worked out by the caller, so the name a copy is given
+stays the backend's business.
 
 =cut
 

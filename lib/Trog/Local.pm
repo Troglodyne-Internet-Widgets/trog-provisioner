@@ -78,15 +78,9 @@ sub describe { return 'this machine' }
 
 =head2 interactive
 
-Whether there is anybody there to answer a question.
-
-A fact about the process rather than about a guest, which is why it lives on the
-machine running this rather than on a hypervisor.  Callers use it to decide
-whether asking is possible at all: a prompt with nothing to answer it does not
-fail, it hangs until something else kills the run.
-
-Its own method because a filetest on a real handle is not something a test can
-stand in for, and both answers are worth covering.
+Whether there is anybody there to answer a question.  A prompt with nothing to
+answer it does not fail, it hangs until something else kills the run, so callers
+ask this before asking anything else.
 
 =cut
 

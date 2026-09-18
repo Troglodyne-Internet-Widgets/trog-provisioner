@@ -26,9 +26,7 @@ use Provisioner::Cookbook();
 # my is invisible to anything above the line it is written on.
 my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
-# What clone_guest_disk names a copy, and what backup_volumes knows one by.  The
-# two ends of that are a long way apart, and a sweep matching a suffix the copies
-# are no longer given would find none of them and say so cheerfully.
+# What clone_guest_disk names a copy, and what backup_volumes knows one by.
 my $BACKUP_SUFFIX = '.bak-qcow2';
 
 =head1 NAME
@@ -1395,17 +1393,13 @@ sub rollback_possible {
 
 Whether rebuilding this domain would take the guest apart.
 
-True when there is a guest and its disk cannot be kept: C<clear_guest> then
-undefines the domain and deletes the disk, and everything on it goes with them.
-A first build has no guest to lose and answers false, as does a rebuild that can
-keep the disk it has.
+True when there is a guest and its disk cannot be kept at C<capacity>:
+C<clear_guest> then undefines the domain and deletes the disk.  A first build,
+and a rebuild that can keep the disk it has, answer false.
 
-Narrower than the negation of C<rollback_possible>, deliberately.  That one is
-also false for a guest whose disk is perfectly reusable but which has no
-C<trog-pristine> snapshot to go back to -- built before there was one.  Such a
-rebuild destroys the guest as well, but it is the state every guest built before
-this existed is in, and treating it as a thing to stop for would mean stopping
-for nearly all of them.
+Not the negation of C<rollback_possible>, which is also false for a reusable
+disk with no C<trog-pristine> snapshot to go back to -- the state every guest
+built before that existed is in, and too many to stop for.
 
 =cut
 
@@ -1420,30 +1414,16 @@ sub rebuild_destroys_guest {
 
 Copy this guest's disk aside as C<$domain.bak-qcow2>, and say where it landed.
 
-Taken with the guest stopped.  A qcow2 copied while qemu is writing into it is a
-copy of a moment that never existed, and the caller asking for this is about to
-destroy the guest anyway, so stopping costs it nothing.
+The guest is stopped first: a qcow2 copied while qemu is writing into it is a
+copy of a moment that never existed.  The copy is a volume and nothing else --
+no domain, no address, and no backing store, so it neither boots nor depends on
+the base image this guest was laid over.
 
-A disk and nothing else: no domain is defined for the copy, it takes no address
-out of the pool, and nothing starts it.  What it is for is the data that was on
-the guest, and a copy that booted would be a second machine answering to the
-first one's name.
+Nothing removes it afterwards, C<guest_volumes> not naming it, and one already
+there is kept rather than written over.
 
-It stands on its own: no backing store is declared, so the copy does not depend
-on the base image this guest was laid over.  A backup that stops working the day
-somebody prunes another file is not much of one.
-
-Nothing removes it afterwards.  C<guest_volumes> does not name it, so
-F<bin/destroy> leaves it alone -- deliberately, since it is the copy of a machine
-somebody was about to lose.  One that is already there is kept rather than
-written over, because the older copy is as likely to be the wanted one.
-
-Undef when there is no disk to copy, which is an answer rather than a failure.
-
-Anything that goes wrong in the copying dies instead of answering undef.  The
-caller rebuilds over the disk on the strength of a copy having been made, so a
-refusal that read as "there was nothing to copy" would destroy exactly what it
-was asked to keep.
+Undef when there is no disk to copy.  A copy that was attempted and failed dies
+instead, the caller rebuilding over the disk on the strength of this.
 
 =cut
 
@@ -1486,13 +1466,9 @@ list rather than matching on the name itself.
 sub backup_volumes {
     my ($self) = @_;
 
-    # Nothing here is caught, the volume names included.  EPERM on a pool is not
-    # a smaller answer than a pool with nothing in it, it is none, and a caller
-    # handed the shorter list sweeps fewer copies than exist without anything
-    # saying so.
-    #
-    # list_all_volumes rather than list_volumes, which is documented as one RPC
-    # call per volume.
+    # Nothing caught, the volume names included: EPERM on a pool is not a
+    # smaller answer than an empty one, and a caller handed the short list
+    # sweeps fewer copies than exist.  list_volumes is an RPC per volume.
     my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
 
     return @names;

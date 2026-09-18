@@ -24,25 +24,14 @@ Trog::Utils - the small things more than one of these programs needs
 
 =head2 prompt($message, %opts)
 
-Ask a question and hand back what was typed.
+Ask a question and hand back what was typed.  C<%opts> reach L<IO::Prompter>
+untouched: C<-echo> to mask what is typed, C<-in> and C<-out> to ask somewhere
+other than standard input.
 
-C<%opts> reach L<IO::Prompter> untouched: C<-echo> to mask what is typed,
-C<-in> and C<-out> to ask somewhere other than standard input.
-
-=head3 Why this is not just IO::Prompter::prompt
-
-IO::Prompter reads from C<*ARGV>, so a program that has arguments -- which
-F<bin/provision>, F<bin/new_config> and F<bin/destroy> all do, the domain being
-one -- sends it off to open a file named after one of them:
-
-    prompt(): Can't open *ARGV: No such file or directory
-
-Flattening C<@ARGV> to a single string leaves nothing there to open, and it
-falls back to the terminal or to standard input as intended.  Every caller needs
-that, which is why it is here rather than in each of them.
-
-The flattening is C<local> to this call, so C<@ARGV> is whatever it was again by
-the time this returns.
+Call this rather than C<IO::Prompter::prompt>, which reads from C<*ARGV> and so
+dies with C<Can't open *ARGV> in any program that has arguments -- the domain
+being one here.  C<@ARGV> is flattened for the call and C<local> to it, so it is
+whatever it was again by the time this returns.
 
 =cut
 

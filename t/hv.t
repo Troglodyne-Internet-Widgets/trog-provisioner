@@ -1074,12 +1074,11 @@ subtest 'the disk is copied aside as a volume of its own, with the guest stopped
     my ($cloned) = $pool->cloned;
     like( $cloned->{xml}, qr{<name>vm[.]test[.]bak-qcow2</name>}, 'libvirt was asked for that name' );
 
-    # The claim the POD makes: a backup that depends on the base image the guest
-    # was laid over stops working the day somebody prunes it.
+    # The claim the POD makes: a copy depending on the base image stops working
+    # the day somebody prunes it.
     unlike( $cloned->{xml}, qr/backingStore/, 'and for a volume standing on its own, with no backing store declared' );
 
-    # Rebuilding twice running is exactly when writing over the older copy would
-    # take the one that was wanted.
+    # Rebuilding twice is when writing over the older copy takes the wanted one.
     @did = ();
     $mock->redefine( volume_path => sub { '/opt/terraform/disks/vm.test.bak-qcow2' } );
     my $kept = quietly( sub { $hv->clone_guest_disk('vm.test') } );
@@ -1090,10 +1089,8 @@ subtest 'the disk is copied aside as a volume of its own, with the guest stopped
     $mock->redefine( volume      => sub { undef } );
     is( quietly( sub { $hv->clone_guest_disk('vm.test') } ), undef, 'and a guest with no disk has none to copy' );
 
-    # A refusal must not read as "there was nothing to copy".  The caller
-    # rebuilds over the disk on the strength of a copy having been made, so a
-    # libvirt that would not make one has to take the run down rather than hand
-    # back the same undef a guest with no disk gets.
+    # A refusal must not read as "there was nothing to copy": the caller rebuilds
+    # over the disk on the strength of a copy having been made.
     $mock->redefine( volume => sub { FakeBuildVolume->new( '/opt/terraform/disks/vm.test-qcow2', 42949672960 ) } );
     $mock->redefine( pool   => sub { FakeBuildPool->new( [], refuse => 1 ) } );
 

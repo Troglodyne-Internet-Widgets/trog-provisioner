@@ -373,10 +373,8 @@ subtest 'a cloud rebuild never takes the guest apart' => sub {
     my $hv = cloud();
     $FAKE = Test::FakeCloud->new( servers => [ { id => 'a', name => 'vm.example.com', status => 'ACTIVE' } ] );
 
-    # Nova replaces what is on the root disk and keeps the server, its addresses
-    # and its floating IP, so there is nothing for a rebuild to destroy.  That is
-    # why the question bin/provision stops to ask an operator cannot arise on a
-    # cloud, and why what cloning one aside would mean never has to be answered.
+    # Nova replaces the root disk and keeps the server, its addresses and its
+    # floating IP, so a rebuild has nothing to destroy and nothing to ask about.
     ok !$hv->rebuild_destroys_guest( 'vm.example.com', capacity => 42949672960 ),
       'a server that is there is rebuilt in place rather than taken apart';
     ok !$hv->rebuild_destroys_guest( 'nope.example.com', capacity => 42949672960 ),

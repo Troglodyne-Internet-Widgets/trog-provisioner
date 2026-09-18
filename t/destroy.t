@@ -313,8 +313,7 @@ subtest 'the POD documents the interface' => sub {
     sub get_name ($self) { return $self->{name} }
 }
 
-# The pool a backup sweep reads, kept apart from the domain fake above because
-# the two sweeps ask different questions of a hypervisor.
+# The pool a backup sweep reads; the domain fake above answers the other sweep.
 {
 
     package Test::Pool;
@@ -395,17 +394,13 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
     says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
     is_deeply( \@deleted, [qw{gone.test.bak-qcow2 live.test.bak-qcow2}], 'and the sweep takes the copies, and only the copies' );
 
-    # The noun still agrees with the count, which is all that is left to get
-    # wrong now that the verb carries its own tense.
     @deleted = ();
     local @Test::Pool::VOLUMES = qw{only.test.bak-qcow2};
     my ($alone) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
     like( $alone, qr/1[ ]disk[ ]copied[ ]aside/, 'and a single copy is counted in the singular' );
     unlike( $alone, qr/1[ ]disks/, 'rather than agreeing with nothing' );
 
-    # A pool that will not answer is not a pool with nothing in it.  It throws,
-    # and nothing catches it: turning that into an exit code is how EPERM comes
-    # to read as "there was nothing here".
+    # EPERM on a pool is not a pool with nothing in it.
     @deleted = ();
     local $Test::Pool::REFUSE = 1;
     my $refused = exception {
@@ -483,9 +478,7 @@ subtest 'a hypervisor that will not say what it has takes the run down' => sub {
     $hv->redefine( domain_dir => sub { tempdir( CLEANUP => 1 ) } );
     $hv->redefine( vmm        => sub { die "connection refused\n" } );
 
-    # libvirt's own words rather than ours.  Nothing catches this to reword it,
-    # which is the whole point: a hypervisor that cannot be asked what it holds
-    # is not one anything here could work against.
+    # libvirt's own words rather than ours, nothing catching this to reword it.
     my $refused = exception {
         says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } )
     };
