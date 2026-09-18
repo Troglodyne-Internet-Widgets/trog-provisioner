@@ -104,7 +104,11 @@ sub main {
 
             # A driver that needs a server address takes it with the option
             # that %d2o names.
-            push( @preamble, "--$d2o{$driver}=" . qq{'$dconf{"$driver.server"}'} ) if $dconf{"$driver.server"};
+            if ( $dconf{"$driver.server"} ) {
+                my $option = $d2o{$driver}
+                  or die "$cfile gives $driver a server, and synczones does not know which lexicon option takes it for that driver\n";
+                push( @preamble, "--$option=" . qq{'$dconf{"$driver.server"}'} );
+            }
 
             my $lexicon = join( ' ', @preamble );
             foreach my $type (@record_types) {
@@ -129,7 +133,7 @@ sub main {
                         push( @cmd_suffix, "--ttl $ttl" )            if $action ne 'delete';
                         push( @cmd_suffix, "--name '$name'" )        if $action ne 'delete';
                         push( @cmd_suffix, "--content '$content'" )  if $action ne 'delete';
-                        my $suffix = join( ' ', @cmd_suffix ) // '';
+                        my $suffix = join( ' ', @cmd_suffix );
                         my $do_cmd = qq{$lexicon $action $origin $type $suffix};
 
                         if ($dryrun) {

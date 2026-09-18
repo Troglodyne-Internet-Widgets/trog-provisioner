@@ -19,6 +19,8 @@ delete, and which renderings of a record it counts as the same one
 use Test::More;
 use Net::DNS::RR();
 use Test::Fatal qw{exception};
+use File::Temp  qw{tempdir};
+use File::Slurper::Temp();
 
 use FindBin;
 use FindBin::libs;
@@ -145,6 +147,19 @@ subtest 'a zonefile with two SOA records is refused' => sub {
         );
     };
     like( $e, qr/two[ ]updates[ ]to[ ]SOA/, 'rather than updating the one SOA twice' );
+};
+
+# Before anything is listed, so this runs no lexicon.
+subtest 'a server for a driver whose server option is unknown is refused by name' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/synczones.conf", "[bogusdriver]\nserver=bogus.test\n" );
+    File::Slurper::Temp::write_text( "$dir/test.test.zone", "\$ORIGIN test.test.\n\@ 300 IN A 10.0.0.1\n" );
+
+    like(
+        exception { ZoneSyncer::main( qw{--driver bogusdriver --quiet --config}, "$dir/synczones.conf", "$dir/test.test.zone" ) },
+        qr/gives[ ]bogusdriver[ ]a[ ]server/,
+        'rather than dying on an undefined option name'
+    );
 };
 
 done_testing();
