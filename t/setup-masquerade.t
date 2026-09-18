@@ -203,6 +203,17 @@ subtest 'and a guest with no default route is told to name one rather than left 
     );
 };
 
+# The script runs from a postrun task, and its output is read by whoever is on
+# the guest, who has no use for a line number in it.
+subtest 'a rules file that cannot be read is named, and nothing else' => sub {
+    no warnings 'once';
+    local $Trog::Script::SetupMasquerade::FILE = tempdir( CLEANUP => 1 ) . '/bogus/before.rules';
+
+    my $error = exception { Trog::Script::SetupMasquerade::main('10.8.0.0/24') };
+    like( $error, qr/\ACannot[ ]read[ ]\S+\/bogus\/before\.rules:[ ]/, 'the message names the file' );
+    unlike( $error, qr/[ ]line[ ]\d+/, 'and not the line of the script that noticed, the way no other failure here does' );
+};
+
 subtest 'no subnets is a no-op rather than an empty block' => sub {
     my $path = rules_file();
     my ( $rc, $after ) = run_on($path);

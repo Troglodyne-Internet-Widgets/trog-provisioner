@@ -80,7 +80,7 @@ sub main {
     my (@args) = @_;
     return 0 unless @args;
 
-    open( my $fh, '<', $FILE ) or die "Cannot read $FILE: $!";
+    open( my $fh, '<', $FILE ) or die "Cannot read $FILE: $!\n";
     my $content = do { local $/; <$fh> };
     close($fh) or die "Cannot close $FILE: $!\n";
 
@@ -112,7 +112,7 @@ sub main {
 
     return 0 if $content eq $original;
 
-    open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!";
+    open( my $out, '>', $FILE ) or die "Cannot write $FILE: $!\n";
     print {$out} $content;
     close($out) or die "Cannot write $FILE: $!\n";
 
