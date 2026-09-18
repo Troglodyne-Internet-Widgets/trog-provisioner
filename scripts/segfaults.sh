@@ -2,25 +2,32 @@
 
 # Report a new segfault in the system log.
 
-IS_RPM=$(which rpm)
-
-if [ ! -z $IS_RPM ]
-then
-    SYSLOG=/var/log/messages
-else
-    SYSLOG=/var/log/syslog
+# Only the test sets these, to point the script at files of its own.
+STATE_DIR=${STATE_DIR:-/root}
+if [ -z "$SYSLOG" ]; then
+    if [ -n "$(which rpm)" ]; then
+        SYSLOG=/var/log/messages
+    else
+        SYSLOG=/var/log/syslog
+    fi
 fi
 
-touch /root/segfaults.log
-touch /root/new-segfaults.log
-mv /root/new-segfaults.log /root/segfaults.log
-FSZ=$(stat --printf "%s" /root/segfaults.log)
-grep -i 'segfault' $SYSLOG 2>/dev/null | grep -v 'segfaults.sh' >> /root/new-segfaults.log
-echo "$(sort < /root/new-segfaults.log | uniq)" > /root/new-segfaults.log
-NEWSZ=$(stat --printf "%s" /root/new-segfaults.log)
+SEEN="$STATE_DIR/segfaults.log"
+NOW="$STATE_DIR/new-segfaults.log"
 
-if [ $FSZ != $NEWSZ ]
+touch "$NOW"
+mv "$NOW" "$SEEN"
+
+# -a, because a crash can leave NUL bytes in the log, and grep then stops
+# printing lines for what it takes to be a binary file.
+grep -ai 'segfault' "$SYSLOG" 2>/dev/null | grep -v 'segfaults.sh' | sort -u > "$NOW"
+
+# A line in this run's list that the last run did not have.  A size
+# comparison misses a new segfault when rotation takes an old line of the
+# same length out of the log.
+NEW_SEGFAULTS=$(comm -13 "$SEEN" "$NOW")
+if [ -n "$NEW_SEGFAULTS" ]
 then
 	echo "DANGER: New Segmentation Fault detected, investigate $SYSLOG!"
-	diff /root/segfaults.log /root/new-segfaults.log
+	echo "$NEW_SEGFAULTS"
 fi

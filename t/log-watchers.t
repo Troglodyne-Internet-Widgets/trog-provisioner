@@ -59,5 +59,20 @@ subtest 'outgoing_blocks.sh' => sub {
     like( $said, qr/^DPT=9999$/m, 'a block after NUL bytes in the log is still read' );
 };
 
+subtest 'segfaults.sh' => sub {
+    my $state = tempdir( CLEANUP => 1 );
+    my $line  = "Sep 18 10:00:00 host kernel: [1.0] bogus[100]: segfault at 0 ip 0000 sp 0000 error 4 in bogus[1000+2000]\n";
+
+    my $said = watch( $state, 'segfaults.sh', 'SYSLOG', $line );
+    like( $said, qr/^DANGER:/,     'a new segfault is reported' );
+    like( $said, qr/bogus\[100\]/, 'with its line' );
+
+    is( watch( $state, 'segfaults.sh', 'SYSLOG', $line ), '', 'a segfault already reported is not reported again' );
+
+    ( my $same_length = $line ) =~ s/bogus\[100\]/bogus\[200\]/;
+    $said = watch( $state, 'segfaults.sh', 'SYSLOG', $same_length );
+    like( $said, qr/bogus\[200\]/, 'a new segfault is reported when rotation took one of the same length away' );
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();
