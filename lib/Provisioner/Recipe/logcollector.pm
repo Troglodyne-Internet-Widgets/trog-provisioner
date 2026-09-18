@@ -154,7 +154,7 @@ sub args {
                 type        => 'integer',
                 default     => 12,
                 minimum     => 1,
-                description => 'How many rotations to keep.  Twelve weekly rotations is a quarter, which is what this has always kept.',
+                description => 'How many rotations to keep.  Twelve weekly rotations is a quarter.',
             },
             rotate => {
                 type        => 'string',

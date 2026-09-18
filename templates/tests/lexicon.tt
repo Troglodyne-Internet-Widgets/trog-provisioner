@@ -15,7 +15,7 @@ ok(-x $shortcut, 'and can be run');
 
 # On an older guest this path is a directory with one shortcut per provider.
 # The build must remove it, not move the new file into it.
-ok(!-d $shortcut, 'as a file, rather than the per-provider directory it used to be');
+ok(!-d $shortcut, 'as a file, and not a directory of per-provider shortcuts');
 
 my @st = stat $shortcut;
 is($st[4] // -1, 0, 'owned by root, since it carries the credentials') if @st;
