@@ -22,8 +22,9 @@ use parent qw{Provisioner::Recipe};
 =head2 DESCRIPTION
 
 This recipe installs the newest postgres in the apt repository of the
-PostgreSQL project.  It puts back the databases that the replaced guest had.  If
-a domain never had a database, it loads the configured dumps instead.
+PostgreSQL project, or the major version that C<version> names.  It puts back
+the databases that the replaced guest had.  If a domain never had a database,
+it loads the configured dumps instead.
 
 =head3 What a rebuild keeps
 
@@ -63,6 +64,8 @@ sub args {
                 type  => 'array',
                 items => { type => "string" },
             },
+
+            version => { type => 'integer', minimum => 1, description => 'The major version of postgres to install, such as 16.  Unset installs the newest one the PGDG repository offers.' },
         },
     );
 }
