@@ -74,5 +74,24 @@ subtest 'segfaults.sh' => sub {
     like( $said, qr/bogus\[200\]/, 'a new segfault is reported when rotation took one of the same length away' );
 };
 
+subtest 'escalations.sh' => sub {
+    my $admin   = "Sep 18 10:00:00 host sudo[1]: pam_unix(sudo:session): session opened for user root(uid=0) by bogusadmin(uid=1000)\n";
+    my $other   = "Sep 18 10:00:01 host sudo[2]: pam_unix(sudo:session): session opened for user root(uid=0) by bogusother(uid=1001)\n";
+    my $old_pam = "Sep 18 10:00:02 host sudo[3]: pam_unix(sudo:session): session opened for user root by bogusold(uid=1002)\n";
+
+    my $state = tempdir( CLEANUP => 1 );
+    my $said  = watch( $state, 'escalations.sh', 'AUTHLOG', $admin . $other . $old_pam, 'bogusadmin' );
+    like( $said, qr/^DANGER:/,   'an escalation by a user nobody named is reported' );
+    like( $said, qr/bogusother/, 'in the format Linux-PAM writes now' );
+    like( $said, qr/bogusold/,   'and in the one it wrote before 1.4' );
+    unlike( $said, qr/bogusadmin/, 'and the named user is exempt' );
+
+    is( watch( $state, 'escalations.sh', 'AUTHLOG', $admin . $other . $old_pam, 'bogusadmin' ), '', 'an escalation already reported is not reported again' );
+
+    $state = tempdir( CLEANUP => 1 );
+    $said  = watch( $state, 'escalations.sh', 'AUTHLOG', $admin );
+    like( $said, qr/bogusadmin/, 'with no user named, every escalation is reported' );
+};
+
 Test::NoWarnings::had_no_warnings();
 done_testing();

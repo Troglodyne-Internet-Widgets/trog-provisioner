@@ -1,12 +1,15 @@
 #!/bin/bash
 
-IS_RPM=$(which rpm)
+# Let you know when a user who is not named on the command line becomes root.
 
-if [ ! -z $IS_RPM ]
-then
-    AUTHLOG=/var/log/secure
-else
-    AUTHLOG=/var/log/auth.log
+# Only the test sets these, to point the script at files of its own.
+STATE_DIR=${STATE_DIR:-/root}
+if [ -z "$AUTHLOG" ]; then
+    if [ -n "$(which rpm)" ]; then
+        AUTHLOG=/var/log/secure
+    else
+        AUTHLOG=/var/log/auth.log
+    fi
 fi
 
 oldIFS=$IFS;
@@ -14,14 +17,27 @@ IFS='|';
 USER_EXEMPT_REGEX="$*"
 IFS=$oldIFS;
 
-touch /root/escalations.log
-FSZ=$(stat --printf "%s" /root/escalations.log)
-grep 'session opened for user root by' $AUTHLOG | grep -vP $USER_EXEMPT_REGEX >> /root/escalations.log
-echo "$(sort < /root/escalations.log | uniq)" > /root/escalations.log
-NEWSZ=$(stat --printf "%s" /root/escalations.log)
+# With no user named, every escalation is unexpected.
+exempt() {
+    if [ -n "$USER_EXEMPT_REGEX" ]; then
+        grep -vP -- "$USER_EXEMPT_REGEX"
+    else
+        cat
+    fi
+}
 
-if [ $FSZ != $NEWSZ ]
+SEEN="$STATE_DIR/escalations.log"
+
+touch "$SEEN"
+FSZ=$(stat --printf "%s" "$SEEN")
+# Linux-PAM 1.4 and later write "for user root(uid=0) by", and older ones
+# "for user root by".
+grep -aE 'session opened for user root(\(uid=0\))? by' "$AUTHLOG" | exempt >> "$SEEN"
+sort -u -o "$SEEN" "$SEEN"
+NEWSZ=$(stat --printf "%s" "$SEEN")
+
+if [ "$FSZ" != "$NEWSZ" ]
 then
 	echo "DANGER: Root escalation by unexpected user detected, investigate $AUTHLOG!"
-	cat /root/escalations.log
+	cat "$SEEN"
 fi
