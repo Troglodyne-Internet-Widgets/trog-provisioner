@@ -100,16 +100,9 @@ C<bin/provision --clone-on-nonreusable> copied aside, on each hypervisor in the
 fleet.  Takes no domain.  Pair it with C<--dryrun> first; it names every copy and
 says which machine holds it.
 
-A copy is a volume rather than a domain -- nothing is defined for one, and
-nothing starts it -- so this is the only thing in the toolkit that will ever
-remove them.  Destroying the guest a copy came from leaves it standing, which is
-what makes it a backup and also why they pile up.
-
-Its safety is not C<--orphans>' safety.  That sweep spares anything a hypervisor
-still has a guest for; this one cannot, because a copy whose guest is gone is
-exactly the case where the copy is all that is left.  What it has instead is a
-narrow eye and a loud mouth: it looks at nothing but the copies, names every one
-of them before any of them goes, and removes nothing under C<--dryrun>.
+A copy is a volume rather than a domain, so nothing else in the toolkit removes
+one -- and this spares nothing, not even a copy whose guest is still running.
+C<sweep_backups> has why, and why that is not the bargain C<--orphans> makes.
 
 =item B<--dryrun>
 
@@ -447,15 +440,6 @@ sub purge_data_dir {
     return;
 }
 
-=head2 sweep_orphans($uri, $hvconf, $dryrun)
-
-What C<--orphans> does: every C<.test> directory under C<sweep_roots> that no
-hypervisor in the fleet has a guest for and no recipe configuration names, here
-and on each of them.  Non-zero when a hypervisor could not be asked, or there was
-nowhere to look.
-
-=cut
-
 =head2 sweep_backups($uri, $hvconf, $dryrun)
 
 Take away the disks C<bin/provision --clone-on-nonreusable> copied aside.
@@ -484,12 +468,6 @@ sub sweep_backups {
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
-    # Nothing caught.  A backend with no way of copying a disk aside answers with
-    # an empty list and contributes nothing, so the two cases need no telling
-    # apart here: the one that cannot is silent about it, and the one that tried
-    # and failed throws.  There is nothing useful to do with that difference
-    # except stop, and converting it to an exit code is how a pool nobody could
-    # read comes to read as a pool with nothing in it.
     my %found;
     foreach my $hv (@hvs) {
         push @{ $found{$_} }, $hv for $hv->backup_volumes;
@@ -526,20 +504,29 @@ sub sweep_backups {
     return $removed == scalar(@copies) ? 0 : 1;
 }
 
+=head2 sweep_orphans($uri, $hvconf, $dryrun)
+
+What C<--orphans> does: every C<.test> directory under C<sweep_roots> that no
+hypervisor in the fleet has a guest for and no recipe configuration names, here
+and on each of them.  Non-zero when there was nowhere to look.
+
+A hypervisor that cannot say what guests it holds takes the run down rather than
+being counted as holding none.  Its guests are exactly the names that would
+otherwise look like orphans, so reading a question it could not answer as "it
+holds none" would be reading it as permission to remove everything that machine
+was keeping.
+
+=cut
+
 sub sweep_orphans {
     my ( $uri, $hvconf, $dryrun ) = @_;
 
     my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
 
-    # Every guest anywhere in the fleet.  Nothing is caught: a hypervisor that
-    # cannot say what guests it has takes the run down with it, because the
-    # guests it holds are exactly the ones that would otherwise look like
-    # orphans -- and a hypervisor that cannot be asked that much is not one
-    # anything here can do its job against anyway.
-    #
-    # Asked of the hypervisor rather than of libvirt, because not every
-    # hypervisor has one -- a cloud answers this out of Nova, and asking it for a
-    # domain list stopped the sweep for the whole fleet.
+    # Every guest anywhere in the fleet, asked of the hypervisor rather than of
+    # libvirt, because not every hypervisor has one -- a cloud answers this out
+    # of Nova, and asking it for a domain list stopped the sweep for the whole
+    # fleet.
     my %spoken_for = map { $_ => 1 } grep { !m/\A_/ } keys %{ Provisioner::Cookbook->configuration() };
     foreach my $hv (@hvs) {
         $spoken_for{$_} = 1 for $hv->guest_names;

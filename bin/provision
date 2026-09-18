@@ -395,9 +395,9 @@ sub _public_half {
 }
 
 # What to do about a rebuild that would destroy the guest, as the
-# --*-on-nonreusable options set it.  The numbering is the one #189 specifies,
-# and 1 is deliberately a gap: cloning the guest aside first is not implemented,
-# and it can land later without renumbering what is here.
+# --*-on-nonreusable options set it.  `ask` is not a fourth thing to do: it is
+# the absence of an answer, which an operator supplies when there is one to ask
+# and which a run with nobody to ask resolves to `stop`.
 our %NONREUSABLE = (
     ask     => 0,
     clone   => 1,

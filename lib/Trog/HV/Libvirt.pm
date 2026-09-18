@@ -26,6 +26,11 @@ use Provisioner::Cookbook();
 # my is invisible to anything above the line it is written on.
 my $PRISTINE_SNAPSHOT = 'trog-pristine';
 
+# What clone_guest_disk names a copy, and what backup_volumes knows one by.  The
+# two ends of that are a long way apart, and a sweep matching a suffix the copies
+# are no longer given would find none of them and say so cheerfully.
+my $BACKUP_SUFFIX = '.bak-qcow2';
+
 =head1 NAME
 
 Trog::HV::Libvirt - the libvirt backend: domains, storage pools and the facts of
@@ -1424,6 +1429,10 @@ out of the pool, and nothing starts it.  What it is for is the data that was on
 the guest, and a copy that booted would be a second machine answering to the
 first one's name.
 
+It stands on its own: no backing store is declared, so the copy does not depend
+on the base image this guest was laid over.  A backup that stops working the day
+somebody prunes another file is not much of one.
+
 Nothing removes it afterwards.  C<guest_volumes> does not name it, so
 F<bin/destroy> leaves it alone -- deliberately, since it is the copy of a machine
 somebody was about to lose.  One that is already there is kept rather than
@@ -1441,14 +1450,9 @@ was asked to keep.
 sub clone_guest_disk {
     my ( $self, $domain ) = @_;
 
-    # A guest with no disk has none to copy, which is an answer.  Everything
-    # after it is a failure if it goes wrong, and dies saying so: the caller
-    # rebuilds over the disk on the strength of a copy having been made, so a
-    # failure that read as "nothing to copy" would destroy what it was asked to
-    # keep.
     my $source = $self->volume("$domain-qcow2") or return;
     my $info   = $source->get_info();
-    my $name   = "$domain.bak-qcow2";
+    my $name   = "$domain$BACKUP_SUFFIX";
 
     if ( my $existing = $self->volume_path($name) ) {
         print "$name is in the pool already; keeping that rather than writing over it.\n";
@@ -1459,9 +1463,6 @@ sub clone_guest_disk {
 
     print "Copying $domain's disk aside as $name\n";
 
-    # No backingStore declared, so the copy stands on its own rather than
-    # depending on the base image this guest was laid over.  It is a backup: one
-    # that stops working when somebody prunes another file is not much of one.
     my $clone = $self->pool->clone_volume( <<"XML", $source );
 <volume>
   <name>@{[ _xml_escape($name) ]}</name>
@@ -1478,23 +1479,21 @@ XML
 Every disk in the pool that C<clone_guest_disk> put there, by name.
 
 The suffix is this backend's to know.  A caller sweeping them up asks for the
-list rather than matching on C<.bak-qcow2> itself, so the convention lives where
-the copies are made.
+list rather than matching on the name itself.
 
 =cut
 
 sub backup_volumes {
     my ($self) = @_;
 
-    # Nothing here is caught, the volume names included.  A pool that will not
-    # answer is not a pool with nothing in it, and a volume that will not say its
-    # own name is not a volume that is not there: both are a failure to find out,
-    # and a caller handed the shorter list sweeps fewer copies than exist without
-    # anything saying so.  EPERM on a pool is not a smaller answer, it is none.
+    # Nothing here is caught, the volume names included.  EPERM on a pool is not
+    # a smaller answer than a pool with nothing in it, it is none, and a caller
+    # handed the shorter list sweeps fewer copies than exist without anything
+    # saying so.
     #
     # list_all_volumes rather than list_volumes, which is documented as one RPC
     # call per volume.
-    my @names = sort grep { m/[.]bak-qcow2 \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
+    my @names = sort grep { m/\Q$BACKUP_SUFFIX\E \z/ } map { $_->get_name() } $self->pool->list_all_volumes();
 
     return @names;
 }

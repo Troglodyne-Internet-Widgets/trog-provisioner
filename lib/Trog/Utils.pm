@@ -39,8 +39,7 @@ one -- sends it off to open a file named after one of them:
 
 Flattening C<@ARGV> to a single string leaves nothing there to open, and it
 falls back to the terminal or to standard input as intended.  Every caller needs
-that, every caller got it wrong at least once, and it was written out three
-times before it was written down here.
+that, which is why it is here rather than in each of them.
 
 The flattening is C<local> to this call, so C<@ARGV> is whatever it was again by
 the time this returns.
