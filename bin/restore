@@ -97,16 +97,20 @@ sub main {
         -message => 'Pass exactly one of --latest, --oldest or --name'
     ) unless $modes == 1;
 
-    # Without a fleet, provision.conf names the hypervisor, so read it now.  A
-    # missing file is not an error here.  The die after the revert catches it.
+    # Read provision.conf before anything is reverted, because without it there
+    # is no user or address to reach the guest at afterwards.  Without a fleet,
+    # it also names the hypervisor.
     $domain_dir //= Trog::HV->default_domain_dir;
-    my $cfile = "$domain_dir/$domain/provision.conf";
-    my $hv    = Trog::Hypervisors->find(
+    my $cfile  = "$domain_dir/$domain/provision.conf";
+    my $config = eval { Config::Simple->new($cfile) }
+      or die "No provision.conf to read at $cfile: $Config::Simple::errstr\n";
+
+    my $hv = Trog::Hypervisors->find(
         $domain,
         uri        => $uri,
         hvconf     => $hvconf,
         domain_dir => $domain_dir,
-        config     => scalar eval { Config::Simple->new($cfile) },
+        config     => $config,
     );
     print "Restoring on hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
@@ -131,8 +135,6 @@ sub main {
 
     print "Revert complete. Verifying SSH connectivity...\n";
 
-    my $config = eval { Config::Simple->new($cfile) }
-      or die "No provision.conf to read at $cfile: $Config::Simple::errstr\n";
     my $user = $config->param('admin_user') // 'root';
     my $ips  = $config->param('ips');
     my ($ip) = ref $ips ? @$ips : split /[\s,]+/, ( $ips // '' );

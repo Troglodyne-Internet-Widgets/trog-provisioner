@@ -84,12 +84,17 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     isnt( $rc, 0, 'two modes at once exits non-zero' );
 }
 
+# A domain directory with a provision.conf in it, for the cases that fail after
+# the file is read: a missing one is refused before anything else.
+my $CONFIGURED = tempdir( CLEANUP => 1 );
+_make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'doge', ips => '10.9.9.5' );
+
 # No snapshots -> dies
 {
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { () } );
 
-    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/No[ ]snapshots[ ]found/, 'main() dies when no snapshots exist' );
+    like( exception { main_restore( '--domaindir', $CONFIGURED, '--latest', 'myvm.lan' ) }, qr/No[ ]snapshots[ ]found/, 'main() dies when no snapshots exist' );
 }
 
 # --name for nonexistent snapshot -> dies
@@ -97,7 +102,7 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names => sub { ( 'snap-a', 'snap-b' ) } );
 
-    like( exception { main_restore(qw{--name snap-z myvm.lan}) }, qr/not[ ]found[ ]for[ ]myvm\Nlan/, 'main() dies when the named snapshot is not there' );
+    like( exception { main_restore( '--domaindir', $CONFIGURED, qw{--name snap-z myvm.lan} ) }, qr/not[ ]found[ ]for[ ]myvm\Nlan/, 'main() dies when the named snapshot is not there' );
 }
 
 # Revert fails -> dies
@@ -106,16 +111,18 @@ like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
     $hv_mock->redefine( revert_snapshot => sub { 0 } );
 
-    like( exception { main_restore( '--latest', 'myvm.lan' ) }, qr/Failed[ ]to[ ]revert/, 'main() dies when the revert fails' );
+    like( exception { main_restore( '--domaindir', $CONFIGURED, '--latest', 'myvm.lan' ) }, qr/Failed[ ]to[ ]revert/, 'main() dies when the revert fails' );
 }
 
-# Missing provision.conf -> dies
+# Missing provision.conf -> dies, before anything is reverted
 {
+    my @reverted;
     my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
     $hv_mock->redefine( snapshot_names  => sub { ('snap-a') } );
-    $hv_mock->redefine( revert_snapshot => sub { 1 } );
+    $hv_mock->redefine( revert_snapshot => sub { @reverted = @_; return 1 } );
 
-    like( exception { main_restore(qw{--latest --domaindir /tmp/nonexistent_xyz myvm.lan}) }, qr/No[ ]provision\.conf[ ]to[ ]read/, 'main() dies when provision.conf is missing' );
+    like( exception { main_restore(qw{--latest --domaindir /bogus/nonexistent myvm.lan}) }, qr/No[ ]provision\.conf[ ]to[ ]read/, 'main() dies when provision.conf is missing' );
+    is_deeply( \@reverted, [], 'and reverts nothing, leaving the guest as it was' );
 }
 
 # Helper: build a minimal provision.conf in a temp dir
