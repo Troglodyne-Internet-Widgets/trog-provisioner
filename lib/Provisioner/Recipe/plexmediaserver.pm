@@ -114,6 +114,9 @@ sub args {
             plex_login_name => { type => 'string' },
             admin_mail      => { type => 'email' },
             media_dirs      => { type => 'array', items => { type => 'string' }, default => [] },
+
+            # The fragment writes it into a sed expression in single quotes.
+            claim_token => { type => 'string', pattern => '^claim-[A-Za-z0-9_-]+$', description => 'A token from https://plex.tv/claim that links a new server to the Plex account on its first start.  Only a server that has never been linked needs one.' },
         },
     );
 }
