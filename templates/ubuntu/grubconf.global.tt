@@ -1,3 +1,6 @@
-mv 00-grub.conf /etc/default/grub.d/00-grub.conf
-chown root:root /etc/default/grub.d/00-grub.conf
+[%# Remove the fragment that an older guest has.  grub-mkconfig reads only
+    names that end in .cfg, so it never read that one. -%]
+rm -f /etc/default/grub.d/00-grub.conf
+mv 99-grubconf.cfg /etc/default/grub.d/99-grubconf.cfg
+chown root:root /etc/default/grub.d/99-grubconf.cfg
 update-grub
