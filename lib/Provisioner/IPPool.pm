@@ -36,9 +36,20 @@ Provisioner::IPPool - assign static IP addresses from a pool, and record which a
 The addresses in the pool are on the subnet of the primary bridge of the
 hypervisor.  F<docs/NETWORK.md> says what that means.
 
-=head2 SUBROUTINES
+=head1 WHY A DATABASE
 
-=head3 pool_ips($pool)
+Two runs cannot safely share a file of assignments.  Both read it, both find the
+same free address, and both write it.  The second write wins.  Two guests then
+get the same address, and nothing reports an error.  You find out later, when
+you cannot connect to one of them.
+
+So the assignments are in SQLite, and each assignment is one transaction.  The
+row goes in, or the address is already taken and C<assign> tries the next one.
+F<ipmap.cfg> still gives the range of the pool, in C<[ip_pool]>.
+
+=head1 SUBROUTINES
+
+=head2 pool_ips($pool)
 
 C<$pool> is the C<[ip_pool]> block of F<ipmap.cfg>, as a hash reference.
 C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
@@ -89,18 +100,7 @@ sub pool_ips {
     return @ips;
 }
 
-=head1 WHY A DATABASE
-
-Two runs cannot safely share a file of assignments.  Both read it, both find the
-same free address, and both write it.  The second write wins.  Two guests then
-get the same address, and nothing reports an error.  You find out later, when
-you cannot connect to one of them.
-
-So the assignments are in SQLite, and each assignment is one transaction.  The
-row goes in, or the address is already taken and C<assign> tries the next one.
-F<ipmap.cfg> still gives the range of the pool, in C<[ip_pool]>.
-
-=head3 db_path()
+=head2 db_path()
 
 Returns the path of the database.  This is F<ips.db>, in the same directory as
 the rest of the configuration.
@@ -109,7 +109,7 @@ the rest of the configuration.
 
 sub db_path { return Trog::Config->path('ips.db') }
 
-=head3 schema_path()
+=head2 schema_path()
 
 Returns the absolute path of F<schema/ips.sql> in this checkout.  The path is
 relative to this file, as C<bin/new_config> finds its scripts.
@@ -120,7 +120,7 @@ sub schema_path {
     return Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../../schema/ips.sql' );
 }
 
-=head3 dbh()
+=head2 dbh()
 
 Returns a handle on the database at C<db_path>, with the schema applied.
 
@@ -128,7 +128,7 @@ Returns a handle on the database at C<db_path>, with the schema applied.
 
 sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 
-=head3 assignments()
+=head2 assignments()
 
 Returns a hash reference of each guest domain to its address.  Reservations
 are not in it.  C<bin/new_config> gives this to the templates as C<ipmap>, and
@@ -141,7 +141,7 @@ sub assignments {
     return { map { $_->{domain} => $_->{ip} } @$rows };
 }
 
-=head3 taken()
+=head2 taken()
 
 Returns a hash reference of each address in the database to the name that holds
 it.  Reservations are in it, because a reserved address is not free.
@@ -153,7 +153,7 @@ sub taken {
     return { map { $_->{ip} => $_->{domain} } @$rows };
 }
 
-=head3 held_by($domain)
+=head2 held_by($domain)
 
 Returns the address that C<$domain> has, or undef.
 
@@ -168,7 +168,7 @@ sub held_by {
     return $row ? $row->[0] : undef;
 }
 
-=head3 reserve($ip, $name)
+=head2 reserve($ip, $name)
 
 Records C<$ip> as an address that no guest gets, for example a hypervisor or a
 gateway.  C<$name> says what holds it.  Returns true if this call wrote the row.
@@ -184,7 +184,7 @@ sub reserve {
     return $rows && $rows != 0 ? 1 : 0;
 }
 
-=head3 record($ip, $domain)
+=head2 record($ip, $domain)
 
 Records C<$ip> as the address of the guest C<$domain>.  This is for an address
 that a hypervisor reports, not one that C<assign> gave out.  Returns true if
@@ -198,7 +198,7 @@ sub record {
     return $rows && $rows != 0 ? 1 : 0;
 }
 
-=head3 release($domain)
+=head2 release($domain)
 
 Gives back the address of C<$domain>.  Returns that address, or undef if the
 domain held no address.
@@ -218,7 +218,7 @@ sub release {
     return $ip;
 }
 
-=head3 assign($domain, $pool)
+=head2 assign($domain, $pool)
 
 Returns the address of C<$domain>.  If the domain has no address, this gives it
 the first free address in C<$pool>.  If it has one, this returns that address
@@ -272,7 +272,7 @@ sub assign {
     return $chosen;
 }
 
-=head3 forget_seeding()
+=head2 forget_seeding()
 
 Deletes the record of which hypervisors were seeded, so the next seed asks each
 of them again.  Returns the number of records it deleted.
@@ -284,7 +284,7 @@ sub forget_seeding {
     return $rows && $rows ne '0E0' ? $rows : 0;
 }
 
-=head3 clear_reservations()
+=head2 clear_reservations()
 
 Deletes each reservation: the hypervisors, the gateways, and the other machines
 that answered on the network.  Returns the number it deleted.
@@ -303,7 +303,7 @@ sub clear_reservations {
     return $rows && $rows ne '0E0' ? $rows : 0;
 }
 
-=head3 ensure_seeded($pool)
+=head2 ensure_seeded($pool)
 
 Fills the database from the addresses that are already in use, once for each
 hypervisor.  Returns what C<seed> returns.
@@ -322,7 +322,7 @@ sub ensure_seeded {
     return seed($pool);
 }
 
-=head3 seed($pool)
+=head2 seed($pool)
 
 Records the address of each guest on each hypervisor.  It also reserves the
 addresses of the hypervisors, the gateway, and other machines that answer.
@@ -409,7 +409,7 @@ sub seed {
     return $recorded;
 }
 
-=head3 _guest_addresses($hv)
+=head2 _guest_addresses($hv)
 
 Returns a list of hash references with the keys C<domain> and C<ip>, one for
 each address of each guest on C<$hv>.  A guest can appear more than once.
@@ -465,7 +465,7 @@ sub _guest_addresses {
     return @found;
 }
 
-=head3 _live_addresses($hv, $pool)
+=head2 _live_addresses($hv, $pool)
 
 C<$pool> is an array reference of addresses.  Returns a list of hash references
 with the keys C<ip> and C<mac>, one for each address that answers now.  The
@@ -519,7 +519,7 @@ sub _live_addresses {
     return map { { ip => $_, mac => $mac{$_} // 'unknown' } } sort keys %live;
 }
 
-=head3 _resolve($host)
+=head2 _resolve($host)
 
 Returns C<$host> if it is already an IPv4 address.  If not, returns the address
 that the resolver gives, or undef.  It does not die, because the seed skips a
