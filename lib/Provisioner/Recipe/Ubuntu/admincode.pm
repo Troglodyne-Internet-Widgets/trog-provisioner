@@ -14,11 +14,6 @@ use parent qw{Provisioner::Recipe::admincode};
 
 Provisioner::Recipe::Ubuntu::admincode - Ubuntu's C<deps> for L<Provisioner::Recipe::admincode>.
 
-=head1 DESCRIPTION
-
-A package name belongs to a distribution, not to the software, so the names are
-here.  The rest of admincode is in the recipe that this class inherits from.
-
 =cut
 
 sub deps {

@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::mail};
 
 Provisioner::Recipe::Ubuntu::mail - Ubuntu's C<deps> and C<dep_conflicts> for L<Provisioner::Recipe::mail>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software, so the
-package names are here.  The rest of mail is in the recipe that this class
-inherits from.
-
 =cut
 
 sub deps {

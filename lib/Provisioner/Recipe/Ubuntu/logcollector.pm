@@ -16,10 +16,6 @@ Provisioner::Recipe::Ubuntu::logcollector - Ubuntu's C<deps> for L<Provisioner::
 
 =head1 DESCRIPTION
 
-A package name is a fact about a distribution, not about the software, so it is
-here.  The recipe that this class inherits from does everything else that logcollector
-does.
-
 The image ships rsyslog today.  This recipe names it anyway, because the
 collector needs rsyslog and must not depend on what the image happens to contain.
 

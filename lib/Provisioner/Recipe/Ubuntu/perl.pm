@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::perl};
 
 Provisioner::Recipe::Ubuntu::perl - Ubuntu's C<deps> for L<Provisioner::Recipe::perl>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about the distribution, not about the software, so
-the package names live here.  Everything else is in the recipe that this one
-inherits from.
-
 =cut
 
 sub deps {

@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::configd};
 
 Provisioner::Recipe::Ubuntu::configd - Ubuntu's C<deps> for L<Provisioner::Recipe::configd>.
 
-=head1 DESCRIPTION
-
-C<deps> returns the Ubuntu packages that configd needs.  A package name belongs to
-a distribution, not to the software, so the names live in this class.  The
-recipe that this class inherits from does everything else.
-
 =cut
 
 sub deps {

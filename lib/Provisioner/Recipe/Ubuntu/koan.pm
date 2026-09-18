@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::koan};
 
 Provisioner::Recipe::Ubuntu::koan - Ubuntu's C<deps> for L<Provisioner::Recipe::koan>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software, so it
-is here.  Everything else that koan does is in the recipe that this class
-inherits from.
-
 =head2 @pkgs = $recipe->deps()
 
 Returns the Ubuntu packages that koan needs to build and run.

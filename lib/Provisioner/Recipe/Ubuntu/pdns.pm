@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::pdns};
 
 Provisioner::Recipe::Ubuntu::pdns - Ubuntu's C<deps> for L<Provisioner::Recipe::pdns>.
 
-=head1 DESCRIPTION
-
-A package name belongs to a distribution, not to the software, so the package
-names are here.  The rest of pdns is in the recipe that this class inherits
-from.
-
 =cut
 
 sub deps {

@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::nginx};
 
 Provisioner::Recipe::Ubuntu::nginx - Ubuntu's C<deps> for L<Provisioner::Recipe::nginx>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software, so it
-is here.  The recipe that this class inherits from does everything else for
-nginx.
-
 =cut
 
 sub deps {

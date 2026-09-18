@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::matrix};
 
 Provisioner::Recipe::Ubuntu::matrix - Ubuntu's C<deps> for L<Provisioner::Recipe::matrix>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about the distribution, not about the software.  So
-this module names the packages that matrix needs on Ubuntu.  The parent recipe
-does everything else.
-
 =head2 @pkgs = $recipe->deps()
 
 The Python libraries of synapse, from the Ubuntu archive.  The synapse package

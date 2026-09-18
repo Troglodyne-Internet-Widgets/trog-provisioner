@@ -70,9 +70,6 @@ service does not start.  C<t/recipes.t> catches it: it asserts that every recipe
 with packages has them for every distribution.  If you add a distribution and
 forget a recipe, that test fails before a guest does.
 
-Do not add a C<target_packager> check to get around this.  C<t/recipes.t>
-refuses one.
-
 =head3 The fragment is a makefile, not a shell script
 
 Each recipe renders C<templates/E<lt>distroE<gt>/E<lt>nameE<gt>.tt> into a

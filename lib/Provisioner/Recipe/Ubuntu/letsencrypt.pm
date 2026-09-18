@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::letsencrypt};
 
 Provisioner::Recipe::Ubuntu::letsencrypt - Ubuntu's C<deps> for L<Provisioner::Recipe::letsencrypt>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software, so it
-is here.  Everything else that letsencrypt does is in the recipe that this
-class inherits from.
-
 =cut
 
 sub deps {

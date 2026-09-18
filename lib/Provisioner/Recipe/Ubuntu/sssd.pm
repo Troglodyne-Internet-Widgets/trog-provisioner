@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::sssd};
 
 Provisioner::Recipe::Ubuntu::sssd - Ubuntu's C<deps> for L<Provisioner::Recipe::sssd>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution rather than about the software, so
-this is where it lives.  Everything else sssd does is in the recipe this
-inherits from.
-
 =cut
 
 sub deps {

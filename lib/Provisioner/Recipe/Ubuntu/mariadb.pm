@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::mariadb};
 
 Provisioner::Recipe::Ubuntu::mariadb - Ubuntu's C<deps> for L<Provisioner::Recipe::mariadb>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software, so it
-lives here.  Everything else that mariadb does is in the recipe that this class
-inherits from.
-
 =cut
 
 sub deps {

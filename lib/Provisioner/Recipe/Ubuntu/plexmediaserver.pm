@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::plexmediaserver};
 
 Provisioner::Recipe::Ubuntu::plexmediaserver - Ubuntu's C<deps> for L<Provisioner::Recipe::plexmediaserver>.
 
-=head1 DESCRIPTION
-
-A package name belongs to the distribution, not to the software, so the package
-names are here.  The recipe that this module inherits from does everything else
-for plexmediaserver.
-
 =cut
 
 sub deps {

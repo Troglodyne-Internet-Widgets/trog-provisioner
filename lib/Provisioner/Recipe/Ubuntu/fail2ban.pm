@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::fail2ban};
 
 Provisioner::Recipe::Ubuntu::fail2ban - Ubuntu's C<deps> for L<Provisioner::Recipe::fail2ban>.
 
-=head1 DESCRIPTION
-
-A package name belongs to the distribution, not to the software, so the package
-names are here.  The recipe that this module inherits from does everything else
-for fail2ban.
-
 =cut
 
 sub deps {

@@ -14,12 +14,6 @@ use parent qw{Provisioner::Recipe::postgres};
 
 Provisioner::Recipe::Ubuntu::postgres - Ubuntu's C<deps> for L<Provisioner::Recipe::postgres>.
 
-=head1 DESCRIPTION
-
-A package name is a fact about a distribution, not about the software.  So the
-package names for Ubuntu are in this module.  Everything else that postgres does
-is in the recipe that this module inherits from.
-
 =cut
 
 sub deps {
