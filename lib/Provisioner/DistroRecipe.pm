@@ -118,23 +118,6 @@ C<base_image> in L<Trog::HV::Libvirt> downloads it.
 
 sub base_image { return shift->_unanswered('base_image') }
 
-=head2 $url = $distro->current_image()
-
-The image that this distribution names as current today, or C<undef>.
-
-C<base_image> is the image that guests are built on, and it is pinned on
-purpose.  A new release does not force the fleet to move.  C<bin/preflight>
-compares the two and reports a pin that is a release behind.
-
-C<undef> is a valid answer and the default.  It means that this distribution
-has no way to be asked, or that it did not answer.  A preflight run must not
-fail because a mirror is down.  So a caller treats C<undef> as "no opinion" and
-reports nothing.
-
-=cut
-
-sub current_image { return undef }
-
 =head2 $cmd = $distro->packager_invocation()
 
 The command that installs a list of packages.  It runs without prompts, and it
@@ -175,6 +158,23 @@ False.  See L</It directs the build and does not run in it>.
 =cut
 
 sub is_module { return 0 }
+
+=head2 $url = $distro->current_image()
+
+The image that this distribution names as current today, or C<undef>.
+
+C<base_image> is the image that guests are built on, and it is pinned on
+purpose.  A new release does not force the fleet to move.  C<bin/preflight>
+compares the two and reports a pin that is a release behind.
+
+C<undef> is a valid answer and the default.  It means that this distribution
+has no way to be asked, or that it did not answer.  A preflight run must not
+fail because a mirror is down.  So a caller treats C<undef> as "no opinion" and
+reports nothing.
+
+=cut
+
+sub current_image { return undef }
 
 =head2 %args = $distro->args()
 
