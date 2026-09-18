@@ -219,7 +219,9 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     $hv->redefine( guest_ssh_ip => sub { $asked++; die "There is no guest called 'vm.test'\n" } );
 
     Trog::HV->forget();
-    my $cloud = Trog::HV->new( cloud => 'testcloud', domain_dir => $dir );
+
+    # Called for what it leaves behind: the instance that the code under test gets.
+    Trog::HV->new( cloud => 'testcloud', domain_dir => $dir );
 
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( $_->[0], $_->[1] )
@@ -229,7 +231,7 @@ subtest 'a dry run of a guest that is not there yet' => sub {
         [ transfer_user => 'doge' ],    [ transfer_port => 22 ],
       );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
+    my ($user) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
     is( $asked, 0,      'nothing asked the cloud how to reach a guest it has not built' );
     is( $user,  'doge', 'and the dry run came back rather than dying' );
@@ -285,7 +287,7 @@ subtest 'a dry run applies nothing' => sub {
         [ transfer_ip => '192.168.1.49' ],  [ transfer_user => 'doge' ], [ transfer_port => 22 ],
       );
 
-    my ( $user, $ip ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
+    quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
     is_deeply( \@applied, [], 'nothing outside the domain directory was touched' )
       or diag "applied: @applied";

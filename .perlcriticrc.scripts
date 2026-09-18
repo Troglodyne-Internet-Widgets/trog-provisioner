@@ -216,7 +216,14 @@ package_exemptions = main [a-z][a-z0-9_]*
 [Variables::ProhibitLocalVars]
 [Variables::ProhibitMatchVars]
 [Variables::ProhibitReusedNames]
-[Variables::ProhibitUnusedVariables]
+# Stricter than the core ProhibitUnusedVariables, which reports only a bare
+# `my $x;` and misses a variable that is assigned and never read.
+[Variables::ProhibitUnusedVarsStricter]
+# A method takes the arguments of its interface, whether it reads them or not.
+allow_unused_subroutine_arguments = 1
+# pushd returns a guard, which changes back to the old directory when it goes
+# out of scope.
+allow_if_computed_by = pushd
 [Variables::ProtectPrivateVars]
 [Variables::RequireLexicalLoopIterators]
 [Variables::RequireLocalizedPunctuationVars]

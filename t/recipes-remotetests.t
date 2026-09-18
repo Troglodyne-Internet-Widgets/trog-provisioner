@@ -299,8 +299,6 @@ sub test_recipe {
 sub do_provision {
     my ( $recipe, $ipmap_path, $recipes_path, $tests, %files ) = @_;
 
-    my $provisioner_bin = '/opt/trog-provisioner/bin/provision';
-
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
             '--ipmap',   $ipmap_path,

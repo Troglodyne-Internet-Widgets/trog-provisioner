@@ -227,7 +227,6 @@ subtest 'two runs at once cannot be given the same address' => sub {
     # exactly what a fan-out of provisions is, and what the [ips] section could
     # not survive.
     my $pool = { cidr => '10.9.40.0/27' };
-    my $dir  = $ENV{TROG_PROVISIONER_CONFIG};
 
     pipe( my $read, my $write ) or die "pipe: $!";
 

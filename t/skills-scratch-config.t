@@ -95,7 +95,7 @@ subtest 'somebody is authorized on a scratch guest either way' => sub {
 };
 
 subtest 'the base is built here rather than taken from the installation' => sub {
-    my ( $recipes, $dir ) = scratch();
+    my ($recipes) = scratch();
 
     is_deeply( [ sort keys %$recipes ],              ['_base'],   'no domain of the installation comes across' );
     is_deeply( [ sort keys %{ $recipes->{_base} } ], ['_global'], 'and none of its recipe set either' );
