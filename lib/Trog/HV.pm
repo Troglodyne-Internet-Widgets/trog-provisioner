@@ -318,7 +318,7 @@ sub config_value {
 
     my $value = ref $config eq 'HASH' ? $config->{$key} : $config->param($key);
     $value = $value->[0] if ref $value eq 'ARRAY';
-    return ( length $value ) ? $value : undef;
+    return ( length $value ) ? $value : undef;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a setting of "0" is still a setting
 }
 
 =head2 forget()
