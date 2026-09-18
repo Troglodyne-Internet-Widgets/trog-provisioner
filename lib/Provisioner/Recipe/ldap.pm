@@ -97,6 +97,7 @@ sub args {
                     type       => 'object',
                     properties => {
                         gecos         => { type => 'string' },
+                        mail          => { type => 'string', description => 'The mail attribute the seed gives this user.  Left out of the seed when it is not set.' },
                         name          => { type => 'string' },
                         shell         => { type => 'string' },
                         ssh_import_id => { type => 'array', items => { type => 'string' } },

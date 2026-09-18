@@ -456,9 +456,18 @@ subtest 'grubconf refuses to render an empty fragment' => sub {
 subtest 'grubconf writes its variables in the same order every time' => sub {
     my $r    = 'Provisioner::Recipe::grubconf'->new(%PROV);
     my %vars = map { $_ => 'x' } qw{GRUB_A GRUB_B GRUB_C GRUB_D GRUB_E GRUB_F};
-    my $conf = $r->render_file( 'files/grubconf.tt', $r->validate( %G, grub_vars => \%vars ) );
+    my $conf = $r->render_file( 'files/grubconf.tt', %G, grub_vars => \%vars );
     my @set  = $conf =~ m/^(GRUB_[[:upper:]]+)=/mg;
     is_deeply( \@set, [ sort keys %vars ], 'sorted by name' ) or diag $conf;
+};
+
+subtest 'ldap seeds the mail address a user is given' => sub {
+    my $r    = 'Provisioner::Recipe::ldap'->new(%PROV);
+    my %cfg  = ( %G, admin_password => 's3cr3t', base_dn => 'dc=test,dc=test' );
+    my $seed = $r->render_file( 'files/ldap.seed.ldif.tt', %cfg, users => [ { name => 'someone', mail => 'someone@test.test' } ] );
+    like( $seed, qr/^mail:[ ]someone\@test[.]test$/m, 'as the mail attribute' ) or diag $seed;
+
+    like( exception { $r->validate( %cfg, users => [ { name => 'someone', mail => ['someone@test.test'] } ] ) }, qr{/users/0/mail}, 'and it is one address, not a list' );
 };
 
 subtest 'ntp rejects empty server list' => sub {
