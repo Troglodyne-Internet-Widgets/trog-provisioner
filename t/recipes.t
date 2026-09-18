@@ -306,6 +306,7 @@ my %required_config = (
     letsencrypt => {},
     pdns        => { api_key        => 'test-api-key' },
     grafana     => { admin_password => 's3cr3t' },
+    grubconf    => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
 
     registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
     matrix    => {
@@ -446,6 +447,20 @@ rejects_missing( 'sssd', { ldap_uri => 'ldaps://ldap.example.test' }, 'base_dn',
 # ----------------------------------------------------------------
 # ntp: validate enforces server list constraints
 # ----------------------------------------------------------------
+subtest 'grubconf refuses to render an empty fragment' => sub {
+    my $r = 'Provisioner::Recipe::grubconf'->new(%PROV);
+    like( exception { $r->render(%G) },                    qr{/grub_vars:[ ]Missing},      'grub_vars is required' );
+    like( exception { $r->render( %G, grub_vars => {} ) }, qr{/grub_vars:[ ]Not[ ]enough}, 'and has to set something' );
+};
+
+subtest 'grubconf writes its variables in the same order every time' => sub {
+    my $r    = 'Provisioner::Recipe::grubconf'->new(%PROV);
+    my %vars = map { $_ => 'x' } qw{GRUB_A GRUB_B GRUB_C GRUB_D GRUB_E GRUB_F};
+    my $conf = $r->render_file( 'files/grubconf.tt', $r->validate( %G, grub_vars => \%vars ) );
+    my @set  = $conf =~ m/^(GRUB_[[:upper:]]+)=/mg;
+    is_deeply( \@set, [ sort keys %vars ], 'sorted by name' ) or diag $conf;
+};
+
 subtest 'ntp rejects empty server list' => sub {
     my $r   = 'Provisioner::Recipe::ntp'->new(%PROV);
     my $res = exception { $r->render( %G, servers => [] ) };

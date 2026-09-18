@@ -28,6 +28,21 @@ off things such as the new names for network adapters, or IPv6.
 
 use parent qw{Provisioner::Recipe};
 
+sub args {
+    return (
+        type       => 'object',
+        required   => [qw{grub_vars}],
+        properties => {
+            grub_vars => {
+                type                 => 'object',
+                minProperties        => 1,
+                additionalProperties => { type => 'string' },
+                description          => 'The variables to set in /etc/default/grub.d/00-grub.conf, by name.  Each value is written in double quotes.',
+            },
+        },
+    );
+}
+
 sub template_files {
     my ($self) = @_;
 
