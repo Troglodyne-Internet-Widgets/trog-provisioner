@@ -1960,7 +1960,7 @@ subtest 'ufw own limit is applied to nothing, and cannot come back by accident' 
     # The delete is not the same thing and has to stay: it takes off limits an
     # older provision left on a profile, which ufw keeps alongside an allow
     # rather than displacing with it.
-    like( $code, qr/\Qufw --force delete limit in\E/, 'while an older limit is still cleaned off' );
+    like( $code, qr/\bufw\(\s*qw\{--force\s+delete\s+limit\s+in\}/, 'while an older limit is still cleaned off' );
 
     # Rate limiting lives in the other script, and the exemptions with it.
     my $limits = File::Slurper::read_text("$FindBin::Bin/../scripts/setup-ufw-ratelimits");

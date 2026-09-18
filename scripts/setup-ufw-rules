@@ -18,9 +18,8 @@ and out.  A recipe declares a profile to say that this guest uses a port.  The
 default denies outgoing traffic, so the C<allow out> is the only rule that lets
 the guest send on that port.
 
-With C<--dry-run>, ufw prints the reset, the defaults and the profile rules and
-does not apply them.  The script still deletes old limits and applies the fixed
-port ranges.
+With C<--dry-run>, every ufw command that changes a rule gets C<--dry-run> too.
+ufw then prints what it would do and changes nothing.
 
 This script does not rate limit.  See C<setup-ufw-ratelimits>, which gets the
 limits and the networks that are exempt from them.
@@ -28,6 +27,12 @@ limits and the networks that are exempt from them.
 =cut
 
 my $DRY_RUN = ( grep { $_ eq '--dry-run' } @ARGV ) ? 1 : 0;
+
+# Every change goes through here, so that --dry-run covers all of them.
+sub ufw {
+    my (@args) = @_;
+    return system( 'ufw', ( $DRY_RUN ? '--dry-run' : () ), @args );
+}
 
 my $list = qx{ufw app list};
 my @apps = split( /\n/, $list );
@@ -56,29 +61,30 @@ foreach my $app (@apps) {
     # Delete any limit that an older provision left on this profile.  ufw keys
     # a rule on its action and its ports, so an allow does not replace a limit.
     # Usually there is no limit, and the delete fails.
-    system( qw{ufw --force delete limit in},  $app );
-    system( qw{ufw --force delete limit out}, $app );
+    ufw( qw{--force delete limit in},  $app );
+    ufw( qw{--force delete limit out}, $app );
 
     push( @rules, [ "allow", "out", $app ] );
     push( @rules, [ "allow", "in",  $app ] );
 }
 
-@rules = map { unshift( @{$_}, '--dry-run' ); $_ } @rules if $DRY_RUN;
-@rules = map { unshift( @{$_}, 'ufw' );       $_ } @rules;
-
-foreach my $rule (@rules) {
-    system(@$rule);
-}
-
 # Allow the ports that Linux gives to outgoing connections, so that the guest
 # can use outgoing ssh and similar.
-system(qw{ufw allow out 32768:61000/tcp});
-system(qw{ufw allow out 32768:61000/udp});
-system(qw{ufw allow in 32768:61000/tcp});
-system(qw{ufw allow in 32768:61000/udp});
+push(
+    @rules,
+    [qw{allow out 32768:61000/tcp}],
+    [qw{allow out 32768:61000/udp}],
+    [qw{allow in 32768:61000/tcp}],
+    [qw{allow in 32768:61000/udp}],
+);
 
 # Allow DHCP for IPv4 and IPv6.
-system(qw{ufw allow out 67:68/udp});
-system(qw{ufw allow in 67:68/udp});
-system(qw{ufw allow out 546:547/udp});
-system(qw{ufw allow in 546:547/udp});
+push(
+    @rules,
+    [qw{allow out 67:68/udp}],
+    [qw{allow in 67:68/udp}],
+    [qw{allow out 546:547/udp}],
+    [qw{allow in 546:547/udp}],
+);
+
+ufw(@$_) for @rules;
