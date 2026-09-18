@@ -10,6 +10,8 @@ use re '/aasx';
 
 use parent qw{Provisioner::Recipe};
 
+use File::Path qw{rmtree};
+
 =head1 Provisioner::Recipe::ufw
 
 =head2 SYNOPSIS
@@ -32,8 +34,6 @@ listens on.  The networks in C<admin_networks> are exempt from these limits.
 Forwards the ports in C<port_forwards>, if you give any.
 
 =cut
-
-use File::Path qw{rmtree};
 
 =head2 %opts = $recipe->enrich(%opts)
 
