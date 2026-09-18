@@ -24,6 +24,13 @@ foreach my $file (
 }
 
 [% IF messaging_provider == 'matrix' -%]
+[% IF matrix_e2ee -%]
+# Without a pickle key the bot cannot open its Olm store.
+my $env = do { local ( @ARGV, $/ ) = '[% install_dir %]/[% domain %]/koan/.env'; <> } // '';
+like($env, qr/^KOAN_MATRIX_E2EE=1$/m,        'the bot runs with E2EE on');
+like($env, qr/^KOAN_MATRIX_PICKLE_KEY=\S+$/m, 'and has a pickle key for its store');
+[% END -%]
+
 # The matrix federation port.  templates/files/koan.ufw.conf.tt says why it is
 # a profile.
 my $profile = '/etc/ufw/applications.d/koan';
