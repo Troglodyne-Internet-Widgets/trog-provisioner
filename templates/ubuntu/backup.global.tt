@@ -1,3 +1,6 @@
+[%# rsyncd opens its log before it chroots, so the directory has to be out
+    here rather than inside the path of some module.  One for the guest, since
+    every domain logs into it. -%]
 mkdir -p /var/log/rsyncd
 mv backup.logrotate /etc/logrotate.d/rsyncd-backup
 [%# Owned by root and mode 0644, or logrotate skips the file and reports it

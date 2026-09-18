@@ -8,7 +8,7 @@ ok(-f '/root/.ssh/authorized_keys', 'authorized_keys exists');
 # /etc, not /root: some builds of rsync do not read a configuration from
 # /root.  Provisioner::Recipe::backup has the whole account.
 ok(-f '/etc/rsyncd.[% domain %].conf', 'rsync daemon config exists in /etc');
-ok(!-e '/root/rsyncd.[% domain %].conf', 'and not in /root, where it used to be');
+ok(!-e '/root/rsyncd.[% domain %].conf', 'and not in /root');
 
 my $authorized = do { local (@ARGV, $/) = '/root/.ssh/authorized_keys'; <> } // '';
 

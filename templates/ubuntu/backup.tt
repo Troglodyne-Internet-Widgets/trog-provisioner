@@ -2,9 +2,6 @@
     the backup key arrives here.  It must not stay.  -f, so that a second
     provision does not fail when the key is already gone. -%]
 rm -f [% install_dir %]/[% domain %]/[% key_file %]
-[%# rsyncd opens its log before it chroots, so the directory must be outside
-    every module. -%]
-mkdir -p /var/log/rsyncd
 [%# /etc, not /root: some builds of rsync do not read a configuration from
     /root.  Provisioner::Recipe::backup has the whole account. -%]
 mv rsyncd.conf /etc/rsyncd.[% domain %].conf
