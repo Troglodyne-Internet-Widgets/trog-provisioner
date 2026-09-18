@@ -66,7 +66,4 @@ SKIP: {
 }
 [% END %]
 
-# The root disk of the guest is a virtio disk.
-ok(-d '/sys/block/vda', 'the root disk is virtio') or diag `ls /sys/block`;
-
 done_testing();

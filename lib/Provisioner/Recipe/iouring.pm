@@ -150,6 +150,12 @@ the guest, and not the value you gave it.
 
 =back
 
+=head3 enrich
+
+Adds to C<members> the accounts of the recipes on this guest that run something
+able to use io_uring, and sets C<restart_units> to their services.  See
+L</Which accounts go in the group>.
+
 =cut
 
 # The recipes that run something able to use io_uring, with their accounts.
