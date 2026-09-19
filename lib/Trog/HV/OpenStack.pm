@@ -815,6 +815,8 @@ host.
 
 =back
 
+=for Pod::Coverage eject_cdrom create_disk nic_names has_tpm
+
 =cut
 
 # The message names the call and what to use instead, which "method not found"

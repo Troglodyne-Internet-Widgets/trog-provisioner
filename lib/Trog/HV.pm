@@ -131,6 +131,8 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
+=for Pod::Coverage config_keys annihilate_domain revert_snapshot
+
 =head1 CLASS METHODS
 
 =cut
@@ -784,7 +786,7 @@ sub check_config {
 
     my $dir = Trog::Config->dir;
 
-    my @missing = grep { !readable("$dir/$_") } qw{ipmap.cfg recipes.yaml admin_authorized_keys};
+    my @missing = grep { !_readable("$dir/$_") } qw{ipmap.cfg recipes.yaml admin_authorized_keys};
 
     # An empty key file passes a check for existence and then stops
     # bin/new_config, which is the failure that this check prevents.
@@ -1008,7 +1010,7 @@ sub _plaintext_in {
     return ();
 }
 
-sub readable {
+sub _readable {
     my ($path) = @_;
     return -r $path ? 1 : 0;    ## no critic (ValuesAndExpressions::ProhibitFiletest_rwxRWX) -- the only question is whether it can be read, and what reads it opens it itself
 }
