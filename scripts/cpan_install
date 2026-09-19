@@ -18,11 +18,12 @@ use Getopt::Long ();
     cpan_install [--notest] installdeps DIR
     cpan_install [--notest] dzil DIR
     cpan_install [--notest] pin PKGCONFIG_PACKAGE MODULE
+    cpan_install test DIR
 
 =head2 DESCRIPTION
 
 This script installs what recipes ask for from CPAN into the perl that the
-C<perl> recipe built.  The target of that recipe calls it once for each step of
+C<perl> recipe built, and runs a checkout's tests against that perl.  The target of that recipe calls it once for each step of
 its C<cpan_deps>.  The verbs are the names of those steps, and
 L<Provisioner::Recipe::perl> documents them.
 
@@ -40,6 +41,11 @@ dzil fails, the step fails.  A failure does not count as nothing missing.
 =item * C<pin> installs C<MODULE> at the version that pkg-config reports for
 C<PKGCONFIG_PACKAGE> when this runs.  C<Sys::Virt> is the reason for this verb.
 Its version must match the C<libvirt> that it builds against.
+
+=item * C<test> runs the tests in F<DIR/t> with the C<prove> of that perl, from
+C<DIR> and with C<-l>.  It is here, and not in the caller, because only this
+script knows which perl the dependencies went into.  A C<prove> from C<PATH>
+is the system perl's, which has none of them.
 
 =back
 
@@ -85,7 +91,7 @@ C<GIT_CONFIG_COUNT> and its pairs.  It does not write to any F<.gitconfig>.
 # tree.
 our $PERL_ROOT = '/opt/perl5';
 
-my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin ARGS\n";
+my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin|test ARGS\n";
 
 sub main {
     my @args = @_;
@@ -133,6 +139,9 @@ sub main {
         }
         my $spec = "$module\@$version";
         $rc = run_in( undef, @cpanm, mirror_only($spec), $spec );
+    }
+    elsif ( $verb eq 'test' && @rest == 1 ) {
+        $rc = run_in( $rest[0], "$bin/prove", '-lvm', 't' );
     }
     else {
         return usage();
