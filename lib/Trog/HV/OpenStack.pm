@@ -893,8 +893,8 @@ before it fails.
 a server from libvirt XML, and takes cloud-init as C<user_data>.  So there is no
 XML to define and no ISO to attach.  See L</create_guest(%spec)>.
 
-=item * C<pool_path>, C<pool_target>, C<nuke_pool>, C<base_image>,
-C<create_disk>: there is no storage pool, and no disk file on a filesystem.
+=item * C<pool_path>, C<pool_target>, C<base_image>, C<create_disk>: there is
+no storage pool, and no disk file on a filesystem.
 
 =item * C<lease_ip>, C<release_dhcp_lease>, C<guest_mac>, C<nic_slots>,
 C<nic_names>: Neutron assigns addresses and MACs.  There is no NAT lease table
@@ -923,7 +923,6 @@ sub cloudinit_iso ( $self, @ ) { return $self->_no_such_thing( 'cloudinit_iso', 
 sub eject_cdrom   ( $self, @ ) { return $self->_no_such_thing( 'eject_cdrom',   'there is no cdrom' ) }
 sub pool_path     ( $self, @ ) { return $self->_no_such_thing( 'pool_path',     'there is no storage pool' ) }
 sub pool_target   ( $self, @ ) { return $self->_no_such_thing( 'pool_target',   'there is no storage pool' ) }
-sub nuke_pool     ( $self, @ ) { return $self->_no_such_thing( 'nuke_pool',     'there is no storage pool' ) }
 sub base_image    ( $self, @ ) { return $self->_no_such_thing( 'base_image',    'a root disk comes from a Glance image, not a downloaded file' ) }
 sub create_disk   ( $self, @ ) { return $self->_no_such_thing( 'create_disk',   'a disk is a Cinder volume -- use create_volume' ) }
 sub lease_ip      ( $self, @ ) { return $self->_no_such_thing( 'lease_ip',      'Neutron assigns addresses; there is no lease table' ) }

@@ -671,35 +671,6 @@ sub eject_cdrom {
     return $ok ? 1 : 0;
 }
 
-=head2 nuke_pool($name)
-
-Removes the pool directory from the hypervisor, then stops, deletes and
-undefines the storage pool C<$name>.  Use it for a pool in a state that nothing
-else can repair.  Returns 1 if libvirt had the pool, and 0 if not.  A step that
-fails gives a warning.
-
-=cut
-
-sub nuke_pool {
-    my ( $self, $name ) = @_;
-
-    # The directory goes first.  pool-delete does nothing when the directory is
-    # gone, but the other order leaves files that libvirt still owns.
-    $self->run_sudo( qw{rm -rf}, $self->pool_path );
-
-    my $vmm  = $self->vmm;
-    my $pool = eval { $vmm->get_storage_pool_by_name($name) };
-    unless ($pool) {
-        print "No storage pool named $name on " . $self->uri . ", nothing to nuke.\n";
-        return 0;
-    }
-
-    foreach my $step (qw{destroy delete undefine}) {
-        eval { $pool->$step(); 1 } or warn "pool $step failed for $name: $@";
-    }
-    return 1;
-}
-
 =head1 BUILDING THINGS
 
 The pool, its volumes, the cloud-init seed and the domain, made through libvirt.
@@ -1987,9 +1958,9 @@ Passes when the ssh user has passwordless sudo, for everything or only for the
 lease helper.  Fails, with the commands that give the grant, when it has neither.
 
 A grant for the lease helper alone is enough to build a guest.  The other root
-steps are the first install of F<virtiofs-better>, C<bin/nuke_pool>, and the
-C<qemu-img> calls for the C<trog-pristine> snapshot and its revert.  Without
-those, a guest builds, but a rebuild cannot keep its disk.  C<sudo -n true>
+steps are the first install of F<virtiofs-better> and the C<qemu-img> calls for
+the C<trog-pristine> snapshot and its revert.  Without those, a guest builds,
+but a rebuild cannot keep its disk.  C<sudo -n true>
 fails for the narrow grant too, so this also asks C<sudo -n -l> about the lease
 helper.
 
@@ -2010,8 +1981,8 @@ sub check_passwordless_sudo {
 
     # A narrow grant is correct for an account that builds guests unattended.
     return $self->_verdict( 1, "Passwordless sudo for $LEASE_HELPER, which is what a provision needs", <<"FIX" )
-bin/nuke_pool will not work for this account, which is deliberate at this
-level.  Widen the grant if you need it.
+A rebuild that keeps the disk of a guest will not work for this account, which
+is deliberate at this level.  Widen the grant if you need it.
 FIX
       if $self->run_cmd( qw{sudo -n -l}, $LEASE_HELPER ) == 0;
 
@@ -2042,9 +2013,8 @@ a provision does is the libvirt API -- which wants group membership, not root
     echo '$user ALL=(root) NOPASSWD: $LEASE_HELPER' | sudo tee /etc/sudoers.d/90-$user
     sudo usermod -aG libvirt $user
 
-That leaves bin/nuke_pool needing root it does not have, and needs
-/usr/libexec/virtiofs-better already in place -- bin/provision installs it on
-first use, which is the one step that wants the wider grant.
+That needs /usr/libexec/virtiofs-better already in place -- bin/provision
+installs it on first use, which is the one step that wants the wider grant.
 FIX
 }
 

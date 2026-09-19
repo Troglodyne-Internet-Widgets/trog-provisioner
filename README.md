@@ -342,15 +342,6 @@ keystrokes, which is holding ESC by hand and about as reliable.
 `--console`, `--hold` and `--single` all change something.  `--restore` puts the
 serial port, the boot menu and the kernel command line all back.
 
-### Nuking a wedged storage pool
-
-A storage pool can get into a state nothing else will get it out of.  `bin/nuke_pool` removes the pool's directory from the hypervisor and then stops, deletes and undefines the pool:
-
-```
-bin/nuke_pool
-bin/nuke_pool --hypervisor hv1
-```
-
 ## RUNNING THIS WITHOUT A TERMINAL
 
 Two passwords get asked for: the passphrase to `secrets.kdbx`, and the sudo
