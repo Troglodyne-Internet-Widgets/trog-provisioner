@@ -42,6 +42,7 @@ subtest 'a template stands for the recipe that renders it' => sub {
     is_deeply( [ $map->('templates/files/tpsgi.tt') ],          [ 'lib/Provisioner/Recipe/Ubuntu/tpsgi.pm', 'lib/Provisioner/Recipe/tpsgi.pm' ], 'a file from template_files, with the subclass of the distribution' );
     is_deeply( [ $map->('templates/tests/nginxdirindex.tt') ],  ['lib/Provisioner/Recipe/nginxdirindex.pm'],                                     'and its guest test' );
     is_deeply( [ $map->('templates/makefile.tt') ],             ['bin/new_config'],                                                              'the makefile, for what renders it' );
+    is_deeply( [ $map->('openssl.conf') ],                      ['bin/new_config'],                                                              'and the openssl.conf of its ssl target, for what copies it' );
 };
 
 subtest 'a script on the system perl stands for the tests that name it' => sub {
