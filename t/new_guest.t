@@ -139,16 +139,23 @@ subtest 'a dependency that needs something says so as well' => sub {
 subtest 'a recipe that salvages something can still be scaffolded' => sub {
 
     # Provisioner::Recipe::required_recipes asks restores() what goes back, and
-    # Provisioner::Cookbook asks that at scaffold time with the global
-    # configuration and no domain.  letsencrypt and pdns both interpolate the
-    # domain into the paths they restore, so the undef was fatal under
-    # `warnings FATAL => 'all'` and bin/new_guest died before writing anything --
-    # "Use of uninitialized value $domain", naming a recipe nobody had asked
-    # about.  None of the recipes scaffolded above declares a restores(), which
-    # is why nothing here caught it.
+    # Provisioner::Cookbook asks that at scaffold time.  letsencrypt and pdns
+    # both interpolate the domain into the paths they restore, so a scaffold
+    # walk without the domain dies on the undef under `warnings FATAL => 'all'`.
+    # None of the recipes scaffolded above declares a restores().
     my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['letsencrypt'], \%BASE_HAS_DATA );
 
     ok( exists $config->{'vm.test'}{letsencrypt}, 'the recipe is scaffolded rather than taking the run down' );
+};
+
+subtest 'a recipe whose dependencies are built from the domain can be scaffolded' => sub {
+
+    # tpsgi builds the path that perl installs from out of install_dir and the
+    # domain.  No _base can name the domain, and this one names no install_dir.
+    my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', ['tpsgi'], {} );
+
+    ok( exists $config->{'vm.test'}{tpsgi},          'tpsgi is scaffolded' );
+    ok( ( grep { $_ eq 'tpsgi.routers[0]' } @todo ), 'and asks for its routers' ) or diag "todo was: @todo";
 };
 
 subtest 'every domain gets a data recipe, because new_config requires one' => sub {
