@@ -18,10 +18,9 @@ use File::Temp       qw{tempdir};
 use List::Util();
 use File::Slurper();
 use File::Slurper::Temp();
-use Provisioner::Cookbook();
-
 use FindBin;
 use FindBin::libs;
+use Provisioner::Cookbook();
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.

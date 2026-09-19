@@ -20,10 +20,9 @@ use Test::MockModule qw{strict};
 use Test::NoWarnings;
 use File::Slurper();
 use File::Slurper::Temp();
+use FindBin::libs;
 use Trog::Config();
 use Trog::Secrets();
-
-use FindBin::libs;
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.

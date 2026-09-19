@@ -19,9 +19,8 @@ use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
 use File::Slurper();
 use File::Temp();
-use Provisioner::Utils();
-
 use FindBin::libs;
+use Provisioner::Utils();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on.

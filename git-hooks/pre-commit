@@ -204,7 +204,7 @@ fi
 if ! command -v tests-covering >/dev/null 2>&1
 then
     echo "Running every test, because tests-covering is not on PATH; install Perl::Tests::Covering..."
-    prove -lm -j8 t/ || {
+    prove -m -j8 t/ || {
         echo "pre-commit: the tests above failed."
         exit 1
     }
@@ -221,7 +221,9 @@ then
 fi
 
 echo "Running the tests that ran what this commit changes..."
-prove -lm -j8 $tests || {
+# No -l: each test finds lib/ itself, through FindBin::libs, and -l would hide
+# a test that loads from lib/ before it does.
+prove -m -j8 $tests || {
     echo "pre-commit: the tests above failed."
     exit 1
 }
