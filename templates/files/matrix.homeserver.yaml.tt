@@ -84,7 +84,7 @@ email:
   smtp_user: "[% smtp_user %]"
   smtp_pass: "[% smtp_pass %]"
   require_transport_security: "[% require_transport_security %]"
-  notif_from: "%(app)s chat server <[% smtp_user %]@[% smtp_domain %]>"
+  notif_from: "%(app)s chat server <[% smtp_from %]>"
 [% IF modules.grep('redis').size() %]
 
 # Redis pub/sub, because the redis recipe runs on this guest too.

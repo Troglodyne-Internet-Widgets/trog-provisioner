@@ -108,7 +108,7 @@ sub required_config {
             smtp_host      => 'mail.test.test',
             smtp_user      => 'notify@test.test',
             smtp_pass      => 'smtp-pass',
-            smtp_domain    => 'test.test',
+            smtp_from      => 'notify@test.test',
             modules        => ['nginxproxy'],
         },
         roundcube => {

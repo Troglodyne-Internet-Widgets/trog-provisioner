@@ -26,7 +26,7 @@ use MIME::Base64();
             smtp_port: 465
             smtp_user: notifications@example.test
             smtp_pass: smtp_password
-            smtp_domain: example.test
+            smtp_from: notifications@example.test
 
 =head2 DESCRIPTION
 
@@ -102,7 +102,7 @@ sub args {
     my ($self) = @_;
     return (
         type       => 'object',
-        required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_domain}],
+        required   => [qw{server_name admin_password smtp_host smtp_user smtp_pass smtp_from}],
         properties => {
             server_name => { type => 'string' },
 
@@ -113,10 +113,10 @@ sub args {
             admin_user                 => { type => 'string', default => 'admin' },
             admin_password             => { type => 'string' },
             smtp_host                  => { type => 'string' },
-            smtp_port                  => { type => 'integer', default => 465, minimum => 0 },
-            smtp_user                  => { type => 'string' },
+            smtp_port                  => { type => 'integer', default     => 465, minimum => 0 },
+            smtp_user                  => { type => 'string',  description => 'The login to smtp_host, which is not always an address.' },
             smtp_pass                  => { type => 'string' },
-            smtp_domain                => { type => 'string' },
+            smtp_from                  => { type => 'string',  format  => 'email', description => 'The address that notices from the homeserver come from.' },
             require_transport_security => { type => 'boolean', default => 1 },
             ipv6                       => { type => 'boolean', default => 1 },
 

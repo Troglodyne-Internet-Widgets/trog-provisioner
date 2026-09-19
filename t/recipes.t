@@ -394,7 +394,7 @@ rejects_missing(
         smtp_host   => 'mail.test.test',
         smtp_user   => 'n@test.test',
         smtp_pass   => 'p',
-        smtp_domain => 'test.test',
+        smtp_from   => 'n@test.test',
         modules     => ['nginxproxy'],
     },
     'admin_password',
@@ -682,7 +682,7 @@ subtest 'matrix homeserver.yaml includes redis section when redis recipe is load
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',
         smtp_pass      => 'smtp-pass',
-        smtp_domain    => 'test.test',
+        smtp_from      => 'notify@test.test',
         redis_host     => '127.0.0.1',
         redis_port     => 6379,
         modules        => [ 'nginxproxy', 'redis' ],
@@ -706,7 +706,7 @@ subtest 'matrix homeserver.yaml omits redis section when redis recipe is not loa
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',
         smtp_pass      => 'smtp-pass',
-        smtp_domain    => 'test.test',
+        smtp_from      => 'notify@test.test',
         modules        => ['nginxproxy'],
     );
     my $out;
@@ -724,7 +724,7 @@ subtest 'matrix homeserver.yaml includes redis password when redis_password is s
         smtp_host      => 'mail.test.test',
         smtp_user      => 'notify@test.test',
         smtp_pass      => 'smtp-pass',
-        smtp_domain    => 'test.test',
+        smtp_from      => 'notify@test.test',
         redis_password => 'supersecret',
         modules        => [ 'nginxproxy', 'redis' ],
     );
