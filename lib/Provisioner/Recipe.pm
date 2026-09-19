@@ -88,16 +88,23 @@ the next, and a command that spans lines needs a C<\> at the end of each.  A
 heredoc cannot work at all.  Render the script through C<template_files> and
 install it.
 
-=item * Recipe lines run under C</bin/sh>, which is dash on Ubuntu, not bash.
-Dash has no brace expansion.  In dash, C<&E<gt>> starts a background job and
-then redirects.  It does not redirect both streams.
+=item * Recipe lines run under bash: F<makefile.tt> sets C<SHELL := /bin/bash>,
+and the first-boot package list installs it.  What make does not run has no
+such guarantee.  C<at> hands a job to C</bin/sh>, which is dash on Ubuntu, so a
+queued task stays POSIX: dash has no brace expansion, and in dash C<&E<gt>>
+starts a background job and then redirects rather than redirecting both
+streams.
 
 =back
 
-Fragments must be re-entrant, because the makefile runs with C<make -j>.  That
-is the purpose of C<deps>.  Everything that must happen first is declared up
-front and installed in one pass, so no target races to install its own
-packages.
+Fragments must be re-entrant.  A target's last line stamps it, so a target that
+fails leaves no stamp, and every line of it runs again on the next C<make> on
+that guest.  That is also the purpose of C<deps>: what a recipe needs is declared up
+front and installed in one pass, rather than by a target that has to ask
+whether it already did so.
+
+The guest runs plain C<make>, one target after another: see the C<make> line in
+F<ubuntu.setup.sh.tt>.  Issue #252 has what running it with C<-j> would take.
 
 =head3 Global and per-domain parts
 
@@ -138,9 +145,15 @@ settles.  A recipe comes before everything it requires, because C<lastuniq>
 keeps the last mention of a dependency and each recipe that requires it names
 it again.
 
-You cannot ask for a position.  If one thing must exist before another, use
-C<[% script_dir %]/queue_postrun_task>, or wait for it in your own fragment.
-Both work under C<make -j>, and an order does not.
+You cannot ask for a position.  The depsolver settles it, and only the order of
+the prerequisites of C<all> in F<makefile.tt> enforces it.  So a recipe may
+rely on the recipes that require it having run already, and on nothing else.
+That is how the C<perl> target installs from a checkout that C<tcms> made.
+
+If one thing must exist before another and the graph does not already say so,
+use C<[% script_dir %]/queue_postrun_task>, which runs after every target, or
+wait for it in your own fragment.  Both say what they need, and a position does
+not.
 
 =head3 Where a template is looked for
 

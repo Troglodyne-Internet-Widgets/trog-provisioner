@@ -1,8 +1,8 @@
 [%# trog-provisioner, on a guest that can run it.
 
-    A makefile fragment.  Each line runs in its own shell, which is dash, not
-    bash.  Write `$$` for what the shell expands, `\` on every continued line,
-    and no heredocs.  See Provisioner::Recipe.
+    A makefile fragment.  Each line runs in its own shell.  Write `$$` for what
+    the shell expands, `\` on every continued line, and no heredocs.  See
+    Provisioner::Recipe.
 
     No apostrophes in an Xslate comment.  The lexer reads one as the start of
     a string, and takes the template up to the next quote into it.

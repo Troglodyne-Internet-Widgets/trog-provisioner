@@ -1,7 +1,8 @@
 [%# Queued rather than run here: the provider is reached over the network, and
     the shortcut this reads the credential out of is installed by the lexicon
-    recipe, which make -j gives no ordering against.  The postrun runs after
-    every target, so both are settled by the time this goes.
+    recipe, which this one requires and which therefore runs after it.  The
+    postrun runs after every target, so both are settled by the time this
+    goes.
 
     Empty only where the hypervisor allocates the address and there is none to
     publish yet.  A guest serving its own zone gets this too -- see the recipe on

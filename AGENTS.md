@@ -153,7 +153,7 @@ Two traps, both of which fail silently:
 
 Templates generate makefile fragments:
 - No leading tabs (added automatically)
-- Must be re-entrant for parallel execution
+- Must be re-entrant: a target that fails leaves no stamp and runs again
 
 ## File Organization
 
