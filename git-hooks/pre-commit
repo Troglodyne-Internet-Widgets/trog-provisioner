@@ -56,6 +56,11 @@
 # Redirect output to stderr.
 exec 1>&2
 
+# The tests that skip unless these are set run too.  t/TESTING.md says which
+# tests those are.  git-hooks/post-commit sets them as well, so that the records
+# the choice is made from are of the tests as they run here.
+export AUTHOR_TESTING=1 RELEASE_TESTING=1
+
 # ACMR so that a file deleted in this commit is not handed to perltidy, which
 # would fail on a path that is no longer there.
 staged=$(git diff --cached --name-only --diff-filter=ACMR)

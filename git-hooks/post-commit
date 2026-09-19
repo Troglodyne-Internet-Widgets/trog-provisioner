@@ -8,8 +8,15 @@
 # to every test that loaded a changed file, and grows coarser with each commit.
 #
 # In the background, because it runs each stale test under Devel::Cover, and a
-# full refresh takes most of a minute.  Run tests-covering --refresh by hand to
-# catch up.
+# full refresh takes most of a minute.  Run it by hand to catch up, with the
+# same environment as below.
+#
+# AUTHOR_TESTING and RELEASE_TESTING as git-hooks/pre-commit sets them.  A test
+# that skips without them records only itself, and then the files it loads when
+# it does run choose nothing.  tests-covering does not take a change of
+# environment as a reason to run a test again, so records made without them stay
+# until the cache is removed.
+export AUTHOR_TESTING=1 RELEASE_TESTING=1
 #
 # Install it: cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 

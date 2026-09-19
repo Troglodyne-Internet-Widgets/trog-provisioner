@@ -63,6 +63,11 @@ All tests belong in `t/`
 Integration tests must skip unless the `RELEASE_TESTING` env var = 1
 Acceptance tests must skip unless  the `AUTHOR_TESTING` env var = 1
 
+The pre-commit hook sets both variables.  So a test behind either one runs on
+each commit that can break it, and must pass on the machine that commits.  Some
+tests need more than that machine, such as a guest.  Such a test must check for
+what it needs, and skip when that is not there.
+
 ## Approach to writing tests
 
 Load the system under test with either `use_ok()` for modules, or require\_ok() for modulino binaries. Only use `ok do ...` when testing nonmodlino scripts.

@@ -75,8 +75,9 @@ Trog::Credentials->remember( keepass => 'throwaway' );
 # Every recipe there is, by the name the configuration uses.  The Cookbook's
 # answer rather than a walk of the directory, which also found each distro
 # subclass under Ubuntu/ and so tested most recipes twice.  data is tested
-# first, on its own, below.
-my @available = grep { $_ ne 'data' } Provisioner::Cookbook->names();
+# first, on its own, below.  registrar is left out, because it is the
+# credentials for a zone that somebody else holds, and installs nothing to test.
+my @available = grep { $_ ne 'data' && $_ ne 'registrar' } Provisioner::Cookbook->names();
 
 my $tld     = 'test.test';
 my $aliases = join( ".$tld=data.$tld\n", @available ) . ".$tld=data.$tld";
@@ -138,13 +139,17 @@ my %recipes_raw = (
     # recipes now insist on the whole version, and why these fixtures have to
     # look like the real thing.
     imagemagick => { version => '7.1.0-48' },
-    mariadb     => {
+
+    # A password is not a thing a schema can default, and grubconf refuses to
+    # render nothing.  The same minimum t/recipes.t gives them.
+    grafana  => { admin_password => 's3cr3t' },
+    grubconf => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
+    mariadb  => {
         root_pw  => 's3cr3t',
         dumpfile => 'dump.sql',
         version  => '10.11.6',
     },
-    tpsgi       => { routers  => ['app.psgi'] },
-    tcms        => { tcms_dir => 'tcms' },
+    tpsgi       => { routers => ['app.psgi'] },
     adminconfig => {
         skel => "/$tmpdir/dotfiles",
     },
@@ -161,7 +166,6 @@ my %recipes_raw = (
         }
     },
     letsencrypt => {},
-    registrar   => { type    => 'route53', user => 'foo', key => 'bar' },
     pdns        => { api_key => 'test-api-key' },
     matrix      => {
         server_name    => 'test.test.test',
@@ -175,7 +179,8 @@ my %recipes_raw = (
         version => '1.6.0',
         modules => ['nginxproxy'],
     },
-    koan => {
+    grafanasyslog => { modules => ['grafana'] },
+    koan          => {
         user               => 'koan',
         koan_email         => 'koan@test.test',
         messaging_provider => 'telegram',
@@ -222,23 +227,19 @@ my %recipes_raw = (
     },
 );
 
-# Make each so-named domain to provision do nothing but provision its own stuff
+# Each domain provisions its own recipe, and the recipes that `modules` names
+# beside it, with the configuration each of those has here.  Beside it, not in
+# it: a recipe's configuration takes only its own fields.
+my %domains;
 foreach my $key ( 'data', @available ) {
-
-    # XXX ALSO re-do things such that recipes can inform their dependent recipes of what their required values are gonna be
-    if ( ref $recipes_raw{$key}{modules} eq 'ARRAY' ) {
-        my $modules = delete $recipes_raw{$key}{modules};
-        foreach my $module (@$modules) {
-            $recipes_raw{$key}{$module} = $recipes_raw{$module} // {};
-        }
-    }
-}
-foreach my $key ( 'data', @available ) {
-    my $data = delete $recipes_raw{$key} // {};
+    my %data    = %{ $recipes_raw{$key}    // {} };
+    my @modules = @{ delete $data{modules} // [] };
 
     # The domain is fully qualified; the recipe inside it is still the recipe.
-    $recipes_raw{"$key.$tld"} = { $key => $data };
+    $domains{"$key.$tld"} = { $key => \%data, map { $_ => $recipes_raw{$_} // {} } @modules };
 }
+delete @recipes_raw{ 'data', @available };
+%recipes_raw = ( %recipes_raw, %domains );
 $recipes_raw{_base} = {
     _global   => { user => 'test', data_source => "/$tmpdir/data", install_dir => "/$tmpdir/domains" },
     registrar => {
