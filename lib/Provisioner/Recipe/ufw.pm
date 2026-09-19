@@ -33,6 +33,14 @@ listens on.  The networks in C<admin_networks> are exempt from these limits.
 
 Forwards the ports in C<port_forwards>, if you give any.
 
+Refuses a configuration in which two recipes bind one port, before any target
+runs.  Each recipe claims its ports in C<listeners>, from its C<rate_limits>
+and its C<listens>.  See L<Provisioner::Recipe/listens>.  C<bin/new_config>
+adds the claims of the other domains on the same guest, so the check covers
+the guest and not only the domain.  The error names the port and the recipes
+that claim it.  A claim has no address, so a port is refused to a second
+recipe even on another address.  See L<Provisioner::Recipe/listens>.
+
 =cut
 
 =head2 %opts = $recipe->enrich(%opts)
@@ -109,6 +117,16 @@ sub args {
                 properties => {
                     22 => { type => 'integer', default => 64 },
                 },
+            },
+
+            # Which recipe binds each port, from Provisioner::Recipe/listens.
+            # Two recipes on one port is a service that cannot start.
+            listeners => {
+                type                 => 'object',
+                default              => {},
+                description          => 'The recipe that binds each port.  A port that two recipes claim is refused.',
+                propertyNames        => { pattern => '^\d+(?:/udp)?$' },
+                additionalProperties => { type    => 'object', maxProperties => 1 },
             },
 
             # Networks that are exempt from rate_limits.  enrich adds every

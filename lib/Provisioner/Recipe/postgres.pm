@@ -53,6 +53,16 @@ is whole, C<touch> its C<complete> file.
 
 =cut
 
+=head2 @ports = $recipe->listens()
+
+5432, where the packaged configuration listens, on loopback.
+
+=cut
+
+sub listens {
+    return qw{5432};
+}
+
 sub args {
     return (
         type       => 'object',

@@ -70,6 +70,16 @@ sub required_recipes {
     );
 }
 
+=head2 @ports = $recipe->listens()
+
+3000 on loopback, where nginx sends the requests for gogs.
+
+=cut
+
+sub listens {
+    return qw{3000};
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  One gogs is one site.  C<DOMAIN> and C<ROOT_URL> in F<app.ini> name it,

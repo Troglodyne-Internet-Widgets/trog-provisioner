@@ -490,4 +490,37 @@ subtest 'generate_files writes what template_files names' => sub {
     is( File::Slurper::read_text("$out/verbatim.conf"), 'left [% alone %]',    'and anything else is copied' );
 };
 
+subtest 'each port a recipe binds is claimed for it, from ufw' => sub {
+    {
+
+        package Provisioner::Recipe::claimant;
+        use parent -norequire, 'Provisioner::Recipe';
+        sub rate_limits { return ( 80 => 1024, '53/udp' => 64 ) }
+        sub listens { return ( '3000/tcp', 8086 ) }
+    }
+    {
+
+        package Provisioner::Recipe::quiet;
+        use parent -norequire, 'Provisioner::Recipe';
+        sub listens { return 5432 }
+    }
+
+    my %req = Provisioner::Recipe::required_recipes('Provisioner::Recipe::claimant');
+    ok( $req{ufw}, 'a recipe that binds ports requires ufw' ) or return;
+    my %ufw = $req{ufw}->();
+    is_deeply(
+        $ufw{listeners},
+        { 80 => { claimant => 1 }, '53/udp' => { claimant => 1 }, 3000 => { claimant => 1 }, 8086 => { claimant => 1 } },
+        'claiming what it rate limits and what it only binds, each under its own name, with tcp written bare'
+    );
+    is_deeply( $ufw{rate_limits}, { 80 => 1024, '53/udp' => 64 }, 'and the limits go along unchanged' );
+
+    my %quiet = Provisioner::Recipe::required_recipes('Provisioner::Recipe::quiet');
+    ok( $quiet{ufw}, 'a port with no limit still requires ufw' ) or return;
+    is_deeply( { $quiet{ufw}->() }, { rate_limits => {}, listeners => { 5432 => { quiet => 1 } } }, 'with the claim and no limits' );
+
+    my %none = Provisioner::Recipe::required_recipes('Provisioner::Recipe::nametest');
+    ok( !$none{ufw}, 'and a recipe that binds nothing does not' );
+};
+
 done_testing();
