@@ -59,6 +59,11 @@ that machine.  A backend without both of these cannot replace this one.
 
 our $DEFAULT_URI = 'qemu:///system';
 
+# Where a console capture is written on the hypervisor, and the pause a restart
+# leaves between stopping a domain and starting it again.
+our $CONSOLE_LOG_DIR = '/tmp';
+my $RESTART_SETTLE = 2;
+
 # The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
@@ -335,6 +340,180 @@ sub start_domain {
     return 1 if $domain->is_active();
     eval { $domain->create(); 1 } or die "Could not start $name: $@";
     return 1;
+}
+
+=head2 @actions = $hv->debug_actions()
+
+Every action of F<bin/debug_boot>.  The tool was written against libvirt, and
+each of its actions edits the definition of a domain, drives libguestfs on the
+hypervisor, or asks libvirt for a screen.
+
+=cut
+
+sub debug_actions { return qw{console fetch hold shot vnc keys restore cat ls single} }
+
+=head2 $xml = $hv->domain_definition($name)
+
+The definition of a domain, as libvirt would define it again.
+
+Inactive, so this is the definition and not the runtime state.  The runtime
+state has allocated devices and aliases that libvirt cannot define.
+
+Dies if there is no such domain.
+
+=cut
+
+sub domain_definition {
+    my ( $self, $name ) = @_;
+
+    my $domain = $self->_domain($name)
+      or die "No domain called $name on " . $self->describe . "\n";
+
+    return $domain->get_xml_description( Sys::Virt::Domain::XML_INACTIVE() );
+}
+
+=head2 $hv->restart_domain($name)
+
+Stops a domain and starts it again, so that it boots with the definition it has
+now.  Returns 1.
+
+=cut
+
+sub restart_domain {
+    my ( $self, $name ) = @_;
+
+    $self->stop_domain($name);
+
+    # The pause came with this code from bin/debug_boot, and no commit says what
+    # it is for.  qemu is still tearing the guest down when destroy returns, so
+    # it is left in place.
+    sleep $RESTART_SETTLE;
+    $self->start_domain($name);
+
+    return 1;
+}
+
+=head2 $path = $hv->console_log_path($name)
+
+Where the console of this domain is captured on the hypervisor.
+
+=cut
+
+sub console_log_path { my ( $self, $name ) = @_; return "$CONSOLE_LOG_DIR/$name-console.log" }
+
+=head2 $restarted = $hv->console_capture($name, wait =E<gt> $seconds)
+
+Points the serial port of the domain at C<console_log_path> and restarts it, so
+that the capture starts at the first line of the firmware.  Waits C<$seconds>
+for the guest to boot, and returns 1: libvirt cannot read the output of a boot
+that already happened.
+
+Dies if the domain already writes its console to a file, which C<console_output>
+reads and C<console_capture_off> undoes, or if it has no C<pty> serial port.
+
+=cut
+
+sub console_capture {
+    my ( $self, $name, %opts ) = @_;
+
+    my $xml = $self->domain_definition($name);
+    my $log = $self->console_log_path($name);
+
+    die "$name already logs its console to a file.  Read that capture rather than\n" . "starting another, and put the serial port back before capturing again.\n"
+      if index( $xml, q{<serial type='file'} ) >= 0;
+
+    # libvirt writes the serial output directly to this file.  Nothing must hold
+    # a pty open.
+    $xml =~ s{<serial[ ]type='pty'>}{<serial type='file'><source path='$log'/>}
+      or die "$name has no pty serial port to redirect.\n";
+
+    $self->define_domain($xml);
+    $self->restart_domain($name);
+
+    sleep( $opts{wait} // 0 );
+    return 1;
+}
+
+=head2 $hv->console_capture_off($name)
+
+Puts the serial port back to a C<pty>, undoing C<console_capture>.  Returns 1.
+
+The domain has to be restarted for it to take effect.
+
+=cut
+
+sub console_capture_off {
+    my ( $self, $name ) = @_;
+
+    my $xml = $self->domain_definition($name);
+    my $log = $self->console_log_path($name);
+
+    # libvirt reformats the XML and puts <source> on a line of its own.  The
+    # match is on the log path, because that is the part that is ours.
+    $xml =~ s{<serial[ ]type='file'>\s*<source[ ]path='\Q$log\E'\s*/>}{<serial type='pty'>};
+
+    $self->define_domain($xml);
+    return 1;
+}
+
+=head2 $text = $hv->console_output($name)
+
+What C<console_capture> has captured, or undef if the file is not there or is
+empty.
+
+=cut
+
+sub console_output {
+    my ( $self, $name ) = @_;
+
+    # sudo, because libvirt writes the file as root.
+    my $log = $self->console_log_path($name);
+    return $self->capture_cmd("sudo cat '$log'") || undef;
+}
+
+=head2 ($advice, $port) = $hv->vnc_access($name)
+
+The VNC port of the domain, and how to reach it.  The display listens on the
+loopback of the hypervisor, so the advice is the ssh tunnel to it.
+
+Dies if there is no such domain, or if it has no display with a port.  A
+display with C<autoport='yes'> has C<port='-1'> until the domain runs.
+
+=cut
+
+sub vnc_access {
+    my ( $self, $name ) = @_;
+
+    my $domain = $self->_domain($name)
+      or die "No domain called $name on " . $self->describe . "\n";
+
+    my $port = _vnc_port( $domain->get_xml_description() )
+      or die "$name has no display to connect to.\n";
+
+    my $through = $self->ssh_target // 'localhost';
+    my $advice  = <<"TUNNEL";
+$name has VNC on port $port, on the hypervisor's loopback.
+
+  ssh -N -L $port:127.0.0.1:$port $through
+  then point a VNC client at 127.0.0.1:$port
+
+TUNNEL
+
+    return ( $advice, $port );
+}
+
+# The port of the VNC display in the live definition of a domain, or undef when
+# there is no VNC display with a port of its own yet.
+sub _vnc_port {
+    my ($xml) = @_;
+
+    foreach my $graphics ( $xml =~ m{<graphics\b[^>]*>}g ) {
+        next if index( $graphics, q{type='vnc'} ) < 0;
+        my ($port) = $graphics =~ m{\bport='(-?\d+)'};
+        return $port if defined $port && $port > 0;
+    }
+
+    return undef;
 }
 
 =head2 domain_uuid($name)

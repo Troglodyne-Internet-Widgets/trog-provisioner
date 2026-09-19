@@ -413,6 +413,44 @@ addresses do not come from the pool.
 sub builds_by_api     { return 0 }
 sub manages_addresses { return 0 }
 
+=head2 @actions = $hv->debug_actions()
+
+The actions of F<bin/debug_boot> that this backend can do, named as the options
+are: C<console>, C<fetch>, C<hold>, C<shot>, C<vnc>, C<keys>, C<restore>,
+C<cat>, C<ls>, C<single>.
+
+Empty by default, so a backend that says nothing debugs nothing and the tool
+refuses before it touches the guest.  A backend that names an action
+implements the methods below that the action uses.
+
+=cut
+
+sub debug_actions { return () }
+
+=head2 $restarted = $hv->console_capture($domain, wait =E<gt> $seconds)
+
+Makes the console of C<$domain> readable by C<console_output>, and
+returns whether it restarted the guest to do it.
+
+A backend that has to redirect the console restarts the guest, waits
+C<$seconds> for it to boot, and returns true.  A backend that keeps the console
+of every guest does nothing and returns false.
+
+=head2 $text = $hv->console_output($domain)
+
+What the console of C<$domain> has printed, as text, or undef if there is none
+to read.
+
+=head2 ($advice, $value) = $hv->vnc_access($domain)
+
+How to reach the display of C<$domain>.  C<$advice> is text for the operator,
+which names what stands between them and the display, such as an ssh tunnel.
+C<$value> is the one thing a caller can act on: a port, or a URL.
+
+Dies if the guest has no display.
+
+=cut
+
 =head1 WHAT EVERY BACKEND ANSWERS
 
 This class declares these methods, so a backend that leaves one out gets an
@@ -460,6 +498,9 @@ sub clear_guest           ( $self, @ ) { return $self->_abstract('clear_guest') 
 sub rollback_possible     ( $self, @ ) { return $self->_abstract('rollback_possible') }
 sub provision_guest       ( $self, @ ) { return $self->_abstract('provision_guest') }
 sub would_provision       ( $self, @ ) { return $self->_abstract('would_provision') }
+sub console_capture       ( $self, @ ) { return $self->_abstract('console_capture') }
+sub console_output        ( $self, @ ) { return $self->_abstract('console_output') }
+sub vnc_access            ( $self, @ ) { return $self->_abstract('vnc_access') }
 
 =head2 $name = $hv->snapshot_before_rebuild($domain, capacity =E<gt> $bytes)
 

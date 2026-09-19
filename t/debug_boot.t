@@ -7,13 +7,14 @@ use re '/aasx';
 
 =head1 NAME
 
-t/debug_boot.t - bin/debug_boot: the XML it rewrites, and the grub line it edits
+t/debug_boot.t - bin/debug_boot: what it refuses, what it rewrites, and the
+grub line it edits
 
 =cut
 
 use Test::More;
 use Test::Fatal      qw{exception};
-use Capture::Tiny    qw{capture_stdout};
+use Capture::Tiny    qw{capture capture_stdout};
 use Test::MockModule qw{strict};
 
 use File::Temp();
@@ -30,7 +31,8 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 # Test::MockModule in strict mode has methods to find.  The backend rather than
 # Trog::HV, because that is where the libvirt methods these mocks replace live,
 # and Trog::HV requires it lazily.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();      ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports) -- the backend whose refusal is under test
 
 my $script = "$FindBin::Bin/../bin/debug_boot";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
@@ -69,57 +71,80 @@ sub domain_xml {
 XML
 }
 
-# Every one of these drives libvirt; what is under test is the rewriting, so
-# libvirt is a place the XML goes and comes back from.
+# The actions below drive libvirt through Trog::HV::Libvirt; what is under test
+# is what the script does with the XML, so the backend is a place the XML goes
+# and comes back from.  domain_definition gives back what was last defined,
+# because libvirt does.
 sub with_domain {
     my ( $xml, $code ) = @_;
 
-    # These are subs in the script, not methods on Trog::HV.
     my %seen = ( defined => undef, restarted => 0 );
-    my $bin  = Test::MockModule->new( 'Trog::Bin::DebugBoot', no_auto => 1 );
-    $bin->redefine( definition => sub { $xml } );
-    $bin->redefine( redefine   => sub { $seen{defined} = $_[2]; 1 } );
-    $bin->redefine( restart    => sub { $seen{restarted}++;     1 } );
+    my $hv   = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( domain_definition => sub { $seen{defined} // $xml } );
+    $hv->redefine( define_domain     => sub { $seen{defined} = $_[1]; 1 } );
+    $hv->redefine( restart_domain    => sub { $seen{restarted}++;     1 } );
 
-    $code->( \%seen, $bin );
+    my $bin = Test::MockModule->new( 'Trog::Bin::DebugBoot', no_auto => 1 );
+    $code->( \%seen, $bin, $hv );
     return \%seen;
 }
 
-subtest 'the console log goes where the guest can be found by name' => sub {
-    is( Trog::Bin::DebugBoot::log_path('vm.test'), '/tmp/vm.test-console.log', 'one file per guest' );
-};
+subtest 'an action the backend cannot do is refused before the guest is touched' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::OpenStack');
+    $hv->redefine( describe => sub { 'the OpenStack cloud test' } );
+    my $cloud = bless( {}, 'Trog::HV::OpenStack' );
 
-subtest '--console points the serial at a file' => sub {
-    my $seen = with_domain(
-        domain_xml(),
-        sub {
-            my ( undef, $bin ) = @_;
-            $bin->redefine( fetch => sub { 0 } );
+    ok( Trog::Bin::DebugBoot::refuse_unsupported( $cloud, 'console' ), 'an action it can do goes ahead' );
 
-            # Not actually waiting out the boot.
-            no warnings 'redefine';    ## no critic (ProhibitNoWarningsRedefine)
-            Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 0 } );
-        }
+    my $err = exception { Trog::Bin::DebugBoot::refuse_unsupported( $cloud, 'single' ) };
+    like( $err, qr/cannot[ ]--single/,              'and one it cannot is refused' );
+    like( $err, qr/the[ ]OpenStack[ ]cloud[ ]test/, 'naming the backend' );
+    like( $err, qr/--console.*--fetch.*--vnc/,      'and what it can do there' );
+
+    # A backend that says nothing debugs nothing, rather than failing later with
+    # an error about libguestfs.
+    my $silent = Test::MockModule->new('Trog::HV::Libvirt');
+    $silent->redefine( debug_actions => sub { () } );
+    $silent->redefine( describe      => sub { 'hv.test' } );
+    like(
+        exception { Trog::Bin::DebugBoot::refuse_unsupported( bless( {}, 'Trog::HV::Libvirt' ), 'console' ) },
+        qr/can[ ]debug[ ]nothing[ ]there/, 'a backend that lists none says so'
     );
-
-    like( $seen->{defined}, qr{<serial[ ]type='file'>},                        'the serial is a file now' );
-    like( $seen->{defined}, qr{<source[ ]path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
-    unlike( $seen->{defined}, qr{<serial[ ]type='pty'>}, 'and is no longer a pty' );
-    is( $seen->{restarted}, 1, 'restarted, because the boot we want has not happened yet' );
 };
 
-subtest '--console refuses a guest already set up for it' => sub {
-    my $xml = domain_xml( file => '/tmp/vm.test-console.log' );
-    my $err = exception {
-        with_domain(
-            $xml,
-            sub {
-                Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 0 } );
-            }
-        );
-    };
-    like( $err, qr/already[ ]logs[ ]its[ ]console[ ]to[ ]a[ ]file/, 'says so' );
-    like( $err, qr/--fetch/,                                        'and what to use instead' );
+subtest '--console asks the backend to capture, and says whether it restarted' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    my %asked;
+    $hv->redefine( console_capture => sub { my ( undef, $name, %o ) = @_; %asked = ( name => $name, %o ); return 1 } );
+
+    my $bin = Test::MockModule->new( 'Trog::Bin::DebugBoot', no_auto => 1 );
+    $bin->redefine( fetch => sub { 0 } );
+
+    my ( undef, $err ) = capture { Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 7 } ) };
+    is( $asked{name}, 'vm.test', 'the guest it was given' );
+    is( $asked{wait}, 7,         'and how long to let it boot' );
+    like( $err, qr/Restarted[ ]it/, 'a backend that restarts the guest says so' );
+
+    $hv->redefine( console_capture => sub { 0 } );
+    ( undef, $err ) = capture { Trog::Bin::DebugBoot::console( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { wait => 7 } ) };
+    like( $err, qr/Nothing[ ]was[ ]restarted/, 'and one that keeps the console says that instead' );
+};
+
+subtest '--fetch writes what the backend read, and says when there is none' => sub {
+    my $dir = File::Temp::tempdir( CLEANUP => 1 );
+    my $hv  = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( console_output => sub { "one\ntwo\nthree\n" } );
+    $hv->redefine( describe       => sub { 'hv.test' } );
+
+    my ( $out, undef, $rc ) = capture { Trog::Bin::DebugBoot::fetch( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', { into => "$dir/console.log" } ) };
+    is( $rc,                                          0,                    'it succeeds' );
+    is( $out,                                         "$dir/console.log\n", 'and prints the file it wrote' );
+    is( File::Slurper::read_text("$dir/console.log"), "one\ntwo\nthree\n",  'which holds what the backend read' );
+
+    $hv->redefine( console_output => sub { undef } );
+    my ( undef, $err, $none ) = capture { Trog::Bin::DebugBoot::fetch( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test', {} ) };
+    is( $none, 1, 'no console output is a failure' );
+    like( $err, qr/No[ ]console[ ]output[ ]for[ ]vm[.]test[ ]on[ ]hv[.]test/, 'naming the guest and where it looked' );
 };
 
 subtest '--hold adds a boot menu, once' => sub {
@@ -157,9 +182,8 @@ subtest '--restore undoes both, through what libvirt gives back' => sub {
     my $seen = with_domain(
         $xml,
         sub {
-            my ( undef, $bin ) = @_;
+            my ( undef, $bin, $hv ) = @_;
             $bin->redefine( guest_tool => sub { ( q{}, 0 ) } );
-            my $hv = Test::MockModule->new('Trog::HV::Libvirt');
             $hv->redefine( vmm => sub { undef } );
             Trog::Bin::DebugBoot::restore( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' );
         }
@@ -230,26 +254,18 @@ sub with_vmm {
     return $hv;
 }
 
-subtest 'the vnc port comes out of the live definition' => sub {
-    my $mock = with_vmm( dom => FakeDom->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) );
+subtest '--vnc prints what the backend says to act on, and its advice' => sub {
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( vnc_access => sub { ( "tunnel to it like this\n", 5910 ) } );
 
-    my ($out) = capture_stdout { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
+    my ( $out, $err ) = capture { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
+    is( $out, "5910\n",                   'the one thing a caller can act on goes to stdout' );
+    is( $err, "tunnel to it like this\n", 'and the advice to the operator goes to stderr' );
 
-    is( $out, "5910\n", 'the port libvirt allocated, as libvirt reports it' );
-};
-
-subtest 'a domain with no running display says so' => sub {
-
-    # Measured on libvirt 10.0.0: an autoport display reads port='-1' until the
-    # domain is running.  That is the absence of a port, not port -1.
-    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>}), undef, 'port -1 is no port' );
-    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics type='spice' port='5901'>}),                               undef, 'and a display that is not vnc is not this one' );
-    is( Trog::Bin::DebugBoot::vnc_port(q{<graphics port='5905' type='vnc'>}),                                 5905,  'in whichever order the attributes come' );
-
-    my $mock = with_vmm( dom => FakeDom->new( xml => q{<graphics type='vnc' port='-1'>} ) );
-    my $err  = exception { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
-    ok( $err, 'vnc stops rather than printing a port' );
-    like( $err, qr/has[ ]no[ ]display[ ]to[ ]connect[ ]to/, 'and says why' );
+    # A cloud hands out a URL instead, and the script prints that the same way.
+    $hv->redefine( vnc_access => sub { ( "open this\n", 'https://cloud.test/vnc?token=x' ) } );
+    ($out) = capture { Trog::Bin::DebugBoot::vnc( bless( {}, 'Trog::HV::Libvirt' ), 'vm.test' ) };
+    is( $out, "https://cloud.test/vnc?token=x\n", 'whatever shape it is' );
 };
 
 subtest 'a screenshot is streamed straight here, and named for what it is' => sub {

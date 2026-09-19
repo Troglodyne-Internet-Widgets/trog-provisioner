@@ -570,4 +570,39 @@ subtest 'what it refuses to pretend to' => sub {
     }
 };
 
+subtest 'what bin/debug_boot can ask a cloud for' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new( servers => [ { id => 's1', name => 'vm.example.com', status => 'ACTIVE' } ] );
+
+    is_deeply [ sort $hv->debug_actions ], [qw{console fetch vnc}], 'the three Nova answers, and not the ones that need a disk or a domain';
+    is $hv->console_capture( 'vm.example.com', wait => 45 ), 0, 'nothing is restarted to read a console the cloud already keeps';
+
+    my @asked;
+    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return { output => "[    0.000000] Linux version 6.8.0\n" } } );
+
+    is $hv->console_output('vm.example.com'), "[    0.000000] Linux version 6.8.0\n", 'the console log comes back as text';
+    is_deeply $asked[0], [ POST => '/servers/s1/action', { 'os-getConsoleOutput' => { length => 5000 } } ],
+      'asked of the server, for enough lines to hold a boot';
+
+    $mock->redefine( _nova => sub { return {} } );
+    is $hv->console_output('vm.example.com'), undef, 'a server with no console output says none rather than an empty file';
+
+    @asked = ();
+    $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return { remote_console => { type => 'novnc', url => 'https://cloud.test/vnc_auto.html?token=abc' } } } );
+
+    my ( $advice, $url ) = $hv->vnc_access('vm.example.com');
+    is $url, 'https://cloud.test/vnc_auto.html?token=abc', 'the console URL is the thing to act on';
+    like $advice, qr/Open[ ]this[ ]in[ ]a[ ]browser/, 'and the advice says what to do with it';
+    like $advice, qr/expires[ ]the[ ]token/,          'and that it does not keep';
+    is_deeply $asked[0], [ POST => '/servers/s1/remote-consoles', { remote_console => { protocol => 'vnc', type => 'novnc' } }, '2.6' ],
+      'asked through remote-consoles, at the microversion that has it';
+
+    $mock->redefine( _nova => sub { return {} } );
+    like exception { $hv->vnc_access('vm.example.com') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'a server the cloud gives no URL for says so';
+
+    like exception { $hv->console_output('gone.example.com') }, qr/no[ ]guest[ ]called[ ]'gone\Nexample\Ncom'/, 'and a server that is not there is named';
+
+    $mock->unmock('_nova');
+};
+
 done_testing();
