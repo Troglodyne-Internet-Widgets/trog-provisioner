@@ -62,7 +62,6 @@ sub makefile {
             fragments              => { perl => "echo perl\n" },
             global_fragments       => {},
             data_fragment          => "echo data\n",
-            packages               => [],
             testdeps               => [],
             testdeps_flags         => [],
             full_aliases           => [],
