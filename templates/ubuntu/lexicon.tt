@@ -1,6 +1,7 @@
 [%# One shortcut for each domain, rendered from the recipe that holds its zone
     (see Provisioner::DNSRecipe/credentials_for).  Only this recipe writes it,
-    because two recipes that write one file race under make -j. -%]
+    because the second of two recipes that write one file replaces what the
+    first wrote. -%]
 mkdir -p /opt/lexicon; /bin/true
 [%# On an older guest this path is a directory with one shortcut per provider.
     mv onto a directory puts the file inside it, so remove the directory first. -%]
