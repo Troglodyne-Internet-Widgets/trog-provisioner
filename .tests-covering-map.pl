@@ -30,6 +30,11 @@ F<templates/tests/>.  Each name is looked for in every directory of
 C<template_dirs>.  F<templates/makefile.tt> stands for F<bin/new_config>, which
 renders it.
 
+=item F<openssl.conf>
+
+It stands for F<bin/new_config>, which copies it into the configuration of
+every domain, for the ssl target of the makefile.
+
 =item A script under F<scripts/>
 
 A script that starts with C<#!/usr/bin/perl> runs on the system perl, which
@@ -140,6 +145,9 @@ return sub {
     }
 
     return _tests_that_name($path) if $path =~ m{\Ascripts/[^/]+\z};
+
+    # bin/new_config copies it into the configuration of every domain.
+    return 'bin/new_config' if $path eq 'openssl.conf';
 
     return 'lib/Provisioner/Cookbook.pm' if $path =~ m{\Alib/Provisioner/Recipe/.+[.]pm\z};
 
