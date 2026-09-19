@@ -28,7 +28,7 @@ preflight - say whether a throwaway guest can be built, before any time is spent
 =head1 SYNOPSIS
 
     bin/preflight
-    bin/preflight --connect qemu+ssh://root@hv/system
+    bin/preflight --hypervisor hv1
 
 =head1 DESCRIPTION
 
@@ -49,9 +49,11 @@ Exits 0 when a run is worth starting and 1 when it is not.
 
 =over 4
 
-=item B<--connect> URI
+=item B<--hypervisor> NAME
 
-Check this hypervisor instead of the one that the fleet picks.
+Check the hypervisor that F<hypervisors.conf> calls NAME, instead of the one
+the fleet picks.  It dies when the file does not name it, and says which names
+it has.
 
 =item B<--hvconf> FILE
 
@@ -65,16 +67,16 @@ of L<Trog::Config>.
 sub main {
     my @args = @_;
 
-    my ( $uri, $hvconf, $help );
+    my ( $hv_name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
-        'connect=s' => \$uri,
-        'hvconf=s'  => \$hvconf,
-        'help'      => \$help,
-    );
+        'hypervisor=s' => \$hv_name,
+        'hvconf=s'     => \$hvconf,
+        'help'         => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    my $hv = hypervisor( $uri, $hvconf );
+    my $hv = hypervisor( $hv_name, $hvconf );
     return 1 unless $hv;
 
     print "Hypervisor: " . $hv->uri . "\n\n";
@@ -140,16 +142,18 @@ sub seed_admin_keys {
 }
 
 sub hypervisor {
-    my ( $uri, $hvconf ) = @_;
+    my ( $hv_name, $hvconf ) = @_;
 
     my $hv = eval {
-        return Trog::HV->new( uri => $uri ) if $uri;
-
         my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
-        return Trog::HV->new() unless $fleet->configured;
 
-        my ($name) = $fleet->names();
-        return $fleet->hypervisor($name);
+        # A name is answered from the fleet, and the lack of one is this
+        # machine.  A name with no fleet to look it up in is neither.
+        die "No hypervisors are configured in " . $fleet->{path} . ", so there is no '$hv_name' to check.\n"
+          if defined $hv_name && !$fleet->configured;
+
+        return Trog::HV->new() unless $fleet->configured;
+        return $fleet->hypervisor( $hv_name // ( $fleet->names )[0] );
     };
 
     print "Could not work out which hypervisor to use: $@" unless $hv;

@@ -52,7 +52,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--connect=uri] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -73,8 +73,8 @@ The --hvconf option names the fleet definition that chooses the hypervisor of a
 new guest.  The default is F</etc/trog-provisioner/hypervisors.conf>.  See
 L<Trog::Hypervisors>.
 
-The --connect option names the hypervisor by its libvirt URI, and the fleet is
-not asked.  The --domaindir option names the directory that the configuration
+The --hypervisor option names one hypervisor in the fleet definition, and the
+search is not done.  The --domaindir option names the directory that the configuration
 of each domain goes in, instead of the one that the hypervisor names.
 F<bin/provision> passes both when it gets them.
 
@@ -206,7 +206,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $cfile, $sfile, $pfile, $hvconf, $connect, $domaindir, $skip_ssh, $dryrun );
+our ( $cfile, $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
@@ -270,20 +270,20 @@ sub main {
     # Clear the gaps and the hypervisor options of the last run, because a
     # process can call main() more than once.
     %SALVAGE_GAPS = ();
-    undef $_ for $hvconf, $connect, $domaindir;
+    undef $_ for $hvconf, $hv_name, $domaindir;
 
     my $credentials;
     GetOptionsFromArray(
         \@args,
-        'ipmap=s'     => \$cfile,
-        'secrets=s'   => \$sfile,
-        'recipes=s'   => \$pfile,
-        'hvconf=s'    => \$hvconf,
-        'connect=s'   => \$connect,
-        'domaindir=s' => \$domaindir,
-        'skip_ssh'    => \$skip_ssh,
-        'credentials' => \$credentials,
-        'dryrun'      => \$dryrun,
+        'ipmap=s'      => \$cfile,
+        'secrets=s'    => \$sfile,
+        'recipes=s'    => \$pfile,
+        'hvconf=s'     => \$hvconf,
+        'hypervisor=s' => \$hv_name,
+        'domaindir=s'  => \$domaindir,
+        'skip_ssh'     => \$skip_ssh,
+        'credentials'  => \$credentials,
+        'dryrun'       => \$dryrun,
     );
 
     # The password of the secrets database, for a run with no terminal.  See
@@ -449,7 +449,7 @@ sub handle_domain {
     # placement needs.
     $hv //= Trog::Hypervisors->choose(
         $domain,
-        uri         => $connect,
+        hypervisor  => $hv_name,
         hvconf      => $hvconf,
         domain_dir  => $domaindir,
         config      => $global_config,

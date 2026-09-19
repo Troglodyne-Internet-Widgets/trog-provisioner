@@ -58,11 +58,11 @@ sub main_restore (@args) { return Trog::Bin::Restore::main( '--hvconf', $NO_FLEE
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section( "$FindBin::Bin/../bin/restore", 'SYNOPSIS|OPTIONS' );
-like( $synopsis, qr/--latest/,  'POD documents --latest' );
-like( $synopsis, qr/--oldest/,  'POD documents --oldest' );
-like( $synopsis, qr/--name/,    'POD documents --name' );
-like( $synopsis, qr/--connect/, 'POD documents --connect' );
-like( $synopsis, qr/DOMAIN/,    'POD documents the DOMAIN argument' );
+like( $synopsis, qr/--latest/,     'POD documents --latest' );
+like( $synopsis, qr/--oldest/,     'POD documents --oldest' );
+like( $synopsis, qr/--name/,       'POD documents --name' );
+like( $synopsis, qr/--hypervisor/, 'POD documents --hypervisor' );
+like( $synopsis, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
 
 # No domain, and no mode, both exit non-zero with the usage.  These have to be
 # real runs, since pod2usage exits rather than dying.
@@ -210,7 +210,7 @@ sub _make_conf {
     like( $connected->ssh_key, qr{myvm\.lan/key\.rsa}, 'with the domain key' );
 }
 
-# --connect reaches the hypervisor object
+# --hypervisor reaches the hypervisor object
 {
     my $tmpdir = tempdir( CLEANUP => 1 );
     _make_conf( $tmpdir, 'myvm.lan', admin_user => 'ubuntu', ips => '10.0.0.5' );
@@ -222,11 +222,12 @@ sub _make_conf {
     my $guest_mock = Test::MockModule->new('Trog::Guest');
     $guest_mock->redefine( wait_for_ssh => sub { return $_[0] } );
 
+    File::Slurper::Temp::write_text( "$tmpdir/hypervisors.conf", "[hv1]\nlibvirt_uri=qemu+ssh://hv1/system\n" );
     main_restore(
-        qw{--latest --connect qemu+ssh://hv1/system --domaindir},
-        $tmpdir, 'myvm.lan'
+        qw{--latest --hypervisor hv1 --hvconf}, "$tmpdir/hypervisors.conf",
+        '--domaindir', $tmpdir, 'myvm.lan'
     );
-    is( $seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we asked for' );
+    is( $seen, 'qemu+ssh://hv1/system', 'snapshots are looked up on the hypervisor we named' );
 }
 
 sub _run {

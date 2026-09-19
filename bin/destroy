@@ -32,19 +32,19 @@ destroy - remove a provisioned VM
     destroy --orphans [--dryrun]
 
     destroy vm.example.com
-    destroy --purge --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    destroy --purge --hypervisor hv1 vm.example.com
     destroy --purge --purge-data vm.test
 
 =head1 OPTIONS
 
 =over 4
 
-=item B<--connect> URI
+=item B<--hypervisor> NAME
 
-The libvirt connection string of the hypervisor that holds the domain.  With
-it, destroy does not search the fleet (see C<--hvconf>) and goes to that
-hypervisor.  Name a remote hypervisor with an ssh transport
-(C<qemu+ssh://user@host/system>).
+The name of a hypervisor in F<hypervisors.conf>, when you know which one holds
+the domain.  With it, destroy does not search the fleet (see C<--hvconf>) and
+goes to that hypervisor.  It dies when the file does not name it, and says
+which names it has.
 
 =item B<--hvconf> FILE
 
@@ -136,21 +136,21 @@ sub main {
 
     umask 0022;
 
-    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $uri, $domain_dir, $hvconf );
+    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf );
     GetOptionsFromArray(
         \@args,
-        'domaindir=s' => \$domain_dir,
-        'purge'       => \$purge,
-        'purge-data'  => \$purge_data,
-        'orphans'     => \$orphans,
-        'backups'     => \$backups,
-        'dryrun'      => \$dryrun,
-        'connect=s'   => \$uri,
-        'hvconf=s'    => \$hvconf,
+        'domaindir=s'  => \$domain_dir,
+        'purge'        => \$purge,
+        'purge-data'   => \$purge_data,
+        'orphans'      => \$orphans,
+        'backups'      => \$backups,
+        'dryrun'       => \$dryrun,
+        'hypervisor=s' => \$hv_name,
+        'hvconf=s'     => \$hvconf,
     );
 
-    return sweep_orphans( $uri, $hvconf, $dryrun ) if $orphans;
-    return sweep_backups( $uri, $hvconf, $dryrun ) if $backups;
+    return sweep_orphans( $hv_name, $hvconf, $dryrun ) if $orphans;
+    return sweep_backups( $hv_name, $hvconf, $dryrun ) if $backups;
 
     my $domain = shift @args;
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
@@ -166,9 +166,21 @@ sub main {
     # remove what is on this side: the domain directory, the authorized key and
     # the address.  If this stops here, the address stays reserved for a domain
     # that nobody has.
-    my $hosted = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir ) };
-    my $err    = $@;
-    my $hv     = $hosted;
+    #
+    # A hypervisor that was named is not that case.  The name is either in the
+    # fleet or a typing error, and a typing error must stop rather than fall
+    # through to this machine and remove what is on this side.
+    my %where = ( hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir );
+    my ( $hosted, $err );
+    if ( defined $hv_name ) {
+        $hosted = Trog::Hypervisors->find( $domain, %where );    # dies on a name the fleet has not got
+    }
+    else {
+        $hosted = eval { Trog::Hypervisors->find( $domain, %where ) };
+        $err    = $@;
+    }
+
+    my $hv = $hosted;
     unless ($hv) {
 
         # Print the reason too.  "Nothing has it" reads the same for a shared
@@ -476,7 +488,22 @@ sub purge_data_dir {
     return;
 }
 
-=head2 sweep_backups($uri, $hvconf, $dryrun)
+=head2 @hvs = _sweep_hypervisors($hv_name, $hvconf)
+
+The hypervisors a sweep looks at: the one that C<$hv_name> names, or every one
+in the fleet.  Dies if the fleet does not name it.
+
+=cut
+
+sub _sweep_hypervisors {
+    my ( $hv_name, $hvconf ) = @_;
+
+    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path );
+    return ( $fleet->hypervisor($hv_name) ) if defined $hv_name;
+    return $fleet->hypervisors;
+}
+
+=head2 sweep_backups($hv_name, $hvconf, $dryrun)
 
 Remove the disks that C<bin/provision --clone-on-nonreusable> copied aside.
 Returns 0 if it removed every copy, found none, or C<$dryrun> is true.  Returns
@@ -511,9 +538,9 @@ backend dies, and nothing here catches it.
 =cut
 
 sub sweep_backups {
-    my ( $uri, $hvconf, $dryrun ) = @_;
+    my ( $hv_name, $hvconf, $dryrun ) = @_;
 
-    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
+    my @hvs = _sweep_hypervisors( $hv_name, $hvconf );
 
     my %found;
     foreach my $hv (@hvs) {
@@ -549,7 +576,7 @@ sub sweep_backups {
     return $removed == $count ? 0 : 1;
 }
 
-=head2 sweep_orphans($uri, $hvconf, $dryrun)
+=head2 sweep_orphans($hv_name, $hvconf, $dryrun)
 
 The sweep that C<--orphans> runs, over the directories that C<sweep_roots>
 returns.  See C<--orphans> for what it removes.  Returns 1 if there was nowhere
@@ -559,9 +586,9 @@ holds.
 =cut
 
 sub sweep_orphans {
-    my ( $uri, $hvconf, $dryrun ) = @_;
+    my ( $hv_name, $hvconf, $dryrun ) = @_;
 
-    my @hvs = $uri ? ( Trog::HV->new( uri => $uri ) ) : Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path )->hypervisors;
+    my @hvs = _sweep_hypervisors( $hv_name, $hvconf );
 
     # Ask the hypervisor, not libvirt, because a cloud has no libvirt.  It
     # answers from Nova.

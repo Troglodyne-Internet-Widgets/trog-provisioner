@@ -91,14 +91,14 @@ sub main_with {
 }
 
 subtest 'the command line reaches the choice' => sub {
-    my $asked = choices( main_with( qw{--hvconf /bogus/fleet.conf --connect qemu+ssh://root@hv.test.test/system --domaindir /bogus/elsewhere}, 'vm.test.test' ) );
+    my $asked = choices( main_with( qw{--hvconf /bogus/fleet.conf --hypervisor hv1 --domaindir /bogus/elsewhere}, 'vm.test.test' ) );
     my $vm    = $asked->{'vm.test.test'};
 
-    is( $vm->{hvconf},         '/bogus/fleet.conf',                   '--hvconf' );
-    is( $vm->{uri},            'qemu+ssh://root@hv.test.test/system', '--connect' );
-    is( $vm->{domain_dir},     '/bogus/elsewhere',                    '--domaindir' );
-    is( $vm->{config}{cpus},   2,                                     'and the _global of the domain' );
-    is( $vm->{config}{memory}, 2048,                                  'with what _base gives it' );
+    is( $vm->{hvconf},         '/bogus/fleet.conf', '--hvconf' );
+    is( $vm->{hypervisor},     'hv1',               '--hypervisor' );
+    is( $vm->{domain_dir},     '/bogus/elsewhere',  '--domaindir' );
+    is( $vm->{config}{cpus},   2,                   'and the _global of the domain' );
+    is( $vm->{config}{memory}, 2048,                'with what _base gives it' );
     ok( !defined $vm->{host}, 'a domain with its own machine names no host' );
 
     # main runs once for each call in bin/provision, and a later call must not

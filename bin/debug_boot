@@ -132,10 +132,11 @@ Where C<--console>, C<--fetch>, C<--shot> and C<--cat> write what they read.
 Each one prints the path.  C<--shot> defaults to a file in F</tmp> named for
 the domain.  The others default to a new temporary file.
 
-=item B<--connect> URI, B<--hvconf> FILE
+=item B<--hypervisor> NAME, B<--hvconf> FILE
 
-The hypervisor that has the guest.  Without C<--connect>, this asks the fleet in
-C<--hvconf>, or in the default fleet file, which hypervisor has the guest.
+The hypervisor that has the guest, named as F<hypervisors.conf> names it.
+Without C<--hypervisor>, this asks the fleet in C<--hvconf>, or in the default
+fleet file, which hypervisor has the guest.
 
 =back
 
@@ -157,7 +158,7 @@ sub main {
     GetOptionsFromArray(
         \@args, \%opt,
         qw{console fetch hold shot vnc keys restore cat ls single
-          wait=i timeout=i into=s connect=s hvconf=s help}
+          wait=i timeout=i into=s hypervisor=s hvconf=s help}
     );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $opt{help};
@@ -172,7 +173,7 @@ sub main {
         -message => 'Pick one of --console --fetch --hold --shot --vnc --keys --restore --cat --ls --single'
     ) unless $action;
 
-    my $hv = hypervisor( $domain, $opt{connect}, $opt{hvconf} );
+    my $hv = hypervisor( $domain, $opt{hypervisor}, $opt{hvconf} );
     refuse_unsupported( $hv, $action );
 
     return console( $hv, $domain, \%opt )           if $action eq 'console';
@@ -188,10 +189,10 @@ sub main {
 }
 
 sub hypervisor {
-    my ( $domain, $uri, $hvconf ) = @_;
+    my ( $domain, $hv_name, $hvconf ) = @_;
 
-    my $hv = eval { Trog::Hypervisors->find( $domain, uri => $uri, hvconf => $hvconf ) }
-      or die $@ . "Pass --connect if $domain is somewhere the fleet does not list.\n";
+    my $hv = eval { Trog::Hypervisors->find( $domain, hypervisor => $hv_name, hvconf => $hvconf ) }
+      or die $@ . "Pass --hypervisor if the fleet has $domain somewhere it does not look.\n";
     return $hv;
 }
 

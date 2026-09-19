@@ -44,7 +44,7 @@ Even business units at giant corporations can do just fine with this approach.
     * cpu\_mode: libvirt `<cpu mode="...">` value.  Defaults to `host-passthrough` so the guest sees the HV's real CPU (incl. AVX/AVX2 — required by anything that probes cpuid for vector extensions, e.g. the v8 snapshot bundled with the `claude` CLI).  Set to `host-model` or a specific qemu CPU model if you need to migrate the guest to a differently-specced HV.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
-2. Run `bin/provision $DOMAIN` -- fully qualified, e.g. `bin/provision mysql.troglodyne.net` (add `--connect $URI` to build on another hypervisor)
+2. Run `bin/provision $DOMAIN` -- fully qualified, e.g. `bin/provision mysql.troglodyne.net` (add `--hypervisor $NAME` to build on a particular one)
 3. It is the responsibility of data.tar.gz to have a Makefile in the TLD which sets up all relevant dependencies, loads up DBs, etc as the default target.
 4. To set up new sites, have a skeleton site generator to build a blank site tarball.
 
@@ -123,15 +123,15 @@ It still has to fit; a pin to a machine with no room is an error rather than a q
 Skip all of the above and say where to build:
 
 ```
-bin/provision --connect qemu+ssh://root@hv1.example.test/system mysite.test
-bin/destroy   --connect qemu+ssh://root@hv1.example.test/system mysite.test
-bin/snapshot  --connect qemu+ssh://root@hv1.example.test/system mysite.test
-bin/restore   --connect qemu+ssh://root@hv1.example.test/system --latest mysite.test
+bin/provision --hypervisor hv1 mysite.test
+bin/destroy   --hypervisor hv1 mysite.test
+bin/snapshot  --hypervisor hv1 mysite.test
+bin/restore   --hypervisor hv1 --latest mysite.test
 ```
 
-`--connect` bypasses `hypervisors.conf` entirely: no search, no capacity check, build it there.
+`--hypervisor` names a block of `hypervisors.conf` and skips the rest of it: no search, no capacity check, act there.  A name the file does not have stops the command, which then says which names it has.  It is a name and not a connection string because a hypervisor is libvirt or a cloud now, and a libvirt URI cannot say the second kind.
 
-Without a `hypervisors.conf`, `libvirt_uri` in a guest's `provision.conf` still works the way it used to.  It's deprecated -- it's a property of the machine, not the guest -- and it's ignored, with a warning, once a fleet exists.
+Without a `hypervisors.conf`, `libvirt_uri` in a guest's `provision.conf` still works the way it used to, and it stays a URI: a name means a block of a file that isn't there.  It's deprecated -- it's a property of the machine, not the guest -- and it's ignored, with a warning, once a fleet exists.  With no fleet and no `libvirt_uri`, you build on this machine, as before.
 
 ### What that actually does
 
@@ -290,7 +290,7 @@ FAILED No passwordless sudo for doge on hv1.example.test
 ```
 
 Exits 0 when a run is worth starting and 1 when it is not, so it works in a
-script. `--connect` checks a particular hypervisor instead of whichever the
+script. `--hypervisor` checks a particular hypervisor instead of whichever the
 fleet would pick.
 
 Two of these are worth the trouble because of how they fail otherwise:
@@ -348,7 +348,7 @@ A storage pool can get into a state nothing else will get it out of.  `bin/nuke_
 
 ```
 bin/nuke_pool
-bin/nuke_pool --connect qemu+ssh://root@hv1.example.test/system
+bin/nuke_pool --hypervisor hv1
 ```
 
 ## RUNNING THIS WITHOUT A TERMINAL

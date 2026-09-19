@@ -23,23 +23,18 @@ nuke_pool - tear down a hypervisor's storage pool and everything in it
     nuke_pool [OPTIONS]
 
     nuke_pool
-    nuke_pool --connect qemu+ssh://root@hv1.example.net/system
     nuke_pool --hypervisor hv1
 
 =head1 OPTIONS
 
 =over 4
 
-=item B<--connect> URI
-
-The libvirt connection string of the hypervisor that holds the pool.  The
-default is the hypervisor that libvirt picks, which is this machine.
-
 =item B<--hypervisor> NAME
 
-The name of a hypervisor in F<hypervisors.conf>, instead of a connection
-string.  This option does not search for a guest, because a storage pool
-belongs to a machine and not to a guest.
+The name of a hypervisor in F<hypervisors.conf>, which holds the pool.  The
+default is the hypervisor that libvirt picks, which is this machine.  This
+option does not search for a guest, because a storage pool belongs to a machine
+and not to a guest.
 
 =item B<--hvconf> FILE
 
@@ -74,10 +69,9 @@ directory, so this deletes the disks of all the guests.
 sub main {
     my @args = @_;
 
-    my ( $uri, $pool, $pool_path, $name, $hvconf, $help );
+    my ( $pool, $pool_path, $name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
-        'connect=s'    => \$uri,
         'pool=s'       => \$pool,
         'poolpath=s'   => \$pool_path,
         'hypervisor=s' => \$name,
@@ -85,11 +79,6 @@ sub main {
         'help'         => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 1, -input => __FILE__ ) if $help;
-
-    pod2usage(
-        -exitval => 2, -verbose => 1, -input => __FILE__,
-        -message => 'Pass --connect or --hypervisor, not both'
-    ) if $uri && $name;
 
     my $hv;
     if ($name) {
@@ -99,7 +88,7 @@ sub main {
         $hv = $fleet->hypervisor($name)->activate();
     }
     else {
-        $hv = Trog::HV->new( uri => $uri, pool_path => $pool_path );
+        $hv = Trog::HV->new( pool_path => $pool_path );
     }
     $hv->{pool_path} = $pool_path if defined $pool_path;
     $hv->nuke_pool( $pool // $hv->pool_name );

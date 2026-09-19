@@ -26,7 +26,7 @@ restore - revert a provisioned VM to one of its snapshots
     restore [--latest|--oldest|--name SNAP] [OPTIONS] DOMAIN
 
     restore --latest vm.example.com
-    restore --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    restore --name before-upgrade --hypervisor hv1 vm.example.com
 
 =head1 OPTIONS
 
@@ -51,10 +51,12 @@ Revert to the named snapshot.
 The directory that holds one directory for each domain.  The default is
 F</opt/domains>.
 
-=item B<--connect> URI
+=item B<--hypervisor> NAME
 
-The libvirt connection string of the hypervisor that holds the domain.  With
-this option, the command does not do the search that C<--hvconf> describes.
+The name of a hypervisor in F<hypervisors.conf>, when you know which one holds
+the domain.  With this option, the command does not do the search that
+C<--hvconf> describes.  It dies when the file does not name it, and says which
+names it has.
 
 =item B<--hvconf> FILE
 
@@ -76,15 +78,15 @@ gives a VM you cannot reach is a failure, not a success.
 sub main {
     my @args = @_;
 
-    my ( $latest, $oldest, $name, $domain_dir, $uri, $hvconf );
+    my ( $latest, $oldest, $name, $domain_dir, $hv_name, $hvconf );
     GetOptionsFromArray(
         \@args,
-        'latest'      => \$latest,
-        'oldest'      => \$oldest,
-        'name=s'      => \$name,
-        'domaindir=s' => \$domain_dir,
-        'connect=s'   => \$uri,
-        'hvconf=s'    => \$hvconf,
+        'latest'       => \$latest,
+        'oldest'       => \$oldest,
+        'name=s'       => \$name,
+        'domaindir=s'  => \$domain_dir,
+        'hypervisor=s' => \$hv_name,
+        'hvconf=s'     => \$hvconf,
     );
 
     my $domain = shift @args;
@@ -107,7 +109,7 @@ sub main {
 
     my $hv = Trog::Hypervisors->find(
         $domain,
-        uri        => $uri,
+        hypervisor => $hv_name,
         hvconf     => $hvconf,
         domain_dir => $domain_dir,
         config     => $config,

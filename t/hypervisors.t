@@ -278,11 +278,24 @@ subtest 'find' => sub {
     my $path = fleet_file();
 
     Trog::HV->forget();
-    my $explicit = Trog::Hypervisors->find(
+    my $named = Trog::Hypervisors->find(
         'vm.example.test',
-        uri => 'qemu+ssh://root@elsewhere/system', hvconf => $path
+        hypervisor => 'hv2', hvconf => $path
     );
-    is( $explicit->uri, 'qemu+ssh://root@elsewhere/system', '--connect skips the fleet entirely' );
+    is( $named->name,        'hv2', '--hypervisor names one, and no guest is searched for' );
+    is( Trog::HV->new->name, 'hv2', 'and it became the current hypervisor' );
+
+    Trog::HV->forget();
+    my $unknown = exception { Trog::Hypervisors->find( 'vm.example.test', hypervisor => 'hv9', hvconf => $path ) };
+    like( $unknown, qr/No[ ]hypervisor[ ]named[ ]'hv9'/, 'a name the file does not have stops it' );
+    like( $unknown, qr/it[ ]has:[ ]hv1,[ ]hv2/,          'and says which names it does have' );
+
+    Trog::HV->forget();
+    like(
+        exception { Trog::Hypervisors->find( 'vm.example.test', hypervisor => 'hv1', hvconf => '/tmp/nonexistent_xyz/hypervisors.conf' ) },
+        qr/No[ ]hypervisors[ ]are[ ]configured/,
+        'and naming one where there is no fleet is refused rather than falling back to this machine'
+    );
 
     Trog::HV->forget();
     my $no_fleet = Trog::Hypervisors->find(
@@ -310,14 +323,14 @@ subtest 'choose' => sub {
     my $path = fleet_file();
 
     Trog::HV->forget();
-    my $explicit = Trog::Hypervisors->choose(
+    my $named = Trog::Hypervisors->choose(
         'vm.example.test',
-        uri        => 'qemu+ssh://root@elsewhere/system',
+        hypervisor => 'hv2',
         hvconf     => $path,
         domain_dir => '/bogus/domains',
     );
-    is( $explicit->uri,        'qemu+ssh://root@elsewhere/system', '--connect skips the fleet entirely' );
-    is( $explicit->domain_dir, '/bogus/domains',                   'and keeps the domain directory it was given' );
+    is( $named->name,       'hv2',            '--hypervisor names one, and nothing is placed' );
+    is( $named->domain_dir, '/bogus/domains', 'and keeps the domain directory it was given' );
 
     Trog::HV->forget();
     my $no_fleet = Trog::Hypervisors->choose(

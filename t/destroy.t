@@ -292,7 +292,7 @@ subtest 'the POD documents the interface' => sub {
 
     like( $text, qr/--purge/,      'POD documents --purge' );
     like( $text, qr/--dryrun/,     'POD documents --dryrun' );
-    like( $text, qr/--connect/,    'POD documents --connect' );
+    like( $text, qr/--hypervisor/, 'POD documents --hypervisor' );
     like( $text, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
     like( $text, qr/--purge-data/, 'POD documents --purge-data' );
     like( $text, qr/--orphans/,    'POD documents --orphans' );
@@ -376,7 +376,33 @@ subtest 'purge_data_dir takes the domain data directory, and dryrun does not' =>
     File::Path::remove_tree("$data/kept.test");
 };
 
+# A fleet with one hypervisor in it, for the sweeps: they take the name of one,
+# and the file is where a name is looked up.
+sub one_hypervisor {
+    my $dir = tempdir( CLEANUP => 1 );
+    File::Slurper::Temp::write_text( "$dir/hypervisors.conf", "[hv1]\nlibvirt_uri=qemu:///system\n" );
+    return "$dir/hypervisors.conf";
+}
+
+subtest 'a hypervisor named by a name the fleet does not have stops the destroy' => sub {
+    my $fleet = one_hypervisor();
+    my $dir   = tempdir( CLEANUP => 1 );
+    make_path("$dir/vm.test");
+
+    # Nothing is mocked to say the guest is somewhere, because nothing should
+    # get that far: the name is wrong, and a wrong name is not a guest that
+    # nobody holds.
+    my @args = ( '--hvconf', $fleet, qw{--hypervisor nope --domaindir}, $dir, 'vm.test' );
+    my $err  = exception {
+        says( sub { Trog::Bin::Destroy::main(@args) } )
+    };
+    like( $err, qr/No[ ]hypervisor[ ]named[ ]'nope'/, 'it stops, naming what was asked for' );
+    like( $err, qr/it[ ]has:[ ]hv1/,                  'and which names there are' );
+    ok( -d "$dir/vm.test", 'and the domain directory is still there' );
+};
+
 subtest 'the backup sweep takes the copies, which nothing else ever will' => sub {
+    my $fleet = one_hypervisor();
     Trog::HV->forget();
 
     my @deleted;
@@ -386,19 +412,19 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
 
     local @Test::Pool::VOLUMES = qw{live.test-qcow2 live.test-cloudinit.iso gone.test.bak-qcow2 live.test.bak-qcow2};
 
-    my ($said) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_backups( 'hv1', $fleet, 1 ) } );
     like( $said, qr/gone\.test\.bak-qcow2/,      'the dry run names a copy' );
     like( $said, qr/2[ ]disks[ ]copied[ ]aside/, 'and counts them in a sentence that agrees with itself' );
     like( $said, qr/live\.test\.bak-qcow2/,      'and the copy of a guest that is still here, since both are copies' );
     unlike( $said, qr/live\.test-qcow2/, 'and not the disk a guest is running on' );
     is_deeply( \@deleted, [], 'removing none of it' );
 
-    says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } );
+    says( sub { Trog::Bin::Destroy::sweep_backups( 'hv1', $fleet, 0 ) } );
     is_deeply( \@deleted, [qw{gone.test.bak-qcow2 live.test.bak-qcow2}], 'and the sweep takes the copies, and only the copies' );
 
     @deleted = ();
     local @Test::Pool::VOLUMES = qw{only.test.bak-qcow2};
-    my ($alone) = says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 1 ) } );
+    my ($alone) = says( sub { Trog::Bin::Destroy::sweep_backups( 'hv1', $fleet, 1 ) } );
     like( $alone, qr/1[ ]disk[ ]copied[ ]aside/, 'and a single copy is counted in the singular' );
     unlike( $alone, qr/1[ ]disks/, 'rather than agreeing with nothing' );
 
@@ -406,7 +432,7 @@ subtest 'the backup sweep takes the copies, which nothing else ever will' => sub
     @deleted = ();
     local $Test::Pool::REFUSE = 1;
     my $refused = exception {
-        says( sub { Trog::Bin::Destroy::sweep_backups( 'qemu:///system', undef, 0 ) } )
+        says( sub { Trog::Bin::Destroy::sweep_backups( 'hv1', $fleet, 0 ) } )
     };
     like( $refused, qr/cannot[ ]read[ ]the[ ]pool/, 'a pool it could not read takes the run down with it' );
     is_deeply( \@deleted, [], 'and nothing is removed on the strength of it' );
@@ -467,6 +493,7 @@ subtest 'the sweep takes what belongs to no guest, and nothing else' => sub {
 };
 
 subtest 'the sweep covers the domain directory as well as the data source' => sub {
+    my $fleet   = one_hypervisor();
     my $domains = tempdir( CLEANUP => 1 );
     write_config( 'named.test' => 1 );
     make_path("$data/$_")    for qw{orphan.test live.test};
@@ -481,7 +508,7 @@ subtest 'the sweep covers the domain directory as well as the data source' => su
     $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
     local @Test::Libvirt::DOMAINS = ('live.test');
 
-    my ($said) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    my ($said) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'hv1', $fleet, 0 ) } );
     like( $said, qr/\Q$domains\E/, 'the domain directory is one of the places it looks' );
 
     ok( !-e "$data/orphan.test",    'the orphan goes from the data source' );
@@ -498,6 +525,7 @@ subtest 'the sweep covers the domain directory as well as the data source' => su
 };
 
 subtest 'a hypervisor that will not say what it has takes the run down' => sub {
+    my $fleet = one_hypervisor();
     write_config();
     make_path("$data/orphan.test");
 
@@ -508,7 +536,7 @@ subtest 'a hypervisor that will not say what it has takes the run down' => sub {
 
     # libvirt's own words rather than ours, nothing catching this to reword it.
     my $refused = exception {
-        says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } )
+        says( sub { Trog::Bin::Destroy::sweep_orphans( 'hv1', $fleet, 0 ) } )
     };
     like( $refused, qr/connection[ ]refused/, 'the sweep dies rather than carrying on' );
 
@@ -528,6 +556,7 @@ subtest 'a sweep with nothing to do says so' => sub {
 };
 
 subtest 'with no data source, the domain directories are still swept' => sub {
+    my $fleet   = one_hypervisor();
     my $domains = tempdir( CLEANUP => 1 );
     File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "_base:\n    ntp:\n" );
     Provisioner::Cookbook->forget();
@@ -539,7 +568,7 @@ subtest 'with no data source, the domain directories are still swept' => sub {
     $hv->redefine( vmm        => sub { bless {}, 'Test::Libvirt' } );
     local @Test::Libvirt::DOMAINS = ();
 
-    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'qemu:///system', undef, 0 ) } );
+    my ( $said, $rc ) = says( sub { Trog::Bin::Destroy::sweep_orphans( 'hv1', $fleet, 0 ) } );
     like( $said, qr/only[ ]the[ ]domain[ ]directories[ ]are[ ]swept/, 'saying there is no data source' );
     ok( !-e "$domains/orphan.test", 'and sweeping where guests are built all the same' );
     is( $rc, 0, 'which is not a failure' );
