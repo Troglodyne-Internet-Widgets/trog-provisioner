@@ -49,10 +49,17 @@ subtest 'a script on the system perl stands for the tests that name it' => sub {
     ok( ( grep { $_ eq 't/setup-ufw-rules.t' } @tests ), 'its own test' ) or diag "got: @tests";
 };
 
+subtest 'a recipe that no test loads yet stands for the Cookbook that finds it' => sub {
+    is_deeply( [ $map->('lib/Provisioner/Recipe/zzprobe.pm') ],        ['lib/Provisioner/Cookbook.pm'], 'a recipe' );
+    is_deeply( [ $map->('lib/Provisioner/Recipe/Ubuntu/zzprobe.pm') ], ['lib/Provisioner/Cookbook.pm'], 'and its subclass for a distribution' );
+    is_deeply( [ $map->('lib/Trog/Zzprobe.pm') ],                      [],                              'but not any other module' );
+};
+
+# The empty string is NO_TESTS in Perl::Tests::Covering.
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
-    is_deeply( [ $map->('CLAUDE.md') ],        ['CLAUDE.md'],        'markdown stands for itself' );
-    is_deeply( [ $map->('docs/APPROACH.md') ], ['docs/APPROACH.md'], 'as does docs/' );
-    is_deeply( [ $map->('dist.ini') ],         [],                   'and dist.ini is unexplained, so every test runs' );
+    is_deeply( [ $map->('CLAUDE.md') ],        [q{}], 'markdown reaches no test' );
+    is_deeply( [ $map->('docs/APPROACH.md') ], [q{}], 'nor does docs/' );
+    is_deeply( [ $map->('dist.ini') ],         [],    'and dist.ini is unexplained, so every test runs' );
 };
 
 done_testing();

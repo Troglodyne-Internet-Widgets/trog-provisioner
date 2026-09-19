@@ -35,10 +35,14 @@ renders it.
 A script that starts with C<#!/usr/bin/perl> runs on the system perl, which
 cannot record what it loads.  It stands for each test that names it.
 
+=item A new recipe
+
+L<Provisioner::Cookbook> finds recipes at run time, so nothing in a diff uses a
+new one.  A recipe that no test loads yet stands for the Cookbook.
+
 =item Documentation
 
-Markdown, F<docs/>, F<LICENSE> and F<CHANGES> reach no test, so each stands for
-itself, which no test loads.
+Markdown, F<docs/>, F<LICENSE> and F<CHANGES> reach no test.
 
 =back
 
@@ -107,7 +111,9 @@ sub _tests_that_name {
 return sub {
     my ($path) = @_;
 
-    return $path if $path =~ m{(?:[.]md|\ALICENSE|\ACHANGES)\z} || $path =~ m{\Adocs/};
+    # NO_TESTS in Perl::Tests::Covering, spelled out so that the test of this
+    # map does not need the module.
+    return q{} if $path =~ m{(?:[.]md|\ALICENSE|\ACHANGES)\z} || $path =~ m{\Adocs/};
 
     if ( $path =~ m{\Atemplates/} ) {
         %stands_for = _templates_of_recipes() unless %stands_for;
@@ -117,6 +123,8 @@ return sub {
     }
 
     return _tests_that_name($path) if $path =~ m{\Ascripts/[^/]+\z};
+
+    return 'lib/Provisioner/Cookbook.pm' if $path =~ m{\Alib/Provisioner/Recipe/.+[.]pm\z};
 
     return;
 };

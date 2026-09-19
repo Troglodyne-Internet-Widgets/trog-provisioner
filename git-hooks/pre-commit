@@ -194,25 +194,11 @@ fi
 
 # tests-covering follows the Perl that each test loads.  .tests-covering-map.pl
 # at the root answers for templates, for scripts that run on the system perl,
-# and for documentation.  --unexplained all runs every test for anything else
-# that the records and the map cannot follow.
-#
-# A new recipe is the exception.  tests-covering takes a Perl file that a diff
-# adds as explained, because the files that use it are in the diff too.  But
-# Provisioner::Cookbook finds recipes at run time, so nothing in the diff uses
-# it, and the map is not asked.
-whole_suite=''
-added=$(git diff --cached --name-only --diff-filter=A -- 'lib/Provisioner/Recipe/*.pm' | head -n 1)
-test -n "$added" && whole_suite="$added is a new recipe"
-
+# for new recipes and for documentation.  --unexplained all runs every test for
+# anything else that the records and the map cannot follow.
 if ! command -v tests-covering >/dev/null 2>&1
 then
-    whole_suite="tests-covering is not on PATH; install Perl::Tests::Covering"
-fi
-
-if [ -n "$whole_suite" ]
-then
-    echo "Running every test, because $whole_suite..."
+    echo "Running every test, because tests-covering is not on PATH; install Perl::Tests::Covering..."
     prove -lm -j8 t/ || {
         echo "pre-commit: the tests above failed."
         exit 1
