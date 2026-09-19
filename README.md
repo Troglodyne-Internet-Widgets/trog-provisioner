@@ -255,7 +255,7 @@ bin/new_config mysql.troglodyne.net
 bin/provision  mysql.troglodyne.net
 ```
 
-`[addons]` and `tld` are gone from `ipmap.cfg`, and the keys in `[ips]` and `[aliases]` -- and the top-level key of each recipe -- are fully qualified.  `bin/qualify_site_data --tld yourdomain.com` does the rename once, backing both up first.  It refuses if two entries would collapse into one, which is worth knowing about: a short name and a qualified one can both be in there meaning the same machine with different addresses, and picking between them is not a decision a script should make.
+`[addons]` and `tld` are gone from `ipmap.cfg`, and the keys in `[ips]` and `[aliases]` -- and the top-level key of each recipe -- are fully qualified.  The one-time rename was `bin/qualify_site_data`, which is gone now that every known configuration is migrated.  An installation still on the old format can take it from the history, with `git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data`.
 
 ### Why there is no terraform any more
 

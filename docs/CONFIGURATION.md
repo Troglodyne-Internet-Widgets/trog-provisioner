@@ -17,8 +17,10 @@ points somewhere else; every command also takes `--ipmap`, `--recipes` and
 Domains are always written in full. There is no `tld` to append to a short name
 and no separate path for anything under a different parent: `[ips]`, `[aliases]`
 and the top-level key of every recipe all name a fully qualified domain.
-`bin/qualify_site_data --tld yourdomain.com` does the rename once if you are
-coming from an older installation.
+An older installation must run `bin/qualify_site_data` once.  The tool is
+removed, and this prints it from the history:
+
+    git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data
 
 ## ipmap.cfg
 
