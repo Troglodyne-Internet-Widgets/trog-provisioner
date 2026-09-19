@@ -7,32 +7,25 @@ my $status = `systemctl is-active fail2ban 2>/dev/null`;
 chomp $status;
 is($status, 'active', 'fail2ban is running');
 
-my $jail   = '/etc/fail2ban/jail.d/[% domain %].conf';
-my $filter = '/etc/fail2ban/filter.d/[% domain %].conf';
-ok(-f $jail,   'fail2ban jail config exists');
-ok(-f $filter, 'fail2ban filter config exists');
-
-# Each file must hold what its directory expects.  fail2ban runs, and bans
-# nobody, when the jail and the filter are swapped.
-my $jail_text   = do { local (@ARGV, $/) = $jail;   <> } // '';
-my $filter_text = do { local (@ARGV, $/) = $filter; <> } // '';
-
-like($jail_text, qr/^\s*\[\s*\Q[% domain %]\E\s*\]/m, 'the jail names this domain');
-like($jail_text, qr/^enabled\s*=\s*true/m,            'and is enabled');
-like($jail_text, qr/^filter\s*=/m,                    'and names a filter');
-unlike($jail_text, qr/failregex/,                     'and is not a filter definition');
-
-like($filter_text, qr/^\s*\[Definition\]/m, 'the filter has a [Definition]');
-like($filter_text, qr/^failregex\s*=/m,     'with a failregex');
-unlike($filter_text, qr/^enabled\s*=/m,     'and is not a jail definition');
-
 # Whether fail2ban can read its configuration is a different question from
 # whether it runs.
 my $check = `fail2ban-client -t 2>&1`;
 like($check, qr/OK/i, 'fail2ban accepts its configuration') or diag $check;
 
-# The jail is loaded.  fail2ban does not start a jail whose log file is missing.
-# See the fragment for how this recipe makes sure that the log exists.
-my $jails = `fail2ban-client status 2>&1`;
-like($jails, qr/\Q[% domain %]\E/, 'the jail for this domain is loaded') or diag $jails;
+ok(-f '/etc/fail2ban/jail.d/[% domain %].conf', 'the jails of this domain are installed');
+
+# fail2ban does not start a jail whose log is missing, and says so only in its
+# own log.  So ask it which jails it runs.
+my $running = `fail2ban-client status 2>&1`;
+my ($list) = $running =~ /Jail list:\s*(.*)/;
+my %running = map { $_ => 1 } split /,\s*/, ($list // '');
+
+# sshd is on by default on Ubuntu, and every jail bans through ufw rather than
+# the nftables that Ubuntu sets.
+foreach my $jail (sort 'sshd', qw{[% FOR name IN jails.keys().sort() %] [% name %][% END %] }) {
+    ok($running{$jail}, "the $jail jail is running") or diag $running;
+    my $actions = `fail2ban-client get $jail actions 2>&1`;
+    like($actions, qr/\bufw\b/, "and bans through ufw") or diag $actions;
+}
+
 done_testing();

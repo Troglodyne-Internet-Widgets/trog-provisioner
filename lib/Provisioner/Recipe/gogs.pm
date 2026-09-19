@@ -187,6 +187,28 @@ sub tests {
     return qw{gogs.tt};
 }
 
+=head2 %jails = $recipe->jails()
+
+A jail that bans a host whose logins fail too often.  gogs logs nothing when a
+login fails.  It answers the failed C<POST /user/login> with a 200 and the
+form again, and a good one with a redirect, so the jail reads the access log
+of nginx for the 200.  That log is shared by every vhost on the guest, so
+another vhost that answers C<POST /user/login> with a 200 counts too.
+
+=cut
+
+sub jails {
+    return (
+        'gogs-login' => {
+            filter    => '',
+            backend   => 'auto',
+            port      => 'http,https',
+            logpath   => '/var/log/nginx/access.log',
+            failregex => '^<HOST> \S+ \S+ \[\] "POST /user/login HTTP/[\d.]+" 200',
+        },
+    );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 GitHub, which serves the release tarballs of gogs.  See C<github_release_hosts>

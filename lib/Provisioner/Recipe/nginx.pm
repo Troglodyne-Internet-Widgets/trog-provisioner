@@ -36,6 +36,21 @@ sub rate_limits {
     return ( 80 => 1024, 443 => 1024 );
 }
 
+=head2 %jails = $recipe->jails()
+
+The jails that fail2ban ships for nginx: failed basic authentication, and
+requests for the paths that bots probe.  Both read the error log of nginx, so
+both read the file and not the journal.
+
+=cut
+
+sub jails {
+    return (
+        'nginx-http-auth' => { backend => 'auto' },
+        'nginx-botsearch' => { backend => 'auto' },
+    );
+}
+
 =head2 @names = $recipe->subdomains()
 
 C<www>, which the vhost this writes answers for: it serves the domain and every

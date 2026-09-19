@@ -56,6 +56,15 @@ generated together agree.
 
 A file that regenerates correctly does not belong in C<remote_files>.
 
+=head3 No jail
+
+This recipe declares no fail2ban jail, because nothing it logs can name the
+host of a failed login.  C<deluge-web> logs C<Login failed (ClientIP
+127.0.0.1)>, which is nginx, not the client.  nginx answers a failed login and
+a good one with the same C<POST /json> and the same 200, so its access log
+cannot tell them apart.  A web UI that faces the public can be guessed at
+without a ban.
+
 The fetch reads the guest as root.  So the whole path down to C<state/> stays
 C<debian-deluged:debian-deluged>, and no other account gets access to it.
 

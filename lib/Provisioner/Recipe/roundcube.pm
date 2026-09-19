@@ -131,6 +131,19 @@ sub tests {
     return qw{roundcube.tt};
 }
 
+=head2 %jails = $recipe->jails()
+
+The C<roundcube-auth> jail that fail2ban ships, which bans a host whose logins
+to the webmail fail too often.  Roundcube logs a failed login to the journal
+from php-fpm, which runs as the service user, so the jail reads every journal
+and not only the system one.  See L<Provisioner::Recipe/jails>.
+
+=cut
+
+sub jails {
+    return ( 'roundcube-auth' => { backend => 'systemd[journalflags=1]' } );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 GitHub, which serves roundcube's release tarballs: see C<github_release_hosts>

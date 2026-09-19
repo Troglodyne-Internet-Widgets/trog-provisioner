@@ -96,6 +96,42 @@ sub tests {
     return qw{tpsgi.tt};
 }
 
+=head2 %jails = $recipe->jails(%opts)
+
+A jail for the domain, which bans a host whose logins fail too often.  tCMS
+writes each failure into the log of tPSGI, in the format of its C<Trog::Log>:
+
+    2026-08-27T21:51:59Z [INFO]: RequestId INIT From ::ffff:192.168.1.104 |nobody| Failed login for user doge
+
+and C<TOTP auth failed for user> when the password was right and the code was
+not.  fail2ban reads the IPv4 address out of an IPv4-mapped one, so the ban
+covers the client.  The request lines that tPSGI itself writes have a format
+of their own, and none of them says that a login failed, because tCMS answers
+a failed login with a 200.
+
+It is named after the domain, because two domains on one guest each have
+their own log.
+
+=cut
+
+sub jails {
+    my ( $self, %opts ) = @_;
+
+    return (
+        "tpsgi-$opts{domain}" => {
+            filter      => '',
+            backend     => 'auto',
+            port        => 'http,https',
+            logpath     => "$opts{install_dir}/$opts{domain}/log/tpsgi.log",
+            datepattern => '%%Y-%%m-%%dT%%H:%%M:%%SZ',
+            failregex   => '^ \[INFO\]: RequestId \S+ From <HOST> \|\S+\| (?:Failed login|TOTP auth failed) for user',
+            maxretry    => 5,
+            findtime    => 600,
+            bantime     => 3600,
+        }
+    );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 Returns C<github.com>, which serves the tPSGI checkout that this recipe clones.

@@ -1,11 +1,7 @@
-rm /etc/fail2ban/jail.d/[% domain %].conf; /bin/true
-rm /etc/fail2ban/filter.d/[% domain %].conf; /bin/true
-mv jail.cfg   /etc/fail2ban/jail.d/[% domain %].conf
-mv filter.cfg /etc/fail2ban/filter.d/[% domain %].conf
-[%# fail2ban does not start a jail whose log file is missing:
-    "Have not found any log file for <jail>".  This recipe is in the base set,
-    so many guests never write the application log.  An empty file matches
-    nothing, and the application appends to it when it runs. -%]
-mkdir -p [% install_dir %]/[% domain %]/log
-touch [% install_dir %]/[% domain %]/log/tpsgi.log
-systemctl reload fail2ban
+[%# The filter file of the jail that this recipe used to write itself.  The
+    jails of the recipes carry their filters now. -%]
+rm -f /etc/fail2ban/filter.d/[% domain %].conf
+mv jail.cfg /etc/fail2ban/jail.d/[% domain %].conf
+[%# Restarted after the ufw target, whose ufw reset drops any ban that
+    fail2ban inserted.  fail2ban puts its bans back when it starts. -%]
+[% script_dir %]/queue_postrun_task systemctl restart fail2ban

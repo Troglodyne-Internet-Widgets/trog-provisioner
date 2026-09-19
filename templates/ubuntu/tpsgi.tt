@@ -1,5 +1,11 @@
 mkdir -p '[% install_dir %]/[% domain %]/www';  /bin/true
 mkdir -p '[% install_dir %]/[% domain %]/run';  /bin/true
+[%# fail2ban does not start a jail whose log file is missing, and a checkout
+    that has never run has written none.  See jails in Provisioner::Recipe::tpsgi.
+    It is chowned below, with www and run, because starman writes it as the
+    service user. -%]
+mkdir -p '[% install_dir %]/[% domain %]/log'
+touch '[% install_dir %]/[% domain %]/log/tpsgi.log'
 cd '[% install_dir %]/[% domain %]' && git clone --no-checkout https://github.com/Troglodyne-Internet-Widgets/tPSGI.git repo && mv repo/.git .git && rmdir repo
 HOME='[% install_dir %]/[% domain %]' git config --global --add safe.directory '[% install_dir %]/[% domain %]'
 cd '[% install_dir %]/[% domain %]' && HOME='[% install_dir %]/[% domain %]' git reset --hard HEAD
@@ -15,6 +21,7 @@ chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/.git' '[% i
 chown [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/.gitconfig'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/www'
 chown -R [% user %]:www-data '[% install_dir %]/[% domain %]/run'
+chown -R [% user %]:[% admin_user %] '[% install_dir %]/[% domain %]/log'
 ln -s [% install_dir %]/[% domain %]/service/tpsgi.service /usr/lib/systemd/system/[% domain %].service
 [%# PATH gets the perl that the perl recipe built, for starman, and the
     checkout, for build_service.  The task finds that perl when it runs,

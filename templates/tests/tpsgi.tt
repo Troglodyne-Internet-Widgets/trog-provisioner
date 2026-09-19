@@ -22,6 +22,7 @@ my %owner = (
     '.tpsgi.ini' => '[% user %]:[% admin_user %]',
     'www'        => '[% user %]:www-data',
     'run'        => '[% user %]:www-data',
+    'log'        => '[% user %]:[% admin_user %]',
 );
 foreach my $name (sort keys %owner) {
     my @st = stat "[% install_dir %]/[% domain %]/$name";

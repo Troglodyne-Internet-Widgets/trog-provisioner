@@ -210,6 +210,30 @@ sub template_files {
     );
 }
 
+=head2 %jails = $recipe->jails()
+
+A jail that bans a host whose logins fail too often.  grafana logs each request
+to its log file, with the address that nginx forwarded:
+
+    logger=context userId=0 orgId=0 uname= t=2026-09-19T16:22:14.270753469Z level=info msg="Request Completed" method=POST path=/login status=401 remote_addr=192.168.122.57 time_ms=25 ...
+
+The filter that fail2ban ships for grafana looks for a message that grafana no
+longer writes.
+
+=cut
+
+sub jails {
+    return (
+        'grafana-login' => {
+            filter    => '',
+            backend   => 'auto',
+            port      => 'http,https',
+            logpath   => '/var/log/grafana/grafana.log',
+            failregex => '^logger=context .* msg="Request Completed" method=POST path=/login status=401 remote_addr=<HOST>',
+        },
+    );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 The two vendor archives.  C<influxdb> is not here, because it comes from the
