@@ -63,13 +63,6 @@ starts, and does not ask for them.  Use it for a run with no terminal, for
 example the reprovision button of tCMS, or cron.  See L<Trog::Credentials> for
 the format.
 
-=item B<--no-config>
-
-Does not generate the configuration of the domain, and builds from the files
-that are already in its directory.  Without this option, provision runs
-F<bin/new_config> first.  That program writes F<provision.conf> and packs
-F<data.tar.gz>.  Use this option to build exactly what is on disk.
-
 =item B<--salvage-gaps-ok>
 
 Rebuilds the guest even when state that is on the guest did not come off it.
@@ -172,10 +165,11 @@ must make all four, and a dry run must not make them.
 =head1 DESCRIPTION
 
 provision builds the guest for DOMAIN and runs its makefile.  First it runs
-F<bin/new_config> to generate the configuration of the domain, unless you pass
-C<--no-config>.  Then it reads F<DOMAIN/provision.conf> and
-F<DOMAIN/users.yaml> in the domain directory, chooses the hypervisor, and asks
-the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
+F<bin/new_config> to generate the configuration of the domain, always: the
+generation is what chooses the hypervisor, and the address, the bridge and the
+transfer address all follow from that choice.  Then it reads
+F<DOMAIN/provision.conf> and F<DOMAIN/users.yaml> in the domain directory,
+chooses the hypervisor, and asks the hypervisor to build the guest.  Last, it puts the secrets onto the guest,
 and waits for cloud-init and the makefile to finish.
 
 If F<provision.conf> names another domain in C<depends_on>, provision builds
@@ -261,9 +255,8 @@ the value.  So nobody can read a secret from the domain directory or from a
 backup of it.
 
 Most guests ask for no secret, and F<bin/new_config> writes no manifest for
-them.  C<--no-config> writes no manifest at all.  With no manifest, this sub
-does nothing and returns an empty list.  It also returns an empty list on a
-second call for the same domain.  It returns 1 after it places the files and
+them.  With no manifest, this sub does nothing and returns an empty list.  It
+also returns an empty list on a second call for the same domain.  It returns 1 after it places the files and
 calls C<authorize_runner_key>.
 
 It asks for the password of the store through L<Trog::Credentials>.  It dies if
@@ -438,7 +431,7 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse, $uri, $domain_dir, $hvconf, $no_config, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse, $uri, $domain_dir, $hvconf, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     GetOptionsFromArray(
         \@args,
@@ -447,7 +440,6 @@ sub main {
         'dryrun'                 => \$dryrun,
         'connect=s'              => \$uri,
         'hvconf=s'               => \$hvconf,
-        'no-config'              => \$no_config,
         'recipes=s'              => \$recipes,
         'ipmap=s'                => \$ipmap,
         'credentials'            => \$credentials,
@@ -455,7 +447,7 @@ sub main {
         'clone-on-nonreusable'   => \$clone_on_nonreusable,
         'destroy-on-nonreusable' => \$destroy_on_nonreusable,
         'die-on-nonreusable'     => \$die_on_nonreusable,
-    );
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
 
     my @said = grep { $_ } ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     pod2usage(
@@ -504,12 +496,12 @@ sub main {
             # Only from the command line: see --salvage-gaps-ok in the POD.
             salvage_gaps_ok => $salvage_gaps_ok,
         }
-    ) unless $no_config;
+    );
 
     # Ask the hypervisor that generate_config chose, because its block in
     # hypervisors.conf can set the domain directory.
     $domain_dir = Trog::HV->new()->domain_dir
-      unless $no_config || defined $domain_dir_from_cli;
+      unless defined $domain_dir_from_cli;
 
     my $cfile = "$domain_dir/$domain/provision.conf";
     close( _must_read( $cfile, "No provision.conf for $domain" ) ) or die "Could not close $cfile: $!\n";
