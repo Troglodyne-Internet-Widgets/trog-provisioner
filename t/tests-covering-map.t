@@ -56,10 +56,16 @@ subtest 'a recipe that no test loads yet stands for the Cookbook that finds it' 
 };
 
 # The empty string is NO_TESTS in Perl::Tests::Covering.
+subtest 'the configuration of the tools reaches no test' => sub {
+    foreach my $path (qw{dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini .preferred_binaries.ini .pod_stopwords}) {
+        is_deeply( [ $map->($path) ], [q{}], "$path reaches no test" );
+    }
+};
+
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
     is_deeply( [ $map->('CLAUDE.md') ],        [q{}], 'markdown reaches no test' );
     is_deeply( [ $map->('docs/APPROACH.md') ], [q{}], 'nor does docs/' );
-    is_deeply( [ $map->('dist.ini') ],         [],    'and dist.ini is unexplained, so every test runs' );
+    is_deeply( [ $map->('.gitattributes') ],   [],    'and .gitattributes is unexplained, so every test runs' );
 };
 
 done_testing();

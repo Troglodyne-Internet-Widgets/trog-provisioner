@@ -44,6 +44,13 @@ new one.  A recipe that no test loads yet stands for the Cookbook.
 
 Markdown, F<docs/>, F<LICENSE> and F<CHANGES> reach no test.
 
+=item Configuration of the tools
+
+F<dist.ini>, F<weaver.ini>, F<.mailmap>, F<.perltidyrc>, the C<perlcritic>
+profiles and the files that they read reach no test.  The pre-commit hook runs
+C<perltidy> and C<perlcritic> itself, and no test reads these files from this
+checkout.
+
 =back
 
 Anything else is left unexplained, and the hook then runs every test.
@@ -53,6 +60,13 @@ Anything else is left unexplained, and the hook then runs every test.
 use File::Spec();
 use File::Temp();
 use Provisioner::Cookbook();
+
+# Read by the tools that the hook runs, and by dzil, and by no test.
+my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
+  dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts
+  scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini
+  .preferred_binaries.ini .pod_stopwords
+};
 
 # The path of each template, relative to the root, and the files that stand for
 # it.  Built on the first call, because loading every recipe takes a second.
@@ -114,6 +128,9 @@ return sub {
     # NO_TESTS in Perl::Tests::Covering, spelled out so that the test of this
     # map does not need the module.
     return q{} if $path =~ m{(?:[.]md|\ALICENSE|\ACHANGES)\z} || $path =~ m{\Adocs/};
+
+    # Before the scripts, because scripts/.perlcriticrc is a link to the profile.
+    return q{} if $TOOL_CONFIGURATION{$path};
 
     if ( $path =~ m{\Atemplates/} ) {
         %stands_for = _templates_of_recipes() unless %stands_for;
