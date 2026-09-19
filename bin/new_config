@@ -241,6 +241,10 @@ our %SALVAGE_GAPS;
 # before its tenants are generated.
 our %MACHINE_MODULES;
 
+# The ports that the domains of each guest so far claim, keyed by the guest's
+# own domain, in the form of ufw's listeners.  See handle_domain.
+our %MACHINE_LISTENERS;
+
 =head2 %gaps = salvage_gaps()
 
 Returns the salvages of the last C<main> that got nothing from a guest that
@@ -698,6 +702,20 @@ sub handle_domain {
 
         die "$domain is provisioned onto $depends_on, and both are configured with: " . join( ', ', @cannot ) . "\n" . "There is one of that on a guest, and it cannot be told about a second domain -- so this\n" . "would replace what $depends_on configured rather than add to it.  Configure it on one of\n" . "the two, or give $domain a machine of its own.\n"
           if @cannot;
+    }
+
+    # One guest has one of each port.  Each domain resolves its recipes alone,
+    # so hand the claims that the guest already has to this domain's ufw, whose
+    # schema refuses a port that two recipes claim.  The host comes first, and
+    # starts the guest's claims afresh.
+    my $machine = $depends_on // $domain;
+    $MACHINE_LISTENERS{$machine} = {} unless $depends_on;
+    if ( my $ufw = $rconf->{$domain}{ufw} ) {
+        my $prior = $MACHINE_LISTENERS{$machine} // {};
+        foreach my $port ( keys %$prior ) {
+            $ufw->{listeners}{$port}{$_} = 1 for keys %{ $prior->{$port} };
+        }
+        $MACHINE_LISTENERS{$machine} = clone( $ufw->{listeners} // {} );
     }
 
     my %guest_secrets;

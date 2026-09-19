@@ -42,6 +42,17 @@ than 1 second during the first 3 clock updates.
 
 =cut
 
+=head2 @ports = $recipe->listens()
+
+The command port of chrony, 323/udp on loopback.  chrony serves no time, so
+nothing listens on 123.
+
+=cut
+
+sub listens {
+    return qw{323/udp};
+}
+
 sub args {
     return (
         type       => 'object',

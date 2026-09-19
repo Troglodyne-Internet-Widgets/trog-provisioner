@@ -59,6 +59,17 @@ sub rate_limits {
     return ( 53 => 4096, '53/udp' => 4096 );
 }
 
+=head2 @ports = $recipe->listens()
+
+The authoritative server on 2500, on loopback, where the recursor on 53 sends
+the zones that this guest serves.  C<rate_limits> names 53.
+
+=cut
+
+sub listens {
+    return qw{2500 2500/udp};
+}
+
 =head2 %required = $recipe->required_recipes(%opts)
 
 Adds C<nostubresolver> and C<lexicon>.

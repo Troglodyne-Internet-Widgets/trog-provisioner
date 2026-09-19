@@ -103,6 +103,20 @@ sub required_recipes {
     );
 }
 
+=head2 @ports = $recipe->listens(%opts)
+
+grafana on C<port>, and influxd on 8086 for queries and on 8088 for backups,
+all three on loopback.
+
+=cut
+
+sub listens {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, as required_recipes does.
+    return ( $opts{port} // 3000, 8086, 8088 );
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  The machine has one grafana, one influxd and one telegraf.  This recipe

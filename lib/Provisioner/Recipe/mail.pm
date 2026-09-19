@@ -226,6 +226,19 @@ sub args {
     );
 }
 
+=head2 @ports = $recipe->listens()
+
+The ports of postfix: SMTP on 25, SMTP over TLS on 465, submission on 587,
+and the return from amavis on 10025.  The ports of dovecot: POP3 on 110 and
+995, IMAP on 143 and 993.  amavis on 10024, C<postgrey> on 10023 and C<spamd>
+on 783, all on loopback.
+
+=cut
+
+sub listens {
+    return qw{25 465 587 10025 110 995 143 993 10024 10023 783};
+}
+
 =head2 %jails = $recipe->jails()
 
 The jails that fail2ban ships for postfix and dovecot.  They ban a host whose

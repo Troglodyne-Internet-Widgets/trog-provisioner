@@ -62,6 +62,7 @@ my $TENANT = 'tenant.test.test';
 # naming the tenant expands the list to include its host, and the host is done
 # first.
 sub generate {
+    my (%on) = @_;
     my $tmpdir = tempdir( CLEANUP => 1 );
     mkdir "$tmpdir/domains";
 
@@ -98,8 +99,8 @@ IPMAP
 
         _base   => { _global => { data_source => "$tmpdir/data" } },
         _shared => { $HOST   => [$TENANT] },
-        $HOST   => { nosnap  => undef },
-        $TENANT => { nosnap  => undef },
+        $HOST   => $on{host}   // { nosnap => undef },
+        $TENANT => $on{tenant} // { nosnap => undef },
     );
 
     my ( $ih, $ipmap_file ) = tempfile();
@@ -159,6 +160,27 @@ subtest 'a recipe that cannot be shared is refused rather than replacing the fir
     like( $err, qr/\Q$HOST\E/,   'and the one it is being layered onto' );
 
     ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for it' );
+};
+
+subtest 'two recipes on one guest cannot claim one port, from two domains either' => sub {
+
+    # Two recipes that need nothing, made to bind a port.  A domain resolves its
+    # recipes alone, so only the guest's claims so far can show ufw the other.
+    Provisioner::Cookbook->load($_) for qw{tmpfs};
+    my %mock = map { $_ => Test::MockModule->new("Provisioner::Recipe::$_") } qw{nosnap tmpfs};
+    $mock{$_}->redefine( listens => sub { return 3000 } ) for keys %mock;
+
+    my ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    ok( $err, 'the generation stops' ) or return;
+    like( $err, qr{/listeners/3000:.*\(nosnap,[ ]tmpfs\)}, 'at the port, naming both recipes' );
+    ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for the domain that came second' );
+
+    ( $err, $domains ) = generate();
+    is( $err, undef, 'one recipe on two domains is one claim' ) or diag $err;
+
+    $mock{tmpfs}->redefine( listens => sub { return 3001 } );
+    ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    is( $err, undef, 'and two recipes on two ports are two claims' ) or diag $err;
 };
 
 done_testing;

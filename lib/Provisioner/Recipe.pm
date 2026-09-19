@@ -17,6 +17,7 @@ use File::Copy();
 use File::Slurper::Temp();
 
 use JSON::Validator::Schema::Troglodyne;
+use Mojo::JSON::Pointer();
 
 =head1 NAME
 
@@ -654,8 +655,9 @@ The sub returns options for the dependency.  It fills in mandatory options that
 the configuration leaves out.  In some cases, you can then leave the dependency
 out of the configuration entirely.
 
-The base class requires C<ufw> when C<rate_limits> returns limits, C<fail2ban>
-when C<jails> returns jails, and C<data> when C<restores> returns something.  An override does not need to call
+The base class requires C<ufw> when C<rate_limits> or C<listens> names a port,
+C<fail2ban> when C<jails> returns jails, and C<data> when C<restores> returns
+something.  An override does not need to call
 C<SUPER::required_recipes> for those, because C<bin/new_config> asks the base
 class itself.  See L<Provisioner::Cookbook/Two sources, on purpose>.
 
@@ -689,9 +691,12 @@ sub required_recipes {
 
     # A recipe that names limits listens, and something must apply them.
     # Declaring the dependency here means that ufw does not have to know every
-    # recipe that listens.
-    my %limits = $self->rate_limits(%opts);
-    push( @required, ufw => sub { return ( rate_limits => \%limits ) } ) if %limits;
+    # recipe that listens.  Each port it binds is claimed under its name, and
+    # ufw's schema allows one name to a port.  A bare port and /tcp are one port.
+    my %limits    = $self->rate_limits(%opts);
+    my $name      = $self->recipe_name();
+    my %listeners = map { s{/tcp\z}{}r => { $name => 1 } } keys(%limits), $self->listens(%opts);
+    push( @required, ufw => sub { return ( rate_limits => \%limits, listeners => \%listeners ) } ) if %listeners;
 
     # Likewise for the jails of fail2ban.
     my %jails = $self->jails(%opts);
@@ -816,6 +821,30 @@ into the other.
 =cut
 
 sub rate_limits {
+    return ();
+}
+
+=head3 @ports = $recipe->listens(%opts)
+
+The ports that the services of this recipe bind and that C<rate_limits> does
+not name, such as a port on loopback that nothing outside the guest reaches.
+A port is written as in C<rate_limits>: C<3000> for TCP, C<1194/udp> for UDP.
+A range is each of its ports.
+
+Empty by default.  The ports that this returns and the keys of C<rate_limits>
+are together the claims of the recipe.  C<required_recipes> hands them to
+C<ufw> as C<listeners>, each port with the name of the recipe, and ufw refuses
+a configuration in which two recipes claim one port.  A claim with no rate
+limit therefore still reaches ufw, and pulls it in.
+
+A service that another recipe runs is that recipe's to claim.  An application
+behind C<nginxproxy> binds nothing of its own on 80 or 443, which C<nginx>
+claims.  This method runs before validation, so read C<%opts> with the same
+defaults that the schema declares.
+
+=cut
+
+sub listens {
     return ();
 }
 
@@ -1409,12 +1438,31 @@ sub validate {
         my $name  = $self->recipe_name() // ( Scalar::Util::blessed($self) // $self );
         my $where = $opts{domain} ? " for $opts{domain}" : q{};
 
-        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { "  $_" } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
+        die "The $name recipe's configuration$where is not valid:\n" . join( "\n", map { '  ' . _explain( $_, \%opts ) } @errors ) . "\nSee `bin/recipes $name` for what it takes.\n";
     }
 
     $opts{user} //= $opts{admin_user};
 
     return $self->enrich(%opts);
+}
+
+=head3 $text = _explain($error, $opts)
+
+The text of a schema error.  An error that counts the properties of an object,
+such as C<Too many properties: 2/1>, names none of them, so the keys of that
+object follow it.  Only the keys: a value can be a password.
+
+=cut
+
+sub _explain {
+    my ( $error, $opts ) = @_;
+
+    my ( undef, $keyword ) = @{ $error->details };
+    return "$error" unless ( $keyword // '' ) =~ m/\A(?:max|min)Properties\z/;
+
+    my $at = Mojo::JSON::Pointer->new($opts)->get( $error->path );
+    return "$error" unless ref $at eq 'HASH';
+    return "$error (" . join( ', ', sort keys %$at ) . ')';
 }
 
 =head3 %vars = $recipe->validated(%opts)

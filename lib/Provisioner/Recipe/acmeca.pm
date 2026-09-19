@@ -122,6 +122,20 @@ our $DEFAULT_PORT = 9000;
 our $INTERMEDIATE_DAYS = 1825;
 my $DAY = 86_400;
 
+=head2 @ports = $recipe->listens(%opts)
+
+step-ca on C<port>, on loopback.
+
+=cut
+
+sub listens {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, because required_recipes calls this
+    # before validation.
+    return ( $opts{port} // $DEFAULT_PORT );
+}
+
 =head2 %schema = $recipe->args()
 
 =cut

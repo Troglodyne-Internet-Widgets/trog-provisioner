@@ -110,6 +110,19 @@ sub required_recipes {
     );
 }
 
+=head2 @ports = $recipe->listens(%opts)
+
+The syslog input of telegraf on C<port>, on loopback.
+
+=cut
+
+sub listens {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, as required_recipes does.
+    return ( $opts{port} // 6514 );
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  There is one telegraf input on one port, one dashboard, and one

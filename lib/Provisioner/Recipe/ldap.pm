@@ -70,6 +70,20 @@ A rebuild can lose at most the changes of the last hour.
 
 =cut
 
+=head2 @ports = $recipe->listens(%opts)
+
+slapd: LDAP on 389, and LDAP over TLS on C<port>.
+
+=cut
+
+sub listens {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, because required_recipes calls this
+    # before validation.
+    return ( 389, $opts{port} // 636 );
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 Returns false.  A guest has one slapd.  Its suffix, its organization and its
