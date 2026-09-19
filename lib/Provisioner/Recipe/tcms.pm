@@ -37,6 +37,13 @@ state.  It is the site that somebody runs, so this recipe does not reset,
 update or reconcile it.  C<config/> is partly tracked, so a write into the
 working tree replaces a live configuration with what master says today.
 
+After the checkout is in place, the fragment runs the C<install> target of F<Installer.mk> in the
+checkout, as the service user.  That target makes the directories that tCMS
+needs and git does not track: C<data/> for its databases, C<totp/>, C<logs/>,
+the C<www/> directories, and C<~/.tcms>.  Without C<data/>, tCMS cannot open
+its database, and every request answers 500.  The target makes only what is
+missing, so it does not change a checkout that came down from the last guest.
+
 TODO: let the configuration name a commit to check out (#223).
 
 tCMS requires C<Sys::Virt>, so this recipe installs it before the other modules
