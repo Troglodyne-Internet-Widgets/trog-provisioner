@@ -317,8 +317,8 @@ subtest 'the hypervisor that has the guest is found and made current' => sub {
 
     $mock->redefine( domain_exists => sub { 0 } );
     my $err = exception { Trog::Bin::DebugBoot::hypervisor( 'vm.test', undef, "$dir/hypervisors.conf" ) };
-    like( $err, qr/vm[.]test/,        'a guest nothing has is named' );
-    like( $err, qr/Pass[ ]--connect/, 'and the way round it is said' );
+    like( $err, qr/vm[.]test/,           'a guest nothing has is named' );
+    like( $err, qr/Pass[ ]--hypervisor/, 'and the way round it is said' );
     Trog::HV->forget();
 };
 

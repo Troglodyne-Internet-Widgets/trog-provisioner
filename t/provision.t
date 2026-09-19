@@ -55,7 +55,7 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 # --- The interface lives in POD, and pod2usage prints it ----------------------
 subtest 'the POD documents the interface' => sub {
     my $synopsis = _pod_section( $script, 'SYNOPSIS|OPTIONS' );
-    like( $synopsis, qr/--connect/,                'POD documents --connect' );
+    like( $synopsis, qr/--hypervisor/,             'POD documents --hypervisor' );
     like( $synopsis, qr/--domaindir/,              'POD documents --domaindir' );
     like( $synopsis, qr/--existing/,               'POD documents --existing' );
     like( $synopsis, qr/--dryrun/,                 'POD documents --dryrun' );
@@ -97,7 +97,7 @@ subtest 'the nonreusable options say different things, so only one is taken' => 
     like( $out, qr/Usage:/,                   'and printing the usage out of the POD' );
 };
 
-# --- The hypervisor comes off the config, and --connect beats it -------------
+# --- The hypervisor comes off the config, and --hypervisor beats it ----------
 #
 # Run main() as far as the hypervisor being built and then stop it, so we can
 # see what it decided without letting it near a real libvirt or a real ssh.
@@ -147,11 +147,16 @@ subtest 'main() resolves the hypervisor before it touches anything' => sub {
     );
     is( $hv->domain_dir, $dir, '--domaindir does too' );
 
+    # A fleet with one hypervisor in it, so that a name has something to name.
+    my $fleet = "$dir/hypervisors.conf";
+    File::Slurper::Temp::write_text( $fleet, "[clihv]\nlibvirt_uri=qemu+ssh://root\@clihv/system\n" );
+
     $hv = $run->(
-        '--domaindir', $dir,
-        qw{--connect qemu+ssh://root@clihv/system vm.example.test}
+        '--domaindir', $dir, '--hvconf', $fleet,
+        qw{--hypervisor clihv vm.example.test}
     );
-    is( $hv->uri, 'qemu+ssh://root@clihv/system', '--connect wins over the config' );
+    is( $hv->uri,  'qemu+ssh://root@clihv/system', '--hypervisor wins over the config' );
+    is( $hv->name, 'clihv',                        'and the guest is built on the one it names' );
 };
 
 # --- Adopting the state a hypervisor already had -----------------------------
@@ -1021,12 +1026,12 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
 
     quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml" } ) } );
     %given = @flags[ 0 .. $#flags - 1 ];
-    ok( !exists $given{'--hvconf'},    'and not passed when there is none, so the generator reads the default' );
-    ok( !exists $given{'--connect'},   'nor --connect' );
-    ok( !exists $given{'--domaindir'}, 'nor a domain directory that was only the default' );
+    ok( !exists $given{'--hvconf'},     'and not passed when there is none, so the generator reads the default' );
+    ok( !exists $given{'--hypervisor'}, 'nor --hypervisor' );
+    ok( !exists $given{'--domaindir'},  'nor a domain directory that was only the default' );
 
-    # The generator chooses the hypervisor, so --connect and a --domaindir from
-    # the command line go to it, as --hvconf does.
+    # The generator chooses the hypervisor, so --hypervisor and a --domaindir
+    # from the command line go to it, as --hvconf does.
     quietly(
         sub {
             Trog::Bin::Provisioner::generate_config(
@@ -1035,14 +1040,14 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
                     domain_dir       => $dir,
                     domain_dir_given => $dir,
                     recipes          => "$dir/recipes.yaml",
-                    uri              => 'qemu+ssh://root@hv.test.test/system',
+                    hypervisor       => 'hv1',
                 }
             );
         }
     );
     %given = @flags[ 0 .. $#flags - 1 ];
-    is( $given{'--connect'},   'qemu+ssh://root@hv.test.test/system', '--connect is passed on' );
-    is( $given{'--domaindir'}, $dir,                                  'and so is a --domaindir from the command line' );
+    is( $given{'--hypervisor'}, 'hv1', '--hypervisor is passed on' );
+    is( $given{'--domaindir'},  $dir,  'and so is a --domaindir from the command line' );
 };
 
 done_testing;

@@ -86,9 +86,9 @@ subtest 'what bin/destroy is asked for' => sub {
     my $run3 = Test::MockModule->new('IPC::Run3');
     $run3->redefine( run3 => sub { push @ran, $_[0]; $? = 0; return 1 } );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the caller reads it afterwards, as it would from the real run3
 
-    says( sub { Trog::Skill::Teardown::destroy_guest( 'vm.test', 'qemu:///system', undef, 1, 1 ) } );
+    says( sub { Trog::Skill::Teardown::destroy_guest( 'vm.test', 'hv1', undef, 1, 1 ) } );
     my @cmd = @{ $ran[0] }[ 2 .. $#{ $ran[0] } ];
-    is_deeply( \@cmd, [qw{--purge --purge-data --connect qemu:///system --dryrun vm.test}], 'the domain directory, the data directory, and what was passed through' );
+    is_deeply( \@cmd, [qw{--purge --purge-data --hypervisor hv1 --dryrun vm.test}], 'the domain directory, the data directory, and what was passed through' );
 
     @ran = ();
     says( sub { Trog::Skill::Teardown::destroy_guest( 'vm.test', undef, undef, 0, 0 ) } );

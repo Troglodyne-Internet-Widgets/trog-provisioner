@@ -111,10 +111,11 @@ printed.
 
 Override what would otherwise come from the configuration and the lease.
 
-=item B<--connect> URI, B<--hvconf> FILE
+=item B<--hypervisor> NAME, B<--hvconf> FILE
 
-Which hypervisor is holding the guest.  Without either, the fleet is asked
-which one has it, the same way C<bin/destroy> finds a guest to destroy.
+Which hypervisor is holding the guest, named as F<hypervisors.conf> names it.
+Without either, the fleet is asked which one has it, the same way
+C<bin/destroy> finds a guest to destroy.
 
 =back
 
@@ -123,16 +124,16 @@ which one has it, the same way C<bin/destroy> finds a guest to destroy.
 sub main {
     my @args = @_;
 
-    my ( $into, $user, $key, $host, $uri, $hvconf, $help );
+    my ( $into, $user, $key, $host, $hv_name, $hvconf, $help );
     GetOptionsFromArray(
         \@args,
-        'into=s'    => \$into,
-        'user=s'    => \$user,
-        'key=s'     => \$key,
-        'host=s'    => \$host,
-        'connect=s' => \$uri,
-        'hvconf=s'  => \$hvconf,
-        'help'      => \$help,
+        'into=s'       => \$into,
+        'user=s'       => \$user,
+        'key=s'        => \$key,
+        'host=s'       => \$host,
+        'hypervisor=s' => \$hv_name,
+        'hvconf=s'     => \$hvconf,
+        'help'         => \$help,
     );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
@@ -140,7 +141,7 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $guest = connect_to( $domain, user => $user, key => $key, host => $host, uri => $uri, hvconf => $hvconf );
+    my $guest = connect_to( $domain, user => $user, key => $key, host => $host, hypervisor => $hv_name, hvconf => $hvconf );
 
     $into //= File::Temp::tempdir( "trog-artifacts-$domain-XXXXXX", TMPDIR => 1 );
     make_path($into);
@@ -246,7 +247,7 @@ sub capture_to {
 sub connect_to {
     my ( $domain, %opts ) = @_;
 
-    my $hv         = hypervisor( $domain, $opts{uri}, $opts{hvconf} );
+    my $hv         = hypervisor( $domain, $opts{hypervisor}, $opts{hvconf} );
     my $domain_dir = $hv->domain_dir;
     my $cfg_dir    = "$domain_dir/$domain";
 
@@ -278,7 +279,7 @@ sub connect_to {
     my $whoami = eval { $guest->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
     die "Could not get a shell on $user\@$host for $domain.\n" . "  key:  $key\n" . "  host: $host (the NAT lease; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
-      unless defined $whoami && length $whoami;
+      if !defined $whoami || $whoami eq q{};
 
     return $guest;
 }
@@ -286,15 +287,14 @@ sub connect_to {
 # Which machine is holding this guest.  The same question bin/destroy asks, and
 # the same answer: whichever one in the fleet actually has it.
 sub hypervisor {
-    my ( $domain, $uri, $hvconf ) = @_;
-
-    return Trog::HV->new( uri => $uri ) if $uri;
+    my ( $domain, $hv_name, $hvconf ) = @_;
 
     my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
+    return $fleet->hypervisor($hv_name)->activate() if defined $hv_name;
     return Trog::HV->new() unless $fleet->configured;
 
     my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in the fleet has $domain.\n" . "Pass --connect if it is somewhere the fleet does not list.\n";
+      or die "No hypervisor in the fleet has $domain.\n" . "Pass --hypervisor if it is somewhere the fleet does not look.\n";
 
     return $hv;
 }

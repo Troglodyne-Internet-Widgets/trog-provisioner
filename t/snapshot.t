@@ -43,10 +43,10 @@ sub main_snapshot (@args) { return Trog::Bin::Snapshot::main( '--hvconf', $NO_FL
 
 # The interface is documented in POD now, and pod2usage prints that.
 my $synopsis = _pod_section( "$FindBin::Bin/../bin/snapshot", 'SYNOPSIS|OPTIONS' );
-like( $synopsis, qr/--name/,      'POD documents --name' );
-like( $synopsis, qr/--connect/,   'POD documents --connect' );
-like( $synopsis, qr/--disk-only/, 'POD documents --disk-only' );
-like( $synopsis, qr/DOMAIN/,      'POD documents the DOMAIN argument' );
+like( $synopsis, qr/--name/,       'POD documents --name' );
+like( $synopsis, qr/--hypervisor/, 'POD documents --hypervisor' );
+like( $synopsis, qr/--disk-only/,  'POD documents --disk-only' );
+like( $synopsis, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
 
 # No domain -> usage, non-zero exit.  This one has to be a real run, since
 # pod2usage exits rather than dying.

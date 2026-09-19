@@ -38,6 +38,6 @@ is( exception { Trog::Bin::NukePool::main('--help') }, "usage exit 0\n", '--help
 
 is( exception { Trog::Bin::NukePool::main(qw{--domaindir /bogus}) }, "usage exit 2\n", '--domaindir is not an option, and nothing is reached' );
 
-is( exception { Trog::Bin::NukePool::main(qw{--connect qemu:///bogus --hypervisor hv1}) }, "usage exit 2\n", '--connect and --hypervisor together are refused' );
+is( exception { Trog::Bin::NukePool::main(qw{--connect qemu:///bogus}) }, "usage exit 2\n", '--connect is gone, and an option that is not there is refused' );
 
 done_testing();

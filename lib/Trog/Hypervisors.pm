@@ -26,7 +26,7 @@ Trog::Hypervisors - the fleet, and which hypervisor a guest belongs on
     # Where the guest lives now, or where it goes.
     my $hv = $fleet->select_for('vm.example.test', $config);
 
-    # The same, with --connect and no fleet taken care of.
+    # The same, with --hypervisor and no fleet taken care of.
     $hv = Trog::Hypervisors->choose('vm.example.test', config => $config);
 
 =head1 DESCRIPTION
@@ -64,7 +64,9 @@ here in one systemd slice.  That slice is the only place to cap CPU and I/O for
 all of them together.  Neither key sets a limit by itself.
 
 If the file does not exist, there is no fleet.  The hypervisor is then whatever
-F<provision.conf> or C<--connect> names, which for most people is this machine.
+the C<libvirt_uri> of F<provision.conf> names, which for most people is this
+machine.  C<--hypervisor> names a block of this file, so it has nothing to name
+without one.
 
 =head1 CHOOSING
 
@@ -165,11 +167,11 @@ sub default_path { return Trog::Config->path('hypervisors.conf') }
 
 Returns the hypervisor that runs a guest, made current.  I<Made current> means
 that L<Trog::HV/new> returns it from then on.  Every tool that acts on an
-existing guest, and does not create one, uses this.  Takes C<uri>, C<hvconf>,
-C<domain_dir> and C<config>, all optional.
+existing guest, and does not create one, uses this.  Takes C<hypervisor>,
+C<hvconf>, C<domain_dir> and C<config>, all optional.
 
-An explicit C<uri> (that is, C<--connect>) wins.  Otherwise this searches a
-configured fleet, and dies if no hypervisor in it has the guest.  An action on
+A named C<hypervisor> (that is, C<--hypervisor>) wins.  Otherwise this searches
+a configured fleet, and dies if no hypervisor in it has the guest.  An action on
 a guest that nobody can find does nothing, or acts on the wrong machine.  With
 no fleet configured, this returns C<< Trog::HV->from_config >>.
 
@@ -193,11 +195,13 @@ sub find {
 
 Returns the hypervisor that a guest is built on, made current.  C<find> is for
 a guest that exists, and this is for a guest that is about to be built or
-rebuilt.  F<bin/new_config> and F<bin/provision> both call it.  Takes C<uri>,
-C<hvconf>, C<domain_dir>, C<config>, C<host> and C<host_config>, all optional.
+rebuilt.  F<bin/new_config> and F<bin/provision> both call it.  Takes
+C<hypervisor>, C<hvconf>, C<domain_dir>, C<config>, C<host> and C<host_config>,
+all optional.
 
-An explicit C<uri> (that is, C<--connect>) wins.  With no fleet configured, this
-returns C<< Trog::HV->from_config($config) >>.  Otherwise it returns what
+A named C<hypervisor> (that is, C<--hypervisor>) wins.  With no fleet
+configured, this returns C<< Trog::HV->from_config($config) >>.  Otherwise it
+returns what
 C<select_for> answers, and it warns if C<config> names a C<libvirt_uri>, which
 the fleet overrides.
 
@@ -227,9 +231,14 @@ sub choose {
 =head2 _before_fleet(%opts)
 
 The steps that C<find> and C<choose> take before they ask a fleet.  Takes their
-C<uri>, C<hvconf>, C<domain_dir> and C<config>.  Returns the hypervisor when an
-explicit C<uri> or the lack of a fleet decides it.  Otherwise returns undef,
-the fleet to ask, and the C<domain_dir> pair when one was given.
+C<hypervisor>, C<hvconf>, C<domain_dir> and C<config>.  Returns the hypervisor
+when a name or the lack of a fleet decides it.  Otherwise returns undef, the
+fleet to ask, and the C<domain_dir> pair when one was given.
+
+A name is answered from the fleet, made current, so that a tool told which
+hypervisor to use skips the search and the capacity arithmetic both.  It dies
+when there is no fleet to name one in, rather than falling back to this
+machine, which is not what the name asked for.
 
 =cut
 
@@ -237,10 +246,17 @@ sub _before_fleet {
     my ( $class, %opts ) = @_;
 
     my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
-
-    return Trog::HV->new( uri => $opts{uri}, %paths ) if $opts{uri};
-
     my $fleet = $class->load( $opts{hvconf} // $class->default_path );
+
+    if ( defined $opts{hypervisor} ) {
+        die "No hypervisors are configured in " . $fleet->{path} . ", so there is no '$opts{hypervisor}' to name.\n"
+          unless $fleet->configured;
+
+        my $named = $fleet->hypervisor( $opts{hypervisor} )->activate();
+        $named->{$_} = $paths{$_} for keys %paths;
+        return $named;
+    }
+
     return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
 
     return ( undef, $fleet, %paths );
@@ -251,8 +267,7 @@ sub _before_fleet {
 =head2 configured
 
 Returns true when there is a fleet.  When it is false, the other methods here
-have nothing to say.  The hypervisor then comes from F<provision.conf> or
-C<--connect>.
+have nothing to say, and the hypervisor comes from F<provision.conf>.
 
 =head2 names
 

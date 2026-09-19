@@ -28,7 +28,7 @@ Trog::HV - the hypervisor we are provisioning against, whichever kind it is
     use Trog::HV();
 
     my $config = Config::Simple->new('/opt/domains/vm.example.test/provision.conf');
-    my $uri    = 'qemu+ssh://root@hv1.example.test/system';    # or undef, from --connect
+    my $uri    = 'qemu+ssh://root@hv1.example.test/system';    # or undef
 
     # Once, wherever the config and command line are read:
     Trog::HV->from_config($config, uri => $uri);
@@ -160,7 +160,7 @@ sub new {
     my ( $class, %opts ) = @_;
 
     # An option that is not set is not a request for a different hypervisor,
-    # so an unset --connect gets the current one.
+    # so a call that passes none gets the current one.
     return $INSTANCE if $INSTANCE && !any { $opts{$_} } keys %opts;
 
     return $class->candidate(%opts)->activate();

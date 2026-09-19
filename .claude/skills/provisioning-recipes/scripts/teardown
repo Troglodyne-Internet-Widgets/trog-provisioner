@@ -80,7 +80,7 @@ building another.  It is left anyway while another domain in it remains.
 Leave the domain's data directory where it is, here and on the hypervisor.  For
 when the next run should start from what this one produced.
 
-=item B<--connect> URI, B<--hvconf> FILE
+=item B<--hypervisor> NAME, B<--hvconf> FILE
 
 Passed through to C<bin/destroy>.
 
@@ -99,15 +99,15 @@ our $MARKER = '.trog-scratch-config';
 sub main {
     my @args = @_;
 
-    my ( $keep_config, $keep_data, $uri, $hvconf, $dryrun, $help );
+    my ( $keep_config, $keep_data, $hv_name, $hvconf, $dryrun, $help );
     GetOptionsFromArray(
         \@args,
-        'keep-config' => \$keep_config,
-        'keep-data'   => \$keep_data,
-        'connect=s'   => \$uri,
-        'hvconf=s'    => \$hvconf,
-        'dryrun'      => \$dryrun,
-        'help'        => \$help,
+        'keep-config'  => \$keep_config,
+        'keep-data'    => \$keep_data,
+        'hypervisor=s' => \$hv_name,
+        'hvconf=s'     => \$hvconf,
+        'dryrun'       => \$dryrun,
+        'help'         => \$help,
     );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
@@ -116,7 +116,7 @@ sub main {
       unless $domain;
 
     my $purge_data = !$keep_data && is_scratch();
-    my $rc         = destroy_guest( $domain, $uri, $hvconf, $dryrun, $purge_data );
+    my $rc         = destroy_guest( $domain, $hv_name, $hvconf, $dryrun, $purge_data );
 
     $rc ||= remove_config( $domain, $dryrun ) unless $keep_config;
 
@@ -124,7 +124,7 @@ sub main {
 }
 
 sub destroy_guest {
-    my ( $domain, $uri, $hvconf, $dryrun, $purge_data ) = @_;
+    my ( $domain, $hv_name, $hvconf, $dryrun, $purge_data ) = @_;
 
     # Progress for whoever is standing here, so STDERR rather than warn: warn
     # stamps every line with a file and a line number from inside this script,
@@ -136,8 +136,8 @@ sub destroy_guest {
 
     my @cmd = ( $^X, $destroy, '--purge' );
     push @cmd, '--purge-data' if $purge_data;
-    push @cmd, '--connect', $uri    if $uri;
-    push @cmd, '--hvconf',  $hvconf if $hvconf;
+    push @cmd, '--hypervisor', $hv_name if $hv_name;
+    push @cmd, '--hvconf',     $hvconf  if $hvconf;
     push @cmd, '--dryrun' if $dryrun;
     push @cmd, $domain;
 
@@ -190,7 +190,7 @@ sub remove_config {
     ## no critic (ProhibitPrintSTDERR)
 
     my $dir = $ENV{TROG_PROVISIONER_CONFIG};
-    unless ( defined $dir && length $dir ) {
+    if ( !defined $dir || $dir eq q{} ) {
         print {*STDERR} "TROG_PROVISIONER_CONFIG is not set, so there is no scratch config to remove.\n";
         return 0;
     }

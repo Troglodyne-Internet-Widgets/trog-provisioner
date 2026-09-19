@@ -22,7 +22,7 @@ snapshot - take a snapshot of a provisioned VM
     snapshot [OPTIONS] DOMAIN
 
     snapshot vm.example.com
-    snapshot --name before-upgrade --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    snapshot --name before-upgrade --hypervisor hv1 vm.example.com
     snapshot --disk-only --name before-upgrade vm.example.com
 
 =head1 OPTIONS
@@ -47,10 +47,12 @@ Use this option when you do not want the memory.  A full system snapshot writes
 all of the RAM of the guest into the image, which is slow and large.  A revert
 to it resumes the guest where it stopped, and does not boot it.
 
-=item B<--connect> URI
+=item B<--hypervisor> NAME
 
-The libvirt connection string of the hypervisor that holds the domain.  With
-this option, the command does not do the search that C<--hvconf> describes.
+The name of a hypervisor in F<hypervisors.conf>, when you know which one holds
+the domain.  With this option, the command does not do the search that
+C<--hvconf> describes.  It dies when the file does not name it, and says which
+names it has.
 
 =item B<--domaindir> DIR
 
@@ -84,14 +86,14 @@ its snapshot as it is, and leaves it off.
 sub main {
     my @args = @_;
 
-    my ( $name, $uri, $domain_dir, $hvconf, $disk_only );
+    my ( $name, $hv_name, $domain_dir, $hvconf, $disk_only );
     GetOptionsFromArray(
         \@args,
-        'name=s'      => \$name,
-        'connect=s'   => \$uri,
-        'domaindir=s' => \$domain_dir,
-        'hvconf=s'    => \$hvconf,
-        'disk-only'   => \$disk_only,
+        'name=s'       => \$name,
+        'hypervisor=s' => \$hv_name,
+        'domaindir=s'  => \$domain_dir,
+        'hvconf=s'     => \$hvconf,
+        'disk-only'    => \$disk_only,
     );
 
     my $domain = shift @args;
@@ -100,7 +102,7 @@ sub main {
 
     my $hv = Trog::Hypervisors->find(
         $domain,
-        uri => $uri, hvconf => $hvconf, domain_dir => $domain_dir
+        hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir
     );
 
     my $before = $hv->snapshot_current_name($domain);

@@ -42,19 +42,18 @@ provision - build a VM from a domain directory
     provision [OPTIONS] DOMAIN
 
     provision vm.example.com
-    provision --connect qemu+ssh://root@hv1.example.net/system vm.example.com
+    provision --hypervisor hv1 vm.example.com
 
 =head1 OPTIONS
 
 =over 4
 
-=item B<--connect> URI
+=item B<--hypervisor> NAME
 
-The libvirt connection string of the hypervisor to build on.  With this option,
-provision does not read F<hypervisors.conf>.  It does not choose a hypervisor
-and does not look at capacity.  It builds the guest on this one.  A remote
-hypervisor must use an ssh transport (C<qemu+ssh://user@host/system>), because
-provision needs its filesystem as well as its libvirt.
+The name of a hypervisor in F<hypervisors.conf>, which is the one to build on.
+With this option, provision does not search the fleet and does not look at
+capacity.  It builds the guest there.  It dies when the file does not name it,
+and says which names it has.
 
 =item B<--credentials>
 
@@ -128,8 +127,8 @@ Passed to F<bin/new_config>.  The default is F</etc/trog-provisioner/ipmap.cfg>.
 The fleet definition, which is the file that lists the hypervisors.  The
 default is F</etc/trog-provisioner/hypervisors.conf>.  If the file exists,
 provision chooses the hypervisor from it.  See L<Trog::Hypervisors>.  If it
-does not exist, F<provision.conf> and C<--connect> give the hypervisor.  For
-most people, that is still this machine.
+does not exist, F<provision.conf> gives the hypervisor, through its
+C<libvirt_uri>.  For most people, that is still this machine.
 
 =item B<--domaindir> DIR
 
@@ -431,14 +430,14 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse, $uri, $domain_dir, $hvconf, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse, $hv_name, $domain_dir, $hvconf, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     GetOptionsFromArray(
         \@args,
         'existing=s'             => \$reuse,
         'domaindir=s'            => \$domain_dir,
         'dryrun'                 => \$dryrun,
-        'connect=s'              => \$uri,
+        'hypervisor=s'           => \$hv_name,
         'hvconf=s'               => \$hvconf,
         'recipes=s'              => \$recipes,
         'ipmap=s'                => \$ipmap,
@@ -490,7 +489,7 @@ sub main {
             recipes          => $recipes,
             ipmap            => $ipmap,
             hvconf           => $hvconf,
-            uri              => $uri,
+            hypervisor       => $hv_name,
             dryrun           => $dryrun,
 
             # Only from the command line: see --salvage-gaps-ok in the POD.
@@ -525,7 +524,7 @@ sub main {
     # same object back from Trog::HV->new().
     my $hv = Trog::Hypervisors->choose(
         $domain,
-        uri         => $uri,
+        hypervisor  => $hv_name,
         hvconf      => $hvconf,
         domain_dir  => $domain_dir,
         config      => $config,
@@ -618,8 +617,8 @@ they wrote by hand, which is supported.  It returns 1 after it generates the
 configuration.
 
 The generator chooses the hypervisor with C<< Trog::Hypervisors->choose >>,
-and the rest of this program uses the same one.  C<hvconf> and C<uri> go to the
-generator as C<--hvconf> and C<--connect>.  C<domain_dir_given>, the
+and the rest of this program uses the same one.  C<hvconf> and C<hypervisor> go
+to the generator as C<--hvconf> and C<--hypervisor>.  C<domain_dir_given>, the
 C<--domaindir> of the command line, goes as C<--domaindir>.  C<domain_dir> is
 not passed, because it holds a default, and a default must not override the
 directory that a hypervisor in the fleet names.
@@ -648,9 +647,9 @@ sub generate_config {
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
-    push( @flags, '--hvconf',    $opts->{hvconf} )           if defined $opts->{hvconf};
-    push( @flags, '--connect',   $opts->{uri} )              if $opts->{uri};
-    push( @flags, '--domaindir', $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
+    push( @flags, '--hvconf',     $opts->{hvconf} )           if defined $opts->{hvconf};
+    push( @flags, '--hypervisor', $opts->{hypervisor} )       if defined $opts->{hypervisor};
+    push( @flags, '--domaindir',  $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
 
     # For the generator, this only keeps the key of a guest that is up.  See
     # DRY RUNS in bin/new_config.
