@@ -269,6 +269,31 @@ sub tests {
     return qw{matrix.tt};
 }
 
+=head2 %jails = $recipe->jails()
+
+A jail that bans a host whose logins fail too often.  synapse answers a failed
+login with a 403, and its access log names the address that nginx forwarded:
+
+    2026-09-19 16:18:06,793 - synapse.access.http.8008 - 643 - INFO - POST-3 - 192.168.122.50 - 8008 - {None} Processed request: 0.003sec/0.001sec ru=(0.001sec, 0.000sec) db=(0.000sec/0.000sec/1) 64B 403 "POST /_matrix/client/v3/login HTTP/1.1" "curl/8.5.0" [0 dbevts]
+
+After three of those in a row, synapse answers with a 429 of its own, and the
+jail counts that too.  A host that stopped at the 429 would never reach the
+ban.  fail2ban ships no filter for synapse.
+
+=cut
+
+sub jails {
+    return (
+        'matrix-login' => {
+            filter    => '',
+            backend   => 'auto',
+            port      => 'http,https',
+            logpath   => '/var/log/matrix-synapse/homeserver.log',
+            failregex => '^ - synapse\.access\.http\.\d+ - \d+ - INFO - \S+ - <HOST> - \d+ - \{\S*\} Processed request: .* (?:403|429) "POST /_matrix/client/(?:r0|v3)/login HTTP',
+        },
+    );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 C<packages.matrix.org>, which serves the synapse package.  Also GitHub, which

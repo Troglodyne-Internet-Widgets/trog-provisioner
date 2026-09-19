@@ -835,7 +835,7 @@ options: its name enables it, with the filter and the log that fail2ban gives
 it.  A jail of our own names a C<logpath> and a C<failregex>, and C<filter> set
 to the empty string, so that fail2ban looks for no filter file.
 
-Two things about the options:
+Three things about the options:
 
 =over 4
 
@@ -843,6 +843,11 @@ Two things about the options:
 
 =item * On Ubuntu, a jail reads the journal unless it says otherwise.  A jail
 that reads a log file needs C<backend> set to C<auto>.
+
+=item * The journal that such a jail reads is the system journal.  C<journald>
+files what a process with a user ID of 1000 or more writes into the journal of that
+user, so a jail for a service that runs as the service user needs C<backend>
+set to C<systemd[journalflags=1]>, which reads every journal.
 
 =back
 

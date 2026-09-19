@@ -169,6 +169,34 @@ sub rate_limits {
     return ( 3900 => 1024, 3901 => 1024, 3902 => 1024, 3903 => 1024 );
 }
 
+=head2 %jails = $recipe->jails(%opts)
+
+A jail that bans a host that asks the S3 API or the admin API with a key or a
+token that garage does not know.  garage logs each refusal to the journal:
+
+    2026-09-19T16:19:53.523536Z  INFO garage_api_common::generic_server: error 403 Forbidden, Forbidden: No such key: GKbogus0000000000000000000 in response to 192.168.122.57:53962 (key GKbogus0000000000000000000) GET /
+
+and C<Invalid bearer token> in place of C<No such key> on the admin API.
+
+=cut
+
+sub jails {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, as restores does.
+    my @ports = ( $opts{api_port} // 3900, $opts{admin_port} // 3903 );
+
+    return (
+        'garage-auth' => {
+            filter       => '',
+            backend      => 'systemd',
+            journalmatch => '_SYSTEMD_UNIT=garage.service',
+            port         => join( ',', @ports ),
+            failregex    => 'error 403 Forbidden, Forbidden: (?:No such key|Invalid bearer token)\b.* in response to <HOST>:\d+',
+        },
+    );
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  The endpoints this node answers on are one domain's: C<root_domain> is

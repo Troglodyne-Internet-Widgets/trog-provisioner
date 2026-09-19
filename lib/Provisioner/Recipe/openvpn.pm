@@ -115,6 +115,36 @@ sub rate_limits {
     return ( ( $opts{port} // 1194 ) . '/' . ( $opts{proto} // 'udp' ) => 256 );
 }
 
+=head2 %jails = $recipe->jails(%opts)
+
+A jail that bans a host that sends packets without the C<tls-auth> key.  Such
+a host is not a client of this server, and openvpn logs it as one of these:
+
+    TLS Error: cannot locate HMAC in incoming packet from [AF_INET]192.168.122.186:51342
+    TLS Error: incoming packet authentication failed from [AF_INET]192.168.122.50:36431
+
+Its log has no timestamps, so the jail reads each line as happening when it is
+read.
+
+=cut
+
+sub jails {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, as rate_limits does.
+    return (
+        'openvpn-tls' => {
+            filter      => '',
+            backend     => 'auto',
+            port        => $opts{port}  // 1194,
+            protocol    => $opts{proto} // 'udp',
+            logpath     => '/var/log/openvpn/openvpn.log',
+            datepattern => '{NONE}',
+            failregex   => '^TLS Error: (?:cannot locate HMAC in incoming packet|incoming packet authentication failed) from \[AF_INET6?\]<HOST>:\d+',
+        },
+    );
+}
+
 =head2 $bool = $recipe->is_multi_tenant()
 
 False.  The machine has one server, with one F</etc/openvpn/server> and one
