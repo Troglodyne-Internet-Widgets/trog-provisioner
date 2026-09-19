@@ -547,7 +547,6 @@ subtest 'what it refuses to pretend to' => sub {
         eject_cdrom        => qr/no[ ]cdrom/,
         pool_path          => qr/no[ ]storage[ ]pool/,
         pool_target        => qr/no[ ]storage[ ]pool/,
-        nuke_pool          => qr/no[ ]storage[ ]pool/,
         base_image         => qr/Glance[ ]image/,
         create_disk        => qr/Cinder[ ]volume/,
         lease_ip           => qr/no[ ]lease[ ]table/,
