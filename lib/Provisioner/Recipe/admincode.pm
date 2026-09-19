@@ -48,9 +48,12 @@ The purpose is to set up a developer or an agent with all of their repositories
 in one step.  Supply the global git configuration of the admin through the
 C<skel> of L<Provisioner::Recipe::adminconfig>.
 
-If the C<perl> recipe is enabled, the CPAN dependencies of each repository that
-has a F<Makefile.PL> are installed, and its tests are run.  So this recipe can
-smoke your own personal PAN.  If your repositories need system packages, list
+If the C<perl> recipe is enabled, the CPAN dependencies of each repository are
+installed into the perl that it built, and then the tests of the repository run
+against that perl.  A repository with a F<dist.ini> gets what C<dzil> says it
+needs, author dependencies included.  One with a F<Makefile.PL> or a
+F<Build.PL> gets what cpanm reads from it.  A repository with none of these is
+skipped.  So this recipe can smoke your own personal PAN.  If your repositories need system packages, list
 them in C<extra_pkgs>.
 
 =head2 Cloning while the fetch cache is in front of it

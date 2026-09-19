@@ -141,6 +141,15 @@ subtest 'pin: the version pkg-config reports, asked when it runs' => sub {
     is( scalar( grep { $_->[1] eq $CPANM } @{ $r->{ran} } ), 0, 'with nothing pinned' );
 };
 
+subtest 'test: the prove of that perl, in the checkout' => sub {
+    my $r = install( args => [qw{test /bogus/checkout}] );
+    is( $r->{rc}, 0, 'it succeeds' );
+    is_deeply( $r->{ran}, [ [ '/bogus/checkout', "$PERL/bin/prove", qw{-lvm t} ] ], 'with lib/ on the path, so a checkout that is not built still finds itself' );
+
+    $r = install( args => [qw{test /bogus/checkout}], fails => qr{/prove\z} );
+    is( $r->{rc}, 1, 'and a suite that fails is the exit code' );
+};
+
 subtest 'exit_code: what a child exit status says, the way a shell says it' => sub {
     is( Trog::Script::CpanInstall::exit_code(0),        0,   'success' );
     is( Trog::Script::CpanInstall::exit_code( 2 << 8 ), 2,   'the code it exited with' );

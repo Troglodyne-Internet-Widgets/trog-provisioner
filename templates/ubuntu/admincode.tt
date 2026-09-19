@@ -40,6 +40,7 @@ rm -f [% install_dir %]/[% domain %]/.repos_for.token
 [% IF modules.grep('^perl$').size() %]
 [%# --notest always, because this smokes the suites of the repositories and not
     the suites of their dependencies.  smoke_perl_modules.pl runs those suites
-    with prove.  The cpan_notest setting of the perl recipe does not apply. -%]
-[% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl [% install_dir %]/[% domain %]/[% basedir %] [% script_dir %]/cpan_install --notest installdeps"
+    with cpan_install test, against the perl that the dependencies went into.
+    The cpan_notest setting of the perl recipe does not apply. -%]
+[% script_dir %]/queue_postrun_task "[% script_dir %]/smoke_perl_modules.pl [% install_dir %]/[% domain %]/[% basedir %] [% script_dir %]/cpan_install --notest"
 [% END -%]
