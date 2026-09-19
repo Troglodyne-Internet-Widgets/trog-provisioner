@@ -28,10 +28,8 @@ bin/new_config --ipmap=path/to/ipmap.cfg --recipes=path/to/recipes.yaml domain.n
 # Install dependencies (if cpanfile exists)
 cpanm --installdeps .
 
-# Run perl syntax check, should say OK
-perl -c lib/Provisioner/Recipe/yourmodule.pm
-
-# perltidy and perlcritic run in the pre-commit hook.  See STYLE.md.
+# perltidy, perlcritic, perl -c and the tests that a change can break run in
+# the pre-commit hook.  See STYLE.md.
 
 # Check POD documentation has no POD errors
 perldoc lib/Provisioner/Recipe/yourmodule.pm
@@ -63,6 +61,14 @@ sub deps { return qw{package1 package2} }
 A package name is a fact about a distribution rather than about the software.
 `t/recipes.t` fails if a recipe that needs packages has no version for some
 distribution.
+
+Each recipe also has `t/remotetests-<recipe>.t`, which generates its domain
+under `AUTHOR_TESTING` through `t/lib/Trog/Test/RemoteTests.pm`.  For a new
+recipe, copy any of them and change the name of the recipe in it.
+`t/recipes-remotetests.t` fails when a recipe has none, or has no guest tests.
+
+A required field with no default needs a value in both `t/recipes.t` and those
+tests.  Both read it from `t/lib/Trog/Test/RecipeConfig.pm`, so add it there.
 
 Everything else stays in the recipe itself.  What a recipe takes is declared
 rather than checked by hand: `args()` returns an OpenAPI schema, and that one

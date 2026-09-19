@@ -1,6 +1,7 @@
 #!/bin/sh
 
-# Tidy the staged Perl, then refuse the commit if perlcritic objects to it.
+# Tidy the staged Perl, refuse the commit if perlcritic objects to it or it does
+# not compile, then run the tests that the commit can break.
 #
 # STYLE.md says to run perltidy and there is a .perltidyrc to run it with, and
 # for a long time neither was true of the tree -- so touching any file meant a
@@ -12,7 +13,12 @@
 # before every commit, and a check that lives in a document is a check somebody
 # has to remember; this is the same check where it cannot be forgotten.
 #
-# Install it: cp git-hooks/pre-commit .git/hooks/
+# The tests are the step after that.  tests-covering, from Perl::Tests::Covering,
+# reads the staged diff and names the tests whose runs reached the lines it
+# changes.  git-hooks/post-commit brings its records up to date after each
+# commit, and the choice is only as good as those records.
+#
+# Install both: cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 #
 # A file qualifies three ways:
 #   - a .pm, .pl or .t extension
@@ -49,6 +55,11 @@
 
 # Redirect output to stderr.
 exec 1>&2
+
+# The tests that skip unless these are set run too.  t/TESTING.md says which
+# tests those are.  git-hooks/post-commit sets them as well, so that the records
+# the choice is made from are of the tests as they run here.
+export AUTHOR_TESTING=1 RELEASE_TESTING=1
 
 # ACMR so that a file deleted in this commit is not handed to perltidy, which
 # would fail on a path that is no longer there.
@@ -91,12 +102,13 @@ all_files="$perl_files $scripts_files"
 # is more than one file -- which would stop the hook working in exactly the
 # commits that need it most.  Unquoted below, because there the word splitting is
 # what turns one string into an argument list.
+#
+# No early exit when nothing is Perl: a commit of templates still has tests to
+# run.
 if [ -z "$perl_files" ] && [ -z "$scripts_files" ]
 then
-    exit 0
-fi
-
-if command -v perltidy >/dev/null 2>&1
+    :
+elif command -v perltidy >/dev/null 2>&1
 then
     echo "Auto-tidying perl changes..."
 
@@ -158,3 +170,58 @@ then
 else
     echo "pre-commit: perlcritic is not on PATH, skipping the critic pass."
 fi
+
+# Choosing tests by the lines they ran trusts that each changed file compiles.
+# A syntax error in a sub that no test runs chooses no test, and still breaks
+# every test that loads the file.  A .t is left out, because a test in the diff
+# is always run.
+compile_failed=''
+for file in $all_files
+do
+    case "$file" in
+        *.t)
+            continue
+            ;;
+    esac
+
+    out=$(perl -Ilib -c "$file" 2>&1) || {
+        echo "$out"
+        compile_failed=1
+    }
+done
+
+if [ -n "$compile_failed" ]
+then
+    echo
+    echo "pre-commit: the above does not compile."
+    exit 1
+fi
+
+# tests-covering follows the Perl that each test loads.  .tests-covering-map.pl
+# at the root answers for templates, for scripts that run on the system perl,
+# for new recipes and for documentation.  --unexplained all runs every test for
+# anything else that the records and the map cannot follow.
+if ! command -v tests-covering >/dev/null 2>&1
+then
+    echo "Running every test, because tests-covering is not on PATH; install Perl::Tests::Covering..."
+    prove -lm -j8 t/ || {
+        echo "pre-commit: the tests above failed."
+        exit 1
+    }
+    exit 0
+fi
+
+# --full-index, because tests-covering matches each file to its records by the
+# blob id on the diff's index line, and an abbreviated id matches nothing.
+tests=$(git diff --cached --full-index | tests-covering --diff --unexplained all) || exit 1
+if [ -z "$tests" ]
+then
+    echo "No test ran a line that this commit changes."
+    exit 0
+fi
+
+echo "Running the tests that ran what this commit changes..."
+prove -lm -j8 $tests || {
+    echo "pre-commit: the tests above failed."
+    exit 1
+}

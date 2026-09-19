@@ -1,11 +1,12 @@
 # Perl Style
 
 The perl here is tidied with `perltidy` and the `.perltidyrc` beside this file.
-You do not run it yourself.  The git pre-commit hook tidies what you staged, and
-then runs perlcritic over it.  If the profile objects, the hook refuses the
-commit.  Install it once:
+You do not run it yourself.  The git pre-commit hook tidies what you staged,
+runs perlcritic over it, compiles it, and runs the tests that the change can
+break.  If any of those fails, the hook refuses the commit.  Install it, and the
+post-commit hook that keeps its choice of tests current, once:
 
-    cp git-hooks/pre-commit .git/hooks/
+    cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
 Without it the tree drifts out of tidy, and then the first person to run
 perltidy on a file they were only changing three lines of gets a hundred line

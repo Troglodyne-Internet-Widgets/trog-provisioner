@@ -89,21 +89,28 @@ Apply the three skills that the commit gate asks for in this order: data-perl,
 testing-perl, then reviewing-perl against the whole diff.  Loading a skill is
 not applying it.  The hook sees the first, and the review is still yours.
 
-Then the mechanical ones:
+Then run `podchecker` over each changed file.
 
-    perl -c <each changed .pm or bin/ script>
-    podchecker <each changed file>
-    prove -lm -j8 t/
+Do not run `perltidy`, `perlcritic`, `perl -c` or the tests yourself.  The
+pre-commit hook tidies the Perl you staged, runs perlcritic over it
+with the right profile for its path, and compiles it.  Then it runs the tests
+that the commit can break, which `tests-covering` chooses.  If any step fails,
+the commit does not happen, and the hook prints why.  Install both hooks once
+in each checkout that you commit from:
 
-Do not run `perltidy` or `perlcritic` yourself.  The pre-commit hook tidies
-the Perl you staged, and then runs perlcritic over it with the right profile
-for its path.  If a profile objects, the commit does not happen, and the hook
-prints why.  Install the hook once in each checkout that you commit from:
+    cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
-    cp git-hooks/pre-commit .git/hooks/
+The post-commit hook brings the records of `tests-covering` up to date in the
+background.
 
-`git-hooks/pre-commit` says which profile judges which path, and why
-`scripts/` has a profile of its own.
+A file that no test loads, such as a template, reaches its tests through
+`.tests-covering-map.pl`.  A path that the map cannot place runs every test.
+So if a commit runs the whole suite and does not plainly touch everything, the
+map is probably missing a rule.  Add the rule to `.tests-covering-map.pl` in
+the same change, and add the case to `t/tests-covering-map.t`.
+
+`git-hooks/pre-commit` says which profile judges which path, and why `scripts/`
+has a profile of its own.
 
 ## When something is slow
 
