@@ -1,8 +1,13 @@
-[ [% domain %] ]
+[%# The jails of this domain, which its recipes declare.  See jails in
+    Provisioner::Recipe.  mark_raw, because a failregex has a <HOST> in it,
+    which the default escaping would turn into &lt;HOST&gt;. -%]
+[% FOR name IN jails.keys().sort() -%]
+[[% name %]]
 enabled = true
-port = http,https
-filter = [% domain %]
-logpath = [% install_dir %]/[% domain %]/log/tpsgi.log
-maxretry = 5
-findtime = 60
-bantime  = 600
+[% FOR key IN jails.$name.keys().sort() -%]
+[% IF key != 'enabled' -%]
+[% key %] = [% jails.$name.$key | mark_raw %]
+[% END -%]
+[% END -%]
+
+[% END -%]

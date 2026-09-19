@@ -654,8 +654,8 @@ The sub returns options for the dependency.  It fills in mandatory options that
 the configuration leaves out.  In some cases, you can then leave the dependency
 out of the configuration entirely.
 
-The base class requires C<ufw> when C<rate_limits> returns limits, and C<data>
-when C<restores> returns something.  An override does not need to call
+The base class requires C<ufw> when C<rate_limits> returns limits, C<fail2ban>
+when C<jails> returns jails, and C<data> when C<restores> returns something.  An override does not need to call
 C<SUPER::required_recipes> for those, because C<bin/new_config> asks the base
 class itself.  See L<Provisioner::Cookbook/Two sources, on purpose>.
 
@@ -692,6 +692,10 @@ sub required_recipes {
     # recipe that listens.
     my %limits = $self->rate_limits(%opts);
     push( @required, ufw => sub { return ( rate_limits => \%limits ) } ) if %limits;
+
+    # Likewise for the jails of fail2ban.
+    my %jails = $self->jails(%opts);
+    push( @required, fail2ban => sub { return ( jails => \%jails ) } ) if %jails;
 
     # Likewise for state: a recipe that says where its salvage goes back
     # depends on data, which walks what every dependent gave it.
@@ -812,6 +816,42 @@ into the other.
 =cut
 
 sub rate_limits {
+    return ();
+}
+
+=head3 %jails = $recipe->jails(%opts)
+
+The fail2ban jails that the services of this recipe need, keyed by the name of
+the jail.  Each value is a hash of jail options, which the C<fail2ban> recipe
+writes into a jail file as C<key = value> lines, under C<enabled = true>.
+
+Empty by default.  A recipe that overrides this gets C<fail2ban> in its
+C<required_recipes>, and its jails merge into the configuration of
+C<fail2ban>, as C<rate_limits> merge into C<ufw>.  Every jail bans through
+ufw, so a ban and a rate limit are in one firewall.
+
+A jail that fail2ban ships, such as C<postfix> or C<nginx-http-auth>, needs no
+options: its name enables it, with the filter and the log that fail2ban gives
+it.  A jail of our own names a C<logpath> and a C<failregex>, and C<filter> set
+to the empty string, so that fail2ban looks for no filter file.
+
+Two things about the options:
+
+=over 4
+
+=item * fail2ban reads C<%> as interpolation, so a literal one is C<%%>.
+
+=item * On Ubuntu, a jail reads the journal unless it says otherwise.  A jail
+that reads a log file needs C<backend> set to C<auto>.
+
+=back
+
+A jail name is shared by every domain on the guest.  Name a jail of your own
+after the domain, so that two domains with the same recipe do not collide.
+
+=cut
+
+sub jails {
     return ();
 }
 

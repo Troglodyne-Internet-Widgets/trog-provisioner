@@ -96,6 +96,32 @@ sub tests {
     return qw{tpsgi.tt};
 }
 
+=head2 %jails = $recipe->jails(%opts)
+
+A jail for the domain, which bans a host that gets too many 4xx responses as
+the anonymous user, from the log of tPSGI.  It is named after the domain,
+because two domains on one guest each have their own log.
+
+=cut
+
+sub jails {
+    my ( $self, %opts ) = @_;
+
+    return (
+        "tpsgi-$opts{domain}" => {
+            filter      => '',
+            backend     => 'auto',
+            port        => 'http,https',
+            logpath     => "$opts{install_dir}/$opts{domain}/log/tpsgi.log",
+            datepattern => '%%Y-%%m-%%dT%%H:%%M:%%SZ',
+            failregex   => '^ \[INFO\]: RequestId [\d\w-]+ From <HOST> \|nobody\| \w+ 4\d{2} http',
+            maxretry    => 5,
+            findtime    => 60,
+            bantime     => 600,
+        }
+    );
+}
+
 =head2 @hosts = $recipe->fetch_hosts()
 
 Returns C<github.com>, which serves the tPSGI checkout that this recipe clones.

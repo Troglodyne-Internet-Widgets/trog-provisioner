@@ -226,6 +226,20 @@ sub args {
     );
 }
 
+=head2 %jails = $recipe->jails()
+
+The jails that fail2ban ships for postfix and dovecot.  They ban a host whose
+logins to SMTP, IMAP or POP fail too often, and read both from the journal.
+
+=cut
+
+sub jails {
+    return (
+        postfix => {},
+        dovecot => {},
+    );
+}
+
 =head2 @names = $recipe->subdomains()
 
 C<mail>, which the MX names and the SRV records point at, and C<autodiscover>

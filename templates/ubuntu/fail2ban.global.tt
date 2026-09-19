@@ -1,0 +1,5 @@
+[%# Ban through ufw, which holds the rate limits too, and not through the
+    nftables that Ubuntu sets in jail.d/defaults-debian.conf.  jail.d is read
+    in order, so this name comes after that one. -%]
+printf '[DEFAULT]\nbanaction = ufw\nbanaction_allports = ufw\n' > /etc/fail2ban/jail.d/trog-provisioner.conf
+[% script_dir %]/queue_postrun_task systemctl restart fail2ban
