@@ -98,7 +98,12 @@ When a piece of code is removed, don't assert that it isn't there - testing unde
 
 # Running tests
 
-Run tests with `prove -lm -j8`
+Run tests with `prove -m -j8`
+
+Do not pass `-l`.  Each test puts `lib/` on its path itself, with `use
+FindBin::libs`, before it loads anything from the repository.  With `-l`, a test
+that loads a module first passes anyway, and then fails for anyone who runs
+plain `prove`.
 
 The pre-commit hook runs the tests that a commit can break, and
 `git-hooks/pre-commit` says how it chooses them.  A test that reads a file
@@ -120,7 +125,7 @@ We want coverage per file to be greater than or equal to what it was before a pa
 Structural test files should not ever take more than 30 seconds to run, and we should aim for substantially less than that.
 If the runtime of a test increases by 3 standard deviations versus what it previously took, profiling should be done; there is likely room for improvement.
 
-`prove -MDevel::NYTProf -lmv $testfile && nytprofhtml` will produce the profiling information you need to read in `nytprof/`
+`prove -MDevel::NYTProf -mv $testfile && nytprofhtml` will produce the profiling information you need to read in `nytprof/`
 
 See the `perl-slop:profiling-perl` skill for more details.
 

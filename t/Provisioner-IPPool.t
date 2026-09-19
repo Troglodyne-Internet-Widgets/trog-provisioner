@@ -17,9 +17,8 @@ use File::Temp qw{tempfile};
 use File::Slurper::Temp();
 use POSIX();
 
-use Trog::SQLite();
-
 use FindBin::libs;
+use Trog::SQLite();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.

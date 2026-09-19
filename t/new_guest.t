@@ -18,6 +18,8 @@ t/new_guest.t - bin/new_guest and bin/recipes, the two front ends to the cookboo
 use Test::More;
 use Test::Fatal   qw{exception};
 use Capture::Tiny qw{capture_stderr};
+use FindBin;
+use FindBin::libs;
 use Provisioner::Cookbook();
 use Test::MockModule qw{strict};
 use File::Temp       qw{tempdir};
@@ -25,9 +27,6 @@ use File::Slurper();
 use File::Slurper::Temp();
 use YAML::XS();
 use IPC::Run3();
-
-use FindBin;
-use FindBin::libs;
 
 ## no critic (CompileTime) -- setting it at compile time is the point:
 ## anything that reads it must be loaded after, not before.
