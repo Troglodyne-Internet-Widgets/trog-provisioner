@@ -96,7 +96,10 @@ When a piece of code is removed, don't assert that it isn't there - testing unde
 Run tests with `prove -lm -j8`
 
 The pre-commit hook runs the tests that a commit can break, and
-`git-hooks/pre-commit` says how it chooses them.
+`git-hooks/pre-commit` says how it chooses them.  A test that reads a file
+instead of loading it, such as a template or a script that runs on the system
+perl, is found through `.tests-covering-map.pl`.  If you add a template that no
+recipe names, `t/tests-covering-map.t` fails.
 
 Re-run with `-v $testfile` option if you need details on why a specific test failed
 

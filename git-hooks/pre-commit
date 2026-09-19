@@ -192,36 +192,18 @@ then
     exit 1
 fi
 
-# tests-covering follows Perl, and nothing else.  A commit that touches what it
-# cannot follow runs the whole suite:
-#   - a template, fixture or configuration file, which tests read and do not load
-#   - anything under scripts/, which ships to a guest and runs on the system
-#     perl, so a test that runs it has no record of it
-#   - a new module, because Provisioner::Cookbook finds recipes at run time, and
-#     a test that finds a module that way was never recorded as loading it
-# Documentation runs nothing, and needs no tests.
+# tests-covering follows the Perl that each test loads.  .tests-covering-map.pl
+# at the root answers for templates, for scripts that run on the system perl,
+# and for documentation.  --unexplained all runs every test for anything else
+# that the records and the map cannot follow.
+#
+# A new recipe is the exception.  tests-covering takes a Perl file that a diff
+# adds as explained, because the files that use it are in the diff too.  But
+# Provisioner::Cookbook finds recipes at run time, so nothing in the diff uses
+# it, and the map is not asked.
 whole_suite=''
-for file in $(git diff --cached --name-only)
-do
-    case "$file" in
-        *.md|docs/*|LICENSE|CHANGES)
-            ;;
-        scripts/*)
-            whole_suite="$file runs on the system perl"
-            ;;
-        *.pm|*.pl|*.PL|*.t)
-            ;;
-        *)
-            if ! { test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'; }
-            then
-                whole_suite="tests-covering cannot follow $file"
-            fi
-            ;;
-    esac
-done
-
-added=$(git diff --cached --name-only --diff-filter=A -- '*.pm' | head -n 1)
-test -n "$added" && whole_suite="$added is new"
+added=$(git diff --cached --name-only --diff-filter=A -- 'lib/Provisioner/Recipe/*.pm' | head -n 1)
+test -n "$added" && whole_suite="$added is a new recipe"
 
 if ! command -v tests-covering >/dev/null 2>&1
 then
@@ -240,7 +222,7 @@ fi
 
 # --full-index, because tests-covering matches each file to its records by the
 # blob id on the diff's index line, and an abbreviated id matches nothing.
-tests=$(git diff --cached --full-index | tests-covering --diff) || exit 1
+tests=$(git diff --cached --full-index | tests-covering --diff --unexplained all) || exit 1
 if [ -z "$tests" ]
 then
     echo "No test ran a line that this commit changes."
