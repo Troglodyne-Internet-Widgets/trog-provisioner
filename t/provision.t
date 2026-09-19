@@ -59,7 +59,6 @@ subtest 'the POD documents the interface' => sub {
     like( $synopsis, qr/--domaindir/,              'POD documents --domaindir' );
     like( $synopsis, qr/--existing/,               'POD documents --existing' );
     like( $synopsis, qr/--dryrun/,                 'POD documents --dryrun' );
-    like( $synopsis, qr/--no-config/,              'POD documents --no-config' );
     like( $synopsis, qr/--clone-on-nonreusable/,   'POD documents --clone-on-nonreusable' );
     like( $synopsis, qr/--destroy-on-nonreusable/, 'POD documents --destroy-on-nonreusable' );
     like( $synopsis, qr/--die-on-nonreusable/,     'POD documents --die-on-nonreusable' );
@@ -73,6 +72,18 @@ subtest 'no domain exits with the usage' => sub {
     isnt( $?, 0, 'exits non-zero' );
     like( $out, qr/No[ ]domain[ ]passed/, 'saying what was missing' );
     like( $out, qr/Usage:/,               'and printing the usage out of the POD' );
+};
+
+# A run that names an option this does not have builds nothing.  --no-config is
+# the one that was taken away, and a cron line or a script that still passes it
+# would otherwise generate the configuration it asked not to.
+subtest 'an option that is not there is refused rather than ignored' => sub {
+    my $out = q{};
+    IPC::Run3::run3( [ $^X, $script, '--no-config', 'vm.test' ], \undef, \$out, \$out );
+
+    isnt( $?, 0, 'exits non-zero' );
+    like( $out, qr/Unknown[ ]option:[ ]no-config/, 'naming the option' );
+    like( $out, qr/Usage:/,                        'and printing the usage out of the POD' );
 };
 
 # A real run, since pod2usage exits rather than dying.  Safe: the refusal comes
@@ -723,9 +734,14 @@ subtest 'a dependency with no configuration is named as the one that is missing'
     $hv_mock->redefine( file_exists  => sub { 1 } );
     $hv_mock->redefine( prepare_host => sub { 1 } );
 
+    # Every provision generates, and what is under test here is the guard that
+    # reads what generation wrote.  So the generation is the step that is faked.
+    my $bin_mock = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
+    $bin_mock->redefine( generate_config => sub { 1 } );
+
     Trog::HV->forget();
     my $err = exception {
-        quietly( sub { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, '--no-config', '--domaindir', $dir, 'tenant.test' ) } )
+        quietly( sub { Trog::Bin::Provisioner::main( '--hvconf', $no_fleet, '--domaindir', $dir, 'tenant.test' ) } )
     };
 
     # The guard read the tenant's own provision.conf, which is right there, so a
@@ -850,6 +866,10 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     my $bin_mock = Test::MockModule->new( 'Trog::Bin::Provisioner', no_auto => 1 );
     $bin_mock->redefine( provision_domain => sub { push @order, 'provision'; return ( 'ubuntu', '203.0.113.10' ) } );
 
+    # The order of the steps after the configuration is what this is about, and
+    # the domain directory here is written by hand rather than generated.
+    $bin_mock->redefine( generate_config => sub { 1 } );
+
     # main() calls this itself, so mocking provision_domain does not cover it,
     # and what it does with the secret store is another subtest's business.
     $bin_mock->redefine( place_guest_secrets => sub { 1 } );
@@ -858,8 +878,8 @@ subtest 'the seed ISO is not ejected until cloud-init has read it' => sub {
     my $no_fleet = tempdir( CLEANUP => 1 ) . '/hypervisors.conf';
     my $rc       = eval {
         Trog::Bin::Provisioner::main(
-            '--no-config', '--hvconf', $no_fleet,
-            '--domaindir', $dir,       'vm.example.test'
+            '--hvconf',    $no_fleet,
+            '--domaindir', $dir, 'vm.example.test'
         );
     };
     is( $@,  '', 'main() runs to the end' ) or diag $@;

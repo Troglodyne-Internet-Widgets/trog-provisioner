@@ -179,7 +179,7 @@ That means:
 
 `bin/new_config` and `bin/provision` used to live in separate repositories and be run one after the other: generate a domain's configuration, then build the VM.  That held together while the generator could assume it was running *on* the hypervisor it was writing about -- it read the internal IP and the sshd port straight off the local machine.  Once which hypervisor to use became a choice, both halves had to agree on the answer, and the only honest way for them to agree is to be one program.
 
-So `bin/provision` generates the configuration first, and the generator is what picks the hypervisor: the recipe already says how much memory, disk and CPU the guest wants, which is everything placement needs.  `provision.conf` never has to carry it.  `--no-config` skips the generation and builds whatever is already in the domain directory, which is what you want for a domain you wrote by hand.
+So `bin/provision` generates the configuration first, and the generator is what picks the hypervisor: the recipe already says how much memory, disk and CPU the guest wants, which is everything placement needs.  `provision.conf` never has to carry it.  Every provision generates, for that reason: a configuration written for one hypervisor says the wrong thing about any other, down to the address the guest is given, and a build that skipped the generation could not tell.  A domain you want built is a domain in `recipes.d`.
 
 ### Configuration lives in /etc/trog-provisioner
 
