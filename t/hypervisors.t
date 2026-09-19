@@ -305,6 +305,67 @@ subtest 'find' => sub {
     like( $err, qr/Looked[ ]on:[ ]hv1,[ ]hv2/,                      'saying where we looked' );
 };
 
+# --- choose -------------------------------------------------------------------
+subtest 'choose' => sub {
+    my $path = fleet_file();
+
+    Trog::HV->forget();
+    my $explicit = Trog::Hypervisors->choose(
+        'vm.example.test',
+        uri        => 'qemu+ssh://root@elsewhere/system',
+        hvconf     => $path,
+        domain_dir => '/bogus/domains',
+    );
+    is( $explicit->uri,        'qemu+ssh://root@elsewhere/system', '--connect skips the fleet entirely' );
+    is( $explicit->domain_dir, '/bogus/domains',                   'and keeps the domain directory it was given' );
+
+    Trog::HV->forget();
+    my $no_fleet = Trog::Hypervisors->choose(
+        'vm.example.test',
+        hvconf => '/bogus/nonexistent/hypervisors.conf',
+        config => guest_conf( libvirt_uri => 'qemu+ssh://root@confhv/system' ),
+    );
+    is( $no_fleet->uri, 'qemu+ssh://root@confhv/system', 'with no fleet, the configuration of the guest names it' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { $_[0]->name eq 'hv2' && $_[1] eq 'host.example.test' ? 1 : 0 } );
+    $mock->redefine( capacity      => sub { capacity() } );
+
+    my @warned;
+    local $SIG{__WARN__} = sub { push @warned, @_ };
+
+    Trog::HV->forget();
+    my $placed = quietly(
+        sub {
+            Trog::Hypervisors->choose(
+                'vm.example.test',
+                hvconf     => $path,
+                domain_dir => '/bogus/domains',
+                config     => guest_conf( memory => 4096, cpus => 2, size => 40 * $GB, libvirt_uri => 'qemu+ssh://root@confhv/system' ),
+            );
+        }
+    );
+    is( $placed->name,         'hv1',            'a new guest is placed in the fleet' );
+    is( $placed->domain_dir,   '/bogus/domains', 'and a domain directory that was given wins over the fleet' );
+    is( Trog::HV->new()->name, 'hv1',            'and it became the current hypervisor' );
+    like( "@warned", qr/libvirt_uri[ ]in[ ]its[ ]configuration[ ]is[ ]ignored/, 'a libvirt_uri that the fleet overrides is warned about' );
+
+    # hv1 is current now.  A second guest is chosen for all the same, rather
+    # than handed the one that the first guest got.
+    my $tenant = quietly(
+        sub {
+            Trog::Hypervisors->choose(
+                'tenant.example.test',
+                hvconf      => $path,
+                config      => guest_conf( memory => 4096, cpus => 2, size => 40 * $GB ),
+                host        => 'host.example.test',
+                host_config => guest_conf( memory => 8192, cpus => 4, size => 40 * $GB ),
+            );
+        }
+    );
+    is( $tenant->name, 'hv2', 'a tenant goes where its host is, and not where the last guest went' );
+};
+
 # --- Capacity arithmetic, against a stand-in libvirt --------------------------
 subtest 'capacity counts what is committed, not what is used' => sub {
     Trog::HV->forget();
