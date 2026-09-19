@@ -5,6 +5,11 @@ use Test::More;
 
 my $dir = '[% install_dir %]/[% domain %]/tCMS';
 
+# The first request that tCMS answers touches config/setup, and from then on
+# nobody is offered the page that registers the first user.  The flag is there
+# before this test only in a checkout that came down from the last guest.
+my $was_set_up = -e "$dir/config/setup";
+
 ok(-d $dir, 'the tCMS checkout is there');
 ok(-d "$dir/.git", 'and is a git checkout');
 
@@ -37,6 +42,16 @@ foreach my $made ("$dir/data/files", "$dir/totp", "$dir/logs", '[% install_dir %
 # not nginx, whose cache can answer 200 for a tCMS that answers 500.
 my $code = `curl -s -m 30 -o /dev/null -w '%{http_code}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/ 2>&1`;
 is($code, '200', 'tCMS answers its front page');
+
+# Asking took the first-time setup away from a fresh install, so give it back.
+# The running workers opened the databases that the reset deletes, so restart
+# them too.
+SKIP: {
+    skip 'the checkout was set up before this test', 2 if $was_set_up;
+    my $reset = `sudo -u [% user %] HOME='[% install_dir %]/[% domain %]' make -C '$dir' -f Installer.mk reset 2>&1 && systemctl restart '[% domain %]' 2>&1`;
+    is($?, 0, 'a fresh install is reset, and tCMS restarted') or diag $reset;
+    ok(!-e "$dir/config/setup", 'so its first visitor is offered the setup page');
+}
 
 # git refuses to work in a checkout that another account owns, and the service
 # user is not the admin.
