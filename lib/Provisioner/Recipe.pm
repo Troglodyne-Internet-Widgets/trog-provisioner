@@ -837,6 +837,12 @@ C<ufw> as C<listeners>, each port with the name of the recipe, and ufw refuses
 a configuration in which two recipes claim one port.  A claim with no rate
 limit therefore still reaches ufw, and pulls it in.
 
+A claim is a port and a protocol, not an address.  So two recipes on one port
+are refused even where the kernel would let both bind, as one on 127.0.0.1 and
+one on an external address of the guest.  By default, every recipe here binds
+loopback or every address, and each of those pairs does collide.  See issue
+#250 for claims that carry the address.
+
 A service that another recipe runs is that recipe's to claim.  An application
 behind C<nginxproxy> binds nothing of its own on 80 or 443, which C<nginx>
 claims.  This method runs before validation, so read C<%opts> with the same

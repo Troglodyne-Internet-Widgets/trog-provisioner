@@ -38,7 +38,8 @@ runs.  Each recipe claims its ports in C<listeners>, from its C<rate_limits>
 and its C<listens>.  See L<Provisioner::Recipe/listens>.  C<bin/new_config>
 adds the claims of the other domains on the same guest, so the check covers
 the guest and not only the domain.  The error names the port and the recipes
-that claim it.
+that claim it.  A claim has no address, so a port is refused to a second
+recipe even on another address.  See L<Provisioner::Recipe/listens>.
 
 =cut
 
