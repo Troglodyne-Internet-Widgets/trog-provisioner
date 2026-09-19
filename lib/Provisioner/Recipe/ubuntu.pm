@@ -79,6 +79,8 @@ and that is not a reason to fail a build.
 
 =back
 
+=for Pod::Coverage release
+
 =cut
 
 sub packager                   { return 'deb' }
