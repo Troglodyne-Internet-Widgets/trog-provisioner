@@ -56,107 +56,9 @@ use YAML::XS();
 
 use Provisioner::Cookbook();
 use Provisioner::Utils();
+use Trog::Test::RecipeConfig();
 
 my $TLD = 'test.test';
-
-# What each recipe must be given, where it has no default that could mean
-# anything.  `modules` names the recipes that go beside it in its domain, each
-# with the configuration that it has here.  $tmpdir is the directory of the run.
-sub _required_config {
-    my ($tmpdir) = @_;
-
-    return (
-
-        # A mirror of no release, and a shipper with nowhere to ship.  The same
-        # minimum t/recipes.t gives them.
-        aptmirror  => { releases => ['noble'] },
-        logshipper => { host     => 'logs.test.test' },
-
-        # Both of these are full releases on purpose.  The archives they come
-        # from publish one artifact per release, so a series like 7.1.0 or 10.11
-        # is a 404 that the recipe cannot do anything useful with.
-        imagemagick => { version => '7.1.0-48' },
-        mariadb     => {
-            root_pw  => 's3cr3t',
-            dumpfile => 'dump.sql',
-            version  => '10.11.6',
-        },
-
-        # A password is not a thing a schema can default, and grubconf refuses
-        # to render nothing.  The same minimum t/recipes.t gives them.
-        grafana       => { admin_password => 's3cr3t' },
-        grafanasyslog => { modules        => ['grafana'] },
-        grubconf      => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
-
-        tpsgi       => { routers => ['app.psgi'] },
-        adminconfig => { skel    => "$tmpdir/dotfiles" },
-        admincode   => {
-            repos_from => [],
-            basedir    => 'Code',
-        },
-        nginxproxy => {
-            vhosts => {
-                8080 => {
-                    proxy_uri  => 'run/app.sock',
-                    static_dir => 'www/static',
-                }
-            }
-        },
-        pdns   => { api_key => 'test-api-key' },
-        matrix => {
-            server_name    => 'test.test.test',
-            admin_password => 's3cr3t',
-            smtp_host      => 'mail.test.test',
-            smtp_user      => 'notify@test.test',
-            smtp_pass      => 'smtp-pass',
-            smtp_domain    => 'test.test',
-        },
-        roundcube => {
-            version => '1.6.0',
-            modules => ['nginxproxy'],
-        },
-        koan => {
-            user               => 'koan',
-            koan_email         => 'koan@test.test',
-            messaging_provider => 'telegram',
-            telegram_token     => 'fake-token',
-            telegram_chat_id   => 12345,
-            cli_provider       => 'local',
-            github_user        => 'test-bot',
-            github_token       => 'ghp_fakefakefake',
-        },
-        backupdestination => {
-            base_dir    => '/opt/backups',
-            hosts       => ['backup.host'],
-            targets     => ['etc'],
-            key_file    => 'backup.rsa',
-            data_source => "$tmpdir/data",
-        },
-        backup => {
-            targets     => { etc => '/etc' },
-            key_file    => 'backup.rsa',
-            data_source => "$tmpdir/data",
-        },
-        postgres        => { dumps => [] },
-        plexmediaserver => {
-            plex_login_name => 'bogus',
-            admin_mail      => 'bogus@test.test',
-        },
-        gogs => {
-            version        => 'bogus',
-            admin_password => 'bogus',
-        },
-        openvpnclient => {
-            server   => 'bogus.test',
-            cert_dir => '/bogus',
-        },
-        ldap => { admin_password => 'bogus' },
-        sssd => {
-            base_dn  => 'bogus',
-            ldap_uri => 'ldap://test.test',
-        },
-    );
-}
 
 =head1 FUNCTIONS
 
@@ -282,7 +184,7 @@ IPMAP
     # Each domain has its own recipe, and the recipes that `modules` names
     # beside it.  Beside it, not in it: a recipe's configuration takes only its
     # own fields.
-    my %required = _required_config($tmpdir);
+    my %required = Trog::Test::RecipeConfig::required_config($tmpdir);
     my %config;
     foreach my $name (@recipes) {
         my %own     = %{ $required{$name}     // {} };
@@ -291,11 +193,7 @@ IPMAP
     }
     $config{_base} = {
         _global   => { user => 'test', data_source => "$tmpdir/data", install_dir => "$tmpdir/domains" },
-        registrar => {
-            type => 'bogus',
-            user => 'bogus',
-            key  => 'bogus',
-        },
+        registrar => $required{registrar},
     };
 
     my ( $ih, $ipmap_file ) = File::Temp::tempfile( DIR => $tmpdir );

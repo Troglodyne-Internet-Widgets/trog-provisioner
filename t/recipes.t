@@ -35,6 +35,7 @@ use List::Util       qw{any};
 use File::Find();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
+use Trog::Test::RecipeConfig();
 use IPC::Run3();
 use File::Find();
 use File::Path();
@@ -270,89 +271,14 @@ sub rejects_missing {
     };
 }
 
-# Needed by backup recipes
+# The backup recipes read their key from here.  See Trog::Test::RecipeConfig.
 my $tmp  = tempdir( CLEANUP => 1 );
-my $ddir = "$tmp/test.test.test";
-mkdir $ddir;
-Provisioner::Utils::write_ssh_keypair( "$ddir/key.rsa", RSA => 2048, 'recipes.t' );
+my $ddir = "$tmp/data/$G{domain}";
+File::Path::make_path($ddir);
+Provisioner::Utils::write_ssh_keypair( "$ddir/backup.rsa", RSA => 2048, 'recipes.t' );
 
 # Build list of known modules with required input data
-my %required_config = (
-    aptmirror   => { releases => ['noble'] },
-    imagemagick => { version  => '7.1.1-47' },
-    logshipper  => { host     => 'logs.test.test' },
-    mariadb     => {
-        root_pw  => 's3cr3t',
-        dumpfile => 'dump.sql',
-        version  => '11.4.4',
-    },
-    tpsgi           => { routers         => ['app.psgi'] },
-    gogs            => { version         => '0.13.0',        admin_password => 's3cr3t' },
-    plexmediaserver => { plex_login_name => 'plexuser',      admin_mail     => 'admin@test.test' },
-    openvpnclient   => { server          => 'vpn.test.test', cert_dir       => '/opt/domains/test.test.test/vpn' },
-    adminconfig     => { skel            => '/opt/dotfiles' },
-    admincode       => {
-        repos_from => [],
-        basedir    => 'Code',
-    },
-    nginxproxy => {
-        vhosts => {
-            8080 => {
-                proxy_uri  => 'run/app.sock',
-                static_dir => 'www/static',
-            },
-        },
-    },
-    letsencrypt => {},
-    pdns        => { api_key        => 'test-api-key' },
-    grafana     => { admin_password => 's3cr3t' },
-    grubconf    => { grub_vars      => { GRUB_TIMEOUT => '5', GRUB_CMDLINE_LINUX => 'net.ifnames=0' } },
-
-    registrar => { type => 'easydns', user => 'somebody', key => 'a-token' },
-    matrix    => {
-        server_name    => 'test.test.test',
-        admin_password => 's3cr3t',
-        smtp_host      => 'mail.test.test',
-        smtp_user      => 'notify@test.test',
-        smtp_pass      => 'smtp-pass',
-        smtp_domain    => 'test.test',
-        modules        => ['nginxproxy'],
-    },
-    roundcube => {
-        version => '1.6.0',
-        modules => ['nginxproxy'],
-    },
-    koan => {
-        user               => 'koan',
-        koan_email         => 'koan@test.test',
-        messaging_provider => 'telegram',
-        telegram_token     => 'fake-token',
-        telegram_chat_id   => 12345,
-        cli_provider       => 'local',
-        github_user        => 'test-bot',
-        github_token       => 'ghp_fakefakefake',
-    },
-    backupdestination => {
-        base_dir    => '/opt/backups',
-        hosts       => ['backup.host'],
-        targets     => ['etc'],
-        key_file    => 'key.rsa',
-        data_source => $tmp,
-    },
-    backup => {
-        modules     => [],
-        targets     => { etc => '/etc' },
-        key_file    => 'key.rsa',
-        data_source => $tmp,
-    },
-    ldap => {
-        admin_password => 's3cr3t',
-    },
-    sssd => {
-        ldap_uri => 'ldaps://ldap.test.test.test',
-        base_dn  => 'dc=test,dc=test',
-    },
-);
+my %required_config = Trog::Test::RecipeConfig::required_config($tmp);
 
 # Every recipe there is, asked of the thing that already answers it.
 #

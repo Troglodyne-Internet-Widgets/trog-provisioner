@@ -67,6 +67,9 @@ under `AUTHOR_TESTING` through `t/lib/Trog/Test/RemoteTests.pm`.  For a new
 recipe, copy any of them and change the name of the recipe in it.
 `t/recipes-remotetests.t` fails when a recipe has none, or has no guest tests.
 
+A required field with no default needs a value in both `t/recipes.t` and those
+tests.  Both read it from `t/lib/Trog/Test/RecipeConfig.pm`, so add it there.
+
 Everything else stays in the recipe itself.  What a recipe takes is declared
 rather than checked by hand: `args()` returns an OpenAPI schema, and that one
 declaration validates the configuration, fills in defaults, coerces types and
