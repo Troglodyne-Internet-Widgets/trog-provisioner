@@ -38,7 +38,7 @@ use Trog::HV();
 
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
-use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::Libvirt();
 
 # Every subtest wants a hypervisor of its own, and new() hands back the last one
 # it built unless you ask for something different.
@@ -1598,5 +1598,97 @@ subtest 'libvirt refusing to set up, start or remove something is an error' => s
         return 1;
     }
 }
+
+# --- What bin/debug_boot asks a backend for ------------------------------------
+{
+
+    package FakeConsoleDomain;
+    sub new                 ( $class, %what ) { return bless {%what}, $class }
+    sub get_xml_description ( $self, @ )      { return $self->{xml} }
+}
+
+# The definition of a guest, near enough: the serial libvirt gives it, and a
+# display.
+sub console_xml {
+    my (%opt) = @_;
+    my $serial =
+      $opt{file}
+      ? "<serial type='file'>\n      <source path='$opt{file}'/>\n    </serial>"
+      : "<serial type='pty'>\n      <target type='isa-serial' port='0'/>\n    </serial>";
+    return "<domain type='kvm'><devices>\n    $serial\n  </devices></domain>";
+}
+
+subtest 'a backend says which debug_boot actions it can do' => sub {
+    is_deeply( [ Trog::HV->debug_actions ], [], 'the base class none, so an unknown backend debugs nothing' );
+
+    my @libvirt = Trog::HV::Libvirt->debug_actions;
+    ok( ( grep { $_ eq 'single' } @libvirt ),  'libvirt names an action that needs its disk' );
+    ok( ( grep { $_ eq 'console' } @libvirt ), 'and the console' );
+};
+
+subtest 'a console capture redirects the serial port and restarts the guest' => sub {
+    my %seen = ( defined => undef, restarted => 0 );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_definition => sub { $seen{defined} // console_xml() } );
+    $mock->redefine( define_domain     => sub { $seen{defined} = $_[1]; 1 } );
+    $mock->redefine( restart_domain    => sub { $seen{restarted}++;     1 } );
+
+    my $hv = bless( {}, 'Trog::HV::Libvirt' );
+    is( $hv->console_log_path('vm.test'), '/tmp/vm.test-console.log', 'one capture file per guest' );
+
+    is( $hv->console_capture( 'vm.test', wait => 0 ), 1, 'it reports that it restarted the guest' );
+    like( $seen{defined}, qr{<serial[ ]type='file'>},                        'the serial is a file now' );
+    like( $seen{defined}, qr{<source[ ]path='/tmp/vm\.test-console\.log'/>}, 'named for the guest' );
+    unlike( $seen{defined}, qr{<serial[ ]type='pty'>}, 'and is no longer a pty' );
+    is( $seen{restarted}, 1, 'restarted, because the boot to read has not happened yet' );
+
+    # Twice would mean two <serial> elements, which libvirt refuses.
+    like( exception { $hv->console_capture( 'vm.test', wait => 0 ) }, qr/already[ ]logs[ ]its[ ]console/, 'a capture that is on is not started again' );
+
+    # libvirt reformats what it is handed, so the file serial comes back with
+    # its source on a line of its own.  Matching the one-liner is how the undo
+    # silently did nothing.
+    $seen{defined} = console_xml( file => '/tmp/vm.test-console.log' );
+    $hv->console_capture_off('vm.test');
+    like( $seen{defined}, qr{<serial[ ]type='pty'>}, 'and taking it off puts the pty back' );
+
+    $mock->redefine( domain_definition => sub { '<domain type=\'kvm\'><devices></devices></domain>' } );
+    like( exception { $hv->console_capture( 'no-serial.test', wait => 0 ) }, qr/no[ ]pty[ ]serial[ ]port/, 'a guest with no pty serial port is refused' );
+};
+
+subtest 'the console of a libvirt guest is read off the hypervisor as root' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    my $asked;
+    $mock->redefine( capture_cmd => sub { $asked = $_[1]; return "boot line\n" } );
+
+    my $hv = bless( {}, 'Trog::HV::Libvirt' );
+    is( $hv->console_output('vm.test'), "boot line\n", 'what the capture holds' );
+    like( $asked, qr{\Asudo[ ]cat[ ]'/tmp/vm[.]test-console[.]log'\z}, 'read with sudo, because libvirt writes it as root' );
+
+    $mock->redefine( capture_cmd => sub { q{} } );
+    is( $hv->console_output('vm.test'), undef, 'and an empty capture is no console at all' );
+};
+
+subtest 'the vnc access of a libvirt guest is a port and the tunnel to it' => sub {
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( _domain    => sub { FakeConsoleDomain->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) } );
+    $mock->redefine( ssh_target => sub { 'doge@hv.test' } );
+    $mock->redefine( describe   => sub { 'hv.test' } );
+
+    my ( $advice, $port ) = bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test');
+    is( $port, 5910, 'the port libvirt allocated, as libvirt reports it' );
+    like( $advice, qr/ssh[ ]-N[ ]-L[ ]5910:127[.]0[.]0[.]1:5910[ ]doge\@hv[.]test/, 'and the tunnel to reach it, because the display is on loopback' );
+
+    # Measured on libvirt 10.0.0: an autoport display reads port='-1' until the
+    # domain runs.  That is the absence of a port, not port -1.
+    $mock->redefine( _domain => sub { FakeConsoleDomain->new( xml => q{<graphics type='vnc' port='-1' autoport='yes'>} ) } );
+    like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'port -1 is no port' );
+
+    $mock->redefine( _domain => sub { FakeConsoleDomain->new( xml => q{<graphics type='spice' port='5901'>} ) } );
+    like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test') }, qr/no[ ]display[ ]to[ ]connect[ ]to/, 'and a display that is not vnc is not this one' );
+
+    $mock->redefine( _domain => sub { undef } );
+    like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('gone.test') }, qr/No[ ]domain[ ]called[ ]gone[.]test/, 'a guest that is not there is named' );
+};
 
 done_testing;

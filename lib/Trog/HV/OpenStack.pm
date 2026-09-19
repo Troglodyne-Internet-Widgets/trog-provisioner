@@ -96,6 +96,97 @@ our $REBUILD_TIMEOUT = 600;
 # rebuild keeps the payload that the server was created with.
 our $REBUILD_MICROVERSION = '2.57';
 
+# The first compute microversion with the remote-consoles call, which took the
+# place of os-getVNCConsole.
+our $CONSOLE_MICROVERSION = '2.6';
+
+# How many lines of the console Nova is asked for.  It keeps the last 64KB of
+# it, so a larger number costs nothing and a smaller one loses the boot.
+our $CONSOLE_LINES = 5000;
+
+=head2 @actions = $hv->debug_actions()
+
+C<console>, C<fetch> and C<vnc>.  Nova keeps the console of a server and hands
+out a console URL, so those three have an answer here.
+
+The rest of F<bin/debug_boot> edits a libvirt domain or drives libguestfs on
+the hypervisor, and a cloud gives us neither the definition nor the disk.
+Rescuing a server is the nearest thing to C<--single>, and it boots the server
+from a rescue image rather than its own kernel, so it is not that action under
+another name.
+
+=cut
+
+sub debug_actions { return qw{console fetch vnc} }
+
+=head2 $restarted = $hv->console_capture($name, wait =E<gt> $seconds)
+
+Returns 0 and does nothing else.  Nova keeps the console of every server, so
+there is nothing to redirect and no reason to restart the server.
+
+=cut
+
+sub console_capture { return 0 }
+
+=head2 $text = $hv->console_output($name)
+
+The console log of the server, from C<os-getConsoleOutput>, or undef if Nova
+returns none.  The cloud keeps the last part of it, so an old boot is gone.
+
+Dies if the cloud has no server of that name.
+
+=cut
+
+sub console_output {
+    my ( $self, $name ) = @_;
+
+    my $server = $self->server($name)
+      or die "There is no guest called '$name' on " . $self->describe . "\n";
+
+    my $answer = $self->_nova( POST => "/servers/$server->{id}/action", { 'os-getConsoleOutput' => { length => $CONSOLE_LINES } } );
+
+    return ( ref $answer eq 'HASH' ? $answer->{output} : undef ) || undef;
+}
+
+=head2 ($advice, $url) = $hv->vnc_access($name)
+
+The URL of a C<noVNC> session for the server, from the C<remote-consoles> call,
+and what the operator has to know about it.
+
+The URL carries a token of its own and the cloud expires it, so it is fetched
+each time and not kept.
+
+Dies if the cloud has no server of that name, or if it returns no URL.
+
+=cut
+
+sub vnc_access {
+    my ( $self, $name ) = @_;
+
+    my $server = $self->server($name)
+      or die "There is no guest called '$name' on " . $self->describe . "\n";
+
+    my $answer = $self->_nova(
+        POST => "/servers/$server->{id}/remote-consoles",
+        { remote_console => { protocol => 'vnc', type => 'novnc' } },
+        $CONSOLE_MICROVERSION
+    );
+
+    my $url = ref $answer eq 'HASH' ? $answer->{remote_console}{url} : undef;
+    die "$name has no display to connect to on " . $self->describe . "\n" unless $url;
+
+    my $advice = <<"CONSOLE";
+$name has a noVNC console.  Open this in a browser:
+
+  $url
+
+The cloud expires the token in it, so ask again rather than keeping it.
+
+CONSOLE
+
+    return ( $advice, $url );
+}
+
 =head2 config_keys
 
 Returns the F<hypervisors.conf> keys that this backend reads.  C<cloud> marks a

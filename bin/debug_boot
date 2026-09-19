@@ -15,6 +15,7 @@ use FindBin::libs;
 use File::Slurper::Temp();
 use File::Temp();
 use Getopt::Long qw{GetOptionsFromArray};
+use List::Util   qw{any};
 use Pod::Usage   qw{pod2usage};
 
 use Trog::Hypervisors();
@@ -49,6 +50,17 @@ C<bin/provision> can only tell you that it never asked for an address.
 
 This tool is for that case.  It works on a guest that ran for a year and does
 not come back from a reboot.  It also works on a guest that never came up.
+
+=head2 It is a libvirt tool, mostly
+
+Every action here edits the definition of a domain, drives libguestfs on the
+hypervisor, or asks libvirt for a screen.  A guest that a cloud built has none
+of those.  The hypervisor says which actions it can do, and this refuses the
+rest before it touches the guest, naming the backend.
+
+On an OpenStack cloud that leaves C<--console>, C<--fetch> and C<--vnc>, which
+Nova answers: it keeps the console log of a server and hands out a console URL.
+See L<Trog::HV/debug_actions>.
 
 =head2 Start with --console
 
@@ -129,7 +141,8 @@ C<--hvconf>, or in the default fleet file, which hypervisor has the guest.
 
 =cut
 
-our $LOG_DIR = '/tmp';
+# How many of the last lines of a console capture to show.
+our $TAIL_LINES = 8;
 
 # How much of a screenshot to take off the libvirt stream at a time.
 our $STREAM_CHUNK = 65_536;
@@ -160,6 +173,7 @@ sub main {
     ) unless $action;
 
     my $hv = hypervisor( $domain, $opt{connect}, $opt{hvconf} );
+    refuse_unsupported( $hv, $action );
 
     return console( $hv, $domain, \%opt )           if $action eq 'console';
     return fetch( $hv, $domain, \%opt )             if $action eq 'fetch';
@@ -181,30 +195,39 @@ sub hypervisor {
     return $hv;
 }
 
-sub log_path { return "$LOG_DIR/$_[0]-console.log" }
+=head2 refuse_unsupported($hv, $action)
 
-# --- Reshaping the domain ------------------------------------------------------
-# Both of these edit the persistent definition and restart the guest, because
-# the output of a boot that already happened cannot be read again.
+Dies unless the hypervisor lists C<$action> in C<debug_actions>, naming the
+backend and what it can do there.  Returns 1.
+
+Each action below is written against libvirt, and a backend that cannot do one
+of them has no error of its own to give: libguestfs is not there, and there is
+no domain to redefine.  So this refuses first.
+
+=cut
+
+sub refuse_unsupported {
+    my ( $hv, $action ) = @_;
+
+    my @can = $hv->debug_actions;
+    return 1 if any { $_ eq $action } @can;
+
+    die "debug_boot cannot --$action on " . $hv->describe . ".\n" . ( @can ? 'There it can do: ' . join( ', ', map { "--$_" } sort @can ) . ".\n" : "It can debug nothing there.\n" );
+}
+
+# --- Reshaping the guest -------------------------------------------------------
+# What a capture costs is the backend's to know: a hypervisor that has to
+# redirect the serial port restarts the guest, and a cloud that keeps the log
+# does not.
 sub console {
     my ( $hv, $domain, $opt ) = @_;
 
-    my $xml = definition( $hv, $domain );
-    my $log = log_path($domain);
+    ## no critic (ProhibitPrintSTDERR)
+    print {*STDERR} "Capturing the console of $domain.  A hypervisor that has to restart it takes $opt->{wait}s longer.\n";
 
-    die "$domain already logs its console to a file; --fetch reads it,\n" . "and --restore puts it back.\n"
-      if index( $xml, q{<serial type='file'} ) >= 0;
-
-    # libvirt writes the serial output directly to this file.  Nothing must hold
-    # a pty open, and the capture starts at the first line of the firmware.
-    $xml =~ s{<serial[ ]type='pty'>}{<serial type='file'><source path='$log'/>}
-      or die "$domain has no pty serial port to redirect.\n";
-
-    redefine( $hv, $domain, $xml );
-    restart( $hv, $domain );
-
-    print {*STDERR} "Letting it boot for $opt->{wait}s...\n";    ## no critic (ProhibitPrintSTDERR)
-    sleep $opt->{wait};
+    my $restarted = $hv->console_capture( $domain, wait => $opt->{wait} );
+    print {*STDERR} $restarted ? "Restarted it and let it boot for $opt->{wait}s.\n" : "Nothing was restarted: the console of a running guest is kept there.\n";
+    ## use critic
 
     return fetch( $hv, $domain, $opt );
 }
@@ -212,12 +235,12 @@ sub console {
 sub hold {
     my ( $hv, $domain, $opt ) = @_;
 
-    my $xml = definition( $hv, $domain );
+    my $xml = $hv->domain_definition($domain);
     $xml =~ s{<os>}{<os><bootmenu enable='yes' timeout='$opt->{timeout}'/>}
       if index( $xml, '<bootmenu' ) < 0;
 
-    redefine( $hv, $domain, $xml );
-    restart( $hv, $domain );
+    $hv->define_domain($xml);
+    $hv->restart_domain($domain);
 
     printf {*STDERR} "%s is holding at the boot menu for %ds.\n", $domain, $opt->{timeout} / 1000;    ## no critic (ProhibitPrintSTDERR)
     return vnc( $hv, $domain );
@@ -226,15 +249,11 @@ sub hold {
 sub restore {
     my ( $hv, $domain ) = @_;
 
-    my $xml = definition( $hv, $domain );
-    my $log = log_path($domain);
+    $hv->console_capture_off($domain);
 
-    # libvirt reformats the XML and puts <source> on a line of its own.  The
-    # match is on the log path, because that is the part that is ours.
-    $xml =~ s{<serial[ ]type='file'>\s*<source[ ]path='\Q$log\E'\s*/>}{<serial type='pty'>};
+    my $xml = $hv->domain_definition($domain);
     $xml =~ s{<bootmenu[^>]*/>}{};
-
-    redefine( $hv, $domain, $xml );
+    $hv->define_domain($xml);
 
     # Undo --single on the disk too, but only when the guest is off.  A write
     # to the disk of a running guest corrupts it.
@@ -255,12 +274,9 @@ sub restore {
 sub fetch {
     my ( $hv, $domain, $opt ) = @_;
 
-    my $log = log_path($domain);
-
-    # sudo, because libvirt writes the file as root.
-    my $content = $hv->capture_cmd("sudo cat '$log'");
+    my $content = $hv->console_output($domain);
     unless ($content) {
-        print {*STDERR} "Nothing at $log on the hypervisor.\n" . "Was this started with --console?\n";    ## no critic (ProhibitPrintSTDERR)
+        print {*STDERR} "No console output for $domain on " . $hv->describe . ".\n" . "Was this started with --console?\n";    ## no critic (ProhibitPrintSTDERR)
         return 1;
     }
 
@@ -270,9 +286,13 @@ sub fetch {
     )->filename;
     File::Slurper::Temp::write_text( $into, $content );
 
+    # A guest that printed less than a screenful is the interesting case, and
+    # a negative slice of an array shorter than the slice dies.
     my @lines = split m/\n/, $content;
+    my @tail  = @lines > $TAIL_LINES ? @lines[ -$TAIL_LINES .. -1 ] : @lines;
+
     ## no critic (ProhibitPrintSTDERR)
-    print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines ) . join( q{}, map { "  $_\n" } @lines[ -8 .. -1 ] ) . "\nA hang is the last line before the silence.\n\n";
+    print {*STDERR} sprintf( "%d lines of console. The last of them:\n\n", scalar @lines ) . join( q{}, map { "  $_\n" } @tail ) . "\nA hang is the last line before the silence.\n\n";
     ## use critic
 
     print "$into\n";
@@ -334,48 +354,13 @@ sub screen_file {
 sub vnc {
     my ( $hv, $domain ) = @_;
 
-    my $dom = eval { $hv->vmm->get_domain_by_name($domain) }
-      or die "No domain called $domain on " . $hv->describe . "\n";
+    # What stands between the operator and the display is the backend's to
+    # explain: an ssh tunnel to a hypervisor, a URL from a cloud.
+    my ( $advice, $value ) = $hv->vnc_access($domain);
 
-    my $vnc = vnc_port( $dom->get_xml_description() )
-      or die "$domain has no display to connect to.\n";
-
-    # The display listens on the loopback of the hypervisor, so the operator
-    # needs an ssh tunnel to it.
-    ## no critic (ProhibitPrintSTDERR)
-    my $through = $hv->ssh_target // 'localhost';
-    print {*STDERR} <<"TUNNEL";
-$domain has VNC on port $vnc, on the hypervisor's loopback.
-
-  ssh -N -L $vnc:127.0.0.1:$vnc $through
-  then point a VNC client at 127.0.0.1:$vnc
-
-TUNNEL
-    ## use critic
-
-    print "$vnc\n";
+    print {*STDERR} $advice;    ## no critic (ProhibitPrintSTDERR)
+    print "$value\n";
     return 0;
-}
-
-=head2 $port = vnc_port($xml)
-
-The port of the VNC display in C<$xml>, the live definition of a domain.
-Returns undef if there is no VNC display with a port.  A display with
-C<autoport='yes'> has C<port='-1'> until the domain runs, and that also returns
-undef.
-
-=cut
-
-sub vnc_port {
-    my ($xml) = @_;
-
-    foreach my $graphics ( $xml =~ m{<graphics\b[^>]*>}g ) {
-        next if index( $graphics, q{type='vnc'} ) < 0;
-        my ($port) = $graphics =~ m{\bport='(-?\d+)'};
-        return $port if defined $port && $port > 0;
-    }
-
-    return undef;
 }
 
 sub keys_to {
@@ -480,37 +465,6 @@ sub single {
     print {*STDERR} "$domain is booting single-user.  Undo it with --restore.\n\n";    ## no critic (ProhibitPrintSTDERR)
 
     return vnc( $hv, $domain );
-}
-
-# --- Talking to libvirt --------------------------------------------------------
-sub definition {
-    my ( $hv, $domain ) = @_;
-
-    my $dom = eval { $hv->vmm->get_domain_by_name($domain) }
-      or die "No domain called $domain on " . $hv->describe . "\n";
-
-    # Inactive, so this returns the definition and not the runtime state.  The
-    # runtime state has allocated ptys and aliases that libvirt cannot define.
-    return $dom->get_xml_description( Sys::Virt::Domain::XML_INACTIVE() );
-}
-
-sub redefine {
-    my ( $hv, $domain, $xml ) = @_;
-    $hv->vmm->define_domain($xml);
-    return 1;
-}
-
-sub restart {
-    my ( $hv, $domain ) = @_;
-
-    my $dom = $hv->vmm->get_domain_by_name($domain);
-    $dom->destroy() if $dom->is_active();
-    sleep 2;
-    $dom = $hv->vmm->get_domain_by_name($domain);
-    $dom->create();
-
-    print {*STDERR} "Restarted $domain\n";    ## no critic (ProhibitPrintSTDERR)
-    return 1;
 }
 
 exit main(@ARGV) unless caller;
