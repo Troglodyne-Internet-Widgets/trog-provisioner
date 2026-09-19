@@ -33,7 +33,6 @@ use Trog::Config();
 use Trog::Credentials();
 use Trog::Secrets();
 use Trog::Guest();
-use Trog::HV();
 use Trog::Hypervisors();
 use Trog::Local();
 use File::Copy qw{copy};
@@ -53,7 +52,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--connect=uri] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -73,6 +72,11 @@ directory that holds them.  To name one file at a time, use the --recipes and
 The --hvconf option names the fleet definition that chooses the hypervisor of a
 new guest.  The default is F</etc/trog-provisioner/hypervisors.conf>.  See
 L<Trog::Hypervisors>.
+
+The --connect option names the hypervisor by its libvirt URI, and the fleet is
+not asked.  The --domaindir option names the directory that the configuration
+of each domain goes in, instead of the one that the hypervisor names.
+F<bin/provision> passes both when it gets them.
 
 Most of what you put in the main recipes.yaml goes in the _base section:
 
@@ -202,7 +206,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $cfile, $sfile, $pfile, $hvconf, $skip_ssh, $dryrun );
+our ( $cfile, $sfile, $pfile, $hvconf, $connect, $domaindir, $skip_ssh, $dryrun );
 
 sub get_config {
     my $c = Config::Simple->new($cfile);
@@ -259,10 +263,10 @@ sub salvage_gaps { return %SALVAGE_GAPS }
 sub main {
     my @args = @_;
 
-    # Clear the gaps and the fleet of the last run, because a process can call
-    # main() more than once.
+    # Clear the gaps and the hypervisor options of the last run, because a
+    # process can call main() more than once.
     %SALVAGE_GAPS = ();
-    undef $hvconf;
+    undef $_ for $hvconf, $connect, $domaindir;
 
     my $credentials;
     GetOptionsFromArray(
@@ -271,6 +275,8 @@ sub main {
         'secrets=s'   => \$sfile,
         'recipes=s'   => \$pfile,
         'hvconf=s'    => \$hvconf,
+        'connect=s'   => \$connect,
+        'domaindir=s' => \$domaindir,
         'skip_ssh'    => \$skip_ssh,
         'credentials' => \$credentials,
         'dryrun'      => \$dryrun,
@@ -348,26 +354,6 @@ sub hv_lines {
     ## use critic
 
     return join( q{}, map { "\n$_=$global_config->{$_}" } @keys );
-}
-
-=head2 $hv = choose_hypervisor($domain, $requirements)
-
-Returns the L<Trog::HV> for the guest: the one that C<--connect> named, else the
-hypervisor that already has the guest, else one with room for
-C<$requirements>.  With no fleet configured, it returns this machine.
-
-=cut
-
-sub choose_hypervisor {
-    my ( $domain, $requirements ) = @_;
-
-    my $chosen = Trog::HV->new();
-    return $chosen if $chosen->explicit;
-
-    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
-    return $chosen unless $fleet->configured;
-
-    return $fleet->select_for( $domain, $requirements );
 }
 
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
@@ -457,7 +443,15 @@ sub handle_domain {
 
     # Chosen here, because _global already gives the memory, disk and CPU that
     # placement needs.
-    $hv //= choose_hypervisor( $domain, $global_config );
+    $hv //= Trog::Hypervisors->choose(
+        $domain,
+        uri         => $connect,
+        hvconf      => $hvconf,
+        domain_dir  => $domaindir,
+        config      => $global_config,
+        host        => $depends_on,
+        host_config => defined $depends_on ? Provisioner::Cookbook->global_config( $depends_on, $rconf ) : undef,
+    );
 
     # No pool when the hypervisor gives its guests their addresses, because an
     # address from the pool stays reserved for a guest that never uses it.

@@ -1001,7 +1001,28 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
 
     quietly( sub { Trog::Bin::Provisioner::generate_config( 'vm.test.test', { domain_dir => $dir, recipes => "$dir/recipes.yaml" } ) } );
     %given = @flags[ 0 .. $#flags - 1 ];
-    ok( !exists $given{'--hvconf'}, 'and not passed when there is none, so the generator reads the default' );
+    ok( !exists $given{'--hvconf'},    'and not passed when there is none, so the generator reads the default' );
+    ok( !exists $given{'--connect'},   'nor --connect' );
+    ok( !exists $given{'--domaindir'}, 'nor a domain directory that was only the default' );
+
+    # The generator chooses the hypervisor, so --connect and a --domaindir from
+    # the command line go to it, as --hvconf does.
+    quietly(
+        sub {
+            Trog::Bin::Provisioner::generate_config(
+                'vm.test.test',
+                {
+                    domain_dir       => $dir,
+                    domain_dir_given => $dir,
+                    recipes          => "$dir/recipes.yaml",
+                    uri              => 'qemu+ssh://root@hv.test.test/system',
+                }
+            );
+        }
+    );
+    %given = @flags[ 0 .. $#flags - 1 ];
+    is( $given{'--connect'},   'qemu+ssh://root@hv.test.test/system', '--connect is passed on' );
+    is( $given{'--domaindir'}, $dir,                                  'and so is a --domaindir from the command line' );
 };
 
 done_testing;

@@ -26,6 +26,9 @@ Trog::Hypervisors - the fleet, and which hypervisor a guest belongs on
     # Where the guest lives now, or where it goes.
     my $hv = $fleet->select_for('vm.example.test', $config);
 
+    # The same, with --connect and no fleet taken care of.
+    $hv = Trog::Hypervisors->choose('vm.example.test', config => $config);
+
 =head1 DESCRIPTION
 
 F<provision.conf> describes a I<guest>: how much memory it wants, which packages
@@ -175,12 +178,8 @@ no fleet configured, this returns C<< Trog::HV->from_config >>.
 sub find {
     my ( $class, $domain, %opts ) = @_;
 
-    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
-
-    return Trog::HV->new( uri => $opts{uri}, %paths ) if $opts{uri};
-
-    my $fleet = $class->load( $opts{hvconf} // $class->default_path );
-    return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
+    my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
+    return $given if $given;
 
     my $hv = $fleet->hosting($domain)
       or die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n";
@@ -188,6 +187,63 @@ sub find {
     $hv->activate();
     $hv->{$_} = $paths{$_} for keys %paths;
     return $hv;
+}
+
+=head2 choose($domain, %opts)
+
+Returns the hypervisor that a guest is built on, made current.  C<find> is for
+a guest that exists, and this is for a guest that is about to be built or
+rebuilt.  F<bin/new_config> and F<bin/provision> both call it.  Takes C<uri>,
+C<hvconf>, C<domain_dir>, C<config>, C<host> and C<host_config>, all optional.
+
+An explicit C<uri> (that is, C<--connect>) wins.  With no fleet configured, this
+returns C<< Trog::HV->from_config($config) >>.  Otherwise it returns what
+C<select_for> answers, and it warns if C<config> names a C<libvirt_uri>, which
+the fleet overrides.
+
+C<config> is the configuration of the guest, as C<select_for> takes it.  A
+domain that goes onto the guest of another domain names that domain as
+C<host>, and passes its configuration as C<host_config>.  The fleet then
+chooses for the host, because the host is the machine that runs.  A
+C<domain_dir> wins over the directory that the fleet names.
+
+=cut
+
+sub choose {
+    my ( $class, $domain, %opts ) = @_;
+
+    my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
+    return $given if $given;
+
+    warn "hypervisors.conf decides which hypervisor $domain lands on; the libvirt_uri in its configuration is ignored\n"
+      if defined Trog::HV->config_value( $opts{config}, 'libvirt_uri' );
+
+    my $hv = defined $opts{host} ? $fleet->select_for( $opts{host}, $opts{host_config} ) : $fleet->select_for( $domain, $opts{config} );
+
+    $hv->{$_} = $paths{$_} for keys %paths;
+    return $hv;
+}
+
+=head2 _before_fleet(%opts)
+
+The steps that C<find> and C<choose> take before they ask a fleet.  Takes their
+C<uri>, C<hvconf>, C<domain_dir> and C<config>.  Returns the hypervisor when an
+explicit C<uri> or the lack of a fleet decides it.  Otherwise returns undef,
+the fleet to ask, and the C<domain_dir> pair when one was given.
+
+=cut
+
+sub _before_fleet {
+    my ( $class, %opts ) = @_;
+
+    my %paths = map { $_ => $opts{$_} } grep { defined $opts{$_} } qw{domain_dir};
+
+    return Trog::HV->new( uri => $opts{uri}, %paths ) if $opts{uri};
+
+    my $fleet = $class->load( $opts{hvconf} // $class->default_path );
+    return Trog::HV->from_config( $opts{config}, %paths ) unless $fleet->configured;
+
+    return ( undef, $fleet, %paths );
 }
 
 =head1 METHODS

@@ -483,23 +483,4 @@ IPMAP
     is_deeply( $none, {}, 'and a map naming no aliases at all has none, rather than undef' );
 };
 
-# bin/provision passes its --hvconf here, and the fleet it names is the one
-# that places the guest.
-subtest 'choose_hypervisor asks the fleet that --hvconf names' => sub {
-    my @loaded;
-    my $hv    = Test::MockModule->new('Trog::HV');
-    my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $hv->redefine( new => sub { return bless( { explicit => 0 }, 'Trog::HV' ) } );
-    $fleet->redefine( load => sub { push @loaded, $_[1]; return bless( { order => [] }, 'Trog::Hypervisors' ) } );
-
-    local $Trog::Provisioner::Config::Generator::hvconf = '/bogus/fleet.conf';
-    Trog::Provisioner::Config::Generator::choose_hypervisor( 'vm.test.test', {} );
-    is_deeply( \@loaded, ['/bogus/fleet.conf'], 'the named fleet, not the default one' );
-
-    @loaded = ();
-    local $Trog::Provisioner::Config::Generator::hvconf = undef;
-    Trog::Provisioner::Config::Generator::choose_hypervisor( 'vm.test.test', {} );
-    is_deeply( \@loaded, [ Trog::Hypervisors->default_path() ], 'and the default one when none is named' );
-};
-
 done_testing();

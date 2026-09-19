@@ -493,12 +493,13 @@ sub main {
     generate_config(
         $domain,
         {
-            domain_dir => $domain_dir,
-            recipes    => $recipes,
-            ipmap      => $ipmap,
-            hvconf     => $hvconf,
-            uri        => $uri,
-            dryrun     => $dryrun,
+            domain_dir       => $domain_dir,
+            domain_dir_given => $domain_dir_from_cli,
+            recipes          => $recipes,
+            ipmap            => $ipmap,
+            hvconf           => $hvconf,
+            uri              => $uri,
+            dryrun           => $dryrun,
 
             # Only from the command line: see --salvage-gaps-ok in the POD.
             salvage_gaps_ok => $salvage_gaps_ok,
@@ -519,15 +520,25 @@ sub main {
     my $config = Config::Simple->new($cfile);
     my $reuser = $config->param('admin_user') // 'root';
 
+    # A domain can go onto the guest of another domain, which is built first.
+    my $depends = $config->param('depends_on');
+    my $dconfig;
+    if ($depends) {
+        my $dcfile = "$domain_dir/$depends/provision.conf";
+        close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
+        $dconfig = Config::Simple->new($dcfile);
+    }
+
     # Choose the hypervisor before anything changes.  Every other sub gets the
     # same object back from Trog::HV->new().
-    my $hv = choose_hypervisor(
-        $config, $domain,
-        {
-            uri        => $uri,
-            domain_dir => $domain_dir,
-            hvconf     => $hvconf,
-        }
+    my $hv = Trog::Hypervisors->choose(
+        $domain,
+        uri         => $uri,
+        hvconf      => $hvconf,
+        domain_dir  => $domain_dir,
+        config      => $config,
+        host        => $depends,
+        host_config => $dconfig,
     );
     print "Provisioning against hypervisor " . $hv->uri . "\n" unless $hv->is_local;
 
@@ -542,12 +553,8 @@ sub main {
     # If this domain depends on another, build that guest first.  With
     # --existing, this only adds configuration to a guest that is up.
     my $skey;
-    my $depends = $config->param('depends_on');
     if ($depends) {
         print "$domain depends on $depends, provisioning that first...\n";
-        my $dcfile = "$domain_dir/$depends/provision.conf";
-        close( _must_read( $dcfile, "No provision.conf for $depends, which $domain depends on" ) ) or die "Could not close $dcfile: $!\n";
-        my $dconfig = Config::Simple->new($dcfile);
 
         #XXX Perhaps die here if the admin_user settings differ.
 
@@ -609,17 +616,21 @@ sub main {
 
 Runs F<bin/new_config> for $domain, in this process, when there are recipes
 for it to read.  $opts is a hash reference.  This sub reads its keys
-C<domain_dir>, C<recipes>, C<ipmap>, C<uri>, C<dryrun> and C<salvage_gaps_ok>.
-C<recipes> and C<ipmap> default to the files that L<Trog::Config> names.
+C<domain_dir>, C<domain_dir_given>, C<recipes>, C<ipmap>, C<hvconf>, C<uri>,
+C<dryrun> and C<salvage_gaps_ok>.  C<recipes> and C<ipmap> default to the files
+that L<Trog::Config> names.
 
 It returns 0 and does nothing when there is no F<recipes.yaml> and no
 F<recipes.d> beside it.  Then somebody provisions from a domain directory that
 they wrote by hand, which is supported.  It returns 1 after it generates the
 configuration.
 
-With C<uri>, this sub sets the hypervisor before the generator runs, and the
-generator uses it.  Without C<uri>, the generator chooses the hypervisor.  In
-both cases, the rest of this program uses the same one.
+The generator chooses the hypervisor with C<< Trog::Hypervisors->choose >>,
+and the rest of this program uses the same one.  C<hvconf> and C<uri> go to the
+generator as C<--hvconf> and C<--connect>.  C<domain_dir_given>, the
+C<--domaindir> of the command line, goes as C<--domaindir>.  C<domain_dir> is
+not passed, because it holds a default, and a default must not override the
+directory that a hypervisor in the fleet names.
 
 It dies if the generator fails, and through C<refuse_on_salvage_gaps> if the
 salvage left a gap.
@@ -641,14 +652,13 @@ sub generate_config {
 
     print "Generating the configuration for $domain...\n";
 
-    # The generator takes this singleton, and does not choose a hypervisor.
-    Trog::HV->new( uri => $opts->{uri}, domain_dir => $dir ) if $opts->{uri};
-
     push @INC, '.';
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;
     my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
-    push( @flags, '--hvconf', $opts->{hvconf} ) if defined $opts->{hvconf};
+    push( @flags, '--hvconf',    $opts->{hvconf} )           if defined $opts->{hvconf};
+    push( @flags, '--connect',   $opts->{uri} )              if $opts->{uri};
+    push( @flags, '--domaindir', $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};
 
     # For the generator, this only keeps the key of a guest that is up.  See
     # DRY RUNS in bin/new_config.
@@ -704,39 +714,6 @@ sub refuse_on_salvage_gaps {
 
     die "Refusing to rebuild: state that is on the guest did not come off it.\n\n" . $detail
       . "\nThe guest was asked, and it still has files under each of those -- so this is\na fetch that did not bring them, not a service that has nothing.  Rebuilding now\ndestroys the only copy.\n\nThe salvage reads them as root over sudo, so the usual cause is sudo being\nrefused on the guest or the fetch failing partway.  Look at what it said above,\nfix it and run again, or pass --salvage-gaps-ok if that state is gone for good\nand you want the guest rebuilt without it.\n";
-}
-
-=head2 $hv = choose_hypervisor($config, $domain, $opts)
-
-Returns the hypervisor that the guest of $domain belongs on.  $config is the
-Config::Simple object of F<provision.conf>.  $opts is a hash reference with the
-keys C<uri>, C<domain_dir> and C<hvconf>.
-
-With C<uri>, from C<--connect>, it returns that hypervisor and asks nothing
-else.  Otherwise, a configured F<hypervisors.conf> decides.  The guest goes
-where it is now, or where it fits.  See L<Trog::Hypervisors>.  With no fleet,
-F<provision.conf> holds the connection details.
-
-=cut
-
-sub choose_hypervisor {
-    my ( $config, $domain, $opts ) = @_;
-
-    my %paths = ( domain_dir => $opts->{domain_dir} );
-
-    return Trog::HV->new( uri => $opts->{uri}, %paths ) if $opts->{uri};
-
-    my $fleet = Trog::Hypervisors->load( $opts->{hvconf} // Trog::Hypervisors->default_path );
-    return Trog::HV->from_config( $config, %paths ) unless $fleet->configured;
-
-    warn "hypervisors.conf decides which hypervisor $domain lands on; the " . "libvirt_uri in its provision.conf is ignored\n"
-      if $config->param('libvirt_uri');
-
-    my $hv = $fleet->select_for( $domain, $config );
-
-    # The command line beats the fleet on where our files go.
-    $hv->{domain_dir} = $opts->{domain_dir} if defined $opts->{domain_dir};
-    return $hv;
 }
 
 =head2 $behavior = ask_about_nonreusable($domain)
