@@ -28,10 +28,8 @@ bin/new_config --ipmap=path/to/ipmap.cfg --recipes=path/to/recipes.yaml domain.n
 # Install dependencies (if cpanfile exists)
 cpanm --installdeps .
 
-# Run perl syntax check, should say OK
-perl -c lib/Provisioner/Recipe/yourmodule.pm
-
-# perltidy and perlcritic run in the pre-commit hook.  See STYLE.md.
+# perltidy, perlcritic, perl -c and the tests that a change can break run in
+# the pre-commit hook.  See STYLE.md.
 
 # Check POD documentation has no POD errors
 perldoc lib/Provisioner/Recipe/yourmodule.pm

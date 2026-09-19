@@ -1,6 +1,7 @@
 #!/bin/sh
 
-# Tidy the staged Perl, then refuse the commit if perlcritic objects to it.
+# Tidy the staged Perl, refuse the commit if perlcritic objects to it or it does
+# not compile, then run the tests that the commit can break.
 #
 # STYLE.md says to run perltidy and there is a .perltidyrc to run it with, and
 # for a long time neither was true of the tree -- so touching any file meant a
@@ -12,7 +13,12 @@
 # before every commit, and a check that lives in a document is a check somebody
 # has to remember; this is the same check where it cannot be forgotten.
 #
-# Install it: cp git-hooks/pre-commit .git/hooks/
+# The tests are the step after that.  tests-covering, from Perl::Tests::Covering,
+# reads the staged diff and names the tests whose runs reached the lines it
+# changes.  git-hooks/post-commit brings its records up to date after each
+# commit, and the choice is only as good as those records.
+#
+# Install both: cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 #
 # A file qualifies three ways:
 #   - a .pm, .pl or .t extension
@@ -91,12 +97,13 @@ all_files="$perl_files $scripts_files"
 # is more than one file -- which would stop the hook working in exactly the
 # commits that need it most.  Unquoted below, because there the word splitting is
 # what turns one string into an argument list.
+#
+# No early exit when nothing is Perl: a commit of templates still has tests to
+# run.
 if [ -z "$perl_files" ] && [ -z "$scripts_files" ]
 then
-    exit 0
-fi
-
-if command -v perltidy >/dev/null 2>&1
+    :
+elif command -v perltidy >/dev/null 2>&1
 then
     echo "Auto-tidying perl changes..."
 
@@ -158,3 +165,90 @@ then
 else
     echo "pre-commit: perlcritic is not on PATH, skipping the critic pass."
 fi
+
+# Choosing tests by the lines they ran trusts that each changed file compiles.
+# A syntax error in a sub that no test runs chooses no test, and still breaks
+# every test that loads the file.  A .t is left out, because a test in the diff
+# is always run.
+compile_failed=''
+for file in $all_files
+do
+    case "$file" in
+        *.t)
+            continue
+            ;;
+    esac
+
+    out=$(perl -Ilib -c "$file" 2>&1) || {
+        echo "$out"
+        compile_failed=1
+    }
+done
+
+if [ -n "$compile_failed" ]
+then
+    echo
+    echo "pre-commit: the above does not compile."
+    exit 1
+fi
+
+# tests-covering follows Perl, and nothing else.  A commit that touches what it
+# cannot follow runs the whole suite:
+#   - a template, fixture or configuration file, which tests read and do not load
+#   - anything under scripts/, which ships to a guest and runs on the system
+#     perl, so a test that runs it has no record of it
+#   - a new module, because Provisioner::Cookbook finds recipes at run time, and
+#     a test that finds a module that way was never recorded as loading it
+# Documentation runs nothing, and needs no tests.
+whole_suite=''
+for file in $(git diff --cached --name-only)
+do
+    case "$file" in
+        *.md|docs/*|LICENSE|CHANGES)
+            ;;
+        scripts/*)
+            whole_suite="$file runs on the system perl"
+            ;;
+        *.pm|*.pl|*.PL|*.t)
+            ;;
+        *)
+            if ! { test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'; }
+            then
+                whole_suite="tests-covering cannot follow $file"
+            fi
+            ;;
+    esac
+done
+
+added=$(git diff --cached --name-only --diff-filter=A -- '*.pm' | head -n 1)
+test -n "$added" && whole_suite="$added is new"
+
+if ! command -v tests-covering >/dev/null 2>&1
+then
+    whole_suite="tests-covering is not on PATH; install Perl::Tests::Covering"
+fi
+
+if [ -n "$whole_suite" ]
+then
+    echo "Running every test, because $whole_suite..."
+    prove -lm -j8 t/ || {
+        echo "pre-commit: the tests above failed."
+        exit 1
+    }
+    exit 0
+fi
+
+# --full-index, because tests-covering matches each file to its records by the
+# blob id on the diff's index line, and an abbreviated id matches nothing.
+tests=$(git diff --cached --full-index | tests-covering --diff) || exit 1
+if [ -z "$tests" ]
+then
+    echo "No test ran a line that this commit changes."
+    exit 0
+fi
+
+echo "Running the tests that ran what this commit changes..."
+prove -lm -j8 $tests || {
+    echo "pre-commit: the tests above failed."
+    exit 1
+}

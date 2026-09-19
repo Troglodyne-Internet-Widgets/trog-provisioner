@@ -89,21 +89,24 @@ Apply the three skills that the commit gate asks for in this order: data-perl,
 testing-perl, then reviewing-perl against the whole diff.  Loading a skill is
 not applying it.  The hook sees the first, and the review is still yours.
 
-Then the mechanical ones:
+Then run `podchecker` over each changed file.
 
-    perl -c <each changed .pm or bin/ script>
-    podchecker <each changed file>
-    prove -lm -j8 t/
+Do not run `perltidy`, `perlcritic`, `perl -c` or the tests yourself before a
+commit.  The pre-commit hook tidies the Perl you staged, runs perlcritic over it
+with the right profile for its path, and compiles it.  Then it runs the tests
+that the commit can break, which `tests-covering` chooses.  If any step fails,
+the commit does not happen, and the hook prints why.  Install both hooks once
+in each checkout that you commit from:
 
-Do not run `perltidy` or `perlcritic` yourself.  The pre-commit hook tidies
-the Perl you staged, and then runs perlcritic over it with the right profile
-for its path.  If a profile objects, the commit does not happen, and the hook
-prints why.  Install the hook once in each checkout that you commit from:
+    cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
-    cp git-hooks/pre-commit .git/hooks/
+The post-commit hook brings the records of `tests-covering` up to date in the
+background.  A commit made before that finishes is chosen against older
+records.  So run the whole suite, `prove -lm -j8 t/`, before you open a pull
+request.
 
-`git-hooks/pre-commit` says which profile judges which path, and why
-`scripts/` has a profile of its own.
+`git-hooks/pre-commit` says which profile judges which path, why `scripts/` has
+a profile of its own, and which changes run every test.
 
 ## When something is slow
 

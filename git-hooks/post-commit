@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Bring the records of tests-covering up to the commit just made.
+#
+# git-hooks/pre-commit chooses tests by reading a diff against these records,
+# and a diff describes the files as they were before the change.  So after each
+# commit the records must describe that commit, or the next choice falls back
+# to every test that loaded a changed file, and grows coarser with each commit.
+#
+# In the background, because it runs each stale test under Devel::Cover, and a
+# full refresh takes most of a minute.  Run tests-covering --refresh by hand to
+# catch up.
+#
+# Install it: cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
+
+command -v tests-covering >/dev/null 2>&1 || exit 0
+
+tests-covering --refresh --jobs "$(nproc 2>/dev/null || echo 1)" >/dev/null 2>&1 &

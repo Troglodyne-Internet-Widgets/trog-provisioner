@@ -95,6 +95,9 @@ When a piece of code is removed, don't assert that it isn't there - testing unde
 
 Run tests with `prove -lm -j8`
 
+The pre-commit hook runs the tests that a commit can break, and
+`git-hooks/pre-commit` says how it chooses them.
+
 Re-run with `-v $testfile` option if you need details on why a specific test failed
 
 # Test coverage
