@@ -329,6 +329,19 @@ subtest 'every rsync of a payload names the machine holding it' => sub {
 
 # Every recipe shares the domain directory, and the last chown to run wins, so
 # only one recipe may set its owner.  docs/APPROACH.md says who owns what.
+# The ssl target of templates/makefile.tt makes the self-signed certificate for
+# every domain, and bin/new_config copies its openssl.conf.  A recipe that also
+# generated one was overwritten by that copy, and so never reached a guest.
+subtest 'no recipe generates the openssl.conf of the ssl target' => sub {
+    my @generates;
+    foreach my $recipe (@available) {
+        my $r     = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my %files = $r->template_files(@available);
+        push @generates, $recipe if any { $_ eq 'openssl.conf' } values %files;
+    }
+    is( "@generates", '', 'bin/new_config is the one that writes it' );
+};
+
 subtest 'only data sets the owner of the domain directory' => sub {
     my $domain_dir = "$G{install_dir}/$G{domain}";
     my %chowners;

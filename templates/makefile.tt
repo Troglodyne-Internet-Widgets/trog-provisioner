@@ -128,7 +128,11 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 	mv scripts/* [% script_dir %]/
 	touch $@
 
-# Make a self-signed certificate before the recipes, because many of them need one.
+# A self-signed certificate, only so that a service with TLS can start before
+# there is a real one.  The letsencrypt recipe gets the real one with dehydrated
+# in the postrun, points the two links below at it, and restarts the services.
+# Every domain gets this, whatever its recipes are, because it costs one
+# openssl command and a guest has no certificate otherwise.
 [% state_dir %]/ssl:
 	# Name the domain first, then every alias.  new_config adds www and mail to
 	# the aliases of each domain.
