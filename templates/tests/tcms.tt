@@ -26,6 +26,18 @@ foreach my $module (qw{Sys::Virt Imager::File::PNG Trog::TOTP}) {
     is($?, 0, "$module loads in the perl the recipe built") or diag $loaded;
 }
 
+# Installer.mk makes what the checkout does not track.  Without data/, every
+# request answers 500.
+foreach my $made ("$dir/data/files", "$dir/totp", "$dir/logs", '[% install_dir %]/[% domain %]/.tcms') {
+    my $owner = getpwuid( ( stat $made )[4] // -1 ) // '';
+    is($owner, '[% user %]', "$made is there, and the service user owns it");
+}
+
+# The tests run after post_install has started the service.  Ask its socket,
+# not nginx, whose cache can answer 200 for a tCMS that answers 500.
+my $code = `curl -s -m 30 -o /dev/null -w '%{http_code}' --unix-socket '[% install_dir %]/[% domain %]/run/tpsgi.sock' -H 'Host: [% domain %]' http://localhost/ 2>&1`;
+is($code, '200', 'tCMS answers its front page');
+
 # git refuses to work in a checkout that another account owns, and the service
 # user is not the admin.
 my $safe = `HOME='[% install_dir %]/[% domain %]' git config --global --get-all safe.directory 2>/dev/null`;
