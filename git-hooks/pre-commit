@@ -23,11 +23,22 @@
 # A file qualifies three ways:
 #   - a .pm, .pl or .t extension
 #   - a .PL extension, for a build script if this ever grows one
-#   - executable with perl on its shebang line, which is how the extensionless
-#     scripts in bin/ get covered
+#   - perl on the shebang line of a file in bin/ or scripts/, which is how the
+#     extensionless scripts there get covered
 #
 # .t is in there because not one of the test files is executable, so the shebang
 # rule would catch none of them.
+#
+# The shebang rule used to want the executable bit as well, and a new script in
+# bin/ committed without one was judged not to be Perl at all: not tidied, not
+# criticized, not compiled.  Whether a file is Perl is what it says on its first
+# line; whether it is executable is the separate question the pass after this
+# one asks.
+#
+# It is bin/ and scripts/ rather than any path, because the guest tests under
+# templates/tests/ open with a perl shebang of their own and are Xslate
+# templates: perltidy writes an .ERR file for the [% %] in them, perlcritic
+# reports on perl nobody wrote that way, and perl -c fails outright.
 #
 # Which profile judges it is a separate question from whether it qualifies, and
 # the answer is the path.  What is under scripts/ ships to a guest and runs on
@@ -76,8 +87,8 @@ do
         *.pm|*.pl|*.PL|*.t)
             is_perl=1
             ;;
-        *)
-            if test -x "$file" && head -n 1 "$file" | grep -Eq '^#!.*perl'
+        bin/*|scripts/*)
+            if head -n 1 "$file" | grep -Eq '^#!.*perl'
             then
                 is_perl=1
             fi
@@ -97,6 +108,37 @@ do
 done
 
 all_files="$perl_files $scripts_files"
+
+# Everything in bin/ and scripts/ is run by its path -- by an operator, by the
+# makefile on a guest, or by bin/new_config, which packs scripts/ with the mode
+# each file has here.  So one that ships without its executable bit is broken
+# for the only thing that runs it, and the shebang says that is how it expects
+# to be run.
+#
+# Any shebang, not perl alone: a shell script in there is as broken.
+unexecutable=''
+for file in $staged
+do
+    case "$file" in
+        bin/*|scripts/*) ;;
+        *) continue ;;
+    esac
+
+    test -f "$file" || continue
+    test -x "$file" && continue
+
+    head -n 1 "$file" | grep -Eq '^#!' || continue
+
+    echo "$file has a shebang and is not executable."
+    unexecutable=1
+done
+
+if [ -n "$unexecutable" ]
+then
+    echo
+    echo "pre-commit: chmod +x the above, and git add them again."
+    exit 1
+fi
 
 # Quoted here, because a bare [ $all_files ] is a syntax error the moment there
 # is more than one file -- which would stop the hook working in exactly the

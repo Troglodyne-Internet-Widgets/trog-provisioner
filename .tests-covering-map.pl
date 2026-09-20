@@ -49,12 +49,16 @@ new one.  A recipe that no test loads yet stands for the Cookbook.
 
 Markdown, F<docs/>, F<LICENSE> and F<CHANGES> reach no test.
 
-=item Configuration of the tools
+=item Configuration of the tools, and the hooks that run them
 
 F<dist.ini>, F<weaver.ini>, F<.mailmap>, F<.perltidyrc>, the C<perlcritic>
 profiles and the files that they read reach no test.  The pre-commit hook runs
 C<perltidy> and C<perlcritic> itself, and no test reads these files from this
 checkout.
+
+F<git-hooks/> is in the same position.  The hooks are shell, nothing loads them,
+and a change to one cannot break a test -- so running every test to find out
+says nothing that reading the hook does not.
 
 =back
 
@@ -71,6 +75,7 @@ my %TOOL_CONFIGURATION = map { $_ => 1 } qw{
   dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts
   scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini
   .preferred_binaries.ini .pod_stopwords
+  git-hooks/pre-commit git-hooks/post-commit
 };
 
 # The path of each template, relative to the root, and the files that stand for

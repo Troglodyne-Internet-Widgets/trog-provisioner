@@ -61,6 +61,11 @@ subtest 'the configuration of the tools reaches no test' => sub {
     foreach my $path (qw{dist.ini weaver.ini .mailmap .perltidyrc .perlcriticrc .perlcriticrc.scripts scripts/.perlcriticrc .preferred_modules.ini .preferred_modules.scripts.ini .preferred_binaries.ini .pod_stopwords}) {
         is_deeply( [ $map->($path) ], [q{}], "$path reaches no test" );
     }
+
+    # The hooks are shell, and no test loads one.  Left unexplained they ran
+    # every test, which answers nothing about a change to a hook.
+    is_deeply( [ $map->('git-hooks/pre-commit') ],  [q{}], 'and so does the pre-commit hook' );
+    is_deeply( [ $map->('git-hooks/post-commit') ], [q{}], 'and the post-commit one' );
 };
 
 subtest 'documentation reaches no test, and anything else is left to the caller' => sub {
