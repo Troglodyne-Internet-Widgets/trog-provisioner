@@ -1,0 +1,75 @@
+[%# GitHub for one account on the guest: the login state of gh, and an ssh
+    identity for pushing and signing.  The CLI itself is installed by
+    github.global.tt, which runs before every per-domain target.
+
+    Each block works out the home of the account with getent rather than
+    assuming one: the service user of a domain lives under install_dir, and an
+    administrator lives under /home.  Each line of a fragment is its own shell,
+    so the lookup is repeated per block rather than kept in a variable.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+[% IF github_token %]
+# The login state that `gh auth login` would write, so that gh works with
+# nothing interactive.  Then setup-git makes git send the same token over
+# HTTPS.  It needs no GH_TOKEN of its own: the file below is what gh reads, and
+# a token on a command line is a token in the process table.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.config/gh" \
+    && install -o '[% account %]' -g '[% account %]' -m 0600 github.hosts.yml "$$home/.config/gh/hosts.yml"
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- gh auth setup-git -h github.com
+[% END %]
+
+[% IF ssh_identity %]
+# The ssh identity of the account.  bin/provision put the key under the domain
+# directory from the secret store before the makefile started, owned by root
+# because the account did not exist yet.  This gives it to the account, in the
+# home where ssh looks for it.  The payload has no copy of it.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.ssh" \
+    && if [ "$$home/.ssh/id_github" != '[% install_dir %]/[% domain %]/.ssh/id_github' ]; then \
+        install -o '[% account %]' -g '[% account %]' -m 0600 '[% install_dir %]/[% domain %]/.ssh/id_github' "$$home/.ssh/id_github" \
+        && rm -f '[% install_dir %]/[% domain %]/.ssh/id_github'; \
+    fi \
+    && chown '[% account %]:[% account %]' "$$home/.ssh/id_github" \
+    && chmod 0600 "$$home/.ssh/id_github"
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- ssh-keygen -y -f "$$home/.ssh/id_github" > "$$home/.ssh/id_github.pub" \
+    && chown '[% account %]:[% account %]' "$$home/.ssh/id_github.pub" \
+    && chmod 0644 "$$home/.ssh/id_github.pub"
+[%# Somebody has to register the key on the GitHub account, and this is the
+    only place that shows it. -%]
+echo 'github: register this as an Authentication key and a Signing key on the GitHub account of [% github_user %]:'
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; cat "$$home/.ssh/id_github.pub"
+
+# Trust the host keys of github.com, unless known_hosts already has them.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    if ! runuser -u '[% account %]' -- ssh-keygen -F github.com -f "$$home/.ssh/known_hosts" >/dev/null 2>&1; then \
+        ssh-keyscan -t ed25519,rsa github.com 2>/dev/null >> "$$home/.ssh/known_hosts" \
+        && chown '[% account %]:[% account %]' "$$home/.ssh/known_hosts" \
+        && chmod 0644 "$$home/.ssh/known_hosts"; \
+    fi
+
+# Use this key for github.com, without ssh-agent.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    printf 'Host github.com\n    IdentityFile %s/.ssh/id_github\n    IdentitiesOnly yes\n' "$$home" > "$$home/.ssh/config" \
+    && chown '[% account %]:[% account %]' "$$home/.ssh/config" \
+    && chmod 0644 "$$home/.ssh/config"
+
+# Sign commits and tags with the same key, in the ssh format.  user.name and
+# user.email say who the commits are from.  allowed_signers is what lets
+# `git log --show-signature` verify them on the guest.
+runuser -u '[% account %]' -- git config --global user.name       '[% git_name %]'
+runuser -u '[% account %]' -- git config --global user.email      '[% git_email %]'
+runuser -u '[% account %]' -- git config --global gpg.format      ssh
+runuser -u '[% account %]' -- git config --global commit.gpgsign  true
+runuser -u '[% account %]' -- git config --global tag.gpgsign     true
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- git config --global user.signingkey "$$home/.ssh/id_github.pub"
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0755 "$$home/.config/git" \
+    && printf '%s %s\n' '[% git_email %]' "$$(cat "$$home/.ssh/id_github.pub")" > "$$home/.config/git/allowed_signers" \
+    && chown '[% account %]:[% account %]' "$$home/.config/git/allowed_signers" \
+    && runuser -u '[% account %]' -- git config --global gpg.ssh.allowedSignersFile "$$home/.config/git/allowed_signers"
+[% END %]

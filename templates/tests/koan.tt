@@ -60,4 +60,15 @@ SKIP: {
 ok(!-e '/etc/ufw/applications.d/koan', 'no matrix firewall profile on a bot that does not speak matrix');
 [% END -%]
 
+[% FOR pname IN projects.keys().sort() %]
+[% p = projects.$pname %]
+[% IF p.github_url %]
+# The projects are cloned by post_install rather than by the target, because
+# they need the login state and the key that Provisioner::Recipe::github writes
+# in a target of its own.  The tests run after post_install, so a clone that
+# never happened shows here.  A test for the directory alone would pass on the
+# empty one that mkdir leaves.
+ok(-d '[% p.path %]/.git', '[% pname %] is cloned at [% p.path %]');
+[% END %]
+[% END %]
 done_testing();

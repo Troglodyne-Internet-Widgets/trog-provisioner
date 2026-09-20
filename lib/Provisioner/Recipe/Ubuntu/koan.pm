@@ -29,7 +29,6 @@ sub deps {
       python3-dev
       nodejs
       npm
-      gh
       ca-certificates
       make
       build-essential

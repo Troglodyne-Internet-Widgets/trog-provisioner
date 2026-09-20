@@ -944,17 +944,17 @@ subtest 'a secret only some domains want is only placed for those' => sub {
 
     # guest_secrets used to be handed the install dir and the domain and nothing
     # else, so it could not tell whether this domain had asked for the thing it
-    # places.  koan's ssh identity is the case: most bots do not have one, and
-    # minting a key for a bot nobody registered it for is worse than useless.
-    my $koan = Provisioner::Cookbook->load('koan');
+    # places.  the github ssh identity is the case: most accounts do not have
+    # one, and minting a key nobody registered on GitHub is worse than useless.
+    my $github = Provisioner::Cookbook->load('github');
 
-    is_deeply( { $koan->guest_secrets( '/opt/domains', 'k.test.test' ) }, {}, 'a domain that did not ask gets nothing placed' );
+    is_deeply( { $github->guest_secrets( '/opt/domains', 'k.test.test' ) }, {}, 'a domain that did not ask gets nothing placed' );
 
-    my %placed = $koan->guest_secrets( '/opt/domains', 'k.test.test', github_ssh_identity => 1 );
-    is_deeply( [ keys %placed ], ['/opt/domains/k.test.test/.ssh/id_koan'], 'and one that did gets the identity' );
+    my %placed = $github->guest_secrets( '/opt/domains', 'k.test.test', ssh_identity => 1 );
+    is_deeply( [ keys %placed ], ['/opt/domains/k.test.test/.ssh/id_github'], 'and one that did gets the identity' );
 
-    my $entry = $placed{'/opt/domains/k.test.test/.ssh/id_koan'};
-    is( $entry->{ref}, 'secret:koan/k.test.test-github-ssh/password', 'from the store, keyed on the domain' );
+    my $entry = $placed{'/opt/domains/k.test.test/.ssh/id_github'};
+    is( $entry->{ref}, 'secret:github/k.test.test-github-ssh/password', 'from the store, keyed on the domain' );
 
     # bin/provision writes the value with a newline of its own, and ssh-keygen
     # refuses a key with a blank line on the end.
@@ -963,18 +963,18 @@ subtest 'a secret only some domains want is only placed for those' => sub {
     like( $key, qr/\A-----BEGIN[ ]OPENSSH[ ]PRIVATE[ ]KEY-----/, 'and is an OpenSSH private key' );
 };
 
-subtest 'the bot ssh key is not in the payload any more' => sub {
-    my $koan  = Provisioner::Cookbook->load( 'koan', distro => $DISTRO )->new(%PROV);
-    my %files = $koan->template_files();
+subtest 'the ssh key is not in the payload any more' => sub {
+    my $github = Provisioner::Cookbook->load( 'github', distro => $DISTRO )->new(%PROV);
+    my %files  = $github->template_files();
 
     # It was rendered into the domain directory and installed from there, which
     # put a private key in the payload, in the tarball and on every machine that
     # holds a copy of either.
     ok( !( grep { index( $_, 'privkey' ) >= 0 } keys %files, values %files ), 'nothing named for a private key is generated' );
 
-    my $fragment = $koan->render( %G, %{ $required_config{koan} }, github_ssh_identity => 1 );
-    unlike( $fragment, qr/install\s+\S*\s*koan-ssh-privkey/, 'and the fragment installs no such file' );
-    like( $fragment, qr{chown[ ]\S+[ ]'/opt/domains/\S+/\.ssh/id_koan'}, 'it gives away what bin/provision already placed' );
+    my $fragment = $github->render( %G, ssh_identity => 1, github_user => 'bot', github_token => 'ghp_fake', git_email => 'bot@test.test' );
+    unlike( $fragment, qr/install\s+\S*\s*\S*ssh-privkey/, 'and the fragment installs no such file' );
+    like( $fragment, qr{'/opt/domains/\S+/\.ssh/id_github'}, 'it gives away what bin/provision already placed' );
 };
 
 # A file placed out of the secret store is one the guest must never hand back:
@@ -2356,18 +2356,15 @@ subtest 'a recipe whose upstream is configured names the host it will reach' => 
 
     # admincode asks each api_url it is given; the hosts it then clones from come
     # back from that API, so nothing can declare them in advance.
-    #
-    # cli.github.com is there whatever it is configured with, because the target
-    # fetches the gh signing key unconditionally -- an upstream of the recipe
-    # rather than one a configuration named.
     my @asked = Provisioner::Cookbook->load('admincode')->fetch_hosts(
         repos_from => [ { api_url => 'https://gitea.test/api/v1/' }, { api_url => 'https://git.test/api/v1/' } ],
     );
-    is_deeply( [ sort @asked ], [qw{cli.github.com git.test gitea.test}], 'admincode: every api_url it was configured with, and the gh archive' );
-    is_deeply(
-        [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ],
-        ['cli.github.com'], 'and the gh archive alone when it is configured with none'
-    );
+    is_deeply( [ sort @asked ],                                             [qw{git.test gitea.test}], 'admincode: every api_url it was configured with' );
+    is_deeply( [ Provisioner::Cookbook->load('admincode')->fetch_hosts() ], [],                        'and nothing when it is configured with none' );
+
+    # The archive of the gh CLI is an upstream of the recipe that installs it
+    # rather than one a configuration named, so it is there either way.
+    is_deeply( [ Provisioner::Cookbook->load('github')->fetch_hosts() ], ['cli.github.com'], 'github: the archive it installs the CLI from' );
 };
 
 Test::NoWarnings::had_no_warnings();

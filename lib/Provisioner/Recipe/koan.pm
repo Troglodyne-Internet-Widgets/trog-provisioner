@@ -16,8 +16,6 @@ use Provisioner::Utils();
 our $DEFAULT_REPO = 'https://github.com/troglodyne/koan.git';
 
 use Crypt::PRNG();
-use File::Temp();
-use File::Slurper();
 
 =head1 Provisioner::Recipe::koan
 
@@ -47,10 +45,10 @@ use File::Slurper();
             github_token: "ghp_..."
 
             # Give the bot an ssh identity for git push and commit signing.
-            # See guest_secrets below.  Register the public key that the
-            # build prints on the GitHub account of the bot.  Add it as an
-            # "Authentication key" for push and as a "Signing key", so that
-            # signed commits show as Verified.
+            # Provisioner::Recipe::github does that work and holds the key;
+            # register the public key that the build prints on the GitHub
+            # account of the bot, as an "Authentication key" for push and as
+            # a "Signing key", so that signed commits show as Verified.
             github_ssh_identity: 1
 
             # The name for @mentions.  The default is github_user.
@@ -159,7 +157,7 @@ The recipe does these steps:
 
 =over 1
 
-=item * It installs the system packages (git, python venv, nodejs and C<npm>, gh).
+=item * It installs the system packages (git, python venv, nodejs and C<npm>).
 
 =item * It clones koan into C<install_dir/domain/koan>.
 
@@ -174,10 +172,30 @@ The recipe does these steps:
 
 =back
 
+=head3 Cloning the projects after everything else
+
+A project with a C<github_url> is cloned by a script that C<post_install>
+runs, rather than by this recipe's target.
+
+The clone belongs to the bot and uses the bot's login and ssh key, and
+L<Provisioner::Recipe::github> writes both in its own target -- which the
+depsolver puts B<after> this one, as it does with every dependency.  The
+postrun queue runs once every target has, so that is where a clone can have
+them.  The guest tests run after C<post_install>, and F<templates/tests/koan.tt>
+asserts that each project is there.
+
 The secrets (the telegram, slack and matrix tokens, the github PAT, the claude
 OAuth token and the SMTP password) are in the rendered C<.env> file.  That file
-is installed 0640 root:I<user>.  The makefile fragment also holds the github
-PAT, and the matrix password and pickle key for the bootstrap.
+is installed 0640 root:I<user>.  The makefile fragment also holds the matrix
+password and pickle key for the bootstrap.
+
+The bot's GitHub identity is L<Provisioner::Recipe::github>'s: the CLI, the
+login state, and the ssh key that pushes and signs.  This recipe hands it
+C<github_user>, C<github_token>, C<github_ssh_identity> and C<koan_email>, so a
+configuration written before that split says all of it here as it always did.
+A guest built before it holds its key at C<secret:koan/E<lt>domainE<gt>-github-ssh>,
+which is no longer where the key is read from; see L<Provisioner::Recipe::github/THE SSH KEY>
+for the one command that moves it.
 
 C<remote_files> keeps the C<instance/> tree across provisions.  So the memory,
 journal and missions of the bot stay after a rebuild.
@@ -197,7 +215,25 @@ C<deps> is in L<Provisioner::Recipe::Ubuntu::koan>.
 =cut
 
 sub required_recipes {
-    return ( claude => sub { () } );
+    return (
+        claude => sub { () },
+
+        # The bot is a GitHub account, and github does everything that follows
+        # from that: the CLI, the login state, and the key that pushes and
+        # signs.  What koan calls these fields it has always called them, so a
+        # configuration written before the split still says it here.
+        github => sub {
+            my (%opts) = @_;
+
+            return (
+                account      => $opts{user},
+                github_user  => $opts{github_user},
+                github_token => $opts{github_token},
+                ssh_identity => $opts{github_ssh_identity} // 0,
+                git_email    => $opts{koan_email},
+            );
+        },
+    );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()
@@ -242,8 +278,8 @@ sub args {
             github_user             => { type => 'string' },
             github_token            => { type => 'string' },
             github_nickname         => { type => 'string' },
-            github_authorized_users => { type => 'array',   items   => { type => 'string' }, default => [] },
-            github_ssh_identity     => { type => 'boolean', default => 0, description => 'Give the bot an ssh identity for git push and commit signing.  The key itself lives in the secret store and is placed on the guest by bin/provision; it is never written into the payload.  Register the pubkey the first build prints under the bot GitHub account, as an Authentication key and a Signing key.' },
+            github_authorized_users => { type => 'array',   items   => { type => 'string' }, default     => [] },
+            github_ssh_identity     => { type => 'boolean', default => 0,                    description => 'Give the bot an ssh identity for git push and commit signing.  Provisioner::Recipe::github holds the key, in the secret store; it is never written into the payload.  Register the pubkey the first build prints under the bot GitHub account, as an Authentication key and a Signing key.' },
             max_runs_per_day        => { type => 'integer', default => 10 },
             interval_seconds        => { type => 'integer', default => 60 },
             start_on_pause          => { type => 'integer', default => 1 },
@@ -337,59 +373,11 @@ sub enrich {
     return %opts;
 }
 
-=head2 %files = $recipe->guest_secrets($install_dir, $domain, %opts)
-
-Returns the ssh identity of the bot when C<github_ssh_identity> is true, and
-an empty list when it is false.
-
-The first build makes the key and keeps it in the secret store.  Every later
-provision takes it from the store, and the key never goes in the payload.
-C<remote_files> does not name F<.ssh>, so the key is only on the guest and in
-the store.
-
-To keep a key that GitHub already knows, put it in the store with
-C<bin/add_secret> before the first build.  If you do not, that build mints a
-new key and GitHub does not know it:
-
-    bin/add_secret --group koan --title <domain>-github-ssh -- "$(cat old_key)"
-
-=cut
-
-sub guest_secrets {
-    my ( $self, $install_dir, $domain, %opts ) = @_;
-
-    return () unless $opts{github_ssh_identity};
-
-    return (
-        "$install_dir/$domain/.ssh/id_koan" => {
-            ref => "secret:koan/$domain-github-ssh/password",
-
-            # Ed25519 because the key fits in a password field, and no
-            # passphrase because the bot runs unattended.
-            generate => sub {
-                my $dir  = File::Temp::tempdir( CLEANUP => 1 );
-                my $path = "$dir/id_koan";
-                Provisioner::Utils::write_ssh_keypair( $path, Ed25519 => 256, 'koan' );
-
-                # Remove the trailing newline.  bin/provision adds one, and
-                # ssh-keygen refuses a key that ends with a blank line.
-                my $key = File::Slurper::read_binary($path);
-                $key =~ s/\n\z//;
-                return $key;
-            },
-
-            # Owned by root until the fragment gives it to the service user,
-            # because the file is placed before the makefile makes the account.
-            mode => '0600',
-        },
-    );
-}
-
 =head2 @files = $recipe->template_files()
 
 Returns pairs of a template and the file that it renders to: the env file, the
 behavior configuration, the project list, the two systemd units, the ufw
-profile and the gh auth state.
+profile and the script that clones the projects.
 
 =cut
 
@@ -405,8 +393,10 @@ sub template_files {
         # It is always rendered, and the fragment installs it only for matrix.
         'koan.ufw.conf.tt' => 'koan_ufw.conf',
 
-        # The gh auth state, so that the bot can run `gh` without `gh auth login`.
-        'koan-gh-hosts.yml.tt' => 'koan-gh-hosts.yml',
+        # The project clones, as a script rather than fragment lines, because
+        # they run after every target rather than in this one.  See
+        # L</Cloning the projects after everything else>.
+        'koan.clone-projects.sh.tt' => 'koan-clone-projects.sh',
     );
 }
 

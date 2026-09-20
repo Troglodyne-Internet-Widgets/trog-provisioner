@@ -1,0 +1,27 @@
+#!/bin/bash
+[%# The projects of the bot, cloned once every target has run.
+
+    A script rather than lines in the fragment because of when it runs:
+    Provisioner::Recipe::github writes the login state and the ssh key of the
+    bot in its own target, and a dependency target runs after the recipe that
+    required it.  The postrun queue is after both.  See WHAT RUNS WHEN in
+    Provisioner::Recipe::github.
+
+    Run as root by post_install, and each clone drops to the service user, so
+    that the clone belongs to the bot and uses its ssh key and its gh login.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+set -euo pipefail
+
+[% FOR pname IN projects.keys().sort() %]
+[% p = projects.$pname %]
+[% IF p.github_url %]
+# [% pname %]
+if [ ! -d '[% p.path %]/.git' ]; then
+    mkdir -p "$(dirname '[% p.path %]')"
+    chown '[% user %]:[% user %]' "$(dirname '[% p.path %]')"
+    runuser -u '[% user %]' -- gh repo clone '[% p.github_url %]' '[% p.path %]'
+fi
+[% END %]
+[% END %]

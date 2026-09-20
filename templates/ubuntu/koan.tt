@@ -68,75 +68,6 @@ if [ ! -f '[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env' 
 fi
 [% END %]
 
-[% IF github_ssh_identity %]
-# The ssh identity of the bot.  It is in ~[% user %]/.ssh, not KOAN_ROOT, so
-# that a new clone of the repo keeps it.
-#
-# bin/provision put the key here from the secret store before the makefile
-# started.  It is owned by root because the account did not exist yet.  The
-# payload has no copy, so this gives the key to the service user.
-install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
-chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_koan'
-chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_koan'
-runuser -u '[% user %]' -- ssh-keygen -y -f '[% install_dir %]/[% domain %]/.ssh/id_koan' > '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
-chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
-chmod 0644 '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
-[%# Somebody must add the public key to GitHub, and this is the only place
-    that shows it. -%]
-echo 'koan: register this as an Authentication key and a Signing key on the bot GitHub account:'
-cat '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
-
-# Trust the host keys of github.com, unless known_hosts already has them.
-if ! runuser -u '[% user %]' -- ssh-keygen -F github.com -f '[% install_dir %]/[% domain %]/.ssh/known_hosts' >/dev/null 2>&1; then \
-    ssh-keyscan -t ed25519,rsa github.com 2>/dev/null >> '[% install_dir %]/[% domain %]/.ssh/known_hosts'; \
-    chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/known_hosts'; \
-    chmod 0644 '[% install_dir %]/[% domain %]/.ssh/known_hosts'; \
-fi
-
-# Use the bot key for github.com, without ssh-agent.
-printf 'Host github.com\n    IdentityFile ~/.ssh/id_koan\n    IdentitiesOnly yes\n' > '[% install_dir %]/[% domain %]/.ssh/config'
-chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/config'
-chmod 0644 '[% install_dir %]/[% domain %]/.ssh/config'
-
-# Sign commits and tags with the same key, in the ssh format.  user.name and
-# user.email make the bot the author.  allowed_signers lets
-# `git log --show-signature` verify the signatures locally.
-runuser -u '[% user %]' -- git config --global user.name        '[% github_user %]'
-runuser -u '[% user %]' -- git config --global user.email       '[% koan_email %]'
-runuser -u '[% user %]' -- git config --global gpg.format       ssh
-runuser -u '[% user %]' -- git config --global user.signingkey  '[% install_dir %]/[% domain %]/.ssh/id_koan.pub'
-runuser -u '[% user %]' -- git config --global commit.gpgsign   true
-runuser -u '[% user %]' -- git config --global tag.gpgsign      true
-install -d -o '[% user %]' -g '[% user %]' -m 0755 '[% install_dir %]/[% domain %]/.config/git'
-printf '%s %s\n' '[% koan_email %]' "$$(cat '[% install_dir %]/[% domain %]/.ssh/id_koan.pub')" > '[% install_dir %]/[% domain %]/.config/git/allowed_signers'
-chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.config/git/allowed_signers'
-runuser -u '[% user %]' -- git config --global gpg.ssh.allowedSignersFile '[% install_dir %]/[% domain %]/.config/git/allowed_signers'
-[% END %]
-
-# Install hosts.yml, so that gh is logged in without `gh auth login`.  Its
-# git_protocol is ssh when the bot has an ssh identity, and https when not.
-install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.config/gh'
-install -o '[% user %]' -g '[% user %]' -m 0600 koan-gh-hosts.yml '[% install_dir %]/[% domain %]/.config/gh/hosts.yml'
-
-# The gh credential helper for git over HTTPS.  It is needed when the bot has
-# no ssh identity, and ssh remotes do not use it.
-sudo -u [% user %] GH_TOKEN='[% github_token %]' gh auth setup-git -h github.com
-
-# Clone each project that has a github_url to its path, unless it has a .git.
-# The clone runs as [% user %], so that the ssh key and the gh configuration
-# above apply.  The parent directory is given to [% user %] first, so that the
-# clone can write to it.
-[% FOR pname IN projects.keys().sort() %]
-[% p = projects.$pname %]
-[% IF p.github_url %]
-if [ ! -d '[% p.path %]/.git' ]; then \
-    mkdir -p "$$(dirname '[% p.path %]')"; \
-    chown '[% user %]:[% user %]' "$$(dirname '[% p.path %]')"; \
-    sudo -u [% user %] GH_TOKEN='[% github_token %]' gh repo clone '[% p.github_url %]' '[% p.path %]'; \
-fi
-[% END %]
-[% END %]
-
 # Give the checkout, the virtualenv and the git configuration to the service
 # user.  Not the whole domain directory, because data owns that, and admincode
 # owns its basedir.  Then .env and config.yaml become 0640 root:[% user %], so
@@ -158,6 +89,13 @@ systemctl enable koan.service
 # Install the ufw profile for matrix federation.  koan.ufw.conf.tt says why.
 install -o root -g root -m 0644 koan_ufw.conf /etc/ufw/applications.d/koan
 [% END %]
+
+# The clones need the login state and the ssh key of the bot, and
+# Provisioner::Recipe::github writes those in its own target, which runs after
+# this one.  So the clones go in the postrun queue, ahead of the line below
+# that starts the bot.
+install -o root -g '[% user %]' -m 0750 koan-clone-projects.sh '[% install_dir %]/[% domain %]/koan-clone-projects.sh'
+[% script_dir %]/queue_postrun_task '[% install_dir %]/[% domain %]/koan-clone-projects.sh'
 
 # Start koan after every other target has run.
 [% script_dir %]/queue_postrun_task systemctl start koan.service

@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# gh must come from GitHub's own archive, not from Ubuntu: a test that it is
+# installed at all passes on the distro package too, and that one is too old to
+# edit a pull request.  Provisioner::Recipe::github says why.
+# command is a shell builtin, so it needs a shell.
+ok(qx{sh -c 'command -v gh'}, 'gh is installed');
+
+my $ghlist = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/github-cli.list'; <> } // '';
+like($ghlist, qr{https://cli\.github\.com/packages\s+stable\s+main}, 'the gh repository is cli.github.com')
+    or diag $ghlist;
+ok(-s '/usr/share/keyrings/githubcli-archive-keyring.gpg', 'the gh signing key is installed');
+
+my $ghpolicy = qx{apt-cache policy gh 2>/dev/null};
+like($ghpolicy, qr{cli\.github\.com}, 'and gh came from that archive, not the distro')
+    or diag $ghpolicy;
+
+# And it runs.  A package that installed is not a program that starts, and the
+# version is what says which of the two archives won.
+my $version = qx{gh --version 2>&1};
+like($version, qr/gh[ ]version[ ](\d+)\.(\d+)/x, 'gh runs and says its version') or diag $version;
+
+my $home = (getpwnam('[% account %]'))[7] // '';
+ok($home && -d $home, 'the account [% account %] has a home for its configuration');
+
+[% IF github_token %]
+# The login state, which is the whole point of installing it for an account
+# that nobody logs in as.  0600 because the token is in it.
+my $hosts = "$home/.config/gh/hosts.yml";
+ok(-f $hosts, 'gh has login state for [% account %]');
+
+SKIP: {
+    skip 'no hosts.yml to read', 3 unless -f $hosts;
+
+    my @st = stat $hosts;
+    is(sprintf('%04o', $st[2] & 07777), '0600', 'and it is readable only by the account');
+    is(scalar getpwuid($st[4] // -1), '[% account %]', 'and owned by it');
+
+    my $text = do { local (@ARGV, $/) = $hosts; <> } // '';
+    like($text, qr/^\s*user:\s*\Q[% github_user %]\E\s*$/m, 'and names the GitHub account it logs in as')
+        or diag $text;
+}
+
+# git must send the token for HTTPS remotes, which is what setup-git wrote.
+my $helper = qx{runuser -u '[% account %]' -- git config --global --get-all credential.https://github.com.helper 2>/dev/null};
+like($helper, qr/gh[ ]auth[ ]git-credential/x, 'git asks gh for the credential of github.com') or diag $helper;
+[% END %]
+
+[% IF ssh_identity %]
+# The key itself, and the public half that somebody has to register.
+my $key = "$home/.ssh/id_github";
+ok(-f $key, 'the account has an ssh key for github');
+
+SKIP: {
+    skip 'no key to read', 4 unless -f $key;
+
+    my @st = stat $key;
+    is(sprintf('%04o', $st[2] & 07777), '0600', 'kept to the account, or ssh refuses it');
+    is(scalar getpwuid($st[4] // -1), '[% account %]', 'and owned by it');
+
+    ok(-s "$key.pub", 'the public half is there to register on GitHub');
+
+    # ssh-keygen -y answers from the private key, so this fails on a key that
+    # is truncated or is not a key at all, which a test for -s would not.
+    my $derived = qx{runuser -u '[% account %]' -- ssh-keygen -y -f '$key' 2>&1};
+    like($derived, qr/\Assh-/, 'and the private half is a key ssh can read') or diag $derived;
+}
+
+# Without the host keys, every push is an interactive prompt that nothing
+# answers, which looks like a hang rather than a refusal.
+my $known = qx{runuser -u '[% account %]' -- ssh-keygen -F github.com -f "$home/.ssh/known_hosts" 2>/dev/null};
+like($known, qr/github\.com/, 'github.com is in known_hosts');
+
+my $config = do { local (@ARGV, $/) = "$home/.ssh/config"; <> } // '';
+like($config, qr/IdentityFile\s+\Q$home\E\/\.ssh\/id_github/, 'ssh uses that key for github.com') or diag $config;
+
+# Signing: the format, the key and the file that verifies it locally.
+foreach my $pair ([ 'gpg.format' => 'ssh' ], [ 'commit.gpgsign' => 'true' ], [ 'tag.gpgsign' => 'true' ]) {
+    my ($key_name, $want) = @$pair;
+    my $got = qx{runuser -u '[% account %]' -- git config --global --get $key_name 2>/dev/null};
+    chomp $got;
+    is($got, $want, "$key_name is $want");
+}
+
+my $signers = qx{runuser -u '[% account %]' -- git config --global --get gpg.ssh.allowedSignersFile 2>/dev/null};
+chomp $signers;
+ok($signers && -s $signers, 'allowed_signers is written, so a signature verifies on the guest')
+    or diag "git says: $signers";
+
+my $email = qx{runuser -u '[% account %]' -- git config --global --get user.email 2>/dev/null};
+chomp $email;
+is($email, '[% git_email %]', 'commits are attributed to the address the signature names');
+[% END %]
+
+done_testing();

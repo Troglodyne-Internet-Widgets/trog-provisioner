@@ -32,9 +32,10 @@ In recipes.yaml:
 
 =head2 DESCRIPTION
 
-Sets up the admin account of a domain for work at a shell.  It installs C<gh>,
-C<git> and the C<extra_pkgs>.  It clones every repository that each entity in
-C<repos_for> owns on the git server at C<api_url>.
+Sets up the admin account of a domain for work at a shell.  It installs
+C<git> and the C<extra_pkgs>, and requires L<Provisioner::Recipe::github> for
+the GitHub CLI.  It clones every repository that each entity in C<repos_for>
+owns on the git server at C<api_url>.
 
 The clones go into C<basedir> under the directory of the domain.  If the admin
 user is not the service user, a link named C<basedir> in the home of the admin
@@ -79,6 +80,19 @@ does.
 
 =cut
 
+=head2 %required = $recipe->required_recipes(%opts)
+
+C<github>, for the CLI.  Somebody working at a shell on the guest expects it,
+and it used to be installed here.  Nothing is configured for it: the login and
+the ssh identity are for an account that pushes, and an administrator logs in
+and does that themselves.
+
+=cut
+
+sub required_recipes {
+    return ( github => sub { () } );
+}
+
 sub args {
     return (
         type       => 'object',
@@ -115,8 +129,8 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts(%opts)
 
-Returns C<cli.github.com>, for the signing key of C<gh>, and the host of each
-C<api_url> in C<repos_from>.
+Returns the host of each C<api_url> in C<repos_from>.  The archive of the
+GitHub CLI is L<Provisioner::Recipe::github>'s to name.
 
 The hosts that the clones come from are not in the list.  The API gives them
 as C<clone_url>, so this method cannot know them in advance.  If one of them is
@@ -124,26 +138,15 @@ a host that the cache answers for, the clone goes through the cache.  That is
 correct.  See L</Cloning while the fetch cache is in front of it> for the ssh
 fallback.
 
+There are no C<cache_classes> either.  Each answer from the API is for one
+account and one token, so the cache must not keep it.
+
 =cut
 
 sub fetch_hosts {
     my ( $self, %opts ) = @_;
 
-    return ( 'cli.github.com', grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] } );
-}
-
-=head2 @classes = $recipe->cache_classes()
-
-Returns the classes for the apt repository of C<gh>.  The repository API is
-not in it, because each answer is for one account and one token, and the cache
-must not keep it.
-
-=cut
-
-sub cache_classes {
-    my ($self) = @_;
-
-    return $self->apt_repo_classes('cli.github.com');
+    return grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $opts{repos_from} // [] };
 }
 
 1;
