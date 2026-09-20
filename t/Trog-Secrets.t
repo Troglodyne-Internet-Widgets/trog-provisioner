@@ -21,6 +21,7 @@ use FindBin::libs;
 ## anything that reads it must be loaded after, not before.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
+use File::KeePass::KDBX();
 use Trog::Secrets();
 
 subtest 'a reference names a group, an entry and a field' => sub {
@@ -240,5 +241,94 @@ subtest 'remember makes a secret once and keeps it' => sub {
     like( $err, qr/did[ ]not[ ]keep/,         'a field the database drops is an error at once' );
     like( $err, qr/password[ ]or[ ]username/, 'and it says which fields there are' );
 };
+
+# The group in a reference used to be dropped on the way to the database: the
+# query key that File::KeePass documents is not the one File::KeePass::KDBX
+# answers to, so every entry landed in the root group and every read matched on
+# the title alone.  Two references that differ only by group are what that
+# cannot express, and a migration between groups is exactly that case.
+subtest 'a reference is filed under the group it names' => sub {
+    my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+
+    Trog::Secrets->create( $file, 'pw', 'secret:koan/a-key/password' => 'the old one' );
+    Trog::Secrets->replace( $file, 'pw', 'secret:github/a-key/password' => 'the new one' );
+
+    my %where = entries_by_group($file);
+    is_deeply( $where{koan},       ['a-key'], 'the entry is in the group its reference names' );
+    is_deeply( $where{github},     ['a-key'], 'and so is the one that was written afterwards' );
+    is_deeply( $where{Root} // [], [],        'with nothing left in the root group' );
+
+    my %values = Trog::Secrets->lookup(
+        $file, 'pw',
+        old => 'secret:koan/a-key/password',
+        new => 'secret:github/a-key/password',
+    );
+    is( $values{old}, 'the old one', 'and one title in two groups is two secrets' );
+    is( $values{new}, 'the new one', 'each read from the group that was asked for' );
+};
+
+subtest 'two entries of one name in one group are refused by name' => sub {
+    my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+    Trog::Secrets->create( $file, 'pw', 'secret:koan/a-key/password' => 'first' );
+
+    # By hand, because nothing in this module will write the second one.
+    my $kdbx = File::KeePass::KDBX->load_db( $file, 'pw' );
+    $kdbx->unlock;
+    my ($group) = grep { $_->{title} eq 'koan' } @{ $kdbx->groups };
+    $kdbx->add_entry( { group => $group, title => 'a-key', password => 'second' } );
+    $kdbx->save_db( $file, 'pw' );
+
+    my $err = exception { Trog::Secrets->lookup( $file, 'pw', probe => 'secret:koan/a-key/password' ) };
+    like( $err, qr/holds[ ]2[ ]entries[ ]called[ ]'a-key'/, 'the refusal counts them and names the entry' );
+    like( $err, qr/koan/,                                   'and the group they are in' );
+    like( $err, qr/forget_secret/,                          'and what removes the one that is not wanted' );
+};
+
+subtest 'forget() takes the entry out, and leaves the group' => sub {
+    my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
+    Trog::Secrets->create(
+        $file, 'pw',
+        'secret:koan/a-key/password' => 'go',
+        'secret:koan/b-key/password' => 'stay',
+    );
+
+    my @gone = Trog::Secrets->forget( $file, 'pw', 'secret:koan/a-key/password' );
+    is_deeply( \@gone, ['secret:koan/a-key/password'], 'it says what it removed' );
+
+    my %where = entries_by_group($file);
+    is_deeply( $where{koan}, ['b-key'], 'the entry is gone and its neighbour is not' );
+
+    # The whole entry, not the one field: an entry with the password taken out
+    # still says what the password was for.
+    like(
+        exception { Trog::Secrets->lookup( $file, 'pw', probe => 'secret:koan/a-key/password' ) },
+        qr/No[ ]entry[ ]'a-key'/, 'and nothing of it is left to read'
+    );
+
+    is_deeply( [ Trog::Secrets->forget( $file, 'pw', 'secret:koan/a-key/password' ) ],   [], 'asking again removes nothing, and is not an error' );
+    is_deeply( [ Trog::Secrets->forget( $file, 'pw', 'secret:nosuch/thing/password' ) ], [], 'nor is a group that was never there' );
+};
+
+# The groups of a store, as a hash of group title to the titles it holds.
+sub entries_by_group {
+    my ($file) = @_;
+
+    my $kdbx = File::KeePass::KDBX->load_db( $file, 'pw' );
+    $kdbx->unlock;
+
+    my %by_group;
+    my $walk;
+    $walk = sub {
+        my ($groups) = @_;
+        foreach my $group ( @{ $groups // [] } ) {
+            $by_group{ $group->{title} } = [ sort map { $_->{title} } @{ $group->{entries} // [] } ];
+            $walk->( $group->{groups} );
+        }
+        return;
+    };
+    $walk->( $kdbx->groups );
+
+    return %by_group;
+}
 
 done_testing();

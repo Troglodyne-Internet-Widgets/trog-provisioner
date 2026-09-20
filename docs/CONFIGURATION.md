@@ -193,6 +193,20 @@ A password is never written here. `secret:GROUP/ENTRY/FIELD` names an entry in
 `secrets.kdbx` and is resolved when the configuration is read -- see
 `Trog::Secrets`.
 
+The group is part of the address. `secret:koan/somebox-github-ssh/password` and
+`secret:github/somebox-github-ssh/password` are two different secrets, and an
+entry is only found in the group its reference names. Two entries of one name
+inside one group are refused, naming the group, because nothing can choose
+between them.
+
+`bin/add_secret` writes one, `bin/forget_secret` removes one, and
+`bin/regroup_secrets` is a one-time repair: `Trog::Secrets` used to drop the
+group on the way to the database, so every entry this tooling wrote landed in
+the root group whatever its reference said. Run it once after upgrading, with
+`--dryrun` first. Until it has run, the entries the tooling wrote are where the
+new code does not look, and a reference that resolves to nothing is one that
+`bin/new_config` generates a fresh value for.
+
 ## `_global`
 
 Variables every recipe's templates for that domain can see.
