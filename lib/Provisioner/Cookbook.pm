@@ -12,7 +12,7 @@ use Clone qw{clone};
 use Cwd();
 use File::Basename();
 use File::Find();
-use List::Util qw{any};
+use List::Util qw{any uniq};
 use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
@@ -21,6 +21,7 @@ use JSON::Validator::Schema::Troglodyne;
 use YAML::XS();
 
 use Trog::Config();
+use Trog::Secrets();
 
 =head1 NAME
 
@@ -136,6 +137,64 @@ sub fetch_hosts {
 
     state @hosts = List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names );
     return @hosts;
+}
+
+=head2 @refs = secret_references()
+
+Every C<secret:> reference this installation asks the store for, sorted and
+without duplicates.  Three kinds go in:
+
+=over 4
+
+=item * What the configuration writes down, at any depth, which
+L<Trog::Secrets/needed> finds.
+
+=item * What each recipe of each domain places from the store, which its
+C<guest_secrets> names.
+
+=item * The key of each configured domain, which opens the guest and which
+L<Trog::Guest/ref_for_key> names.
+
+=back
+
+F<bin/forget_secret> asks so that it can refuse to delete one that is still
+wanted, and F<bin/regroup_secrets> asks so that it knows which group each entry
+belongs in.  Neither can work it out from the store itself: an entry says what
+it is called, not who reads it.
+
+A recipe this installation does not have is skipped rather than fatal, as in
+C<configured_fetch_hosts>.
+
+=cut
+
+sub secret_references {
+    my ($class) = @_;
+
+    my $conf   = $class->configuration();
+    my %needed = Trog::Secrets->needed($conf);
+
+    my @refs = values %needed;
+
+    foreach my $domain ( grep { $_ ne '_base' } sort keys %$conf ) {
+        my $config  = $class->domain_config( $domain, $conf );
+        my $install = $class->install_dir( $domain, $conf );
+
+        # Not a use at the top: Trog::Guest loads Net::OpenSSH::More, which
+        # loads File::HomeDir in a BEGIN block, which stats the filesystem
+        # looking for xdg-user-dir.  Every test that mocks the filesystem loads
+        # this module, and an unmocked stat is fatal there.
+        require Trog::Guest;
+        push( @refs, Trog::Guest->ref_for_key($domain) );
+
+        foreach my $recipe ( sort keys %$config ) {
+            next unless $class->has($recipe);
+
+            my %placed = eval { $class->load($recipe)->guest_secrets( $install, $domain, %{ $config->{$recipe} // {} } ) } or next;
+            push( @refs, map { $_->{ref} } grep { ref eq 'HASH' && $_->{ref} } values %placed );
+        }
+    }
+
+    return uniq( sort grep { $_ } @refs );
 }
 
 =head2 configured_fetch_hosts
