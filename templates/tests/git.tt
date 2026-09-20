@@ -1,0 +1,84 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# git itself, which everything below is configuration for.  A path is not a
+# program: this runs it.
+my $version = qx{git --version 2>&1};
+like($version, qr/git[ ]version[ ]\d+\./x, 'git runs and says its version') or diag $version;
+
+[% FOR account IN accounts.keys().sort() %]
+[% who = accounts.$account %]
+{
+    my $home = (getpwnam('[% account %]'))[7] // '';
+    ok($home && -d $home, '[% account %] has a home for its configuration');
+
+[% FOR host IN who.hosts %]
+    # Without the host keys, every push waits on a prompt that nothing answers,
+    # which looks like a hang rather than a refusal.  True of a forwarded key
+    # too, so this is asserted whether or not the account has one of its own.
+    {
+        my $known = qx{runuser -u '[% account %]' -- ssh-keygen -F '[% host %]' -f "$home/.ssh/known_hosts" 2>/dev/null};
+        like($known, qr/\Q[% host %]\E/, '[% account %] trusts the host keys of [% host %]') or diag $known;
+    }
+[% END %]
+
+[% IF who.ssh_identity %]
+    my $key = "$home/.ssh/id_git";
+    ok(-f $key, '[% account %] has an ssh key of its own');
+
+    SKIP: {
+        skip 'no key to read', 4 unless -f $key;
+
+        my @st = stat $key;
+        is(sprintf('%04o', $st[2] & 07777), '0600', 'kept to the account, or ssh refuses it');
+        is(scalar getpwuid($st[4] // -1), '[% account %]', 'and owned by it');
+
+        ok(-s "$key.pub", 'the public half is there to register on the forge');
+
+        # ssh-keygen -y answers from the private key, so this fails on a key
+        # that is truncated or is not a key at all, which -s would not.
+        my $derived = qx{runuser -u '[% account %]' -- ssh-keygen -y -f '$key' 2>&1};
+        like($derived, qr/\Assh-/, 'and the private half is a key ssh can read') or diag $derived;
+    }
+
+    # The copy bin/provision placed is moved into the home, not left behind for
+    # anything that salvages the domain directory to pick up.
+    ok(!-e '[% install_dir %]/[% domain %]/.ssh/id_git-[% account %]', 'and no copy is left under the domain directory');
+
+    {
+        my $config = do { local (@ARGV, $/) = "$home/.ssh/config"; <> } // '';
+        like($config, qr/IdentityFile\s+\Q$home\E\/\.ssh\/id_git/, 'ssh uses that key') or diag $config;
+[% FOR host IN who.hosts %]
+        like($config, qr/^Host\b[^\n]*\b\Q[% host %]\E\b/m, 'for [% host %]') or diag $config;
+[% END %]
+    }
+
+    # Signing: the format, the key and the file that verifies it locally.
+    foreach my $pair ([ 'gpg.format' => 'ssh' ], [ 'commit.gpgsign' => 'true' ], [ 'tag.gpgsign' => 'true' ]) {
+        my ($name, $want) = @$pair;
+        my $got = qx{runuser -u '[% account %]' -- git config --global --get $name 2>/dev/null};
+        chomp $got;
+        is($got, $want, "[% account %]: $name is $want");
+    }
+
+    {
+        my $signers = qx{runuser -u '[% account %]' -- git config --global --get gpg.ssh.allowedSignersFile 2>/dev/null};
+        chomp $signers;
+        ok($signers && -s $signers, '[% account %]: allowed_signers is written, so a signature verifies here')
+            or diag "git says: $signers";
+    }
+[% END %]
+
+[% IF who.user_email %]
+    {
+        my $email = qx{runuser -u '[% account %]' -- git config --global --get user.email 2>/dev/null};
+        chomp $email;
+        is($email, '[% who.user_email %]', '[% account %]: commits are attributed to the address configured');
+    }
+[% END %]
+}
+[% END %]
+
+done_testing();

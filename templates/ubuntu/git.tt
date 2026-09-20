@@ -1,0 +1,84 @@
+[%# What git needs to talk to a forge as somebody: the host keys, a key where
+    the account has one, and the signature.  What the GitHub CLI needs is
+    Provisioner::Recipe::github, which is a different question.
+
+    One pass per account, because a guest holds more than one and they want
+    different things: see ONE BLOCK PER ACCOUNT in Provisioner::Recipe::git.
+
+    Each block works out the home of the account with getent rather than
+    assuming one: a service user lives under install_dir and an administrator
+    under /home.  Each line of a fragment is its own shell, so the lookup is
+    repeated per block rather than kept in a variable.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+[% FOR account IN accounts.keys().sort() %]
+[% who = accounts.$account %]
+
+# ---- [% account %] ----
+[% FOR host IN who.hosts %]
+# The host keys of [% host %], unless known_hosts already has them.  Without
+# them the first push waits on a prompt that nothing answers, which reads as a
+# hang rather than a refusal -- and that is as true of a key the operator
+# forwards as of one placed below, so it does not wait on having one.
+#
+# A scan that comes back with nothing says so and carries on.  A forge that is
+# unreachable for a minute, or one that serves https and no ssh, is not a
+# reason to fail the build; the guest test for this recipe is what reports it,
+# and hosts is what to take it out of.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.ssh"; \
+    if ! runuser -u '[% account %]' -- ssh-keygen -F '[% host %]' -f "$$home/.ssh/known_hosts" >/dev/null 2>&1; then \
+        ssh-keyscan -t ed25519,rsa '[% host %]' 2>/dev/null >> "$$home/.ssh/known_hosts" \
+            || echo 'git: no host keys came back for [% host %], so a push to it will wait on a prompt' >&2; \
+        chown '[% account %]:[% account %]' "$$home/.ssh/known_hosts"; \
+        chmod 0644 "$$home/.ssh/known_hosts"; \
+    fi
+[% END %]
+
+[% IF who.ssh_identity %]
+# The key of [% account %].  bin/provision put it under the domain directory
+# from the secret store before the makefile started, owned by root because the
+# account did not exist yet.  This gives it to the account, in the home where
+# ssh looks for it.  The payload has no copy of it.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.ssh" \
+    && install -o '[% account %]' -g '[% account %]' -m 0600 '[% install_dir %]/[% domain %]/.ssh/id_git-[% account %]' "$$home/.ssh/id_git" \
+    && rm -f '[% install_dir %]/[% domain %]/.ssh/id_git-[% account %]'
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- ssh-keygen -y -f "$$home/.ssh/id_git" > "$$home/.ssh/id_git.pub" \
+    && chown '[% account %]:[% account %]' "$$home/.ssh/id_git.pub" \
+    && chmod 0644 "$$home/.ssh/id_git.pub"
+[%# Somebody has to register the key on the forge, and this is the only place
+    that shows it. -%]
+echo 'git: register this on [% who.hosts.join(", ") %] for [% who.user_name %], as an authentication key and a signing key:'
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; cat "$$home/.ssh/id_git.pub"
+
+# Use that key for each of those forges, without ssh-agent.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    printf 'Host [% who.hosts.join(" ") %]\n    IdentityFile %s/.ssh/id_git\n    IdentitiesOnly yes\n' "$$home" > "$$home/.ssh/config" \
+    && chown '[% account %]:[% account %]' "$$home/.ssh/config" \
+    && chmod 0644 "$$home/.ssh/config"
+[% END %]
+
+[% IF who.user_email %]
+# Who the commits of [% account %] are from.
+runuser -u '[% account %]' -- git config --global user.name  '[% who.user_name %]'
+runuser -u '[% account %]' -- git config --global user.email '[% who.user_email %]'
+[% END %]
+
+[% IF who.ssh_identity %]
+# And the signature, in the ssh format, with the same key.  allowed_signers is
+# what lets `git log --show-signature` verify it on the guest.
+runuser -u '[% account %]' -- git config --global gpg.format     ssh
+runuser -u '[% account %]' -- git config --global commit.gpgsign true
+runuser -u '[% account %]' -- git config --global tag.gpgsign    true
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- git config --global user.signingkey "$$home/.ssh/id_git.pub"
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0755 "$$home/.config/git" \
+    && printf '%s %s\n' '[% who.user_email %]' "$$(cat "$$home/.ssh/id_git.pub")" > "$$home/.config/git/allowed_signers" \
+    && chown '[% account %]:[% account %]' "$$home/.config/git/allowed_signers" \
+    && runuser -u '[% account %]' -- git config --global gpg.ssh.allowedSignersFile "$$home/.config/git/allowed_signers"
+[% END %]
+[% END %]

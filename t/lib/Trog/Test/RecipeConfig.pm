@@ -118,8 +118,17 @@ sub required_config {
         github => {
             github_user  => 'test-bot',
             github_token => 'ghp_fakefakefake',
-            ssh_identity => 1,
-            git_email    => 'test-bot@test.test',
+            git_protocol => 'ssh',
+        },
+        git => {
+            accounts => {
+                test => {
+                    hosts        => ['github.com'],
+                    ssh_identity => 1,
+                    user_name    => 'test-bot',
+                    user_email   => 'test-bot@test.test',
+                },
+            },
         },
         koan => {
             user               => 'koan',

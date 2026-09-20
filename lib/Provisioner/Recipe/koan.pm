@@ -45,7 +45,7 @@ use Crypt::PRNG();
             github_token: "ghp_..."
 
             # Give the bot an ssh identity for git push and commit signing.
-            # Provisioner::Recipe::github does that work and holds the key;
+            # Provisioner::Recipe::git does that work and holds the key;
             # register the public key that the build prints on the GitHub
             # account of the bot, as an "Authentication key" for push and as
             # a "Signing key", so that signed commits show as Verified.
@@ -178,10 +178,10 @@ A project with a C<github_url> is cloned by a script that C<post_install>
 runs, rather than by this recipe's target.
 
 The clone belongs to the bot and uses the bot's login and ssh key, and
-L<Provisioner::Recipe::github> writes both in its own target -- which the
-depsolver puts B<after> this one, as it does with every dependency.  The
-postrun queue runs once every target has, so that is where a clone can have
-them.  The guest tests run after C<post_install>, and F<templates/tests/koan.tt>
+L<Provisioner::Recipe::github> and L<Provisioner::Recipe::git> write those in
+targets of their own -- which the depsolver puts B<after> this one, as it does
+with every dependency.  The postrun queue runs once every target has, so that
+is where a clone can have them.  The guest tests run after C<post_install>, and F<templates/tests/koan.tt>
 asserts that each project is there.
 
 The secrets (the telegram, slack and matrix tokens, the github PAT, the claude
@@ -189,13 +189,17 @@ OAuth token and the SMTP password) are in the rendered C<.env> file.  That file
 is installed 0640 root:I<user>.  The makefile fragment also holds the matrix
 password and pickle key for the bootstrap.
 
-The bot's GitHub identity is L<Provisioner::Recipe::github>'s: the CLI, the
-login state, and the ssh key that pushes and signs.  This recipe hands it
-C<github_user>, C<github_token>, C<github_ssh_identity> and C<koan_email>, so a
-configuration written before that split says all of it here as it always did.
-A guest built before it holds its key at C<secret:koan/E<lt>domainE<gt>-github-ssh>,
-which is no longer where the key is read from; see L<Provisioner::Recipe::github/THE SSH KEY>
-for the one command that moves it.
+The bot's GitHub identity is two recipes.  L<Provisioner::Recipe::github>
+installs the CLI and logs it in with the token; L<Provisioner::Recipe::git>
+holds the ssh key it pushes and signs with, and trusts the host keys of
+C<github.com>.  C<gh> itself needs no key, which is why they are separate.
+
+This recipe hands them C<github_user>, C<github_token>, C<github_ssh_identity>
+and C<koan_email>, so a configuration written before that split says all of it
+here as it always did.  A guest built before it holds its key at
+C<secret:koan/E<lt>domainE<gt>-github-ssh>, which is no longer where the key is
+read from; see L<Provisioner::Recipe::git/THE SSH KEY> for the one command that
+moves it.
 
 C<remote_files> keeps the C<instance/> tree across provisions.  So the memory,
 journal and missions of the bot stay after a rebuild.
@@ -218,19 +222,40 @@ sub required_recipes {
     return (
         claude => sub { () },
 
-        # The bot is a GitHub account, and github does everything that follows
-        # from that: the CLI, the login state, and the key that pushes and
-        # signs.  What koan calls these fields it has always called them, so a
+        # The bot is a GitHub account, which is two things: github logs the
+        # CLI in with its token, and git holds the key it pushes and signs
+        # with.  gh itself needs no key -- a token is what it authenticates
+        # with -- so they are separate recipes and koan asks for both.
+        #
+        # What koan calls these fields it has always called them, so a
         # configuration written before the split still says it here.
         github => sub {
             my (%opts) = @_;
 
             return (
-                account      => $opts{user},
+                account      => $opts{user} // $opts{admin_user},
                 github_user  => $opts{github_user},
                 github_token => $opts{github_token},
-                ssh_identity => $opts{github_ssh_identity} // 0,
-                git_email    => $opts{koan_email},
+                git_protocol => $opts{github_ssh_identity} ? 'ssh' : 'https',
+            );
+        },
+
+        git => sub {
+            my (%opts) = @_;
+
+            # admin_user in the end, because required_recipes runs before
+            # validation, where user falls back to it.
+            my $account = $opts{user} // $opts{admin_user};
+
+            return (
+                accounts => {
+                    $account => {
+                        hosts        => ['github.com'],
+                        ssh_identity => $opts{github_ssh_identity} // 0,
+                        user_name    => $opts{github_user},
+                        user_email   => $opts{koan_email},
+                    },
+                },
             );
         },
     );
@@ -279,7 +304,7 @@ sub args {
             github_token            => { type => 'string' },
             github_nickname         => { type => 'string' },
             github_authorized_users => { type => 'array',   items   => { type => 'string' }, default     => [] },
-            github_ssh_identity     => { type => 'boolean', default => 0,                    description => 'Give the bot an ssh identity for git push and commit signing.  Provisioner::Recipe::github holds the key, in the secret store; it is never written into the payload.  Register the pubkey the first build prints under the bot GitHub account, as an Authentication key and a Signing key.' },
+            github_ssh_identity     => { type => 'boolean', default => 0,                    description => 'Give the bot an ssh identity for git push and commit signing.  Provisioner::Recipe::git holds the key, in the secret store; it is never written into the payload.  Register the pubkey the first build prints under the bot GitHub account, as an Authentication key and a Signing key.' },
             max_runs_per_day        => { type => 'integer', default => 10 },
             interval_seconds        => { type => 'integer', default => 60 },
             start_on_pause          => { type => 'integer', default => 1 },

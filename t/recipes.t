@@ -944,17 +944,17 @@ subtest 'a secret only some domains want is only placed for those' => sub {
 
     # guest_secrets used to be handed the install dir and the domain and nothing
     # else, so it could not tell whether this domain had asked for the thing it
-    # places.  the github ssh identity is the case: most accounts do not have
-    # one, and minting a key nobody registered on GitHub is worse than useless.
-    my $github = Provisioner::Cookbook->load('github');
+    # places.  The ssh identity is the case: most accounts do not have one, and
+    # minting a key nobody registered on a forge is worse than useless.
+    my $git = Provisioner::Cookbook->load('git');
 
-    is_deeply( { $github->guest_secrets( '/opt/domains', 'k.test.test' ) }, {}, 'a domain that did not ask gets nothing placed' );
+    is_deeply( { $git->guest_secrets( '/opt/domains', 'k.test.test' ) }, {}, 'a domain that did not ask gets nothing placed' );
 
-    my %placed = $github->guest_secrets( '/opt/domains', 'k.test.test', ssh_identity => 1 );
-    is_deeply( [ keys %placed ], ['/opt/domains/k.test.test/.ssh/id_github'], 'and one that did gets the identity' );
+    my %placed = $git->guest_secrets( '/opt/domains', 'k.test.test', accounts => { bot => { ssh_identity => 1 } } );
+    is_deeply( [ keys %placed ], ['/opt/domains/k.test.test/.ssh/id_git-bot'], 'and one that did gets the identity' );
 
-    my $entry = $placed{'/opt/domains/k.test.test/.ssh/id_github'};
-    is( $entry->{ref}, 'secret:github/k.test.test-github-ssh/password', 'from the store, keyed on the domain' );
+    my $entry = $placed{'/opt/domains/k.test.test/.ssh/id_git-bot'};
+    is( $entry->{ref}, 'secret:git/k.test.test-bot-ssh/password', 'from the store, keyed on the domain and the account' );
 
     # bin/provision writes the value with a newline of its own, and ssh-keygen
     # refuses a key with a blank line on the end.
@@ -964,17 +964,17 @@ subtest 'a secret only some domains want is only placed for those' => sub {
 };
 
 subtest 'the ssh key is not in the payload any more' => sub {
-    my $github = Provisioner::Cookbook->load( 'github', distro => $DISTRO )->new(%PROV);
-    my %files  = $github->template_files();
+    my $git   = Provisioner::Cookbook->load( 'git', distro => $DISTRO )->new(%PROV);
+    my %files = $git->template_files();
 
     # It was rendered into the domain directory and installed from there, which
     # put a private key in the payload, in the tarball and on every machine that
     # holds a copy of either.
     ok( !( grep { index( $_, 'privkey' ) >= 0 } keys %files, values %files ), 'nothing named for a private key is generated' );
 
-    my $fragment = $github->render( %G, ssh_identity => 1, github_user => 'bot', github_token => 'ghp_fake', git_email => 'bot@test.test' );
+    my $fragment = $git->render( %G, accounts => { bot => { ssh_identity => 1, hosts => ['github.com'], user_name => 'bot', user_email => 'bot@test.test' } } );
     unlike( $fragment, qr/install\s+\S*\s*\S*ssh-privkey/, 'and the fragment installs no such file' );
-    like( $fragment, qr{'/opt/domains/\S+/\.ssh/id_github'}, 'it gives away what bin/provision already placed' );
+    like( $fragment, qr{'/opt/domains/\S+/\.ssh/id_git-bot'}, 'it gives away what bin/provision already placed' );
 };
 
 # A file placed out of the secret store is one the guest must never hand back:

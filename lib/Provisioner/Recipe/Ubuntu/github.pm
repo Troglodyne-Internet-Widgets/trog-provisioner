@@ -16,13 +16,13 @@ Provisioner::Recipe::Ubuntu::github - Ubuntu's C<deps> for L<Provisioner::Recipe
 
 =head2 @pkgs = $recipe->deps()
 
-The packages the fragment needs before it runs.  C<gh> is not among them: it
-comes from GitHub's archive, which the global fragment adds.
+What the fragment needs before it runs.  C<gh> is not among them: it comes from
+GitHub's archive, which the global fragment adds.
 
 =cut
 
 sub deps {
-    return qw{git curl ca-certificates openssh-client};
+    return qw{curl ca-certificates};
 }
 
 1;

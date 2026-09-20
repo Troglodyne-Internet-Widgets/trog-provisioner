@@ -82,15 +82,32 @@ does.
 
 =head2 %required = $recipe->required_recipes(%opts)
 
-C<github>, for the CLI.  Somebody working at a shell on the guest expects it,
-and it used to be installed here.  Nothing is configured for it: the login and
-the ssh identity are for an account that pushes, and an administrator logs in
-and does that themselves.
+C<github> for the CLI, which somebody working at a shell on the guest expects
+and which used to be installed here, and C<git> for the host keys of each
+C<api_url> it clones from.
+
+Neither is given a login or a key.  An administrator logs in as themselves and
+forwards their own key; the host keys are the half of that which the guest has
+to have either way, because the C<ssh_url> fallback in F<scripts/repos_for>
+meets the same prompt as any other push and nothing is there to answer it.
 
 =cut
 
 sub required_recipes {
-    return ( github => sub { () } );
+    return (
+        github => sub { () },
+        git    => sub {
+            my (%given) = @_;
+
+            return (
+                accounts => {
+                    $given{admin_user} => {
+                        hosts => [ grep { $_ } map { Provisioner::Utils::host_of( $_->{api_url} ) } @{ $given{repos_from} // [] } ],
+                    },
+                },
+            );
+        },
+    );
 }
 
 sub args {
