@@ -24,7 +24,6 @@ use Capture::Tiny    qw{capture_stdout};
 use Test::Fatal      qw{exception};
 use Test::MockModule qw{strict};
 use File::Temp();
-use File::Slurper::Temp();
 
 use Trog::SQLite();
 use Provisioner::IPPool();
@@ -34,7 +33,6 @@ require_ok("$FindBin::Bin/../bin/reseed_ips") or die "could not require SUT: $@"
 sub fresh_db {
     Trog::SQLite::forget();
     $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- set for the subtest that called this, after it returns
-    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\ngateway=10.9.9.1\n" );
     return;
 }
 

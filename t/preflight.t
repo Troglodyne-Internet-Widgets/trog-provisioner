@@ -296,7 +296,7 @@ subtest 'a guest has to have an address of ours to fetch from' => sub {
     ($result) = quietly( sub { Trog::HV->new()->check_transfer_ip } );
     ok( !$result->{ok}, 'no route to the guest network fails' );
     like( $result->{fix}, qr/transfer_ip/, 'and points at the setting that overrides it' );
-    like( $result->{fix}, qr/\[global\]/,  'in the section it goes in' );
+    like( $result->{fix}, qr/_global/,     'in the block it goes in' );
 
     # Reported, not thrown: a hypervisor that will not answer about its bridge
     # is one more line in the list rather than the end of the run.
@@ -351,10 +351,10 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     my ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( !$result->{ok}, 'an empty directory fails' );
-    like( $result->{what}, qr/ipmap\.cfg,[ ]recipes\.yaml,[ ]admin_authorized_keys/, 'naming what is missing' );
-    like( $result->{fix},  qr/ssh-import-id/,                                        'and how to seed the keys' );
+    like( $result->{what}, qr/recipes\.yaml,[ ]admin_authorized_keys/, 'naming what is missing' );
+    like( $result->{fix},  qr/ssh-import-id/,                          'and how to seed the keys' );
 
-    foreach my $file (qw{ipmap.cfg recipes.yaml admin_authorized_keys}) {
+    foreach my $file (qw{recipes.yaml admin_authorized_keys}) {
         open( my $fh, '>', "$dir/$file" ) or die $!;
         close($fh)                        or die "Could not close $dir/$file: $!";
     }
@@ -367,6 +367,18 @@ subtest 'the configuration it copies from has to be there' => sub {
     like( $result->{what}, qr/admin_authorized_keys/, 'and that is the one it names' );
 
     File::Slurper::Temp::write_text( "$dir/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAsomebodyskey somebody\n" );
+
+    # The files being there says nothing about whether they say who
+    # administers a guest, which bin/new_config reads for the first domain it
+    # generates.
+    ($result) = quietly( sub { Trog::HV->new()->check_config } );
+    ok( !$result->{ok}, 'an empty recipes.yaml is a configuration with no settings in it' );
+    like( $result->{what}, qr/settings[ ]every[ ]guest/, 'which it says' );
+    like( $result->{fix},  qr/ipmap_to_globals/,         'and how an older installation brings them across' );
+
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: doge\n    admin_gecos: Doge Doge\n    admin_email: doge\@test.test\n    gateway: 192.168.1.254\n    resolvers: [192.168.1.254]\n" );
+    Provisioner::Cookbook->forget();
+
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( $result->{ok}, 'and passes once they are there' );
 };

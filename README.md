@@ -183,13 +183,13 @@ So `bin/provision` generates the configuration first, and the generator is what 
 
 ### Configuration lives in /etc/trog-provisioner
 
-Five files, none of them in the checkout -- `hypervisors.conf`, `ipmap.cfg`,
+Four files, none of them in the checkout -- `hypervisors.conf`,
 `recipes.yaml`, `recipes.d/` and `secrets.kdbx`.  What goes in each of them is
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 They describe an *installation*, not this software.  They used to sit in the checkout, which meant `.gitignore` was the only thing between a password database and a public repository, and meant every command had to be run from one particular directory to find them.  `.gitignore` still lists them, so an old working copy can't commit one by habit.
 
-`TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--ipmap`, `--recipes` and `--hvconf` individually.
+`TROG_PROVISIONER_CONFIG` points somewhere else -- another installation, or a temporary directory in a test with no business reading the real one.  Every command also takes `--recipes` and `--hvconf` individually.
 
 ### Spinning one up from the recipes
 
@@ -255,7 +255,15 @@ bin/new_config mysql.troglodyne.net
 bin/provision  mysql.troglodyne.net
 ```
 
-`[addons]` and `tld` are gone from `ipmap.cfg`, and the keys in `[ips]` and `[aliases]` -- and the top-level key of each recipe -- are fully qualified.  The one-time rename was `bin/qualify_site_data`, which is gone now that every known configuration is migrated.  An installation still on the old format can take it from the history, with `git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data`.
+`[addons]` and `tld` are gone, and the aliases of a domain -- and the top-level key of each recipe -- are fully qualified.  The one-time rename was `bin/qualify_site_data`, which is gone now that every known configuration is migrated.  An installation still on the old format can take it from the history, with `git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data`.
+
+### One file describes an installation, not two
+
+Who administers a guest, how it reaches the network and where its addresses come from lived in `ipmap.cfg`, in the format `Config::Simple` reads.  What a guest is made of lived in `recipes.yaml`.  Nothing distinguished the two lists: a recipe read `admin_user` out of one and its own settings out of the other, and each new setting was an argument about which file it belonged in.
+
+They are one list now, the `_global` of `_base` in `recipes.yaml`, which a domain overrides in its own `_global`.  `Provisioner::Cookbook->global_schema` declares it, so an installation missing a setting is told all of them at once rather than the first one a script happened to read.  That is also the end of a failure this repeated: `bin/new_guest` built a configuration that never went through `bin/new_config`, so nothing refused the guest it wrote with no `admin_user` in it, and the recipes that own a file on the guest rendered one owned by nobody.
+
+An installation that still has the older file moves it across with `bin/ipmap_to_globals`.  The addresses do not move: they live in `ips.db`, and nothing has read them out of a file since `bin/assign_ip` took over handing them out.
 
 ### Why there is no terraform any more
 

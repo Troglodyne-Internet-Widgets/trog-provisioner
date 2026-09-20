@@ -12,7 +12,7 @@ use re '/aasx';
 
 use FindBin::libs;
 
-use Config::Simple;
+use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Trog::Config();
 use Cpanel::JSON::XS;
@@ -21,21 +21,23 @@ use Provisioner::IPPool;
 
 =head1 USAGE
 
-    list_ip_pool [--ipmap=file] [--available] [--assigned] [--json]
+    list_ip_pool [--recipes=file] [--available] [--assigned] [--json]
 
 Shows the status of the static IP pool.  It lists the IPs that are assigned to
 guests and the IPs that are available.
 
-=head2 ipmap.cfg format
+=head2 Where the pool is written
 
-Add an [ip_pool] section to your ipmap.cfg:
+Add an C<ip_pool> to the C<_global> of C<_base> in F<recipes.yaml>:
 
-    [ip_pool]
-    ; Explicit list of all IPs in the pool (space-separated)
-    addresses = 192.168.1.10 192.168.1.11 192.168.1.12 192.168.1.13
+    _base:
+      _global:
+        ip_pool:
+          # Every address of the pool.
+          addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
 
-    ; OR specify one or more CIDR blocks (space-separated)
-    ; cidr = 192.168.1.0/24 10.0.0.0/28
+          # Or one or more CIDR blocks, separated by spaces.
+          cidr: 192.168.1.0/24 10.0.0.0/28
 
 You can use both keys.  The pool is the addresses list and the addresses of
 each CIDR block together.
@@ -48,12 +50,12 @@ IP in the pool that is not in the database is available for a new guest.
 sub main {
     my @args = @_;
 
-    my $cfile = Trog::Config->path('ipmap.cfg');
+    my $rfile = Trog::Config->path('recipes.yaml');
     my ( $assigned, $available, $json );
 
     GetOptionsFromArray(
         \@args,
-        'ipmap=s'   => \$cfile,
+        'recipes=s' => \$rfile,
         'assigned'  => \$assigned,
         'available' => \$available,
         'json'      => \$json,
@@ -62,9 +64,8 @@ sub main {
     # Without --assigned or --available, show both.
     ( $assigned, $available ) = ( 1, 1 ) if !$assigned && !$available;
 
-    my $c = Config::Simple->new($cfile);
-    die "$Config::Simple::errstr\n" unless $c;
-    my $pool = $c->param( -block => 'ip_pool' ) // {};
+    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $pool    = $globals->{ip_pool} // {};
 
     unless ( keys %$pool ) {
 
@@ -72,16 +73,20 @@ sub main {
         # warn do not help them.
         ## no critic (ProhibitPrintSTDERR)
         print {*STDERR} <<"GUIDANCE";
-No [ip_pool] section found in $cfile
+No ip_pool in the _global of _base in $rfile
 Add one like:
 
-  [ip_pool]
-  addresses = 192.168.1.10 192.168.1.11 192.168.1.12
+  _base:
+    _global:
+      ip_pool:
+        addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
 
   OR
 
-  [ip_pool]
-  cidr = 192.168.1.0/24
+  _base:
+    _global:
+      ip_pool:
+        cidr: 192.168.1.0/24
 
 GUIDANCE
         ## use critic
@@ -98,7 +103,7 @@ GUIDANCE
     # The database is the record that bin/new_config assigns from.  The first
     # call fills it from the hypervisors, so an empty database does not show
     # every IP as available.
-    Provisioner::IPPool::ensure_seeded($pool);
+    Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
     my %assigned = %{ Provisioner::IPPool::taken() };
 
     my @available = grep { !$assigned{$_} } @pool_ips;

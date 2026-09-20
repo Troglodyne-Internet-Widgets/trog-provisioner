@@ -8,7 +8,7 @@
     a string, and takes the template up to the next quote into it.
 
     Layout, under the domain directory:
-      etc/trog-provisioner/   ipmap.cfg, recipes.yaml, ips.db
+      etc/trog-provisioner/   recipes.yaml, ips.db
       the checkout dir        if there is one
       .ssh/id_ed25519         the key a hypervisor trusts, linked into the home
     /etc/trog-provisioner is a symlink to the first of these. -%]
@@ -24,7 +24,6 @@
 install -d -o '[% user %]' -g '[% admin_user %]' -m 0750 '[% install_dir %]/[% domain %]/etc/trog-provisioner'
 ln -sfn '[% install_dir %]/[% domain %]/etc/trog-provisioner' /etc/trog-provisioner
 
-install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.ipmap.cfg    '[% install_dir %]/[% domain %]/etc/trog-provisioner/ipmap.cfg'
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.recipes.yaml '[% install_dir %]/[% domain %]/etc/trog-provisioner/recipes.yaml'
 install -o '[% user %]' -g '[% admin_user %]' -m 0640 trogrunner.admin_authorized_keys '[% install_dir %]/[% domain %]/etc/trog-provisioner/admin_authorized_keys'
 [% IF hypervisors.keys().size() %]

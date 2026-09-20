@@ -234,7 +234,7 @@ subtest 'upstream is trusted as little as possible' => sub {
     like( $vhost, qr/^\s+proxy_cache_use_stale[ ][^;]*\berror\b[^;]*\bhttp_503\b/m, 'what it had is served when upstream fails' );
     like( $vhost, qr/^\s+resolver[ ]192\.168\.1\.253[ ]8\.8\.8\.8[ ]ipv6=off;$/m,   'looked up through the resolvers it was given' );
 
-    # The fleet's list, as a real ipmap.cfg has it: a loopback for guests that
+    # The fleet's list, as a real installation has it: a loopback for guests that
     # run the pdns recursor, which this one does not, and an IPv6 address nginx
     # is told not to use.  Measured on a guest: nginx rotated onto 127.0.0.1
     # and every few lookups was a refused connection.

@@ -113,8 +113,8 @@ subtest 'the settings every recipe is handed are declared once' => sub {
     my $ntp = Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new(%prov);
     my %got = $ntp->validate( domain => 'x.test.test', admin_user => 'doge', transfer_port => '22', main_ip => undef, gateway => undef );
 
-    # ipmap.cfg is read by Config::Simple, which has no types, so the port
-    # arrives as the string it was written as.
+    # A port written in the configuration with quotes around it arrives as the
+    # string it was written as.
     is( $got{transfer_port}, 22, 'a port written as a string comes out an integer' );
 
     # Both genuinely absent where the hypervisor addresses its own guests, so

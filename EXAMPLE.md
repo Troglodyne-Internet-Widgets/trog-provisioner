@@ -7,38 +7,35 @@ Herein lie some examples of trog-provisioner usage.
 With the following data in the noted files/dirs, you should be able to provision
 a tCMS site hosted by tPSGI correctly at test.test.test:
 
-### ipmap.cfg:
+### recipes.yaml, the settings every guest shares
 
-```
-[global]
-tld=test.test                # Obviously change to a domain you control
-ip=127.0.0.0                 # You will want to set this to the actual IP of your HV
-basedir=/opt/domains         # Change depending on your disk layout
-transfer_user=me             # User which is going to run trog-provisioner
-admin_user=you               # User which will be admin on the guests
-admin_key=gh:teodesian       # How to get the key for said admin via ssh-import-id
-admin_email=test@test.test   # MAILTO for most crons
-admin_gecos=Testy McTester   # Who to blame
-gateway=1.1.1.1              # Gateway to setup on the guests
-resolvers=127.0.0.1          # Comma-separated list of resolvers to use on guests
-bridge_devname=ens4          # device name to setup a static IP on
-dhcp_devname=ens3            # device name to setup dhcp IP on
-[ip_pool]
-addresses=                   # Both of these are comma separated lists of available static IPs
-cidr= 192.168.1.0/26         # 
-[ips]
-test=192.168.1.1             # Static IP for test.test.test
-otherdomain.test=192.168.1.2 # Static IP for something that isn't a subdo of the tld
-[addons]
-otherdomain.test=1           # Mark otherdomain.test to not be a subdo of tld
-[aliases]
-dev=test                     # Mark dev.test.test as a CNAME of test.test.test
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
+```yaml
+_base:
+    _global:
+        basedir: /opt/domains          # Where a generated configuration lands here
+        transfer_user: me              # The account that runs trog-provisioner
+        admin_user: you                # The account that administers the guests
+        admin_email: test@test.test    # MAILTO for most crons
+        admin_gecos: Testy McTester    # Who to blame
+        gateway: 1.1.1.1               # The gateway of the guests
+        resolvers: [1.1.1.1, 8.8.8.8]  # What the guests resolve with
+        bridge_devname: ens4           # The device that gets the static address
+        dhcp_devname: ens3             # The device that gets a DHCP address
+        ip_pool:
+            cidr: 192.168.1.0/26       # The static addresses a guest can get
+        nameservers:
+            ns1: ns1.test.test
+            ns2: ns2.test.test
+
+test.test.test:
+    _global:
+        aliases: [dev.test.test]       # dev.test.test is a CNAME of it
 ```
 
-### recipes.yaml
+The administrator's public keys are not in here.  They are one per line in
+`admin_authorized_keys` beside it, and `bin/preflight` offers to seed that file.
+
+### recipes.yaml, what the guests are made of
 
 Here we setup stuff we want on all our guests.
 

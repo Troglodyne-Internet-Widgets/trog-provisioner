@@ -62,37 +62,32 @@ sub testdeps_target {
     mkdir "$tmpdir/data/$DOMAIN";
 
     my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
-    my ( $ih, $ipmap_file ) = tempfile();
 
-    # One resolver on purpose.  Config::Simple hands back a bare string for a
-    # single-valued key, and bin/new_config dereferenced that raw when it wrote
-    # provision.conf -- so generating from this is what catches it coming back.
-    print {$ih} <<"IPMAP";
-[global]
-ip=192.168.1.50
-basedir=$tmpdir/domains
-transfer_user=doge
-admin_user=doge
-admin_email=bogus\@test.test
-admin_gecos=Test Test
-gateway=192.168.1.254
-resolvers=192.168.1.254
-bridge_devname=ens4
-dhcp_devname=ens3
-[ip_pool]
-addresses=$pool
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
-IPMAP
-    close($ih) or die "Could not close $ipmap_file: $!";
+    # One resolver on purpose, written as a scalar rather than a list.  That is
+    # what an operator writes, and bin/new_config dereferenced it raw when it
+    # wrote provision.conf -- so generating from this is what catches it coming
+    # back.
+    my %global = (
+        data_source    => "$tmpdir/data",
+        basedir        => "$tmpdir/domains",
+        transfer_user  => 'doge',
+        admin_user     => 'doge',
+        admin_email    => 'bogus@test.test',
+        admin_gecos    => 'Test Test',
+        gateway        => '192.168.1.254',
+        resolvers      => '192.168.1.254',
+        bridge_devname => 'ens4',
+        dhcp_devname   => 'ens3',
+        ip_pool        => { addresses => $pool },
+        nameservers    => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+    );
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
-    File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( { _base => { _global => { data_source => "$tmpdir/data" } }, $DOMAIN => { configd => undef } } ) );
+    File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( { _base => { _global => \%global }, $DOMAIN => { configd => undef } } ) );
     Provisioner::Cookbook->forget();
 
     my $err = exception {
-        Trog::Provisioner::Config::Generator::main( '--ipmap', $ipmap_file, '--recipes', $recipe_file, '--skip_ssh', $DOMAIN );
+        Trog::Provisioner::Config::Generator::main( '--recipes', $recipe_file, '--skip_ssh', $DOMAIN );
     };
     is( $err, undef, 'the generation runs to the end' ) or diag $err;
 

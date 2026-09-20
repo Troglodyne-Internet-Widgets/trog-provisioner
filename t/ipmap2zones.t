@@ -35,6 +35,18 @@ use YAML::XS();
 use Provisioner::Cookbook();
 use Provisioner::IPPool();
 
+# What every domain of this installation is configured with.  The script wants
+# the administrator's address out of it, and the nameservers.
+my %GLOBAL = (
+    basedir     => '/bogus',
+    admin_user  => 'doge',
+    admin_gecos => 'Doge Doge',
+    admin_email => 'doge@test.test',
+    gateway     => '192.168.1.254',
+    resolvers   => ['192.168.1.254'],
+    nameservers => { ns1 => 'ns1.test.test' },
+);
+
 my $script = "$FindBin::Bin/../bin/ipmap2zones";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
@@ -44,9 +56,10 @@ File::Slurper::Temp::write_text(
     "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
     YAML::XS::Dump(
         {
-            'web.test'   => { nginx => undef },
-            'post.test'  => { mail  => undef },
-            'plain.test' => { ntp   => undef },
+            _base        => { _global => \%GLOBAL },
+            'web.test'   => { nginx   => undef },
+            'post.test'  => { mail    => undef },
+            'plain.test' => { ntp     => undef },
         }
     )
 );
@@ -58,15 +71,6 @@ Provisioner::IPPool::record( '192.168.1.60', 'web.test' );
 Provisioner::IPPool::record( '192.168.1.61', 'plain.test' );
 Provisioner::IPPool::record( '192.168.1.62', 'post.test' );
 
-my ( $ih, $ipmap_file ) = tempfile();
-print {$ih} <<'IPMAP';
-[global]
-admin_email=doge@test.test
-[nameservers]
-ns1=ns1.test.test
-IPMAP
-close($ih) or BAIL_OUT("Cannot close $ipmap_file: $!");
-
 # The zone it writes for one domain, as text.  What it answered with is not
 # interesting: it dies on anything it cannot do, which the subtests below check
 # for directly.
@@ -74,7 +78,7 @@ sub zone_for {
     my ($domain) = @_;
 
     my $out = tempdir( CLEANUP => 1 );
-    capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--ipmap', $ipmap_file, '--output-dir', $out, $domain ) };
+    capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--output-dir', $out, $domain ) };
 
     my $file = "$out/$domain.zone";
 
@@ -83,7 +87,7 @@ sub zone_for {
 
 subtest 'a domain has to be named' => sub {
     like(
-        exception { Trog::Provisioner::IPMap2Zones::main( '--ipmap', $ipmap_file ) },
+        exception { Trog::Provisioner::IPMap2Zones::main() },
         qr/Name[ ]at[ ]least[ ]one[ ]domain/,
         'naming none is refused rather than answered for all of them'
     );
@@ -91,7 +95,7 @@ subtest 'a domain has to be named' => sub {
 
 subtest 'the zone carries the names that domain serves' => sub {
     my $out = tempdir( CLEANUP => 1 );
-    my ($said) = capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--ipmap', $ipmap_file, '--output-dir', $out, 'web.test' ) };
+    my ($said) = capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--output-dir', $out, 'web.test' ) };
     like( $said, qr/web[.]test[.]zone/, 'it says which file it wrote' );
 
     my $zone = File::Slurper::read_text("$out/web.test.zone");
@@ -142,7 +146,7 @@ subtest 'a domain the pool has no address for is refused' => sub {
     my $out = tempdir( CLEANUP => 1 );
 
     my $err = exception {
-        capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--ipmap', $ipmap_file, '--output-dir', $out, 'nowhere.test' ) }
+        capture_stdout { Trog::Provisioner::IPMap2Zones::main( '--output-dir', $out, 'nowhere.test' ) }
     };
 
     like( $err, qr/No[ ]address[ ]for[ ]'nowhere[.]test'/, 'naming what it has no address for says so' );
@@ -155,24 +159,15 @@ subtest 'a recipe this installation does not have is skipped' => sub {
     # down too.  This rewrites recipes.yaml, so it runs last.
     File::Slurper::Temp::write_text(
         "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml",
-        YAML::XS::Dump( { 'odd.test' => { nginx => undef, 'not-a-recipe' => undef } } )
+        YAML::XS::Dump( { _base => { _global => \%GLOBAL }, 'odd.test' => { nginx => undef, 'not-a-recipe' => undef } } )
     );
     Provisioner::Cookbook->forget();
 
     Provisioner::IPPool::record( '192.168.1.63', 'odd.test' );
 
-    my ( $oh, $odd_ipmap ) = tempfile();
-    print {$oh} <<'IPMAP';
-[global]
-admin_email=doge@test.test
-[nameservers]
-ns1=ns1.test.test
-IPMAP
-    close($oh) or die "Cannot close $odd_ipmap: $!";
-
     my $out = tempdir( CLEANUP => 1 );
     my $err = exception {
-        Trog::Provisioner::IPMap2Zones::main( '--ipmap', $odd_ipmap, '--output-dir', $out, 'odd.test' );
+        Trog::Provisioner::IPMap2Zones::main( '--output-dir', $out, 'odd.test' );
     };
     is( $err, undef, 'a name this installation has no recipe for is not fatal' ) or diag $err;
 

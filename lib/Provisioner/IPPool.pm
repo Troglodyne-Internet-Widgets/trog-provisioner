@@ -13,7 +13,7 @@ use File::Basename();
 use List::Util qw{first};
 use Net::IP;
 
-use Config::Simple;
+use Provisioner::Utils();
 
 use Trog::Config();
 use Trog::SQLite();
@@ -45,15 +45,17 @@ you cannot connect to one of them.
 
 So the assignments are in SQLite, and each assignment is one transaction.  The
 row goes in, or the address is already taken and C<assign> tries the next one.
-F<ipmap.cfg> still gives the range of the pool, in C<[ip_pool]>.
+The C<ip_pool> of the C<_global> of C<_base> still gives the range of the pool.
 
 =head1 SUBROUTINES
 
 =head2 pool_ips($pool)
 
-C<$pool> is the C<[ip_pool]> block of F<ipmap.cfg>, as a hash reference.
+C<$pool> is the C<ip_pool> of the C<_global> of C<_base>, as a hash reference,
+which L<Provisioner::Cookbook/globals> hands back with the rest of them.
 C<addresses> is a list of addresses and C<cidr> is a list of CIDR blocks.
-Whitespace separates the items in each list.
+Either may be written as a YAML list or as one string with whitespace between
+the items.
 
 Returns each address in the pool once, in order.  Dies if a CIDR block is not
 valid.
@@ -64,36 +66,30 @@ sub pool_ips {
     my ($pool) = @_;
     my ( %seen, @ips );
 
-    if ( my $addrs = $pool->{addresses} ) {
-        for my $ip ( split /\s+/, $addrs ) {
-            next unless $ip =~ /\S/;
-            push @ips, $ip unless $seen{$ip}++;
-        }
+    foreach my $ip ( _items( $pool->{addresses} ) ) {
+        push @ips, $ip unless $seen{$ip}++;
     }
 
-    if ( my $cidrs = $pool->{cidr} ) {
-        for my $cidr ( split /\s+/, $cidrs ) {
-            next unless $cidr =~ /\S/;
-            my $net = Net::IP->new($cidr)
-              or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
+    foreach my $cidr ( _items( $pool->{cidr} ) ) {
+        my $net = Net::IP->new($cidr)
+          or die "Invalid CIDR '$cidr': " . Net::IP::Error() . "\n";
 
-            my @block;
-            do {
-                push @block, $net->ip();
-            } while ( ++$net );
+        my @block;
+        do {
+            push @block, $net->ip();
+        } while ( ++$net );
 
-            # The first address of an IPv4 block is the network and the last is
-            # the broadcast.  A guest on either one cannot talk to anything.
-            # A /31 is a point-to-point link with two usable addresses (RFC 3021).
-            # A /32 is one host.  Neither block has an address to spare.
-            if ( @block > 2 ) {
-                pop @block;
-                shift @block;
-            }
+        # The first address of an IPv4 block is the network and the last is
+        # the broadcast.  A guest on either one cannot talk to anything.
+        # A /31 is a point-to-point link with two usable addresses (RFC 3021).
+        # A /32 is one host.  Neither block has an address to spare.
+        if ( @block > 2 ) {
+            pop @block;
+            shift @block;
+        }
 
-            foreach my $ip (@block) {
-                push @ips, $ip unless $seen{$ip}++;
-            }
+        foreach my $ip (@block) {
+            push @ips, $ip unless $seen{$ip}++;
         }
     }
 
@@ -131,7 +127,8 @@ sub dbh { return Trog::SQLite::dbh( schema_path(), db_path() ) }
 =head2 assignments()
 
 Returns a hash reference of each guest domain to its address.  Reservations
-are not in it.  C<bin/new_config> gives this to the templates as C<ipmap>, and
+are not in it.  C<bin/new_config> gives this to the templates as the C<ipmap>
+variable, which is the address of each domain rather than a file, and
 the pdns zone makes its records from it.
 
 =cut
@@ -216,6 +213,12 @@ sub release {
     $db->do( "DELETE FROM ips WHERE domain = ? AND kind = 'domain'", undef, $domain );
 
     return $ip;
+}
+
+# The items of a pool key, which is a list or one string with whitespace in it.
+sub _items {
+    my ($said) = @_;
+    return grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $said // [] ) };
 }
 
 =head2 assign($domain, $pool)
@@ -303,7 +306,7 @@ sub clear_reservations {
     return $rows && $rows ne '0E0' ? $rows : 0;
 }
 
-=head2 ensure_seeded($pool)
+=head2 ensure_seeded($pool, $gateway)
 
 Fills the database from the addresses that are already in use, once for each
 hypervisor.  Returns what C<seed> returns.
@@ -318,18 +321,22 @@ hypervisor as done, so the next run tries it again.
 =cut
 
 sub ensure_seeded {
-    my ($pool) = @_;
-    return seed($pool);
+    my ( $pool, $gateway ) = @_;
+    return seed( $pool, $gateway );
 }
 
-=head2 seed($pool)
+=head2 seed($pool, $gateway)
 
 Records the address of each guest on each hypervisor.  It also reserves the
-addresses of the hypervisors, the gateway, and other machines that answer.
+addresses of the hypervisors, C<$gateway>, and other machines that answer.
 Returns the number of addresses it recorded.
 
-The list of guests comes from the hypervisors, not from F<ipmap.cfg>.  A
-hypervisor reports what it runs, but somebody can edit the file.  The address
+The caller passes the gateway rather than this reading it, because the
+configuration it comes out of is the one that caller was given, which is not
+always the one L<Trog::Config> names.
+
+The list of guests comes from the hypervisors, not from the configuration.  A
+hypervisor reports what it runs, but somebody can edit a file.  The address
 of each guest comes from its own F<provision.conf>, which is what it was built
 with.
 
@@ -339,19 +346,14 @@ an address outside the pool, so a row for one is noise.
 =cut
 
 sub seed {
-    my ($pool) = @_;
+    my ( $pool, $gateway ) = @_;
 
     my $recorded = 0;
     my %in_pool  = map { $_ => 1 } pool_ips($pool);
 
     # The gateway goes first, so that its row names it as the gateway and not
     # as one more machine that answered.
-    my $ipmap   = Config::Simple->new( Trog::Config->path('ipmap.cfg') );
-    my $global  = $ipmap ? ( $ipmap->param( -block => 'global' ) // {} ) : {};
-    my $gateway = $global->{gateway} // q{};
-    foreach my $gw ( grep { $_ } split /[\s,]+/, $gateway ) {
-        $recorded += reserve( $gw, "gateway:$gw" ) if $in_pool{$gw};
-    }
+    $recorded += reserve( $gateway, "gateway:$gateway" ) if defined $gateway && $in_pool{$gateway};
 
     my $db    = dbh();
     my %done  = map { $_->[0] => 1 } @{ $db->selectall_arrayref('SELECT source FROM seeded') };

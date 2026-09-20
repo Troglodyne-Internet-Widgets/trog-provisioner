@@ -21,6 +21,7 @@ use File::Slurper();
 use File::Temp();
 use FindBin::libs;
 use Provisioner::Utils();
+use YAML::XS();
 
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on.
@@ -76,50 +77,45 @@ my %HYDRA = (
     },
 );
 
-subtest 'the four sections of an ipmap Config::Simple will read back' => sub {
+subtest 'what the runner configures its own guests with' => sub {
     my ($dir) = built(
         config => {
             gateway     => '192.168.1.254',
-            ips         => { 'g.test.test' => '192.168.1.60' },
-            aliases     => { 'g.test.test' => 'www.test.test' },
-            nameservers => { ns1           => 'ns1.test.test' },
+            nameservers => { ns1 => 'ns1.test.test' },
             addresses   => '192.168.1.60-192.168.1.99',
             cidr        => '192.168.1.0/24',
         },
+        recipes => { 'g.test.test' => { _global => { aliases => ['www.test.test'] } } },
     );
-    my $cfg = slurp( $dir, 'trogrunner.ipmap.cfg' );
+    my $said   = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) );
+    my $global = $said->{_base}{_global};
 
-    like( $cfg, qr/^\[ip_pool\]$/m,                                'the pool section' );
-    like( $cfg, qr/^addresses=192\.168\.1\.60-/m,                  'with the range it was given' );
-    like( $cfg, qr/^\[ips\]\ng\.test\.test=192\.168\.1\.60$/m,     'assignments' );
-    like( $cfg, qr/^\[aliases\]\ng\.test\.test=www\.test\.test$/m, 'aliases' );
-    like( $cfg, qr/^\[nameservers\]\nns1=ns1\.test\.test$/m,       'nameservers' );
-    like( $cfg, qr/^\[global\]$/m,                                 'and the global block' );
+    is_deeply( $global->{ip_pool},     { addresses => '192.168.1.60-192.168.1.99', cidr => '192.168.1.0/24' }, 'the pool is one key, with the range it was given' );
+    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                       'the nameservers' );
+    is_deeply( $said->{'g.test.test'}{_global}{aliases}, ['www.test.test'], 'and a domain of the runner keeps the aliases it was written with' );
 
     # The runner administers what it builds as whoever administers it, which is
     # what _global already says about this guest -- so nobody has to write it
     # down twice.
-    like( $cfg, qr/^admin_user=doge$/m,              'the admin comes from the guest own' );
-    like( $cfg, qr/^admin_email=doge\@test\.test$/m, 'and so does the address' );
-    like( $cfg, qr/^ip=192\.168\.1\.50$/m,           'and the address it serves payloads from' );
+    is( $global->{admin_user},  'doge',           'the admin comes from the guest own' );
+    is( $global->{admin_email}, 'doge@test.test', 'and so does the address' );
 };
 
 subtest 'a runner told nothing at all can still build a guest' => sub {
 
-    # bin/new_config refuses to generate anything for a domain unless all six of
+    # bin/new_config refuses to generate anything for a domain unless all of
     # these are set, so a default that comes out empty is a runner that cannot
     # do the one thing it exists for.  Measured on a guest: two of them did.
     my ($dir) = built();
-    my $cfg = slurp( $dir, 'trogrunner.ipmap.cfg' );
+    my $global = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) )->{_base}{_global};
 
-    foreach my $required (qw{admin_user admin_gecos admin_email gateway resolvers}) {
-        like( $cfg, qr/^\Q$required\E=\S/m, "$required is not empty" )
-          or diag "bin/new_config on the runner would die: Must set $required in global section";
+    foreach my $required (qw{basedir admin_user admin_gecos admin_email gateway resolvers}) {
+        ok( defined $global->{$required} && $global->{$required} ne q{}, "$required is not empty" )
+          or diag 'bin/new_config on the runner would refuse it: the settings of this installation are not valid';
     }
 
-    # The keys left ipmap.cfg for a file of their own, and an empty one is the
-    # same failure in different clothes: a runner that builds guests nobody can
-    # log in to.
+    # The keys are a file of their own, and an empty one is the same failure in
+    # different clothes: a runner that builds guests nobody can log in to.
     like( slurp( $dir, 'trogrunner.admin_authorized_keys' ), qr/\Assh-/, 'and the administrator keys came down with it' );
 };
 
@@ -387,8 +383,7 @@ subtest 'what comes back off the guest being replaced' => sub {
     # which the salvage-gap check refuses to rebuild over.  Either way, every
     # second provision stopped.
     my %skipped = map { $_ => 1 } $recipe->remote_skip();
-    ok( !$skipped{'ipmap.cfg'},    'the rendered configuration is not skipped' );
-    ok( !$skipped{'recipes.yaml'}, 'nor is the recipe list' );
+    ok( !$skipped{'recipes.yaml'}, 'the rendered configuration is not skipped' );
     ok( $skipped{'secrets.kdbx'},  'but the store is, which is what remote_skip is for' );
 
     # datadirs makes it before the fragment runs, so the address pool has a

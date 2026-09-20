@@ -118,10 +118,6 @@ You can pass only one of the three C<--*-on-nonreusable> options.
 Passed to F<bin/new_config>.  The default is
 F</etc/trog-provisioner/recipes.yaml>.
 
-=item B<--ipmap> FILE
-
-Passed to F<bin/new_config>.  The default is F</etc/trog-provisioner/ipmap.cfg>.
-
 =item B<--hvconf> FILE
 
 The fleet definition, which is the file that lists the hypervisors.  The
@@ -430,7 +426,7 @@ sub main {
 
     umask 0022;
 
-    my ( $reuse, $hv_name, $domain_dir, $hvconf, $recipes, $ipmap, $credentials, $salvage_gaps_ok, $dryrun );
+    my ( $reuse, $hv_name, $domain_dir, $hvconf, $recipes, $credentials, $salvage_gaps_ok, $dryrun );
     my ( $clone_on_nonreusable, $destroy_on_nonreusable, $die_on_nonreusable );
     GetOptionsFromArray(
         \@args,
@@ -440,7 +436,6 @@ sub main {
         'hypervisor=s'           => \$hv_name,
         'hvconf=s'               => \$hvconf,
         'recipes=s'              => \$recipes,
-        'ipmap=s'                => \$ipmap,
         'credentials'            => \$credentials,
         'salvage-gaps-ok'        => \$salvage_gaps_ok,
         'clone-on-nonreusable'   => \$clone_on_nonreusable,
@@ -487,7 +482,6 @@ sub main {
             domain_dir       => $domain_dir,
             domain_dir_given => $domain_dir_from_cli,
             recipes          => $recipes,
-            ipmap            => $ipmap,
             hvconf           => $hvconf,
             hypervisor       => $hv_name,
             dryrun           => $dryrun,
@@ -607,9 +601,9 @@ sub main {
 
 Runs F<bin/new_config> for $domain, in this process, when there are recipes
 for it to read.  $opts is a hash reference.  This sub reads its keys
-C<domain_dir>, C<domain_dir_given>, C<recipes>, C<ipmap>, C<hvconf>, C<uri>,
-C<dryrun> and C<salvage_gaps_ok>.  C<recipes> and C<ipmap> default to the files
-that L<Trog::Config> names.
+C<domain_dir>, C<domain_dir_given>, C<recipes>, C<hvconf>, C<uri>,
+C<dryrun> and C<salvage_gaps_ok>.  C<recipes> defaults to the file that
+L<Trog::Config> names.
 
 It returns 0 and does nothing when there is no F<recipes.yaml> and no
 F<recipes.d> beside it.  Then somebody provisions from a domain directory that
@@ -633,7 +627,6 @@ sub generate_config {
 
     my $dir     = $opts->{domain_dir};
     my $recipes = $opts->{recipes} // Trog::Config->path('recipes.yaml');
-    my $ipmap   = $opts->{ipmap}   // Trog::Config->path('ipmap.cfg');
 
     my $recipe_dir = File::Basename::dirname($recipes) . '/recipes.d';
     unless ( -f $recipes || -d $recipe_dir ) {    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is site data at all; the generator opens what there is
@@ -646,7 +639,7 @@ sub generate_config {
     push @INC, '.';
     my $generator = File::Basename::dirname(__FILE__) . '/new_config';
     require $generator;
-    my @flags = ( '--recipes', $recipes, '--ipmap', $ipmap );
+    my @flags = ( '--recipes', $recipes );
     push( @flags, '--hvconf',     $opts->{hvconf} )           if defined $opts->{hvconf};
     push( @flags, '--hypervisor', $opts->{hypervisor} )       if defined $opts->{hypervisor};
     push( @flags, '--domaindir',  $opts->{domain_dir_given} ) if defined $opts->{domain_dir_given};

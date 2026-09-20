@@ -12,7 +12,7 @@ use re '/aasx';
 
 use FindBin::libs;
 
-use Config::Simple;
+use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -21,7 +21,7 @@ use Provisioner::IPPool();
 
 =head1 USAGE
 
-    reseed_ips [--dryrun] [--prune] [--ipmap=file]
+    reseed_ips [--dryrun] [--prune] [--recipes=file]
 
 Ask each hypervisor again, and make F<ips.db> agree with the addresses that are
 in use now.
@@ -78,21 +78,20 @@ transaction back.  The command asks the hypervisors, but it writes nothing.
 sub main {
     my @args = @_;
 
-    my $cfile = Trog::Config->path('ipmap.cfg');
+    my $rfile = Trog::Config->path('recipes.yaml');
     my ( $dryrun, $prune, $help );
     GetOptionsFromArray(
         \@args,
-        'ipmap=s' => \$cfile,
-        'dryrun'  => \$dryrun,
-        'prune'   => \$prune,
-        'help'    => \$help,
+        'recipes=s' => \$rfile,
+        'dryrun'    => \$dryrun,
+        'prune'     => \$prune,
+        'help'      => \$help,
     );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
-    my $c = Config::Simple->new($cfile);
-    die "$Config::Simple::errstr\n" unless $c;
-    my $pool = $c->param( -block => 'ip_pool' ) // {};
+    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $pool    = $globals->{ip_pool} // {};
 
     my $db     = Provisioner::IPPool::dbh();
     my %before = %{ Provisioner::IPPool::taken() };
@@ -104,7 +103,7 @@ sub main {
     my $ok = eval {
         Provisioner::IPPool::forget_seeding();
         Provisioner::IPPool::clear_reservations();
-        Provisioner::IPPool::ensure_seeded($pool);
+        Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
         prune_absent( \%before ) if $prune;
         1;
     };

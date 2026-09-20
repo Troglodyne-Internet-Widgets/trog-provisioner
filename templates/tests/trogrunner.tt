@@ -52,11 +52,15 @@ my ($have) = $sysvirt =~ m/^v?(\d+\.\d+)/;
 is( $have, $want, "Sys::Virt matches the libvirt-dev this guest has ($libvirt)" )
     or diag "Sys::Virt said: $sysvirt";
 
-# Two files that bin/preflight requires, and one thing it does not ask.  The
+# The file that bin/preflight requires, and one thing it does not ask.  The
 # address pool creates ips.db in this directory on first use.  If the runner
 # cannot write here, it cannot assign an address.
-ok( -r "$confdir/ipmap.cfg",    'ipmap.cfg is readable' );
 ok( -r "$confdir/recipes.yaml", 'recipes.yaml is readable' );
+
+# The settings that the guests of the runner share, which used to be a second
+# file.  See enrich in Provisioner::Recipe::trogrunner.
+my $said = do { local ( @ARGV, $/ ) = "$confdir/recipes.yaml"; <> } // q{};
+like( $said, qr/^\s+admin_user:/m, 'and names who administers the guests it builds' );
 is( readlink('/etc/trog-provisioner') // q{}, $confdir, '/etc/trog-provisioner points at it' );
 
 # In /etc, not a dotfile under the domain directory.  That directory is a home

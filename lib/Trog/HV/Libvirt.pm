@@ -1945,10 +1945,10 @@ A guest scps its payload and rsyncs its data directory out of this machine, so
 it needs an address here that it can get to.  Nothing routes to the
 hypervisor's guest network from here.
 
-Put this machine on that network, or name the address yourself in the [global]
-section of ipmap.cfg:
+Put this machine on that network, or name the address yourself in the _global
+of _base in recipes.yaml:
 
-    transfer_ip = 192.0.2.10
+    transfer_ip: 192.0.2.10
 FIX
 }
 

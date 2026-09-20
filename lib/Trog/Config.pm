@@ -15,8 +15,8 @@ Trog::Config - where this installation keeps its configuration
 
     use Trog::Config();
 
-    my $ipmap = Trog::Config->path('ipmap.cfg');
-    my $fleet = Trog::Config->path('hypervisors.conf');
+    my $recipes = Trog::Config->path('recipes.yaml');
+    my $fleet   = Trog::Config->path('hypervisors.conf');
 
 =head1 DESCRIPTION
 

@@ -186,7 +186,7 @@ subtest 'the four files are written, and the three YAML ones are YAML' => sub {
     like( $setup, qr/\Q$DOMAIN\E/, 'and knows which domain it is fetching for' );
 
     # It fetches from whoever wrote the payload, which is this machine, at the
-    # basedir out of ipmap.cfg.  It used to be told the hypervisor's domain_dir,
+    # basedir of the installation.  It used to be told the hypervisor's domain_dir,
     # which has been the wrong machine since the guest stopped fetching from
     # there -- the same path only by both of them defaulting to /opt/domains.
     like( $setup, qr{transfer\N\@192\.168\.122\.251:/bogus/domains/\Q$DOMAIN\E/data\.tar\.gz}, 'from the machine holding the payload, at the path it was written to' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
