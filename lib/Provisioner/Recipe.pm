@@ -19,6 +19,11 @@ use File::Slurper::Temp();
 use JSON::Validator::Schema::Troglodyne;
 use Mojo::JSON::Pointer();
 
+# The account that administers a guest when nothing names one.  Every guest has
+# root before it has any other account, so it is the one answer that is always
+# true, and a recipe that reads admin_user therefore never reads an undef.
+our $DEFAULT_ADMIN_USER = 'root';
+
 =head1 NAME
 
 Provisioner::Recipe - Base class for the recipes, with what every recipe can do and what each one must declare.
@@ -311,14 +316,22 @@ C<admin_user> into it.  Without it, the lexicon shortcut exports an
 C<AUTH_USERNAME> for a registrar that authenticates with a token alone.  The
 C<admin_user> of L<Provisioner::Recipe::matrix> is the Synapse account.
 
-Nothing here declares a default, and nothing here is required, for three
-reasons:
+C<admin_user> is the one setting here that declares a default, and nothing here
+is required.  The default is C<root>: every guest has that account before it
+has any other, so the answer is true wherever nobody gave one, and a recipe
+that reads C<admin_user> never reads an undef.  No recipe requires it, so it
+satisfies nothing on an operator's behalf.  L<Provisioner::Cookbook> hands the
+same default to every C<required_recipes> sub, which runs before validation.
+
+The rest declare none, and nothing here is required, for three reasons:
 
 =over 4
 
 =item * A default satisfies a recipe that requires the key.  koan requires
 C<user>.  A default of the admin account counts as an answer on every domain
-that names no service account.
+that names no service account.  That is about C<user>, which still has none:
+C<validate> copies C<admin_user> into it afterwards, so koan still refuses a
+domain that named no service account.
 
 =item * C<validate> copies C<admin_user> into C<user> after validation, so that
 fallback cannot satisfy a required field.  Also, C<forget_undefs> drops an
@@ -351,6 +364,18 @@ that a recipe declares still arrives.
 
 =cut
 
+=head3 $user = $class->default_admin_user()
+
+The account that administers a guest when nothing names one: C<root>.
+
+The schema fills this in for a configuration that is validated.
+L<Provisioner::Cookbook/resolve_dependencies> hands it to every
+C<required_recipes> sub as well, because those run before validation.
+
+=cut
+
+sub default_admin_user { return $DEFAULT_ADMIN_USER }
+
 sub global_args {
     return (
         type       => 'object',
@@ -362,7 +387,7 @@ sub global_args {
             script_dir  => { type => 'string', description => 'Where the generated helper scripts land on the guest.' },
 
             user        => { type => 'string', description => 'The service account the application runs as and recipes set ownership to.  Falls back to admin_user, which is a fallback rather than the intended configuration.' },
-            admin_user  => { type => 'string', description => 'The account that administers the guest.' },
+            admin_user  => { type => 'string', default     => $DEFAULT_ADMIN_USER, description => 'The account that administers the guest.  Defaults to root, which is the account every guest has before one is made.' },
             admin_email => { type => 'string', description => 'Where mail for the administrator goes.' },
             admin_keys  => { type => 'array',  items       => { type => 'string' }, description => "The administrator's ssh keys, read from admin_authorized_keys beside the rest of the configuration and written straight into the guest." },
 

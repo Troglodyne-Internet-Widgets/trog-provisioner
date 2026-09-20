@@ -174,15 +174,8 @@ sub remote_prepare {
 }
 
 sub restores {
-    my ( $self,        %opts )   = @_;
-    my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
-
-    # admin_user falls back to root, because required_recipes runs before
-    # validation, and bin/new_guest scaffolds with whatever _global has.
-    # Nothing keeps the answer: a scaffold asks only whether the dependency is
-    # there, and the run that configures the guest asks again with an
-    # admin_user.
-    my $admin = $opts{admin_user} // 'root';
+    my ( $self, %opts ) = @_;
+    my ( $install_dir, $domain, $admin ) = @opts{qw{install_dir domain admin_user}};
 
     # Into the export directory, not into slapd.  The export writes there and
     # the fetch reads there.  ldap-reload.sh loads it into slapd later.

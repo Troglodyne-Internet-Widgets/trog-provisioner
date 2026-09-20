@@ -113,8 +113,9 @@ sub restores {
     my ( $install_dir, $domain ) = @opts{qw{install_dir domain}};
 
     # user falls back to admin_user as validate does, because required_recipes
-    # runs before validation.
-    my $user = $opts{user} // $opts{admin_user} // 'root';
+    # runs before validation.  admin_user is always there: the depsolver hands
+    # it over, defaulted, for that reason.
+    my $user = $opts{user} // $opts{admin_user};
 
     return ( "$install_dir/webmail.${domain}_data" => { from => "$install_dir/$domain/roundcube", owner => "$user:www-data" } );
 }

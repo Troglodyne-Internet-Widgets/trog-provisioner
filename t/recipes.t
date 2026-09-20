@@ -194,10 +194,26 @@ subtest 'the globals this file injects are the globals the base class declares' 
 # A default here would be taken for an answer.  koan requires user, and validate
 # fills it in from admin_user only after validation has run -- so a default would
 # satisfy the requirement for every domain that never named a service account.
-subtest 'no setting every recipe is handed carries a default' => sub {
+#
+# admin_user is the exception, and it is safe for the reason the rule names: no
+# recipe requires it, so its default answers for nobody.  Every guest has root
+# before it has another account, and a required_recipes sub that reads
+# admin_user runs before validation, which is why the depsolver hands the same
+# default over.
+subtest 'no setting every recipe is handed carries a default, beside the one that can' => sub {
     my $props = { Provisioner::Recipe->global_args }->{properties};
     my @with  = grep { exists $props->{$_}{default} } sort keys %$props;
-    is_deeply( \@with, [], 'a global is what a run put there, never what a schema guessed' );
+    is_deeply( \@with, ['admin_user'], 'a global is what a run put there, never what a schema guessed' );
+    is( $props->{admin_user}{default}, 'root', 'and the one that does defaults to the account every guest starts with' );
+
+    my @required = @{ { Provisioner::Recipe->global_args }->{required} // [] };
+    is_deeply( \@required, [], 'nothing here is required, so no default answers for an operator' );
+
+    foreach my $recipe ( sort( Provisioner::Cookbook->names ) ) {
+        my %args  = Provisioner::Cookbook->load( $recipe, distro => 'ubuntu' )->args;
+        my @wants = grep { $_ eq 'admin_user' } @{ $args{required} // [] };
+        is_deeply( \@wants, [], "$recipe does not require admin_user, which the default would answer for" );
+    }
 };
 
 # Recipes that put nothing on the guest, and so have a fragment of neither kind.

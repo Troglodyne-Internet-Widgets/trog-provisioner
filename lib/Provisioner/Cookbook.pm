@@ -801,12 +801,15 @@ sub resolve_dependencies {
     my $domain = $args{domain}
       or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
 
-    # What every required_recipes sub is handed.  The domain and install_dir
-    # are there even when the caller's _global has neither, because no file can
-    # name the domain, and install_dir has a default.  A value in _global wins.
+    # What every required_recipes sub is handed.  These three are there even
+    # when the caller's _global has none of them, because no file can name the
+    # domain, and the other two have defaults: a sub runs before validation, so
+    # the schema's defaults have not been filled in yet, and a sub that reads
+    # one of them would read an undef.  A value in _global wins.
     my %given = (
         domain      => $domain,
         install_dir => $class->install_dir( $domain, {} ),
+        admin_user  => Provisioner::Recipe->default_admin_user,
         %$global_config,
     );
 
