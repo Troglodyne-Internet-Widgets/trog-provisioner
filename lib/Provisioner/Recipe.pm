@@ -297,8 +297,8 @@ sub args {
 
 The settings that every recipe receives, declared in one place.
 
-C<bin/new_config> builds one hash per domain from F<ipmap.cfg>, the address
-pool, the machine it runs on and the C<_global> of the domain.  It gives that
+C<bin/new_config> builds one hash per domain from the C<_global> of the domain,
+the address pool and the machine it runs on.  It gives that
 hash to every recipe it renders.  None of these keys belongs to one recipe, so
 no recipe declares them in its C<args()>.  They are declared here, and C<schema>
 puts them under what the recipe declares for itself.

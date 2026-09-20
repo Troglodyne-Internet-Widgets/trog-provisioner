@@ -28,7 +28,7 @@ In recipes.yaml:
 =head2 DESCRIPTION
 
 Copies the C<skel> directory from this machine into the home of the admin user.
-The C<[global]> section of F<ipmap.cfg> names that user as C<admin_user>.
+The C<_global> of the installation names that user as C<admin_user>.
 
 C<pkgs> is optional.  It lists packages to install on the guest for the admin.
 

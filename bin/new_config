@@ -17,7 +17,6 @@ use FindBin::libs;
 use YAML::XS;
 use File::Slurper;
 use File::Slurper::Temp;
-use Config::Simple;
 use Cwd();
 use File::Basename();
 use Clone qw{clone};
@@ -52,7 +51,7 @@ require( Cwd::abs_path( File::Basename::dirname(__FILE__) . '/../scripts/cpan_in
 
 =head1 USAGE
 
-    new_config [--ipmap=file] [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
+    new_config [--secrets=file] [--recipes=file] [--hvconf=file] [--hypervisor=name] [--domaindir=dir] [--skip_ssh] [--credentials] [--dryrun] $domain $domain2 ...
 
 new_config makes a configuration package for each domain that you name.
 F<bin/provision> uses the package to build the virtual machine (the guest) and
@@ -62,12 +61,18 @@ These files control what each domain gets:
 
     /etc/trog-provisioner/recipes.yaml
     /etc/trog-provisioner/recipes.d/*.yaml
-    /etc/trog-provisioner/ipmap.cfg
 
 The files describe your installation, not this software, so they are not in the
 checkout.  To use a different set, set C<TROG_PROVISIONER_CONFIG> to the
-directory that holds them.  To name one file at a time, use the --recipes and
---ipmap options.  See L<Trog::Config>.
+directory that holds them.  To name one file at a time, use the --recipes
+option.  See L<Trog::Config>.
+
+What the guests of an installation share -- who administers them, how they
+reach the network, where their addresses come from -- is the C<_global> of
+C<_base> in F<recipes.yaml>, and a domain overrides one in its own C<_global>.
+L<Provisioner::Cookbook/global_schema> declares them.  An installation that
+still has the older F<ipmap.cfg> moves them across with
+F<bin/ipmap_to_globals>.
 
 The --hvconf option names the fleet definition that chooses the hypervisor of a
 new guest.  The default is F</etc/trog-provisioner/hypervisors.conf>.  See
@@ -153,14 +158,17 @@ protect, except the key that opens a guest that is up now.
 =head2 IP POOL
 
 The IP pool is the set of static addresses that new guests can get.  To use one,
-add an C<[ip_pool]> section to ipmap.cfg:
+add an C<ip_pool> to the C<_global> of C<_base>:
 
-    [ip_pool]
-    ; Space-separated list of all IPs in your static pool
-    addresses = 192.168.1.10 192.168.1.11 192.168.1.12 192.168.1.13
+    _base:
+      _global:
+        ip_pool:
+          # Every address of the static pool.
+          addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
 
-    ; OR expand a CIDR block (both keys may coexist; IPs are merged)
-    ; cidr = 192.168.1.0/24
+          # Or a CIDR block to expand.  Both keys may appear, and the
+          # addresses are merged.
+          cidr: 192.168.1.0/24
 
 new_config gives each domain an address from the pool, and records it in the
 address database of L<Provisioner::IPPool>.  A domain keeps its address when you
@@ -170,7 +178,7 @@ new_config does not use the pool.
 To see which addresses are assigned and which are free, run
 C<bin/list_ip_pool>:
 
-    bin/list_ip_pool [--ipmap=/etc/trog-provisioner/ipmap.cfg]
+    bin/list_ip_pool [--recipes=/etc/trog-provisioner/recipes.yaml]
 
 The output shows the full pool, the guest that holds each assigned address, and
 the addresses that are still free.
@@ -206,20 +214,7 @@ field in the KDBX database.
 
 =cut
 
-our ( $cfile, $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun );
-
-sub get_config {
-    my $c = Config::Simple->new($cfile);
-    die $Config::Simple::errstr unless $c;
-
-    my $global_conf = $c->param( -block => 'global' );
-    my $alias_conf  = $c->param( -block => 'aliases' ) // {};
-    my $ns_conf     = $c->param( -block => 'nameservers' );
-    my $pool_conf   = $c->param( -block => 'ip_pool' ) // {};
-    $alias_conf->{$_} = Provisioner::Utils::coerce_arrayref( $alias_conf->{$_} ) for keys %$alias_conf;
-
-    return ( $global_conf, $alias_conf, $ns_conf, $pool_conf );
-}
+our ( $sfile, $pfile, $hvconf, $hv_name, $domaindir, $skip_ssh, $dryrun );
 
 sub get_recipe_config {
     return Provisioner::Cookbook->configuration($pfile);
@@ -275,7 +270,6 @@ sub main {
     my $credentials;
     GetOptionsFromArray(
         \@args,
-        'ipmap=s'      => \$cfile,
         'secrets=s'    => \$sfile,
         'recipes=s'    => \$pfile,
         'hvconf=s'     => \$hvconf,
@@ -290,7 +284,6 @@ sub main {
     # Trog::Credentials.
     Trog::Credentials->load() if $credentials;
     $skip_ssh //= 0;
-    $cfile    //= Trog::Config->path('ipmap.cfg');
     $sfile    //= Trog::Config->path('secrets.kdbx');
     $pfile    //= Trog::Config->path('recipes.yaml');
 
@@ -366,43 +359,9 @@ sub handle_domain {
 
     die "Must pass domain" unless $domain;
 
-    my ( $global_conf, $alias_conf, $ns_conf, $pool_conf ) = get_config();
-
-    my $basedir = $global_conf->{basedir};
-    die "Must have basedir defined in global section of $cfile" unless $basedir;
-
-    my $admin_user = $global_conf->{admin_user};
-    die "Must set admin_user in global section of $cfile" unless $admin_user;
-
-    # From a file, not from GitHub at first boot, so that a provision does not
-    # wait on GitHub.  A file also takes a raw public key.
-    my $keyfile    = Trog::Config->path('admin_authorized_keys');
-    my @admin_keys = grep { $_ && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
-    die "No administrator keys in $keyfile.\nbin/preflight will offer to seed it with ssh-import-id.\n" unless @admin_keys;
-
-    my $admin_gecos = $global_conf->{admin_gecos};
-    die "Must set admin_gecos in global section of $cfile" unless $admin_gecos;
-
-    my $admin_email = $global_conf->{admin_email};
-    die "Must set admin_email in global section of $cfile" unless $admin_email;
-
-    my $gateway = $global_conf->{gateway};
-    die "Must set gateway (ipv4) in global section of $cfile" unless $gateway;
-
-    # Once, here, because Config::Simple gives a plain string for a key with one
-    # value and all the code below reads a list.
-    my $resolvers = Provisioner::Utils::coerce_arrayref( $global_conf->{resolvers} );
-    die "Must set resolvers in global section of $cfile" unless @$resolvers;
-
-    # A loopback resolver answers only on a guest that runs its own DNS server,
-    # and Provisioner::Recipe::nostubresolver adds it for that guest.
-    my @loopback = grep { m/\A127[.]/ || $_ eq '::1' } @$resolvers;
-    die "resolvers in the global section of $cfile names @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
-      if @loopback;
-
     my $fqdn = $domain;
     my ( undef, $tld ) = split( quotemeta('.'), $domain, 2 );
-    die "'$domain' is not a fully qualified domain name.\n" . "Domains are spelled out in full now, in ipmap.cfg and in recipes.d alike:\n" . "  new_config $domain.example.com\n"
+    die "'$domain' is not a fully qualified domain name.\n" . "Domains are spelled out in full now, in recipes.yaml and in recipes.d alike:\n" . "  new_config $domain.example.com\n"
       unless $tld;
 
     my $rconf = clone( get_recipe_config() );
@@ -424,8 +383,7 @@ sub handle_domain {
         Provisioner::Cookbook->remember( $pfile, $rconf );
     }
 
-    # Copied, not removed, because the merge below needs _base.
-    my $base_globals = clone( $rconf->{_base}{_global} // {} );
+    my $alias_conf = Provisioner::Cookbook->alias_map($rconf);
 
     # This run does not need to know yet if the domain goes onto another host.
     delete $rconf->{_shared};
@@ -436,8 +394,32 @@ sub handle_domain {
     my $depends_on;
     $depends_on = $dep_dom if $dep_dom ne $domain;
 
-    my $global_config = delete $rconf->{$domain}{_global} // {};
-    $global_config = { %$base_globals, %$global_config };
+    # _base and the domain, merged and then validated against
+    # Provisioner::Cookbook/global_schema, which names every setting that is
+    # missing rather than the first of them.
+    my $global_config = Provisioner::Cookbook->globals( $domain, $rconf );
+    delete $rconf->{$domain}{_global};
+
+    my $basedir     = $global_config->{basedir};
+    my $admin_user  = $global_config->{admin_user};
+    my $admin_gecos = $global_config->{admin_gecos};
+    my $admin_email = $global_config->{admin_email};
+    my $gateway     = $global_config->{gateway};
+    my $resolvers   = $global_config->{resolvers};
+    my $ns_conf     = $global_config->{nameservers};
+    my $pool_conf   = $global_config->{ip_pool} // {};
+
+    # From a file, not from GitHub at first boot, so that a provision does not
+    # wait on GitHub.  A file also takes a raw public key.
+    my $keyfile    = Trog::Config->path('admin_authorized_keys');
+    my @admin_keys = grep { $_ && !m/\A[#]/ } map { s/\A\s+|\s+\z//gr } split( m/\n/, File::Slurper::read_text($keyfile) );
+    die "No administrator keys in $keyfile.\nbin/preflight will offer to seed it with ssh-import-id.\n" unless @admin_keys;
+
+    # A loopback resolver answers only on a guest that runs its own DNS server,
+    # and Provisioner::Recipe::nostubresolver adds it for that guest.
+    my @loopback = grep { m/\A127[.]/ || $_ eq '::1' } @$resolvers;
+    die "The resolvers of this installation name @loopback, which only answers on a guest that runs its own DNS server.\n" . "Take it out of the _global in recipes.yaml: nostubresolver puts it in front for a guest running pdns, and every other guest spends its first lookup on an address nothing is listening at.\n"
+      if @loopback;
 
     # Refused here, because a typing error such as `distro: unbuntu` that falls
     # back to the generic recipes builds a guest with no packages.
@@ -461,7 +443,7 @@ sub handle_domain {
     # address from the pool stays reserved for a guest that never uses it.
     my ( $static_ip, $ip_conf ) = ( undef, {} );
     if ( !$hv->manages_addresses ) {
-        Provisioner::IPPool::ensure_seeded($pool_conf);
+        Provisioner::IPPool::ensure_seeded( $pool_conf, $gateway );
 
         # One transaction, so that two provisions cannot get the same address.
         # A domain that you provision again keeps its address.
@@ -480,8 +462,8 @@ sub handle_domain {
     # The NAT bridge, on a hypervisor that does not give its guests their
     # addresses.
     my $tld_ip        = $hv->manages_addresses ? undef : $hv->virbr_ip;
-    my $transfer_port = $global_conf->{transfer_port} // $this_machine->sshd_port;
-    my $transfer_user = $global_conf->{transfer_user} // $this_machine->transfer_user;
+    my $transfer_port = $global_config->{transfer_port} // $this_machine->sshd_port;
+    my $transfer_user = $global_config->{transfer_user} // $this_machine->transfer_user;
     die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
 
     # Every address of ours that routes to the guest, because the firewall of
@@ -490,14 +472,14 @@ sub handle_domain {
     # uses the first address.
     my @towards = grep { $_ } ( $static_ip, $tld_ip );
 
-    my @transfer_ips = $global_conf->{transfer_ip} ? ( $global_conf->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
+    my @transfer_ips = $global_config->{transfer_ip} ? ( $global_config->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
     my $transfer_ip  = $transfer_ips[0];
 
     # No address to route to is a different problem from no route.
-    die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "[global] section of ipmap.cfg.\n"
+    die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "_global of recipes.yaml.\n"
       if !$transfer_ip && !@towards;
 
-    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the [global] section of ipmap.cfg.\n"
+    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the _global of recipes.yaml.\n"
       unless $transfer_ip;
 
     # Before _base is removed, because a fleet usually sets these in _base.
@@ -537,7 +519,7 @@ sub handle_domain {
         @data_users = @{ $data_users_yaml->{users} };
     }
 
-    # The administrator from ipmap.cfg, then the users of the data directory.
+    # The administrator from the globals, then the users of the data directory.
     my $user_conf = {
         users => [
             {

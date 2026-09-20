@@ -35,8 +35,8 @@ use Provisioner::Recipe::pdns();
 my $DOMAIN = 'zone.test';
 
 # What bin/new_config hands the zone template.  Aliases arrive fully qualified:
-# new_config appends www and mail to the domain itself, and whatever ipmap.cfg
-# names is spelled out in full as well.
+# new_config appends www and mail to the domain itself, and whatever a domain
+# names in its _global is spelled out in full as well.
 my %VARS = (
     domain      => $DOMAIN,
     admin_email => 'doge@zone.test',

@@ -73,39 +73,32 @@ sub generate {
 
     my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
 
-    # One resolver on purpose.  Config::Simple hands back a bare string for a
-    # single-valued key, and bin/new_config dereferenced that raw when it wrote
-    # provision.conf -- so generating from this is what catches it coming back.
-    my $ipmap = <<"IPMAP";
-[global]
-ip=192.168.1.50
-basedir=$tmpdir/domains
-transfer_user=doge
-admin_user=doge
-admin_email=bogus\@test.test
-admin_gecos=Test Test
-gateway=192.168.1.254
-resolvers=192.168.1.254
-bridge_devname=ens4
-dhcp_devname=ens3
-[ip_pool]
-addresses=$pool
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
-IPMAP
+    # One resolver on purpose, written as a scalar rather than a list.  That is
+    # what an operator writes, and bin/new_config dereferenced it raw when it
+    # wrote provision.conf -- so generating from this is what catches it coming
+    # back.
+    my %global = (
+        data_source    => "$tmpdir/data",
+        basedir        => "$tmpdir/domains",
+        transfer_user  => 'doge',
+        admin_user     => 'doge',
+        admin_email    => 'bogus@test.test',
+        admin_gecos    => 'Test Test',
+        gateway        => '192.168.1.254',
+        resolvers      => '192.168.1.254',
+        bridge_devname => 'ens4',
+        dhcp_devname   => 'ens3',
+        ip_pool        => { addresses => $pool },
+        nameservers    => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+    );
 
     my %recipes = (
 
-        _base   => { _global => { data_source => "$tmpdir/data" } },
+        _base   => { _global => \%global },
         _shared => { $HOST   => [$TENANT] },
         $HOST   => $on{host}   // { nosnap => undef },
         $TENANT => $on{tenant} // { nosnap => undef },
     );
-
-    my ( $ih, $ipmap_file ) = tempfile();
-    print {$ih} $ipmap;
-    close($ih) or die "Could not close $ipmap_file: $!";
 
     my ( $rh, $recipe_file ) = tempfile();
     print {$rh} YAML::XS::Dump( \%recipes );
@@ -116,7 +109,6 @@ IPMAP
 
     my $err = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $ipmap_file,
             '--recipes', $recipe_file,
             '--skip_ssh',
             $TENANT,

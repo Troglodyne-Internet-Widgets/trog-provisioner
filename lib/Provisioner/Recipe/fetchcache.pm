@@ -471,9 +471,9 @@ Loopback is correct on a guest that runs the pdns recursor, and nothing listens
 there on this guest.  nginx rotates through its resolvers, so a loopback
 resolver refuses some of the lookups.  C<bin/new_config> refuses an installation
 that names loopback, and C<nostubresolver> puts it first on the guest that needs
-it.  This strips loopback from an F<ipmap.cfg> that was written elsewhere.  For
-example, a runner writes its own, and L<Provisioner::Recipe::trogrunner> defaults
-its resolvers to C<1.1.1.1, 8.8.8.8>.
+it.  This strips loopback from a list that was written elsewhere.  For example,
+a runner writes its own, and L<Provisioner::Recipe::trogrunner> defaults its
+resolvers to C<1.1.1.1> and C<8.8.8.8>.
 
 The stub of systemd-resolved fails over correctly, but this does not use it,
 because the C<nostubresolver> recipe turns it off on these guests.  IPv6 goes

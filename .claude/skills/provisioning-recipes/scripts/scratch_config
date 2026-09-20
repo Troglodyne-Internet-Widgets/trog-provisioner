@@ -22,6 +22,7 @@ use Pod::Usage   qw{pod2usage};
 use YAML::XS();
 
 use Trog::Config();
+use Provisioner::Cookbook();
 use Trog::Secrets();
 use Provisioner::Utils();
 
@@ -46,17 +47,22 @@ What it copies, and what it deliberately does not:
 
 =over 4
 
-=item F<ipmap.cfg>
+=item The settings of the installation
 
-Copied.  A guest built from it gets an address out of the real pool, and out of
-the copy's C<[ips]> block, so it cannot be handed one that is already spoken
-for.  The assignment is written to the copy, so the real map does not grow an
-entry for a guest that will not exist by lunchtime.
+Taken out of the C<_global> of C<_base> in the installation's F<recipes.yaml>,
+key for key, for every key that L<Provisioner::Cookbook/global_schema>
+declares.  That is who administers a guest, how it reaches the network, and the
+address pool it draws from: a guest built here gets an address out of the real
+pool, so it cannot be handed one that is already spoken for.  The assignment is
+written to the scratch F<ips.db>, so the installation does not grow a record for
+a guest that will not exist by lunchtime.
+
+The recipes of that C<_base> are left behind, which is the next item.
 
 =item F<admin_authorized_keys>
 
 Copied when the installation has one.  These are public keys rather than a
-credential, so this is the F<ipmap.cfg> case and not the F<secrets.kdbx> one.
+credential, so this is the settings case and not the F<secrets.kdbx> one.
 
 A throwaway pair is minted when it has none, so that a scratch run works on an
 installation nobody has seeded yet -- C<bin/new_config> refuses to build a guest
@@ -67,9 +73,9 @@ is in the list.
 
 =item F<recipes.yaml>
 
-B<Not> copied.  Built here, holding a C<_base> and nothing else: a
-C<data_source> inside this directory, and the installation's C<mirror> when it
-has one.
+B<Not> copied.  Built here, holding a C<_base> and nothing else: the settings
+above, a C<data_source> inside this directory, and the installation's C<mirror>
+when it has one.
 
 Copying it was the bug this replaced.  The installation's C<_base> names
 credentials out of a KeePass store this harness cannot open -- it builds a
@@ -173,8 +179,8 @@ sub main {
     }
 
     my $report = "Scratch configuration in $dir\n";
-    $report .= "  copied from $source: ipmap.cfg" . ( $has_fleet   ? ", hypervisors.conf\n"                                 : "\n" );
-    $report .= '  admin_authorized_keys ' .         ( $keys_copied ? "copied, so a scratch guest lets the same people in\n" : "built here, the installation having none to copy\n" );
+    $report .= "  copied from $source: the settings of _base" . ( $has_fleet   ? ", hypervisors.conf\n"                                 : "\n" );
+    $report .= '  admin_authorized_keys ' .                     ( $keys_copied ? "copied, so a scratch guest lets the same people in\n" : "built here, the installation having none to copy\n" );
     $report .= "  recipes.yaml built here, so none of the installation's credentials are wanted\n";
     $report .= "  no hypervisors.conf there, so the hypervisor is this machine\n"
       unless $has_fleet;
@@ -203,14 +209,9 @@ sub build {
     # What says this is ours to delete later.
     File::Slurper::Temp::write_text( "$dir/$MARKER", "Built by scratch_config; safe to remove.\n" );
 
-    # The addresses.  Copied because a guest cannot be placed without them and
-    # nothing in there is a credential.
-    copy( "$source/ipmap.cfg", "$dir/ipmap.cfg" )
-      or die "Could not copy $source/ipmap.cfg into the scratch config: $!\n";
-
     # Somebody has to be authorized or bin/new_config will not build a guest at
     # all.  Copied when the installation has keys -- they are public, so this is
-    # the ipmap case rather than the secrets one -- and a throwaway pair minted
+    # the settings case rather than the secrets one -- and a throwaway pair minted
     # when it has none, so a scratch run works before anybody has seeded one.
     # Nothing is lost by the stand-in: what reaches a scratch guest is the domain
     # key, which Provisioner::Recipe::ubuntu authorizes on every guest it builds
@@ -235,12 +236,11 @@ sub build {
     }
 
     # And the _base, built rather than taken: see the POD above for what copying
-    # it cost.  Its data source is inside this directory, so a throwaway guest
-    # reads and writes nothing of the installation's.
-    my %global = ( data_source => "$dir/data" );
-
-    my $mirror = source_mirror($source);
-    $global{mirror} = $mirror if defined $mirror && length $mirror;
+    # it cost.  The settings come across because a guest cannot be built without
+    # them; the recipes beside them do not.  The data source is inside this
+    # directory, so a throwaway guest reads and writes nothing of the
+    # installation's.
+    my %global = ( source_globals($source), data_source => "$dir/data" );
 
     # CPAN test suites, when what the build is testing is what gets installed.
     # Otherwise skipped, as on a real guest: see the skill, and
@@ -277,20 +277,24 @@ sub build {
     return ( $password, $has_fleet, $keys_copied, @refs );
 }
 
-# The mirror the installation provisions through, when it has one.  Read rather
-# than the file copied: everything else in its _base is either a credential this
-# harness cannot hold or a recipe the guest under test did not ask for.
-sub source_mirror {
+# What the installation configures its guests with, and its mirror.  Read key by
+# key rather than the file copied: everything else in its _base is either a
+# credential this harness cannot hold or a recipe the guest under test did not
+# ask for.
+sub source_globals {
     my ($source) = @_;
 
     my $file = "$source/recipes.yaml";
     ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    return undef unless -f $file;
+    return () unless -f $file;
 
     my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($file) ) };
-    return undef unless ref $conf eq 'HASH';
+    return () unless ref $conf eq 'HASH';
 
-    return $conf->{_base}{_global}{mirror};
+    my $said   = $conf->{_base}{_global} // {};
+    my %schema = Provisioner::Cookbook->global_schema;
+
+    return map { $_ => $said->{$_} } grep { defined $said->{$_} } ( keys %{ $schema{properties} }, 'mirror' );
 }
 
 sub remove {

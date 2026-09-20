@@ -13,8 +13,7 @@ t/Provisioner-IPPool.t - the static address pool: parsing it, and handing out of
 
 use Test::More;
 use Test::Fatal;
-use File::Temp qw{tempfile};
-use File::Slurper::Temp();
+use File::Temp();
 use POSIX();
 
 use FindBin::libs;
@@ -28,17 +27,14 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 
 use_ok('Provisioner::IPPool');
 
-sub write_ipmap {
-    my ($content) = @_;
-    my ( $fh, $fname ) = tempfile( SUFFIX => '.cfg', UNLINK => 1 );
-    print {$fh} $content;
-    close($fh) or die "Could not close $fname: $!";
-    return $fname;
-}
-
 subtest 'pool_ips: explicit addresses' => sub {
     my @ips = Provisioner::IPPool::pool_ips( { addresses => '10.0.0.1 10.0.0.2 10.0.0.3' } );
     is_deeply \@ips, [qw{10.0.0.1 10.0.0.2 10.0.0.3}], 'parses space-separated addresses';
+};
+
+subtest 'pool_ips: a pool written as YAML lists' => sub {
+    my @ips = Provisioner::IPPool::pool_ips( { addresses => [qw{10.0.0.1 10.0.0.2}], cidr => ['192.168.1.0/30'] } );
+    is_deeply \@ips, [qw{10.0.0.1 10.0.0.2 192.168.1.1 192.168.1.2}], 'a list is a list, as an operator writes one';
 };
 
 subtest 'pool_ips: CIDR expansion' => sub {
@@ -70,7 +66,6 @@ sub fresh_db {
 
     # A directory per subtest, so one subtest's assignments are not another's.
     $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 );    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the subtest that called this reads it afterwards, which local would undo
-    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\ngateway=10.9.9.1\n" );
     return;
 }
 

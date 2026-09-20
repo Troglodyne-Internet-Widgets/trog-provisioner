@@ -2,46 +2,58 @@
 
 These files describe an *installation*, not this software, and they live in
 `/etc/trog-provisioner` rather than in the checkout. `TROG_PROVISIONER_CONFIG`
-points somewhere else; every command also takes `--ipmap`, `--recipes` and
-`--hvconf` individually.
+points somewhere else; every command also takes `--recipes` and `--hvconf`
+individually.
 
 | | |
 |---|---|
 | `hypervisors.conf` | the machines you can build on, and what to spare on each |
-| `ipmap.cfg` | addresses, nameservers, the address pool, and who administers it all |
 | `admin_authorized_keys` | the administrator's public keys, written into every guest cloud-init builds |
-| `recipes.yaml` | the base recipe every guest gets |
+| `recipes.yaml` | the settings every guest shares, and the base recipe every guest gets |
 | `recipes.d/` | one file per guest, named for it |
 | `secrets.kdbx` | the passwords the recipes reach for, and a cloud's credential secret when `clouds.yaml` refers to it |
 
 Domains are always written in full. There is no `tld` to append to a short name
-and no separate path for anything under a different parent: `[ips]`, `[aliases]`
-and the top-level key of every recipe all name a fully qualified domain.
+and no separate path for anything under a different parent: the top-level key of
+every recipe names a fully qualified domain.
 An older installation must run `bin/qualify_site_data` once.  The tool is
 removed, and this prints it from the history:
 
     git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data
 
-## ipmap.cfg
+## The settings every guest shares
 
-Static addresses for guests, and the details every domain inherits.
+They are the `_global` of `_base` in `recipes.yaml`, and a domain overrides one
+in its own `_global`. `Provisioner::Cookbook->global_schema` declares them, and
+`bin/new_config` refuses to build a guest while one that is required is missing.
 
+```yaml
+_base:
+  _global:
+    basedir: /opt/domains
+    admin_user: test
+    admin_gecos: Testy Testerson
+    admin_email: test@test.test
+    gateway: 192.168.1.254
+    resolvers: [192.168.1.254, 8.8.8.8]
+    nameservers:
+      ns1: ns1.test.test
+      ns2: ns2.test.test
+
+tickle.test.test:
+  _global:
+    aliases: [chase.test.test, kiss.test.test]
 ```
-[global]
-basedir=/opt/domains
-admin_user=test
-admin_gecos=Testy Testerson
-admin_email=test@test.test
-gateway=192.168.1.254
-resolvers=192.168.1.254, 8.8.8.8
-[ips]
-tickle.test.test=192.168.1.1
-[aliases]
-tickle.test.test=chase.test.test, kiss.test.test
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
-```
+
+These used to be a second file, `ipmap.cfg`, in the format `Config::Simple`
+reads. An installation that still has one moves it across in one command:
+
+    bin/ipmap_to_globals --dryrun
+    bin/ipmap_to_globals
+
+The addresses of the guests are not moved. They live in `ips.db`, which
+`Provisioner::IPPool` owns, and nothing has read them out of a file since
+`bin/assign_ip` took over handing them out.
 
 `basedir` is where the generated configuration for each domain lands **on this
 machine**, one directory per fully qualified name. It is easy to confuse with
@@ -60,13 +72,13 @@ wasted lookup each time, and `Provisioner::Recipe::fetchcache` strips it back
 out of the list it hands nginx. `bin/new_config` refuses one rather than
 letting it through.
 
-Two optional settings say how a guest reaches back here for its payload, and
-neither is normally needed:
+Three optional settings say how a guest reaches back here for its payload, and
+none is normally needed:
 
-```
-transfer_user=whoever_runs_trog_provisioner
-transfer_ip=192.0.2.10
-transfer_port=22
+```yaml
+    transfer_user: whoever_runs_trog_provisioner
+    transfer_ip: 192.0.2.10
+    transfer_port: 22
 ```
 
 The account defaults to whoever is running the tool, the port to what this
@@ -96,7 +108,7 @@ ssh-import-id -o /etc/trog-provisioner/admin_authorized_keys gh:yourname
 `lp:` for Launchpad. A key you have locally can simply be appended; nothing here
 requires that they came from a service.
 
-This used to be a single `admin_key` in `ipmap.cfg` naming an identity
+This used to be a single `admin_key` in the settings naming an identity
 (`gh:someone`) which cloud-init resolved **on the guest, at first boot**. That
 made every provision wait on GitHub answering, and fail when it did not -- and a
 raw public key had no way in at all. Holding the keys here resolves them once,

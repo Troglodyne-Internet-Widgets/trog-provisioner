@@ -113,8 +113,8 @@ sub run {
     Trog::Secrets->create( Trog::Config->path('secrets.kdbx'), 'throwaway', 'secret:seed/entry/password' => 'throwaway' );
     Trog::Credentials->remember( keepass => 'throwaway' );
 
-    my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
-    my ( $ipmap_file, $recipe_file ) = _configuration( $tmpdir, $recipe );
+    my $tmpdir      = File::Temp::tempdir( CLEANUP => 1 );
+    my $recipe_file = _configuration( $tmpdir, $recipe );
 
     # By module name, never by path.  A file required once by path and once by
     # name is compiled twice, and FATAL warnings make the second a death.
@@ -127,7 +127,6 @@ sub run {
     _generates(
         recipe => $recipe,
         tmpdir => $tmpdir,
-        ipmap  => $ipmap_file,
         config => $recipe_file,
         tests  => \@tests,
         files  => { $r->template_files() },
@@ -136,9 +135,8 @@ sub run {
     return;
 }
 
-# Writes the ipmap.cfg and recipes.yaml of a run, with a domain for every
-# recipe, and returns their paths.  Also makes what a recipe reads from the
-# directory of the run.
+# Writes the recipes.yaml of a run, with a domain for every recipe, and returns
+# its path.  Also makes what a recipe reads from the directory of the run.
 sub _configuration {
     my ( $tmpdir, $recipe ) = @_;
 
@@ -156,30 +154,25 @@ sub _configuration {
     my @recipes = recipes();
 
     # One address per domain out of the pool.  A hundred is more than there are
-    # recipes, and none is the gateway or the .50 that this ipmap says is us.
-    my $pool    = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
-    my $aliases = join( '',  map { "$_.$TLD=data.$TLD\n" } grep { $_ ne 'data' } @recipes );
-    my $ipmap   = <<"IPMAP";
-[global]
-ip=192.168.1.50
-basedir=$tmpdir/domains
-transfer_user=doge
-admin_user=doge
-admin_email=bogus\@test.test
-admin_gecos=Test Test
-gateway=192.168.1.254
-resolvers=192.168.1.254, 8.8.8.8, 1.1.1.1
-bridge_devname=ens4
-dhcp_devname=ens3
-[ip_pool]
-addresses=$pool
+    # recipes, and none is the gateway or the .50 that these settings say is us.
+    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
 
-[aliases]
-$aliases
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
-IPMAP
+    my %global = (
+        user           => 'test',
+        data_source    => "$tmpdir/data",
+        install_dir    => "$tmpdir/domains",
+        basedir        => "$tmpdir/domains",
+        transfer_user  => 'doge',
+        admin_user     => 'doge',
+        admin_email    => 'bogus@test.test',
+        admin_gecos    => 'Test Test',
+        gateway        => '192.168.1.254',
+        resolvers      => [qw{192.168.1.254 8.8.8.8 1.1.1.1}],
+        bridge_devname => 'ens4',
+        dhcp_devname   => 'ens3',
+        ip_pool        => { addresses => $pool },
+        nameservers    => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+    );
 
     # Each domain has its own recipe, and the recipes that `modules` names
     # beside it.  Beside it, not in it: a recipe's configuration takes only its
@@ -190,21 +183,21 @@ IPMAP
         my %own     = %{ $required{$name}     // {} };
         my @modules = @{ delete $own{modules} // [] };
         $config{"$name.$TLD"} = { $name => \%own, map { $_ => $required{$_} // {} } @modules };
+
+        # Every domain but data answers to data.$TLD as well, which is what the
+        # aliases of a real installation look like.
+        $config{"$name.$TLD"}{_global} = { aliases => ["data.$TLD"] } unless $name eq 'data';
     }
     $config{_base} = {
-        _global   => { user => 'test', data_source => "$tmpdir/data", install_dir => "$tmpdir/domains" },
+        _global   => \%global,
         registrar => $required{registrar},
     };
-
-    my ( $ih, $ipmap_file ) = File::Temp::tempfile( DIR => $tmpdir );
-    print {$ih} $ipmap;
-    close($ih) or die "Could not close $ipmap_file: $!";
 
     my ( $rh, $recipe_file ) = File::Temp::tempfile( DIR => $tmpdir );
     print {$rh} YAML::XS::Dump( \%config );
     close($rh) or die "Could not close $recipe_file: $!";
 
-    return ( $ipmap_file, $recipe_file );
+    return $recipe_file;
 }
 
 # Runs new_config for the domain of the recipe, and checks what it wrote.
@@ -214,7 +207,6 @@ sub _generates {
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $args{ipmap},
             '--recipes', $args{config},
             '--skip_ssh',
             "$recipe.$TLD",

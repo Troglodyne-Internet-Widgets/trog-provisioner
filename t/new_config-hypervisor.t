@@ -38,25 +38,23 @@ File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
-my ( $ih, $IPMAP ) = tempfile();
-print {$ih} <<'IPMAP';
-[global]
-basedir=/bogus/domains
-transfer_user=doge
-admin_user=doge
-admin_email=bogus@test.test
-admin_gecos=Test Test
-gateway=192.168.1.254
-resolvers=192.168.1.254
-IPMAP
-close($ih) or die "Could not close $IPMAP: $!";
-
 my $RECIPES = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
 File::Slurper::Temp::write_text(
     $RECIPES,
     YAML::XS::Dump(
         {
-            _base              => { _global          => { memory => 2048 } },
+            _base => {
+                _global => {
+                    memory        => 2048,
+                    basedir       => '/bogus/domains',
+                    transfer_user => 'doge',
+                    admin_user    => 'doge',
+                    admin_email   => 'bogus@test.test',
+                    admin_gecos   => 'Test Test',
+                    gateway       => '192.168.1.254',
+                    resolvers     => '192.168.1.254',
+                },
+            },
             _shared            => { 'host.test.test' => ['tenant.test.test'] },
             'vm.test.test'     => { _global => { cpus => 2 }, ntp => undef },
             'host.test.test'   => { _global => { cpus => 8 }, ntp => undef },
@@ -87,7 +85,7 @@ sub choices {
 
 sub main_with {
     my (@args) = @_;
-    return sub { Trog::Provisioner::Config::Generator::main( '--ipmap', $IPMAP, '--recipes', $RECIPES, '--skip_ssh', @args ) };
+    return sub { Trog::Provisioner::Config::Generator::main( '--recipes', $RECIPES, '--skip_ssh', @args ) };
 }
 
 subtest 'the command line reaches the choice' => sub {
@@ -114,7 +112,6 @@ subtest 'a tenant is chosen for by its host' => sub {
     is_deeply( [ keys %$asked ], ['host.test.test'], 'main asks about the host first' );
 
     # The tenant itself, as main reaches it once the host is generated.
-    local $Trog::Provisioner::Config::Generator::cfile    = $IPMAP;
     local $Trog::Provisioner::Config::Generator::pfile    = $RECIPES;
     local $Trog::Provisioner::Config::Generator::skip_ssh = 1;
     my $tenant = choices( sub { Trog::Provisioner::Config::Generator::handle_domain('tenant.test.test') } )->{'tenant.test.test'};

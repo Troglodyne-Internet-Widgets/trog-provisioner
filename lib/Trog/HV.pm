@@ -402,7 +402,7 @@ doing nothing.
 =head2 manages_addresses
 
 Whether the hypervisor gives its guests their addresses, so that we do not
-choose one out of the pool in F<ipmap.cfg>.
+choose one out of the address pool.
 
 If it does, the pool has nothing to allocate and nothing of ours to collide
 with.  L<Provisioner::IPPool> does not sweep that hypervisor, because its
@@ -713,8 +713,8 @@ either kind, but the answers have nothing in common.
 To reach a machine is an ssh login.  To reach a cloud is a credential that
 authenticates, and a catalog with compute, image and network in it.  To find the
 address that a guest fetches from, libvirt asks the routing table about a NAT
-bridge.  A cloud reads it out of F<ipmap.cfg>, because it has nothing to ask
-until the guest exists.
+bridge.  A cloud reads it out of the configuration, because it has nothing to
+ask until the guest exists.
 
 =cut
 
@@ -817,8 +817,9 @@ FIX
 =head2 $result = $hv->check_config()
 
 Checks that the configuration directory from L<Trog::Config> has a readable
-F<ipmap.cfg> and F<recipes.yaml>, and an F<admin_authorized_keys> that is not
-empty.
+F<recipes.yaml>, an F<admin_authorized_keys> that is not empty, and a
+F<recipes.yaml> that says what its guests are built with.  See
+L<Provisioner::Cookbook/global_schema>.
 
 =cut
 
@@ -827,14 +828,30 @@ sub check_config {
 
     my $dir = Trog::Config->dir;
 
-    my @missing = grep { !_readable("$dir/$_") } qw{ipmap.cfg recipes.yaml admin_authorized_keys};
+    my @missing = grep { !_readable("$dir/$_") } qw{recipes.yaml admin_authorized_keys};
 
     # An empty key file passes a check for existence and then stops
     # bin/new_config, which is the failure that this check prevents.
     push( @missing, 'admin_authorized_keys' )
       if !@missing && !-s "$dir/admin_authorized_keys";
 
-    return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) unless @missing;
+    if ( !@missing ) {
+        my $said = eval { Provisioner::Cookbook->globals(undef) };
+        return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
+
+        # Ten minutes into a build otherwise: bin/new_config reads these for
+        # the first domain it generates, and every recipe that owns a file on
+        # the guest wants one of them.
+        return $self->_verdict( 0, 'The settings every guest is built with are not there', "$@" . <<"FIX" );
+An installation that still has an ipmap.cfg in $dir has them
+in that file, and moves them across with:
+
+    bin/ipmap_to_globals --dryrun
+    bin/ipmap_to_globals
+
+docs/CONFIGURATION.md says what each one is.
+FIX
+    }
 
     return $self->_verdict( 0, "Missing or empty in $dir: " . join( ', ', @missing ), <<"FIX" );
 These are where an installation says which machines exist, what every guest

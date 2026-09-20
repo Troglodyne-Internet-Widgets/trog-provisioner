@@ -13,7 +13,6 @@ use re '/aasx';
 use FindBin;
 use FindBin::libs;
 
-use Config::Simple;
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Net::IP;
@@ -31,13 +30,14 @@ ipmap2zones - write a zone file for each guest you name
 
 =head1 SYNOPSIS
 
-    ipmap2zones [--ipmap=file] [--output-dir=dir] DOMAIN [DOMAIN ...]
+    ipmap2zones [--recipes=file] [--output-dir=dir] DOMAIN [DOMAIN ...]
 
 =head1 DESCRIPTION
 
 Generates BIND-style zone files, one file for each domain that you name.  The
 addresses come from the address database of L<Provisioner::IPPool>.  The
-administrator's email, the aliases and the name servers come from ipmap.cfg.
+administrator's email, the aliases and the name servers come from the
+C<_global> of F<recipes.yaml>.
 
 It writes each file as C<domain.zone> in the current directory, or in the
 directory that --output-dir names.
@@ -53,10 +53,10 @@ At least one domain must be named: a zone carries the names its recipes declare
 
 =over 4
 
-=item --ipmap=FILE
+=item --recipes=FILE
 
-Path to ipmap.cfg.  The default is F<ipmap.cfg> in the configuration directory.
-See L<Trog::Config>.
+Path to F<recipes.yaml>.  The default is the one in the configuration
+directory.  See L<Trog::Config>.
 
 =item --output-dir=DIR
 
@@ -67,32 +67,28 @@ directory must already exist.
 
 =cut
 
-my $USAGE = "usage: ipmap2zones [--ipmap=file] [--output-dir=dir] DOMAIN [DOMAIN ...]\n";
+my $USAGE = "usage: ipmap2zones [--recipes=file] [--output-dir=dir] DOMAIN [DOMAIN ...]\n";
 
 sub main {
     my @args = @_;
 
-    my ( $cfile, $output_dir );
+    my ( $rfile, $output_dir );
     GetOptionsFromArray(
         \@args,
-        'ipmap=s'      => \$cfile,
+        'recipes=s'    => \$rfile,
         'output-dir=s' => \$output_dir,
     ) or die $USAGE;
 
-    $cfile      //= Trog::Config->path('ipmap.cfg');
+    $rfile      //= Trog::Config->path('recipes.yaml');
     $output_dir //= '.';
 
     die "Output directory $output_dir does not exist\n" unless -d $output_dir;
 
-    my $c = Config::Simple->new($cfile);
-    die "$Config::Simple::errstr\n" unless $c;
-    my $global_conf = $c->param( -block => 'global' );
+    my $rconf       = Provisioner::Cookbook->configuration($rfile);
+    my $global_conf = Provisioner::Cookbook->globals( undef, $rconf );
     my $ip_conf     = Provisioner::IPPool::assignments();
-    my $alias_conf  = $c->param( -block => 'aliases' )     // {};
-    my $ns_conf     = $c->param( -block => 'nameservers' ) // {};
-
-    die "Must set admin_email in global section of $cfile\n"
-      unless $global_conf->{admin_email};
+    my $alias_conf  = Provisioner::Cookbook->alias_map($rconf);
+    my $ns_conf     = $global_conf->{nameservers} // {};
 
     my @domains = @args;
     die "Name at least one domain to generate a zone for.\n" . $USAGE unless @domains;

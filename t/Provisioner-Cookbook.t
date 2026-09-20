@@ -945,4 +945,68 @@ subtest 'configured_fetch_hosts names a recipe that cannot answer, rather than l
     like( $err, qr/no[ ]idea/,                                                                                  'and passes on what the recipe said' );
 };
 
+# Every setting an installation shares used to live in a second file, where
+# each reader checked for the ones it wanted and named the first one missing.
+subtest 'the settings of an installation are validated in one place' => sub {
+    my %said = (
+        _base => {
+            _global => {
+                basedir     => '/bogus',
+                admin_user  => 'doge',
+                admin_gecos => 'Doge Doge',
+                admin_email => 'doge@test.test',
+                gateway     => '192.168.1.254',
+                resolvers   => '192.168.1.254',
+            },
+        },
+        'own.test.test' => { _global => { admin_user => 'somebody', resolvers => [ '8.8.8.8', '1.1.1.1' ] } },
+    );
+
+    my $base = Provisioner::Cookbook->globals( undef, \%said );
+    is_deeply( $base->{resolvers}, ['192.168.1.254'], 'one resolver written as a scalar comes back as the list every reader wants' );
+    is( $base->{admin_user}, 'doge', 'and the rest of _base is what it says' );
+
+    my $own = Provisioner::Cookbook->globals( 'own.test.test', \%said );
+    is( $own->{admin_user},  'somebody',       'a domain overrides a setting of _base' );
+    is( $own->{admin_email}, 'doge@test.test', 'and inherits the ones it says nothing about' );
+    is_deeply( $own->{resolvers}, [ '8.8.8.8', '1.1.1.1' ], 'a list it writes as a list is left alone' );
+
+    # Six hand-written refusals, each naming one setting, in the order the
+    # script happened to read them: an operator fixed one and ran it again.
+    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { basedir => '/bogus' } } } ) };
+    like( $err, qr/admin_user/,    'a missing setting is refused' );
+    like( $err, qr/admin_gecos/,   'with every other missing one named in the same breath' );
+    like( $err, qr/admin_email/,   'so one run says all of it' );
+    like( $err, qr/gateway/,       'including the gateway' );
+    like( $err, qr/resolvers/,     'and the resolvers' );
+    like( $err, qr/recipes\.yaml/, 'and the refusal says which file to write them in' );
+
+    like(
+        exception { Provisioner::Cookbook->globals( 'own.test.test', { 'own.test.test' => { _global => { gateway => 'not-an-address' } } } ) },
+        qr/own\.test\.test/,
+        'and a refusal for one domain names the domain'
+    );
+};
+
+# A YAML scalar is a string, and a list of one written as a scalar is what an
+# operator writes.  A single alias anywhere in the map used to arrive as a
+# string, which the aliases schema refuses and which the caller cannot
+# dereference -- so one domain with one alias refused every domain on the
+# installation.
+subtest 'one alias is a list, as two already were' => sub {
+    my %conf = (
+        _base             => { _global => { basedir => '/bogus' } },
+        'one.test.local'  => { _global => { aliases => 'solo.test.local' } },
+        'two.test.local'  => { _global => { aliases => [ 'first.test.local', 'second.test.local' ] } },
+        'none.test.local' => { _global => { basedir => '/bogus' } },
+    );
+
+    my $aliases = Provisioner::Cookbook->alias_map( \%conf );
+
+    is_deeply( $aliases->{'one.test.local'}, ['solo.test.local'],                         'a lone alias is a one-element list rather than a string' );
+    is_deeply( $aliases->{'two.test.local'}, [ 'first.test.local', 'second.test.local' ], 'and a pair is left as the list it already was' );
+    ok( !exists $aliases->{'none.test.local'}, 'and a domain naming none is not in the map at all' );
+    ok( !exists $aliases->{_base},             'nor is _base, which is not a domain' );
+};
+
 done_testing();

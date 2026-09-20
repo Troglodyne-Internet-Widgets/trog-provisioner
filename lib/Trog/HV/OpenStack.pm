@@ -17,7 +17,7 @@ use OpenStack::MetaAPI();
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
 
-use Config::Simple();
+use Provisioner::Cookbook();
 use Trog::Config();
 
 =head1 NAME
@@ -241,8 +241,8 @@ this toolkit can generate.
 
 =head2 manages_addresses
 
-True.  Neutron allocates the addresses, and the pool in F<ipmap.cfg> has no part
-in it.
+True.  Neutron allocates the addresses, and the address pool has no part in
+it.
 
 =cut
 
@@ -977,7 +977,7 @@ FIX
 
 =head2 $result = $hv->check_transfer_ip()
 
-Makes sure that F<ipmap.cfg> names a C<transfer_ip> in its C<[global]> section.
+Makes sure that the C<_global> of F<recipes.yaml> names a C<transfer_ip>.
 A cloud assigns the guest address only when it creates the server, after the
 seed is written.  So the address cannot be found the way libvirt finds it.  See
 L<Trog::HV/PREFLIGHT>.
@@ -987,10 +987,8 @@ L<Trog::HV/PREFLIGHT>.
 sub check_transfer_ip {
     my ($self) = @_;
 
-    my $ipmap  = Trog::Config->path('ipmap.cfg');
-    my $config = eval { Config::Simple->new($ipmap) };
-    my $named  = $config ? $config->param('global.transfer_ip') : undef;
-    $named = $named->[0] if ref $named eq 'ARRAY';
+    my $rfile = Trog::Config->path('recipes.yaml');
+    my $named = eval { Provisioner::Cookbook->globals(undef)->{transfer_ip} };
 
     return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
 
@@ -1002,9 +1000,9 @@ worked out by asking the routing table about the guest's network -- but
 nothing to ask about until the guest exists, and the seed naming the address is
 written before that.
 
-Name it in the [global] section of $ipmap:
+Name it in the _global of _base in $rfile:
 
-    transfer_ip = 192.0.2.10
+    transfer_ip: 192.0.2.10
 
 It has to be an address of this machine that a guest on the cloud can reach.
 FIX

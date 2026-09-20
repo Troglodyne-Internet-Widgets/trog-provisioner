@@ -35,7 +35,7 @@ use List::Util qw{any};
             config:
                 # If unset, admin_user, admin_email, admin_keys and gateway
                 # come from the configuration of this guest.
-                resolvers: "192.168.1.254, 1.1.1.1"
+                resolvers: ["192.168.1.254", "1.1.1.1"]
 
                 # The pool that the runner takes addresses from.  Without
                 # these, every guest it builds stops on "cannot auto-assign IP".
@@ -248,8 +248,10 @@ sub args {
             # only the operator knows where a runner clones its repositories.
             deps_from => { type => 'array', items => { type => 'string' }, default => [] },
 
-            # The ipmap.cfg of the runner.  The defaults are on the members,
-            # not on config, so a domain that sets one member keeps the rest.
+            # What every guest the runner builds shares, which L</enrich>
+            # folds into the _base of its recipes.yaml.  The defaults are on
+            # the members, not on config, so a domain that sets one member
+            # keeps the rest.
             config => {
                 type       => 'object',
                 default    => {},
@@ -260,18 +262,15 @@ sub args {
                     admin_gecos    => { type => 'string', default => 'Administrator' },
                     admin_keys     => { type => 'array',  items   => { type => 'string' }, default => [] },
                     gateway        => { type => 'string', default => q{} },
-                    resolvers      => { type => 'string', default => '1.1.1.1, 8.8.8.8' },
+                    resolvers      => { type => 'array',  items   => { type => 'string' }, default => [qw{1.1.1.1 8.8.8.8}] },
                     dhcp_devname   => { type => 'string', default => 'ens3' },
                     bridge_devname => { type => 'string', default => 'ens4' },
-                    ip             => { type => 'string', default => q{} },
                     transfer_user  => { type => 'string', default => q{} },
                     transfer_ip    => { type => 'string', default => q{} },
                     transfer_port  => { type => 'string', default => q{} },
                     addresses      => { type => 'string', default => q{} },
                     cidr           => { type => 'string', default => q{} },
                     nameservers    => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
-                    ips            => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
-                    aliases        => { type => 'object', default => {}, additionalProperties => { type => 'string' } },
                 },
             },
 
@@ -304,7 +303,7 @@ sub args {
 
             # A keepass database in the data directory of this domain, to
             # install as the store of the runner.  Empty is correct too, because
-            # bin/preflight wants only ipmap.cfg, recipes.yaml and
+            # bin/preflight wants only recipes.yaml and
             # admin_authorized_keys.
             store => { type => 'string', default => q{} },
 
@@ -312,6 +311,37 @@ sub args {
             restrict_key_to_ip => { type => 'boolean', default => 1 },
         },
     );
+}
+
+=head2 \%global = _globals_of($config)
+
+The C<config> of this recipe as the C<_global> of a F<recipes.yaml>.  The pool
+is one key there rather than two, and a setting left empty is left out, so that
+the runner falls back to its own answer for it rather than to an empty string.
+
+=cut
+
+sub _globals_of {
+    my ($config) = @_;
+
+    my $said = sub {
+        my ($key) = @_;
+        my $value = $config->{$key};
+
+        return 0 unless defined $value;
+        return scalar @$value      if ref $value eq 'ARRAY';
+        return scalar keys %$value if ref $value eq 'HASH';
+        return $value ne q{};
+    };
+
+    my %is_pool = map { $_ => 1 } qw{addresses cidr};
+
+    my %global = map { $_ => $config->{$_} } grep { !$is_pool{$_} && $said->($_) } keys %$config;
+
+    my %pool = map { $_ => $config->{$_} } grep { $said->($_) } keys %is_pool;
+    $global{ip_pool} = \%pool if %pool;
+
+    return \%global;
 }
 
 =head3 formatters
@@ -329,7 +359,9 @@ sub formatters {
 
 =head3 enrich
 
-Fills in the identity of the runner from the identity of the guest.  Splits the
+Fills in the identity of the runner from the identity of the guest, and folds
+C<config> into the C<_global> of C<_base> in C<recipes>, which is where the
+runner reads it.  Splits the
 URI of each hypervisor into the host, user and port that C<ssh-keyscan> needs.
 Dies if C<checkout_dir> or C<store> is not a relative path under the domain
 directory, or if a hypervisor URI has no host or is remote without ssh.
@@ -340,8 +372,8 @@ sub enrich {
     my ( $self, %opts ) = @_;
 
     # Unless told otherwise, the runner administers its guests as whoever
-    # administers this one, on the same network.  These come from the [global]
-    # block that built this guest.
+    # administers this one, on the same network.  These come from the _global
+    # that built this guest.
     #
     # bin/new_config refuses to generate anything without admin_user,
     # admin_gecos, admin_email, gateway and resolvers, or without keys in
@@ -353,11 +385,14 @@ sub enrich {
     # ||=, not //=, because the schema defaults these two to an empty string,
     # which //= keeps.
     $opts{config}{gateway} ||= $opts{gateway};
-    $opts{config}{ip}      ||= $opts{main_ip};
 
     # A list, so an unset value is an empty list, not an empty string.
     $opts{config}{admin_keys} = $opts{admin_keys}
       unless @{ $opts{config}{admin_keys} // [] };
+
+    # The recipes on top, because a runner that names a setting of its own in
+    # the file it is handed means it.
+    $opts{recipes}{_base}{_global} = { %{ _globals_of( $opts{config} ) }, %{ $opts{recipes}{_base}{_global} // {} } };
 
     die "trogrunner: checkout_dir cannot be empty, and cannot be '.': git clone will not drop a repo into the domain directory, which already exists by then\n"
       if $opts{checkout} && ( !$opts{checkout_dir} || $opts{checkout_dir} eq '.' );
@@ -481,7 +516,6 @@ sub grant {
 
 sub template_files {
     return (
-        'trogrunner.ipmap.cfg.tt'             => 'trogrunner.ipmap.cfg',
         'trogrunner.admin_authorized_keys.tt' => 'trogrunner.admin_authorized_keys',
         'trogrunner.recipes.yaml.tt'          => 'trogrunner.recipes.yaml',
         'trogrunner.hypervisors.conf.tt'      => 'trogrunner.hypervisors.conf',

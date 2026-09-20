@@ -38,15 +38,21 @@ sub installation {
     my (%extra) = @_;
 
     my $source = tempdir( CLEANUP => 1 );
-    File::Slurper::Temp::write_text( "$source/ipmap.cfg", "[global]\nbasedir = /bogus\n" );
     File::Slurper::Temp::write_binary(
         "$source/recipes.yaml",
         YAML::XS::Dump(
             {
                 _base => {
                     _global => {
-                        registrar => { type => 'easydns', key => 'secret:group/entry/field' },
-                        libdir    => ['/opt/vendor-recipes'],
+                        registrar   => { type => 'easydns', key => 'secret:group/entry/field' },
+                        libdir      => ['/opt/vendor-recipes'],
+                        basedir     => '/bogus',
+                        admin_user  => 'operator',
+                        admin_gecos => 'The Operator',
+                        admin_email => 'operator@test.test',
+                        gateway     => '192.168.1.254',
+                        resolvers   => ['192.168.1.254'],
+                        ip_pool     => { cidr => '192.168.1.0/26' },
                         %extra,
                     },
                     letsencrypt => {},
@@ -104,6 +110,17 @@ subtest 'the base is built here rather than taken from the installation' => sub 
     # DNS server, because the installation's _base said every guest gets them.
     ok( !exists $recipes->{_base}{letsencrypt}, 'so a scratch guest gets what new_guest named' );
     ok( !exists $recipes->{_base}{auditd},      'and nothing the fleet happens to give its own' );
+};
+
+# The settings of the installation are not a credential and a guest cannot be
+# built without them, so they come across while the recipes beside them do not.
+subtest 'a scratch guest is configured as a real one is' => sub {
+    my ($recipes) = scratch();
+    my $global = $recipes->{_base}{_global};
+
+    is( $global->{admin_user}, 'operator',      'the administrator of the installation administers a scratch guest too' );
+    is( $global->{gateway},    '192.168.1.254', 'it reaches the network the same way' );
+    is_deeply( $global->{ip_pool}, { cidr => '192.168.1.0/26' }, 'and draws from the same pool, so it cannot take an address a real guest has' );
 };
 
 subtest 'nothing it cannot hold a credential for comes with it' => sub {

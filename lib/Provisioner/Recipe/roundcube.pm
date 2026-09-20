@@ -52,8 +52,8 @@ mailserver somewhere else wants an IMAP provider a domain can choose, the way it
 chooses a DNS one -- see L<Provisioner::DNSRecipe>.
 
 TLS uses the certificate provided by the 'letsencrypt' recipe.  The C<webmail>
-name is declared in L<Provisioner::Recipe/subdomains>, not written into
-ipmap.cfg.
+name is declared in L<Provisioner::Recipe/subdomains>, not written into the
+aliases of the domain.
 
 Requires the nginx and mail recipes.
 

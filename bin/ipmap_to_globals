@@ -1,0 +1,206 @@
+#!/usr/bin/env perl
+
+package Trog::Bin::IpmapToGlobals;
+
+#ABSTRACT: Move the settings of an older ipmap.cfg into the _global of recipes.yaml.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+use re '/aasx';
+
+use FindBin::libs;
+
+use Config::Simple();
+use File::Copy();
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage   qw{pod2usage};
+use YAML::XS();
+
+use File::Slurper();
+use File::Slurper::Temp();
+use Provisioner::Utils();
+use Trog::Config();
+
+=head1 NAME
+
+ipmap_to_globals - move the settings of an older ipmap.cfg into recipes.yaml
+
+=head1 SYNOPSIS
+
+    ipmap_to_globals [--ipmap FILE] [--recipes FILE] [--dryrun]
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--ipmap> FILE
+
+The file to read.  The default is F<ipmap.cfg> in the configuration directory.
+See L<Trog::Config>.
+
+=item B<--recipes> FILE
+
+The file to write into.  The default is F<recipes.yaml> beside it.
+
+=item B<--dryrun>
+
+Print what would change, and write nothing.
+
+=back
+
+=head1 DESCRIPTION
+
+An installation used to describe a guest in two files.  F<recipes.yaml> held
+what recipes share, in the C<_global> of C<_base>, and F<ipmap.cfg> held who
+administers a guest, how it reaches the network, and where its addresses come
+from.  Nothing distinguished the two lists.  They are one list now, in
+F<recipes.yaml>, and L<Provisioner::Cookbook/global_schema> declares it.
+
+This program does that move, once, for an installation that has the older file.
+It reads these blocks:
+
+=over 4
+
+=item * C<[global]> becomes the C<_global> of C<_base>, key for key.
+C<resolvers> becomes a list, because C<Config::Simple> writes a list as one
+comma-separated string.
+
+=item * C<[ip_pool]> becomes C<ip_pool> in that same block.
+
+=item * C<[nameservers]> becomes C<nameservers> there.
+
+=item * C<[aliases]> is per domain: each name becomes C<aliases> in the
+C<_global> of that domain.
+
+=back
+
+C<[ips]> is not moved.  Addresses live in F<ips.db>, which
+L<Provisioner::IPPool> owns, and nothing has read C<[ips]> since
+C<bin/assign_ip> took over handing them out.
+
+A key that F<recipes.yaml> already sets is left alone, and named in the report.
+The file is copied to F<recipes.yaml.bak> before it is written.  This does not
+delete F<ipmap.cfg>: nothing reads it afterwards, and deleting somebody's
+configuration is not this program's decision.
+
+=head1 SUBROUTINES
+
+=head2 $rc = main(@args)
+
+Runs the move.  Returns 0, or 2 for a usage error.
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $ipmap, $recipes, $dryrun, $help );
+    GetOptionsFromArray(
+        \@args,
+        'ipmap=s'   => \$ipmap,
+        'recipes=s' => \$recipes,
+        'dryrun'    => \$dryrun,
+        'help'      => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    $ipmap   //= Trog::Config->path('ipmap.cfg');
+    $recipes //= Trog::Config->path('recipes.yaml');
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is anything to move
+    die "There is no $ipmap to move; this installation has nothing to do here.\n" unless -f $ipmap;
+
+    my $from = Config::Simple->new($ipmap) or die "Could not read $ipmap: $Config::Simple::errstr\n";
+    my $into = -f $recipes ? YAML::XS::LoadFile($recipes) : {};
+    $into = {} unless ref $into eq 'HASH';
+
+    my ( $moved, $kept ) = move_into( $from, $into );
+
+    unless (@$moved) {
+        print "Nothing in $ipmap is missing from $recipes.\n";
+        return 0;
+    }
+
+    my $report = "From $ipmap into $recipes:\n" . join( q{}, map { "  $_\n" } @$moved );
+    $report .= "\nLeft as $recipes already has it:\n" . join( q{}, map { "  $_\n" } @$kept ) if @$kept;
+    print $report;
+
+    if ($dryrun) {
+        print "\nDry run; nothing was written.\n";
+        return 0;
+    }
+
+    File::Copy::copy( $recipes, "$recipes.bak" ) or die "Could not back $recipes up: $!\n"
+      if -f $recipes;
+    File::Slurper::Temp::write_text( $recipes, YAML::XS::Dump($into) );
+
+    print "\nWrote $recipes, with the old copy at $recipes.bak.\n" . "Nothing reads $ipmap now.\n";
+    return 0;
+}
+
+=head2 (\@moved, \@kept) = move_into($from, $into)
+
+Folds the blocks of C<$from>, a L<Config::Simple>, into C<$into>, the
+configuration as YAML gives it.  Changes C<$into> in place.  Returns what it
+moved and what it left because C<$into> already said it, both as lines to
+print.
+
+=cut
+
+sub move_into {
+    my ( $from, $into ) = @_;
+
+    my ( @moved, @kept );
+    my $global = $into->{_base}{_global} //= {};
+
+    my $said = $from->param( -block => 'global' ) // {};
+    foreach my $key ( sort keys %$said ) {
+        if ( exists $global->{$key} ) {
+            push( @kept, "_base._global.$key" );
+            next;
+        }
+
+        $global->{$key} = $key eq 'resolvers' ? Provisioner::Utils::coerce_arrayref( $said->{$key} ) : $said->{$key};
+        push( @moved, "[global] $key -> _base._global.$key" );
+    }
+
+    # Each of these was a block of its own, and is one key of the globals now.
+    foreach my $name (qw{ip_pool nameservers}) {
+        my $block = $from->param( -block => $name ) // {};
+        next unless %$block;
+
+        if ( exists $global->{$name} ) {
+            push( @kept, "_base._global.$name" );
+            next;
+        }
+
+        # Config::Simple puts whitespace between the addresses of a pool, which
+        # reads as one string; a list is what somebody writing YAML writes.
+        $block->{addresses} = [ grep { m/\S/ } map { split /\s+/ } @{ Provisioner::Utils::coerce_arrayref( $block->{addresses} ) } ]
+          if exists $block->{addresses};
+
+        $global->{$name} = $block;
+        push( @moved, "[$name] -> _base._global.$name" );
+    }
+
+    my $aliases = $from->param( -block => 'aliases' ) // {};
+    foreach my $domain ( sort keys %$aliases ) {
+        my $own = $into->{$domain}{_global} //= {};
+
+        if ( exists $own->{aliases} ) {
+            push( @kept, "$domain._global.aliases" );
+            next;
+        }
+
+        $own->{aliases} = Provisioner::Utils::coerce_arrayref( $aliases->{$domain} );
+        push( @moved, "[aliases] $domain -> $domain._global.aliases" );
+    }
+
+    return ( \@moved, \@kept );
+}
+
+exit main(@ARGV) unless caller;
+
+1;

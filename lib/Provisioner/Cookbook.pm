@@ -17,6 +17,7 @@ use Provisioner::Utils();
 use File::Slurper();
 use File::Temp();
 use Hash::Merge();
+use JSON::Validator::Schema::Troglodyne;
 use YAML::XS();
 
 use Trog::Config();
@@ -1093,6 +1094,131 @@ sub global_config {
     my $own  = clone( ( defined $domain ? $conf->{$domain}{_global} : undef ) // {} );
 
     return { %$base, %$own };
+}
+
+=head2 global_schema()
+
+The schema of the settings that describe the installation rather than one
+recipe: who administers a guest, how it reaches the network, and where its
+addresses come from.  They live in the C<_global> of C<_base> in
+F<recipes.yaml>, and a domain overrides one in its own C<_global>.
+
+It is a schema and not six lines of perl because a schema validates, defaults,
+coerces and documents, and F<bin/recipes> can print it.  These settings were in
+F<ipmap.cfg> until they moved here, where every other setting a guest is built
+from already lived.  See L<Provisioner::Recipe/args> for the same argument
+about a recipe.
+
+C<additionalProperties> stays on: C<_global> also carries what recipes share,
+such as C<install_dir>, C<cpus> and C<distro>, and each of those is declared by
+the recipe that owns it.
+
+=cut
+
+sub global_schema {
+    return (
+        type       => 'object',
+        required   => [qw{basedir admin_user admin_gecos admin_email gateway resolvers}],
+        properties => {
+            basedir     => { type => 'string', description => 'Where the generated configuration of each domain is written on this machine.' },
+            admin_user  => { type => 'string', description => 'The account that administers every guest.  Recipes set ownership to it, and the provisioner reaches a guest as it.' },
+            admin_gecos => { type => 'string', description => 'The real name of that account, as the guest records it.' },
+            admin_email => { type => 'string', description => 'Where mail for the administrator of a guest goes.' },
+            gateway     => { type => 'string', format      => 'ipv4', description => 'The default route of a guest on the bridged network.' },
+
+            resolvers => {
+                type        => 'array',
+                items       => { type => 'string' },
+                minItems    => 1,
+                description => 'The nameservers a guest asks, in order.  A loopback address belongs to a guest that runs its own, and nostubresolver puts that one in front.',
+            },
+
+            dhcp_devname   => { type => 'string', description => 'What the guest calls the interface on the NAT of the hypervisor.  Unset takes the name from the hypervisor, which pins the slot that names it.' },
+            bridge_devname => { type => 'string', description => 'What the guest calls the interface on the bridge that carries its real address.' },
+
+            transfer_user => { type => 'string',  description => 'The account on this machine that a guest fetches its payload as.  Unset is the account running the provision.' },
+            transfer_port => { type => 'integer', description => 'The ssh port of this machine, when it is not the one this machine reports.' },
+            transfer_ip   => { type => 'string',  format      => 'ipv4', description => 'The address of ours that a guest fetches from, for a machine with several routes to the guest.' },
+
+            ip_pool => {
+                type        => 'object',
+                description => 'The addresses this installation hands out, and the network they are on.  bin/assign_ip takes one from here and records it in ips.db.',
+                properties  => {
+                    addresses => { type => [qw{array string}], items => { type => 'string' }, description => 'The addresses, as a list or as one string of them.' },
+                    cidr      => { type => 'string', description => 'The network the addresses are on, as a prefix.' },
+                },
+            },
+
+            nameservers => {
+                type                 => 'object',
+                description          => 'The names of the nameservers that serve the zones of this installation.  bin/ipmap2zones writes them into each zone.',
+                additionalProperties => { type => 'string' },
+            },
+
+            aliases => {
+                type        => 'array',
+                items       => { type => 'string' },
+                description => 'Other names this domain answers to.  It belongs to the _global of a domain rather than to _base, and a certificate covers each one.',
+            },
+        },
+    );
+}
+
+=head2 globals($domain, $conf)
+
+The settings that C<global_schema> declares, for a domain, validated, with the defaults
+filled in.  C<$conf> is as in C<domain_config>.
+
+Dies naming every setting that is missing or wrong, and the file to fix, rather
+than leaving a recipe to interpolate an undef into a path.  That is one refusal
+in one place: before this, F<bin/new_config> hand-wrote six of them and nothing
+else checked at all.
+
+=cut
+
+sub globals {
+    my ( $class, $domain, $conf ) = @_;
+
+    my $said = $class->global_config( $domain, $conf );
+
+    # Coerced here rather than in the schema, because one address written as a
+    # string is what an operator writes, and every reader wants a list.
+    $said->{resolvers} = Provisioner::Utils::coerce_arrayref( $said->{resolvers} )
+      if exists $said->{resolvers};
+
+    my %schema    = $class->global_schema;
+    my $validator = JSON::Validator::Schema::Troglodyne->new;
+    $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
+
+    my @errors = $validator->validate( $said, \%schema );
+    die "The settings of this installation are not valid" . ( defined $domain ? " for $domain" : q{} ) . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
+      if @errors;
+
+    return $said;
+}
+
+=head2 \%aliases = alias_map($conf)
+
+The other names each domain answers to, keyed by domain.  A domain names them
+in the C<aliases> of its own C<_global>.
+
+Every domain, not only the one being built: a zone holds the names of the
+fleet, and F<templates/files/pdns.zone.tt> writes them.  C<$conf> is as in
+C<domain_config>.
+
+=cut
+
+sub alias_map {
+    my ( $class, $conf ) = @_;
+    $conf //= $class->configuration();
+
+    my %aliases;
+    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+        my $said = $class->global_config( $domain, $conf )->{aliases} or next;
+        $aliases{$domain} = Provisioner::Utils::coerce_arrayref($said);
+    }
+
+    return \%aliases;
 }
 
 =head2 install_dir($domain, $conf)

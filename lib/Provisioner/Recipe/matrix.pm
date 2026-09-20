@@ -35,9 +35,9 @@ proxy, with the ketesa admin web interface.  This recipe requires the
 C<nginxproxy> recipe.
 
 Synapse answers at C<matrix.$domain>, and the admin interface at
-C<admin.matrix.$domain>.  Add C<matrix> and C<admin.matrix> to the C<aliases>
-section of F<ipmap.cfg> for the domain, so that the SSL certificate covers
-them.
+C<admin.matrix.$domain>.  Add C<matrix.$domain> and C<admin.matrix.$domain> to
+the C<aliases> in the C<_global> of the domain, so that the SSL certificate
+covers them.
 
 The package names are in the subclass for each distribution, for example
 L<Provisioner::Recipe::Ubuntu::matrix>.

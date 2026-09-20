@@ -60,24 +60,19 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 my $basedir = '/bogus';
 
 subtest "new_config dies when passed a domain with no configuration" => sub {
-    my $ipmap = <<"IPMAP";
-[global]
-basedir     = $basedir
-admin_user  = tester
-admin_gecos = Test User
-admin_email = test\@test.test
-gateway = 192.168.1.254
-resolvers = 8.8.8.8
-transfer_user = provision
-
-[ips]
-testdomain.test.local = 192.168.1.10
-IPMAP
 
     # recipes.yaml has _base but no 'testdomain.test.local' top-level key
-    my $recipe = <<'RECIPES';
+    my $recipe = <<"RECIPES";
 ---
 _base:
+  _global:
+    basedir: $basedir
+    admin_user: tester
+    admin_gecos: Test User
+    admin_email: test\@test.test
+    gateway: 192.168.1.254
+    resolvers: [8.8.8.8]
+    transfer_user: provision
   adminconfig:
     pkgs:
       - vim
@@ -88,14 +83,6 @@ RECIPES
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
-    # XXX Config::Simple is not compatible with Test::MockFile due to using bareword filehandles.
-    my ( $fh, $ipmap_file ) = File::Temp::tempfile();
-    print {$fh} $ipmap;
-    close($fh) or die "Could not close $ipmap_file: $!";
-
-    # However we still have to mock it to prevent explosions in our own code!
-    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
-
     # Read out of the configuration directory rather than fetched by cloud-init,
     # and MockFile is strict here: an unmocked read is fatal, not a miss.  The
     # path is the one Trog::Config resolves, which is the environment override
@@ -104,7 +91,6 @@ RECIPES
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $ipmap_file,
             '--recipes', "$basedir/recipes.yaml",
             '--skip_ssh',
             'testdomain.test.local',
@@ -124,46 +110,39 @@ RECIPES
 # there -- which is what had the fetch cache stripping it back out of the list
 # it hands nginx, and every few lookups was a refused connection.
 #
-# The same fixture as above: this refusal comes before the one about a domain
-# with no recipe configuration, so the domain here never gets that far.
 subtest 'an installation that names loopback as a resolver is refused' => sub {
-    my $ipmap = <<"IPMAP";
-[global]
-basedir     = $basedir
-admin_user  = tester
-admin_gecos = Test User
-admin_email = test\@test.test
-gateway = 192.168.1.254
-resolvers = 127.0.0.1, 192.168.1.254
-transfer_user = provision
 
-[ips]
-testdomain.test.local = 192.168.1.10
-IPMAP
+    # Its own directory, because Provisioner::Cookbook keeps one configuration
+    # per path and the subtest above has already read the one at $basedir.
+    my $loopdir = '/bogus-loopback';
 
-    my $recipe = <<'RECIPES';
+    my $recipe = <<"RECIPES";
 ---
 _base:
+  _global:
+    basedir: $loopdir
+    admin_user: tester
+    admin_gecos: Test User
+    admin_email: test\@test.test
+    gateway: 192.168.1.254
+    resolvers: [127.0.0.1, 192.168.1.254]
+    transfer_user: provision
   adminconfig:
     pkgs:
       - vim
+testdomain.test.local:
+  adminconfig: {}
 RECIPES
 
-    my $td_mock     = Test::MockFile->new_dir( $basedir,             { mode => 0755 } );
-    my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
-    my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
-
-    my ( $fh, $ipmap_file ) = File::Temp::tempfile();
-    print {$fh} $ipmap;
-    close($fh) or die "Could not close $ipmap_file: $!";
-    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
+    my $td_mock     = Test::MockFile->new_dir( $loopdir,             { mode => 0755 } );
+    my $tdd_mock    = Test::MockFile->new_dir( "$loopdir/recipes.d", { mode => 0755 } );
+    my $recipe_mock = Test::MockFile->file( "$loopdir/recipes.yaml", $recipe );
 
     my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $ipmap_file,
-            '--recipes', "$basedir/recipes.yaml",
+            '--recipes', "$loopdir/recipes.yaml",
             '--skip_ssh',
             'testdomain.test.local',
         )
@@ -176,28 +155,22 @@ RECIPES
 
 subtest "a domain with no recipe costs nothing" => sub {
 
-    # auto_assign writes to ipmap.cfg and takes an address out of the pool for
-    # good; get_secrets opens the password database and prompts.  Neither
-    # should happen on the way to telling somebody they typed the name wrong.
-    my $ipmap = <<"IPMAP";
-[global]
-basedir     = $basedir
-admin_user  = tester
-admin_gecos = Test User
-admin_email = test\@test.test
-gateway = 192.168.1.254
-resolvers = 8.8.8.8
-transfer_user = provision
-
-[ip_pool]
-cidr = 192.168.1.0/30
-
-[ips]
-IPMAP
-
-    my $recipe = <<'RECIPES';
+    # auto_assign takes an address out of the pool for good, and get_secrets
+    # opens the password database and prompts.  Neither should happen on the
+    # way to telling somebody they typed the name wrong.
+    my $recipe = <<"RECIPES";
 ---
 _base:
+  _global:
+    basedir: $basedir
+    admin_user: tester
+    admin_gecos: Test User
+    admin_email: test\@test.test
+    gateway: 192.168.1.254
+    resolvers: [8.8.8.8]
+    transfer_user: provision
+    ip_pool:
+      cidr: 192.168.1.0/30
   adminconfig:
     pkgs:
       - vim
@@ -207,22 +180,16 @@ RECIPES
     my $tdd_mock    = Test::MockFile->new_dir( "$basedir/recipes.d", { mode => 0755 } );
     my $recipe_mock = Test::MockFile->file( "$basedir/recipes.yaml", $recipe );
 
-    my ( $fh, $ipmap_file ) = File::Temp::tempfile();
-    print {$fh} $ipmap;
-    close($fh) or die "Could not close $ipmap_file: $!";
-    my $ipmap_mock = Test::MockFile->file( $ipmap_file, $ipmap );
-
     # Read out of the configuration directory rather than fetched by cloud-init,
     # and MockFile is strict here: an unmocked read is fatal, not a miss.  The
     # path is the one Trog::Config resolves, which is the environment override
     # this file sets in BEGIN rather than the basedir the rest of these mock.
     my $keys_mock = Test::MockFile->file( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtesterskey tester\n" );
 
-    my $before = _slurp($ipmap_file);
+    my $before = _slurp("$basedir/recipes.yaml");
 
     my $result = exception {
         Trog::Provisioner::Config::Generator::main(
-            '--ipmap',   $ipmap_file,
             '--recipes', "$basedir/recipes.yaml",
             '--skip_ssh',
             'typo.test.local',
@@ -231,8 +198,8 @@ RECIPES
 
     like( $result, qr/No[ ]recipe[ ]configuration/i, 'it says the recipe is missing' );
     is(
-        _slurp($ipmap_file), $before,
-        'and ipmap.cfg is untouched, so the typo cost no address'
+        _slurp("$basedir/recipes.yaml"), $before,
+        'and recipes.yaml is untouched, so the typo cost no address'
     );
 };
 
@@ -339,7 +306,7 @@ subtest 'hv_lines passes a setting of 0 through, and leaves out an empty one' =>
 # Real directories under here, not mocks.  What the check asks is whether
 # anything actually landed on the hypervisor's disk, and answering that against a
 # mocked filesystem would only prove the mock agrees with itself.  Strict mode
-# has to be told this one tree is allowed, as it is told about ipmap.cfg above.
+# has to be told this one tree is allowed, as it is told about the others above.
 my $salvage_root = File::Temp::tempdir( CLEANUP => 1 );
 Test::MockFile::add_strict_rule_for_filename( [ $salvage_root, qr/^\Q$salvage_root\E/ ] => 1 );
 
@@ -448,39 +415,6 @@ subtest 'an empty tree of directories is not a salvage' => sub {
         Trog::Provisioner::Config::Generator::_dir_has_files($links),    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
         'a symlink is something, and looking at it does not walk into itself'
     );
-};
-
-# Config::Simple hands back a bare string for a key with one value and an array
-# for two.  A single alias anywhere in the map therefore arrived as a string,
-# which the aliases schema refuses and which get_config's caller cannot
-# dereference -- so one domain with one alias refused every domain on the
-# installation.
-subtest 'one alias is a list, as two already were' => sub {
-    my ( $fh, $file ) = File::Temp::tempfile();
-    print {$fh} <<'IPMAP';
-[global]
-basedir = /bogus
-
-[aliases]
-one.test.local = solo.test.local
-two.test.local = first.test.local, second.test.local
-IPMAP
-    close($fh) or die "Could not close $file: $!";
-
-    local $Trog::Provisioner::Config::Generator::cfile = $file;
-    my $aliases = ( Trog::Provisioner::Config::Generator::get_config() )[1];
-
-    is_deeply( $aliases->{'one.test.local'}, ['solo.test.local'],                         'a lone alias is a one-element list rather than a string' );
-    is_deeply( $aliases->{'two.test.local'}, [ 'first.test.local', 'second.test.local' ], 'and a pair is left as the list it already was' );
-
-    my ( $fh2, $bare ) = File::Temp::tempfile();
-    print {$fh2} "[global]\nbasedir = /bogus\n";
-    close($fh2) or die "Could not close $bare: $!";
-
-    local $Trog::Provisioner::Config::Generator::cfile = $bare;
-    my $none = ( Trog::Provisioner::Config::Generator::get_config() )[1];
-
-    is_deeply( $none, {}, 'and a map naming no aliases at all has none, rather than undef' );
 };
 
 done_testing();

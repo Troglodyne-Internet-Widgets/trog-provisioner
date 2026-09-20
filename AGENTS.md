@@ -20,7 +20,7 @@ These are then to be used by the `trog-provisioner` project.
 bin/new_config test.somedomain
 
 # With custom config files
-bin/new_config --ipmap=path/to/ipmap.cfg --recipes=path/to/recipes.yaml domain.name
+bin/new_config --recipes=path/to/recipes.yaml domain.name
 ```
 
 ### Perl Module Development
@@ -178,7 +178,6 @@ trog-provisioner/
 ├── docs/             # Documentation
 ├── vendor/           # Custom/private modules (gitignored)
 ├── recipes.yaml      # File that controls what recipes to load when provisioning any given guest (gitignored due to necessarily containing sensitive information)
-└── ipmap.cfg         # File that describes the network topology of our guests and the admin user's information (gitignored due to necessarily containing sensitive information)
 ```
 
 ## Best Practices

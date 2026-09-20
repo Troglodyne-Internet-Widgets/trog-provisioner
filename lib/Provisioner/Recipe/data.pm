@@ -25,10 +25,10 @@ files of a domain live on the guest, and where they come from:
     somedomain:
         deluged:
 
-and, optionally, in ipmap.cfg:
+and, optionally, in the C<_global> of C<_base>:
 
-    transfer_user=whoever_runs_trog_provisioner
-    transfer_ip=192.0.2.10
+    transfer_user: whoever_runs_trog_provisioner
+    transfer_ip: 192.0.2.10
 
 Neither is required.  The guest fetches from the machine that runs this tool,
 as the account that runs it.  It uses an address of that machine that the guest

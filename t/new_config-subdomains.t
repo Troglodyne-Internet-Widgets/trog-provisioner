@@ -57,33 +57,29 @@ sub generate {
 
     my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
 
-    my $ipmap = <<"IPMAP";
-[global]
-ip=192.168.1.50
-basedir=$tmpdir/domains
-transfer_user=doge
-admin_user=doge
-admin_email=bogus\@test.test
-admin_gecos=Test Test
-gateway=192.168.1.254
-resolvers=192.168.1.254
-bridge_devname=ens4
-dhcp_devname=ens3
-[ip_pool]
-addresses=$pool
-[nameservers]
-ns1=ns1.test.test
-ns2=ns2.test.test
-IPMAP
-
-    my %recipes = (
-        _base   => { _global => { data_source => "$tmpdir/data" } },
-        $domain => \%recipes_for,
+    # One resolver on purpose, written as a scalar rather than a list.  That is
+    # what an operator writes, and bin/new_config dereferenced it raw when it
+    # wrote provision.conf -- so generating from this is what catches it coming
+    # back.
+    my %global = (
+        data_source    => "$tmpdir/data",
+        basedir        => "$tmpdir/domains",
+        transfer_user  => 'doge',
+        admin_user     => 'doge',
+        admin_email    => 'bogus@test.test',
+        admin_gecos    => 'Test Test',
+        gateway        => '192.168.1.254',
+        resolvers      => '192.168.1.254',
+        bridge_devname => 'ens4',
+        dhcp_devname   => 'ens3',
+        ip_pool        => { addresses => $pool },
+        nameservers    => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
-    my ( $ih, $ipmap_file ) = tempfile();
-    print {$ih} $ipmap;
-    close($ih) or die "Could not close $ipmap_file: $!";
+    my %recipes = (
+        _base   => { _global => \%global },
+        $domain => \%recipes_for,
+    );
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     File::Slurper::Temp::write_text( $recipe_file, YAML::XS::Dump( \%recipes ) );
@@ -91,7 +87,7 @@ IPMAP
     Provisioner::Cookbook->forget();
 
     my $err = exception {
-        Trog::Provisioner::Config::Generator::main( '--ipmap', $ipmap_file, '--recipes', $recipe_file, '--skip_ssh', $domain );
+        Trog::Provisioner::Config::Generator::main( '--recipes', $recipe_file, '--skip_ssh', $domain );
     };
 
     my $makefile = "$tmpdir/domains/$domain/Makefile";

@@ -12,7 +12,7 @@ use re '/aasx';
 
 use FindBin::libs;
 
-use Config::Simple;
+use Provisioner::Cookbook();
 use Getopt::Long qw{GetOptionsFromArray};
 use Pod::Usage   qw{pod2usage};
 
@@ -21,7 +21,7 @@ use Provisioner::IPPool();
 
 =head1 USAGE
 
-    assign_ip [--ipmap=file] DOMAIN
+    assign_ip [--recipes=file] DOMAIN
 
 Print the static address that C<DOMAIN> holds.  If it holds none, assign it
 the first free address in the pool and print that.
@@ -36,7 +36,7 @@ a script can call this when it does not know if the domain was provisioned.
     $ bin/assign_ip staging.troglodyne.net
     192.168.1.48
 
-This dies when F<ipmap.cfg> cannot be read, when it has no C<[ip_pool]>, or when
+This dies when F<recipes.yaml> cannot be read, when it has no C<ip_pool>, or when
 the pool has no free address.  It also dies if a hypervisor does not answer
 before the database has a record of its guests.
 
@@ -54,9 +54,9 @@ same time cannot choose the same address.  L<Provisioner::IPPool> tells how.
 sub main {
     my @args = @_;
 
-    my $cfile = Trog::Config->path('ipmap.cfg');
+    my $rfile = Trog::Config->path('recipes.yaml');
     my $help;
-    GetOptionsFromArray( \@args, 'ipmap=s' => \$cfile, 'help' => \$help );
+    GetOptionsFromArray( \@args, 'recipes=s' => \$rfile, 'help' => \$help );
 
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
 
@@ -64,13 +64,12 @@ sub main {
     pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__, -message => 'No domain passed' )
       unless $domain;
 
-    my $c = Config::Simple->new($cfile);
-    die "$Config::Simple::errstr\n" unless $c;
-    my $pool = $c->param( -block => 'ip_pool' ) // {};
+    my $globals = Provisioner::Cookbook->globals( undef, Provisioner::Cookbook->configuration($rfile) );
+    my $pool    = $globals->{ip_pool} // {};
 
     # Seed from the hypervisors first, so a new database does not give out an
     # address that a guest already uses.
-    Provisioner::IPPool::ensure_seeded($pool);
+    Provisioner::IPPool::ensure_seeded( $pool, $globals->{gateway} );
 
     print Provisioner::IPPool::assign( $domain, $pool ) . "\n";
     return 0;

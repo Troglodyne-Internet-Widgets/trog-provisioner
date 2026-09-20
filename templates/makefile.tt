@@ -147,7 +147,7 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 	touch $@
 
 # Set the SSH security policy explicitly.  Password logins stop working, so set
-# up users and their keys in ipmap.cfg and the users.yaml of the data directory.
+# up users and their keys in recipes.yaml and the users.yaml of the data directory.
 [% state_dir %]/ssh:
 	echo 'PermitRootLogin prohibit-password' > /etc/ssh/sshd_config.d/100-security.conf
 	echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config.d/100-security.conf

@@ -31,15 +31,15 @@ payload over it when this machine is the hypervisor.
 
 ## What the configuration names
 
-In `ipmap.cfg`:
+In the `_global` of `_base` in `recipes.yaml`:
 
-- `[ip_pool]` lists the static addresses that guests can get.  They must be on
+- `ip_pool` lists the static addresses that guests can get.  They must be on
   the subnet of the primary bridge.  Keep them out of any range that a DHCP
   server on that network hands out.
-- `gateway` in `[global]` is the gateway of that subnet.
-- `transfer_ip` in `[global]` is the address of this machine that a guest
-  fetches its payload from.  Set it only when this machine has more than one
-  route to the guest, or when the guest has no address yet to route to.
+- `gateway` is the gateway of that subnet.
+- `transfer_ip` is the address of this machine that a guest fetches its payload
+  from.  Set it only when this machine has more than one route to the guest, or
+  when the guest has no address yet to route to.
 
 `bin/assign_ip` prints or assigns the static address of a domain.  Assignments
 are kept in `ips.db`: see `perldoc Provisioner::IPPool`.

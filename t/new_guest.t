@@ -35,6 +35,20 @@ BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir(
 my $script = "$FindBin::Bin/../bin/new_guest";
 require_ok($script) or BAIL_OUT("$script does not load; the install is incomplete");
 
+# What an installation is configured with.  bin/new_guest refuses to scaffold a
+# guest without it, and a subtest that wants that refusal writes its own
+# directory rather than emptying this one.
+my $SETTINGS = <<"SETTINGS";
+    basedir: /bogus
+    admin_user: doge
+    admin_gecos: Doge Doge
+    admin_email: doge\@test.test
+    gateway: 192.168.1.254
+    resolvers: [192.168.1.254]
+SETTINGS
+
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "---\n_base:\n  _global:\n$SETTINGS" );
+
 # These print their progress to stderr; the tests do not need to read it.
 sub quietly {
     my ($code) = @_;
@@ -172,19 +186,19 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 
-    is_deeply( Trog::Bin::NewGuest::base_config(), {}, 'no recipes.yaml at all is not an error' );
+    # An installation that has not said who administers its guests scaffolds
+    # one whose files are owned by nobody, and nothing between here and the
+    # build says so.
+    my $err = exception { Trog::Bin::NewGuest::base_config() };
+    like( $err, qr/admin_user/,    'an installation that says nothing is refused' );
+    like( $err, qr/recipes\.yaml/, 'and told which file says it' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nsome.test.test:\n  ntp:\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  ntp:\n    pool: base.pool\n  _global:\n    data_source: /bogus/data\n$SETTINGS" );
     Provisioner::Cookbook->forget();
-    is_deeply( Trog::Bin::NewGuest::base_config(), {}, 'nor is one with no _base' );
-
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  ntp:\n    pool: base.pool\n  _global:\n    data_source: /bogus/data\n" );
-    Provisioner::Cookbook->forget();
-    is_deeply(
-        Trog::Bin::NewGuest::base_config(),
-        { ntp => { pool => 'base.pool' }, _global => { data_source => '/bogus/data' } },
-        'and it reads, _global and all'
-    );
+    my $base = Trog::Bin::NewGuest::base_config();
+    is_deeply( $base->{ntp}, { pool => 'base.pool' }, 'the recipes of _base read' );
+    is( $base->{_global}{data_source}, '/bogus/data', '_global and all' );
+    is( $base->{_global}{admin_user},  'doge',        'with the settings every guest is built with' );
 
     # A domain file cannot say what every guest gets.
     mkdir("$dir/recipes.d") or die "Could not make $dir/recipes.d: $!";
@@ -198,6 +212,9 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
 subtest 'writing a guest' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n$SETTINGS" );
+    Provisioner::Cookbook->forget();
 
     is( quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname scratch.test ntp ufw}) } ), 0, 'runs' );
 

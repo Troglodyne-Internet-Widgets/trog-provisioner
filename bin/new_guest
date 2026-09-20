@@ -141,7 +141,7 @@ sub main {
     die "No recipe named " . join( ', ', map { "'$_'" } @unknown ) . ".\n" . "Try `bin/recipes` for the ones there are.\n" if @unknown;
 
     $hostname //= default_hostname();
-    die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in ipmap.cfg and recipes.d.\n"
+    die "'$hostname' is not a fully qualified domain name.\n" . "Domains are spelled out in full, here as in recipes.yaml and recipes.d.\n"
       unless Data::Validate::Domain::is_domain( $hostname, { domain_disable_tld_validation => 1 } );
 
     my ( $config, @todo ) = build(
@@ -198,18 +198,22 @@ sub unique {
 
 Returns the C<_base> block of F<recipes.yaml>, with its C<_global>, as
 L<Provisioner::Cookbook> reads it.  Every domain gets the values in C<_base>
-unless it sets them itself, so the new file does not repeat them.  Returns an
-empty hash when the file is missing or has no C<_base> block.  Dies if the file
-does not parse.
+unless it sets them itself, so the new file does not repeat them.  Dies if the
+file does not parse, and if the installation has not said what its guests are
+built with.
+
+That refusal is here rather than in F<bin/new_config> alone because a
+C<required_recipes> sub reads those settings while this scaffolds: a guest
+scaffolded without an C<admin_user> gets files owned by nobody, and nothing
+between here and the build says so.
 
 =cut
 
 sub base_config {
-    my $conf   = Provisioner::Cookbook->configuration();
-    my $base   = Provisioner::Cookbook->domain_config( undef, $conf );
-    my $global = Provisioner::Cookbook->global_config( undef, $conf );
+    my $conf = Provisioner::Cookbook->configuration();
+    my $base = Provisioner::Cookbook->domain_config( undef, $conf );
 
-    $base->{_global} = $global if %$global;
+    $base->{_global} = Provisioner::Cookbook->globals( undef, $conf );
     return $base;
 }
 

@@ -68,16 +68,17 @@ This sets `TROG_PROVISIONER_CONFIG` and `TROG_SCRATCH_PASS` for the shell. Every
 command after it must run with that variable set — if you run each `Bash` call
 separately, re-export it or the tools will read `/etc/trog-provisioner` instead.
 
-It copies `ipmap.cfg` and `recipes.yaml`, leaves `recipes.d/` empty, and builds
-a KeePass DB holding a made-up value for every `secret:` reference in
-`recipes.yaml`.
+It takes the settings of the installation out of the `_global` of `_base` in
+its `recipes.yaml` and writes them into a `recipes.yaml` of its own, leaves
+`recipes.d/` empty, and builds a KeePass DB holding a made-up value for every
+`secret:` reference in that file.
 
 Three things about it worth understanding:
 
 - **Addresses look after themselves.** They come out of `ips.db` beside the rest
-  of the configuration, not the `[ips]` section of `ipmap.cfg`, and `new_config`
-  takes one in a transaction — so a fan-out of provisions cannot hand two guests
-  the same address, and there is nothing to edit by hand. The scratch
+  of the configuration, and `new_config` takes one in a transaction — so a
+  fan-out of provisions cannot hand two guests the same address, and there is
+  nothing to edit by hand. The scratch
   configuration gets its own database, seeded from what the hypervisors are
   actually running, so a throwaway guest cannot take an address a real one has.
 
