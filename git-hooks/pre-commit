@@ -184,7 +184,10 @@ do
             ;;
     esac
 
-    out=$(perl -Ilib -c "$file" 2>&1) || {
+    # t/lib as well as lib, because a test library is loaded by its module
+    # name: Trog::Test::RemoteTests uses Trog::Test::RecipeConfig, and with
+    # lib alone the compile fails on that use rather than on anything staged.
+    out=$(perl -Ilib -It/lib -c "$file" 2>&1) || {
         echo "$out"
         compile_failed=1
     }
