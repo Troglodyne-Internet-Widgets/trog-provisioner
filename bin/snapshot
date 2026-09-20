@@ -81,6 +81,36 @@ back as it was.  C<--disk-only> takes only the disk, and stops and starts the
 guest to do it.  A guest that is off has no memory to save.  The command takes
 its snapshot as it is, and leaves it off.
 
+=head2 A snapshot holds the definition of the guest, not only its disk
+
+libvirt writes the whole C<E<lt>domainE<gt>> into the snapshot, and a revert
+restores that definition as well as the disk.  So a snapshot is of the machine
+the guest was, and not only of what was on it.
+
+That matters where the definition changed since.  The clearest case is the
+machine type: a guest built on i440fx and later rebuilt as q35 has a snapshot
+that carries the i440fx definition, down to the PCI slots of its interfaces.
+Reverting to it puts the guest back on i440fx without saying so, and the next
+C<bin/provision> puts it back on q35, because the generated F<domain.xml> is
+what a provision defines.  Nothing errors on the way through.  See the
+C<machine> setting in L<Provisioner::Recipe::vm>.
+
+A full system snapshot is the worse half of that.  Its memory image belongs to
+the machine it was taken on, so reverting one across a change of machine type
+asks a guest to resume on hardware that is not the hardware it was running on.
+C<--disk-only> has no memory to be wrong, and a revert to it boots the guest.
+
+So take a snapshot again after a change to the definition of a guest, and treat
+the ones from before it as the older machine that they are.
+
+=head2 A snapshot lives inside the disk of the guest
+
+It is a qcow2 internal snapshot, not a file of its own.  A rebuild that cannot
+keep the disk of the guest deletes that disk, and every snapshot in it goes at
+the same time.  C<Trog::HV::Libvirt::disk_reusable> is what decides whether a
+rebuild keeps it, and C<rollback_possible> is where a rebuild asks whether a
+snapshot would survive itself.
+
 =cut
 
 sub main {

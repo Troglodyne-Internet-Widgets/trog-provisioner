@@ -73,6 +73,11 @@ Reverts the domain and leaves it running.  Then it waits until SSH connects at
 the address that F<provision.conf> gives for the domain.  Thus a revert that
 gives a VM you cannot reach is a failure, not a success.
 
+A revert restores the definition of the guest as it was when the snapshot was
+taken, and not only the disk.  F<bin/snapshot> says what that means for a guest
+whose definition has changed since, such as one that has been rebuilt on
+another machine type.
+
 =cut
 
 sub main {
