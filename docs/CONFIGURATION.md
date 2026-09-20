@@ -161,10 +161,15 @@ See [EXAMPLE.md](../EXAMPLE.md) for a worked one, and each recipe's own POD
 
 `_global` also carries the settings that describe how the **hypervisor** builds
 the guest rather than what goes on it: `size`, `memory` and `cpus`, and
-optionally `cpu_mode` and the `disk_*` keys. Those belong to the `vm` recipe, so
+optionally `machine`, `cpu_mode` and the `disk_*` keys. Those belong to the `vm` recipe, so
 `bin/recipes vm` prints what each of them is and what it defaults to. They are
 copied into the guest's `provision.conf`, which is where `bin/provision` reads
 them.
+
+`machine` is the libvirt machine type, and it is `q35` by default: a guest gets
+a PCIe topology, which is what an assigned PCIe device needs.  `pc` asks for the
+older i440fx instead.  It decides the PCI topology the guest knows, so changing
+it on a guest that exists is a new machine to that guest.
 
 The `disk_*` ones are all optional and none of them are emitted blind -- the `vm`
 recipe asks the hypervisor's libvirt and qemu what they will accept and leaves

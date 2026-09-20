@@ -35,12 +35,14 @@
   <iothreads>[% tuning.iothreads %]</iothreads>
 [% END -%]
 
-  <!-- i440fx, not q35.  The machine type decides the PCI topology that the
-       guest kernel knows, and the guests on these hypervisors run on i440fx.
-       `pc` is the alias for the newest i440fx that the host qemu has, so this
-       pins no version that another hypervisor does not have. -->
+  <!-- The machine type decides the PCI topology that the guest kernel knows,
+       so it is a new machine to a guest that already exists.  q35 by default,
+       for the PCIe topology that an assigned device needs.  `q35` and `pc` are
+       aliases for the newest of each family that the host qemu has, so neither
+       pins a version that another hypervisor does not have.  See the machine
+       setting in Provisioner::Recipe::vm. -->
   <os>
-    <type arch='x86_64' machine='pc'>hvm</type>
+    <type arch='x86_64' machine='[% machine %]'>hvm</type>
   </os>
 
   <features>
@@ -117,25 +119,33 @@
     <!-- Two interfaces: the libvirt NAT for the hypervisor to reach it by
          lease, and the outbound bridge for its real address.
 
-         Both the PCI slot and the MAC are pinned rather than left to libvirt.
-         The slot is what the guest's interface name is derived from, because
-         systemd names a PCI NIC after its hotplug slot, so leaving it to
-         allocation order means the names move whenever the device list does.
-         Trog::HV::nic_slots is where they are decided, and nic_names is what
-         the guest is told to expect.  The MAC is derived from the domain name,
-         so it is the same on every rebuild: the DHCP lease stays put, and the
-         network configuration can match on it rather than on a name. -->
+         The MAC is derived from the domain name, so it is the same on every
+         rebuild: the DHCP lease stays put, and the network configuration
+         matches on the MAC rather than on a name, and renames the interface
+         to what Trog::HV::nic_names says.  See ubuntu.network-config.tt.
+
+         On i440fx the PCI slot is pinned too, because systemd names a PCI NIC
+         after its hotplug slot there, so leaving the slot to allocation order
+         moves the name the guest first sees whenever the device list does.
+         Trog::HV::nic_slots decides those.  A q35 guest has no such slot: its
+         devices sit behind PCIe root ports that libvirt allocates, and the
+         name comes from the path.  So the address is left out there, and the
+         rename above is what settles the name. -->
     <interface type='network'>
       <mac address='[% nat_mac %]'/>
       <source network='default'/>
       <model type='virtio'/>
+[% IF !pcie -%]
       <address type='pci' domain='0x0000' bus='0x00' slot='[% nat_slot %]' function='0x0'/>
+[% END -%]
     </interface>
     <interface type='bridge'>
       <mac address='[% bridge_mac %]'/>
       <source bridge='[% bridge_device %]'/>
       <model type='virtio'/>
+[% IF !pcie -%]
       <address type='pci' domain='0x0000' bus='0x00' slot='[% bridge_slot %]' function='0x0'/>
+[% END -%]
     </interface>
 
 [% FOR fs IN filesystems -%]

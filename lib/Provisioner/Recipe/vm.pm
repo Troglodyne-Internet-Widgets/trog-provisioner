@@ -62,6 +62,36 @@ The throttles are the exception.  Any other setting that fails open only leaves
 a guest untuned.  A throttle that is silently not applied leaves somebody who
 believes in a limit that does not exist.  So an unsupported throttle is fatal.
 
+=head2 The machine type is q35, and it is not a setting to change lightly
+
+C<machine> is the libvirt machine type, and it defaults to C<q35>.  A q35 guest
+has a PCIe topology: its devices sit behind root ports rather than on one
+parallel bus, which is what an assigned PCIe device needs, and what a current
+kernel expects to find.  C<pc>, the older i440fx, is still there for a guest
+that wants it.
+
+Two things follow from the choice, and both are about the guest rather than the
+hypervisor.
+
+The guest enumerated its PCI topology when it first booted, so changing this on
+a guest that exists is a new machine to it.  That is not a rebuild, which
+starts from a new disk anyway: it is an edit to the configuration of a guest
+that stays.
+
+The name of an interface follows from the topology.  On i440fx, systemd names a
+PCI NIC after its hotplug slot, and F<templates/files/vm.domain.xml.tt> pins
+those slots so the names are the same on every build.  A q35 guest has no such
+slot, and libvirt places the interfaces itself, so the address is left out and
+the kernel names them after the path.  Either way the guest ends up calling
+them what L<Trog::HV/nic_names> says, because the network configuration matches
+on the MAC address and renames the interface.  See
+F<templates/ubuntu/files/ubuntu.network-config.tt>.
+
+A name with a version in it, such as C<pc-q35-8.2>, pins the device model
+against an upgrade of the host qemu.  Every hypervisor that the guest may be
+built on has to have that machine, and C<virsh capabilities> on each one lists
+what it has.
+
 =head2 WHEN IT IS GENERATED
 
 The XML names a storage volume, a backing image and a seed ISO.  It names them
@@ -147,6 +177,12 @@ sub args {
                 type        => 'integer',
                 default     => 42949672960,
                 description => 'Guest disk, in bytes.  An overlay on the shared base image, so this is what it may grow to rather than what it takes now.',
+            },
+            machine => {
+                type        => 'string',
+                default     => 'q35',
+                description =>
+                  'libvirt <type machine>.  q35 gives the guest a PCIe topology, which is what an assigned PCIe device needs and what a modern kernel expects; pc is the older i440fx.  A name with a version in it, such as pc-q35-8.2, pins the device model against a host qemu upgrade, and every hypervisor that guest may land on has to have it.  Changing this on a guest that exists is a new machine to it: the PCI topology it enumerated at first boot is gone.',
             },
             cpu_mode => {
                 type        => 'string',
@@ -338,9 +374,14 @@ sub enrich {
     # names one to put every guest built here into one systemd slice to cap.
     $opts{partition} = $hv->partition;
 
-    # The PCI slots of the two interfaces, as libvirt writes them.  The
-    # hypervisor decides, because the interface names on the guest come from
-    # these.  See Trog::HV::nic_names.
+    # Whether the machine gives the guest a PCIe topology.  A q35 of any
+    # version does; i440fx does not.  The template puts the interfaces on the
+    # bus that the machine has.
+    $opts{pcie} = ( $opts{machine} // q{} ) =~ m/q35/ ? 1 : 0;
+
+    # The PCI slots of the two interfaces, as libvirt writes them.  On i440fx
+    # the hypervisor decides them, because the interface names on the guest
+    # come from the slot.  See Trog::HV::nic_names.
     ( $opts{nat_slot}, $opts{bridge_slot} ) = map { sprintf '0x%02x', $_ } $hv->nic_slots;
 
     my ( $disks, $filesystems, $devices ) = $self->_devices( \%opts, \%tuning );
