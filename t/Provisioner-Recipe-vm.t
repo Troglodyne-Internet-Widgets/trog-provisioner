@@ -451,6 +451,28 @@ subtest 'a guest goes in the slice and the pool its hypervisor names' => sub {
     like( $confined, qr/<source[ ]pool='runner_disks'/,                                     'out of the pool it was given, rather than the literal that used to be here' );
 };
 
+# --- The machine type, and the topology that follows from it -----------------
+subtest 'a guest is a q35 unless it is configured otherwise' => sub {
+    my $default = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ) );
+    like( $default, qr/<type[ ]arch='x86_64'[ ]machine='q35'>hvm<\/type>/, 'q35 by default, for the PCIe topology' );
+
+    # A q35 guest has its interfaces behind root ports that libvirt allocates.
+    # Pinning a slot on bus 0 there is either refused or an integrated endpoint
+    # with no hotplug slot, and the name no longer follows from it either way.
+    unlike( $default, qr/<address[ ]type='pci'[^>]*slot='0x0[34]'/, 'and its interfaces are left for libvirt to place' );
+
+    my $i440fx = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ), config => { machine => 'pc' } );
+    like( $i440fx, qr/<type[ ]arch='x86_64'[ ]machine='pc'>hvm<\/type>/, 'a guest can ask for the older machine' );
+    like( $i440fx, qr/<address[ ]type='pci'[^>]*slot='0x03'[^>]*\/>/,    'where the slot of the NAT interface is pinned' );
+    like( $i440fx, qr/<address[ ]type='pci'[^>]*slot='0x04'[^>]*\/>/,    'and of the bridge one, because the names come from them there' );
+
+    # Pinning a version is how a guest keeps the same device model across a
+    # host qemu upgrade, and q35 is a substring of every q35 version.
+    my $pinned = _tuned_xml( libvirt => _libvirt( 10, 0, 0 ), qemu => _libvirt( 9, 0, 0 ), config => { machine => 'pc-q35-8.2' } );
+    like( $pinned, qr/machine='pc-q35-8[.]2'/, 'a version can be named' );
+    unlike( $pinned, qr/<address[ ]type='pci'[^>]*slot='0x0[34]'/, 'and it is still a PCIe machine' );
+};
+
 # --- Which netplan entry gets the static IP ----------------------------------
 Test::NoWarnings::had_no_warnings();
 
