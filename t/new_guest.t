@@ -147,6 +147,24 @@ subtest 'a recipe that salvages something can still be scaffolded' => sub {
     ok( exists $config->{'vm.test'}{letsencrypt}, 'the recipe is scaffolded rather than taking the run down' );
 };
 
+subtest 'every recipe can be scaffolded with nothing in _global' => sub {
+
+    # A required_recipes sub, and the restores() that the base class asks for,
+    # run before validation and get only what _global has.  An installation can
+    # name nothing there, so a sub that reads a global has to say what it means
+    # when there is none.  Under `warnings FATAL => 'all'` an unguarded read is
+    # not a wrong answer, it is a dead run: bin/new_guest writes no file, and
+    # bin/provision then reports a domain with no configuration.  See #196.
+    my @refused;
+    foreach my $recipe ( sort( Provisioner::Cookbook->names ) ) {
+        next if eval { Provisioner::Cookbook->scaffold_dependencies( [$recipe], domain => 'd.test', global_config => {} ); 1 };
+        my ($why) = split( m/\n/, $@ );
+        push @refused, "$recipe: $why";
+    }
+
+    is_deeply( \@refused, [], 'every recipe walks its dependencies with an empty global' ) or diag join( "\n", @refused );
+};
+
 subtest 'a recipe whose dependencies are built from the domain can be scaffolded' => sub {
 
     # tpsgi builds the path that perl installs from out of install_dir and the
