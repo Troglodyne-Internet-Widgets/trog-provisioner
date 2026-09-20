@@ -527,8 +527,11 @@ sub dependencies_of {
     $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
 
     # A domain is required rather than defaulted, so a caller with no real one
-    # says which bogus one it means.
-    return Provisioner::Cookbook->scaffold_dependencies( $named, domain => 'd.test', %opts );
+    # says which bogus one it means.  The admin_user is required of an
+    # installation for the same reason: a required_recipes sub reads it, and
+    # nothing invents an account that owns the files of a guest.
+    my %global = ( admin_user => 'doge', %{ $opts{global_config} // {} } );
+    return Provisioner::Cookbook->scaffold_dependencies( $named, domain => 'd.test', %opts, global_config => \%global );
 }
 
 subtest 'a dependency nobody named still says what it wants' => sub {
@@ -552,6 +555,25 @@ subtest 'the walk reaches a dependency of a dependency' => sub {
     ok( ( grep { $_ eq 't_deep.buried' } @todo ), 'and reported with the rest' );
 };
 
+subtest 'a domain with no admin_user is refused rather than owned by root' => sub {
+    my $mock = Test::MockModule->new('Provisioner::Cookbook');
+    $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
+
+    # Every recipe that owns a file reads it, and a guest whose files belong to
+    # root looks built until somebody uses the service account.  bin/new_config
+    # refuses the same thing when it reads ipmap.cfg.
+    my $err = exception {
+        Provisioner::Cookbook->scaffold_dependencies( ['t_reader'], domain => 'd.test', global_config => {} );
+    };
+    like( $err, qr/d[.]test[ ]has[ ]no[ ]admin_user/, 'the refusal names the domain and the setting' );
+    like( $err, qr/ipmap[.]cfg/,                      'and where to name it' );
+
+    like(
+        exception { Provisioner::Cookbook->scaffold_dependencies( ['t_reader'], domain => 'd.test', global_config => { admin_user => q{} } ) },
+        qr/has[ ]no[ ]admin_user/, 'an empty one is no answer either'
+    );
+};
+
 subtest 'a required_recipes sub always gets the domain and install_dir' => sub {
 
     dependencies_of( ['t_reader'] );
@@ -568,10 +590,11 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
 
     my %conf = ( t_requirer => {} );
     my ( $modules, $builders ) = Provisioner::Cookbook->resolve_dependencies(
-        modules     => ['t_requirer'],
-        domain_conf => \%conf,
-        distro      => 'ubuntu',
-        provisioner => {
+        modules       => ['t_requirer'],
+        domain_conf   => \%conf,
+        global_config => { admin_user => 'doge' },
+        distro        => 'ubuntu',
+        provisioner   => {
             template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
             output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
         },
@@ -610,10 +633,11 @@ subtest 'the same configuration comes back in the same order every run' => sub {
     $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
 
     my ($modules) = Provisioner::Cookbook->resolve_dependencies(
-        modules     => ['t_requirer'],
-        domain_conf => { t_requirer => {} },
-        distro      => 'ubuntu',
-        provisioner => {
+        modules       => ['t_requirer'],
+        domain_conf   => { t_requirer => {} },
+        global_config => { admin_user => 'doge' },
+        distro        => 'ubuntu',
+        provisioner   => {
             template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
             output_dir    => File::Temp::tempdir( CLEANUP => 1 ),
         },
@@ -641,10 +665,11 @@ subtest 'a dependency configured inside its requirer is lifted out of the stanza
     my %conf = ( t_requirer => { t_dep => { secret => 'said here' }, t_nonsense => { x => 1 } } );
 
     Provisioner::Cookbook->resolve_dependencies(
-        modules     => ['t_requirer'],
-        domain_conf => \%conf,
-        distro      => 'ubuntu',
-        provisioner => {
+        modules       => ['t_requirer'],
+        domain_conf   => \%conf,
+        global_config => { admin_user => 'doge' },
+        distro        => 'ubuntu',
+        provisioner   => {
             template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
             output_dir    => $out,
         },

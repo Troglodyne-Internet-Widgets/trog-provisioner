@@ -24,6 +24,7 @@ use YAML::XS();
 
 use Provisioner::Cookbook();
 use Trog::Config();
+use Config::Simple();
 
 =head1 NAME
 
@@ -202,6 +203,12 @@ unless it sets them itself, so the new file does not repeat them.  Returns an
 empty hash when the file is missing or has no C<_base> block.  Dies if the file
 does not parse.
 
+The C<_global> gains the C<admin_user> of F<ipmap.cfg> when C<_base> names
+none.  A C<required_recipes> sub reads that setting while this walks the
+dependencies, and F<ipmap.cfg> is where an installation names it, which is the
+same file that F<bin/new_config> reads it from.  It is not written into the
+file this generates: it belongs to the installation and not to one domain.
+
 =cut
 
 sub base_config {
@@ -209,8 +216,34 @@ sub base_config {
     my $base   = Provisioner::Cookbook->domain_config( undef, $conf );
     my $global = Provisioner::Cookbook->global_config( undef, $conf );
 
+    # Only when there is one: an assignment of undef makes the key, and a
+    # _global that carries an admin_user of undef is not the same thing as one
+    # that never mentioned it.
+    my $admin = ipmap_admin_user();
+    $global->{admin_user} //= $admin if defined $admin;
+
     $base->{_global} = $global if %$global;
     return $base;
+}
+
+=head2 $user = ipmap_admin_user()
+
+The C<admin_user> of the global section of F<ipmap.cfg>, or undef when the file
+has none or is not there.  L<Provisioner::Cookbook/resolve_dependencies>
+refuses a domain with no C<admin_user>, so the message an operator gets names
+the setting rather than a path built from an undef.
+
+=cut
+
+sub ipmap_admin_user {
+    my $path = Trog::Config->path('ipmap.cfg');
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- the file is optional, and this is how you ask
+    return undef unless -f $path;
+
+    my $ipmap  = eval { Config::Simple->new($path) } or return undef;
+    my $global = $ipmap->param( -block => 'global' ) // {};
+    return $global->{admin_user};
 }
 
 =head2 ($config, @todo) = build($hostname, \@recipes, \%opts)

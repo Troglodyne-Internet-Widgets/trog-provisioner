@@ -53,6 +53,14 @@ sub run_bin {
     return ( $out, $err, $? >> 8 );
 }
 
+# What an installation has: ipmap.cfg names the account that administers a
+# guest, and Provisioner::Cookbook refuses a domain with none.  base_config
+# reads it out of that file for the same reason, so the runs below that go
+# through the configuration directory need one there.
+my %ADMIN = ( _global => { admin_user => 'doge' } );
+
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/ipmap.cfg", "[global]\nadmin_user=doge\n" );
+
 subtest 'a default hostname is unique, and under a TLD reserved for this' => sub {
     my $one = Trog::Bin::NewGuest::default_hostname();
     my $two = Trog::Bin::NewGuest::default_hostname();
@@ -62,7 +70,7 @@ subtest 'a default hostname is unique, and under a TLD reserved for this' => sub
 };
 
 subtest 'the domain block asks the hypervisor for enough to build with' => sub {
-    my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
+    my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], { base => {%ADMIN} } );
     my $global = $config->{'vm.test'}{_global};
 
     # The vm recipe's, rather than a second set of numbers here: a domain block
@@ -83,7 +91,7 @@ subtest 'the domain block asks the hypervisor for enough to build with' => sub {
 
     ($config) = Trog::Bin::NewGuest::build(
         'vm.test', ['ntp'],
-        { memory => 8192, cpus => 8, size => 42, user => 'someone' }
+        { memory => 8192, cpus => 8, size => 42, user => 'someone', base => {%ADMIN} }
     );
     is_deeply(
         $config->{'vm.test'}{_global},
@@ -93,7 +101,7 @@ subtest 'the domain block asks the hypervisor for enough to build with' => sub {
 
 # A bare key, which is how a configuration names a recipe that takes nothing:
 # what matters to new_guest is that _base mentions data at all.
-my %BASE_HAS_DATA = ( base => { data => undef } );
+my %BASE_HAS_DATA = ( base => { %ADMIN, data => undef } );
 
 subtest 'recipes that need nothing are a bare key' => sub {
     my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', [qw{ntp ufw}], \%BASE_HAS_DATA );
@@ -147,42 +155,58 @@ subtest 'a recipe that salvages something can still be scaffolded' => sub {
     ok( exists $config->{'vm.test'}{letsencrypt}, 'the recipe is scaffolded rather than taking the run down' );
 };
 
-subtest 'every recipe can be scaffolded with nothing in _global' => sub {
+subtest 'every recipe can be scaffolded when the installation is configured' => sub {
 
     # A required_recipes sub, and the restores() that the base class asks for,
-    # run before validation and get only what _global has.  An installation can
-    # name nothing there, so a sub that reads a global has to say what it means
-    # when there is none.  Under `warnings FATAL => 'all'` an unguarded read is
-    # not a wrong answer, it is a dead run: bin/new_guest writes no file, and
+    # run before validation and get only what _global has.  So a sub that reads
+    # a global reads it raw, and under `warnings FATAL => 'all'` an undef is not
+    # a wrong answer, it is a dead run: bin/new_guest writes no file, and
     # bin/provision then reports a domain with no configuration.  See #196.
     my @refused;
     foreach my $recipe ( sort( Provisioner::Cookbook->names ) ) {
-        next if eval { Provisioner::Cookbook->scaffold_dependencies( [$recipe], domain => 'd.test', global_config => {} ); 1 };
+        next if eval { Provisioner::Cookbook->scaffold_dependencies( [$recipe], domain => 'd.test', global_config => { admin_user => 'doge' } ); 1 };
         my ($why) = split( m/\n/, $@ );
         push @refused, "$recipe: $why";
     }
 
-    is_deeply( \@refused, [], 'every recipe walks its dependencies with an empty global' ) or diag join( "\n", @refused );
+    is_deeply( \@refused, [], 'every recipe walks its dependencies with the globals an installation has' ) or diag join( "\n", @refused );
+};
+
+subtest 'a domain with no admin_user is refused, rather than owned by root' => sub {
+
+    # Nothing defaults it.  A guest whose files belong to root looks built until
+    # somebody tries to use the service account, and that is not a thing to
+    # decide on an operator's behalf.
+    my $err = exception { Provisioner::Cookbook->scaffold_dependencies( ['ldap'], domain => 'd.test', global_config => {} ) };
+    like( $err, qr/d[.]test[ ]has[ ]no[ ]admin_user/, 'the refusal names the domain and the setting' );
+    like( $err, qr/ipmap[.]cfg/,                      'and the file to set it in' );
+
+    # An empty string is not an account either, and Config::Simple hands one
+    # back for a key with nothing after the =.
+    like(
+        exception { Provisioner::Cookbook->scaffold_dependencies( ['ldap'], domain => 'd.test', global_config => { admin_user => q{} } ) },
+        qr/has[ ]no[ ]admin_user/, 'an empty one is no answer'
+    );
 };
 
 subtest 'a recipe whose dependencies are built from the domain can be scaffolded' => sub {
 
     # tpsgi builds the path that perl installs from out of install_dir and the
     # domain.  No _base can name the domain, and this one names no install_dir.
-    my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', ['tpsgi'], {} );
+    my ( $config, @todo ) = Trog::Bin::NewGuest::build( 'vm.test', ['tpsgi'], { base => {%ADMIN} } );
 
     ok( exists $config->{'vm.test'}{tpsgi},          'tpsgi is scaffolded' );
     ok( ( grep { $_ eq 'tpsgi.routers[0]' } @todo ), 'and asks for its routers' ) or diag "todo was: @todo";
 };
 
 subtest 'every domain gets a data recipe, because new_config requires one' => sub {
-    my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], {} );
+    my ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], { base => {%ADMIN} } );
     ok( exists $config->{'vm.test'}{data}, 'added even though it was not asked for' );
 
     # But not when _base already configures it: there is nothing to fill in, and
     # a generated file that pins what the fleet supplies is a file that stops
     # following it.
-    ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], { base => { data => undef } } );
+    ($config) = Trog::Bin::NewGuest::build( 'vm.test', ['ntp'], { base => { %ADMIN, data => undef } } );
     ok( !exists $config->{'vm.test'}{data}, 'left to _base when _base has it' );
 };
 
@@ -204,6 +228,23 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
         'and it reads, _global and all'
     );
 
+    # ipmap.cfg is where an installation names the account that administers a
+    # guest, and a required_recipes sub reads it during the walk below.  So
+    # base_config takes it from there, the same file bin/new_config reads it
+    # from, and leaves the generated file to say nothing about it.
+    File::Slurper::Temp::write_text( "$dir/ipmap.cfg", "[global]\nadmin_user=doge\n" );
+    Provisioner::Cookbook->forget();
+    is(
+        Trog::Bin::NewGuest::base_config()->{_global}{admin_user}, 'doge',
+        'the admin_user of ipmap.cfg reaches the walk'
+    );
+
+    # And nothing invents one: a _global with an admin_user of undef would
+    # satisfy the check that refuses a domain without one.
+    unlink "$dir/ipmap.cfg" or die "Could not remove the ipmap: $!";
+    Provisioner::Cookbook->forget();
+    ok( !exists Trog::Bin::NewGuest::base_config()->{_global}{admin_user}, 'and no key at all when no file names it' );
+
     # A domain file cannot say what every guest gets.
     mkdir("$dir/recipes.d") or die "Could not make $dir/recipes.d: $!";
     File::Slurper::Temp::write_text( "$dir/recipes.d/other.test.test.yaml", "---\n_base:\n  ufw:\n" );
@@ -216,6 +257,10 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
 subtest 'writing a guest' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+
+    # As an installation has it: the walk reads the admin_user from here.
+    File::Slurper::Temp::write_text( "$dir/ipmap.cfg", "[global]\nadmin_user=doge\n" );
+    Provisioner::Cookbook->forget();
 
     is( quietly( sub { Trog::Bin::NewGuest::main(qw{--hostname scratch.test ntp ufw}) } ), 0, 'runs' );
 

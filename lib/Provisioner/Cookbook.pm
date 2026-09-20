@@ -801,15 +801,21 @@ sub resolve_dependencies {
     my $domain = $args{domain}
       or die "resolve_dependencies needs the domain being provisioned; pass one, bogus if that is what the caller has.\n";
 
-    # What every required_recipes sub is handed.  These three are there even
-    # when the caller's _global has none of them, because no file can name the
-    # domain, and the other two have defaults: a sub runs before validation, so
-    # the schema's defaults have not been filled in yet, and a sub that reads
-    # one of them would read an undef.  A value in _global wins.
+    # Refused here rather than defaulted.  Every recipe that owns a file reads
+    # admin_user, and a guest whose files belong to root is not what anybody
+    # configured -- it only looks like a guest until somebody tries to use the
+    # service account.  bin/new_config refuses the same thing when it reads
+    # ipmap.cfg; this catches the callers that build a configuration without
+    # going through it, bin/new_guest among them.
+    die "$domain has no admin_user.  Every recipe that owns a file on the guest reads it,\n" . "so name the account that administers the guest in the global section of ipmap.cfg,\n" . "or in the _global of this domain.\n"
+      if !defined $global_config->{admin_user} || $global_config->{admin_user} eq q{};
+
+    # What every required_recipes sub is handed.  The domain and install_dir
+    # are there even when the caller's _global has neither, because no file can
+    # name the domain, and install_dir has a default.  A value in _global wins.
     my %given = (
         domain      => $domain,
         install_dir => $class->install_dir( $domain, {} ),
-        admin_user  => Provisioner::Recipe->default_admin_user,
         %$global_config,
     );
 
