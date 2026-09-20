@@ -11,9 +11,10 @@ my $user    = '[% user %]';
 my $dir     = '[% install_dir %]/[% domain %]';
 my $confdir = "$dir/etc/trog-provisioner";
 
-# The newest perl under /opt/perl5.  scripts/cpan_install and everything else
-# on a guest find the perl this way.
-my ($bin) = reverse sort glob('/opt/perl5/*/bin');
+# The perl that /opt/perl5/current points at, which is what scripts/cpan_install
+# installs into and what the perl recipe's version names.
+my $bin = '/opt/perl5/current/bin';
+($bin) = reverse sort grep { !m{/current/} } glob('/opt/perl5/*/bin') unless -d $bin;
 ok( $bin && -d $bin, 'the perl recipe built a perl under /opt/perl5' )
     or BAIL_OUT( 'no perl was built: nothing under /opt/perl5' );
 diag "the built perl is in $bin" if $bin;

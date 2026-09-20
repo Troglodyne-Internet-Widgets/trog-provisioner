@@ -190,6 +190,23 @@ subtest 'a dependent told no install_dir dies, rather than installing from somew
     like( exception { $required{perl}->( install_dir => $INSTALL ) }, qr/defined,[ ]positive-length/, 'tpsgi' );
 };
 
+subtest 'the release to build is the one the configuration names' => sub {
+    my ($unset) = grep { m{/build_latest_perl[.]sh} } split( m/\n/, rendered() );
+    like( $unset, qr{/build_latest_perl[.]sh\s*$}, 'nothing named means the latest stable, as it always did' );
+
+    my ($pinned) = grep { m{/build_latest_perl[.]sh} } split( m/\n/, rendered( version => '5.40.2' ) );
+    like( $pinned, qr{/build_latest_perl[.]sh[ ]'5[.]40[.]2'$}, 'and a release is handed to the script, quoted for the shell that runs the line' );
+
+    # The script builds perl-$VERSION, so anything that is not a release cannot
+    # name one, and a guest that took it would build whatever came back.
+    foreach my $case ( '5.40', 'stable', '5.40.2; rm -rf /', q{} ) {
+        like(
+            exception { rendered( version => $case ) }, qr{/version:[ ]String[ ]does[ ]not[ ]match},
+            "a version of '$case' is refused"
+        );
+    }
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

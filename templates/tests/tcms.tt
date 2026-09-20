@@ -14,8 +14,9 @@ ok(-d $dir, 'the tCMS checkout is there');
 ok(-d "$dir/.git", 'and is a git checkout');
 
 # scripts/cpan_install installs the dependencies of tCMS with this cpanm.  It
-# uses the newest perl under /opt/perl5, where the perl recipe built one.
-my ($cpanm) = reverse sort glob('/opt/perl5/*/bin/cpanm');
+# uses the perl that /opt/perl5/current points at, where the perl recipe built one.
+my $cpanm = '/opt/perl5/current/bin/cpanm';
+($cpanm) = reverse sort grep { !m{/current/} } glob('/opt/perl5/*/bin/cpanm') unless -x $cpanm;
 ok($cpanm && -x $cpanm, 'the cpanm the perl recipe installed is there');
 
 # A cpanm that is there can still fail to start, so run it.

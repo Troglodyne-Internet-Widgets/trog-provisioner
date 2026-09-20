@@ -10,9 +10,20 @@ my $user = '[% user %]';
 chomp( my $home = `getent passwd $user | cut -d: -f6` );
 ok($home, "$user has a home directory") or BAIL_OUT("no home for $user");
 
-# Test the build first, before anything that points at it.
-my ($built) = glob('/opt/perl5/*/bin/perl');
+# Test the build first, before anything that points at it.  The link is what
+# scripts/cpan_install follows, so it names the perl everything installs into.
+ok(-x '/opt/perl5/current/bin/perl', '/opt/perl5/current points at a built perl');
+
+my $built = '/opt/perl5/current/bin/perl';
+($built) = glob('/opt/perl5/*/bin/perl') unless -x $built;
 ok($built && -x $built, 'a perl was built under /opt/perl5');
+
+[% IF version -%]
+# The release this domain asked for, which is what the directory is named after.
+is(readlink('/opt/perl5/current'), 'perl[% version %]', 'the perl that the configuration named is the current one');
+chomp( my $asked = `$built -e 'print \$^V' 2>/dev/null` );
+is($asked, 'v[% version %]', 'and that release is what got built');
+[% END -%]
 
 SKIP: {
     skip 'nothing built under /opt/perl5', 2 unless $built && -x $built;
@@ -48,6 +59,11 @@ SKIP: {
 ok(-f '/etc/profile.d/perl.sh', '/etc/profile.d/perl.sh is there');
 chomp( my $on_path = `bash -lc 'command -v perl' 2>/dev/null` );
 like($on_path, qr{^/opt/perl5/}, "a login shell gets the built perl first ($on_path)");
+
+# The same perl, by whichever path each of them names it.
+chomp( my $login_version = `$on_path -e 'print \$^V' 2>/dev/null` );
+chomp( my $current_version = `$built -e 'print \$^V' 2>/dev/null` );
+is($login_version, $current_version, 'and it is the perl that /opt/perl5/current points at');
 
 # The editor configurations.  Every account on the guest reads them, and none
 # runs them.

@@ -19,8 +19,16 @@ use parent qw{Provisioner::Recipe};
 
 =head2 DESCRIPTION
 
-This recipe downloads the latest perl, compiles it and installs it into
-/opt/perl5/$version.
+This recipe downloads a perl, compiles it and installs it into
+F</opt/perl5/perl$version>.  C<version> names the release, such as C<5.40.2>.
+Without one it builds the latest stable, and then two guests built a month
+apart can have different versions of perl, and a release made yesterday can
+break a build that worked the day before.
+
+The perl it built is the one everything else installs into: the build points
+F</opt/perl5/current> at it, and F<scripts/cpan_install> follows that link.  So
+a guest that is rebuilt with another C<version> keeps the perl it had, beside
+the new one, and nothing installs into the old one by accident.
 
 It writes F</etc/profile.d/perl.sh>, so a person who logs in gets that perl
 first.  Nothing in a build reads shell init.  make runs its recipe lines under a
@@ -40,8 +48,6 @@ modules from CPAN.  CPAN.pm installs cpanm and nothing else, and
 F<scripts/build_latest_perl.sh> says why.  cpan_install installs the release
 that the index of the mirror names, not the one that cpanmetadb names.  A
 version pin that needs an older release is the exception.
-
-TODO: let the configuration choose the version of perl (#222).
 
 =head2 What other recipes install into it
 
@@ -127,6 +133,11 @@ sub args {
                 default     => [],
                 items       => \%STEP,
                 description => 'What the recipes depending on this one install into it, handed over by them: see perldoc Provisioner::Recipe::perl.  Each step names one of install, installdeps, dzil or pin.  Installed in this target, in the order handed over.',
+            },
+            version => {
+                type        => 'string',
+                pattern     => '\A\d+[.]\d+[.]\d+\z',
+                description => 'The perl release to build, such as 5.40.2.  Unset builds the latest stable, so two guests built a month apart can have different perls, and a release made yesterday can break a build that worked the day before.  A guest rebuilt with another version keeps both, and the one named here is the one everything installs into.',
             },
             cpan_notest => {
                 type        => 'boolean',

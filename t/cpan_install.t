@@ -181,11 +181,22 @@ subtest 'a failed install is the exit code' => sub {
     is( $r->{rc}, 1, 'what cpanm said' );
 };
 
-subtest 'the newest perl is the one installed into' => sub {
+subtest 'the perl that was built is the one installed into' => sub {
     make_path("$PERL_ROOT/perl5.40.0/bin");
 
+    # With no link, the newest, which is the answer on a guest with one perl.
     my $r = install( args => [qw{--notest install Moo}] );
     is( $r->{ran}[0][1], $CPANM, 'not whichever was built first' );
+
+    # With one, what it points at, whichever of them that is.  A guest rebuilt
+    # with another version has both, and only the configuration knows which one
+    # the modules belong in.
+    symlink 'perl5.40.0', "$PERL_ROOT/current" or die "could not link: $!";
+    my $older = install( args => [qw{--notest install Moo}] );
+    is( $older->{ran}[0][1],            "$PERL_ROOT/current/bin/cpanm", 'the cpanm of the perl that /opt/perl5/current names' );
+    is( readlink("$PERL_ROOT/current"), 'perl5.40.0',                   'which here is the older of the two, and not the newest' );
+    unlink "$PERL_ROOT/current";
+
     rmdir "$PERL_ROOT/perl5.40.0/bin";
     rmdir "$PERL_ROOT/perl5.40.0";
 };

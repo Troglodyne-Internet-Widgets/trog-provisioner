@@ -1,4 +1,6 @@
-[% script_dir %]/build_latest_perl.sh
+[%# The release to build, when the configuration names one.  Without one the
+    script builds the latest stable, which is what it always did. -%]
+[% script_dir %]/build_latest_perl.sh[% IF version %] '[% version %]'[% END %]
 [%# What the recipes that depend on this one install into it, in the order
     they handed it over.  It is here and not deferred, because this target runs
     after all of their fragments and before the postrun.  perldoc

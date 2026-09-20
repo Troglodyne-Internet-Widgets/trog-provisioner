@@ -51,11 +51,16 @@ is the system perl's, which has none of them.
 
 =head3 Which perl
 
-The script uses the newest perl under F</opt/perl5>.  It looks for that perl
-each time it runs, because the path of the perl contains its version.  That
-version is the one that was current on the day the guest was built.
-F<build_latest_perl.sh> installs cpanm, Module::Build and Dist::Zilla into that
-perl before anything calls this script.
+The script uses the perl that F</opt/perl5/current> points at, which is the one
+F<build_latest_perl.sh> built and the one the C<version> of the perl recipe
+names.  A guest can hold more than one perl: a rebuild with another version
+builds beside the first, because the path of a perl contains its version.
+
+Without that link the script takes the newest perl under F</opt/perl5>, which
+is what it always did, and is the same perl on a guest that has only one.
+
+F<build_latest_perl.sh> installs cpanm, Module::Build and Dist::Zilla into the
+perl it built before anything calls this script.
 
 The system perl runs this script, so the script is written for it.
 
@@ -168,13 +173,17 @@ sub usage {
 
 =head2 $dir = perl_bin()
 
-Returns the F<bin> directory of the newest perl under C<$PERL_ROOT>.  See
-L</Which perl>.  Dies if no perl is built there.
+Returns the F<bin> directory of the perl to install into: the one that
+C<$PERL_ROOT/current> points at, or the newest under C<$PERL_ROOT> when there
+is no such link.  See L</Which perl>.  Dies if no perl is built there.
 
 =cut
 
 sub perl_bin {
-    my @built = sort glob("$PERL_ROOT/*/bin");
+    my $named = "$PERL_ROOT/current/bin";
+    return $named if -d $named;
+
+    my @built = sort grep { index( $_, "$PERL_ROOT/current/" ) != 0 } glob("$PERL_ROOT/*/bin");
     die "cpan_install: nothing is built under $PERL_ROOT, so there is no perl to install into.  The perl recipe builds one; is it on this guest?\n"
       unless @built;
     return $built[-1];

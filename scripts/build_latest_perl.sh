@@ -1,11 +1,19 @@
 #!/bin/bash
 
-# build_latest_perl.sh
+# build_latest_perl.sh [VERSION]
 #
-# Build the latest perl into /opt/perl5 and give it cpanm, Module::Build and
+# Build a perl into /opt/perl5 and give it cpanm, Module::Build and
 # Dist::Zilla.  The target of the perl recipe installs its cpan_deps after this.
-# scripts/cpan_install finds this perl as the newest under /opt/perl5.  A person
-# finds it through profile.d.
+#
+# VERSION is a release, such as 5.40.2.  Without one this builds the latest
+# stable, which is what the name says and what a guest got before the version
+# could be configured.
+#
+# The perl that this built is the one everything else installs into: the
+# symlink /opt/perl5/current points at it, and scripts/cpan_install follows
+# that.  Without the symlink cpan_install takes the newest under /opt/perl5,
+# which is the same perl on a guest that has only one.  A person finds it
+# through profile.d.
 
 # perlbrew fails under cloud-init without these.
 export SHELL='/bin/bash';
@@ -18,14 +26,26 @@ export PERLBREW_ROOT='/root/perl5/perlbrew'
 source /root/perl5/perlbrew/etc/bashrc
 
 WD=`dirname $(readlink -f $0)`
+WANTED="$1"
 cd /tmp
-perlbrew download stable
-LATEST_TARBALL=$(ls -1 /root/perl5/perlbrew/dists/ | tail -n1)
-NICE_PERL_NAME=$(echo $LATEST_TARBALL | sed 's/\.tar\.gz$//' | sed 's/-//g')
+
+# A named release, or whatever perlbrew calls stable today.  The tarball is
+# named after the release either way, so the directory under /opt/perl5 is too,
+# and a guest that is rebuilt with another version keeps both.
+if [ -n "$WANTED" ]; then
+    perlbrew download "perl-$WANTED" || exit 1
+    PERL_TARBALL="perl-$WANTED.tar.gz"
+else
+    perlbrew download stable || exit 1
+    PERL_TARBALL=$(ls -1 /root/perl5/perlbrew/dists/ | tail -n1)
+fi
+
+[ -f "/root/perl5/perlbrew/dists/$PERL_TARBALL" ] || exit 1
+NICE_PERL_NAME=$(echo $PERL_TARBALL | sed 's/\.tar\.gz$//' | sed 's/-//g')
 
 if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     rm -rf src
-    tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$LATEST_TARBALL
+    tar --one-top-level=src --strip-components=1 -zxf ~/perl5/perlbrew/dists/$PERL_TARBALL
     cd src
     ./Configure -des -Dprefix=/opt/perl5/$NICE_PERL_NAME -Duseshrplib
     # One job for each processor on the guest, which gets two by default.  More
@@ -34,6 +54,11 @@ if [ ! -f /opt/perl5/$NICE_PERL_NAME/bin/perl  ]; then
     make -j"$JOBS"
     make -j"$JOBS" install
 fi
+
+# What everything else installs into.  Written before cpanm, because
+# cpan_install follows it from the next line onwards.  A relative target, so
+# the link says the same thing on a guest and in a copy of /opt/perl5.
+ln -sfn "$NICE_PERL_NAME" /opt/perl5/current
 
 # Install cpanm with the CPAN client of the new perl, because nothing else can
 # install it yet.  -T makes CPAN.pm skip the tests, and yes answers its first-run
@@ -51,8 +76,8 @@ yes | "/opt/perl5/$NICE_PERL_NAME/bin/cpan" -T -i App::cpanminus || exit 1
 # Where a person finds this perl.  The build does not use it, because make runs
 # from an atd job under a non-interactive sh.  systemd and cron also read no
 # shell init.  So everything that installs into this perl names it by path (see
-# scripts/cpan_install).  This file is written again each run, so the newest perl
-# is on the PATH.
+# scripts/cpan_install).  This file is written again each run, so the perl that
+# this build made is the one on the PATH.
 cat > /etc/profile.d/perl.sh <<PROFILE
 PATH="/opt/perl5/$NICE_PERL_NAME/bin:\$PATH"
 PROFILE
