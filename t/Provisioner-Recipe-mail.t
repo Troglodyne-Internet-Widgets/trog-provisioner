@@ -8,7 +8,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/Provisioner-Recipe-mail.t - what the mail recipe accepts for its relay
+t/Provisioner-Recipe-mail.t - what the mail recipe accepts for its relay, and the accounts it writes
 
 =cut
 
@@ -29,7 +29,7 @@ my $recipe = Provisioner::Cookbook->load( 'mail', distro => 'ubuntu' )->new(
 my %BASE = (
     domain      => 'mail.test.test',
     install_dir => '/nonexistent',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
 );
 
 # transport_maps reads relay.to as a list of destinations.
@@ -45,6 +45,18 @@ subtest 'relay.to is a list of destinations' => sub {
         qr{/relay/to},
         'one destination not in a list is refused'
     );
+};
+
+# virtual_maps sends everything unmatched under the domain to its catchall, so
+# the account that owns that mailbox has to be under the domain as well.
+subtest 'the catchall is an account of the domain it catches for' => sub {
+    my $passwd = $recipe->render_file( 'files/mail.passwd.tt', %BASE, names => { someuser => { password => 'x', gecos => 'Some User' } } );
+
+    my @catchall = grep { /^catchall\@/ } split /\n/, $passwd;
+    is( scalar @catchall, 1, 'there is one catchall account' ) or diag $passwd;
+    my @field = split /:/, $catchall[0] // q{};
+    is( $field[0], 'catchall@mail.test.test',       'under the domain' );
+    is( $field[5], '/mail/mail.test.test/catchall', 'with its mailbox there too' );
 };
 
 Test::NoWarnings::had_no_warnings();

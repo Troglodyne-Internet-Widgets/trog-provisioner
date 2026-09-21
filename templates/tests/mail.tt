@@ -134,6 +134,14 @@ SKIP: {
 }
 [% END %]
 [% END %]
+# virtual_maps delivers unmatched mail for the domain to the catchall, and only
+# an account dovecot knows can own that mailbox.
+{
+    my $catchall = `doveadm user -f home 'catchall\@[% domain %]' 2>&1`;
+    chomp $catchall;
+    is($catchall, '/mail/[% domain %]/catchall', 'dovecot knows the catchall of [% domain %]') or diag $catchall;
+}
+
 # install_dkim_records publishes the key into a zone this guest serves itself,
 # once for each selector however many times the guest has been provisioned.
 SKIP: {
