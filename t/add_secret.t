@@ -8,7 +8,7 @@ use re '/aasx';
 
 =head1 NAME
 
-t/add_secret.t - bin/add_secret: putting one secret in, and the three times it must not
+t/add_secret.t - bin/add_secret: putting one secret in, and the times it must not
 
 =cut
 
@@ -20,7 +20,8 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 
 use Test::More;
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
 use File::Temp();
 use IPC::Run3();
 use Trog::Secrets();
@@ -154,10 +155,21 @@ subtest 'standard input and a value on the command line is refused' => sub {
     # gets stored, so this exits on the usage rather than choosing.
     my ( $rc, $out ) = run_add( \"from the pipe\n", '--secrets', $kdbx, qw{--group t --title both --stdin -- fromtheargv} );
     isnt( $rc, 0, 'it exits non-zero' );
-    like( $out, qr/not[ ]both/, 'saying it will not pick one' );
+    like( $out, qr/not[ ]two/, 'saying it will not pick one' );
 
     my %got = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:t/both/password' ) };
     ok( !defined $got{probe}, 'and nothing was stored either way' );
+};
+
+subtest 'a value typed at the terminal and on the command line is refused' => sub {
+    my $kdbx = store();
+
+    my ( $rc, $out ) = run_add( \undef, '--secrets', $kdbx, qw{--group t --title twice --prompt -- fromtheargv} );
+    isnt( $rc, 0, 'it exits non-zero' );
+    like( $out, qr/not[ ]two/, 'saying it will not pick one' );
+
+    my %got = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:t/twice/password' ) };
+    ok( !defined $got{probe}, 'and nothing was stored' );
 };
 
 subtest 'an empty standard input is no value at all' => sub {
@@ -203,6 +215,54 @@ subtest 'a field the database does not keep is an error, not a success' => sub {
     my $rc = eval { add( '--secrets', $kdbx, qw{--group g --title t --field notes -- value} ) };
     is( $rc, undef, 'it dies rather than returning' );
     like( $@, qr/password[ ]or[ ]username/, 'naming the fields that are kept' ) or diag $@;
+};
+
+# A file standing in for /dev/tty.  Each prompt opens it afresh, so both of the
+# two asks read its first line, which is the answer typed the same both times.
+subtest 'a value typed at the terminal' => sub {
+    my $kdbx = store();
+
+    my $tty = File::Temp->new();
+    print {$tty} "hunter2\n";
+    close($tty) or die 'Could not close ' . $tty->filename . ": $!";
+
+    my $rc = do {
+        local $Trog::Credentials::TERMINAL = $tty->filename;
+        add( '--secrets', $kdbx, qw{--group registrar --title typed_token --prompt} );
+    };
+    is( $rc, 0, 'it reports success' );
+
+    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:registrar/typed_token/password' );
+    is( $got{probe}, 'hunter2', 'and the store holds what was typed' );
+
+    my $why = do {
+        local $Trog::Credentials::TERMINAL = '/bogus/tty';
+        exception { add( '--secrets', $kdbx, qw{--group registrar --title untyped_token --prompt} ) };
+    };
+    like( $why, qr{Cannot[ ]ask[ ]for[ ]a[ ]password[ ]at[ ]a[ ]terminal}, 'no terminal is refused, naming it' );
+
+    my %none = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:registrar/untyped_token/password' ) };
+    ok( !defined $none{probe}, 'and nothing was stored' );
+};
+
+subtest 'two answers that differ store nothing' => sub {
+    my $kdbx = store();
+
+    my @said  = qw{hunter2 hunter3};
+    my $asked = 0;
+    my $mock  = Test::MockModule->new('Trog::Credentials');
+    $mock->redefine( prompt => sub { $asked++; return shift @said } );
+
+    like(
+        exception { Provisioner::Bin::add_secret::main( '--secrets', $kdbx, qw{--group registrar --title mistyped_token --prompt} ) },
+        qr/differ/,
+        'it stops, saying the two differ'
+    );
+    is( $asked, 2, 'before it asks for the passphrase' );
+
+    $mock->unmock('prompt');
+    my %got = eval { Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:registrar/mistyped_token/password' ) };
+    ok( !defined $got{probe}, 'and nothing was stored' );
 };
 
 done_testing();
