@@ -17,7 +17,10 @@ Provisioner::Recipe::Ubuntu::lexicon - Ubuntu's C<deps> for L<Provisioner::Recip
 =cut
 
 sub deps {
-    return qw{lexicon};
+
+    # lexicon-pdns-af-unix.patch imports requests_unixsocket into a module the
+    # CLI loads whichever provider it was asked for.
+    return qw{lexicon python3-requests-unixsocket};
 }
 
 1;
