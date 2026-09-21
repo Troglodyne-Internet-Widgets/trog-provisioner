@@ -211,7 +211,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     my $which = Test::MockModule->new('File::Which');
 
     $hv->redefine( is_local => sub { 0 } );
-    $hv->redefine( describe => sub { 'doge@hv.test' } );
+    $hv->redefine( describe => sub { 'someadmin@hv.test' } );
 
     # Both there.
     $hv->redefine( run_cmd => sub { 0 } );
@@ -223,7 +223,7 @@ subtest 'rsync is the one thing both ends have to have' => sub {
     $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::HV->new()->check_rsync } );
     ok( !$result->{ok}, 'missing on the hypervisor fails' );
-    like( $result->{what}, qr/doge\@hv[.]test/,       'naming the end that has not got it' );
+    like( $result->{what}, qr/someadmin\@hv[.]test/,  'naming the end that has not got it' );
     like( $result->{fix},  qr/apt[ ]install[ ]rsync/, 'and how to fix it' );
 
     # Missing here, which is just as fatal and much easier to overlook: this is
@@ -250,7 +250,7 @@ subtest 'a storage pool nothing can write to is a hypervisor nothing can be buil
     my $hv = Test::MockModule->new('Trog::HV::Libvirt');
 
     $hv->redefine( pool_path => sub { '/bogus/pool' } );
-    $hv->redefine( describe  => sub { 'doge@hv.test' } );
+    $hv->redefine( describe  => sub { 'someadmin@hv.test' } );
 
     $hv->redefine( run_cmd => sub { 0 } );
     my ($result) = quietly( sub { Trog::HV->new()->check_pool_writable } );
@@ -260,8 +260,8 @@ subtest 'a storage pool nothing can write to is a hypervisor nothing can be buil
     $hv->redefine( run_cmd => sub { 1 } );
     ($result) = quietly( sub { Trog::HV->new()->check_pool_writable } );
     ok( !$result->{ok}, 'and one that refuses the write does not' );
-    like( $result->{what}, qr/doge\@hv[.]test/, 'naming the hypervisor it asked' );
-    like( $result->{fix},  qr/chown/,           'the guidance is the ownership' );
+    like( $result->{what}, qr/someadmin\@hv[.]test/, 'naming the hypervisor it asked' );
+    like( $result->{fix},  qr/chown/,                'the guidance is the ownership' );
 
     # Both halves of the fix, because the filesystem one alone does not survive:
     # libvirt takes a built pool's ownership from the pool definition.
@@ -376,7 +376,7 @@ subtest 'the configuration it copies from has to be there' => sub {
     like( $result->{what}, qr/settings[ ]every[ ]guest/, 'which it says' );
     like( $result->{fix},  qr/ipmap_to_globals/,         'and how an older installation brings them across' );
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: doge\n    admin_gecos: Doge Doge\n    admin_email: doge\@test.test\n    gateway: 192.168.1.254\n    resolvers: [192.168.1.254]\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\n    resolvers: [192.0.2.254]\n" );
     Provisioner::Cookbook->forget();
 
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
@@ -500,19 +500,19 @@ subtest 'a fleet with no package mirror is told what that costs' => sub {
     # A fresh installation has no domains, and so nothing to say this about.
     is_deeply( $write->("---\n_base:\n    nosnap:\n"), { ok => 1 }, 'nothing configured yet, nothing said' );
 
-    my $note = $write->("---\nweb.troglodyne.net:\n    nginx:\n");
+    my $note = $write->("---\nweb.example.net:\n    nginx:\n");
     ok( !$note->{ok}, 'domains but no mirror is worth saying' );
-    like( $note->{fix}, qr/bin\/new_guest[ ]--hostname[ ]aptmirror\.troglodyne\.net[ ]aptmirror/, 'naming the command, under the parent the fleet already uses' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $note->{fix}, qr/bin\/new_guest[ ]--hostname[ ]aptmirror\.example\.net[ ]aptmirror/, 'naming the command, under the parent the fleet already uses' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
 
     # The more annoying of the two: the work is done and nothing is using it.
-    $note = $write->("---\nweb.troglodyne.net:\n    nginx:\naptmirror.troglodyne.net:\n    aptmirror:\n        releases: [noble]\n");
+    $note = $write->("---\nweb.example.net:\n    nginx:\naptmirror.example.net:\n    aptmirror:\n        releases: [noble]\n");
     ok( !$note->{ok}, 'a mirror nobody points at is worth saying louder' );
-    like( $note->{what}, qr/aptmirror\.troglodyne\.net[ ]mirrors[ ]the[ ]archive/, 'naming the guest that is doing the mirroring' );
-    like( $note->{fix},  qr/mirror:[ ]aptmirror\.troglodyne\.net/,                 'and the line that would use it' );
+    like( $note->{what}, qr/aptmirror\.example\.net[ ]mirrors[ ]the[ ]archive/, 'naming the guest that is doing the mirroring' );
+    like( $note->{fix},  qr/mirror:[ ]aptmirror\.example\.net/,                 'and the line that would use it' );
 
     # Either spelling counts as pointing at one.
-    is_deeply( $write->("---\n_base:\n    _global:\n        mirror: aptmirror.troglodyne.net\nweb.troglodyne.net:\n    nginx:\n"), { ok => 1 }, 'a mirror in _base _global is enough' );
-    is_deeply( $write->("---\nweb.troglodyne.net:\n    ubuntu:\n        mirror: http://m.test/ubuntu\n"),                          { ok => 1 }, 'as is one in a domain distro block' );
+    is_deeply( $write->("---\n_base:\n    _global:\n        mirror: aptmirror.example.net\nweb.example.net:\n    nginx:\n"), { ok => 1 }, 'a mirror in _base _global is enough' );
+    is_deeply( $write->("---\nweb.example.net:\n    ubuntu:\n        mirror: http://m.test/ubuntu\n"),                       { ok => 1 }, 'as is one in a domain distro block' );
 };
 
 subtest 'a fleet with nothing keeping its logs is told so, once there is a sink' => sub {
@@ -534,15 +534,15 @@ subtest 'a fleet with nothing keeping its logs is told so, once there is a sink'
 
     # Logging is opt-in, so a fleet that has not asked for it has nothing said
     # about it -- unlike a mirror, which every guest pays for not having.
-    is_deeply( $write->("---\nweb.troglodyne.net:\n    nginx:\n"), { ok => 1 }, 'no collector and no shipper says nothing' );
+    is_deeply( $write->("---\nweb.example.net:\n    nginx:\n"), { ok => 1 }, 'no collector and no shipper says nothing' );
 
-    my $note = $write->("---\nlogs.troglodyne.net:\n    logcollector:\n");
+    my $note = $write->("---\nlogs.example.net:\n    logcollector:\n");
     ok( !$note->{ok}, 'a sink with nothing shipping to it is worth saying' );
-    like( $note->{what}, qr/logs\.troglodyne\.net[ ]collects[ ]logs/, 'naming the guest doing the collecting' );
-    like( $note->{fix},  qr/host:[ ]logs\.troglodyne\.net/,           'and the line that would use it' );
+    like( $note->{what}, qr/logs\.example\.net[ ]collects[ ]logs/, 'naming the guest doing the collecting' );
+    like( $note->{fix},  qr/host:[ ]logs\.example\.net/,           'and the line that would use it' );
 
     is_deeply(
-        $write->("---\n_base:\n    logshipper:\n        host: logs.troglodyne.net\nlogs.troglodyne.net:\n    logcollector:\n"),
+        $write->("---\n_base:\n    logshipper:\n        host: logs.example.net\nlogs.example.net:\n    logcollector:\n"),
         { ok => 1 }, 'and nothing once the fleet points at it'
     );
 };
@@ -551,7 +551,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
 
-    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.troglodyne.net:\n    nginx:\nold.troglodyne.net:\n    nginx:\n" );
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.example.net:\n    nginx:\nold.example.net:\n    nginx:\n" );
     Provisioner::Cookbook->forget();
 
     my $hv = Test::MockModule->new('Trog::HV::Libvirt');
@@ -562,7 +562,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
     # is somebody else's business.
     $hv->redefine(
         list_dir => sub {
-            return qw{10-web.troglodyne.net.conf 10-old.troglodyne.net.conf 10-notours.example.conf 20-ufw.conf 50-default.conf};
+            return qw{10-web.example.net.conf 10-old.example.net.conf 10-notours.example.conf 20-ufw.conf 50-default.conf};
         }
     );
 
@@ -573,7 +573,7 @@ subtest 'the drop-ins provisioning used to write are worth pointing at' => sub {
 
     # Comma-joined with no spaces, or the brace expansion it prints cannot be
     # pasted into a shell.
-    like( $note->{fix}, qr/\Q{old.troglodyne.net,web.troglodyne.net}\E/, 'the removal command is one that would actually run' );
+    like( $note->{fix}, qr/\Q{old.example.net,web.example.net}\E/, 'the removal command is one that would actually run' );
 };
 
 subtest 'a secret written into the configuration in the clear is worth saying' => sub {
@@ -584,12 +584,12 @@ subtest 'a secret written into the configuration in the clear is worth saying' =
     my $secret = 'hunter2-in-the-clear';
     File::Slurper::Temp::write_text(
         "$dir/recipes.yaml",
-        "---\nweb.test.test:\n" . "    mail:\n        names:\n            andy:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:troglodyne/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n"
+        "---\nweb.test.test:\n" . "    mail:\n        names:\n            someuser:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:dns/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n"
     );
 
     my $note = Trog::HV->new()->note_plaintext_secrets;
     ok( !$note->{ok}, 'a literal password is reported' );
-    like( $note->{at} // $note->{fix}, qr/mail\.names\.andy\.password/, 'naming the field' );
+    like( $note->{at} // $note->{fix}, qr/mail\.names\.someuser\.password/, 'naming the field' );
 
     # Never the value.  A note that printed a password to say a password was
     # printed would be its own answer.

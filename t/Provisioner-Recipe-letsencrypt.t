@@ -44,7 +44,7 @@ my $DOMAIN = 'letsencrypt.test.test';
 # A name a public CA could actually issue for.  .test, .example, .invalid and
 # .localhost are all reserved, and reserved is precisely the case that routes
 # away from the public CA -- so the public path cannot be tested under one.
-my $PUBLIC = 'letsencrypt.troglodyne.net';
+my $PUBLIC = 'letsencrypt.example.net';
 
 sub generated {
     my (%extra) = @_;
@@ -61,8 +61,8 @@ sub generated {
         domain       => $DOMAIN,
         install_dir  => '/opt/domains',
         script_dir   => '/root/bin',
-        admin_user   => 'doge',
-        main_ip      => '192.168.1.9',
+        admin_user   => 'someadmin',
+        main_ip      => '192.0.2.9',
         full_aliases => ["www.$DOMAIN"],
         modules      => [qw{pdns letsencrypt}],
         %extra,
@@ -114,7 +114,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # a guest, where it ended every .test provision with a red makefile.
     like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the guest-wide config asks our own' );
 
-    my %required = $recipe->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %required = $recipe->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( exists $required{acmeca}, 'the CA that serves it is required' );
     ok( exists $required{pdns},   'and so is the dns server that answers its challenge' );
 
@@ -125,7 +125,7 @@ subtest 'a reserved TLD asks the fleet own CA, since no public one can issue' =>
     # ran enrich twice, and the second pass saw ca already set, skipped the
     # branch under test and asserted nothing about it.
     my %handed = $required{pdns}->();
-    my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'doge' );
+    my %opts   = $recipe->validate( domain => $DOMAIN, modules => [qw{pdns letsencrypt}], install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( length $handed{api_key}, 'pdns is handed an api key' );
     is( $handed{api_key}, $opts{lexicon}{key}, 'and the hook is given the same one' );
 
@@ -148,10 +148,10 @@ subtest 'a reserved TLD is served locally whatever reached the module list' => s
     # what serves it, which is true before the depsolver has run.
     like( $slurp->('dehydrated.conf'), qr{^CA="https://localhost:\d+/acme/trog/directory"$}m, 'the fleet CA, with pdns absent from the list' );
 
-    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', modules => ['letsencrypt'] );
+    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
     ok( exists $required{pdns}, 'because the recipe is what puts that server there' );
 
-    my %opts = _fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', modules => ['letsencrypt'] );
+    my %opts = _fresh()->validate( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', modules => ['letsencrypt'] );
     is( $opts{dns_preference}, 'pdns', 'and both callers resolve the one provider' );
 };
 
@@ -164,10 +164,10 @@ subtest 'a domain can name one of the fleet own instead' => sub {
 
     # The edge is what orders the CA ahead of the fetcher, which runs in the
     # postrun: without it the fetcher can be asking something not yet started.
-    my %required = $recipe->required_recipes( domain => $DOMAIN, ca => $url, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %required = $recipe->required_recipes( domain => $DOMAIN, ca => $url, install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( exists $required{acmeca}, 'and the recipe that serves it is required' );
 
-    %required = $recipe->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge' );
+    %required = $recipe->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( !exists $required{acmeca}, 'while a name the public CA can issue for needs nothing of ours' );
 };
 
@@ -200,7 +200,7 @@ subtest 'a registrar is left alone' => sub {
 
 subtest 'the ACME account comes back for a public CA, and not for one of ours' => sub {
     my ($recipe) = generated();
-    my %common = ( install_dir => '/opt/domains', admin_user => 'doge' );
+    my %common = ( install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     my %public = $recipe->restores( %common, domain => $PUBLIC );
     ok( exists $public{'/etc/dehydrated/accounts'}, 'a public CA outlives the guest, so its account is worth keeping' );
@@ -274,7 +274,7 @@ subtest 'the fetcher waits for the server that answers its challenge' => sub {
 };
 
 subtest 'a domain sharing a machine asks pdns with that machine key' => sub {
-    my %common = ( install_dir => '/opt/domains', admin_user => 'doge', modules => [qw{pdns letsencrypt}] );
+    my %common = ( install_dir => '/opt/domains', admin_user => 'someadmin', modules => [qw{pdns letsencrypt}] );
 
     # The arrangement said the way an operator says it, in _shared, rather than
     # handed to the recipe as an argument.  Which guest holds a domain is the
@@ -335,7 +335,7 @@ sub _fresh {
 }
 
 subtest 'a guest that answers its own challenge can resolve its own zone' => sub {
-    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %required = _fresh()->required_recipes( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     # lexicon walks the zone through the system resolver for --resolve-zone-name,
     # and step-ca validates dns-01 through it too.  Measured on a scratch guest
@@ -346,12 +346,12 @@ subtest 'a guest that answers its own challenge can resolve its own zone' => sub
 
     # Somebody else holds the zone, so the guest has no need to resolve it here.
     my $registrar = with_registrar();
-    my %elsewhere = _fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %elsewhere = _fresh()->required_recipes( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
     ok( !exists $elsewhere{nostubresolver}, 'while a registrar-served name is handed no resolver of ours' );
 };
 
 subtest 'a provider that could not answer the challenge is refused' => sub {
-    my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge', @_ ); };
+    my $public = sub { return ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin', @_ ); };
 
     # The rename is not silent.  An unrecognised key is dropped by the schema
     # rather than rejected, so a configuration left unmigrated would have
@@ -377,7 +377,7 @@ subtest 'a provider that could not answer the challenge is refused' => sub {
         my $registrar = with_registrar();
         like(
             exception {
-                _fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge', dns_preference => 'registrar' );
+                _fresh()->enrich( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin', dns_preference => 'registrar' );
             },
             qr/reserve/,
             'and so is naming a registrar for a name no registrar can hold'
@@ -407,7 +407,7 @@ subtest 'a guest that could answer either way is asked which' => sub {
     # different places, and choosing for the operator is a guess.
     my $registrar = with_registrar( pdns => { api_key => 'a-key' } );
 
-    my %both = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %both = ( domain => $PUBLIC, install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     like(
         exception { _fresh()->enrich(%both) },

@@ -164,11 +164,11 @@ add an C<ip_pool> to the C<_global> of C<_base>:
       _global:
         ip_pool:
           # Every address of the static pool.
-          addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
+          addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
 
           # Or a CIDR block to expand.  Both keys may appear, and the
           # addresses are merged.
-          cidr: 192.168.1.0/24
+          cidr: 192.0.2.0/24
 
 new_config gives each domain an address from the pool, and records it in the
 address database of L<Provisioner::IPPool>.  A domain keeps its address when you

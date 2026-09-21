@@ -101,7 +101,7 @@ sub tests {
 A jail for the domain, which bans a host whose logins fail too often.  tCMS
 writes each failure into the log of tPSGI, in the format of its C<Trog::Log>:
 
-    2026-08-27T21:51:59Z [INFO]: RequestId INIT From ::ffff:192.168.1.104 |nobody| Failed login for user doge
+    2026-08-27T21:51:59Z [INFO]: RequestId INIT From ::ffff:192.0.2.104 |nobody| Failed login for user someadmin
 
 and C<TOTP auth failed for user> when the password was right and the code was
 not.  fail2ban reads the IPv4 address out of an IPv4-mapped one, so the ban

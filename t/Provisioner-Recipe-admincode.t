@@ -29,7 +29,7 @@ use Provisioner::Cookbook();
 my %COMMON = (
     domain       => 'code.test.test',
     install_dir  => '/opt/domains',
-    admin_user   => 'doge',
+    admin_user   => 'someadmin',
     script_dir   => '/root/bin',
     full_aliases => [],
     basedir      => 'src',

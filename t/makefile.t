@@ -80,7 +80,7 @@ sub position {
 }
 
 subtest 'with hosts to fetch through a cache, it points them there and gives them back' => sub {
-    my $mf = makefile( cache_ip => '192.168.1.9', fetch_hosts => [qw{codeload.github.com www.cpan.org}] );
+    my $mf = makefile( cache_ip => '192.0.2.9', fetch_hosts => [qw{codeload.github.com www.cpan.org}] );
 
     my ($all)   = $mf =~ m/^all:([^\n]*)$/m;
     my @prereqs = split( q{ }, $all // q{} );
@@ -90,7 +90,7 @@ subtest 'with hosts to fetch through a cache, it points them there and gives the
     ok( $at < position( \@prereqs, "$STATE/perl" ),    'and ahead of every recipe, which is what downloads' );
 
     my ($target) = $mf =~ m/^\Q$STATE\E\/fetch_via_cache:\n((?:\t[^\n]*\n)+)/m;
-    is( $target, "\t/root/bin/fetch_via_cache on 192.168.1.9 fetchcache-ca.crt codeload.github.com www.cpan.org\n", 'pointing each host at the cache, with the authority to trust' );
+    is( $target, "\t/root/bin/fetch_via_cache on 192.0.2.9 fetchcache-ca.crt codeload.github.com www.cpan.org\n", 'pointing each host at the cache, with the authority to trust' );
     unlike( $target // q{}, qr/touch/, 'and never marked done, so a make run again asks the cache again' );
 
     my ($recipe) = $mf =~ m/^all:[^\n]*\n((?:\t[^\n]*\n)+)/m;

@@ -37,21 +37,21 @@ sub installation {
     File::Slurper::Temp::write_text( "$dir/ipmap.cfg", <<'IPMAP' );
 [global]
 basedir=/opt/domains
-admin_user=doge
-admin_gecos=Doge Doge
-admin_email=doge@test.test
-gateway=192.168.1.254
-resolvers=192.168.1.254, 8.8.8.8
+admin_user=someadmin
+admin_gecos=Some Admin
+admin_email=someadmin@test.test
+gateway=192.0.2.254
+resolvers=192.0.2.254, 8.8.8.8
 [ip_pool]
-addresses=192.168.1.100 192.168.1.101
-cidr=192.168.1.0/24
+addresses=192.0.2.100 192.0.2.101
+cidr=192.0.2.0/24
 [nameservers]
 ns1=ns1.test.test
 [aliases]
 one.test.test=solo.test.test
 two.test.test=first.test.test, second.test.test
 [ips]
-one.test.test=192.168.1.100
+one.test.test=192.0.2.100
 IPMAP
 
     File::Slurper::Temp::write_binary( "$dir/recipes.yaml", YAML::XS::Dump( $recipes // { 'one.test.test' => { ntp => undef } } ) );
@@ -70,15 +70,15 @@ subtest 'every block lands where the reader of it now looks' => sub {
     my ( $conf, $said ) = moved( installation() );
     my $global = $conf->{_base}{_global};
 
-    is( $global->{basedir},     '/opt/domains',   'the globals become the _global of _base' );
-    is( $global->{admin_email}, 'doge@test.test', 'key for key' );
+    is( $global->{basedir},     '/opt/domains',        'the globals become the _global of _base' );
+    is( $global->{admin_email}, 'someadmin@test.test', 'key for key' );
 
     # Config::Simple writes a list as one comma-separated string, and every
     # reader of resolvers wants a list.
-    is_deeply( $global->{resolvers}, [ '192.168.1.254', '8.8.8.8' ], 'resolvers become the list they are read as' );
+    is_deeply( $global->{resolvers}, [ '192.0.2.254', '8.8.8.8' ], 'resolvers become the list they are read as' );
 
-    is_deeply( $global->{ip_pool},     { addresses => [ '192.168.1.100', '192.168.1.101' ], cidr => '192.168.1.0/24' }, 'the pool becomes one key' );
-    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                                'and the nameservers another' );
+    is_deeply( $global->{ip_pool},     { addresses => [ '192.0.2.100', '192.0.2.101' ], cidr => '192.0.2.0/24' }, 'the pool becomes one key' );
+    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                          'and the nameservers another' );
 
     # An alias belongs to the domain that answers to it, which is where
     # Provisioner::Cookbook/alias_map reads it from.
@@ -102,7 +102,7 @@ subtest 'what recipes.yaml already says is left alone, and said so' => sub {
     is( $conf->{_base}{_global}{admin_user}, 'somebody', 'a setting already written is not overwritten' );
     is_deeply( $conf->{_base}{_global}{resolvers},         ['1.1.1.1'],        'nor one already written as a list' );
     is_deeply( $conf->{'one.test.test'}{_global}{aliases}, ['kept.test.test'], 'nor the aliases of a domain' );
-    is( $conf->{_base}{_global}{gateway}, '192.168.1.254', 'while the rest still moves across' );
+    is( $conf->{_base}{_global}{gateway}, '192.0.2.254', 'while the rest still moves across' );
 
     like( $said, qr/_base\._global\.admin_user/, 'and the report names what it left' );
 };

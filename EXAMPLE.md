@@ -22,7 +22,7 @@ _base:
         bridge_devname: ens4           # The device that gets the static address
         dhcp_devname: ens3             # The device that gets a DHCP address
         ip_pool:
-            cidr: 192.168.1.0/26       # The static addresses a guest can get
+            cidr: 192.0.2.0/26         # The static addresses a guest can get
         nameservers:
             ns1: ns1.test.test
             ns2: ns2.test.test

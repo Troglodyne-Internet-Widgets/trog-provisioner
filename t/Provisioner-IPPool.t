@@ -33,14 +33,14 @@ subtest 'pool_ips: explicit addresses' => sub {
 };
 
 subtest 'pool_ips: a pool written as YAML lists' => sub {
-    my @ips = Provisioner::IPPool::pool_ips( { addresses => [qw{10.0.0.1 10.0.0.2}], cidr => ['192.168.1.0/30'] } );
-    is_deeply \@ips, [qw{10.0.0.1 10.0.0.2 192.168.1.1 192.168.1.2}], 'a list is a list, as an operator writes one';
+    my @ips = Provisioner::IPPool::pool_ips( { addresses => [qw{10.0.0.1 10.0.0.2}], cidr => ['192.0.2.0/30'] } );
+    is_deeply \@ips, [qw{10.0.0.1 10.0.0.2 192.0.2.1 192.0.2.2}], 'a list is a list, as an operator writes one';
 };
 
 subtest 'pool_ips: CIDR expansion' => sub {
-    my @ips = Provisioner::IPPool::pool_ips( { cidr => '192.168.1.0/30' } );
+    my @ips = Provisioner::IPPool::pool_ips( { cidr => '192.0.2.0/30' } );
     ok scalar(@ips) >= 2, 'expands CIDR to multiple IPs';
-    like $ips[0], qr/^192\.168\.1\./, 'IPs are in correct subnet';
+    like $ips[0], qr/^192\.0\.2\./, 'IPs are in correct subnet';
 };
 
 subtest 'pool_ips: deduplicates overlap' => sub {
@@ -162,26 +162,26 @@ subtest 'what is answering on the wire' => sub {
     # consulted for a second opinion and for the hardware address, because its
     # entries decay to STALE between the sweep and the read.
     my $hv = FakeHV->new(<<'SAID');
-LIVE 192.168.1.43
-LIVE 192.168.1.54
-192.168.1.1 FAILED
-192.168.1.43 lladdr 52:54:00:e7:46:8f REACHABLE
-192.168.1.54 lladdr ce:f9:56:8c:db:2b STALE
-192.168.1.55 lladdr 52:54:00:aa:bb:cc REACHABLE
-192.168.1.59 lladdr 52:54:00:de:ad:01 STALE
-192.168.1.62 lladdr 52:54:00:00:00:01 INCOMPLETE
+LIVE 192.0.2.43
+LIVE 192.0.2.54
+192.0.2.1 FAILED
+192.0.2.43 lladdr 52:54:00:e7:46:8f REACHABLE
+192.0.2.54 lladdr ce:f9:56:8c:db:2b STALE
+192.0.2.55 lladdr 52:54:00:aa:bb:cc REACHABLE
+192.0.2.59 lladdr 52:54:00:de:ad:01 STALE
+192.0.2.62 lladdr 52:54:00:00:00:01 INCOMPLETE
 SAID
 
-    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.168.1.43'] );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
+    my @live = Provisioner::IPPool::_live_addresses( $hv, ['192.0.2.43'] );    ## no critic (Subroutines::ProtectPrivateSubs) -- the private sub is what this tests
 
     # .43 answered and is REACHABLE.  .54 answered but has gone STALE, which is
     # exactly the decay the ping result is there to survive.  .55 did not answer
     # but is REACHABLE, so something is there that does not speak ICMP.
-    is_deeply( [ map { $_->{ip} } @live ], [qw{192.168.1.43 192.168.1.54 192.168.1.55}], 'answered, or reachable' );
+    is_deeply( [ map { $_->{ip} } @live ], [qw{192.0.2.43 192.0.2.54 192.0.2.55}], 'answered, or reachable' );
 
     # STALE without an answer is not a signal: it outlives the machine that put
     # it there, and .59 is an address a guest destroyed days ago used to have.
-    unlike( join( ',', map { $_->{ip} } @live ), qr/192[.]168[.]1[.]59/, 'and a leftover entry is not read as occupied' );
+    unlike( join( ',', map { $_->{ip} } @live ), qr/192[.]0[.]2[.]59/, 'and a leftover entry is not read as occupied' );
 
     is( $live[1]{mac}, 'ce:f9:56:8c:db:2b', 'the hardware address comes off the table even when the entry is stale' );
 
@@ -262,14 +262,13 @@ subtest 'two runs at once cannot be given the same address' => sub {
 subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {
 
     # A guest handed .0 or .63 of a /26 looks provisioned right up until it
-    # cannot talk to anything.  This is where staging.troglodyne.net=192.168.1.0
-    # came from.
-    my @ips = Provisioner::IPPool::pool_ips( { cidr => '192.168.1.0/26' } );
-    is scalar @ips, 62,             'a /26 offers 62 hosts, not 64';
-    is $ips[0],     '192.168.1.1',  'starting after the network address';
-    is $ips[-1],    '192.168.1.62', 'and stopping before the broadcast';
-    ok !( grep { $_ eq '192.168.1.0' } @ips ),  'the network address is not on offer';
-    ok !( grep { $_ eq '192.168.1.63' } @ips ), 'nor is the broadcast';
+    # cannot talk to anything.
+    my @ips = Provisioner::IPPool::pool_ips( { cidr => '192.0.2.0/26' } );
+    is scalar @ips, 62,           'a /26 offers 62 hosts, not 64';
+    is $ips[0],     '192.0.2.1',  'starting after the network address';
+    is $ips[-1],    '192.0.2.62', 'and stopping before the broadcast';
+    ok !( grep { $_ eq '192.0.2.0' } @ips ),  'the network address is not on offer';
+    ok !( grep { $_ eq '192.0.2.63' } @ips ), 'nor is the broadcast';
 
     is_deeply [ Provisioner::IPPool::pool_ips( { cidr => '10.0.0.0/30' } ) ],
       [ '10.0.0.1', '10.0.0.2' ], 'a /30 offers its two hosts';
@@ -283,8 +282,8 @@ subtest 'pool_ips leaves the network and broadcast addresses alone' => sub {
 
     # An explicit address list is taken at its word; if you wrote it down, you
     # meant it.
-    is_deeply [ Provisioner::IPPool::pool_ips( { addresses => '192.168.1.0 192.168.1.5' } ) ],
-      [ '192.168.1.0', '192.168.1.5' ], 'addresses given by hand are not second-guessed';
+    is_deeply [ Provisioner::IPPool::pool_ips( { addresses => '192.0.2.0 192.0.2.5' } ) ],
+      [ '192.0.2.0', '192.0.2.5' ], 'addresses given by hand are not second-guessed';
 };
 
 done_testing;

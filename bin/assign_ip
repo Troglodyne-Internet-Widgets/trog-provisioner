@@ -33,8 +33,8 @@ network of libvirt.  F<docs/NETWORK.md> describes the network model.
 If the domain already holds an address, this prints it and writes nothing.  So
 a script can call this when it does not know if the domain was provisioned.
 
-    $ bin/assign_ip staging.troglodyne.net
-    192.168.1.48
+    $ bin/assign_ip staging.example.net
+    192.0.2.48
 
 This dies when F<recipes.yaml> cannot be read, when it has no C<ip_pool>, or when
 the pool has no free address.  It also dies if a hypervisor does not answer

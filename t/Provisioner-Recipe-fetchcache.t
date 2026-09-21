@@ -57,11 +57,11 @@ sub generated {
 
     my %vars = (
         domain       => $DOMAIN,
-        main_ip      => '192.168.1.9',
+        main_ip      => '192.0.2.9',
         full_aliases => ["www.$DOMAIN"],
         install_dir  => '/opt/domains',
         script_dir   => '/root/bin',
-        resolvers    => [ '192.168.1.253', '8.8.8.8' ],
+        resolvers    => [ '192.0.2.253', '8.8.8.8' ],
         %extra,
     );
 
@@ -232,14 +232,14 @@ subtest 'upstream is trusted as little as possible' => sub {
     like( $vhost, qr/^\s+proxy_set_header[ ]Cookie[ ]"";$/m,                        'nor cookies' );
     like( $vhost, qr/^\s+proxy_ignore_headers[ ][^;]*\bCache-Control\b/m,           'and its caching headers do not decide what is kept' );
     like( $vhost, qr/^\s+proxy_cache_use_stale[ ][^;]*\berror\b[^;]*\bhttp_503\b/m, 'what it had is served when upstream fails' );
-    like( $vhost, qr/^\s+resolver[ ]192\.168\.1\.253[ ]8\.8\.8\.8[ ]ipv6=off;$/m,   'looked up through the resolvers it was given' );
+    like( $vhost, qr/^\s+resolver[ ]192\.0\.2\.253[ ]8\.8\.8\.8[ ]ipv6=off;$/m,     'looked up through the resolvers it was given' );
 
     # The fleet's list, as a real installation has it: a loopback for guests that
     # run the pdns recursor, which this one does not, and an IPv6 address nginx
     # is told not to use.  Measured on a guest: nginx rotated onto 127.0.0.1
     # and every few lookups was a refused connection.
-    my ($fleet) = generated( resolvers => [qw{127.0.0.1 192.168.1.254 8.8.8.8 2600:1700::1}] );
-    like( $fleet, qr/^\s+resolver[ ]192\.168\.1\.254[ ]8\.8\.8\.8[ ]ipv6=off;$/m, 'and only the ones it can reach' );
+    my ($fleet) = generated( resolvers => [qw{127.0.0.1 192.0.2.254 8.8.8.8 2600:1700::1}] );
+    like( $fleet, qr/^\s+resolver[ ]192\.0\.2\.254[ ]8\.8\.8\.8[ ]ipv6=off;$/m, 'and only the ones it can reach' );
 
     # github.com sends five kilobytes of headers, which the default buffer turned
     # into a 502 before the redirect in them was read.
@@ -289,7 +289,7 @@ subtest 'on 443 and 80 under the names of the hosts, so it shares a guest with a
         template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'),
         output_dir    => $mirror,
         distro        => 'ubuntu',
-    )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.168.1.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
+    )->generate_files( $mirror, domain => $DOMAIN, main_ip => '192.0.2.9', full_aliases => [], install_dir => '/opt/domains', script_dir => '/root/bin', releases => ['noble'] );
     my $theirs = File::Slurper::read_text("$mirror/aptmirror.nginx.conf");
 
     my ($their_names) = $theirs =~ m/^\s+server_name[ ]([^;]+);$/m;

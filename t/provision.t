@@ -223,7 +223,7 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     mkdir "$dir/vm.test";
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: doge\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     $hv->redefine( domain_dir    => sub { $dir } );
     $hv->redefine( domain_exists => sub { 0 } );
@@ -242,15 +242,15 @@ subtest 'a dry run of a guest that is not there yet' => sub {
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( $_->[0], $_->[1] )
       for (
-        [ domain        => 'vm.test' ], [ contact_email => 'nobody@vm.test' ],
-        [ admin_user    => 'doge' ],    [ transfer_ip   => '192.168.1.49' ],
-        [ transfer_user => 'doge' ],    [ transfer_port => 22 ],
+        [ domain        => 'vm.test' ],   [ contact_email => 'nobody@vm.test' ],
+        [ admin_user    => 'someadmin' ], [ transfer_ip   => '192.0.2.49' ],
+        [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
       );
 
     my ($user) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
 
-    is( $asked, 0,      'nothing asked the cloud how to reach a guest it has not built' );
-    is( $user,  'doge', 'and the dry run came back rather than dying' );
+    is( $asked, 0,           'nothing asked the cloud how to reach a guest it has not built' );
+    is( $user,  'someadmin', 'and the dry run came back rather than dying' );
 
     Trog::HV->forget();
 };
@@ -291,16 +291,16 @@ subtest 'a dry run applies nothing' => sub {
     # that is up has its public half.
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa",     "PRIVATE\n" );
     File::Slurper::Temp::write_text( "$dir/vm.test/key.rsa.pub", "ssh-rsa AAAA nobody\n" );
-    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: doge\n" );
+    File::Slurper::Temp::write_text( "$dir/vm.test/users.yaml",  "users:\n  - name: someadmin\n" );
 
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( $_->[0], $_->[1] )
       for (
-        [ domain      => 'vm.test' ],       [ contact_email => 'nobody@vm.test' ],
-        [ ips         => '192.168.1.9' ],   [ gateway       => '192.168.1.254' ],
-        [ resolvers   => '192.168.1.254' ], [ admin_user    => 'doge' ],
-        [ size        => 21474836480 ],     [ cpus          => 2 ],      [ memory        => 4096 ],
-        [ transfer_ip => '192.168.1.49' ],  [ transfer_user => 'doge' ], [ transfer_port => 22 ],
+        [ domain      => 'vm.test' ],     [ contact_email => 'nobody@vm.test' ],
+        [ ips         => '192.0.2.9' ],   [ gateway       => '192.0.2.254' ],
+        [ resolvers   => '192.0.2.254' ], [ admin_user    => 'someadmin' ],
+        [ size        => 21474836480 ],   [ cpus          => 2 ],           [ memory        => 4096 ],
+        [ transfer_ip => '192.0.2.49' ],  [ transfer_user => 'someadmin' ], [ transfer_port => 22 ],
       );
 
     quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => 'vm.test', dryrun => 1 ) } );
@@ -369,7 +369,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
         _conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
-            admin_user => 'doge',      distro => 'ubuntu',
+            admin_user => 'someadmin', distro => 'ubuntu',
         )
     );
 
@@ -398,7 +398,7 @@ subtest 'a real provision reaches the vm recipe with what new_config wrote' => s
     ok( !( grep { $_ eq 'write_text' } @applied ), 'nothing is written to the hypervisor for logging' );
     ok( !-e "$dir/vm.test/rsyslog-collector.conf", 'and the vm recipe no longer generates a collector configuration' );
 
-    is( $user, 'doge',           'the admin user comes back' );
+    is( $user, 'someadmin',      'the admin user comes back' );
     is( $ip,   '192.168.122.50', 'with the address the guest leased' );
 };
 
@@ -408,8 +408,8 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
     my $loc = Test::MockModule->new('Trog::Local');
 
     # A guest already there, and two leases on file for its MAC: the one it has,
-    # and one an earlier rebuild left behind.  Measured on hydra: a rebuilt
-    # guest keeps its MAC and still gets a new address, and dnsmasq keeps the
+    # and one an earlier rebuild left behind.  Measured on a hypervisor: a
+    # rebuilt guest keeps its MAC and still gets a new address, and dnsmasq keeps the
     # old lease until it expires.
     $hv->redefine( domain_exists => sub { 1 } );
 
@@ -451,7 +451,7 @@ subtest 'a rebuild releases the leases the guests before it held' => sub {
         _conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
-            admin_user => 'doge',      distro => 'ubuntu',
+            admin_user => 'someadmin', distro => 'ubuntu',
         )
     );
 
@@ -538,7 +538,7 @@ sub rebuild_answering {
         _conf(
             domain     => 'vm.test',   memory => 2048, cpus => 2,
             size       => 42949672960, image  => 'https://example.test/img',
-            admin_user => 'doge',      distro => 'ubuntu',
+            admin_user => 'someadmin', distro => 'ubuntu',
         )
     );
 
@@ -806,8 +806,8 @@ sub _layered {
     $bin->redefine( merge_guest_addresses => sub { 1 } );
     $bin->redefine( place_guest_secrets   => sub { $seen{finished} = 1; 1 } );
 
-    my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'doge' ) );
-    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'doge', depends => $depends ) } );
+    my $config = Config::Simple->new( _conf( domain => $domain, admin_user => 'someadmin' ) );
+    ( $seen{user}, $seen{returned} ) = quietly( sub { Trog::Bin::Provisioner::provision_domain( config => $config, domain => $domain, reuse => $reuse, reuser => 'someadmin', depends => $depends ) } );
 
     return %seen;
 }

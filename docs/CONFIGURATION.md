@@ -34,8 +34,8 @@ _base:
     admin_user: test
     admin_gecos: Testy Testerson
     admin_email: test@test.test
-    gateway: 192.168.1.254
-    resolvers: [192.168.1.254, 8.8.8.8]
+    gateway: 192.0.2.254
+    resolvers: [192.0.2.254, 8.8.8.8]
     nameservers:
       ns1: ns1.test.test
       ns2: ns2.test.test
@@ -153,7 +153,7 @@ tickle.test.test:
     registrar:
         type: "cloudflare"
         user: "someGuy"
-        key:  "secret:troglodyne/cloudflare/password"
+        key:  "secret:registrar/cloudflare/password"
 ```
 
 `registrar` is a recipe rather than a `_global` setting, and usually lives in
@@ -384,14 +384,14 @@ runner.example.test:
             - /srv/code/trog-provisioner
 
         config:
-            resolvers: "192.168.1.254, 1.1.1.1"
-            addresses: 192.168.1.180-192.168.1.199
-            cidr:      192.168.1.0/24
+            resolvers: "192.0.2.254, 1.1.1.1"
+            addresses: 192.0.2.180-192.0.2.199
+            cidr:      192.0.2.0/24
 
         hypervisors:
-            hydra:
-                libvirt_uri: qemu+ssh://runner@hydra.example.test/system
-                pool_path:   /pool/vm-disks/runner
+            hv1:
+                libvirt_uri: qemu+ssh://runner@hv1.example.test/system
+                pool_path:   /srv/vm-disks/runner
                 pool_name:   runner_disks
                 partition:   /machine/runner
 

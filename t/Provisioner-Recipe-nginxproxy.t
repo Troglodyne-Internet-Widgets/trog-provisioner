@@ -23,9 +23,9 @@ use Provisioner::Cookbook();
 my %BASE = (
     domain       => 'proxy.test.test',
     install_dir  => '/opt/domains',
-    admin_user   => 'doge',
+    admin_user   => 'someadmin',
     script_dir   => '/root/bin',
-    main_ip      => '192.168.1.9',
+    main_ip      => '192.0.2.9',
     full_aliases => [],
 );
 

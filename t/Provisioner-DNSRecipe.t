@@ -118,7 +118,7 @@ subtest 'lexicon settles the tie itself where no letsencrypt hands it one' => su
     $conf->redefine( host_of       => sub { return undef } );
 
     # Public, because a reserved TLD has only ever one candidate and so no tie.
-    my %common = ( domain => 'tie.troglodyne.net', install_dir => '/opt/domains', admin_user => 'doge' );
+    my %common = ( domain => 'tie.example.net', install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     like(
         exception { fresh('lexicon')->validate(%common) },
@@ -156,7 +156,7 @@ subtest 'the operator registrar is left alone, so synczones still has an upstrea
 };
 
 subtest 'the CA depends on the capability, not on a recipe name' => sub {
-    my %common = ( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'doge' );
+    my %common = ( domain => $DOMAIN, install_dir => '/opt/domains', admin_user => 'someadmin' );
 
     my %required = fresh('acmeca')->required_recipes(%common);
     my $local    = Provisioner::DNSRecipe->local_implementation;
@@ -193,12 +193,12 @@ subtest 'the interface says which implementation serves a domain' => sub {
     is( Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $nothing ), 'pdns', 'a reserved name is served locally' );
 
     like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $nothing ) },
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $nothing ) },
         qr/no[ ]DNS[ ]provider/,
         'and a public one with nothing configured is refused rather than guessed at'
     );
 
-    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $registrar ), 'registrar', 'the one that is configured serves it' );
+    is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $registrar ), 'registrar', 'the one that is configured serves it' );
 
     like(
         exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.test', configured => $registrar, dns_preference => 'registrar' ) },
@@ -207,19 +207,19 @@ subtest 'the interface says which implementation serves a domain' => sub {
     );
 
     like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $both ) },
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both ) },
         qr/dns_preference/,
         'a guest that could answer either way is asked which'
     );
 
     foreach my $named (qw{pdns registrar}) {
-        is( Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
+        is( Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net', configured => $both, dns_preference => $named ), $named, "naming $named settles it" );
     }
 
     # A domain layered onto another is served by what that guest runs, so the
     # host's configuration counts as well as its own.
     is(
-        Provisioner::DNSRecipe->implementation_for( domain => 'tenant.troglodyne.net', configured => $nothing, host_configured => $registrar ),
+        Provisioner::DNSRecipe->implementation_for( domain => 'tenant.example.net', configured => $nothing, host_configured => $registrar ),
         'registrar',
         'and a tenant is served by what its host holds'
     );
@@ -229,18 +229,18 @@ subtest 'the interface says which implementation serves a domain' => sub {
     like(
         exception {
             Provisioner::DNSRecipe->implementation_for(
-                domain         => 'tenant.troglodyne.net',
+                domain         => 'tenant.example.net',
                 configured     => $nothing,
-                host           => 'host.troglodyne.net',
+                host           => 'host.example.net',
                 dns_preference => 'pdns',
             );
         },
-        qr/host\.troglodyne\.net[ ]is[ ]configured[ ]with[ ]no[ ]pdns/,
+        qr/host\.example\.net[ ]is[ ]configured[ ]with[ ]no[ ]pdns/,
         'and a refusal names the machine it asked about, not the domain on it'
     );
 
     like(
-        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.troglodyne.net' ) },
+        exception { Provisioner::DNSRecipe->implementation_for( domain => 'a.example.net' ) },
         qr/was[ ]not[ ]told[ ]what/,
         'asked without a configuration at all, it says so rather than resolving against something else'
     );

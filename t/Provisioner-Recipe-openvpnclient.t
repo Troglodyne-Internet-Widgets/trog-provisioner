@@ -26,9 +26,9 @@ my %BASE = (
     cert_dir      => '/opt/vpn-certs/first',
     install_dir   => '/opt/domains',
     script_dir    => '/root/bin',
-    admin_user    => 'doge',
-    transfer_user => 'doge',
-    transfer_ip   => '192.168.1.49',
+    admin_user    => 'someadmin',
+    transfer_user => 'someadmin',
+    transfer_ip   => '192.0.2.49',
     transfer_port => 22,
 );
 

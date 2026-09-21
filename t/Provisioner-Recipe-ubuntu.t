@@ -57,14 +57,14 @@ use Provisioner::Cookbook();
 my $DOMAIN    = 'vm.test.test';
 my $GECOS     = q{Sean O'Brien & Co: boss};
 my $EMAIL     = q{o'brien&sons@test.test};
-my $RESOLVERS = [ '192.168.1.253', '8.8.8.8' ];
+my $RESOLVERS = [ '192.0.2.253', '8.8.8.8' ];
 
 # The guest's own configuration, as bin/new_config hands it over.
 sub settings (%overrides) {
     return (
         domain        => $DOMAIN,
-        ips           => ['192.168.1.10'],
-        gateway       => '192.168.1.254',
+        ips           => ['192.0.2.10'],
+        gateway       => '192.0.2.254',
         resolvers     => $RESOLVERS,
         contact_email => $EMAIL,
         admin_user    => 'admin',
@@ -83,7 +83,7 @@ sub settings (%overrides) {
 
         # What bin/new_config hands over as the ip pool's assignments, which is
         # how a mirror named by bare domain gets resolved to an address.
-        ipmap => { 'm.test.test' => '192.168.1.9' },
+        ipmap => { 'm.test.test' => '192.0.2.9' },
         %overrides,
     );
 }
@@ -218,13 +218,13 @@ subtest 'the documents a guest with no mirror is built from' => sub {
                         type        => 'physical',
                         name        => 'ens4',
                         mac_address => Trog::HV::Libvirt->guest_mac( $DOMAIN, 1 ),
-                        gateway4    => '192.168.1.254',
+                        gateway4    => '192.0.2.254',
                         nameservers => { search => [$DOMAIN], addresses => $RESOLVERS },
                         subnets     => [
                             {
                                 type            => 'static',
-                                address         => '192.168.1.10',
-                                gateway         => '192.168.1.254',
+                                address         => '192.0.2.10',
+                                gateway         => '192.0.2.254',
                                 dns_search      => [$DOMAIN],
                                 dns_nameservers => $RESOLVERS,
                             }
@@ -504,7 +504,7 @@ subtest 'a bare name is resolved out of the ip pool' => sub {
     my ( $dir, undef ) = generated( mirror => 'm.test.test' );
     my ($mirrorlist) = grep { $_->{path} eq '/etc/apt/mirrorlist' } @{ loaded( $dir, 'user-data' )->{write_files} };
 
-    like( $mirrorlist->{content}, qr{\Ahttp://192\.168\.1\.9/ubuntu\t}, 'the address out of the pool, with the distribution path on it' );
+    like( $mirrorlist->{content}, qr{\Ahttp://192\.0\.2\.9/ubuntu\t}, 'the address out of the pool, with the distribution path on it' );
 };
 
 subtest 'a name nothing has an address for is refused' => sub {

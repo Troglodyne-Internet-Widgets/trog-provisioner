@@ -57,7 +57,7 @@ RULES
 my $reloads = 0;
 my $mock    = Test::MockModule->new( 'Trog::Script::SetupMasquerade', no_auto => 1 );
 $mock->redefine( _reload         => sub { $reloads++; return } );
-$mock->redefine( _default_routes => sub { return "default via 192.168.1.254 dev ens4 proto static\n" } );
+$mock->redefine( _default_routes => sub { return "default via 192.0.2.254 dev ens4 proto static\n" } );
 
 sub rules_file {
     my ($content) = @_;

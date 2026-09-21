@@ -35,7 +35,7 @@ use_ok('Trog::Machine') or BAIL_OUT('Trog::Machine does not load; the install is
 sub remote (%overrides) {
     return Trog::Machine->new(
         host     => 'hv.test',
-        user     => 'doge',
+        user     => 'someadmin',
         port     => 2222,
         key_path => '/bogus/domains/vm.test/key.rsa',
         %overrides,
@@ -111,8 +111,8 @@ subtest 'what get_dir asks rsync for' => sub {
 
     ok( remote()->get_dir( '/bogus/lib/deluged', "$dir/deep/deluged", exclude => ['secrets.key'], update => 1, sudo => 1 ), 'it comes' );
 
-    is( $asked[0][0], 'doge@hv.test:/bogus/lib/deluged/', 'the guest is the source' );
-    is( $asked[0][1], "$dir/deep/deluged/",               'and we are the destination' );
+    is( $asked[0][0], 'someadmin@hv.test:/bogus/lib/deluged/', 'the guest is the source' );
+    is( $asked[0][1], "$dir/deep/deluged/",                    'and we are the destination' );
     is_deeply(
         { @{ $asked[0] }[ 2 .. $#{ $asked[0] } ] },
         { exclude => ['secrets.key'], update => 1, sudo => 1 },

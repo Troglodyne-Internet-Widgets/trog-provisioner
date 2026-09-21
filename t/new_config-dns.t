@@ -38,7 +38,7 @@ use Trog::Secrets();
 
 # The administrator's keys are read out of the configuration directory now,
 # rather than named as an identity for cloud-init to fetch at first boot.
-File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAdogeskey doge\n" );
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
 require Trog::HV;
 require Trog::HV::Libvirt;
@@ -53,7 +53,7 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
 
 # Reserved, so the guest holds its own zone; public, so somebody else does.
 my $LOCAL  = 'local.test';
-my $REMOTE = 'remote.troglodyne.net';
+my $REMOTE = 'remote.example.net';
 
 sub generate {
     my ( $domain, %recipes_for ) = @_;
@@ -63,7 +63,7 @@ sub generate {
     mkdir "$tmpdir/data";
     mkdir "$tmpdir/data/$domain";
 
-    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my $pool = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
 
     # One resolver on purpose, written as a scalar rather than a list.  That is
     # what an operator writes, and bin/new_config dereferenced it raw when it
@@ -72,12 +72,12 @@ sub generate {
     my %global = (
         data_source    => "$tmpdir/data",
         basedir        => "$tmpdir/domains",
-        transfer_user  => 'doge',
-        admin_user     => 'doge',
+        transfer_user  => 'someadmin',
+        admin_user     => 'someadmin',
         admin_email    => 'bogus@test.test',
         admin_gecos    => 'Test Test',
-        gateway        => '192.168.1.254',
-        resolvers      => '192.168.1.254',
+        gateway        => '192.0.2.254',
+        resolvers      => '192.0.2.254',
         bridge_devname => 'ens4',
         dhcp_devname   => 'ens3',
         ip_pool        => { addresses => $pool },
@@ -139,7 +139,7 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
     # already been given, so the generator never reaches for a terminal.
     Trog::Credentials->remember( 'keepass', 'throwaway' );
 
-    my $pool        = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my $pool        = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";
     File::Slurper::Temp::write_binary(
         $recipe_file,
@@ -149,12 +149,12 @@ subtest 'a credential written as a secret reference reaches the hook resolved' =
                     _global => {
                         data_source    => "$tmpdir/data",
                         basedir        => "$tmpdir/domains",
-                        transfer_user  => 'doge',
-                        admin_user     => 'doge',
+                        transfer_user  => 'someadmin',
+                        admin_user     => 'someadmin',
                         admin_email    => 'bogus@test.test',
                         admin_gecos    => 'Test Test',
-                        gateway        => '192.168.1.254',
-                        resolvers      => '192.168.1.254',
+                        gateway        => '192.0.2.254',
+                        resolvers      => '192.0.2.254',
                         bridge_devname => 'ens4',
                         dhcp_devname   => 'ens3',
                         ip_pool        => { addresses => $pool },

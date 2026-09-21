@@ -1,8 +1,8 @@
 ---
 users:
-- gecos: George S. Baugh
-  name: teodesian
+- gecos: Some Admin
+  name: someadmin
   shell: /bin/bash
   ssh_import_id:
-  - gh:teodesian
+  - gh:someadmin
   sudo: ALL=(ALL) NOPASSWD:ALL

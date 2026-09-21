@@ -55,7 +55,7 @@ sub generated {
 
         # What bin/new_config hands over as the ip pool's assignments, which is
         # how a destination named by bare domain is resolved to an address.
-        ipmap => { 'logs.test.test' => '192.168.1.9' },
+        ipmap => { 'logs.test.test' => '192.0.2.9' },
         %extra,
     );
 
@@ -70,10 +70,10 @@ subtest 'a destination the pool knows is pinned to its address' => sub {
 
     # An address, not the name.  The logs that would tell you DNS is broken
     # should not need DNS to arrive.
-    like( conf($dir), qr/\Qtarget="192.168.1.9"\E/, 'resolved out of the ip pool' );
-    like( conf($dir), qr/\Qport="514"\E/,           'on the default syslog port' );
-    like( conf($dir), qr/\Qprotocol="tcp"\E/,       'over tcp, which can be checked for' );
-    like( conf($dir), qr/^\Q*.*\E\s+action/m,       'forwarding everything by default' );
+    like( conf($dir), qr/\Qtarget="192.0.2.9"\E/, 'resolved out of the ip pool' );
+    like( conf($dir), qr/\Qport="514"\E/,         'on the default syslog port' );
+    like( conf($dir), qr/\Qprotocol="tcp"\E/,     'over tcp, which can be checked for' );
+    like( conf($dir), qr/^\Q*.*\E\s+action/m,     'forwarding everything by default' );
 
     # The collector files a message under the name the sender put in it, and
     # rsyslog sends its short hostname unless told otherwise -- so a fleet with

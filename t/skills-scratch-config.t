@@ -50,9 +50,9 @@ sub installation {
                         admin_user  => 'operator',
                         admin_gecos => 'The Operator',
                         admin_email => 'operator@test.test',
-                        gateway     => '192.168.1.254',
-                        resolvers   => ['192.168.1.254'],
-                        ip_pool     => { cidr => '192.168.1.0/26' },
+                        gateway     => '192.0.2.254',
+                        resolvers   => ['192.0.2.254'],
+                        ip_pool     => { cidr => '192.0.2.0/26' },
                         %extra,
                     },
                     letsencrypt => {},
@@ -118,9 +118,9 @@ subtest 'a scratch guest is configured as a real one is' => sub {
     my ($recipes) = scratch();
     my $global = $recipes->{_base}{_global};
 
-    is( $global->{admin_user}, 'operator',      'the administrator of the installation administers a scratch guest too' );
-    is( $global->{gateway},    '192.168.1.254', 'it reaches the network the same way' );
-    is_deeply( $global->{ip_pool}, { cidr => '192.168.1.0/26' }, 'and draws from the same pool, so it cannot take an address a real guest has' );
+    is( $global->{admin_user}, 'operator',    'the administrator of the installation administers a scratch guest too' );
+    is( $global->{gateway},    '192.0.2.254', 'it reaches the network the same way' );
+    is_deeply( $global->{ip_pool}, { cidr => '192.0.2.0/26' }, 'and draws from the same pool, so it cannot take an address a real guest has' );
 };
 
 subtest 'nothing it cannot hold a credential for comes with it' => sub {

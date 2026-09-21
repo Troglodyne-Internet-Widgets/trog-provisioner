@@ -91,7 +91,7 @@ subtest 'the vimrc looks for the built perl only on a guest that builds one' => 
     foreach my $case ( [ [qw{perllsp}], 0 ], [ [qw{perl perllsp}], 1 ] ) {
         my ( $modules, $built ) = @$case;
         my $dir = tempdir( CLEANUP => 1 );
-        recipe()->generate_files( $dir, domain => 'lsp.test.test', install_dir => '/opt/domains', admin_user => 'admin', script_dir => '/root/bin', main_ip => '192.168.1.9', modules => $modules );
+        recipe()->generate_files( $dir, domain => 'lsp.test.test', install_dir => '/opt/domains', admin_user => 'admin', script_dir => '/root/bin', main_ip => '192.0.2.9', modules => $modules );
         my $vimrc = do { local ( @ARGV, $/ ) = "$dir/perllsp.vim"; <> }
           // q{};
         my $what = join( ' and ', @$modules );

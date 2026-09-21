@@ -17,8 +17,8 @@ use parent qw{Provisioner::DNSRecipe};
     _base:
         registrar:
             type: easydns
-            user: "secret:troglodyne/easydns_token/username"
-            key:  "secret:troglodyne/easydns_token/password"
+            user: "secret:registrar/easydns_token/username"
+            key:  "secret:registrar/easydns_token/password"
 
 =head2 DESCRIPTION
 

@@ -138,7 +138,7 @@ my %G = (
     domain                     => 'test.test.test',
     tld                        => 'test.test',
     admin_keys                 => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAnobodyskey nobody'],
-    gateway                    => '192.168.1.254',
+    gateway                    => '192.0.2.254',
     cache_ip                   => q{},
     transfer_ips               => ['192.168.122.251'],
     install_dir                => '/opt/domains',
@@ -147,15 +147,15 @@ my %G = (
     user                       => 'www-data',
     admin_user                 => 'admin',
     admin_email                => 'admin@test.test',
-    main_ip                    => '192.168.1.100',
-    tld_ip                     => '192.168.1.1',
+    main_ip                    => '192.0.2.100',
+    tld_ip                     => '192.0.2.1',
     transfer_ip                => '192.168.122.251',
     transfer_port              => 22,
     transfer_user              => 'transfer',
     aliases                    => { test => [ 'www.test', 'mail.test' ] },
     full_aliases               => ['www.test.test.test'],
     modules                    => [],
-    ipmap                      => { test => '192.168.1.100' },
+    ipmap                      => { test => '192.0.2.100' },
     nameservers                => {},
     packager_invocation        => 'apt-get install -y',
     packager_up_invocation     => 'apt-get upgrade -y',
@@ -163,7 +163,7 @@ my %G = (
 
     # Every recipe is handed these, not only the distro recipe: the fetch cache
     # runs a resolver of its own and refuses to render without them.
-    resolvers => [ '192.168.1.253', '8.8.8.8' ],
+    resolvers => [ '192.0.2.253', '8.8.8.8' ],
     users     => [
         { name => 'admin', gecos => 'Admin User',  shell => '/bin/bash' },
         { name => 'alice', gecos => 'Alice Smith', shell => '/bin/bash' },
@@ -300,7 +300,7 @@ foreach my $recipe (@available) {
 
 # The guest rsyncs its payload off whoever is holding it -- this machine -- so
 # every one of these has to name it.  When the host came out empty the recipe
-# still rendered, and still looked plausible -- 'doge@:/opt/data/...' -- and only
+# still rendered, and still looked plausible -- 'someadmin@:/opt/data/...' -- and only
 # failed on the guest, hours later, at the point where it had already been told
 # the build succeeded.
 subtest 'every rsync of a payload names the machine holding it' => sub {
@@ -806,7 +806,7 @@ subtest 'every guest test renders to a Perl script that says something' => sub {
     my %vars = (
         %G,
         domain       => 'd.test',       install_dir => '/opt/domains',
-        admin_user   => 'doge',         user        => 'svc',
+        admin_user   => 'someadmin',    user        => 'svc',
         script_dir   => '/root/bin',    version     => '1.2.3-4',
         zone         => 'dc1',          buckets     => ['a'],
         channels     => ['x'],          disks       => [],
@@ -1149,26 +1149,26 @@ subtest 'a recipe names the directories it fetches, and copes with not being tol
 subtest 'ufw exempts every address the provisioner arrives from' => sub {
     my $ufw = Provisioner::Cookbook->load('ufw')->new(%PROV);
 
-    my %got = $ufw->enrich( transfer_ips => [ '192.168.1.49', '192.168.122.251' ] );
+    my %got = $ufw->enrich( transfer_ips => [ '192.0.2.49', '192.168.122.251' ] );
     is_deeply(
         $got{admin_networks},
-        [ '192.168.1.49', '192.168.122.251' ],
+        [ '192.0.2.49', '192.168.122.251' ],
         'both of ours are exempt, not just the one the payload came from'
     );
 
     # What an operator wrote stays, and ours go in front of it.
     %got = $ufw->enrich(
-        transfer_ips   => ['192.168.1.49'],
+        transfer_ips   => ['192.0.2.49'],
         admin_networks => ['10.0.0.0/8'],
     );
-    is_deeply( $got{admin_networks}, [ '192.168.1.49', '10.0.0.0/8' ], 'and what was already named is kept' );
+    is_deeply( $got{admin_networks}, [ '192.0.2.49', '10.0.0.0/8' ], 'and what was already named is kept' );
 
     # Said twice is still one rule.
     %got = $ufw->enrich(
-        transfer_ips   => [ '192.168.1.49', '192.168.122.251' ],
-        admin_networks => ['192.168.1.49'],
+        transfer_ips   => [ '192.0.2.49', '192.168.122.251' ],
+        admin_networks => ['192.0.2.49'],
     );
-    is_deeply( $got{admin_networks}, [ '192.168.122.251', '192.168.1.49' ], 'an address named twice is exempt once' );
+    is_deeply( $got{admin_networks}, [ '192.168.122.251', '192.0.2.49' ], 'an address named twice is exempt once' );
 
     # A configuration written before there was a list of them.
     %got = $ufw->enrich( transfer_ip => '192.168.122.1' );

@@ -44,7 +44,7 @@ Even business units at giant corporations can do just fine with this approach.
     * cpu\_mode: libvirt `<cpu mode="...">` value.  Defaults to `host-passthrough` so the guest sees the HV's real CPU (incl. AVX/AVX2 — required by anything that probes cpuid for vector extensions, e.g. the v8 snapshot bundled with the `claude` CLI).  Set to `host-model` or a specific qemu CPU model if you need to migrate the guest to a differently-specced HV.
 2. Write $DOMAIN/users.yaml describing the users to create. See cloud-init's [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) for examples.
 2. Ensure tarball backups to restore (if they exist) are in the directory as data.tar.gz.
-2. Run `bin/provision $DOMAIN` -- fully qualified, e.g. `bin/provision mysql.troglodyne.net` (add `--hypervisor $NAME` to build on a particular one)
+2. Run `bin/provision $DOMAIN` -- fully qualified, e.g. `bin/provision mysql.example.net` (add `--hypervisor $NAME` to build on a particular one)
 3. It is the responsibility of data.tar.gz to have a Makefile in the TLD which sets up all relevant dependencies, loads up DBs, etc as the default target.
 4. To set up new sites, have a skeleton site generator to build a blank site tarball.
 
@@ -165,7 +165,7 @@ That means:
 
     What the kernel *will* enforce is a storage pool on a filesystem with a limit on it, and a systemd slice.  Both are named in the hypervisor's block:
 
-        pool_path = /pool/vm-disks/runner
+        pool_path = /srv/vm-disks/runner
         pool_name = runner_disks
         partition = /machine/runner
 
@@ -251,8 +251,8 @@ Domains used to be written two ways: short, with a `tld` from `ipmap.cfg`'s glob
 There is one spelling now, in full, matching what `recipes.d` already named its files:
 
 ```
-bin/new_config mysql.troglodyne.net
-bin/provision  mysql.troglodyne.net
+bin/new_config mysql.example.net
+bin/provision  mysql.example.net
 ```
 
 `[addons]` and `tld` are gone, and the aliases of a domain -- and the top-level key of each recipe -- are fully qualified.  The one-time rename was `bin/qualify_site_data`, which is gone now that every known configuration is migrated.  An installation still on the old format can take it from the history, with `git show $(git log -1 --format=%H --diff-filter=D -- bin/qualify_site_data)^:bin/qualify_site_data`.
@@ -287,10 +287,10 @@ them run even after the first failure, and each one that fails says what to do:
 
 ```
 $ bin/preflight
-Hypervisor: qemu+ssh://doge@hv1.example.test/system
+Hypervisor: qemu+ssh://someadmin@hv1.example.test/system
 
-  ok   Reached doge@hv1.example.test as doge
-FAILED No passwordless sudo for doge on hv1.example.test
+  ok   Reached someadmin@hv1.example.test as someadmin
+FAILED No passwordless sudo for someadmin on hv1.example.test
   ok   Cloud-init seed builder: xorriso
   ok   libvirt answers, running 10.0.0
   ok   Sys::Virt 10.0.0 matches libvirt 10.0.0 on the hypervisor
