@@ -1,0 +1,35 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+
+# A package that installed is not a program that runs, and rustup without a
+# toolchain is an installer with nothing installed.
+my $rustup = qx{rustup --version 2>&1};
+like($rustup, qr/rustup[ ]\d+\./x, 'rustup runs and says its version') or diag $rustup;
+
+my $rustc = qx{rustc --version 2>&1};
+like($rustc, qr/rustc[ ]\d+\./x, 'rustc runs, so a toolchain is installed') or diag $rustc;
+
+my $cargo = qx{cargo --version 2>&1};
+like($cargo, qr/cargo[ ]\d+\./x, 'and so does cargo') or diag $cargo;
+
+my $shown = qx{rustup show active-toolchain 2>&1};
+like($shown, qr/\Q[% toolchain %]\E/, 'the default toolchain is the one that was asked for') or diag $shown;
+
+# rustc calls cc to link, and says so only when something asks it to link.
+# Without a C toolchain this is where it fails, rather than at install time.
+my $dir = "/tmp/rust-recipe-test.$$";
+mkdir $dir or die "Cannot make $dir: $!";
+open(my $fh, '>', "$dir/hello.rs") or die "Cannot write hello.rs: $!";
+print {$fh} "fn main() { println!(\"ok\"); }\n";
+close($fh) or die "Cannot close hello.rs: $!";
+
+my $built = qx{cd $dir && rustc hello.rs -o hello 2>&1};
+is($built, '', 'a program compiles with nothing to say') or diag $built;
+is(qx{$dir/hello 2>&1}, "ok\n", 'and the binary it linked runs');
+
+unlink "$dir/hello.rs", "$dir/hello";
+rmdir $dir;
+
+done_testing();
