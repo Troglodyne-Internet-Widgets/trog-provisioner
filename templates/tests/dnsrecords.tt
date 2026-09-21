@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use JSON::PP ();
 
 # The credential this recipe writes records with belongs to the lexicon recipe,
 # which it requires.  Without the shortcut there is nothing to publish through,
@@ -12,15 +13,29 @@ ok(-x $shortcut, 'the lexicon shortcut is installed, since that is what carries 
 [% IF publish_records %]
 # Asked of the provider rather than of a resolver: what is under test is that
 # the records were published, and a resolver would answer out of its cache for
-# as long as whatever it held before this lives.
-my $a_records = `$shortcut list A --output=JSON 2>&1`;
-like($a_records, qr/\[/, 'the provider answered with a list of A records') or diag $a_records;
-like($a_records, qr/\Q[% main_ip %]\E/, 'holding the address this guest was built with') or diag $a_records;
+# as long as whatever it held before this lives.  stdout alone, so that a
+# warning cannot spoil the JSON; stderr is asked for again only to explain a
+# failure.
+sub listed {
+    my ($type) = @_;
+    my $out = `$shortcut list $type --output=JSON 2>/dev/null`;
+    my $ok = $? == 0;
+    my $list = eval { JSON::PP->new->utf8->decode($out) };
+    return ($ok && ref $list eq 'ARRAY') ? $list : undef;
+}
 
-my $cnames = `$shortcut list CNAME --output=JSON 2>&1`;
-like($cnames, qr/\[/, 'and with a list of CNAMEs') or diag $cnames;
+sub why { my ($type) = @_; return scalar `$shortcut list $type --output=JSON 2>&1` }
+
+my $a_records = listed('A');
+ok($a_records, 'the provider answered with a list of A records') or diag why('A');
+ok((grep { ($_->{content} // '') eq '[% main_ip %]' } @{ $a_records // [] }), 'holding the address this guest was built with')
+    or diag explain $a_records;
+
+my $cnames = listed('CNAME');
+ok($cnames, 'and with a list of CNAMEs') or diag why('CNAME');
+my %cname = map { ($_->{name} // '') => 1 } @{ $cnames // [] };
 [% FOREACH alias IN full_aliases.sort() %]
-like($cnames, qr/"name": "\Q[% alias %]\E"/, '[% alias %] is published under exactly that name') or diag $cnames;
+ok($cname{'[% alias %]'}, '[% alias %] is published under exactly that name') or diag explain $cnames;
 [% END -%]
 [% ELSE %]
 # The hypervisor allocates the address here, so there was none to publish at the
