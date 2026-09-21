@@ -30,7 +30,7 @@ my %G = (
     domain      => 'build.test.test',
     install_dir => '/opt/domains',
     script_dir  => '/root/bin',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
     user        => 'builder',
 );
 

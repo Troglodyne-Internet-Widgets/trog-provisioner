@@ -32,7 +32,7 @@ my %G = (
     domain      => 'bot.test.test',
     install_dir => '/opt/domains',
     script_dir  => '/root/bin',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
     user        => 'koan',
 );
 
@@ -51,7 +51,7 @@ subtest 'a guest that was told nothing gets nothing' => sub {
 # The host keys are the half a forwarded key needs too: without them the first
 # push waits on a prompt that nothing answers, which reads as a hang.
 subtest 'host keys without a key of our own' => sub {
-    my $said = recipe()->render( %G, accounts => { doge => { hosts => [ 'github.com', 'gitea.test' ] } } );
+    my $said = recipe()->render( %G, accounts => { someadmin => { hosts => [ 'github.com', 'gitea.test' ] } } );
 
     like( $said, qr/ssh-keyscan[^\n]*'github\.com'/, 'each host is keyscanned' );
     like( $said, qr/ssh-keyscan[^\n]*'gitea\.test'/, 'including the second' );
@@ -59,7 +59,7 @@ subtest 'host keys without a key of our own' => sub {
     unlike( $said, qr/id_git/,      'and still no key' );
     unlike( $said, qr/gpg\.format/, 'nor signing, which needs one' );
 
-    is_deeply( { recipe()->guest_secrets( '/opt/domains', 'bot.test.test', accounts => { doge => { hosts => ['github.com'] } } ) }, {}, 'nothing is taken from the store either' );
+    is_deeply( { recipe()->guest_secrets( '/opt/domains', 'bot.test.test', accounts => { someadmin => { hosts => ['github.com'] } } ) }, {}, 'nothing is taken from the store either' );
 };
 
 subtest 'a key with nobody to attribute it to is refused' => sub {
@@ -96,7 +96,7 @@ subtest 'the key, and what is configured with it' => sub {
 };
 
 subtest 'an identity without a key is just an identity' => sub {
-    my $said = recipe()->render( %G, accounts => { doge => { user_name => 'somebody', user_email => 'somebody@test.test' } } );
+    my $said = recipe()->render( %G, accounts => { someadmin => { user_name => 'somebody', user_email => 'somebody@test.test' } } );
 
     like( $said, qr/user\.email[ ]*'somebody\@test\.test'/, 'the author is configured' );
     unlike( $said, qr/gpg\.format/, 'and nothing is signed, there being no key to sign with' );
@@ -124,9 +124,9 @@ subtest 'what the recipes that require it ask for' => sub {
     ok( ref $admincode{git} eq 'CODE', 'admincode requires it too' );
 
     my %wanted = $admincode{git}->( %G, repos_from => [ { api_url => 'https://gitea.test/api/v1/' }, { api_url => 'https://git.test/api/v1/' } ] );
-    ok( $wanted{accounts}{doge}, 'for the administrator' );
-    is_deeply( [ sort @{ $wanted{accounts}{doge}{hosts} } ], [qw{git.test gitea.test}], 'for the host keys of each forge it clones from' );
-    ok( !$wanted{accounts}{doge}{ssh_identity}, 'and with no key: the operator forwards one' );
+    ok( $wanted{accounts}{someadmin}, 'for the administrator' );
+    is_deeply( [ sort @{ $wanted{accounts}{someadmin}{hosts} } ], [qw{git.test gitea.test}], 'for the host keys of each forge it clones from' );
+    ok( !$wanted{accounts}{someadmin}{ssh_identity}, 'and with no key: the operator forwards one' );
 };
 
 Test::NoWarnings::had_no_warnings();
