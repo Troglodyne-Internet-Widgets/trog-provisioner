@@ -189,7 +189,13 @@ CONSOLE
 Returns the F<hypervisors.conf> keys that this backend reads.  C<cloud> marks a
 block as one for this backend.  It names an entry in F<clouds.yaml>.
 
+=head2 marker
+
+Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
+
 =cut
+
+sub marker { return 'cloud' }
 
 sub config_keys {
     return ( map { $_ => $_ } qw{cloud flavor image network floating_network availability_zone security_group keypair domain_dir} );

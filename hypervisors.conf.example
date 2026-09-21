@@ -71,11 +71,11 @@ reserve_memory = 8192
 ; ---------------------------------------------------------------------------
 ; A cloud, rather than a machine.
 ;
-; A block is one kind of hypervisor or the other, and which one is decided by
-; what is in it: libvirt_uri above, or cloud here.  A block naming both, or
-; neither, is an error naming the block -- a block naming neither would
-; otherwise fall through to libvirt's default connection, which is this
-; machine, and that is the one placement nobody writing this file meant.
+; A block is one kind of hypervisor, and which one is decided by what is in it:
+; libvirt_uri above, cloud here, or linode_token below.  A block naming two, or
+; none, is an error naming the block -- a block naming none would otherwise
+; fall through to libvirt's default connection, which is this machine, and that
+; is the one placement nobody writing this file meant.
 ;
 ; Nothing here is a path or a device, because there is no filesystem to reach
 ; and no bridge to detect.  A guest gets a flavor rather than a memory figure
@@ -87,8 +87,8 @@ reserve_memory = 8192
 ; See Trog::OpenStack::Config for where clouds.yaml is looked for.
 cloud             = openstack
 
-; What to build guests as.  Each can be a name or an id, and each can be
-; overridden per guest in provision.conf.
+; What to build guests as.  Each can be a name or an id.  Every guest built on
+; this block gets them; a guest that needs another flavor needs another block.
 flavor            = m1.medium
 image             = ubuntu-24.04
 
@@ -111,3 +111,36 @@ keypair           = buildkey
 ; headroom the cloud will refuse.  max_guests defaults to the instance quota.
 reserve_memory    = 4096
 reserve_cpus      = 2
+
+; ---------------------------------------------------------------------------
+; A Linode account, where every guest is a Linode bought by the month.
+;
+; Placement puts a guest on the cheapest hypervisor that has room, and a machine
+; above costs nothing more for one more guest.  So a guest only lands here when
+; no machine can take it, or when its provision.conf pins it here with
+; hypervisor=linode1.
+
+[linode1]
+; The API token, as a reference into the secret store and never written out.
+; Put it there with `bin/add_secret --group linode --title api`.  It needs
+; read_write on linodes and images.
+linode_token   = secret:linode/api/password
+
+; Where to build, what, and from which image.  Every guest built on this block
+; is this type, and a guest asking for more than the type has does not fit.
+; The region has to run the metadata service and the image has to read
+; cloud-init from it, which bin/preflight checks.  Ask Linode what exists:
+; `linode-cli regions list`, `linode-cli linodes types`, `linode-cli images list`.
+region         = us-east
+type           = g6-standard-2
+image          = linode/ubuntu24.04
+
+; What the whole account may cost a month, every Linode on it counted, whatever
+; built it.  A guest that would take it over does not fit.  Unset, nothing caps
+; it.
+monthly_budget = 200
+
+; Optional.  A Cloud Firewall to put new guests behind, by id, and an address on
+; Linode's private network for each.
+;firewall_id    = 12345
+;private_ip     = 1

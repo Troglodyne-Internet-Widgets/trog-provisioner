@@ -282,8 +282,8 @@ sub names      ($self) { return @{ $self->{order} } }
 
 Returns one hypervisor by name, built but not made current.  Dies if the file
 does not name it, because a typo in C<hypervisor=> must not put a guest
-somewhere else.  Also dies if its block has both C<libvirt_uri> and C<cloud>, or
-neither.
+somewhere else.  Also dies if its block has the key of more than one kind of
+hypervisor, C<libvirt_uri>, C<cloud> or C<linode_token>, or of none.
 
 =cut
 
@@ -293,15 +293,15 @@ sub hypervisor {
     my $block = $self->{blocks}{$name}
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
-    # A block with neither key otherwise gets the default libvirt connection,
-    # which is this machine.
-    my $has_uri   = length $block->{libvirt_uri};
-    my $has_cloud = length $block->{cloud};
+    # A block with no backend's key otherwise gets the default libvirt
+    # connection, which is this machine.
+    my @markers = map  { $_->marker_key } Trog::HV->backends;
+    my @has     = grep { $block->{$_} } @markers;
 
-    die "[$name] in " . $self->{path} . " has both libvirt_uri and cloud; it can only be one hypervisor.\n"
-      if $has_uri && $has_cloud;
-    die "[$name] in " . $self->{path} . " has neither libvirt_uri nor cloud, so there is nothing to build on.\n"
-      unless $has_uri || $has_cloud;
+    die "[$name] in " . $self->{path} . ' has ' . join( ' and ', @has ) . "; it can only be one hypervisor.\n"
+      if @has > 1;
+    die "[$name] in " . $self->{path} . ' has none of ' . join( ', ', @markers ) . ", so there is nothing to build on.\n"
+      unless @has;
 
     return $self->{built}{$name} //= Trog::HV->candidate(
         name => $name,

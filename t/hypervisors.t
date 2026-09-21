@@ -534,6 +534,27 @@ CONF
       'the limits are read the same way for either kind, because placement is shared';
 };
 
+subtest 'a block naming a linode_token is a Linode hypervisor' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[linode1]
+linode_token=secret:linode/api/password
+region=us-east
+type=g6-standard-2
+image=linode/ubuntu24.04
+monthly_budget=200
+max_guests=10
+CONF
+
+    my $linode = $fleet->hypervisor('linode1');
+    is ref $linode,             'Trog::HV::Linode',   'the one with a token is Linode';
+    is $linode->name,           'linode1',            'named as the file names it';
+    is $linode->region,         'us-east',            'in its region';
+    is $linode->type,           'g6-standard-2',      'of its type';
+    is $linode->image,          'linode/ubuntu24.04', 'from its image';
+    is $linode->monthly_budget, 200,                  'within its budget';
+    is $linode->max_guests,     10,                   'and the limits are read as for any kind';
+};
+
 subtest 'the documented example is a file that loads' => sub {
 
     # The shipped example, not a copy of it.  A configuration file people are
@@ -546,8 +567,9 @@ subtest 'the documented example is a file that loads' => sub {
 
     my %backend = map { $_ => ref $fleet->hypervisor($_) } $fleet->names;
 
-    is $backend{hv1},    'Trog::HV::Libvirt',   'its machine blocks build machines';
-    is $backend{cloud1}, 'Trog::HV::OpenStack', 'and its cloud block builds a cloud';
+    is $backend{hv1},     'Trog::HV::Libvirt',   'its machine blocks build machines';
+    is $backend{cloud1},  'Trog::HV::OpenStack', 'and its cloud block builds a cloud';
+    is $backend{linode1}, 'Trog::HV::Linode',    'and its Linode block a Linode account';
 };
 
 subtest 'a block has to say which kind of hypervisor it is' => sub {
@@ -559,7 +581,7 @@ CONF
 
     my $err = exception { $both->hypervisor('confused') };
     like $err, qr/\[confused\]/,                     'the error names the block';
-    like $err, qr/both[ ]libvirt_uri[ ]and[ ]cloud/, 'and what is wrong with it';
+    like $err, qr/has[ ]libvirt_uri[ ]and[ ]cloud;/, 'and what is wrong with it';
 
     my $neither = Trog::Hypervisors->load( fleet_of(<<'CONF') );
 [vague]
@@ -567,8 +589,8 @@ reserve_memory=4096
 CONF
 
     $err = exception { $neither->hypervisor('vague') };
-    like $err, qr/\[vague\]/,                           'likewise by name';
-    like $err, qr/neither[ ]libvirt_uri[ ]nor[ ]cloud/, 'and why';
+    like $err, qr/\[vague\]/,                                        'likewise by name';
+    like $err, qr/none[ ]of[ ]libvirt_uri,[ ]cloud,[ ]linode_token/, 'and why, naming the key of each kind';
 
     # The one that matters: without this check a block naming nothing falls
     # through to libvirt's default connection, which is this machine -- the one

@@ -67,12 +67,20 @@ my $RESTART_SETTLE = 2;
 # The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
+=head2 marker
+
+Returns C<uri>, the option that makes a block a libvirt one, from
+C<libvirt_uri>.  A block with no backend's marker is one too, because this
+backend can talk to the machine it runs on.
+
 =head2 config_keys
 
 Returns the pairs of constructor option and F<hypervisors.conf> key that this
 backend reads.  A block with C<libvirt_uri> in it is a block for this backend.
 
 =cut
+
+sub marker { return 'uri' }
 
 sub config_keys {
     return (
