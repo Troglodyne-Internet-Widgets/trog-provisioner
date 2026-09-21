@@ -952,23 +952,23 @@ subtest 'the settings of an installation are validated in one place' => sub {
         _base => {
             _global => {
                 basedir     => '/bogus',
-                admin_user  => 'doge',
-                admin_gecos => 'Doge Doge',
-                admin_email => 'doge@test.test',
-                gateway     => '192.168.1.254',
-                resolvers   => '192.168.1.254',
+                admin_user  => 'someadmin',
+                admin_gecos => 'Some Admin',
+                admin_email => 'someadmin@test.test',
+                gateway     => '192.0.2.254',
+                resolvers   => '192.0.2.254',
             },
         },
         'own.test.test' => { _global => { admin_user => 'somebody', resolvers => [ '8.8.8.8', '1.1.1.1' ] } },
     );
 
     my $base = Provisioner::Cookbook->globals( undef, \%said );
-    is_deeply( $base->{resolvers}, ['192.168.1.254'], 'one resolver written as a scalar comes back as the list every reader wants' );
-    is( $base->{admin_user}, 'doge', 'and the rest of _base is what it says' );
+    is_deeply( $base->{resolvers}, ['192.0.2.254'], 'one resolver written as a scalar comes back as the list every reader wants' );
+    is( $base->{admin_user}, 'someadmin', 'and the rest of _base is what it says' );
 
     my $own = Provisioner::Cookbook->globals( 'own.test.test', \%said );
-    is( $own->{admin_user},  'somebody',       'a domain overrides a setting of _base' );
-    is( $own->{admin_email}, 'doge@test.test', 'and inherits the ones it says nothing about' );
+    is( $own->{admin_user},  'somebody',            'a domain overrides a setting of _base' );
+    is( $own->{admin_email}, 'someadmin@test.test', 'and inherits the ones it says nothing about' );
     is_deeply( $own->{resolvers}, [ '8.8.8.8', '1.1.1.1' ], 'a list it writes as a list is left alone' );
 
     # Six hand-written refusals, each naming one setting, in the order the

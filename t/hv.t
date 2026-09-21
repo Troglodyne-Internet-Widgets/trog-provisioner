@@ -168,13 +168,13 @@ subtest 'a hypervisor can be given a pool and a slice of its own' => sub {
     # silently, which is somebody believing in a quota that is not there.
     my $own = fresh(
         uri       => 'qemu+ssh://hv/system',
-        pool_path => '/pool/vm-disks/runner',
+        pool_path => '/srv/vm-disks/runner',
         pool_name => 'runner_disks',
         partition => '/machine/runner',
     );
-    is( $own->pool_name, 'runner_disks',          'the pool it was given' );
-    is( $own->pool_path, '/pool/vm-disks/runner', 'at the path it was given' );
-    is( $own->partition, '/machine/runner',       'and the slice its guests are placed in' );
+    is( $own->pool_name, 'runner_disks',         'the pool it was given' );
+    is( $own->pool_path, '/srv/vm-disks/runner', 'at the path it was given' );
+    is( $own->partition, '/machine/runner',      'and the slice its guests are placed in' );
 };
 
 subtest 'an existing pool says where it is, and is believed' => sub {
@@ -1468,8 +1468,8 @@ subtest 'a rebuilt guest can hold two leases, and the newest is the address it h
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( vmm => sub { FakeLeaseVMM->new( [] ) } );
 
-    # Measured on hydra: a guest rebuilt under the same name kept its MAC, got
-    # 192.168.122.97, and dnsmasq kept its old 192.168.122.96 on file too --
+    # Measured on a hypervisor: a guest rebuilt under the same name kept its
+    # MAC, got 192.168.122.97, and dnsmasq kept its old 192.168.122.96 on file too --
     # which is what collect_artifacts and ask_guest then connected to, and hung
     # on, for as long as ssh would wait for an address nobody was at.
     my $mac   = '52:54:00:9c:8b:34';
@@ -1672,12 +1672,12 @@ subtest 'the console of a libvirt guest is read off the hypervisor as root' => s
 subtest 'the vnc access of a libvirt guest is a port and the tunnel to it' => sub {
     my $mock = Test::MockModule->new('Trog::HV::Libvirt');
     $mock->redefine( _domain    => sub { FakeConsoleDomain->new( xml => "<domain><devices><graphics type='vnc' port='5910' autoport='yes' listen='127.0.0.1'>\n</graphics></devices></domain>" ) } );
-    $mock->redefine( ssh_target => sub { 'doge@hv.test' } );
+    $mock->redefine( ssh_target => sub { 'someadmin@hv.test' } );
     $mock->redefine( describe   => sub { 'hv.test' } );
 
     my ( $advice, $port ) = bless( {}, 'Trog::HV::Libvirt' )->vnc_access('vm.test');
     is( $port, 5910, 'the port libvirt allocated, as libvirt reports it' );
-    like( $advice, qr/ssh[ ]-N[ ]-L[ ]5910:127[.]0[.]0[.]1:5910[ ]doge\@hv[.]test/, 'and the tunnel to reach it, because the display is on loopback' );
+    ok( index( $advice, q{ssh -N -L 5910:127.0.0.1:5910 someadmin@hv.test} ) >= 0, 'and the tunnel to reach it, because the display is on loopback' ) or diag $advice;
 
     # Measured on libvirt 10.0.0: an autoport display reads port='-1' until the
     # domain runs.  That is the absence of a port, not port -1.

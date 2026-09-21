@@ -32,7 +32,7 @@ use Provisioner::Recipe::mail();
 use_ok('Provisioner::Utils');
 
 subtest 'fleet_address: what a name for another machine turns out to be' => sub {
-    my %pool = ( ipmap => { 'cache.test.test' => '192.168.1.9' }, domain => 'guest.test.test' );
+    my %pool = ( ipmap => { 'cache.test.test' => '192.0.2.9' }, domain => 'guest.test.test' );
     my $ask  = sub { [ Provisioner::Utils::fleet_address( $_[0], %pool ) ] };
 
     is_deeply( $ask->(undef), [ none => q{} ], 'nothing named is no machine at all' );
@@ -43,19 +43,19 @@ subtest 'fleet_address: what a name for another machine turns out to be' => sub 
     is_deeply( $ask->('HTTPS://Cache.test.test/'),    [ url => 'HTTPS://Cache.test.test/' ],    'whatever case its scheme is in' );
 
     is_deeply( $ask->('guest.test.test'), [ self    => q{} ],              'the guest asking about itself is told so' );
-    is_deeply( $ask->('cache.test.test'), [ address => '192.168.1.9' ],    'a name the pool assigns resolves to its address' );
+    is_deeply( $ask->('cache.test.test'), [ address => '192.0.2.9' ],      'a name the pool assigns resolves to its address' );
     is_deeply( $ask->('elsewhere.test'),  [ unknown => 'elsewhere.test' ], 'and one it does not comes back as the name' );
 
     # Self is checked before the pool, so a guest that is also in the pool --
     # which every guest is -- is still recognised as itself.
-    my %own = ( ipmap => { 'guest.test.test' => '192.168.1.5' }, domain => 'guest.test.test' );
+    my %own = ( ipmap => { 'guest.test.test' => '192.0.2.5' }, domain => 'guest.test.test' );
     is_deeply( [ Provisioner::Utils::fleet_address( 'guest.test.test', %own ) ], [ self => q{} ], 'even when the pool knows its address' );
 };
 
 subtest 'tld_of is the last label, and nothing when there is none' => sub {
-    is( Provisioner::Utils::tld_of('guest.test.test'),     'test',    'a name under a reserved TLD' );
-    is( Provisioner::Utils::tld_of('host.troglodyne.net'), 'net',     'and under a public one' );
-    is( Provisioner::Utils::tld_of('a.b.c.d.example'),     'example', 'however many labels precede it' );
+    is( Provisioner::Utils::tld_of('guest.test.test'),  'test',    'a name under a reserved TLD' );
+    is( Provisioner::Utils::tld_of('host.example.net'), 'net',     'and under a public one' );
+    is( Provisioner::Utils::tld_of('a.b.c.d.example'),  'example', 'however many labels precede it' );
 
     # The boundaries: letsencrypt decides from this whether a public CA could
     # ever issue for the name, and acmeca constrains a signing key to it, so an

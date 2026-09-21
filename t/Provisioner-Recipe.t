@@ -111,7 +111,7 @@ subtest 'the settings every recipe is handed are declared once' => sub {
     my %prov = ( template_dirs => Provisioner::Cookbook->template_dirs('ubuntu'), output_dir => $dir, distro => 'ubuntu' );
 
     my $ntp = Provisioner::Cookbook->load( 'ntp', distro => 'ubuntu' )->new(%prov);
-    my %got = $ntp->validate( domain => 'x.test.test', admin_user => 'doge', transfer_port => '22', main_ip => undef, gateway => undef );
+    my %got = $ntp->validate( domain => 'x.test.test', admin_user => 'someadmin', transfer_port => '22', main_ip => undef, gateway => undef );
 
     # A port written in the configuration with quotes around it arrives as the
     # string it was written as.
@@ -128,7 +128,7 @@ subtest 'the settings every recipe is handed are declared once' => sub {
 
     # user is not declared with a default anywhere, so this fallback -- which
     # runs after validation -- is still what fills it in.
-    is( $got{user}, 'doge', 'user still falls back to admin_user' );
+    is( $got{user}, 'someadmin', 'user still falls back to admin_user' );
 };
 
 # A recipe that declares a colliding key is describing a different thing spelled
@@ -144,7 +144,7 @@ subtest 'a recipe that declares one of them keeps its own meaning' => sub {
         distro        => 'ubuntu',
     );
 
-    my %got = $registrar->validate( domain => 'x.test.test', type => 'easydns', admin_user => 'doge' );
+    my %got = $registrar->validate( domain => 'x.test.test', type => 'easydns', admin_user => 'someadmin' );
     is( $got{user}, q{}, 'the registrar account stays empty rather than becoming the admin' );
 };
 
@@ -176,12 +176,12 @@ subtest 'a key no schema declares is refused' => sub {
 
     is( { $ntp->schema() }->{additionalProperties}, 0, 'schema() says so for every recipe, rather than each one deciding' );
 
-    my $err = exception { $ntp->validate( domain => 'x.test.test', admin_user => 'doge', makstep => '1.0 3' ) };
+    my $err = exception { $ntp->validate( domain => 'x.test.test', admin_user => 'someadmin', makstep => '1.0 3' ) };
     like( $err, qr/makstep/,           'the refusal names the key nothing declares' );
     like( $err, qr/bin.recipes[ ]ntp/, 'and points at what would have told them what it takes' );
 
     is(
-        exception { $ntp->validate( domain => 'x.test.test', admin_user => 'doge', makestep => '1.0 3' ) },
+        exception { $ntp->validate( domain => 'x.test.test', admin_user => 'someadmin', makestep => '1.0 3' ) },
         undef, 'while the field it was a misspelling of is taken'
     );
 };
@@ -202,7 +202,7 @@ subtest 'takes() hands a recipe only what it declares' => sub {
 
     my %offered = (
         domain     => 'x.test.test',
-        admin_user => 'doge',
+        admin_user => 'someadmin',
         libdir     => ['/opt/vendor'],
         size       => '50%',
         cpus       => 2,

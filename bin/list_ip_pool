@@ -34,10 +34,10 @@ Add an C<ip_pool> to the C<_global> of C<_base> in F<recipes.yaml>:
       _global:
         ip_pool:
           # Every address of the pool.
-          addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
+          addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
 
           # Or one or more CIDR blocks, separated by spaces.
-          cidr: 192.168.1.0/24 10.0.0.0/28
+          cidr: 192.0.2.0/24 10.0.0.0/28
 
 You can use both keys.  The pool is the addresses list and the addresses of
 each CIDR block together.
@@ -79,14 +79,14 @@ Add one like:
   _base:
     _global:
       ip_pool:
-        addresses: [192.168.1.10, 192.168.1.11, 192.168.1.12]
+        addresses: [192.0.2.10, 192.0.2.11, 192.0.2.12]
 
   OR
 
   _base:
     _global:
       ip_pool:
-        cidr: 192.168.1.0/24
+        cidr: 192.0.2.0/24
 
 GUIDANCE
         ## use critic

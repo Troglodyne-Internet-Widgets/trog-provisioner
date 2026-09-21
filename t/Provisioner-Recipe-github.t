@@ -32,7 +32,7 @@ my %G = (
     domain      => 'bot.test.test',
     install_dir => '/opt/domains',
     script_dir  => '/root/bin',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
     user        => 'koan',
 );
 
@@ -42,8 +42,8 @@ subtest 'the account it configures' => sub {
     my %got = recipe()->validated(%G);
     is( $got{account}, 'koan', 'the service user of the domain, when nothing names one' );
 
-    %got = recipe()->validated( %G, account => 'doge' );
-    is( $got{account}, 'doge', 'and the account the configuration names, when it does' );
+    %got = recipe()->validated( %G, account => 'someadmin' );
+    is( $got{account}, 'someadmin', 'and the account the configuration names, when it does' );
 
     # A guest whose operator logs in by hand wants the CLI and no login, so
     # neither half is required and neither is invented.

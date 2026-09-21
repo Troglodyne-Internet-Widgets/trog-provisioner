@@ -249,7 +249,7 @@ sub with_vmm {
     my (%fake) = @_;
     my $hv = Test::MockModule->new('Trog::HV::Libvirt');
     $hv->redefine( vmm        => sub { FakeVMM->new(%fake) } );
-    $hv->redefine( ssh_target => sub { 'doge@hv.test' } );
+    $hv->redefine( ssh_target => sub { 'someadmin@hv.test' } );
     $hv->redefine( describe   => sub { 'hv.test' } );
     return $hv;
 }

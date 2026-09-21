@@ -39,11 +39,11 @@ use Provisioner::IPPool();
 # the administrator's address out of it, and the nameservers.
 my %GLOBAL = (
     basedir     => '/bogus',
-    admin_user  => 'doge',
-    admin_gecos => 'Doge Doge',
-    admin_email => 'doge@test.test',
-    gateway     => '192.168.1.254',
-    resolvers   => ['192.168.1.254'],
+    admin_user  => 'someadmin',
+    admin_gecos => 'Some Admin',
+    admin_email => 'someadmin@test.test',
+    gateway     => '192.0.2.254',
+    resolvers   => ['192.0.2.254'],
     nameservers => { ns1 => 'ns1.test.test' },
 );
 
@@ -67,9 +67,9 @@ Provisioner::Cookbook->forget();
 
 # The addresses live in ips.db rather than in an [ips] section, which is where
 # the script reads them from.
-Provisioner::IPPool::record( '192.168.1.60', 'web.test' );
-Provisioner::IPPool::record( '192.168.1.61', 'plain.test' );
-Provisioner::IPPool::record( '192.168.1.62', 'post.test' );
+Provisioner::IPPool::record( '192.0.2.60', 'web.test' );
+Provisioner::IPPool::record( '192.0.2.61', 'plain.test' );
+Provisioner::IPPool::record( '192.0.2.62', 'post.test' );
 
 # The zone it writes for one domain, as text.  What it answered with is not
 # interesting: it dies on anything it cannot do, which the subtests below check
@@ -117,8 +117,8 @@ subtest 'a domain that serves neither gets neither name' => sub {
 
     # It still has a zone: the apex, its nameserver and the address the pool
     # assigned it.
-    like( $zone, qr/^\$ORIGIN\s+plain[.]test\./m,     'while the zone itself is still written' );
-    like( $zone, qr/^\@\s+IN\s+A\s+192\.168\.1\.61/m, 'with the address the pool gives it' );
+    like( $zone, qr/^\$ORIGIN\s+plain[.]test\./m,   'while the zone itself is still written' );
+    like( $zone, qr/^\@\s+IN\s+A\s+192\.0\.2\.61/m, 'with the address the pool gives it' );
 };
 
 subtest 'a record points only at a name that domain has' => sub {
@@ -163,7 +163,7 @@ subtest 'a recipe this installation does not have is skipped' => sub {
     );
     Provisioner::Cookbook->forget();
 
-    Provisioner::IPPool::record( '192.168.1.63', 'odd.test' );
+    Provisioner::IPPool::record( '192.0.2.63', 'odd.test' );
 
     my $out = tempdir( CLEANUP => 1 );
     my $err = exception {

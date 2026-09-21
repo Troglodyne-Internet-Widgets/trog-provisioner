@@ -54,11 +54,11 @@ sub built {
         domain      => $DOMAIN,
         install_dir => $INSTALL,
         script_dir  => '/root/bin',
-        admin_user  => 'doge',
-        admin_email => 'doge@test.test',
-        admin_keys  => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey doge'],
-        gateway     => '192.168.1.254',
-        main_ip     => '192.168.1.50',
+        admin_user  => 'someadmin',
+        admin_email => 'someadmin@test.test',
+        admin_keys  => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtheadminkey someadmin'],
+        gateway     => '192.0.2.254',
+        main_ip     => '192.0.2.50',
         %extra,
     );
 
@@ -68,10 +68,10 @@ sub built {
 
 sub slurp { my ( $dir, $file ) = @_; return File::Slurper::read_text("$dir/$file") }
 
-my %HYDRA = (
-    hydra => {
-        libvirt_uri => 'qemu+ssh://runner@hydra.test.test:2222/system',
-        pool_path   => '/pool/vm-disks/runner',
+my %HYPERVISORS = (
+    hv1 => {
+        libvirt_uri => 'qemu+ssh://runner@hv1.test.test:2222/system',
+        pool_path   => '/srv/vm-disks/runner',
         pool_name   => 'runner_disks',
         partition   => '/machine/runner',
     },
@@ -80,25 +80,25 @@ my %HYDRA = (
 subtest 'what the runner configures its own guests with' => sub {
     my ($dir) = built(
         config => {
-            gateway     => '192.168.1.254',
+            gateway     => '192.0.2.254',
             nameservers => { ns1 => 'ns1.test.test' },
-            addresses   => '192.168.1.60-192.168.1.99',
-            cidr        => '192.168.1.0/24',
+            addresses   => '192.0.2.60-192.0.2.99',
+            cidr        => '192.0.2.0/24',
         },
         recipes => { 'g.test.test' => { _global => { aliases => ['www.test.test'] } } },
     );
     my $said   = YAML::XS::Load( slurp( $dir, 'trogrunner.recipes.yaml' ) );
     my $global = $said->{_base}{_global};
 
-    is_deeply( $global->{ip_pool},     { addresses => '192.168.1.60-192.168.1.99', cidr => '192.168.1.0/24' }, 'the pool is one key, with the range it was given' );
-    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                       'the nameservers' );
+    is_deeply( $global->{ip_pool},     { addresses => '192.0.2.60-192.0.2.99', cidr => '192.0.2.0/24' }, 'the pool is one key, with the range it was given' );
+    is_deeply( $global->{nameservers}, { ns1       => 'ns1.test.test' },                                 'the nameservers' );
     is_deeply( $said->{'g.test.test'}{_global}{aliases}, ['www.test.test'], 'and a domain of the runner keeps the aliases it was written with' );
 
     # The runner administers what it builds as whoever administers it, which is
     # what _global already says about this guest -- so nobody has to write it
     # down twice.
-    is( $global->{admin_user},  'doge',           'the admin comes from the guest own' );
-    is( $global->{admin_email}, 'doge@test.test', 'and so does the address' );
+    is( $global->{admin_user},  'someadmin',           'the admin comes from the guest own' );
+    is( $global->{admin_email}, 'someadmin@test.test', 'and so does the address' );
 };
 
 subtest 'a runner told nothing at all can still build a guest' => sub {
@@ -129,14 +129,14 @@ subtest 'a secret in the runner recipes never becomes a password in a file' => s
         recipes => {
             'g.test.test' => {
                 nginx => { cert_password => 'store:g.test.test/tls/password' },
-                mail  => { names         => { andy => { password => 'store:mail/andy/password' } } },
+                mail  => { names         => { someuser => { password => 'store:mail/someuser/password' } } },
             },
         },
     );
 
     my $yaml = slurp( $dir, 'trogrunner.recipes.yaml' );
     ok( index( $yaml, 'secret:g.test.test/tls/password' ) >= 0, 'store: comes back out as secret:' )  or diag $yaml;
-    ok( index( $yaml, 'secret:mail/andy/password' ) >= 0,       'however deep it was nested' )        or diag $yaml;
+    ok( index( $yaml, 'secret:mail/someuser/password' ) >= 0,   'however deep it was nested' )        or diag $yaml;
     ok( index( $yaml, 'store:' ) < 0,                           'and nothing is left saying store:' ) or diag $yaml;
 
     # What the runner gets is a reference, exactly as a hand-written
@@ -147,30 +147,30 @@ subtest 'a secret in the runner recipes never becomes a password in a file' => s
 };
 
 subtest 'a hypervisor block is written whole, and taken apart for ssh' => sub {
-    my ( $dir, $recipe, $vars ) = built( hypervisors => \%HYDRA, hypervisor_access => 'least' );
+    my ( $dir, $recipe, $vars ) = built( hypervisors => \%HYPERVISORS, hypervisor_access => 'least' );
     my $conf = slurp( $dir, 'trogrunner.hypervisors.conf' );
 
-    like( $conf, qr/^\[hydra\]$/m,                                'one block per hypervisor' );
-    like( $conf, qr/^pool_path\s+=[ ]\/pool\/vm-disks\/runner$/m, 'the pool it is confined to' );
-    like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,             'named as well as pathed, or libvirt ignores the path' );
-    like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,        'and the slice its guests land in' );
+    like( $conf, qr/^\[hv1\]$/m,                                 'one block per hypervisor' );
+    like( $conf, qr/^pool_path\s+=[ ]\/srv\/vm-disks\/runner$/m, 'the pool it is confined to' );
+    like( $conf, qr/^pool_name\s+=[ ]runner_disks$/m,            'named as well as pathed, or libvirt ignores the path' );
+    like( $conf, qr/^partition\s+=[ ]\/machine\/runner$/m,       'and the slice its guests land in' );
 
     # Not for the fleet file -- for ssh-keyscan.  libvirt's qemu+ssh transport
     # verifies host keys where Net::OpenSSH::More does not, so an unseeded
     # known_hosts is a hypervisor that refuses on first contact while a plain
     # ssh to the same machine works.
     my %got = $recipe->validate(%$vars);
-    is( $got{hypervisors}{hydra}{ssh_host}, 'hydra.test.test', 'the host out of the URI' );
-    is( $got{hypervisors}{hydra}{ssh_user}, 'runner',          'the user' );
-    is( $got{hypervisors}{hydra}{ssh_port}, 2222,              'and the port, when it is not 22' );
+    is( $got{hypervisors}{hv1}{ssh_host}, 'hv1.test.test', 'the host out of the URI' );
+    is( $got{hypervisors}{hv1}{ssh_user}, 'runner',        'the user' );
+    is( $got{hypervisors}{hv1}{ssh_port}, 2222,            'and the port, when it is not 22' );
 
     my $fragment = $recipe->render(%$vars);
-    like( $fragment, qr/ssh-keyscan[ ]-p[ ]'2222'[ ]'hydra\.test\.test'/, 'which is what gets scanned' );
+    like( $fragment, qr/ssh-keyscan[ ]-p[ ]'2222'[ ]'hv1\.test\.test'/, 'which is what gets scanned' );
 
     # Into the home ssh will read, asked of passwd, rather than into the domain
     # directory -- which is a home only when the domain names a service user.
-    like( $fragment, qr/getent[ ]passwd[ ]'doge'/, 'the home is asked for rather than assumed' );
-    like( $fragment, qr{known_hosts},              'and that is where the host keys go' );
+    like( $fragment, qr/getent[ ]passwd[ ]'someadmin'/, 'the home is asked for rather than assumed' );
+    like( $fragment, qr{known_hosts},                   'and that is where the host keys go' );
     unlike( $fragment, qr{\Q$INSTALL/$DOMAIN\E/\.ssh/known_hosts}, 'not beside the key, where ssh would never read them' );
 };
 
@@ -356,14 +356,14 @@ subtest 'what the block asks for by way of hypervisor access' => sub {
 
     # bin/provision and bin/destroy read this rather than restating the
     # defaults, so that there is one place saying what none means.
-    is_deeply( { $recipe->grant( {} ) },                                                      {}, 'nothing, by default' );
-    is_deeply( { $recipe->grant(undef) },                                                     {}, 'and nothing for a domain that does not run the recipe at all' );
-    is_deeply( { $recipe->grant( { hypervisor_access => 'none', hypervisors => \%HYDRA } ) }, {}, 'nor when it is switched off with hypervisors named' );
+    is_deeply( { $recipe->grant( {} ) },                                                            {}, 'nothing, by default' );
+    is_deeply( { $recipe->grant(undef) },                                                           {}, 'and nothing for a domain that does not run the recipe at all' );
+    is_deeply( { $recipe->grant( { hypervisor_access => 'none', hypervisors => \%HYPERVISORS } ) }, {}, 'nor when it is switched off with hypervisors named' );
 
-    my %grant = $recipe->grant( { hypervisor_access => 'least', hypervisors => \%HYDRA } );
+    my %grant = $recipe->grant( { hypervisor_access => 'least', hypervisors => \%HYPERVISORS } );
     is( $grant{access},   'least', 'what was asked for' );
     is( $grant{restrict}, 1,       'and the address restriction, which is on unless somebody turned it off' );
-    is_deeply( [ sort keys %{ $grant{hypervisors} } ], ['hydra'], 'on the hypervisors it named' );
+    is_deeply( [ sort keys %{ $grant{hypervisors} } ], ['hv1'], 'on the hypervisors it named' );
 
     my %loose = $recipe->grant( { hypervisor_access => 'full', restrict_key_to_ip => 0 } );
     is( $loose{access},   'full', 'full is carried through' );

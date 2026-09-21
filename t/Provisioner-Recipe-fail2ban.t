@@ -94,8 +94,8 @@ subtest 'each recipe that takes a login from the public declares a jail for it' 
 # failregex: with the timestamp that the datepattern found cut out of a file.
 # A journal entry keeps its text whole.
 my @LINES = (
-    [ tpsgi => 'tpsgi-jail.test.test', 1, '192.168.1.104',  q{ [INFO]: RequestId INIT From ::ffff:192.168.1.104 |nobody| Failed login for user doge} ],
-    [ tpsgi => 'tpsgi-jail.test.test', 0, undef,            q{[Worker 1957831] {Request 3c8d2e5b-83ed-48e9-a3e9-539fd77d9294} [doge]  : 0.0.0.0 Opening Log /home/doge/Code/tPSGI/log/tpsgi.log at debug level} ],
+    [ tpsgi => 'tpsgi-jail.test.test', 1, '192.0.2.104',    q{ [INFO]: RequestId INIT From ::ffff:192.0.2.104 |nobody| Failed login for user someadmin} ],
+    [ tpsgi => 'tpsgi-jail.test.test', 0, undef,            q{[Worker 1957831] {Request 3c8d2e5b-83ed-48e9-a3e9-539fd77d9294} [someadmin]  : 0.0.0.0 Opening Log /home/someadmin/Code/tPSGI/log/tpsgi.log at debug level} ],
     [ gogs  => 'gogs-login',           1, '192.168.122.57', q{192.168.122.57 - - [] "POST /user/login HTTP/1.1" 200 7562 "-" "curl/8.5.0"} ],
     [ gogs  => 'gogs-login',           0, undef,            q{192.168.122.57 - - [] "GET /user/login HTTP/1.1" 200 7451 "-" "curl/8.5.0"} ],
     [

@@ -35,7 +35,7 @@ A recipe configuration must not carry a password.  It carries a reference that
 says where the password is:
 
     registrar:
-        key: "secret:troglodyne/easydns_token/password"
+        key: "secret:registrar/easydns_token/password"
 
 C<needed> finds each of those notes, at any depth.  C<lookup> resolves them
 against a KeePass database.  C<apply> puts the answers back where the notes

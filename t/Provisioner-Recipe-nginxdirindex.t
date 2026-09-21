@@ -32,9 +32,9 @@ $r->generate_files(
     $dir,
     domain       => 'index.test.test',
     install_dir  => '/opt/domains',
-    admin_user   => 'doge',
+    admin_user   => 'someadmin',
     script_dir   => '/root/bin',
-    main_ip      => '192.168.1.9',
+    main_ip      => '192.0.2.9',
     full_aliases => [qw{files.test.test www.index.test.test mail.index.test.test}],
 );
 my $conf = do { local ( @ARGV, $/ ) = "$dir/nginxdirindex.domain.conf"; <> }

@@ -30,7 +30,7 @@ my $script = "$FindBin::Bin/../scripts/publish_dns_records";
 require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test");
 
 my $DOMAIN  = 'guest.test.test';
-my $ADDRESS = '192.168.1.50';
+my $ADDRESS = '192.0.2.50';
 
 # A real executable, because the script refuses to run without one: the shortcut
 # is what carries the credential, and its absence is a configuration fault

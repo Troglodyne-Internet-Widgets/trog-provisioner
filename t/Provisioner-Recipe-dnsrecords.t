@@ -29,7 +29,7 @@ use Provisioner::Cookbook();
 
 my %COMMON = (
     install_dir  => '/opt/domains',
-    admin_user   => 'doge',
+    admin_user   => 'someadmin',
     script_dir   => '/root/bin',
     full_aliases => [ 'www.pub.test', 'mail.pub.test' ],
 );
@@ -45,7 +45,7 @@ sub fresh {
 }
 
 subtest 'a guest with an address publishes it, whoever holds the zone' => sub {
-    my %opts = fresh()->validate( %COMMON, domain => 'pub.test', main_ip => '192.168.1.50' );
+    my %opts = fresh()->validate( %COMMON, domain => 'pub.test', main_ip => '192.0.2.50' );
 
     # .test is served by the guest's own pdns, and this used to stay out of the
     # way for exactly that -- on the grounds that the zonefile had already
@@ -66,12 +66,12 @@ subtest 'a guest whose address the hypervisor allocates has nothing to publish' 
 };
 
 subtest 'the fragment queues the publish where there is one, and nothing where there is not' => sub {
-    my $queued = fresh()->render( %COMMON, domain => 'pub.test', main_ip => '192.168.1.50' );
+    my $queued = fresh()->render( %COMMON, domain => 'pub.test', main_ip => '192.0.2.50' );
 
-    like( $queued, qr/queue_postrun_task/,    'it is deferred to the postrun, where the shortcut and the provider are both settled' );
-    like( $queued, qr/publish_dns_records/,   'running the publisher' );
-    like( $queued, qr/[ ]192[.]168[.]1[.]50/, 'with the address the guest was built with' );
-    like( $queued, qr/[ ]mail[.]pub[.]test/,  'and each alias, sorted' );
+    like( $queued, qr/queue_postrun_task/,   'it is deferred to the postrun, where the shortcut and the provider are both settled' );
+    like( $queued, qr/publish_dns_records/,  'running the publisher' );
+    like( $queued, qr/[ ]192[.]0[.]2[.]50/,  'with the address the guest was built with' );
+    like( $queued, qr/[ ]mail[.]pub[.]test/, 'and each alias, sorted' );
 
     my $nothing = fresh()->render( %COMMON, domain => 'pub.test', main_ip => undef );
     unlike( $nothing, qr/\S/, 'and with no address the fragment is empty rather than a target that does nothing' );

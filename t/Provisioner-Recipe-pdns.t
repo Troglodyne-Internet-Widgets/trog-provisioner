@@ -39,13 +39,13 @@ my $DOMAIN = 'zone.test';
 # names in its _global is spelled out in full as well.
 my %VARS = (
     domain      => $DOMAIN,
-    admin_email => 'doge@zone.test',
-    ipmap       => { $DOMAIN => '192.168.1.50' },
+    admin_email => 'someadmin@zone.test',
+    ipmap       => { $DOMAIN => '192.0.2.50' },
     aliases     => { $DOMAIN => [ "www.$DOMAIN", "mail.$DOMAIN" ] },
     nameservers => {},
     modules     => [],
     install_dir => '/opt/domains',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
 );
 
 sub zone {
@@ -127,7 +127,7 @@ subtest 'the apex is the origin, not a name of its own' => sub {
     my $zone = zone();
 
     like( $zone, qr/^\$ORIGIN\s+\Q$DOMAIN\E\./m,               'the zone declares its origin' );
-    like( $zone, qr/^\@\s+IN\s+A\s+192\.168\.1\.50/m,          'and the address is on the apex' );
+    like( $zone, qr/^\@\s+IN\s+A\s+192\.0\.2\.50/m,            'and the address is on the apex' );
     like( $zone, qr/^\@\s+300\s+IN\s+NS\s+\Qns1.$DOMAIN\E\./m, 'with an absolute nameserver' );
 };
 

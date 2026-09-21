@@ -43,7 +43,7 @@ sub generated {
 
     my %vars = (
         domain       => $DOMAIN,
-        main_ip      => '192.168.1.9',
+        main_ip      => '192.0.2.9',
         full_aliases => ["www.$DOMAIN"],
         install_dir  => '/opt/domains',
         script_dir   => '/root/bin',
@@ -116,7 +116,7 @@ subtest 'the vhost answers for the address, not only the name' => sub {
     # A guest fetching packages reaches this by address: it runs cloud-init
     # before it has a resolver, so the request arrives with a Host that is an IP
     # and would otherwise match no server.
-    like( $vhost, qr/^\s+server_name[ ]\Q$DOMAIN\E[ ]192\.168\.1\.9[ ]www\.\Q$DOMAIN\E;$/m, 'the address is a server_name' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $vhost, qr/^\s+server_name[ ]\Q$DOMAIN\E[ ]192\.0\.2\.9[ ]www\.\Q$DOMAIN\E;$/m, 'the address is a server_name' );
 
     # Claiming default_server would mean deleting the packaged default site
     # first, since two of them is a configuration nginx refuses.

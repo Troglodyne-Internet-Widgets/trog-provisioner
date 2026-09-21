@@ -50,7 +50,7 @@ sub guest_that {
 sub refresh {
     my ( $commands, $watched ) = @_;
     return Trog::Provisioner::Config::Generator::refresh_salvage(
-        static_ip  => '192.168.1.9',
+        static_ip  => '192.0.2.9',
         admin_user => 'admin',
         cfg_dir    => '/nonexistent',
         module     => 'mariadb',

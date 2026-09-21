@@ -34,7 +34,7 @@ use YAML::XS();
 
 use Provisioner::Cookbook();
 
-File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAdogeskey doge\n" );
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
@@ -47,12 +47,12 @@ File::Slurper::Temp::write_text(
                 _global => {
                     memory        => 2048,
                     basedir       => '/bogus/domains',
-                    transfer_user => 'doge',
-                    admin_user    => 'doge',
+                    transfer_user => 'someadmin',
+                    admin_user    => 'someadmin',
                     admin_email   => 'bogus@test.test',
                     admin_gecos   => 'Test Test',
-                    gateway       => '192.168.1.254',
-                    resolvers     => '192.168.1.254',
+                    gateway       => '192.0.2.254',
+                    resolvers     => '192.0.2.254',
                 },
             },
             _shared            => { 'host.test.test' => ['tenant.test.test'] },

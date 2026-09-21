@@ -35,17 +35,17 @@ use List::Util qw{any};
             config:
                 # If unset, admin_user, admin_email, admin_keys and gateway
                 # come from the configuration of this guest.
-                resolvers: ["192.168.1.254", "1.1.1.1"]
+                resolvers: ["192.0.2.254", "1.1.1.1"]
 
                 # The pool that the runner takes addresses from.  Without
                 # these, every guest it builds stops on "cannot auto-assign IP".
-                addresses: "192.168.1.180-192.168.1.199"
-                cidr:      "192.168.1.0/24"
+                addresses: "192.0.2.180-192.0.2.199"
+                cidr:      "192.0.2.0/24"
 
             hypervisors:
-                hydra:
-                    libvirt_uri: "qemu+ssh://runner@hydra.test.test/system"
-                    pool_path:   "/pool/vm-disks/runner"
+                hv1:
+                    libvirt_uri: "qemu+ssh://runner@hv1.test.test/system"
+                    pool_path:   "/srv/vm-disks/runner"
                     pool_name:   "runner_disks"
                     partition:   "/machine/runner"
 

@@ -131,8 +131,8 @@ L<Provisioner::Recipe::pdns> builds one zone for each guest, which is the domain
 itself.  So C<www.> and C<mail.> are inside it and work.  An alias outside the
 zone has no place for lexicon to write C<_acme-challenge>, and no local server
 is authoritative for it.  A cross-TLD alias is the obvious case, but the rule is
-the zone and not the TLD.  C<test.troglodyne.net> as an alias of
-C<dev.troglodyne.net> is also out of the zone.
+the zone and not the TLD.  C<test.example.net> as an alias of
+C<dev.example.net> is also out of the zone.
 
 The CA does not set this limit.  C<nameConstraints> takes a list, so one
 intermediate can permit several TLDs, and the leaf certificates under each of

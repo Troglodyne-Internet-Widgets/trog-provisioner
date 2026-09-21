@@ -30,7 +30,7 @@ my $recipe = Provisioner::Cookbook->load( 'mounts', distro => 'ubuntu' )->new(
 my %BASE = (
     domain      => 'mounts.test.test',
     install_dir => '/nonexistent',
-    admin_user  => 'doge',
+    admin_user  => 'someadmin',
 );
 
 sub disk {

@@ -47,10 +47,10 @@ sub add {
 subtest 'a secret that was not there' => sub {
     my $kdbx = store();
 
-    my $rc = add( '--secrets', $kdbx, qw{--group troglodyne --title easydns_token -- hunter2} );
+    my $rc = add( '--secrets', $kdbx, qw{--group registrar --title easydns_token -- hunter2} );
     is( $rc, 0, 'it reports success' );
 
-    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:troglodyne/easydns_token/password' );
+    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:registrar/easydns_token/password' );
     is( $got{probe}, 'hunter2', 'and the store holds it' );
 
     # The one that was there before is still there: saving rewrites the whole
@@ -62,8 +62,8 @@ subtest 'a secret that was not there' => sub {
 subtest 'the field defaults to password, and username works too' => sub {
     my $kdbx = store();
 
-    is( add( '--secrets', $kdbx, qw{--group troglodyne --title tok --field username -- someuser} ), 0, 'a username is stored' );
-    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:troglodyne/tok/username' );
+    is( add( '--secrets', $kdbx, qw{--group registrar --title tok --field username -- someuser} ), 0, 'a username is stored' );
+    my %got = Trog::Secrets->lookup( $kdbx, 'throwaway', probe => 'secret:registrar/tok/username' );
     is( $got{probe}, 'someuser', 'under the field it was given' );
 };
 

@@ -37,7 +37,7 @@ use Provisioner::Cookbook();
 
 # The administrator's keys are read out of the configuration directory now,
 # rather than named as an identity for cloud-init to fetch at first boot.
-File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAdogeskey doge\n" );
+File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
 # Loaded here so Test::MockModule has a package to attach to: the generator
 # requires a recipe only when it reaches it, which is after the mock is wanted.
@@ -71,7 +71,7 @@ sub generate {
     mkdir "$tmpdir/data";
     mkdir "$tmpdir/data/$_" for ( $HOST, $TENANT );
 
-    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my $pool = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
 
     # One resolver on purpose, written as a scalar rather than a list.  That is
     # what an operator writes, and bin/new_config dereferenced it raw when it
@@ -80,12 +80,12 @@ sub generate {
     my %global = (
         data_source    => "$tmpdir/data",
         basedir        => "$tmpdir/domains",
-        transfer_user  => 'doge',
-        admin_user     => 'doge',
+        transfer_user  => 'someadmin',
+        admin_user     => 'someadmin',
         admin_email    => 'bogus@test.test',
         admin_gecos    => 'Test Test',
-        gateway        => '192.168.1.254',
-        resolvers      => '192.168.1.254',
+        gateway        => '192.0.2.254',
+        resolvers      => '192.0.2.254',
         bridge_devname => 'ens4',
         dhcp_devname   => 'ens3',
         ip_pool        => { addresses => $pool },

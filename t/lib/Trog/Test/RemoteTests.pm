@@ -88,7 +88,7 @@ sub run {
 
     # The administrator's keys are read out of the configuration directory,
     # rather than named as an identity for cloud-init to fetch at first boot.
-    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAdogeskey doge\n" );
+    File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/admin_authorized_keys", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAadminskey someadmin\n" );
 
     require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
@@ -140,7 +140,7 @@ sub run {
 sub _configuration {
     my ( $tmpdir, $recipe ) = @_;
 
-    mkdir "$tmpdir/$_"           for qw{dotfiles dotfiles/doge data domains};
+    mkdir "$tmpdir/$_"           for qw{dotfiles dotfiles/someadmin data domains};
     mkdir "$tmpdir/data/$_.$TLD" for qw{data backup backupdestination};
     File::Touch::touch("$tmpdir/dotfiles/test");
 
@@ -155,19 +155,19 @@ sub _configuration {
 
     # One address per domain out of the pool.  A hundred is more than there are
     # recipes, and none is the gateway or the .50 that these settings say is us.
-    my $pool = join( ' ', map { "192.168.1.$_" } 100 .. 199 );
+    my $pool = join( ' ', map { "192.0.2.$_" } 100 .. 199 );
 
     my %global = (
         user           => 'test',
         data_source    => "$tmpdir/data",
         install_dir    => "$tmpdir/domains",
         basedir        => "$tmpdir/domains",
-        transfer_user  => 'doge',
-        admin_user     => 'doge',
+        transfer_user  => 'someadmin',
+        admin_user     => 'someadmin',
         admin_email    => 'bogus@test.test',
         admin_gecos    => 'Test Test',
-        gateway        => '192.168.1.254',
-        resolvers      => [qw{192.168.1.254 8.8.8.8 1.1.1.1}],
+        gateway        => '192.0.2.254',
+        resolvers      => [qw{192.0.2.254 8.8.8.8 1.1.1.1}],
         bridge_devname => 'ens4',
         dhcp_devname   => 'ens3',
         ip_pool        => { addresses => $pool },

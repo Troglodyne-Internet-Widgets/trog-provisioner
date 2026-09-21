@@ -87,7 +87,7 @@ like( $synopsis, qr/DOMAIN/,       'POD documents the DOMAIN argument' );
 # A domain directory with a provision.conf in it, for the cases that fail after
 # the file is read: a missing one is refused before anything else.
 my $CONFIGURED = tempdir( CLEANUP => 1 );
-_make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'doge', ips => '10.9.9.5' );
+_make_conf( $CONFIGURED, 'myvm.lan', admin_user => 'someadmin', ips => '10.9.9.5' );
 
 # No snapshots -> dies
 {

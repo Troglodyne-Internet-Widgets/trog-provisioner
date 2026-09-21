@@ -121,11 +121,11 @@ subtest 'global_defaults: what _global holds when nobody wrote it down' => sub {
 
 subtest 'cache_address: the fetch cache, as the address a guest points names at' => sub {
     my $distro = Provisioner::Cookbook->load('ubuntu');
-    my %fleet  = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.168.1.9' } );
+    my %fleet  = ( domain => 'guest.test.test', ipmap => { 'cache.test.test' => '192.0.2.9' } );
 
     is( $distro->cache_address(%fleet), q{}, 'none configured is none' );
-    is( $distro->cache_address( %fleet, cache => 'cache.test.test' ), '192.168.1.9',  'a name in the pool is its address' );
-    is( $distro->cache_address( %fleet, cache => '192.168.1.77' ),    '192.168.1.77', 'and an address is itself' );
+    is( $distro->cache_address( %fleet, cache => 'cache.test.test' ), '192.0.2.9',  'a name in the pool is its address' );
+    is( $distro->cache_address( %fleet, cache => '192.0.2.77' ),      '192.0.2.77', 'and an address is itself' );
 
     my ($said) = capture_stdout { is( $distro->cache_address( %fleet, cache => 'guest.test.test' ), q{}, 'the cache itself fetches from upstream' ) };
     like( $said, qr/guest\.test\.test[ ]is[ ]the[ ]fetch[ ]cache/, 'and says so' );

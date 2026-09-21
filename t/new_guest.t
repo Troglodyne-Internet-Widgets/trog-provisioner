@@ -40,11 +40,11 @@ require_ok($script) or BAIL_OUT("$script does not load; the install is incomplet
 # directory rather than emptying this one.
 my $SETTINGS = <<"SETTINGS";
     basedir: /bogus
-    admin_user: doge
-    admin_gecos: Doge Doge
-    admin_email: doge\@test.test
-    gateway: 192.168.1.254
-    resolvers: [192.168.1.254]
+    admin_user: someadmin
+    admin_gecos: Some Admin
+    admin_email: someadmin\@test.test
+    gateway: 192.0.2.254
+    resolvers: [192.0.2.254]
 SETTINGS
 
 File::Slurper::Temp::write_text( "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml", "---\n_base:\n  _global:\n$SETTINGS" );
@@ -198,7 +198,7 @@ subtest 'base_config reads _base out of recipes.yaml' => sub {
     my $base = Trog::Bin::NewGuest::base_config();
     is_deeply( $base->{ntp}, { pool => 'base.pool' }, 'the recipes of _base read' );
     is( $base->{_global}{data_source}, '/bogus/data', '_global and all' );
-    is( $base->{_global}{admin_user},  'doge',        'with the settings every guest is built with' );
+    is( $base->{_global}{admin_user},  'someadmin',   'with the settings every guest is built with' );
 
     # A domain file cannot say what every guest gets.
     mkdir("$dir/recipes.d") or die "Could not make $dir/recipes.d: $!";

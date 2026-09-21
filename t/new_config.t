@@ -70,7 +70,7 @@ _base:
     admin_user: tester
     admin_gecos: Test User
     admin_email: test\@test.test
-    gateway: 192.168.1.254
+    gateway: 192.0.2.254
     resolvers: [8.8.8.8]
     transfer_user: provision
   adminconfig:
@@ -124,8 +124,8 @@ _base:
     admin_user: tester
     admin_gecos: Test User
     admin_email: test\@test.test
-    gateway: 192.168.1.254
-    resolvers: [127.0.0.1, 192.168.1.254]
+    gateway: 192.0.2.254
+    resolvers: [127.0.0.1, 192.0.2.254]
     transfer_user: provision
   adminconfig:
     pkgs:
@@ -166,11 +166,11 @@ _base:
     admin_user: tester
     admin_gecos: Test User
     admin_email: test\@test.test
-    gateway: 192.168.1.254
+    gateway: 192.0.2.254
     resolvers: [8.8.8.8]
     transfer_user: provision
     ip_pool:
-      cidr: 192.168.1.0/30
+      cidr: 192.0.2.0/30
   adminconfig:
     pkgs:
       - vim

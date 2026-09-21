@@ -32,9 +32,9 @@ sub recipe {
 my %BASE = (
     domain          => 'plex.test.test',
     install_dir     => '/opt/domains',
-    admin_user      => 'doge',
+    admin_user      => 'someadmin',
     script_dir      => '/root/bin',
-    main_ip         => '192.168.1.9',
+    main_ip         => '192.0.2.9',
     plex_login_name => 'plexuser',
     admin_mail      => 'admin@test.test',
 );
