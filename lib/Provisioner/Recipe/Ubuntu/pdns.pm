@@ -17,7 +17,7 @@ Provisioner::Recipe::Ubuntu::pdns - Ubuntu's C<deps> for L<Provisioner::Recipe::
 =cut
 
 sub deps {
-    return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl python3-requests-unixsocket};
+    return qw{pdns-server pdns-recursor pdns-tools pdns-backend-sqlite3 sqlite3 libconfig-simple-perl libnet-dns-perl libjson-perl};
 }
 
 1;

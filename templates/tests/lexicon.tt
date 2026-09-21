@@ -7,6 +7,11 @@ use Test::More;
 my $which = `command -v lexicon 2>/dev/null`;
 like($which, qr/\S/, 'lexicon is installed') or diag 'no lexicon on PATH';
 
+# Building the parser imports every provider, patched ones included, so a
+# module a patch needs and nothing installed fails here for every provider.
+my $help = `lexicon --help 2>&1`;
+is($?, 0, 'and it starts') or diag $help;
+
 # The shortcut that an operator uses.  It contains the credentials.
 my $shortcut = '/opt/lexicon/[% domain %]';
 
