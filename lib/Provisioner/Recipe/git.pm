@@ -29,7 +29,7 @@ In recipes.yaml:
             # guest can hold a bot that pushes as itself and an administrator
             # who forwards their own key, and they want different things.
             accounts:
-                koan:
+                somebot:
                     # The forges it talks to, whose host keys it trusts.
                     hosts:
                         - github.com
@@ -39,10 +39,10 @@ In recipes.yaml:
 
                     # Who the commits are from.  Required with ssh_identity,
                     # because a signature is attributed to an address.
-                    user_name:  "yourname-bot"
-                    user_email: "bot@example.com"
+                    user_name:  "somebot"
+                    user_email: "somebot@example.com"
 
-                doge:
+                someadmin:
                     # An operator who forwards a key wants the host keys and
                     # nothing else.
                     hosts:
@@ -111,10 +111,10 @@ the first build:
 
     bin/add_secret --group git --title <domain>-<account>-ssh --stdin < id_ed25519
 
-That is also the move for a guest whose key something else minted.  The C<koan>
-recipe held one at C<secret:koan/E<lt>domainE<gt>-github-ssh> until this recipe
-took the work over, and a koan guest whose key is still under that group mints
-a new one on the next provision unless it is copied across first.
+That is also the move for a guest whose key another recipe minted before this
+one existed.  A reference that resolves to nothing is one that
+F<bin/new_config> generates a fresh value for, and a forge is never told about
+the new key.
 
 =cut
 
