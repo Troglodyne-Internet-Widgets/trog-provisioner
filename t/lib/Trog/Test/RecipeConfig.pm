@@ -115,6 +115,21 @@ sub required_config {
             version => '1.6.0',
             modules => ['nginxproxy'],
         },
+        github => {
+            github_user  => 'test-bot',
+            github_token => 'ghp_fakefakefake',
+            git_protocol => 'ssh',
+        },
+        git => {
+            accounts => {
+                test => {
+                    hosts        => ['github.com'],
+                    ssh_identity => 1,
+                    user_name    => 'test-bot',
+                    user_email   => 'test-bot@test.test',
+                },
+            },
+        },
         koan => {
             user               => 'koan',
             koan_email         => 'koan@test.test',

@@ -1,0 +1,22 @@
+[%# The login state of gh for one account.  The CLI itself is installed by
+    github.global.tt, which runs before every per-domain target, and the ssh
+    key that pushes and signs is Provisioner::Recipe::git.
+
+    Each block works out the home of the account with getent rather than
+    assuming one: the service user of a domain lives under install_dir, and an
+    administrator lives under /home.  Each line of a fragment is its own shell,
+    so the lookup is repeated per block rather than kept in a variable.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+[% IF github_token %]
+# The login state that `gh auth login` would write, so that gh works with
+# nothing interactive.  Then setup-git makes git send the same token over
+# HTTPS.  It needs no GH_TOKEN of its own: the file below is what gh reads, and
+# a token on a command line is a token in the process table.
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    install -d -o '[% account %]' -g '[% account %]' -m 0700 "$$home/.config/gh" \
+    && install -o '[% account %]' -g '[% account %]' -m 0600 github.hosts.yml "$$home/.config/gh/hosts.yml"
+home="$$(getent passwd '[% account %]' | cut -d: -f6)"; \
+    runuser -u '[% account %]' -- gh auth setup-git -h github.com
+[% END %]

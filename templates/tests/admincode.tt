@@ -18,21 +18,6 @@ foreach my $dir ($code, '/home/[% admin_user %]/bin') {
 # absolute path.
 ok(-x '/home/[% admin_user %]/bin/repos_for', 'repos_for is installed and executable');
 
-# gh must come from its own archive, not from Ubuntu, and a test that it is
-# installed passes on the Ubuntu package too.  templates/ubuntu/admincode.tt
-# says why.
-# command is a shell builtin, so it needs a shell.
-ok(qx{sh -c 'command -v gh'}, 'gh is installed');
-
-my $ghlist = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/github-cli.list'; <> } // '';
-like($ghlist, qr{https://cli\.github\.com/packages\s+stable\s+main}, 'the gh repository is cli.github.com')
-    or diag $ghlist;
-ok(-s '/usr/share/keyrings/githubcli-archive-keyring.gpg', 'the gh signing key is installed');
-
-my $ghpolicy = qx{apt-cache policy gh 2>/dev/null};
-like($ghpolicy, qr{cli\.github\.com}, 'and gh came from that archive, not the distro')
-    or diag $ghpolicy;
-
 # Test each entity, not the directory.  Every entity clones into the one
 # basedir, so a count of the directory passes when any single entity worked.
 #
