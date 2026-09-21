@@ -53,4 +53,12 @@ SKIP: {
     ok(scalar keys %{ $conf->{enabledPlugins} // {} }, 'and the plugins the recipe enabled are still there');
 }
 
+# The plugins every guest gets, named as their marketplaces publish them.
+SKIP: {
+    skip 'settings did not parse', 2 unless $conf;
+    foreach my $plugin (qw{perl-slop@troglodyne-marketplace simple-english@simple-english}) {
+        ok($conf->{enabledPlugins}{$plugin}, "$plugin is enabled");
+    }
+}
+
 done_testing();
