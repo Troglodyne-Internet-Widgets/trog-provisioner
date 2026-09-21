@@ -1,0 +1,12 @@
+[%# The toolchain, for the whole guest.  The rustup package is the installer
+    alone: it puts /usr/bin/rustup on the guest and nothing to compile with.
+
+    rustup keeps a toolchain under $HOME, so this installs it for the account
+    the makefile runs as, which is root.  See WHO GETS IT in
+    Provisioner::Recipe::rust.
+
+    Re-entrant: rustup updates a toolchain that is already there and exits 0.
+
+    No apostrophes in an Xslate comment.  The lexer reads one as the start of
+    a string, and takes the template up to the next quote into it. -%]
+rustup default '[% toolchain %]'
