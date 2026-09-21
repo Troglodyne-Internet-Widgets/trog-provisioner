@@ -1079,6 +1079,8 @@ L<Trog::HV::Libvirt>, the backend that builds guests with libvirt.
 
 L<Trog::HV::OpenStack>, the one that asks a cloud.
 
+L<Trog::HV::Cloud>, what every backend that builds by API has in common.
+
 L<Trog::Machine>, which this is one of.
 
 L<Trog::Hypervisors>, which chooses between several of these.
