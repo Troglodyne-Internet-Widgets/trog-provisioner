@@ -214,6 +214,37 @@ subtest 'placement is by the tightest resource, not the roomiest' => sub {
     is( $chosen->name, 'hv2', 'the one that will not be nearly full afterwards' );
 };
 
+subtest 'place picks the cheapest that fits, before the roomiest' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file() );
+    my $room  = with_capacity(
+        hv1 => capacity( memory_free => 8192 ),
+        hv2 => capacity( memory_free => 40000 ),
+    );
+
+    my %price = ( hv1 => 0, hv2 => 0 );
+    my $cost  = Test::MockModule->new('Trog::HV::Libvirt');
+    $cost->redefine( monthly_cost => sub { my ($self) = @_; my $p = $price{ $self->name }; die "$p\n" if $p =~ m/[[:alpha:]]/; return $p } );
+
+    my %needs = ( memory_mb => 4096, cpus => 2, disk_bytes => 40 * $GB );
+
+    $price{hv2} = 12;
+    my ( $out, $chosen ) = capture_stdout { $fleet->place( 'vm.example.test', %needs ) };
+    is( $chosen->name, 'hv1', 'one that costs nothing, though it is fuller, over one that bills for the guest' );
+    like( $out, qr/the[ ]roomiest[ ]of[ ]those[ ]that[ ]cost[ ]nothing[ ]more/, 'saying why' );
+
+    %price = ( hv1 => 24, hv2 => 12 );
+    ( $out, $chosen ) = capture_stdout { $fleet->place( 'vm.example.test', %needs ) };
+    is( $chosen->name, 'hv2', 'of two that bill, the cheaper' );
+    like( $out, qr/the[ ]cheapest[ ]at[ ]12[.]00[ ]a[ ]month/, 'saying what it costs' );
+
+    %price = ( hv1 => 12, hv2 => 12 );
+    is( quietly( sub { $fleet->place( 'vm.example.test', %needs ) } )->name, 'hv2', 'and of two that cost the same, the roomier' );
+
+    %price = ( hv1 => 0, hv2 => 'no price for that type' );
+    my $err = exception { $fleet->place( 'vm.example.test', %needs, memory_mb => 16384 ) };
+    like( $err, qr/hv2:[ ]unreachable[ ]--[ ]no[ ]price[ ]for[ ]that[ ]type/, 'one that cannot say what the guest would cost is not placed on, and says why' );
+};
+
 subtest 'nowhere to put it is an error that says why' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
     my $mock  = with_capacity(

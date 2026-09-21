@@ -73,6 +73,9 @@ L</headroom(%needs)> read: a hash with C<memory_mb>, C<memory_free>,
 C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
 C<cpus_free>, C<disk_free> and C<guests>.
 
+=item * C<monthly_cost>, if a guest costs money there.  See
+L</monthly_cost(%needs)>.
+
 =item * The guest lifecycle, C<domain_exists> and C<annihilate_domain>.  Also
 the four snapshot methods: C<snapshot_names>, C<snapshot_current_name>,
 C<create_snapshot> and C<revert_snapshot>.
@@ -596,6 +599,22 @@ provides it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
 =cut
 
 sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
+
+=head2 monthly_cost(%needs)
+
+Returns what a guest that wants C<memory_mb>, C<cpus> and C<disk_bytes> would
+cost a month here, as a number in the currency the backend bills in.
+L<Trog::Hypervisors/place($domain, %needs)> chooses the cheapest hypervisor that
+fits before the roomiest one.
+
+0 here: a machine that we own costs the same whether it runs one more guest or
+not.  A backend that bills for each guest overrides it.  It dies when it cannot
+find the price, and placement then reports it as unreachable, because a guess at
+a price is the one answer that spends money.
+
+=cut
+
+sub monthly_cost { return 0 }
 
 =head2 shortfalls(%needs)
 

@@ -8,7 +8,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 use Config::Simple();
 use File::Slurper();
-use List::Util qw{reduce};
+use List::Util qw{any reduce};
 use Trog::Config();
 use Trog::HV();
 
@@ -347,10 +347,15 @@ sub hosting {
 
 =head2 place($domain, %needs)
 
-Returns the roomiest hypervisor that can hold a guest that wants C<memory_mb>,
-C<cpus> and C<disk_bytes>, and prints which one it chose.  When none can, dies
-with the name of each hypervisor and what it lacks.  A hypervisor that cannot be
-reached is in that list as unreachable.
+Returns the hypervisor that should hold a guest that wants C<memory_mb>,
+C<cpus> and C<disk_bytes>, and prints which one it chose.  Of those that can
+hold it, that is the cheapest by L<Trog::HV/monthly_cost(%needs)>, then the
+roomiest, then the first in the file.  So a machine we own, which costs
+nothing more for one more guest, is chosen over any that bills for it.
+
+When none can hold it, dies with the name of each hypervisor and what it lacks.
+A hypervisor that cannot be reached, or cannot say what the guest would cost,
+is in that list as unreachable.
 
 =cut
 
@@ -370,7 +375,13 @@ sub place {
             next;
         }
 
-        push @fits, [ $hv, $hv->headroom(%needs) ];
+        my $cost = eval { $hv->monthly_cost(%needs) };
+        if ( !defined $cost ) {
+            push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline( $@ || 'it could not say what the guest would cost' );
+            next;
+        }
+
+        push @fits, [ $hv, $cost, $hv->headroom(%needs) ];
     }
 
     die "Nowhere to put $domain: it wants " . sprintf(
@@ -381,12 +392,14 @@ sub place {
       . join( "\n", @why_not ) . "\n"
       unless @fits;
 
-    # The roomiest, and of those equally roomy, the first in the file.
-    my $best = ( reduce { $b->[1] > $a->[1] ? $b : $a } @fits )->[0];
-    printf(
-        "Placing %s on %s (%s), the roomiest of %d that fit\n",
-        $domain, $best->name, $best->uri, scalar @fits
-    );
+    # The cheapest, of those the roomiest, and of those the first in the file.
+    my $winner = reduce { ( $b->[1] < $a->[1] || ( $b->[1] == $a->[1] && $b->[2] > $a->[2] ) ) ? $b : $a } @fits;
+    my ( $best, $cost ) = @$winner;
+    my $why =
+        $cost                     ? sprintf( 'the cheapest at %.2f a month', $cost )
+      : ( any { $_->[1] } @fits ) ? 'the roomiest of those that cost nothing more'
+      :                             'the roomiest';
+    printf( "Placing %s on %s (%s), %s of %d that fit\n", $domain, $best->name, $best->uri, $why, scalar @fits );
     return $best;
 }
 
