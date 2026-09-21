@@ -21,7 +21,7 @@ In recipes.yaml:
             # The account on the guest this is for.  The service user by
             # default, which is what a bot wants; name the administrator for a
             # machine somebody logs in to.
-            account: doge
+            account: someadmin
 
             # The GitHub account, and a personal access token for it.  Both or
             # neither: one without the other cannot log anything in.
