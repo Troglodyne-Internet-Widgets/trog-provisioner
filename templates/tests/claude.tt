@@ -31,4 +31,26 @@ SKIP: {
         or diag 'declared: ' . join(', ', sort keys %declared);
 }
 
+# rtk filters the output of a shell command before the agent reads it.  A path
+# is not a program, so this runs it, and the version says the .deb of the
+# release is what is installed rather than whatever was on the guest before.
+my $rtk = qx{rtk --version 2>&1};
+like($rtk, qr/\d+\.\d+\.\d+/, 'rtk runs and says its version') or diag $rtk;
+like($rtk, qr/\Q[% rtk_version.replace('^v', '') %]\E/, 'and it is the version that was asked for') or diag $rtk;
+
+# The hook is the whole point: without it in settings.json, rtk is installed
+# and nothing goes through it.
+SKIP: {
+    skip 'settings did not parse', 2 unless $conf;
+
+    my @bash = grep { ($_->{matcher} // '') eq 'Bash' } @{ $conf->{hooks}{PreToolUse} // [] };
+    my @commands = map { map { $_->{command} // '' } @{ $_->{hooks} // [] } } @bash;
+    ok((grep { m/\brtk\b/ } @commands), 'the Bash tool goes through rtk')
+        or diag 'PreToolUse commands: ' . join(', ', @commands);
+
+    # rtk edits this file rather than writing its own, so a recipe that ran it
+    # in the wrong order would leave the settings with no plugins in them.
+    ok(scalar keys %{ $conf->{enabledPlugins} // {} }, 'and the plugins the recipe enabled are still there');
+}
+
 done_testing();
