@@ -166,7 +166,7 @@ sub snapshot_current_name {
 
 =head1 PROVISIONING
 
-=head2 $address = $hv->provision_guest($config, $seed, %opts)
+=head2 provision_guest($config, $seed, %opts)
 
 Gets the guest from the service, and returns its address.  If the guest exists,
 this rebuilds it.  If not, this creates it.
