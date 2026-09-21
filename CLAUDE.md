@@ -142,6 +142,14 @@ that a guest came up is worth the log line that shows it.  So is a claim about
 work you did: the URL `gh pr create` gave back, the sha `git push` reported.  A
 PR number nobody can open is worse than no number.
 
+Quote that line with the names taken out.  `ok 3 - $domain trusts the host keys
+of $forge` proves what the line naming the guest proved, because what made it
+evidence is that the assertion ran and passed, not which installation ran it.
+This repository is public and the fleet it is developed on is not: a commit
+message, a PR description and an issue are read by people who have no business
+knowing the hostnames, the accounts, the addresses or the customers.
+`perl-slop:information-security` is the whole of it.
+
 Stack a branch on another only when the *code* depends on it, never when only
 the verification does.  The tcms checkout needed the postrun fix before a guest
 would go green, so its PR was opened against that branch -- while touching none
