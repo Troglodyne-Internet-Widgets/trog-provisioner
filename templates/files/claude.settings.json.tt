@@ -6,7 +6,8 @@
 [% IF modules.grep('^perl$').size() %]
     "perl-development@perigrin-marketplace": true,
 [% END %]
-    "perl-slop@troglodyne-marketplace": true
+    "perl-slop@troglodyne-marketplace": true,
+    "simple-english@simple-english": true
   },
   "extraKnownMarketplaces": {
 [% IF modules.grep('perllsp').size() %]
@@ -29,6 +30,12 @@
       "source": {
         "source": "github",
         "repo": "Troglodyne-Internet-Widgets/claude-plugins-marketplace"
+      }
+    },
+    "simple-english": {
+      "source": {
+        "source": "github",
+        "repo": "AminBlg/SimpleEnglish"
       }
     }
   },
