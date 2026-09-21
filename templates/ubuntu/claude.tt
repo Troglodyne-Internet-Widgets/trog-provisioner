@@ -1,3 +1,22 @@
 command -v claude >/dev/null 2>&1 || HOME='[% install_dir %]/[% domain %]' npm install -g --silent @anthropic-ai/claude-code
 install -m 0755 -o [% admin_user %] -g [% admin_user %] -d [% install_dir %]/[% domain %]/.claude
 mv claude.settings.json [% install_dir %]/[% domain %]/.claude/settings.json
+[%# rtk, from the .deb its release publishes: one binary in /usr/bin that every
+    account can run, and a version dpkg can be asked about.
+
+    The version check is what makes this re-entrant.  dpkg-query says nothing
+    and exits non-zero when the package is absent, so || is the install. -%]
+[ "$$(dpkg-query -W -f='$${Version}' rtk 2>/dev/null)" = "[% rtk_version.replace('^v', '') %]-1" ] \
+    || { curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/[% rtk_version %]/rtk_[% rtk_version.replace('^v', '') %]-1_$$(dpkg --print-architecture).deb" -o /tmp/rtk.deb \
+        && DEBIAN_FRONTEND="noninteractive" apt-get install -y -q /tmp/rtk.deb \
+        && rm -f /tmp/rtk.deb; }
+[%# After the settings file, because this edits it: the hook goes into the JSON
+    that is already there.  --auto-patch answers the two questions the
+    interactive form asks, which a makefile has nobody to answer.
+
+    Re-entrant: a second run says the hook is already present. -%]
+HOME='[% install_dir %]/[% domain %]' rtk init -g --auto-patch
+[%# rtk writes RTK.md, a CLAUDE.md that references it and a backup of the
+    settings, all as root because make runs as root.  The admin is who reads
+    them. -%]
+chown -R [% admin_user %]:[% admin_user %] [% install_dir %]/[% domain %]/.claude

@@ -107,6 +107,7 @@ RPC
 RSA
 Readahead
 Roundcube
+RTK
 SHA
 SIGALRM
 SIGILLs
@@ -329,6 +330,7 @@ nginxproxy
 nodejs
 noeviction
 nonreusable
+npm
 ntp
 nvm
 nvram
@@ -393,6 +395,7 @@ rsyncd
 rsynced
 rsyncs
 rsyslog
+rtk
 ruleset
 scaffolded
 scp
