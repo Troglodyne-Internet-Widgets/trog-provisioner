@@ -18,6 +18,7 @@ use Pod::Usage   qw{pod2usage};
 use Trog::HV();
 use Trog::Local();
 use Trog::Config();
+use Trog::Credentials();
 use Trog::Hypervisors();
 use Trog::Utils();
 
@@ -55,6 +56,13 @@ Check the hypervisor that F<hypervisors.conf> calls NAME, instead of the one
 the fleet picks.  It dies when the file does not name it, and says which names
 it has.
 
+=item B<--credentials>
+
+Reads the passwords that the checks need from standard input before they run,
+and does not ask for them.  A check that asks a cloud needs the passphrase of
+the secret store when the cloud's credential is kept there, as a Linode token
+is.  See L<Trog::Credentials> for the format.
+
 =item B<--hvconf> FILE
 
 The fleet definition.  The default is the one in the configuration directory
@@ -67,14 +75,19 @@ of L<Trog::Config>.
 sub main {
     my @args = @_;
 
-    my ( $hv_name, $hvconf, $help );
+    my ( $hv_name, $hvconf, $credentials, $help );
     GetOptionsFromArray(
         \@args,
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
+        'credentials'  => \$credentials,
         'help'         => \$help,
     ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
     pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    # Before anything asks for a password, and only with --credentials.  See
+    # Trog::Credentials for why it has to be asked for.
+    Trog::Credentials->load() if $credentials;
 
     my $hv = hypervisor( $hv_name, $hvconf );
     return 1 unless $hv;
