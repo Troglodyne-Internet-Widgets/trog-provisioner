@@ -69,10 +69,13 @@ sub quietly {
         return { name => $name };
     }
 
-    sub image_from_name {
-        my ( $self, $name ) = @_;
-        return unless List::Util::any { $_ eq $name } @{ $self->{images} // [] };
-        return { name => $name };
+    # Glance filters on the os_ properties that image_for_distro asks by.
+    sub list_images {
+        my ( $self, %query ) = @_;
+        return grep {
+            my $image = $_;
+            List::Util::all { ( $image->{$_} // q{} ) eq $query{$_} } keys %query
+        } @{ $self->{images} // [] };
     }
 }
 
@@ -83,12 +86,12 @@ sub cloud_hv {
         services => [qw{compute image network volumev3}],
         flavors  => ['m1.medium'],
         networks => ['internal'],
-        images   => ['ubuntu-24.04'],
+        images   => [ { id => 'img-noble', os_distro => 'ubuntu', os_version => '24.04', status => 'active' } ],
         %{ $opts{api} // {} },
     );
 
     Trog::HV->forget();
-    my $hv = Trog::HV->new( cloud => 'testcloud', flavor => 'm1.medium', image => 'ubuntu-24.04', network => 'internal', %{ $opts{hv} // {} } );
+    my $hv = Trog::HV->new( cloud => 'testcloud', flavor => 'm1.medium', network => 'internal', %{ $opts{hv} // {} } );
 
     my $mock = Test::MockModule->new('Trog::HV::OpenStack');
     $mock->redefine( api => sub { $api } );
@@ -103,15 +106,20 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
     ok $ok->{ok}, 'a credential that authenticates and a catalog with the three services';
 
     ($ok) = quietly( sub { $hv->check_cloud_resources } );
-    ok $ok->{ok}, 'a flavor, image and network the cloud has';
+    ok $ok->{ok}, 'a flavor and network the cloud has, and an image for the distro in use';
+    like $ok->{what}, qr/from[ ]img-noble/, 'naming the image the distro recipe gets';
 
     # Getting one of these wrong otherwise fails a provision minutes in, with an
     # error from the API rather than from us.
-    my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope', image => 'not-an-image' } );
+    my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope' } );
     my ($failed) = quietly( sub { $bad->check_cloud_resources } );
     ok !$failed->{ok}, 'and it notices when they are not';
-    like $failed->{what}, qr/flavor[ ]'m1\.nope'/,    'naming the flavor';
-    like $failed->{what}, qr/image[ ]'not-an-image'/, 'and the image';
+    like $failed->{what}, qr/flavor[ ]'m1\.nope'/, 'naming the flavor';
+
+    my ( $bare, $bare_mock ) = cloud_hv( api => { images => [] } );
+    ($failed) = quietly( sub { $bare->check_cloud_resources } );
+    ok !$failed->{ok}, 'and a cloud with no image for the distro';
+    like $failed->{fix}, qr/os_distro=ubuntu[ ]and[ ]os_version=24[.]04/, 'saying which properties an image needs';
 
     my ( $thin, $thin_mock ) = cloud_hv( api => { services => [qw{compute volumev3}] } );
     ($failed) = quietly( sub { $thin->check_reachable } );

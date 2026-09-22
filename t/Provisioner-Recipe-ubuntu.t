@@ -425,6 +425,17 @@ subtest 'the key a domain already has is kept, on a real run and a dry one' => s
     is( $build->(), $first, 'and a real run keeps it, since the store is holding that key' );
 };
 
+subtest 'release_version: the pinned release, as the image catalogs name it' => sub {
+    my $recipe = Provisioner::Cookbook->load('ubuntu');
+    is( $recipe->release,         'noble',  'noble is pinned' );
+    is( $recipe->release_version, '24.04',  'which a catalog calls 24.04' );
+    is( $recipe->distribution,    'ubuntu', 'of ubuntu' );
+
+    my $pin = Test::MockModule->new('Provisioner::Recipe::ubuntu');
+    $pin->redefine( release => sub { 'bogus' } );
+    like( exception { $recipe->release_version }, qr/version[ ]of[ ]the[ ]release[ ]'bogus'/, 'a release with no version recorded is refused, not guessed at' );
+};
+
 subtest 'which release is current is read, not inferred' => sub {
     my $recipe = Provisioner::Cookbook->load('ubuntu');
 

@@ -86,6 +86,12 @@ it to tell that a directory belongs to a guest that still exists.
 
 =item * C<guest_ssh_ip>, the address at which you reach a built guest.
 
+=item * C<image_for_distro($distro)>, what this hypervisor boots a guest of that
+distribution from: a URL, a Glance image, a Linode image.  The distro recipe
+decides the distribution and the release, and every kind of hypervisor answers
+for the same pair.  F<bin/new_config> writes the answer into F<provision.conf>
+as C<image>.  Dies when this hypervisor has no image for it.
+
 =item * C<inspection_address($domain)>, the address at which a person reaches a
 built guest to look at it, for the scripts that collect its logs or ask it
 something.  It works when the build did not, which is when it is wanted.
@@ -139,7 +145,7 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
-=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot inspection_address
+=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot inspection_address image_for_distro
 
 =head1 CLASS METHODS
 
@@ -533,6 +539,7 @@ sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_dom
 sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
 sub guest_ssh_ip          ( $self, @ ) { return $self->_abstract('guest_ssh_ip') }
 sub inspection_address    ( $self, @ ) { return $self->_abstract('inspection_address') }
+sub image_for_distro      ( $self, @ ) { return $self->_abstract('image_for_distro') }
 sub snapshot_names        ( $self, @ ) { return $self->_abstract('snapshot_names') }
 sub snapshot_current_name ( $self, @ ) { return $self->_abstract('snapshot_current_name') }
 sub create_snapshot       ( $self, @ ) { return $self->_abstract('create_snapshot') }
@@ -929,6 +936,25 @@ lp: for Launchpad.  Holding them here rather than naming an identity for the
 guest to resolve is deliberate: cloud-init would fetch them from GitHub while
 the guest boots, which delays every provision and fails when GitHub is down.
 FIX
+}
+
+=head2 @distros = $hv->distros_in_use()
+
+The distro recipes that the configuration builds guests of, loaded: the
+C<distro> of each domain's C<_global>, C<ubuntu> where it names none, and
+C<ubuntu> alone for a configuration with no domains yet.  A preflight check that
+asks whether a hypervisor has an image asks it for each of these.
+
+=cut
+
+sub distros_in_use {
+    my $conf  = eval { Provisioner::Cookbook->configuration() } // {};
+    my %named = map {
+        ( ( eval { Provisioner::Cookbook->global_config( $_, $conf ) } // {} )->{distro} // 'ubuntu' ) => 1
+    } grep { !m/\A_/ } keys %$conf;
+    %named = ( ubuntu => 1 ) unless %named;
+
+    return map { Provisioner::Cookbook->load($_) } sort keys %named;
 }
 
 =head2 $result = $hv->note_stale_image()

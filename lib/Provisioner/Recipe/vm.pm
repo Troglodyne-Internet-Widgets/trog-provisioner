@@ -160,7 +160,7 @@ sub args {
 
             image => {
                 type        => 'string',
-                description => 'Cloud image the guest disk is layered over, as a URL.  Supplied by the distro recipe; see Provisioner::DistroRecipe.',
+                description => 'What the guest boots from: the hypervisor\'s image for the distro recipe\'s release, which bin/new_config asks it for.  On libvirt, the cloud image URL the disk is layered over; on a cloud, an image in its own catalog.  See image_for_distro in Trog::HV.',
             },
             memory => {
                 type        => 'integer',

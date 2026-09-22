@@ -83,6 +83,15 @@ sub reset_linode {
     return;
 }
 
+# What image_for_distro asks of a distro recipe, and nothing else.
+{
+
+    package Test::Distro;
+    sub new             ( $class, $distribution, $version ) { return bless { distribution => $distribution, version => $version }, $class }
+    sub distribution    ($self)                             { return $self->{distribution} }
+    sub release_version ($self)                             { return $self->{version} }
+}
+
 sub linode_of ($label) {
     return ( grep { $_->{label} eq $label } @{ $STATE{linodes} } )[0];
 }
@@ -213,7 +222,7 @@ $mock->redefine( api => sub ($self) { return $self->{_api} //= Linode::API->new(
 
 sub linode_hv (%opts) {
     reset_linode() unless %STATE;
-    return Trog::HV::Linode->build( linode_token => 'secret:linode/api/password', region => 'us-east', type => 'g6-standard-2', image => 'linode/ubuntu24.04', %opts );
+    return Trog::HV::Linode->build( linode_token => 'secret:linode/api/password', region => 'us-east', type => 'g6-standard-2', %opts );
 }
 
 # What a call warned, which Test::NoWarnings would otherwise take as a failure,
@@ -232,6 +241,7 @@ sub asked_to ( $method, $path ) {
 sub config_for ($domain) {
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( domain => $domain );
+    $config->param( image  => 'linode/ubuntu24.04' );
     return $config;
 }
 
@@ -333,7 +343,7 @@ subtest 'create_guest' => sub {
     reset_linode();
     my $hv = linode_hv( firewall_id => 42, private_ip => 1 );
 
-    my $linode = $hv->create_guest( name => 'new.test.test', user_data => "#cloud-config\n" );
+    my $linode = $hv->create_guest( image => 'linode/ubuntu24.04', name => 'new.test.test', user_data => "#cloud-config\n" );
     is( $linode->{status}, 'running', 'it waits until Linode says the guest is running' );
 
     my ($created) = asked_to( POST => '/v4/linode/instances' );
@@ -349,15 +359,15 @@ subtest 'create_guest' => sub {
     like( $body->{root_pass}, qr/\A\S{48}\z/, 'and a long random root password, which Linode requires' );
 
     reset_linode();
-    linode_hv()->create_guest( name => 'again.test.test' );
+    linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'again.test.test' );
     isnt( ( asked_to( POST => '/v4/linode/instances' ) )[0][2]{root_pass}, $body->{root_pass}, 'a different one each time' );
 
-    like( exception { linode_hv( image => undef )->create_guest( name => 'x.test.test' ) }, qr/needs[ ]'image'/, 'no image is said, not sent' );
-    like( exception { linode_hv()->create_guest( name => 'big.test.test', user_data => 'x' x 65536 ) }, qr/65536[ ]bytes/,   'nor a payload over what the metadata service takes' );
-    like( exception { linode_hv()->create_guest( name => 'x' x 65 ) },                                  qr/64[ ]characters/, 'nor a label Linode would refuse' );
+    like( exception { linode_hv()->create_guest( name => 'x.test.test' ) },                                                            qr/needs[ ]an[ ]image/, 'no image is said, not sent' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'big.test.test', user_data => 'x' x 65536 ) }, qr/65536[ ]bytes/,      'nor a payload over what the metadata service takes' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'x' x 65 ) },                                  qr/64[ ]characters/,    'nor a label Linode would refuse' );
 
     reset_linode();
-    like( exception { linode_hv()->create_guest( name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
     is( scalar asked_to( POST => '/v4/linode/instances' ), 0, 'and nothing was sent' ) or diag explain \@ASKED;
 };
 
@@ -366,30 +376,30 @@ subtest 'rebuild_guest' => sub {
     add_linode( label => 'vm.test.test', type => 'g6-nanode-1' );
     my $hv = linode_hv();
 
-    my $linode = $hv->rebuild_guest( 'vm.test.test', user_data => "#cloud-config\n" );
+    my $linode = $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', user_data => "#cloud-config\n" );
     is( $linode->{status},                   'running', 'it waits until the rebuilt guest is running' );
     is( linode_of('vm.test.test')->{status}, 'running', 'running after the rebuild, not the running Linode reported before it began' );
 
     my ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
-    is( $rebuilt->{image},                                              'linode/ubuntu24.04', 'onto the image of the block' );
+    is( $rebuilt->{image},                                              'linode/ubuntu24.04', 'onto the image it was given' );
     is( MIME::Base64::decode_base64( $rebuilt->{metadata}{user_data} ), "#cloud-config\n",    'with the new seed' );
     is( $rebuilt->{type},                                               'g6-standard-2',      'and resized to the type of the block, which it was not' );
     is( scalar asked_to( POST => '/v4/linode/instances' ),              0,                    'without a new Linode' );
 
     @ASKED = ();
-    $hv->rebuild_guest('vm.test.test');
+    $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' );
     ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
     ok( !exists $rebuilt->{type}, 'a guest of the right type is not resized' );
 
-    like( exception { $hv->rebuild_guest('nope.test.test') }, qr/no[ ]guest[ ]called[ ]'nope\.test\.test'/, 'and one that is not there is said' );
+    like( exception { $hv->rebuild_guest( 'nope.test.test', image => 'linode/ubuntu24.04' ) }, qr/no[ ]guest[ ]called[ ]'nope\.test\.test'/, 'and one that is not there is said' );
 
     @ASKED = ();
     $STATE{busy} = 2;
-    is( $hv->rebuild_guest('vm.test.test')->{status},       'running', 'a Linode still busy with the last thing is asked again until it is not' );
-    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ), 3,         'twice refused, and the third time taken' );
+    is( $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' )->{status}, 'running', 'a Linode still busy with the last thing is asked again until it is not' );
+    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ),                            3,         'twice refused, and the third time taken' );
 
     $STATE{busy} = 1_000_000;
-    like( exception { $hv->rebuild_guest('vm.test.test') }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );
+    like( exception { $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' ) }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );
     $STATE{busy} = 0;
 };
 
@@ -457,19 +467,33 @@ subtest 'snapshots' => sub {
     like( exception { $hv->create_snapshot( 'nope.test.test', 'x' ) }, qr/no[ ]guest[ ]called/, 'and a guest that is not there has nothing to snapshot' );
 };
 
+subtest 'image_for_distro' => sub {
+    is( linode_hv()->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ), 'linode/ubuntu24.04', 'the distribution and its version, run together, as Linode names its images' );
+    is( linode_hv()->image_for_distro( Test::Distro->new( debian => '12' ) ),    'linode/debian12',    'whichever distribution it is' );
+};
+
 subtest 'check_linode_resources' => sub {
     reset_linode();
-    ok( linode_hv()->check_linode_resources->{ok}, 'a region with the metadata service and an image that reads it' );
+    my @distros = ( Test::Distro->new( ubuntu => '24.04' ) );
+    my $in_use  = Test::MockModule->new('Trog::HV');
+    $in_use->redefine( distros_in_use => sub { return @distros } );
 
-    my $result = linode_hv( region => 'us-west', image => 'linode/arch' )->check_linode_resources;
-    ok( !$result->{ok}, 'a region without it and an image that does not read it' );
+    my $result = linode_hv()->check_linode_resources;
+    ok( $result->{ok}, 'a region with the metadata service and an image for each distro that reads it' );
+    like( $result->{what}, qr/from[ ]linode\/ubuntu24[.]04/, 'naming the image it builds from' );
+
+    @distros = ( Test::Distro->new( ubuntu => '24.04' ), Test::Distro->new( arch => q{} ) );
+    $result  = linode_hv( region => 'us-west' )->check_linode_resources;
+    ok( !$result->{ok}, 'a region without it, and a second distro whose image does not read it' );
     like( $result->{what}, qr/no[ ]metadata[ ]service[ ]in[ ]us-west/,        'each named' );
     like( $result->{what}, qr/linode\/arch[ ]does[ ]not[ ]read[ ]cloud-init/, 'both of them' );
 
-    $result = linode_hv( type => 'g1-bogus', region => 'mars-1' )->check_linode_resources;
-    like( $result->{what}, qr/no[ ]region[ ]'mars-1',[ ]no[ ]type[ ]'g1-bogus'/, 'as are a region and a type Linode does not have' );
+    @distros = ( Test::Distro->new( debian => '99' ) );
+    like( linode_hv()->check_linode_resources->{what}, qr/no[ ]image[ ]'linode\/debian99'/, 'and a release Linode has no image of' );
 
-    like( linode_hv( image => undef )->check_linode_resources->{what}, qr/Not[ ]configured:[ ]image/, 'and one the block does not name' );
+    @distros = ( Test::Distro->new( ubuntu => '24.04' ) );
+    $result  = linode_hv( type => 'g1-bogus', region => 'mars-1' )->check_linode_resources;
+    like( $result->{what}, qr/no[ ]region[ ]'mars-1',[ ]no[ ]type[ ]'g1-bogus'/, 'as are a region and a type Linode does not have' );
 
     $STATE{refuse_token} = 1;
     $result = linode_hv()->check_linode_resources;

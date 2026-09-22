@@ -111,12 +111,37 @@ sub packager { return shift->_unanswered('packager') }
 The cloud image that is the base layer of the disk of every guest.  It is a URL
 that the hypervisor can fetch.
 
-C<bin/new_config> writes it into the F<provision.conf> of a domain as C<image>.
-C<base_image> in L<Trog::HV::Libvirt> downloads it.
+It is what a libvirt hypervisor builds from: L<Trog::HV::Libvirt/image_for_distro>
+answers with it, C<bin/new_config> writes it into the F<provision.conf> of a
+domain as C<image>, and C<base_image> in L<Trog::HV::Libvirt> downloads it.  A
+cloud has its own catalog, and names its image from C<distribution> and
+C<release_version> instead.
 
 =cut
 
 sub base_image { return shift->_unanswered('base_image') }
+
+=head2 $version = $distro->release_version()
+
+The version of the release that this distribution pins, as image catalogs name
+it: C<24.04>, not C<noble>.  A cloud finds the image a guest boots from by it,
+with C<distribution>: Linode as C<linode/ubuntu24.04>, Glance by its
+C<os_distro> and C<os_version> properties.
+
+=cut
+
+sub release_version { return shift->_unanswered('release_version') }
+
+=head2 $name = $distro->distribution()
+
+The distribution, as image catalogs name it: Glance's C<os_distro>, and the
+start of the name of a Linode image.  The name of the recipe, which is what the
+catalogs call every distribution that this toolkit has a recipe for.  A
+distribution whose catalog name is not its recipe name overrides it.
+
+=cut
+
+sub distribution { my ($self) = @_; return $self->recipe_name }
 
 =head2 $cmd = $distro->packager_invocation()
 

@@ -57,6 +57,7 @@ use Trog::HV::Cloud();    ## no critic (ProhibitUnusedImports) -- the parent of 
 sub config_for ($domain) {
     my $config = Config::Simple->new( syntax => 'simple' );
     $config->param( domain => $domain );
+    $config->param( image  => 'test/image' );
     return $config;
 }
 
@@ -67,13 +68,13 @@ subtest 'provision_guest' => sub {
 
     my $ip;
     my $out = capture_stdout { $ip = $cloud->provision_guest( config_for('new.test.test'), $SEED ) };
-    is_deeply( $cloud->{calls}, [ [ create_guest => { name => 'new.test.test', user_data => "#cloud-config\n" } ] ], 'a guest that is not there is created, with the seed as its payload' );
+    is_deeply( $cloud->{calls}, [ [ create_guest => { name => 'new.test.test', image => 'test/image', user_data => "#cloud-config\n" } ] ], 'a guest that is not there is created from the image in its provision.conf, with the seed as its payload' );
     is( $ip, '203.0.113.7', 'and its address is what comes back' );
     like( $out, qr/new[.]test[.]test[ ]is[ ]at[ ]203[.]0[.]113[.]7/, 'and printed' );
 
     $cloud->{calls} = [];
     capture_stdout { $ip = $cloud->provision_guest( config_for('there.test.test'), $SEED ) };
-    is_deeply( $cloud->{calls}, [ [ rebuild_guest => 'there.test.test', { user_data => "#cloud-config\n" } ] ], 'a guest that is there is rebuilt, not created beside itself' );
+    is_deeply( $cloud->{calls}, [ [ rebuild_guest => 'there.test.test', { image => 'test/image', user_data => "#cloud-config\n" } ] ], 'a guest that is there is rebuilt from that image, not created beside itself' );
     is( $ip, '203.0.113.5', 'and keeps its address' );
 
     $cloud->{calls} = [];

@@ -83,6 +83,9 @@ and that is not a reason to fail a build.
 
 =cut
 
+# The version of each release that the image catalogs name it by.
+my %VERSION_OF = ( jammy => '22.04', noble => '24.04', plucky => '25.04', questing => '25.10', resolute => '26.04' );
+
 sub packager                   { return 'deb' }
 sub release                    { return 'noble' }
 sub mirror_path                { return '/ubuntu' }
@@ -92,6 +95,20 @@ sub packager_remove_invocation { return 'DEBIAN_FRONTEND="noninteractive" apt-ge
 
 sub packager_invocation {
     return 'DEBIAN_FRONTEND="noninteractive" apt-get install -Uy -o Acquire::Retries=3 -o Dpkg::Options=--force-confdef -o Dpkg::Options=--force-confold -o Dpkg::Options=--force-overwrite --autoremove';
+}
+
+=head2 $version = $recipe->release_version()
+
+The version of the release that C<release> pins, such as C<24.04> for C<noble>.
+Dies for a release this does not know the version of, rather than guessing at
+an image name from a codename.
+
+=cut
+
+sub release_version {
+    my ($self) = @_;
+    my $release = $self->release;
+    return $VERSION_OF{$release} // die "The ubuntu recipe does not know the version of the release '$release'; add it to \%VERSION_OF\n";
 }
 
 =head2 $url = $recipe->image_for($release)
