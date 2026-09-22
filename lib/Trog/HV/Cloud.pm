@@ -228,7 +228,8 @@ sub would_provision {
 
 =head2 $result = $hv->check_transfer_ip()
 
-Makes sure that the C<_global> of F<recipes.yaml> names a C<transfer_ip>.
+Makes sure that a C<transfer_ip> is named, in the block of this hypervisor in
+F<hypervisors.conf> or in the C<_global> of F<recipes.yaml>.
 A service assigns the guest address only when it creates the guest, after the
 seed is written.  So the address cannot be found the way libvirt finds it.  See
 L<Trog::HV/PREFLIGHT>.
@@ -239,7 +240,7 @@ sub check_transfer_ip {
     my ($self) = @_;
 
     my $rfile = Trog::Config->path('recipes.yaml');
-    my $named = eval { Provisioner::Cookbook->globals(undef)->{transfer_ip} };
+    my $named = $self->configured_transfer_ip // eval { Provisioner::Cookbook->globals(undef)->{transfer_ip} };
 
     return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
 
@@ -251,11 +252,18 @@ worked out by asking the routing table about the guest's network -- but
 nothing to ask about until the guest exists, and the seed naming the address is
 written before that.
 
-Name it in the _global of _base in $rfile:
+Name it in the block of this hypervisor in hypervisors.conf:
+
+    transfer_ip   = 192.0.2.10
+    transfer_port = 2222
+
+or, for every hypervisor, in the _global of _base in $rfile:
 
     transfer_ip: 192.0.2.10
 
-It has to be an address of this machine that a guest on the cloud can reach.
+It has to be an address of this machine that a guest on the cloud can reach,
+and transfer_port the port that reaches this machine's sshd there, when a
+gateway forwards another one to it.
 FIX
 }
 

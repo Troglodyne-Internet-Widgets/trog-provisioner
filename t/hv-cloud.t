@@ -124,6 +124,15 @@ subtest 'nothing to do' => sub {
     is( $cloud->cpu_overcommit, 1, 'and no overcommit on vCPUs the service already counts' );
 };
 
+subtest 'check_transfer_ip' => sub {
+    my $cloud = Test::Cloud->new;
+    $cloud->{transfer_ip} = '192.0.2.10';
+
+    my $result = $cloud->check_transfer_ip;
+    ok( $result->{ok}, 'an address named in the block of the hypervisor is enough' );
+    like( $result->{what}, qr/192[.]0[.]2[.]10/, 'and is the one named' );
+};
+
 subtest 'refusals' => sub {
     my $cloud = Test::Cloud->new;
 

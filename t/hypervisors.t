@@ -555,6 +555,29 @@ CONF
     is $linode->max_guests,     10,                   'and the limits are read as for any kind';
 };
 
+subtest 'any block can say where its guests reach us' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[far]
+libvirt_uri=qemu+ssh://root@far.example.net/system
+transfer_ip=192.0.2.10
+transfer_port=2222
+
+[typo]
+libvirt_uri=qemu+ssh://root@typo.example.net/system
+transfer_port=ssh
+CONF
+
+    is $fleet->hypervisor('hv1')->configured_transfer_ip,   undef,        'a block that does not say leaves it to _global and the routing table';
+    is $fleet->hypervisor('hv1')->configured_transfer_port, undef,        'port included';
+    is $fleet->hypervisor('far')->configured_transfer_ip,   '192.0.2.10', 'one that does, says the address';
+    is $fleet->hypervisor('far')->configured_transfer_port, 2222,         'and the port';
+
+    like exception { $fleet->hypervisor('typo')->configured_transfer_port }, qr/transfer_port[ ]for[ ]typo[ ]is[ ]'ssh'/, 'and a port that is not one is said, naming the block';
+};
+
 subtest 'the documented example is a file that loads' => sub {
 
     # The shipped example, not a copy of it.  A configuration file people are

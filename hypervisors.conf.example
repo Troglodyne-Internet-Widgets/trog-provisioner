@@ -144,3 +144,11 @@ monthly_budget = 200
 ; Linode's private network for each.
 ;firewall_id    = 12345
 ;private_ip     = 1
+
+; Where a guest here reaches this machine for its payload, which is somewhere
+; else than a guest on a machine of ours reaches it: across the internet, at
+; the gateway's address, on a port the gateway forwards to this machine's sshd.
+; Any block can set these, and they win over transfer_ip and transfer_port in
+; the _global of recipes.yaml for the guests built on it.
+transfer_ip    = 192.0.2.10
+transfer_port  = 2222

@@ -274,11 +274,16 @@ a list of pairs.  A key that the block does not set is left out.
 It reads the keys of every backend, because the content of a block decides
 which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
-placement limits, because placement belongs to this class.
+placement limits, because placement belongs to this class, and C<transfer_ip>
+and C<transfer_port>, because every kind of hypervisor has guests that fetch
+from us.
 
 =cut
 
 my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit};
+
+# Where a guest of this hypervisor reaches us, which is any backend's question.
+my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
 sub options_from_block {
     my ( $class, $block ) = @_;
@@ -292,7 +297,7 @@ sub options_from_block {
         }
     }
 
-    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS;
+    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS;
 
     return %opts;
 }
@@ -369,6 +374,27 @@ can take a default.
 =cut
 
 sub explicit ($self) { return $self->{explicit} }
+
+=head2 configured_transfer_ip, configured_transfer_port
+
+The address and the ssh port of this machine that a guest of this hypervisor
+fetches its payload from, when its block in F<hypervisors.conf> names them, or
+undef.  They win over the C<_global> of F<recipes.yaml>, because the answer
+depends on where the guest is.  A guest on a machine of ours reaches us across
+our own network.  A guest on a cloud reaches us through the gateway, at an
+address and a port forwarded past it.
+
+Dies when C<transfer_port> is not a port number.
+
+=cut
+
+sub configured_transfer_ip ($self) { return $self->{transfer_ip} }
+
+sub configured_transfer_port ($self) {
+    my $port = $self->{transfer_port};
+    return $port if !defined $port || $port =~ m/\A\d{1,5}\z/ && $port > 0 && $port < 65536;
+    die "transfer_port for " . ( $self->name // $self->describe ) . " is '$port', which is not a port\n";
+}
 
 =head1 PATHS
 
