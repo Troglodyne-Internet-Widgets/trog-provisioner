@@ -126,11 +126,24 @@ $FAKE->log->level('fatal');
     $r->get('/v4/images')->to(
         cb => sub ($c) {
             $asked->($c);
-            my @shown = map {
-                { %$_ }
-            } @{ $STATE{images} };
-            $_->{status} = 'available' for @{ $STATE{images} };    # the next look finds them captured
-            $page->( $c, @shown );
+            $page->(
+                $c,
+                map {
+                    { %$_ }
+                } @{ $STATE{images} }
+            );
+        }
+    );
+
+    $r->get('/v4/images/*imageId')->to(
+        cb => sub ($c) {
+            $asked->($c);
+            my ($image) = grep { $_->{id} eq $c->param('imageId') } @{ $STATE{images} };
+            return $c->render( status => 404, json => { errors => [ { reason => 'Not found' } ] } ) unless $image;
+
+            my $shown = {%$image};
+            $image->{status} = 'available';    # the next look finds it captured
+            $c->render( json => $shown );
         }
     );
 
@@ -430,6 +443,12 @@ subtest 'snapshots' => sub {
     is( $image->{disk_id},                   $id * 10,             'of its disk, not its swap' );
     is( $image->{description},               'vm.test.test@first', 'kept under the guest it was taken of' );
     is( linode_of('vm.test.test')->{status}, 'running',            'and the guest is up again before it returns' );
+
+    # A private image's id holds a slash, which Linode::API sends as one from
+    # 0.002 on.  So the image it waits for is asked for by id, rather than
+    # found by listing every image the account has.
+    my ($waited) = grep { $_->[0] eq 'GET' && $_->[1] =~ m{\A/v4/images/} } @ASKED;
+    like( $waited->[1], qr{\A/v4/images/private/\d+\z}, 'the image it waits for is asked for by id, with its slash sent as one' );
 
     @ASKED = ();
     my $name = $hv->snapshot_before_rebuild('vm.test.test');
