@@ -12,6 +12,7 @@ use FindBin::libs;
 use Provisioner::IPPool();
 use Provisioner::Cookbook();
 use Trog::Config();
+use Trog::Credentials();
 use Trog::HV();
 use Trog::Local();
 use Trog::Hypervisors();
@@ -116,6 +117,13 @@ A copy is a volume, not a domain, so nothing else in the toolkit removes one.
 This sweep removes every copy, even a copy whose guest still runs.
 C<sweep_backups> tells why, and why this is not the same rule as C<--orphans>.
 
+=item B<--credentials>
+
+Reads the passwords that the run needs from standard input before it starts,
+and does not ask for them.  Asking a Linode hypervisor whether it has the guest
+opens the secret store, where its token is.  See L<Trog::Credentials> for the
+format.
+
 =item B<--dryrun>
 
 Say what destroy will remove, and remove nothing.
@@ -136,7 +144,7 @@ sub main {
 
     umask 0022;
 
-    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf );
+    my ( $purge, $purge_data, $orphans, $backups, $dryrun, $hv_name, $domain_dir, $hvconf, $credentials );
     GetOptionsFromArray(
         \@args,
         'domaindir=s'  => \$domain_dir,
@@ -147,7 +155,12 @@ sub main {
         'dryrun'       => \$dryrun,
         'hypervisor=s' => \$hv_name,
         'hvconf=s'     => \$hvconf,
+        'credentials'  => \$credentials,
     );
+
+    # Before anything asks for a password, and only with --credentials.  See
+    # Trog::Credentials for why it has to be asked for.
+    Trog::Credentials->load() if $credentials;
 
     return sweep_orphans( $hv_name, $hvconf, $dryrun ) if $orphans;
     return sweep_backups( $hv_name, $hvconf, $dryrun ) if $backups;
@@ -170,22 +183,16 @@ sub main {
     # A hypervisor that was named is not that case.  The name is either in the
     # fleet or a typing error, and a typing error must stop rather than fall
     # through to this machine and remove what is on this side.
-    my %where = ( hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir );
-    my ( $hosted, $err );
-    if ( defined $hv_name ) {
-        $hosted = Trog::Hypervisors->find( $domain, %where );    # dies on a name the fleet has not got
-    }
-    else {
-        $hosted = eval { Trog::Hypervisors->find( $domain, %where ) };
-        $err    = $@;
-    }
+    #
+    # Nor is a hypervisor that could not be asked, which may be the one that
+    # has the guest: removing this side of a guest that is still running leaves
+    # it billing with nothing here that can reach it.  So every hypervisor has
+    # to answer, and one that cannot stops this.
+    my %where  = ( hypervisor => $hv_name, hvconf => $hvconf, domain_dir => $domain_dir );
+    my $hosted = Trog::Hypervisors->find( $domain, %where, missing_ok => 1, must_answer => 1 );    # dies on a name the fleet has not got
 
     my $hv = $hosted;
     unless ($hv) {
-
-        # Print the reason too.  "Nothing has it" reads the same for a shared
-        # guest and for a domain name with a typing error.
-        print $err if $err;
         print "Nothing in the fleet has $domain, so only what is on this side goes.\n";
         $hv = Trog::HV->from_config( undef, ( defined $domain_dir ? ( domain_dir => $domain_dir ) : () ) )->activate();
     }

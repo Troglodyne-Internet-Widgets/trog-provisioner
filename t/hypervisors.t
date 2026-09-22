@@ -188,6 +188,31 @@ subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     like( join( '', @warnings ), qr/connection[ ]refused/, 'including why' );
 };
 
+subtest 'must_answer: nowhere is only an answer when everywhere answered' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file() );
+    local $SIG{__WARN__} = sub { };
+
+    my %has;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { my $answer = $has{ $_[0]->name }; die "$answer\n" if $answer =~ m/[[:alpha:]]/; return $answer } );
+
+    %has = ( hv1 => 'locked', hv2 => 1 );
+    is( $fleet->hosting( 'vm.example.test', must_answer => 1 )->name, 'hv2', 'one that has it is found, whatever another could not say' );
+
+    %has = ( hv1 => 'locked', hv2 => 0 );
+    is( $fleet->hosting('vm.example.test'), undef, 'without must_answer, one that could not say is taken not to have it' );
+    my $err = exception { $fleet->hosting( 'vm.example.test', must_answer => 1 ) };
+    like( $err, qr/Could[ ]not[ ]ask[ ]every[ ]hypervisor/, 'with it, that is not an answer' );
+    like( $err, qr/hv1:[ ]locked/,                          'naming the one, and why' );
+
+    %has = ( hv1 => 0, hv2 => 0 );
+    is( $fleet->hosting( 'vm.example.test', must_answer => 1 ), undef, 'and when everywhere says no, it is nowhere' );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = File::Basename::dirname( fleet_file() );
+    is( Trog::Hypervisors->find( 'vm.example.test', hvconf => fleet_file(), missing_ok => 1 ), undef, 'find says nowhere with missing_ok' );
+    like( exception { Trog::Hypervisors->find( 'vm.example.test', hvconf => fleet_file() ) }, qr/No[ ]hypervisor[ ]in/, 'and dies without it, as it did' );
+};
+
 # --- Placement ----------------------------------------------------------------
 subtest 'place picks the roomiest that fits' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );

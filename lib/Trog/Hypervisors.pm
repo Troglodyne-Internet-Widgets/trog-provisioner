@@ -168,12 +168,16 @@ sub default_path { return Trog::Config->path('hypervisors.conf') }
 Returns the hypervisor that runs a guest, made current.  I<Made current> means
 that L<Trog::HV/new> returns it from then on.  Every tool that acts on an
 existing guest, and does not create one, uses this.  Takes C<hypervisor>,
-C<hvconf>, C<domain_dir> and C<config>, all optional.
+C<hvconf>, C<domain_dir> and C<config>, all optional, and C<missing_ok> and
+C<must_answer>.
 
 A named C<hypervisor> (that is, C<--hypervisor>) wins.  Otherwise this searches
 a configured fleet, and dies if no hypervisor in it has the guest.  An action on
 a guest that nobody can find does nothing, or acts on the wrong machine.  With
-no fleet configured, this returns C<< Trog::HV->from_config >>.
+C<missing_ok>, it returns undef there instead, for a caller with something to
+do about a guest that is nowhere.  With C<must_answer>, a hypervisor that
+cannot be asked is not taken to lack the guest: see L</hosting($domain, %opts)>.
+With no fleet configured, this returns C<< Trog::HV->from_config >>.
 
 =cut
 
@@ -183,8 +187,10 @@ sub find {
     my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
     return $given if $given;
 
-    my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n";
+    my $hv = $fleet->hosting( $domain, must_answer => $opts{must_answer} );
+    return undef if !$hv && $opts{missing_ok};
+    die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n"
+      unless $hv;
 
     $hv->activate();
     $hv->{$_} = $paths{$_} for keys %paths;
@@ -320,27 +326,38 @@ sub hypervisors {
     return map { $self->hypervisor($_) } $self->names;
 }
 
-=head2 hosting($domain)
+=head2 hosting($domain, %opts)
 
 Returns the hypervisor that already runs C<$domain>, or undef when none does.
 
 This warns about a hypervisor it cannot reach, and skips it.  Perhaps that one
 holds the guest.  But a fleet that stops when one machine is down for
-maintenance is worse than one that warns and continues.
+maintenance is worse than one that warns and continues, when the question is
+where to build.
+
+When the question is whether to remove what is left of a guest, that is the
+wrong way round, so with C<must_answer> it dies instead, naming each
+hypervisor it could not ask, when none of the others has the guest.
 
 =cut
 
 sub hosting {
-    my ( $self, $domain ) = @_;
+    my ( $self, $domain, %opts ) = @_;
 
+    my @unasked;
     foreach my $hv ( $self->hypervisors ) {
         my $has = eval { $hv->domain_exists($domain) };
         unless ( defined $has ) {
-            warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $@";
+            my $why = $@;
+            warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $why";
+            push @unasked, $hv->name . ': ' . _oneline($why);
             next;
         }
         return $hv if $has;
     }
+
+    die "Could not ask every hypervisor whether it has $domain, and one of these may:\n" . join( q{}, map { "  $_\n" } @unasked )
+      if $opts{must_answer} && @unasked;
 
     return undef;
 }
