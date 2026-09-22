@@ -466,6 +466,30 @@ subtest 'every check reports rather than dying, so one run gets the whole list' 
     like( $out, qr/7[ ]things[ ]to[ ]fix[ ]first/, 'counted, all in one run' );
 };
 
+subtest '--credentials reads the passwords before any check asks for one' => sub {
+
+    # A Linode token lives in the secret store, so a check that asks Linode
+    # needs its passphrase, and a run with nobody at the terminal can only give
+    # it on standard input.
+    my $hv = Test::MockModule->new('Trog::HV::Libvirt');
+    $hv->redefine( is_local  => sub { 1 } );
+    $hv->redefine( run_cmd   => sub { 1 } );
+    $hv->redefine( iso_maker => sub { die "none\n" } );
+    $hv->redefine( vmm       => sub { die "no\n" } );
+
+    my $loaded      = 0;
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( load => sub { $loaded++; return 1 } );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = tempdir( CLEANUP => 1 );
+
+    quietly( sub { Trog::Bin::Preflight::main() } );
+    is( $loaded, 0, 'without it, standard input is left alone' );
+
+    quietly( sub { Trog::Bin::Preflight::main('--credentials') } );
+    is( $loaded, 1, 'with it, the passwords are read, once' );
+};
+
 subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {
     my $ubuntu = Test::MockModule->new('Provisioner::Recipe::ubuntu');
 

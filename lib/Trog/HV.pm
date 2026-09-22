@@ -63,7 +63,8 @@ below, so a backend must answer to each one:
 =over 4
 
 =item * C<build(%opts)> and C<config_keys>: how to make one, and which
-F<hypervisors.conf> keys make it.
+F<hypervisors.conf> keys make it.  C<marker>, the one option that says a block
+is this kind: see L</backend_for(%opts)>.
 
 =item * C<is_local> and C<describe>, which every diagnostic prints.
 L<Trog::Machine> gives a default for both.
@@ -73,6 +74,9 @@ L</headroom(%needs)> read: a hash with C<memory_mb>, C<memory_free>,
 C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
 C<cpus_free>, C<disk_free> and C<guests>.
 
+=item * C<monthly_cost>, if a guest costs money there.  See
+L</monthly_cost(%needs)>.
+
 =item * The guest lifecycle, C<domain_exists> and C<annihilate_domain>.  Also
 the four snapshot methods: C<snapshot_names>, C<snapshot_current_name>,
 C<create_snapshot> and C<revert_snapshot>.
@@ -81,6 +85,10 @@ C<create_snapshot> and C<revert_snapshot>.
 it to tell that a directory belongs to a guest that still exists.
 
 =item * C<guest_ssh_ip>, the address at which you reach a built guest.
+
+=item * C<inspection_address($domain)>, the address at which a person reaches a
+built guest to look at it, for the scripts that collect its logs or ask it
+something.  It works when the build did not, which is when it is wanted.
 
 =item * C<clear_guest>, which removes what must go before a guest of that name
 can be made.  For libvirt, that is the domain, its disks and the addresses it
@@ -131,7 +139,7 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
-=for Pod::Coverage config_keys annihilate_domain revert_snapshot
+=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot inspection_address
 
 =head1 CLASS METHODS
 
@@ -211,7 +219,7 @@ Returns the class name of every backend, and loads each one.
 sub backends {
     my ($class) = @_;
 
-    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack};
+    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack Linode};
 
     # Loaded with require here, not with use at the top: each backend is a
     # subclass of this class, so a load at compile time makes a cycle.
@@ -225,11 +233,10 @@ sub backends {
 
 =head2 backend_for(%opts)
 
-Returns the backend class that these options ask for: L<Trog::HV::OpenStack>
-if C<cloud> is set, and L<Trog::HV::Libvirt> if it is not.  Dies if both
-C<cloud> and C<uri> are set.
+Returns the backend class that these options ask for: the one whose C<marker>
+option is set, or L<Trog::HV::Libvirt> when none is.  Dies if more than one is.
 
-This is the one seam.  Everything else about a second kind of hypervisor is a
+This is the one seam.  Everything else about another kind of hypervisor is a
 subclass, and this method decides which subclass you get.
 
 =cut
@@ -237,19 +244,30 @@ subclass, and this method decides which subclass you get.
 sub backend_for {
     my ( $class, %opts ) = @_;
 
-    # A cloud has a name, and a libvirt hypervisor has a URI.  A configuration
-    # that names both cannot be satisfied, so do not choose one of them.
-    my $named_cloud = length $opts{cloud};
-    my $named_uri   = length $opts{uri};
+    # A cloud has a name, a libvirt hypervisor has a URI, and a Linode account
+    # has a token.  A configuration that names two cannot be satisfied, so do
+    # not choose one of them.
+    my @backends = $class->backends;
+    my @named    = grep { $opts{ $_->marker } } @backends;
 
-    die "A hypervisor is either a libvirt_uri or a cloud, and this has both.\n"
-      if $named_cloud && $named_uri;
+    die 'A hypervisor is one of ' . join( ', ', map { $_->marker_key } @backends ) . ', and this has ' . join( ' and ', map { $_->marker_key } @named ) . ".\n"
+      if @named > 1;
 
-    my $wanted = __PACKAGE__ . ( $named_cloud ? '::OpenStack' : '::Libvirt' );
+    return $named[0] // __PACKAGE__ . '::Libvirt';
+}
 
-    my ($backend) = grep { $_ eq $wanted } $class->backends;
+=head2 marker_key
 
-    return $backend;
+The F<hypervisors.conf> key of a backend's C<marker>, which is how a person
+writing the file knows it.
+
+=cut
+
+sub marker_key {
+    my ($class) = @_;
+
+    my %in_file = $class->config_keys;
+    return $in_file{ $class->marker };
 }
 
 =head2 options_from_block($block)
@@ -260,11 +278,16 @@ a list of pairs.  A key that the block does not set is left out.
 It reads the keys of every backend, because the content of a block decides
 which backend it describes.  So all keys must be read before that decision.
 Each backend names its own keys in C<config_keys>.  This class reads the
-placement limits, because placement belongs to this class.
+placement limits, because placement belongs to this class, and C<transfer_ip>
+and C<transfer_port>, because every kind of hypervisor has guests that fetch
+from us.
 
 =cut
 
 my @LIMIT_KEYS = qw{reserve_memory reserve_cpus reserve_disk max_guests cpu_overcommit};
+
+# Where a guest of this hypervisor reaches us, which is any backend's question.
+my @TRANSFER_KEYS = qw{transfer_ip transfer_port};
 
 sub options_from_block {
     my ( $class, $block ) = @_;
@@ -278,7 +301,7 @@ sub options_from_block {
         }
     }
 
-    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS;
+    $opts{$_} = $block->{$_} for grep { defined $block->{$_} } @LIMIT_KEYS, @TRANSFER_KEYS;
 
     return %opts;
 }
@@ -355,6 +378,27 @@ can take a default.
 =cut
 
 sub explicit ($self) { return $self->{explicit} }
+
+=head2 configured_transfer_ip, configured_transfer_port
+
+The address and the ssh port of this machine that a guest of this hypervisor
+fetches its payload from, when its block in F<hypervisors.conf> names them, or
+undef.  They win over the C<_global> of F<recipes.yaml>, because the answer
+depends on where the guest is.  A guest on a machine of ours reaches us across
+our own network.  A guest on a cloud reaches us through the gateway, at an
+address and a port forwarded past it.
+
+Dies when C<transfer_port> is not a port number.
+
+=cut
+
+sub configured_transfer_ip ($self) { return $self->{transfer_ip} }
+
+sub configured_transfer_port ($self) {
+    my $port = $self->{transfer_port};
+    return $port if !defined $port || $port =~ m/\A\d{1,5}\z/ && $port > 0 && $port < 65536;
+    die "transfer_port for " . ( $self->name // $self->describe ) . " is '$port', which is not a port\n";
+}
 
 =head1 PATHS
 
@@ -483,10 +527,12 @@ sub _abstract {
 
 sub build                 ( $self, @ ) { return $self->_abstract('build') }
 sub config_keys           ( $self, @ ) { return $self->_abstract('config_keys') }
+sub marker                ( $self, @ ) { return $self->_abstract('marker') }
 sub domain_exists         ( $self, @ ) { return $self->_abstract('domain_exists') }
 sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_domain') }
 sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
 sub guest_ssh_ip          ( $self, @ ) { return $self->_abstract('guest_ssh_ip') }
+sub inspection_address    ( $self, @ ) { return $self->_abstract('inspection_address') }
 sub snapshot_names        ( $self, @ ) { return $self->_abstract('snapshot_names') }
 sub snapshot_current_name ( $self, @ ) { return $self->_abstract('snapshot_current_name') }
 sub create_snapshot       ( $self, @ ) { return $self->_abstract('create_snapshot') }
@@ -596,6 +642,22 @@ provides it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
 =cut
 
 sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
+
+=head2 monthly_cost(%needs)
+
+Returns what a guest that wants C<memory_mb>, C<cpus> and C<disk_bytes> would
+cost a month here, as a number in the currency the backend bills in.
+L<Trog::Hypervisors/place($domain, %needs)> chooses the cheapest hypervisor that
+fits before the roomiest one.
+
+0 here: a machine that we own costs the same whether it runs one more guest or
+not.  A backend that bills for each guest overrides it.  It dies when it cannot
+find the price, and placement then reports it as unreachable, because a guess at
+a price is the one answer that spends money.
+
+=cut
+
+sub monthly_cost { return 0 }
 
 =head2 shortfalls(%needs)
 
@@ -1078,6 +1140,10 @@ sub _readable {
 L<Trog::HV::Libvirt>, the backend that builds guests with libvirt.
 
 L<Trog::HV::OpenStack>, the one that asks a cloud.
+
+L<Trog::HV::Linode>, the one that buys a Linode for each guest.
+
+L<Trog::HV::Cloud>, what every backend that builds by API has in common.
 
 L<Trog::Machine>, which this is one of.
 

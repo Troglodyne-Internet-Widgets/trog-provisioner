@@ -60,7 +60,8 @@ rest before it touches the guest, naming the backend.
 
 On an OpenStack cloud that leaves C<--console>, C<--fetch> and C<--vnc>, which
 Nova answers: it keeps the console log of a server and hands out a console URL.
-See L<Trog::HV/debug_actions>.
+On Linode it leaves nothing: the API has no console to read, and Linode's
+console is Lish, an ssh login of its own.  See L<Trog::HV/debug_actions>.
 
 =head2 Start with --console
 

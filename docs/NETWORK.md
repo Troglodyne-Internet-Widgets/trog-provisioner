@@ -56,3 +56,8 @@ An OpenStack cloud gives a guest its address when it creates the guest, and
 the guest is reached by a floating IP.  The pool is not used, and there is no
 NAT bridge of ours.  A cloud can have more than one network that a guest is
 on, and the provisioner does not choose between them yet: see issue #203.
+
+A Linode gets a public address when Linode creates it, and the guest is
+reached there.  The pool is not used here either.  A guest with `private_ip`
+also has an address on Linode's private network, which is not the one we
+reach it at.

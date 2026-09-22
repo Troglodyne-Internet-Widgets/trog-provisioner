@@ -353,6 +353,64 @@ sub hv_lines {
     return join( q{}, map { "\n$_=$global_config->{$_}" } @keys );
 }
 
+=head2 $line = placement_line($hv)
+
+Returns the F<provision.conf> line that pins the guest to C<$hv>, or an empty
+string for a hypervisor that is not in F<hypervisors.conf>.
+
+What this writes depends on where the guest goes: a cloud gives it no address
+from the pool, and a hypervisor can name its own C<transfer_ip>.  So
+F<bin/provision> must build it where it was placed here, and not place it
+again, which can choose another hypervisor that the configuration does not
+fit.
+
+=cut
+
+sub placement_line {
+    my ($hv) = @_;
+    return defined $hv->name ? "\nhypervisor=" . $hv->name . "\n" : q{};
+}
+
+=head2 ($ips, $port, $user) = transfer_to($hv, $this_machine, $global_config, $fqdn, @towards)
+
+Returns where a guest of C<$hv> fetches its payload from: every address of this
+machine that the guest's firewall must accept, the one it fetches from first,
+then the ssh port and the account.
+
+The block of the hypervisor in F<hypervisors.conf> answers first, then the
+C<_global> of the domain, then this machine.  The address is the hypervisor's
+because it depends on where the guest is: a guest on a machine of ours reaches
+us across our own network, and a guest on a cloud reaches us through the
+gateway, at an address and a port forwarded past it.  With neither set, the
+routing table decides, from C<@towards>, the addresses of the guest that it
+could route to.
+
+Dies when there is nothing to route to and nothing configured, as on a cloud,
+which allocates the guest's address after this runs; or when none of this
+machine's addresses reaches the guest.
+
+=cut
+
+sub transfer_to {
+    my ( $hv, $this_machine, $global_config, $fqdn, @towards ) = @_;
+
+    my $port = $hv->configured_transfer_port   // $global_config->{transfer_port} // $this_machine->sshd_port;
+    my $user = $global_config->{transfer_user} // $this_machine->transfer_user;
+    die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $user;
+
+    my $named = $hv->configured_transfer_ip // $global_config->{transfer_ip};
+    my @ips   = $named ? ($named) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
+
+    # No address to route to is a different problem from no route.
+    die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "block of the hypervisor in hypervisors.conf, or in the _global of recipes.yaml.\n"
+      if !@ips && !@towards;
+
+    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the _global of recipes.yaml.\n"
+      unless @ips;
+
+    return ( \@ips, $port, $user );
+}
+
 ## no critic(CognitiveComplexity::ProhibitExcessCognitiveComplexity)
 sub handle_domain {
     my ( $domain, $hv ) = @_;
@@ -461,26 +519,14 @@ sub handle_domain {
 
     # The NAT bridge, on a hypervisor that does not give its guests their
     # addresses.
-    my $tld_ip        = $hv->manages_addresses ? undef : $hv->virbr_ip;
-    my $transfer_port = $global_config->{transfer_port} // $this_machine->sshd_port;
-    my $transfer_user = $global_config->{transfer_user} // $this_machine->transfer_user;
-    die "Could not work out the transfer user on " . $this_machine->describe . "\n" unless $transfer_user;
+    my $tld_ip = $hv->manages_addresses ? undef : $hv->virbr_ip;
 
     # Every address of ours that routes to the guest, because the firewall of
-    # the guest must accept each one.  The routing table decides, and
-    # transfer_ip overrides it where a machine has several routes.  The fetch
-    # uses the first address.
+    # the guest must accept each one.
     my @towards = grep { $_ } ( $static_ip, $tld_ip );
-
-    my @transfer_ips = $global_config->{transfer_ip} ? ( $global_config->{transfer_ip} ) : ( @towards ? $this_machine->transfer_ips(@towards) : () );
+    my ( $transfer_ips, $transfer_port, $transfer_user ) = transfer_to( $hv, $this_machine, $global_config, $fqdn, @towards );
+    my @transfer_ips = @$transfer_ips;
     my $transfer_ip  = $transfer_ips[0];
-
-    # No address to route to is a different problem from no route.
-    die "There is no address of $fqdn to work out which of ours it can reach.\n" . $hv->describe . " allocates that when the guest is created, so it cannot be\n" . "known here.  Name the address a guest fetches from as transfer_ip in the\n" . "_global of recipes.yaml.\n"
-      if !$transfer_ip && !@towards;
-
-    die "Nothing on " . $this_machine->describe . " can be reached from $fqdn.\n" . "A guest fetches its payload from here, so it needs an address of ours it can\n" . "get to -- and none of " . join( ', ', @towards ) . " routes anywhere from this\n" . "machine.  Put it on one of those networks, or name the address as\n" . "transfer_ip in the _global of recipes.yaml.\n"
-      unless $transfer_ip;
 
     # Before _base is removed, because a fleet usually sets these in _base.
     # Provisioner::Cookbook/install_dir says why they belong to _global.
@@ -942,6 +988,7 @@ sub handle_domain {
         payload_dir=$basedir
     );
     $pconf .= "depends_on=$depends_on" if $depends_on;
+    $pconf .= placement_line($hv);
 
     # The hypervisor settings that _global sets.  See hv_lines.
     my %written = map { m/\A\s*(\w+)=/ ? ( $1 => 1 ) : () } split( m/\n/, $pconf );

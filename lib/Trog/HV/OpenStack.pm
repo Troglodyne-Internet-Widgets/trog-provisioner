@@ -8,7 +8,7 @@ use strict;
 use warnings FATAL => 'all';
 
 use re '/aasx';
-use parent 'Trog::HV';
+use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
 use MIME::Base64();
@@ -16,9 +16,6 @@ use OpenStack::MetaAPI();
 
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
-
-use Provisioner::Cookbook();
-use Trog::Config();
 
 =head1 NAME
 
@@ -192,7 +189,13 @@ CONSOLE
 Returns the F<hypervisors.conf> keys that this backend reads.  C<cloud> marks a
 block as one for this backend.  It names an entry in F<clouds.yaml>.
 
+=head2 marker
+
+Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
+
 =cut
+
+sub marker { return 'cloud' }
 
 sub config_keys {
     return ( map { $_ => $_ } qw{cloud flavor image network floating_network availability_zone security_group keypair domain_dir} );
@@ -222,32 +225,8 @@ sub build {
 
 =head1 IDENTITY
 
-=head2 is_local
-
-True, but not because the cloud is this machine.
-
-There is no hypervisor filesystem to reach.  So the directory for each domain is
-on the machine that runs this tool, and every file operation runs locally.  See
-L</DESCRIPTION>.
-
-=cut
-
-sub is_local { return 1 }
-
-=head2 builds_by_api
-
-True.  Nova creates the guest, so this backend uses none of the libvirt XML that
-this toolkit can generate.
-
-=head2 manages_addresses
-
-True.  Neutron allocates the addresses, and the address pool has no part in
-it.
-
-=cut
-
-sub builds_by_api     { return 1 }
-sub manages_addresses { return 1 }
+L<Trog::HV::Cloud> answers C<is_local>, C<builds_by_api> and
+C<manages_addresses> for every backend that builds by API.
 
 =head2 cloud
 
@@ -319,19 +298,6 @@ sub api {
 A quota is what the project is allowed and what it already uses.  L<Trog::HV>
 does the arithmetic.  This backend only returns the numbers in the form that
 L<Trog::HV> reads.
-
-=head2 cpu_overcommit
-
-Returns 1, always.
-
-On a libvirt host, the CPU count is physical, and we decide how many vCPUs per
-core are acceptable.  A quota is already the number of cores that the project
-can run.  So there is nothing to overcommit, and a larger ratio gives headroom
-that the cloud refuses.
-
-=cut
-
-sub cpu_overcommit { return 1 }
 
 =head2 max_guests
 
@@ -560,22 +526,6 @@ sub snapshot_names {
     return map { substr $_->{name}, length("$domain\@") } @images;
 }
 
-=head2 snapshot_current_name($domain)
-
-Returns the name of the newest snapshot of this guest.
-
-libvirt records which snapshot a domain is on.  Glance has no such record, so
-this returns the newest snapshot by creation time.
-
-=cut
-
-sub snapshot_current_name {
-    my ( $self, $domain ) = @_;
-
-    my ($newest) = $self->snapshot_names($domain);
-    return $newest;
-}
-
 =head2 create_snapshot($domain, $name, disk_only =E<gt> $bool)
 
 Takes a snapshot of the guest while it runs, and returns 1.  Dies when there is
@@ -778,24 +728,6 @@ sub _wait_for_active {
     die "The guest '$name' was not ACTIVE ${timeout}s after being rebuilt.\n" . "Check its status, and its console log for what it is doing.\n";
 }
 
-=head2 prepare_host
-
-=head2 release_seed($domain)
-
-=head2 guest_volumes($domain)
-
-Each does nothing, for its own reason.  There is no machine to prepare, because
-Nova builds the guest and its disk comes from Glance.  There is no seed to
-release, because C<user_data> is a field on the server, not a drive.  There are
-no volumes left after a guest is gone, because L</annihilate_domain($name)>
-deletes the ones that this tool made.
-
-=cut
-
-sub prepare_host  { return 1 }
-sub release_seed  { return 1 }
-sub guest_volumes { return () }
-
 =head2 annihilate_domain($name)
 
 Deletes the guest, and the volumes that this tool made for it.
@@ -883,55 +815,31 @@ sub _volumes {
 
 =head1 WHAT THIS CANNOT DO
 
-These are libvirt terms that have no match on a cloud.  Each one dies with its
-own name.  It does not return undef, which a caller can carry somewhere else
-before it fails.
+L<Trog::HV::Cloud/WHAT THIS CANNOT DO> refuses the libvirt terms that have no
+match on a cloud.  This says why in OpenStack's own terms.
 
-=over 4
+=head2 refusals
 
-=item * C<define_domain>, C<cloudinit_iso>, C<eject_cdrom>: Nova does not build
-a server from libvirt XML, and takes cloud-init as C<user_data>.  So there is no
-XML to define and no ISO to attach.  See L</create_guest(%spec)>.
-
-=item * C<pool_path>, C<pool_target>, C<base_image>, C<create_disk>: there is
-no storage pool, and no disk file on a filesystem.
-
-=item * C<lease_ip>, C<release_dhcp_lease>, C<guest_mac>, C<nic_slots>,
-C<nic_names>: Neutron assigns addresses and MACs.  There is no NAT lease table
-to read, and no PCI slot to pin an interface to.  So there is no interface name
-to derive from a slot.
-
-=item * C<has_tpm>: a TPM is a property of a flavor or an image here, not of a
-host.
-
-=back
-
-=for Pod::Coverage eject_cdrom create_disk nic_names has_tpm
+As L<Trog::HV::Cloud/refusals>, with the reasons that Nova, Glance, Cinder and
+Neutron make more precise.
 
 =cut
 
-# The message names the call and what to use instead, which "method not found"
-# does not.
-sub _no_such_thing {
-    my ( $self, $method, $because ) = @_;
-
-    die ref($self) . " has no $method: $because\n";
+sub refusals {
+    my ($self) = @_;
+    return (
+        $self->SUPER::refusals,
+        define_domain      => 'a Nova server is not defined from libvirt XML -- use create_guest',
+        cloudinit_iso      => 'Nova takes cloud-init as user_data, so there is no ISO to build',
+        base_image         => 'a root disk comes from a Glance image, not a downloaded file',
+        create_disk        => 'a disk is a Cinder volume -- use create_volume',
+        lease_ip           => 'Neutron assigns addresses; there is no lease table',
+        release_dhcp_lease => 'Neutron assigns addresses; there is no lease to release',
+        guest_mac          => 'Neutron assigns the MAC, so it cannot be derived from the name',
+        nic_names          => 'interface names come from Neutron and cloud-init, not from a PCI slot',
+        has_tpm            => 'a TPM is a property of the flavor or image, not of a host',
+    );
 }
-
-sub define_domain ( $self, @ ) { return $self->_no_such_thing( 'define_domain', 'a Nova server is not defined from libvirt XML -- use create_guest' ) }
-sub cloudinit_iso ( $self, @ ) { return $self->_no_such_thing( 'cloudinit_iso', 'Nova takes cloud-init as user_data, so there is no ISO to build' ) }
-sub eject_cdrom   ( $self, @ ) { return $self->_no_such_thing( 'eject_cdrom',   'there is no cdrom' ) }
-sub pool_path     ( $self, @ ) { return $self->_no_such_thing( 'pool_path',     'there is no storage pool' ) }
-sub pool_target   ( $self, @ ) { return $self->_no_such_thing( 'pool_target',   'there is no storage pool' ) }
-sub base_image    ( $self, @ ) { return $self->_no_such_thing( 'base_image',    'a root disk comes from a Glance image, not a downloaded file' ) }
-sub create_disk   ( $self, @ ) { return $self->_no_such_thing( 'create_disk',   'a disk is a Cinder volume -- use create_volume' ) }
-sub lease_ip      ( $self, @ ) { return $self->_no_such_thing( 'lease_ip',      'Neutron assigns addresses; there is no lease table' ) }
-
-sub release_dhcp_lease ( $self, @ ) { return $self->_no_such_thing( 'release_dhcp_lease', 'Neutron assigns addresses; there is no lease to release' ) }
-sub guest_mac          ( $self, @ ) { return $self->_no_such_thing( 'guest_mac',          'Neutron assigns the MAC, so it cannot be derived from the name' ) }
-sub nic_slots          ( $self, @ ) { return $self->_no_such_thing( 'nic_slots',          'there is no PCI topology to pin an interface to' ) }
-sub nic_names          ( $self, @ ) { return $self->_no_such_thing( 'nic_names',          'interface names come from Neutron and cloud-init, not from a PCI slot' ) }
-sub has_tpm            ( $self, @ ) { return $self->_no_such_thing( 'has_tpm',            'a TPM is a property of the flavor or image, not of a host' ) }
 
 =head1 PROVISIONING
 
@@ -973,39 +881,6 @@ on.  A credential scoped to a project without all three cannot build one.
 FIX
 
     return $self->_verdict( 1, 'Authenticated; the catalog offers ' . scalar(@services) . ' services', q{} );
-}
-
-=head2 $result = $hv->check_transfer_ip()
-
-Makes sure that the C<_global> of F<recipes.yaml> names a C<transfer_ip>.
-A cloud assigns the guest address only when it creates the server, after the
-seed is written.  So the address cannot be found the way libvirt finds it.  See
-L<Trog::HV/PREFLIGHT>.
-
-=cut
-
-sub check_transfer_ip {
-    my ($self) = @_;
-
-    my $rfile = Trog::Config->path('recipes.yaml');
-    my $named = eval { Provisioner::Cookbook->globals(undef)->{transfer_ip} };
-
-    return $self->_verdict( 1, "Guests fetch their payload from $named", q{} ) if $named;
-
-    return $self->_verdict( 0, 'No transfer_ip, and a cloud cannot be asked for one', <<"FIX" );
-A guest scps its payload and rsyncs its data directory out of this machine, so
-it needs an address here that it can get to.  On a hypervisor that address is
-worked out by asking the routing table about the guest's network -- but
-@{[ $self->describe ]} allocates a guest's address when it creates it, so there is
-nothing to ask about until the guest exists, and the seed naming the address is
-written before that.
-
-Name it in the _global of _base in $rfile:
-
-    transfer_ip: 192.0.2.10
-
-It has to be an address of this machine that a guest on the cloud can reach.
-FIX
 }
 
 =head2 $result = $hv->check_cloud_resources()
@@ -1094,98 +969,12 @@ FIX
     );
 }
 
-=head2 clear_guest($domain)
-
-Does nothing, and returns 1.
-
-The libvirt backend deletes the domain and its disks before it builds them
-again.  Nova rebuilds the server that exists.  The ports, the floating IP and
-the attached volumes stay.  If this cleared the guest first, those would be
-lost, and the scheduler would have to find room for a new server.
-
-=cut
-
-sub clear_guest { return 1 }
-
-=head2 rollback_possible($domain, %opts)
-
-Returns 1 if a snapshot taken now survives the rebuild, and 0 if it does not.
-C<create_snapshot> makes a Glance image, and a rebuild leaves the image alone.
-So this only asks whether there is a server to snapshot.
-
-C<capacity> is accepted and ignored.  The libvirt backend uses it, because there
-the snapshot lives in the disk.  Here nothing sits over a base image, and a new
-flavor makes a different server.
-
-=cut
-
-sub rollback_possible {
-    my ( $self, $domain, %opts ) = @_;
-
-    return eval { $self->server($domain) } ? 1 : 0;
-}
-
-=head2 $address = $hv->provision_guest($config, $seed, %opts)
-
-Gets the guest from the cloud, and returns its address.  If the guest exists,
-this rebuilds it.  If not, this creates it.
-
-C<$seed> holds the C<user-data> that C<bin/provision> already wrote.  There is
-no XML to render and no lease to wait for.  Nova takes the seed directly, and
-the address comes back with the server.  If C<reuse> is true and the guest
-exists, this provisions onto it without a rebuild.
-
-Dies as L</create_guest(%spec)>, L</rebuild_guest($name, user_data =E<gt>
-$seed)> and L</guest_ssh_ip($config, $lease)> do.
-
-=cut
-
-sub provision_guest {
-    my ( $self, $config, $seed, %opts ) = @_;
-
-    my $domain   = $config->param('domain');
-    my $existing = $self->domain_exists($domain);
-
-    if ( $existing && $opts{reuse} ) {
-        print "$domain is already on " . $self->describe . "; provisioning onto it\n";
-    }
-    elsif ($existing) {
-        print 'Asking ' . $self->describe . " to rebuild $domain...\n";
-        $self->rebuild_guest( $domain, user_data => $seed->{'user-data'} );
-    }
-    else {
-        print 'Asking ' . $self->describe . " for $domain...\n";
-        $self->create_guest( name => $domain, user_data => $seed->{'user-data'} );
-    }
-
-    my $ip = $self->guest_ssh_ip($config);
-    print "$domain is at $ip\n";
-
-    return $ip;
-}
-
-=head2 $hv->would_provision($config, %opts)
-
-Prints what C<provision_guest> does, without doing it.  Returns the address of
-a guest that exists, or C<(not built)>.
-
-=cut
-
-sub would_provision {
-    my ( $self, $config, %opts ) = @_;
-
-    my $domain   = $config->param('domain');
-    my $existing = $self->domain_exists($domain);
-    my $doing    = !$existing ? 'build' : $opts{reuse} ? 'reprovision' : 'rebuild';
-
-    print "Would $doing $domain on " . $self->describe . "\n";
-
-    return $existing ? $self->guest_ssh_ip($config) : '(not built)';
-}
-
 =head1 SEE ALSO
 
 L<Trog::HV>, which chooses this backend and does the placement arithmetic.
+
+L<Trog::HV::Cloud>, which provisions a guest from what this backend's calls
+return, and answers what every backend that builds by API answers the same way.
 
 L<Trog::OpenStack::Auth>, which authenticates it.
 

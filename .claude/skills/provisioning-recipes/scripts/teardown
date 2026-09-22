@@ -135,6 +135,13 @@ sub destroy_guest {
     my $destroy = File::Basename::dirname(__FILE__) . '/../../../../bin/destroy';
 
     my @cmd = ( $^X, $destroy, '--purge' );
+
+    # A hypervisor whose credential is in the store is asked through it, and a
+    # scratch configuration's store opens with the password scratch_config
+    # made.  Without it, bin/destroy cannot ask that hypervisor and will not
+    # guess that the guest is not there.
+    my $credentials = defined $ENV{TROG_SCRATCH_PASS} ? "keepass: $ENV{TROG_SCRATCH_PASS}\n\n" : undef;
+    push @cmd, '--credentials' if defined $credentials;
     push @cmd, '--purge-data' if $purge_data;
     push @cmd, '--hypervisor', $hv_name if $hv_name;
     push @cmd, '--hvconf',     $hvconf  if $hvconf;
@@ -142,7 +149,7 @@ sub destroy_guest {
     push @cmd, $domain;
 
     print {*STDERR} "Destroying $domain\n";
-    IPC::Run3::run3( \@cmd, \undef, undef, undef );
+    IPC::Run3::run3( \@cmd, defined $credentials ? \$credentials : \undef, undef, undef );
     my $rc = $? >> 8;
 
     # Worth saying rather than swallowing: what is left behind is a disk and a

@@ -67,12 +67,20 @@ my $RESTART_SETTLE = 2;
 # The transports that also give us a shell on the hypervisor.
 my %SSH_TRANSPORT = map { $_ => 1 } qw{ssh libssh libssh2};
 
+=head2 marker
+
+Returns C<uri>, the option that makes a block a libvirt one, from
+C<libvirt_uri>.  A block with no backend's marker is one too, because this
+backend can talk to the machine it runs on.
+
 =head2 config_keys
 
 Returns the pairs of constructor option and F<hypervisors.conf> key that this
 backend reads.  A block with C<libvirt_uri> in it is a block for this backend.
 
 =cut
+
+sub marker { return 'uri' }
 
 sub config_keys {
     return (
@@ -1880,6 +1888,19 @@ sub guest_ssh_ip {
     die "Provisioning against a remote hypervisor (" . $self->uri . ") requires the guest to have a\n" . "routable address: set 'ips' in provision.conf.  The libvirt NAT lease (" . ( $lease_ip // 'none' ) . ") is only\nreachable from the hypervisor itself.\n"
       unless $ip;
     return $ip;
+}
+
+=head2 inspection_address($domain)
+
+The NAT lease of the guest's first interface, or undef when it holds none.  The
+guest answers there whether or not its static address ever came up, which is
+the case that matters when something went wrong.
+
+=cut
+
+sub inspection_address {
+    my ( $self, $domain ) = @_;
+    return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) );
 }
 
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()

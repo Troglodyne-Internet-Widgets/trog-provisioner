@@ -188,6 +188,31 @@ subtest 'an unreachable hypervisor is warned about, not fatal' => sub {
     like( join( '', @warnings ), qr/connection[ ]refused/, 'including why' );
 };
 
+subtest 'must_answer: nowhere is only an answer when everywhere answered' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file() );
+    local $SIG{__WARN__} = sub { };
+
+    my %has;
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( domain_exists => sub { my $answer = $has{ $_[0]->name }; die "$answer\n" if $answer =~ m/[[:alpha:]]/; return $answer } );
+
+    %has = ( hv1 => 'locked', hv2 => 1 );
+    is( $fleet->hosting( 'vm.example.test', must_answer => 1 )->name, 'hv2', 'one that has it is found, whatever another could not say' );
+
+    %has = ( hv1 => 'locked', hv2 => 0 );
+    is( $fleet->hosting('vm.example.test'), undef, 'without must_answer, one that could not say is taken not to have it' );
+    my $err = exception { $fleet->hosting( 'vm.example.test', must_answer => 1 ) };
+    like( $err, qr/Could[ ]not[ ]ask[ ]every[ ]hypervisor/, 'with it, that is not an answer' );
+    like( $err, qr/hv1:[ ]locked/,                          'naming the one, and why' );
+
+    %has = ( hv1 => 0, hv2 => 0 );
+    is( $fleet->hosting( 'vm.example.test', must_answer => 1 ), undef, 'and when everywhere says no, it is nowhere' );
+
+    local $ENV{TROG_PROVISIONER_CONFIG} = File::Basename::dirname( fleet_file() );
+    is( Trog::Hypervisors->find( 'vm.example.test', hvconf => fleet_file(), missing_ok => 1 ), undef, 'find says nowhere with missing_ok' );
+    like( exception { Trog::Hypervisors->find( 'vm.example.test', hvconf => fleet_file() ) }, qr/No[ ]hypervisor[ ]in/, 'and dies without it, as it did' );
+};
+
 # --- Placement ----------------------------------------------------------------
 subtest 'place picks the roomiest that fits' => sub {
     my $fleet = Trog::Hypervisors->load( fleet_file() );
@@ -212,6 +237,37 @@ subtest 'placement is by the tightest resource, not the roomiest' => sub {
 
     my $chosen = quietly( sub { $fleet->place( 'big.example.test', memory_mb => 4096, cpus => 2, disk_bytes => 50 * $GB ) } );
     is( $chosen->name, 'hv2', 'the one that will not be nearly full afterwards' );
+};
+
+subtest 'place picks the cheapest that fits, before the roomiest' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file() );
+    my $room  = with_capacity(
+        hv1 => capacity( memory_free => 8192 ),
+        hv2 => capacity( memory_free => 40000 ),
+    );
+
+    my %price = ( hv1 => 0, hv2 => 0 );
+    my $cost  = Test::MockModule->new('Trog::HV::Libvirt');
+    $cost->redefine( monthly_cost => sub { my ($self) = @_; my $p = $price{ $self->name }; die "$p\n" if $p =~ m/[[:alpha:]]/; return $p } );
+
+    my %needs = ( memory_mb => 4096, cpus => 2, disk_bytes => 40 * $GB );
+
+    $price{hv2} = 12;
+    my ( $out, $chosen ) = capture_stdout { $fleet->place( 'vm.example.test', %needs ) };
+    is( $chosen->name, 'hv1', 'one that costs nothing, though it is fuller, over one that bills for the guest' );
+    like( $out, qr/the[ ]roomiest[ ]of[ ]those[ ]that[ ]cost[ ]nothing[ ]more/, 'saying why' );
+
+    %price = ( hv1 => 24, hv2 => 12 );
+    ( $out, $chosen ) = capture_stdout { $fleet->place( 'vm.example.test', %needs ) };
+    is( $chosen->name, 'hv2', 'of two that bill, the cheaper' );
+    like( $out, qr/the[ ]cheapest[ ]at[ ]12[.]00[ ]a[ ]month/, 'saying what it costs' );
+
+    %price = ( hv1 => 12, hv2 => 12 );
+    is( quietly( sub { $fleet->place( 'vm.example.test', %needs ) } )->name, 'hv2', 'and of two that cost the same, the roomier' );
+
+    %price = ( hv1 => 0, hv2 => 'no price for that type' );
+    my $err = exception { $fleet->place( 'vm.example.test', %needs, memory_mb => 16384 ) };
+    like( $err, qr/hv2:[ ]unreachable[ ]--[ ]no[ ]price[ ]for[ ]that[ ]type/, 'one that cannot say what the guest would cost is not placed on, and says why' );
 };
 
 subtest 'nowhere to put it is an error that says why' => sub {
@@ -503,6 +559,50 @@ CONF
       'the limits are read the same way for either kind, because placement is shared';
 };
 
+subtest 'a block naming a linode_token is a Linode hypervisor' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[linode1]
+linode_token=secret:linode/api/password
+region=us-east
+type=g6-standard-2
+image=linode/ubuntu24.04
+monthly_budget=200
+max_guests=10
+CONF
+
+    my $linode = $fleet->hypervisor('linode1');
+    is ref $linode,             'Trog::HV::Linode',   'the one with a token is Linode';
+    is $linode->name,           'linode1',            'named as the file names it';
+    is $linode->region,         'us-east',            'in its region';
+    is $linode->type,           'g6-standard-2',      'of its type';
+    is $linode->image,          'linode/ubuntu24.04', 'from its image';
+    is $linode->monthly_budget, 200,                  'within its budget';
+    is $linode->max_guests,     10,                   'and the limits are read as for any kind';
+};
+
+subtest 'any block can say where its guests reach us' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[far]
+libvirt_uri=qemu+ssh://root@far.example.net/system
+transfer_ip=192.0.2.10
+transfer_port=2222
+
+[typo]
+libvirt_uri=qemu+ssh://root@typo.example.net/system
+transfer_port=ssh
+CONF
+
+    is $fleet->hypervisor('hv1')->configured_transfer_ip,   undef,        'a block that does not say leaves it to _global and the routing table';
+    is $fleet->hypervisor('hv1')->configured_transfer_port, undef,        'port included';
+    is $fleet->hypervisor('far')->configured_transfer_ip,   '192.0.2.10', 'one that does, says the address';
+    is $fleet->hypervisor('far')->configured_transfer_port, 2222,         'and the port';
+
+    like exception { $fleet->hypervisor('typo')->configured_transfer_port }, qr/transfer_port[ ]for[ ]typo[ ]is[ ]'ssh'/, 'and a port that is not one is said, naming the block';
+};
+
 subtest 'the documented example is a file that loads' => sub {
 
     # The shipped example, not a copy of it.  A configuration file people are
@@ -515,8 +615,9 @@ subtest 'the documented example is a file that loads' => sub {
 
     my %backend = map { $_ => ref $fleet->hypervisor($_) } $fleet->names;
 
-    is $backend{hv1},    'Trog::HV::Libvirt',   'its machine blocks build machines';
-    is $backend{cloud1}, 'Trog::HV::OpenStack', 'and its cloud block builds a cloud';
+    is $backend{hv1},     'Trog::HV::Libvirt',   'its machine blocks build machines';
+    is $backend{cloud1},  'Trog::HV::OpenStack', 'and its cloud block builds a cloud';
+    is $backend{linode1}, 'Trog::HV::Linode',    'and its Linode block a Linode account';
 };
 
 subtest 'a block has to say which kind of hypervisor it is' => sub {
@@ -528,7 +629,7 @@ CONF
 
     my $err = exception { $both->hypervisor('confused') };
     like $err, qr/\[confused\]/,                     'the error names the block';
-    like $err, qr/both[ ]libvirt_uri[ ]and[ ]cloud/, 'and what is wrong with it';
+    like $err, qr/has[ ]libvirt_uri[ ]and[ ]cloud;/, 'and what is wrong with it';
 
     my $neither = Trog::Hypervisors->load( fleet_of(<<'CONF') );
 [vague]
@@ -536,8 +637,8 @@ reserve_memory=4096
 CONF
 
     $err = exception { $neither->hypervisor('vague') };
-    like $err, qr/\[vague\]/,                           'likewise by name';
-    like $err, qr/neither[ ]libvirt_uri[ ]nor[ ]cloud/, 'and why';
+    like $err, qr/\[vague\]/,                                        'likewise by name';
+    like $err, qr/none[ ]of[ ]libvirt_uri,[ ]cloud,[ ]linode_token/, 'and why, naming the key of each kind';
 
     # The one that matters: without this check a block naming nothing falls
     # through to libvirt's default connection, which is this machine -- the one

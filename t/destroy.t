@@ -595,7 +595,7 @@ subtest '--purge-data is asked for, and never implied by --purge' => sub {
     make_path("$dir/tenant.test");
 
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( find => sub { die "No hypervisor in the fleet has a guest called tenant.test.\n" } );
+    $fleet->redefine( find => sub { return undef } );    # every hypervisor answered no
 
     my @purged;
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );
@@ -659,6 +659,27 @@ subtest 'a guest that will not stop still gives its address back' => sub {
     Trog::HV->forget();
 };
 
+subtest 'a hypervisor that cannot be asked stops the destroy' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    make_path("$dir/vm.test");
+
+    # A hypervisor that could not be asked may be the one that has the guest.
+    # Carrying on removes this side of a guest that is still running: its key,
+    # its directory, its address -- and on a cloud it goes on billing, with
+    # nothing left here that can reach it.  Found tearing down a Linode guest
+    # whose token the run could not open the store for.
+    my %asked;
+    my $fleet = Test::MockModule->new('Trog::Hypervisors');
+    $fleet->redefine( find => sub { my ( undef, undef, %o ) = @_; %asked = %o; die "Could not ask every hypervisor whether it has vm.test, and one of these may:\n  linode1: locked\n" } );
+
+    my $err = exception {
+        says( sub { Trog::Bin::Destroy::main( '--domaindir', $dir, 'vm.test' ) } )
+    };
+    like( $err, qr/Could[ ]not[ ]ask[ ]every[ ]hypervisor/, 'it stops, saying why' );
+    ok( $asked{must_answer} && $asked{missing_ok}, 'having asked that every hypervisor answer, and that nowhere be an answer' );
+    ok( -d "$dir/vm.test",                         'and the domain directory is still there' );
+};
+
 subtest 'a domain no hypervisor holds still gives its address back' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     make_path("$dir/tenant.test");
@@ -668,7 +689,7 @@ subtest 'a domain no hypervisor holds still gives its address back' => sub {
     # measured on a shared host, where tearing the tenant down left its address
     # reserved against a domain that no longer existed.
     my $fleet = Test::MockModule->new('Trog::Hypervisors');
-    $fleet->redefine( find => sub { die "No hypervisor in the fleet has a guest called tenant.test.\n" } );
+    $fleet->redefine( find => sub { return undef } );    # every hypervisor answered no
 
     my @asked;
     my $bin = Test::MockModule->new( 'Trog::Bin::Destroy', no_auto => 1 );

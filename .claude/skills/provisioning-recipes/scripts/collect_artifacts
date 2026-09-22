@@ -109,7 +109,7 @@ printed.
 
 =item B<--user> NAME, B<--key> FILE, B<--host> ADDRESS
 
-Override what would otherwise come from the configuration and the lease.
+Override what would otherwise come from the configuration and the hypervisor.
 
 =item B<--hypervisor> NAME, B<--hvconf> FILE
 
@@ -263,10 +263,8 @@ sub connect_to {
 
     my $user = $opts{user} // admin_user("$cfg_dir/provision.conf");
 
-    # The guest answers on its NAT lease whether or not its static address ever
-    # came up, which is the case that matters when something went wrong.
-    my $host = $opts{host} // $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) );
-    die "Could not find a lease for $domain, so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
+    my $host = $opts{host} // $hv->inspection_address($domain);
+    die "Could not find an address for $domain on " . $hv->describe . ", so there is nothing to connect to.\n" . "Pass --host if you know where it is.\n" unless $host;
 
     print {*STDERR} "Collecting from $domain at $user\@$host\n";    ## no critic (ProhibitPrintSTDERR) -- as above: STDOUT carries the artifact directory alone
 
@@ -278,7 +276,7 @@ sub connect_to {
     # did -- and those want opposite things done about them.
     my $whoami = eval { $guest->capture_cmd('whoami') };
     chomp $whoami if defined $whoami;
-    die "Could not get a shell on $user\@$host for $domain.\n" . "  key:  $key\n" . "  host: $host (the NAT lease; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
+    die "Could not get a shell on $user\@$host for $domain.\n" . "  key:  $key\n" . "  host: $host (from the hypervisor; --host overrides)\n" . "Try it by hand: ssh -i $key $user\@$host\n"
       if !defined $whoami || $whoami eq q{};
 
     return $guest;

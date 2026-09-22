@@ -1433,6 +1433,14 @@ subtest 'leases are looked up by MAC, not by name' => sub {
     # called vm.example.test matches a lease for sub.vm.example.test.
     is( $hv->lease_ip( 'default', hostname => 'vm.example.test' ), '192.168.122.50', 'hostname still works' );
     is( $hv->lease_ip( 'default', hostname => 'nothing.here' ),    undef,            'and misses when it should' );
+
+    # What collect_artifacts and ask_guest reach a guest at: the lease of its
+    # first interface, which answers whether or not its static address came up.
+    my @macs;
+    $mock->redefine( guest_mac => sub { my ( undef, $domain, $nic ) = @_; push @macs, "$domain/$nic"; return '52:54:00:aa:bb:cc' } );
+    @asked = ();
+    is( $hv->inspection_address('vm.example.test'), '192.168.122.50', 'a guest is inspected at its lease' );
+    is_deeply( \@macs, ['vm.example.test/0'], 'the lease of its first interface' );
 };
 
 {

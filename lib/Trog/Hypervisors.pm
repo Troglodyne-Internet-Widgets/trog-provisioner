@@ -8,7 +8,7 @@ use warnings FATAL => 'all';
 use re '/aasx';
 use Config::Simple();
 use File::Slurper();
-use List::Util qw{reduce};
+use List::Util qw{any reduce};
 use Trog::Config();
 use Trog::HV();
 
@@ -168,12 +168,16 @@ sub default_path { return Trog::Config->path('hypervisors.conf') }
 Returns the hypervisor that runs a guest, made current.  I<Made current> means
 that L<Trog::HV/new> returns it from then on.  Every tool that acts on an
 existing guest, and does not create one, uses this.  Takes C<hypervisor>,
-C<hvconf>, C<domain_dir> and C<config>, all optional.
+C<hvconf>, C<domain_dir> and C<config>, all optional, and C<missing_ok> and
+C<must_answer>.
 
 A named C<hypervisor> (that is, C<--hypervisor>) wins.  Otherwise this searches
 a configured fleet, and dies if no hypervisor in it has the guest.  An action on
 a guest that nobody can find does nothing, or acts on the wrong machine.  With
-no fleet configured, this returns C<< Trog::HV->from_config >>.
+C<missing_ok>, it returns undef there instead, for a caller with something to
+do about a guest that is nowhere.  With C<must_answer>, a hypervisor that
+cannot be asked is not taken to lack the guest: see L</hosting($domain, %opts)>.
+With no fleet configured, this returns C<< Trog::HV->from_config >>.
 
 =cut
 
@@ -183,8 +187,10 @@ sub find {
     my ( $given, $fleet, %paths ) = $class->_before_fleet(%opts);
     return $given if $given;
 
-    my $hv = $fleet->hosting($domain)
-      or die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n";
+    my $hv = $fleet->hosting( $domain, must_answer => $opts{must_answer} );
+    return undef if !$hv && $opts{missing_ok};
+    die "No hypervisor in " . $fleet->{path} . " has a guest called $domain.\n" . "Looked on: " . join( ', ', $fleet->names ) . "\n"
+      unless $hv;
 
     $hv->activate();
     $hv->{$_} = $paths{$_} for keys %paths;
@@ -282,8 +288,8 @@ sub names      ($self) { return @{ $self->{order} } }
 
 Returns one hypervisor by name, built but not made current.  Dies if the file
 does not name it, because a typo in C<hypervisor=> must not put a guest
-somewhere else.  Also dies if its block has both C<libvirt_uri> and C<cloud>, or
-neither.
+somewhere else.  Also dies if its block has the key of more than one kind of
+hypervisor, C<libvirt_uri>, C<cloud> or C<linode_token>, or of none.
 
 =cut
 
@@ -293,15 +299,15 @@ sub hypervisor {
     my $block = $self->{blocks}{$name}
       or die "No hypervisor named '$name' in " . $self->{path} . "; it has: " . join( ', ', $self->names ) . "\n";
 
-    # A block with neither key otherwise gets the default libvirt connection,
-    # which is this machine.
-    my $has_uri   = length $block->{libvirt_uri};
-    my $has_cloud = length $block->{cloud};
+    # A block with no backend's key otherwise gets the default libvirt
+    # connection, which is this machine.
+    my @markers = map  { $_->marker_key } Trog::HV->backends;
+    my @has     = grep { $block->{$_} } @markers;
 
-    die "[$name] in " . $self->{path} . " has both libvirt_uri and cloud; it can only be one hypervisor.\n"
-      if $has_uri && $has_cloud;
-    die "[$name] in " . $self->{path} . " has neither libvirt_uri nor cloud, so there is nothing to build on.\n"
-      unless $has_uri || $has_cloud;
+    die "[$name] in " . $self->{path} . ' has ' . join( ' and ', @has ) . "; it can only be one hypervisor.\n"
+      if @has > 1;
+    die "[$name] in " . $self->{path} . ' has none of ' . join( ', ', @markers ) . ", so there is nothing to build on.\n"
+      unless @has;
 
     return $self->{built}{$name} //= Trog::HV->candidate(
         name => $name,
@@ -320,37 +326,53 @@ sub hypervisors {
     return map { $self->hypervisor($_) } $self->names;
 }
 
-=head2 hosting($domain)
+=head2 hosting($domain, %opts)
 
 Returns the hypervisor that already runs C<$domain>, or undef when none does.
 
 This warns about a hypervisor it cannot reach, and skips it.  Perhaps that one
 holds the guest.  But a fleet that stops when one machine is down for
-maintenance is worse than one that warns and continues.
+maintenance is worse than one that warns and continues, when the question is
+where to build.
+
+When the question is whether to remove what is left of a guest, that is the
+wrong way round, so with C<must_answer> it dies instead, naming each
+hypervisor it could not ask, when none of the others has the guest.
 
 =cut
 
 sub hosting {
-    my ( $self, $domain ) = @_;
+    my ( $self, $domain, %opts ) = @_;
 
+    my @unasked;
     foreach my $hv ( $self->hypervisors ) {
         my $has = eval { $hv->domain_exists($domain) };
         unless ( defined $has ) {
-            warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $@";
+            my $why = $@;
+            warn 'Could not ask ' . $hv->name . ' (' . $hv->uri . ") whether it has $domain: $why";
+            push @unasked, $hv->name . ': ' . _oneline($why);
             next;
         }
         return $hv if $has;
     }
+
+    die "Could not ask every hypervisor whether it has $domain, and one of these may:\n" . join( q{}, map { "  $_\n" } @unasked )
+      if $opts{must_answer} && @unasked;
 
     return undef;
 }
 
 =head2 place($domain, %needs)
 
-Returns the roomiest hypervisor that can hold a guest that wants C<memory_mb>,
-C<cpus> and C<disk_bytes>, and prints which one it chose.  When none can, dies
-with the name of each hypervisor and what it lacks.  A hypervisor that cannot be
-reached is in that list as unreachable.
+Returns the hypervisor that should hold a guest that wants C<memory_mb>,
+C<cpus> and C<disk_bytes>, and prints which one it chose.  Of those that can
+hold it, that is the cheapest by L<Trog::HV/monthly_cost(%needs)>, then the
+roomiest, then the first in the file.  So a machine we own, which costs
+nothing more for one more guest, is chosen over any that bills for it.
+
+When none can hold it, dies with the name of each hypervisor and what it lacks.
+A hypervisor that cannot be reached, or cannot say what the guest would cost,
+is in that list as unreachable.
 
 =cut
 
@@ -370,7 +392,13 @@ sub place {
             next;
         }
 
-        push @fits, [ $hv, $hv->headroom(%needs) ];
+        my $cost = eval { $hv->monthly_cost(%needs) };
+        if ( !defined $cost ) {
+            push @why_not, '  ' . $hv->name . ': unreachable -- ' . _oneline( $@ || 'it could not say what the guest would cost' );
+            next;
+        }
+
+        push @fits, [ $hv, $cost, $hv->headroom(%needs) ];
     }
 
     die "Nowhere to put $domain: it wants " . sprintf(
@@ -381,12 +409,14 @@ sub place {
       . join( "\n", @why_not ) . "\n"
       unless @fits;
 
-    # The roomiest, and of those equally roomy, the first in the file.
-    my $best = ( reduce { $b->[1] > $a->[1] ? $b : $a } @fits )->[0];
-    printf(
-        "Placing %s on %s (%s), the roomiest of %d that fit\n",
-        $domain, $best->name, $best->uri, scalar @fits
-    );
+    # The cheapest, of those the roomiest, and of those the first in the file.
+    my $winner = reduce { ( $b->[1] < $a->[1] || ( $b->[1] == $a->[1] && $b->[2] > $a->[2] ) ) ? $b : $a } @fits;
+    my ( $best, $cost ) = @$winner;
+    my $why =
+        $cost                     ? sprintf( 'the cheapest at %.2f a month', $cost )
+      : ( any { $_->[1] } @fits ) ? 'the roomiest of those that cost nothing more'
+      :                             'the roomiest';
+    printf( "Placing %s on %s (%s), %s of %d that fit\n", $domain, $best->name, $best->uri, $why, scalar @fits );
     return $best;
 }
 
