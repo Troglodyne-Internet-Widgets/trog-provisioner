@@ -76,9 +76,11 @@ our $MANAGED_BY = 'trog-provisioner';
 our $API_URL = 'https://api.linode.com/v4';
 
 # Seconds to wait for a Linode to reach a state, and between two looks at it.
-our $BUILD_TIMEOUT = 900;
-our $IMAGE_TIMEOUT = 3600;
-our $POLL          = 5;
+our $BUILD_TIMEOUT  = 900;
+our $IMAGE_TIMEOUT  = 3600;
+our $BUSY_TIMEOUT   = 300;
+our $DELETE_TIMEOUT = 300;
+our $POLL           = 5;
 
 # What Linode reports in megabytes.
 my $MB = 1024 * 1024;
@@ -182,21 +184,29 @@ sub _token {
 
 # One call, answered with Linode's JSON.  Dies with what Linode said, or with
 # what the specification said was wrong before anything was sent.
+#
+# Linode refuses an action on a Linode that is still doing the last one, as
+# "Linode busy.", and that passes: so it is asked again until $BUSY_TIMEOUT.
 sub _call {
     my ( $self, $operation, $params, @body ) = @_;
 
-    my $tx = $self->api->call( $operation, $params // {}, @body );
-    return $tx->res->json unless $tx->error;
+    my $deadline = time + $BUSY_TIMEOUT;
+    my ( $tx, $reasons );
+    do {
+        sleep $POLL if $tx;
+        $tx = $self->api->call( $operation, $params // {}, @body );
+        return $tx->res->json unless $tx->error;
 
-    my $error   = $tx->error;
-    my @errors  = @{ ( $tx->res->json // {} )->{errors} // [] };
-    my $reasons = join(
-        '; ',
-        map {
-            join( ': ', grep { defined } $_->{field} // $_->{path}, $_->{reason} // $_->{message} )
-        } @errors
-    );
+        my @errors = @{ ( $tx->res->json // {} )->{errors} // [] };
+        $reasons = join(
+            '; ',
+            map {
+                join( ': ', grep { defined } $_->{field} // $_->{path}, $_->{reason} // $_->{message} )
+            } @errors
+        );
+    } while ( ( $tx->error->{code} // 0 ) == 400 && $reasons =~ m/\ALinode[ ]busy/i && time < $deadline );
 
+    my $error = $tx->error;
     die "Linode refused $operation: " . ( $error->{code} ? "$error->{code} " : q{} ) . ( $reasons || $error->{message} ) . "\n";
 }
 
@@ -486,6 +496,10 @@ sub rebuild_guest {
     $body{type} = $self->type if $self->type && $self->type ne $linode->{type};
 
     $self->_call( 'post-rebuild-linode-instance', { linodeId => $linode->{id} }, json => \%body );
+
+    # Linode still says running for a moment after it takes the request, so
+    # waiting for running alone returns before the rebuild has begun.
+    $self->_wait_for_change( $linode->{id}, $name, 'running' );
     return $self->_wait_for( $linode->{id}, $name, 'running' );
 }
 
@@ -518,6 +532,19 @@ sub _wait_for {
     die "The guest '$name' was not $want ${timeout}s later.\n" . "Check it in the Cloud Manager, and its console through Lish.\n";
 }
 
+# Waits until the Linode is in any state but the one it was in.
+sub _wait_for_change {
+    my ( $self, $id, $name, $from ) = @_;
+
+    my $deadline = time + $BUSY_TIMEOUT;
+    while ( time < $deadline ) {
+        return 1 if ( $self->_call( 'get-linode-instance', { linodeId => $id } )->{status} // q{} ) ne $from;
+        sleep $POLL;
+    }
+
+    die "The guest '$name' was still $from ${BUSY_TIMEOUT}s after being asked to change\n";
+}
+
 =head2 annihilate_domain($name)
 
 Deletes the guest.  Linode releases its addresses with it.
@@ -526,7 +553,8 @@ A volume that was attached to it is detached and kept, because a volume can
 hold data that somebody attached it for, and this names each one it leaves.
 
 Returns 0 when there was no such guest, so it is safe to call on a name that is
-already gone.  Returns 1 otherwise.
+already gone.  Returns 1 once Linode no longer lists the guest, and dies if it
+still does after C<$DELETE_TIMEOUT> seconds.
 
 =cut
 
@@ -539,6 +567,12 @@ sub annihilate_domain {
     my @volumes = $self->_all( 'get-linode-volumes', { linodeId => $linode->{id} } );
 
     $self->_call( 'delete-linode-instance', { linodeId => $linode->{id} } );
+
+    # Linode lists a deleted Linode for a while yet, and a caller that asks
+    # again in that while is told it exists.
+    my $deadline = time + $DELETE_TIMEOUT;
+    sleep $POLL while $self->linode($name) && time < $deadline;
+    die "The guest '$name' was still listed ${DELETE_TIMEOUT}s after being deleted\n" if $self->linode($name);
 
     warn "Kept the volume $_->{label} ($_->{id}) that was attached to $name; delete it yourself if nothing needs it\n" for @volumes;
 
@@ -574,10 +608,10 @@ sub _snapshots {
 Captures the guest's disk as a private image, and returns 1.
 
 Linode captures a disk consistently only while nothing writes to it, so this
-shuts the guest down, captures the disk, waits until the image is ready, and
-boots the guest again.  With C<leave_down>, it leaves the guest down, as a
-rebuild about to happen wants.  C<disk_only> is accepted and ignored: an image
-never holds memory.
+shuts the guest down, captures the disk, waits until the image is ready, boots
+the guest again, and returns once it is running.  With C<leave_down>, it leaves
+the guest down, as a rebuild about to happen wants.  C<disk_only> is accepted
+and ignored: an image never holds memory.
 
 Warns and returns 0 when Linode will not capture it, after booting the guest
 again unless C<leave_down>.  Dies when there is no such guest.
@@ -612,7 +646,12 @@ sub create_snapshot {
     };
     my $error = $@;
 
-    $self->_call( 'post-boot-linode-instance', { linodeId => $linode->{id} } ) unless $opts{leave_down};
+    # Up again before this returns, so that what the caller does next is not
+    # refused while it boots.
+    unless ( $opts{leave_down} ) {
+        $self->_call( 'post-boot-linode-instance', { linodeId => $linode->{id} } );
+        $self->_wait_for( $linode->{id}, $domain, 'running' );
+    }
 
     return 1 if $ok;
     warn "Could not snapshot $domain: $error";
@@ -733,9 +772,17 @@ image.  What exists is Linode's to say:
     linode-cli images list
 FIX
 
-    my %regions = map { $_->{id} => $_ } eval { $self->_all('get-regions') };
-    my %images  = map { $_->{id} => $_ } eval { $self->_all('get-images') };
-    my $type    = eval { $self->_type( $self->type ) };
+    # A list that could not be had says so, rather than reading as a list
+    # without the thing in it.
+    my ( %regions, %images );
+    my $asked = eval {
+        %regions = map { $_->{id} => $_ } $self->_all('get-regions');
+        %images  = map { $_->{id} => $_ } $self->_all('get-images');
+        1;
+    };
+    return $self->_verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
+
+    my $type = eval { $self->_type( $self->type ) };
 
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };

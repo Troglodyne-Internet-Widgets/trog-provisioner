@@ -31,9 +31,11 @@ use Trog::HV::Linode();
 use Trog::Secrets();        ## no critic (ProhibitUnusedImports) -- mocked below
 use Trog::Credentials();    ## no critic (ProhibitUnusedImports) -- mocked below
 
-local $Trog::HV::Linode::POLL          = 0;
-local $Trog::HV::Linode::BUILD_TIMEOUT = 2;
-local $Trog::HV::Linode::IMAGE_TIMEOUT = 2;
+local $Trog::HV::Linode::POLL           = 0;
+local $Trog::HV::Linode::BUILD_TIMEOUT  = 2;
+local $Trog::HV::Linode::IMAGE_TIMEOUT  = 2;
+local $Trog::HV::Linode::BUSY_TIMEOUT   = 1;
+local $Trog::HV::Linode::DELETE_TIMEOUT = 1;
 
 # A stand-in for Linode that keeps state, so a wait for a state change has one
 # to wait for, and records every request, so the assertions are about what was
@@ -114,7 +116,13 @@ $FAKE->log->level('fatal');
 
     $r->get('/v4/profile')->to( cb => sub ($c) { $asked->($c); $c->render( json => { username => 'test' } ) } );
     $r->get('/v4/linode/types')->to( cb => sub ($c) { $asked->($c); $page->( $c, @{ $STATE{types} } ) } );
-    $r->get('/v4/regions')->to( cb => sub ($c) { $asked->($c); $page->( $c, @{ $STATE{regions} } ) } );
+    $r->get('/v4/regions')->to(
+        cb => sub ($c) {
+            $asked->($c);
+            return $c->render( status => 401, json => { errors => [ { reason => 'Invalid Token' } ] } ) if $STATE{refuse_token};
+            $page->( $c, @{ $STATE{regions} } );
+        }
+    );
     $r->get('/v4/images')->to(
         cb => sub ($c) {
             $asked->($c);
@@ -140,7 +148,9 @@ $FAKE->log->level('fatal');
         cb => sub ($c) {
             $asked->($c);
             my $filter = Cpanel::JSON::XS::decode_json( $c->req->headers->header('X-Filter') // '{}' );
-            $page->( $c, grep { !defined $filter->{label} || $_->{label} eq $filter->{label} } @{ $STATE{linodes} } );
+            my @shown  = grep { !defined $filter->{label} || $_->{label} eq $filter->{label} } @{ $STATE{linodes} };
+            @{ $STATE{linodes} } = grep { $_->{status} ne 'deleting' || $_->{stuck} } @{ $STATE{linodes} };
+            $page->( $c, @shown );
         }
     );
 
@@ -158,7 +168,13 @@ $FAKE->log->level('fatal');
             $asked->($c);
             my $linode = $find->($c);
             my $shown  = {%$linode};
-            $linode->{status} = $linode->{becomes} // 'running' if $TRANSIENT{ $linode->{status} };
+            if ( my $then = delete $linode->{then} ) {
+                $linode->{status} = $then;
+            }
+            elsif ( $TRANSIENT{ $linode->{status} } ) {
+                $linode->{status} = $linode->{becomes} // 'running';
+            }
+            delete $shown->{then};
             $c->render( json => $shown );
         }
     );
@@ -167,8 +183,12 @@ $FAKE->log->level('fatal');
         cb => sub ($c) {
             $asked->($c);
             my $linode = $find->($c);
-            @$linode{qw{status becomes}} = qw{rebuilding running};
-            $linode->{type} = $c->req->json->{type} if $c->req->json->{type};
+            return $c->render( status => 400, json => { errors => [ { reason => 'Linode busy.' } ] } ) if $STATE{busy} && $STATE{busy}--;
+
+            # Linode goes on saying what it was saying for one more look.
+            $linode->{then}    = 'rebuilding';
+            $linode->{becomes} = 'running';
+            $linode->{type}    = $c->req->json->{type} if $c->req->json->{type};
             $c->render( json => $linode );
         }
     );
@@ -179,7 +199,7 @@ $FAKE->log->level('fatal');
     $r->delete('/v4/linode/instances/:id')->to(
         cb => sub ($c) {
             $asked->($c);
-            @{ $STATE{linodes} } = grep { $_->{id} != $c->param('id') } @{ $STATE{linodes} };
+            $find->($c)->{status} = 'deleting';    # still listed, the next look once
             $c->render( json => {} );
         }
     );
@@ -347,7 +367,8 @@ subtest 'rebuild_guest' => sub {
     my $hv = linode_hv();
 
     my $linode = $hv->rebuild_guest( 'vm.test.test', user_data => "#cloud-config\n" );
-    is( $linode->{status}, 'running', 'it waits until the rebuilt guest is running' );
+    is( $linode->{status},                   'running', 'it waits until the rebuilt guest is running' );
+    is( linode_of('vm.test.test')->{status}, 'running', 'running after the rebuild, not the running Linode reported before it began' );
 
     my ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
     is( $rebuilt->{image},                                              'linode/ubuntu24.04', 'onto the image of the block' );
@@ -361,6 +382,15 @@ subtest 'rebuild_guest' => sub {
     ok( !exists $rebuilt->{type}, 'a guest of the right type is not resized' );
 
     like( exception { $hv->rebuild_guest('nope.test.test') }, qr/no[ ]guest[ ]called[ ]'nope\.test\.test'/, 'and one that is not there is said' );
+
+    @ASKED = ();
+    $STATE{busy} = 2;
+    is( $hv->rebuild_guest('vm.test.test')->{status},       'running', 'a Linode still busy with the last thing is asked again until it is not' );
+    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ), 3,         'twice refused, and the third time taken' );
+
+    $STATE{busy} = 1_000_000;
+    like( exception { $hv->rebuild_guest('vm.test.test') }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );
+    $STATE{busy} = 0;
 };
 
 subtest 'provision_guest' => sub {
@@ -382,6 +412,9 @@ subtest 'annihilate_domain' => sub {
     ok( !$hv->domain_exists('vm.test.test'), 'and is gone' );
     like( $warned, qr/Kept[ ]the[ ]volume[ ]vm-data[ ]\(7\)/, 'a volume that was attached to it is kept, and named' );
     is( $hv->annihilate_domain('vm.test.test'), 0, 'and a guest that is gone already is not an error' );
+
+    add_linode( label => 'stuck.test.test', stuck => 1 );
+    like( exception { $hv->annihilate_domain('stuck.test.test') }, qr/still[ ]listed[ ]1s[ ]after[ ]being[ ]deleted/, 'one Linode keeps listing is said, rather than claimed gone' );
 };
 
 subtest 'snapshots' => sub {
@@ -396,7 +429,7 @@ subtest 'snapshots' => sub {
     my ($image) = map { $_->[2] } asked_to( POST => '/v4/images' );
     is( $image->{disk_id},                   $id * 10,             'of its disk, not its swap' );
     is( $image->{description},               'vm.test.test@first', 'kept under the guest it was taken of' );
-    is( linode_of('vm.test.test')->{status}, 'booting',            'and the guest is on its way back up' );
+    is( linode_of('vm.test.test')->{status}, 'running',            'and the guest is up again before it returns' );
 
     @ASKED = ();
     my $name = $hv->snapshot_before_rebuild('vm.test.test');
@@ -437,6 +470,11 @@ subtest 'check_linode_resources' => sub {
     like( $result->{what}, qr/no[ ]region[ ]'mars-1',[ ]no[ ]type[ ]'g1-bogus'/, 'as are a region and a type Linode does not have' );
 
     like( linode_hv( image => undef )->check_linode_resources->{what}, qr/Not[ ]configured:[ ]image/, 'and one the block does not name' );
+
+    $STATE{refuse_token} = 1;
+    $result = linode_hv()->check_linode_resources;
+    like( $result->{what}, qr/Could[ ]not[ ]ask[ ]Linode/, 'a list Linode would not give is said, rather than read as a list without the region in it' );
+    like( $result->{fix},  qr/401[ ]Invalid[ ]Token/,      'with what Linode said' );
 };
 
 subtest 'check_linode_budget' => sub {
