@@ -8,8 +8,9 @@ use re '/aasx';
 
 =head1 NAME
 
-t/new_config-transfer.t - where bin/new_config tells a guest to fetch its
-payload from: the hypervisor's block, then _global, then the routing table
+t/new_config-transfer.t - what bin/new_config writes that depends on the
+hypervisor it chose: where the guest fetches its payload from, and the pin
+that makes bin/provision build it there
 
 =cut
 
@@ -30,6 +31,7 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
     sub configured_transfer_ip   ($self)        { return $self->{ip} }
     sub configured_transfer_port ($self)        { return $self->{port} }
     sub describe ($) { return 'the test cloud' }
+    sub name ($self) { return $self->{name} }
 
     package Test::ThisMachine;
     sub new ( $class, %o ) { return bless {%o}, $class }
@@ -83,6 +85,12 @@ subtest 'transfer_to' => sub {
         qr/can[ ]be[ ]reached[ ]from[ ]vm[.]test[.]test/,
         'and a guest none of our addresses reaches is said',
     );
+};
+
+subtest 'placement_line' => sub {
+    my $placed = Test::Hypervisor->new( name => 'linode1' );
+    is( Trog::Provisioner::Config::Generator::placement_line($placed),                 "\nhypervisor=linode1\n", 'a guest placed on a hypervisor of the fleet is pinned to it, so bin/provision builds it there' );
+    is( Trog::Provisioner::Config::Generator::placement_line( Test::Hypervisor->new ), q{},                      'and one with no fleet is left to whatever bin/provision is given' );
 };
 
 Test::NoWarnings::had_no_warnings();
