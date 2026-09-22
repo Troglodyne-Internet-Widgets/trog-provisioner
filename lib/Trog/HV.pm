@@ -86,6 +86,10 @@ it to tell that a directory belongs to a guest that still exists.
 
 =item * C<guest_ssh_ip>, the address at which you reach a built guest.
 
+=item * C<inspection_address($domain)>, the address at which a person reaches a
+built guest to look at it, for the scripts that collect its logs or ask it
+something.  It works when the build did not, which is when it is wanted.
+
 =item * C<clear_guest>, which removes what must go before a guest of that name
 can be made.  For libvirt, that is the domain, its disks and the addresses it
 held.  A cloud rebuilds the server it already has, so it has nothing to clear.
@@ -135,7 +139,7 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
-=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot
+=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot inspection_address
 
 =head1 CLASS METHODS
 
@@ -528,6 +532,7 @@ sub domain_exists         ( $self, @ ) { return $self->_abstract('domain_exists'
 sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_domain') }
 sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
 sub guest_ssh_ip          ( $self, @ ) { return $self->_abstract('guest_ssh_ip') }
+sub inspection_address    ( $self, @ ) { return $self->_abstract('inspection_address') }
 sub snapshot_names        ( $self, @ ) { return $self->_abstract('snapshot_names') }
 sub snapshot_current_name ( $self, @ ) { return $self->_abstract('snapshot_current_name') }
 sub create_snapshot       ( $self, @ ) { return $self->_abstract('create_snapshot') }

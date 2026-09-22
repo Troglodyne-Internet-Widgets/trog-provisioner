@@ -1890,6 +1890,19 @@ sub guest_ssh_ip {
     return $ip;
 }
 
+=head2 inspection_address($domain)
+
+The NAT lease of the guest's first interface, or undef when it holds none.  The
+guest answers there whether or not its static address ever came up, which is
+the case that matters when something went wrong.
+
+=cut
+
+sub inspection_address {
+    my ( $self, $domain ) = @_;
+    return $self->lease_ip( 'default', mac => $self->guest_mac( $domain, 0 ) );
+}
+
 =head2 @names = $hv->preflight_checks(), $hv->preflight_notes()
 
 The names of the checks and notes that C<bin/preflight> runs on this backend, in

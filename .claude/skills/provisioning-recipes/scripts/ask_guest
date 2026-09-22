@@ -50,8 +50,8 @@ sub main {
     my $cfg_dir = $hv->domain_dir . "/$domain";
     my $config  = eval { Config::Simple->new("$cfg_dir/provision.conf") };
     my $user    = $config ? ( $config->param('admin_user') // 'root' ) : 'root';
-    my $host    = $hv->lease_ip( 'default', mac => $hv->guest_mac( $domain, 0 ) )
-      or die "Could not find a lease for $domain, so there is nothing to ask.\n";
+    my $host    = $hv->inspection_address($domain)
+      or die "Could not find an address for $domain on " . $hv->describe . ", so there is nothing to ask.\n";
 
     # Undef means the store was never opened: key_path prompts for its password,
     # and a script has nothing to type into.  Unchecked, ssh is then handed no

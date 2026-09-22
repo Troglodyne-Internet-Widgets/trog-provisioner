@@ -95,6 +95,15 @@ headroom that the service refuses.
 
 sub cpu_overcommit { return 1 }
 
+=head2 inspection_address($domain)
+
+The guest's own address, from the backend's C<guest_ssh_ip>: the service
+gives the guest its address and there is no other way in.
+
+=cut
+
+sub inspection_address ( $self, $domain ) { return $self->guest_ssh_ip($domain) }
+
 =head1 NOTHING TO DO
 
 =head2 prepare_host

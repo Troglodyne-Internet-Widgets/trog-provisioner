@@ -47,7 +47,7 @@ use Trog::HV::Cloud();    ## no critic (ProhibitUnusedImports) -- the parent of 
         return {};
     }
 
-    sub guest_ssh_ip ( $self, $config ) { return $self->{guests}{ $config->param('domain') } }
+    sub guest_ssh_ip ( $self, $config ) { return $self->{guests}{ ref $config ? $config->param('domain') : $config } }
 
     sub snapshot_names ( $, $ ) { return qw{newest older oldest} }
 
@@ -105,6 +105,10 @@ subtest 'rollback_possible' => sub {
 
     $cloud->{down} = 1;
     is( $cloud->rollback_possible('there.test.test'), 0, 'and a service that cannot be asked offers no rollback, rather than dying' );
+};
+
+subtest 'inspection_address' => sub {
+    is( Test::Cloud->new( 'there.test.test' => '203.0.113.5' )->inspection_address('there.test.test'), '203.0.113.5', 'the address the service gave the guest, which is the only way in' );
 };
 
 subtest 'snapshot_current_name' => sub {
