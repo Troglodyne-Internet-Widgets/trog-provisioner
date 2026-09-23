@@ -201,28 +201,35 @@ sub rest_of_fleet {
     return () unless @others;
 
     print "\nThe rest of the fleet:\n\n";
-    return grep { !$_->{ok} } map { report( %{ block_verdict( $fleet, $_ ) } ) } @others;
+    return grep { !$_->{ok} } map { report(%$_) } map { block_verdicts( $fleet, $_ ) } @others;
 }
 
-=head2 \%verdict = block_verdict($fleet, $name)
+=head2 @verdicts = block_verdicts($fleet, $name)
 
-Returns the verdict for one block: which backend it describes, and whether that
-backend's client will load, as C<[name] what>.  It builds nothing, so a cloud is
-not contacted, no secret store is opened for a token, and a block of a kind this
-installation has no client for is still reported.
+Returns what can be said about one block, each verdict as C<[name] what>: what
+kind of hypervisor it is, and then the checks it answers about itself, which
+L<Trog::HV/@names = $hv-E<gt>preflight_block_checks()> lists.
+
+None of those asks a hypervisor for anything or reads its credential, so a
+preflight of one machine does not authenticate to every cloud in the fleet, and
+does not open the secret store for a token.  A block of a kind whose client is
+not installed here is still reported.
 
 =cut
 
-sub block_verdict {
+sub block_verdicts {
     my ( $fleet, $name ) = @_;
 
-    my $backend = eval { $fleet->backend_of($name) }
-      or return { ok => 0, what => "[$name] does not say what to build on", fix => $@ };
+    return { ok => 0, what => "[$name] does not say what to build on", fix => $@ }
+      unless eval { $fleet->backend_of($name); 1 };
 
-    # The same check the hypervisor above answered, asked of the class, because
-    # a block is judged without one being built.
-    my $verdict = $backend->check_client;
-    return { %$verdict, what => "[$name] $verdict->{what}" };
+    my $hv = eval { $fleet->hypervisor($name) }
+      or return { ok => 0, what => "[$name] cannot be built from its block", fix => $@ };
+
+    return map {
+        my $verdict = $hv->$_;
+        +{ %$verdict, what => "[$name] " . $verdict->{what} };
+    } $hv->preflight_block_checks;
 }
 
 =head2 \%verdict = report(%verdict)

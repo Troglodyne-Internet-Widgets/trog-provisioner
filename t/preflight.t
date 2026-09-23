@@ -713,7 +713,7 @@ subtest 'a configuration that keeps its secrets in the store says nothing' => su
     is_deeply( Trog::HV->new()->note_plaintext_secrets, { ok => 1 }, 'nothing to say' );
 };
 
-subtest 'every other block in the file is judged too, without building one' => sub {
+subtest 'every other block in the file is judged too, without contacting one' => sub {
     my $dir  = tempdir( CLEANUP => 1 );
     my $conf = "$dir/hypervisors.conf";
     File::Slurper::Temp::write_text( $conf, <<'CONF' );
@@ -725,6 +725,8 @@ linode_token=secret:linode/api/password
 
 [cloud]
 cloud=openstack
+transfer_ip=203.0.113.9
+transfer_port=2222
 
 [muddle]
 libvirt_uri=qemu:///system
@@ -737,6 +739,20 @@ CONF
     # exactly what is not installed, so stand one in.
     my $linode = Test::MockModule->new('Trog::HV::Linode');
     $linode->redefine( client_module => sub { return 'Trog::No::Such::Client' } );
+
+    # Nothing here may reach a hypervisor: these are the doors, and a block
+    # that opens one has cost a preflight an authentication it did not need.
+    $linode->redefine( api => sub { die "the account was asked something\n" } );
+    my $stack = Test::MockModule->new('Trog::HV::OpenStack');
+    $stack->redefine( api => sub { die "the cloud was asked something\n" } );
+    my $machines = Test::MockModule->new('Trog::HV::Libvirt');
+    $machines->redefine( vmm => sub { die "libvirt was asked something\n" } );
+
+    # The one thing a transfer address is worth asking, and it is a connection
+    # rather than an answer about this machine.
+    my $answers = 0;
+    my $local   = Test::MockModule->new('Trog::Local');
+    $local->redefine( answers_on => sub { $answers++; return 1 } );
 
     my ( $failed, $said ) = do {
         my @f;
@@ -751,13 +767,23 @@ CONF
     like( $said, qr/Trog::No::Such::Client[ ]will[ ]not[ ]load[ ]here/,        'saying that client will not load' );
     like( $said, qr/FAILED[ ]\[muddle\][ ]does[ ]not[ ]say[ ]what/,            'and so does one that names two kinds of hypervisor' );
 
-    is( scalar @$failed, 2, 'both are returned as failures, so the run exits non-zero' );
-    like( $failed->[0]{fix}, qr/cpanm[ ]Trog::No::Such::Client/,          'the missing client says what installs it' );
-    like( $failed->[1]{fix}, qr/it[ ]can[ ]only[ ]be[ ]one[ ]hypervisor/, 'and the muddled block says what is wrong with it' );
+    # The one this was written for: a cloud nobody gave an address to fetch
+    # from used to be found when a guest was placed there, mid-run.
+    like( $said, qr/FAILED[ ]\[account\][ ]Nothing[ ]says[ ]where[ ]guests/,   'a cloud with no transfer address is reported' );
+    like( $said, qr/ok[ ]+\[cloud\][ ]Guests[ ]here[ ]fetch/,                  'and one that has a forward that answers passes' );
+    like( $said, qr/fetch[ ]from[ ]203[.]0[.]113[.]9:2222/,                    'from the address and port its block names' );
+    like( $said, qr/which[ ]answers,[ ]so[ ]something[ ]forwards[ ]it[ ]here/, 'saying that is what makes it all right' );
 
-    # Judging a block must not authenticate to a cloud, ask Linode anything, or
-    # open the secret store to read a token.
-    ok( !$fleet->{built}{cloud} && !$fleet->{built}{account}, 'nothing was built to answer' );
+    # A machine of ours settles this from the routing table, and is not asked
+    # for the NAT bridge that its own full check would want.
+    like( $said, qr/\[muddle\]/, 'a block that is neither is still reported' );
+    unlike( $said, qr/NAT[ ]bridge/, 'a libvirt block is not asked what its full check would ask' );
+
+    is( $answers, 1, 'the one connection made is made once, for the one block with an address' );
+
+    is( scalar @$failed, 3, 'the failures are returned, so the run exits non-zero' );
+    like( join( q{}, map { $_->{fix} } @$failed ), qr/cpanm[ ]Trog::No::Such::Client/,          'the missing client says what installs it' );
+    like( join( q{}, map { $_->{fix} } @$failed ), qr/it[ ]can[ ]only[ ]be[ ]one[ ]hypervisor/, 'and the muddled block says what is wrong with it' );
 
     # And a run says all of it, so one preflight covers the whole file.
     my $libvirt = Test::MockModule->new('Trog::HV::Libvirt');

@@ -143,7 +143,9 @@ that we receive.  They are not for a step that one kind does not need.  The
 three methods above are for that.  Both are false here.
 
 =item * C<preflight_checks> and C<preflight_notes>, and the checks
-C<check_reachable> and C<check_transfer_ip>.  See L</PREFLIGHT>.
+C<check_reachable> and C<check_transfer_ip>.  See L</PREFLIGHT>, which also has
+C<preflight_block_checks> -- answered here, and worth overriding by a backend
+that can say something about a block without contacting anything.
 
 =back
 
@@ -885,10 +887,28 @@ cannot be built.
 
 The same, for things that are good to have but not required.
 
+=head2 @names = $hv->preflight_block_checks()
+
+The few of those that F<bin/preflight> asks of every I<other> block in
+F<hypervisors.conf>, rather than only of the hypervisor a run would build on.
+
+A run builds on one hypervisor, so the full list above is asked of one.  But a
+block can be wrong in ways that have nothing to do with reaching its hypervisor
+-- a cloud that nobody gave an address to fetch from is the one that keeps
+happening -- and a fault like that is found when a guest is placed there, which
+is a run that has already started.
+
+So a check belongs in this list when it needs nothing but this machine and the
+block itself.  A check that opens a connection, authenticates, or reads a
+credential does not: asking every block those would contact every cloud in the
+fleet, and open the secret store, to preflight a run against one machine.
+
 =cut
 
 sub preflight_checks ( $self, @ ) { return $self->_abstract('preflight_checks') }
 sub preflight_notes  ( $self, @ ) { return $self->_abstract('preflight_notes') }
+
+sub preflight_block_checks { return qw{check_client check_transfer_route} }
 
 =head2 $result = $hv->_verdict($ok, $what, $fix)
 
