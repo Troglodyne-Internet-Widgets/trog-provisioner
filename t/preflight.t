@@ -14,6 +14,7 @@ t/preflight.t - bin/preflight: what it checks, and what it tells you to do about
 use Test::More;
 use Capture::Tiny    qw{capture_stdout};
 use Test::MockModule qw{strict};
+use Test::Fatal      qw{exception};
 use File::Temp       qw{tempdir};
 use List::Util();
 use File::Slurper();
@@ -392,6 +393,17 @@ subtest 'the configuration it copies from has to be there' => sub {
 
     ($result) = quietly( sub { Trog::HV->new()->check_config } );
     ok( $result->{ok}, 'and passes once they are there' );
+
+    # bin/new_config validates the _global of each domain, so a key in one
+    # domain that nothing reads stops that domain, and is refused here first.
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    basedir: /bogus\n    admin_user: someadmin\n    admin_gecos: Some Admin\n    admin_email: someadmin\@test.test\n    gateway: 192.0.2.254\n    resolvers: [192.0.2.254]\none.test.test:\n  _global:\n    wibble: 1\n" );
+    Provisioner::Cookbook->forget();
+
+    ($result) = quietly( sub { Trog::HV->new()->check_config } );
+    ok( !$result->{ok}, 'a key in the _global of one domain that nothing declares fails' );
+    like( $result->{fix}, qr/one[.]test[.]test/, 'naming the domain' );
+    like( $result->{fix}, qr{/wibble:},          'and the key' );
+    Provisioner::Cookbook->forget();
 };
 
 # Saying the keys are missing is check_config's; offering to fetch them is not.
@@ -509,7 +521,7 @@ subtest 'which hypervisors need a port forwarded to us, and which do not' => sub
     $local->redefine( answers_on => sub { return $answered } );
 
     my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
-    $cookbook->redefine( globals => sub { return {} } );
+    $cookbook->redefine( global_config => sub { return {} } );
 
     # A guest on a machine of ours shares a network with us, and the routing
     # table answers when the configuration is generated.
@@ -546,6 +558,32 @@ subtest 'which hypervisors need a port forwarded to us, and which do not' => sub
     $result   = $cloud->check_transfer_route;
     ok $result->{ok}, 'and one that answers is taken as forwarded here';
     like $result->{what}, qr/something[ ]forwards[ ]it[ ]here/, 'which is what answering means';
+};
+
+# check_config is the check that says a _global is refused.  The transfer
+# checks read the same block unvalidated, so the refusal is one failure in the
+# list and not three.
+subtest 'a refused _global still says where guests fetch from' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    local $ENV{TROG_PROVISIONER_CONFIG} = $dir;
+    File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\n_base:\n  _global:\n    transfer_ip: 192.0.2.10\n    wibble: 1\n" );
+    Provisioner::Cookbook->forget();
+
+    ok( exception { Provisioner::Cookbook->globals(undef) }, 'globals refuses this _global' );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( sshd_port     => sub { 22 } );
+    $local->redefine( holds_address => sub { my ( undef, $address ) = @_; return $address eq '192.0.2.10' ? 1 : 0 } );
+
+    my $cloud  = Trog::HV::OpenStack->build( cloud => 'testcloud' );
+    my $result = $cloud->check_transfer_ip;
+    ok( $result->{ok}, 'check_transfer_ip still finds the address' );
+    like( $result->{what}, qr/192[.]0[.]2[.]10/, 'the one _global names' );
+
+    $result = $cloud->check_transfer_route;
+    ok( $result->{ok}, 'and check_transfer_route still judges the route to it' ) or diag $result->{what};
+
+    Provisioner::Cookbook->forget();
 };
 
 subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {

@@ -988,6 +988,34 @@ subtest 'the settings of an installation are validated in one place' => sub {
     );
 };
 
+# A recipe receives only the keys of _global that its schema names, so a key
+# that nothing declares reaches nothing, whoever wrote it.
+subtest 'a setting that nothing declares is refused' => sub {
+    my %base = (
+        basedir     => '/bogus',
+        admin_user  => 'someadmin',
+        admin_gecos => 'Some Admin',
+        admin_email => 'someadmin@test.test',
+        gateway     => '192.0.2.254',
+        resolvers   => ['192.0.2.254'],
+    );
+
+    my %declared = map { $_ => 1 } Provisioner::Cookbook->declared_globals;
+    ok( $declared{basedir}, 'what global_schema declares is declared' );
+    ok( $declared{cpus},    'and so is what a director declares' );
+    ok( $declared{skel},    'and what a recipe declares' );
+    ok( !$declared{wibble}, 'but not a key that nothing declares' );
+
+    ok( Provisioner::Cookbook->globals( undef, { _base => { _global => { %base, cpus => 2, libdir => ['/bogus'] } } } ), 'a key a recipe owns passes, and so does libdir' );
+
+    my $err = exception { Provisioner::Cookbook->globals( undef, { _base => { _global => { %base, wibble => 1, wobble => 2 } } } ) };
+    like( $err, qr{/wibble:[ ]Nothing[ ]declares}, 'a key nothing declares is refused' );
+    like( $err, qr{/wobble:},                      'every one of them, in the same refusal' );
+
+    $err = exception { Provisioner::Cookbook->globals( 'own.test.test', { _base => { _global => \%base }, 'own.test.test' => { _global => { wibble => 1 } } } ) };
+    like( $err, qr{own[.]test[.]test.*/wibble:}s, 'including one in the _global of a domain, naming the domain' );
+};
+
 # A YAML scalar is a string, and a list of one written as a scalar is what an
 # operator writes.  A single alias anywhere in the map used to arrive as a
 # string, which the aliases schema refuses and which the caller cannot

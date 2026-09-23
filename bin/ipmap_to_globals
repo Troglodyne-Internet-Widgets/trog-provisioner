@@ -20,6 +20,7 @@ use YAML::XS();
 
 use File::Slurper();
 use File::Slurper::Temp();
+use Provisioner::Cookbook();
 use Provisioner::Utils();
 use Trog::Config();
 
@@ -65,7 +66,8 @@ It reads these blocks:
 
 =item * C<[global]> becomes the C<_global> of C<_base>, key for key.
 C<resolvers> becomes a list, because C<Config::Simple> writes a list as one
-comma-separated string.
+comma-separated string.  A key that nothing declares stays behind, and the
+report names it.  See L<Provisioner::Cookbook/declared_globals>.
 
 =item * C<[ip_pool]> becomes C<ip_pool> in that same block.
 
@@ -116,7 +118,7 @@ sub main {
     my $into = -f $recipes ? YAML::XS::LoadFile($recipes) : {};
     $into = {} unless ref $into eq 'HASH';
 
-    my ( $moved, $kept ) = move_into( $from, $into );
+    my ( $moved, $kept, $dropped ) = move_into( $from, $into );
 
     unless (@$moved) {
         print "Nothing in $ipmap is missing from $recipes.\n";
@@ -124,7 +126,8 @@ sub main {
     }
 
     my $report = "From $ipmap into $recipes:\n" . join( q{}, map { "  $_\n" } @$moved );
-    $report .= "\nLeft as $recipes already has it:\n" . join( q{}, map { "  $_\n" } @$kept ) if @$kept;
+    $report .= "\nLeft as $recipes already has it:\n" . join( q{}, map { "  $_\n" } @$kept )       if @$kept;
+    $report .= "\nLeft out, because nothing reads it:\n" . join( q{}, map { "  $_\n" } @$dropped ) if @$dropped;
     print $report;
 
     if ($dryrun) {
@@ -140,23 +143,29 @@ sub main {
     return 0;
 }
 
-=head2 (\@moved, \@kept) = move_into($from, $into)
+=head2 (\@moved, \@kept, \@dropped) = move_into($from, $into)
 
 Folds the blocks of C<$from>, a L<Config::Simple>, into C<$into>, the
 configuration as YAML gives it.  Changes C<$into> in place.  Returns what it
-moved and what it left because C<$into> already said it, both as lines to
-print.
+moved, what it left because C<$into> already said it, and what it left because
+nothing reads it, all as lines to print.
 
 =cut
 
 sub move_into {
     my ( $from, $into ) = @_;
 
-    my ( @moved, @kept );
-    my $global = $into->{_base}{_global} //= {};
+    my ( @moved, @kept, @dropped );
+    my $global   = $into->{_base}{_global} //= {};
+    my %declared = map { $_ => 1 } Provisioner::Cookbook->declared_globals;
 
     my $said = $from->param( -block => 'global' ) // {};
     foreach my $key ( sort keys %$said ) {
+        if ( !$declared{$key} ) {
+            push( @dropped, "[global] $key" );
+            next;
+        }
+
         if ( exists $global->{$key} ) {
             push( @kept, "_base._global.$key" );
             next;
@@ -198,7 +207,7 @@ sub move_into {
         push( @moved, "[aliases] $domain -> $domain._global.aliases" );
     }
 
-    return ( \@moved, \@kept );
+    return ( \@moved, \@kept, \@dropped );
 }
 
 exit main(@ARGV) unless caller;

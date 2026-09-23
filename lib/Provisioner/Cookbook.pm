@@ -1205,9 +1205,11 @@ F<ipmap.cfg> until they moved here, where every other setting a guest is built
 from already lived.  See L<Provisioner::Recipe/args> for the same argument
 about a recipe.
 
-C<additionalProperties> stays on: C<_global> also carries what recipes share,
-such as C<install_dir>, C<cpus> and C<distro>, and each of those is declared by
-the recipe that owns it.
+C<additionalProperties> stays on in this schema, because C<_global> also
+carries settings that a recipe owns, such as C<cpus> for C<vm> and C<distro>
+for the distro recipe.  The recipe declares each of those itself.  C<globals>
+refuses a key that neither this schema nor a recipe declares.  See
+C<declared_globals>.
 
 =cut
 
@@ -1231,6 +1233,8 @@ sub global_schema {
 
             linode_type      => { type => 'string', description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
             openstack_flavor => { type => 'string', description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
+
+            libdir => { type => 'array', items => { type => 'string' }, description => 'Directories outside this checkout.  bin/new_config puts the lib/ of each on @INC and looks for templates in its templates/ after the ones here.' },
 
             transfer_user => { type => 'string',  description => 'The account on this machine that a guest fetches its payload as.  Unset is the account running the provision.' },
             transfer_port => { type => 'integer', description => 'The ssh port of this machine, when it is not the one this machine reports.' },
@@ -1270,6 +1274,9 @@ than leaving a recipe to interpolate an undef into a path.  That is one refusal
 in one place: before this, F<bin/new_config> hand-wrote six of them and nothing
 else checked at all.
 
+A key that C<declared_globals> does not list is wrong too.  Nothing reads it,
+and the operator who wrote it believes that something does.
+
 =cut
 
 sub globals {
@@ -1287,10 +1294,41 @@ sub globals {
     $validator->coerce( { %{ $validator->coerce }, defaults => 1 } );
 
     my @errors = $validator->validate( $said, \%schema );
+
+    my %declared = map { $_ => 1 } $class->declared_globals;
+    push( @errors, map { "/$_: Nothing declares this setting, so nothing reads it." } grep { !$declared{$_} } sort keys %$said );
+
     die "The settings of this installation are not valid" . ( defined $domain ? " for $domain" : q{} ) . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
       if @errors;
 
     return $said;
+}
+
+=head2 @keys = declared_globals()
+
+Returns, sorted, every key that a C<_global> can hold.  That is each key that
+C<global_schema> declares, and each key that the C<schema> of a recipe
+declares, the C<directors> included.  A recipe receives only the keys of
+C<_global> that its schema names, so a key that is not in this list reaches
+nothing.
+
+It loads every recipe, and so dies as C<load> does.
+
+=cut
+
+sub declared_globals {
+    my ($class) = @_;
+
+    my %global = $class->global_schema;
+    my @keys   = keys %{ $global{properties} };
+
+    foreach my $name ( $class->names, $class->directors ) {
+        my %schema = $class->load($name)->schema;
+        push( @keys, keys %{ $schema{properties} // {} } );
+    }
+
+    my @declared = sort( uniq(@keys) );
+    return @declared;
 }
 
 =head2 \%aliases = alias_map($conf)
