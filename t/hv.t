@@ -1793,4 +1793,17 @@ subtest 'a client that will not load says which, and how to install it' => sub {
     like( exception { $hv->require_client }, qr/cpanm[ ]File::Which~999[.]0/, 'a version too old asks for the version that is wanted' );
 };
 
+subtest 'what a block is asked is a subset of what a hypervisor is asked' => sub {
+    foreach my $backend ( sort Trog::HV->backends ) {
+        my %full  = map { $_ => 1 } $backend->preflight_checks;
+        my @block = $backend->preflight_block_checks;
+
+        is_deeply( [ grep { !$full{$_} } @block ], [], "$backend asks nothing of a block that it does not ask of a hypervisor" );
+
+        # The two that need this machine and the block, and nothing else.
+        ok( ( grep { $_ eq 'check_client' } @block ),         "$backend says whether its client is here" );
+        ok( ( grep { $_ eq 'check_transfer_route' } @block ), "$backend says where the guests of a block fetch from" );
+    }
+};
+
 done_testing;
