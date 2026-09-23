@@ -753,22 +753,25 @@ sub shortfalls {
     my $have = $self->capacity(%needs);
     my @reasons;
 
+    # An undefined free is no limit rather than no room.  A quota can be
+    # unlimited, and a hypervisor says so by leaving the number undef, because
+    # the -1 a cloud reports for it is not an amount to do arithmetic on.
     push @reasons, sprintf(
         'needs %dMB of memory, %dMB free (%dMB physical, %dMB committed, %dMB reserved)',
         $needs{memory_mb},  $have->{memory_free},
         $have->{memory_mb}, $have->{memory_committed}, $self->reserve_memory
-    ) if ( $needs{memory_mb} // 0 ) > $have->{memory_free};
+    ) if defined $have->{memory_free} && ( $needs{memory_mb} // 0 ) > $have->{memory_free};
 
     push @reasons, sprintf(
         'needs %d vCPUs, %d free (%d CPUs x%d overcommit, %d committed, %d reserved)',
         $needs{cpus},  $have->{cpus_free},
         $have->{cpus}, $self->cpu_overcommit, $have->{cpus_committed}, $self->reserve_cpus
-    ) if ( $needs{cpus} // 0 ) > $have->{cpus_free};
+    ) if defined $have->{cpus_free} && ( $needs{cpus} // 0 ) > $have->{cpus_free};
 
     push @reasons, sprintf(
         'needs %dGB of disk, %dGB free in the pool after a %dGB reserve',
         _gb( $needs{disk_bytes} ), _gb( $have->{disk_free} ), _gb( $self->reserve_disk )
-    ) if ( $needs{disk_bytes} // 0 ) > $have->{disk_free};
+    ) if defined $have->{disk_free} && ( $needs{disk_bytes} // 0 ) > $have->{disk_free};
 
     push @reasons, sprintf( 'already has %d guests, and max_guests is %d', $have->{guests}, $self->max_guests )
       if $self->max_guests && $have->{guests} >= $self->max_guests;
@@ -793,18 +796,22 @@ sub headroom {
     my $have = $self->capacity(%needs);
     my @fractions;
 
-    push @fractions, _fraction( $have->{memory_free} - ( $needs{memory_mb} // 0 ), $have->{memory_mb} );
-    push @fractions, _fraction( $have->{cpus_free} - ( $needs{cpus}        // 0 ), $have->{cpus_allocatable} );
-    push @fractions, _fraction( $have->{disk_free} - ( $needs{disk_bytes} // 0 ), $have->{disk_free} + ( $needs{disk_bytes} // 0 ) );
+    push @fractions, _fraction( $have->{memory_free}, $have->{memory_mb},                                                                    $needs{memory_mb} );
+    push @fractions, _fraction( $have->{cpus_free},   $have->{cpus_allocatable},                                                             $needs{cpus} );
+    push @fractions, _fraction( $have->{disk_free},   defined $have->{disk_free} ? $have->{disk_free} + ( $needs{disk_bytes} // 0 ) : undef, $needs{disk_bytes} );
 
     my ($tightest) = sort { $a <=> $b } @fractions;
     return $tightest;
 }
 
 sub _fraction {
-    my ( $left, $total ) = @_;
+    my ( $free, $total, $wanted ) = @_;
+
+    # No limit is as empty as it gets, and nothing to divide by is as full.
+    return 1 unless defined $free && defined $total;
     return 0 if !$total;
-    my $fraction = $left / $total;
+
+    my $fraction = ( $free - ( $wanted // 0 ) ) / $total;
     return $fraction < 0 ? 0 : $fraction;
 }
 

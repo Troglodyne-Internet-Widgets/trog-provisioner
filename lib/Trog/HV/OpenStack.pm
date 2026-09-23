@@ -366,7 +366,7 @@ The cloud enforces its instance quota, whatever this tool decides.
 sub max_guests {
     my ($self) = @_;
     return $self->{max_guests} if $self->{max_guests};
-    return $self->capacity->{guests_allowed};
+    return $self->capacity->{guests_allowed} // 0;
 }
 
 =head2 shortfalls(%needs)
@@ -380,18 +380,41 @@ this cloud on purpose.
 sub shortfalls {
     my ( $self, %needs ) = @_;
 
-    return 'names no openstack_flavor, so it is not built on this cloud' unless $needs{ $self->size_key };
-    return $self->SUPER::shortfalls(%needs);
+    my $named = $needs{ $self->size_key };
+    return 'names no openstack_flavor, so it is not built on this cloud' unless $named;
+
+    my $flavor = eval { $self->flavor_for(%needs) };
+    return "names the flavor '$named', which this cloud has not got" unless $flavor;
+
+    # What the guest gets is the flavor, so that is what its memory, vCPUs and
+    # disk are measured against -- and what the project's quota pays for.
+    my @reasons;
+    push @reasons, sprintf( 'wants %dMB of memory, and %s has %dMB', $needs{memory_mb}, $named, $flavor->{ram} )
+      if ( $needs{memory_mb} // 0 ) > ( $flavor->{ram} // 0 );
+    push @reasons, sprintf( 'wants %d vCPUs, and %s has %d', $needs{cpus}, $named, $flavor->{vcpus} )
+      if ( $needs{cpus} // 0 ) > ( $flavor->{vcpus} // 0 );
+    push @reasons, sprintf( 'wants %dGB of disk, and %s has %dGB', ( $needs{disk_bytes} // 0 ) / $GB, $named, $flavor->{disk} // 0 )
+      if ( $needs{disk_bytes} // 0 ) > ( $flavor->{disk} // 0 ) * $GB;
+
+    return ( @reasons, $self->SUPER::shortfalls( %needs, memory_mb => $flavor->{ram}, cpus => $flavor->{vcpus}, disk_bytes => 0 ) );
 }
 
 =head2 capacity
 
-As L<Trog::HV/capacity>.  Memory, cores and instances come from the Nova limits.
-Disk comes from the Cinder limits, because block storage has its own quota.
+As L<Trog::HV/capacity(%needs)>.  Memory, cores and instances are the project's
+Nova quota, and what it has already spent of it.  A quota that is unlimited
+comes back undef rather than as the C<-1> Nova reports it as, which is not an
+amount to subtract from: a project with an unlimited quota has room for
+anything, and arithmetic on C<-1> says it has room for nothing.
 
-C<memory_mb> and C<cpus> are the quota, not a physical count.  The quota is the
-only number that limits the project.  The result is kept for the life of the
-object, as in the libvirt backend.
+C<disk_free> is undef.  A guest here boots from an image onto the disk of its
+flavor, so nothing it needs comes out of the Cinder quota, and refusing a guest
+for want of block storage it never asks for is how a project with no volume
+quota came to be unable to build anything.  L</create_volume($domain, $purpose,
+size_gb =E<gt> $n)> is what spends that quota, and nothing in a provision calls
+it.
+
+The result is kept for the life of the object, as in the libvirt backend.
 
 =cut
 
@@ -399,31 +422,50 @@ sub capacity {
     my ($self) = @_;
     return $self->{capacity} if $self->{capacity};
 
-    my $nova = $self->api->limits->{absolute}        // {};
-    my $disk = $self->api->volume_limits->{absolute} // {};
+    my $nova = $self->api->limits->{absolute} // {};
 
-    my $memory_mb   = $nova->{maxTotalRAMSize} // 0;
-    my $memory_used = $nova->{totalRAMUsed}    // 0;
-    my $cpus        = $nova->{maxTotalCores}   // 0;
-    my $cpus_used   = $nova->{totalCoresUsed}  // 0;
-
-    my $disk_total = ( $disk->{maxTotalVolumeGigabytes} // 0 ) * $GB;
-    my $disk_used  = ( $disk->{totalGigabytesUsed}      // 0 ) * $GB;
+    my $memory_mb   = _limit( $nova->{maxTotalRAMSize} );
+    my $memory_used = $nova->{totalRAMUsed} // 0;
+    my $cpus        = _limit( $nova->{maxTotalCores} );
+    my $cpus_used   = $nova->{totalCoresUsed} // 0;
 
     return $self->{capacity} = {
         memory_mb        => $memory_mb,
         memory_committed => $memory_used,
-        memory_free      => $memory_mb - $memory_used - $self->reserve_memory,
+        memory_free      => defined $memory_mb ? $memory_mb - $memory_used - $self->reserve_memory : undef,
         cpus             => $cpus,
         cpus_allocatable => $cpus,
         cpus_committed   => $cpus_used,
-        cpus_free        => $cpus - $cpus_used - $self->reserve_cpus,
-        disk_free        => $disk_total - $disk_used - $self->reserve_disk,
+        cpus_free        => defined $cpus ? $cpus - $cpus_used - $self->reserve_cpus : undef,
+        disk_free        => undef,
         guests           => $nova->{totalInstancesUsed} // 0,
 
         # Not part of what Trog::HV reads.  max_guests uses it.
-        guests_allowed => $nova->{maxTotalInstances} // 0,
+        guests_allowed => _limit( $nova->{maxTotalInstances} ),
     };
+}
+
+# A quota Nova reports as -1 is unlimited, and undef is how that is said here.
+sub _limit {
+    my ($value) = @_;
+    return undef if !defined $value || $value < 0;
+    return $value;
+}
+
+=head2 flavor_for(%needs)
+
+The flavor the guest named in C<openstack_flavor>, as the cloud describes it,
+or undef when the cloud has no such flavor.
+
+=cut
+
+sub flavor_for {
+    my ( $self, %needs ) = @_;
+
+    my $named = $needs{ $self->size_key } or return undef;
+    my ($flavor) = grep { ref $_ && ( ( $_->{name} // q{} ) eq $named || ( $_->{id} // q{} ) eq $named ) } $self->api->flavors_detail;
+
+    return $flavor;
 }
 
 =head1 GUESTS
@@ -1014,8 +1056,9 @@ FIX
 
 =head2 $result = $hv->check_cloud_quota()
 
-Makes sure that the quota has room for one more guest: an instance, memory,
-cores and disk.  On a cloud, the quota takes the place of hardware limits.
+Makes sure that the quota has room for one more guest: an instance, memory and
+cores.  On a cloud, the quota takes the place of hardware limits.  A quota that
+is unlimited is never full, and says so rather than reading as empty.
 
 =cut
 
@@ -1025,16 +1068,16 @@ sub check_cloud_quota {
     my $have = eval { $self->capacity };
     return $self->_verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
 
+    # An undefined free is a quota with no limit in it, which is never full.
     my @full;
-    push @full, 'instances' if $self->max_guests && $have->{guests} >= $self->max_guests;
-    push @full, 'memory'    if $have->{memory_free} <= 0;
-    push @full, 'cpus'      if $have->{cpus_free} <= 0;
-    push @full, 'disk'      if $have->{disk_free} <= 0;
+    push @full, 'instances' if $self->max_guests            && $have->{guests} >= $self->max_guests;
+    push @full, 'memory'    if defined $have->{memory_free} && $have->{memory_free} <= 0;
+    push @full, 'cpus'      if defined $have->{cpus_free}   && $have->{cpus_free} <= 0;
 
     return $self->_verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
-The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests ]} instances,
-@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} ]}MB of memory and
-@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} ]} cores.
+The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests || 'unlimited' ]} instances,
+@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} // 'unlimited' ]}MB of memory and
+@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} // 'unlimited' ]} cores.
 
 Destroy a guest you have finished with, or ask for more quota.  Note that the
 reserves in hypervisors.conf are held back out of the quota, so a project that
@@ -1044,8 +1087,10 @@ FIX
     return $self->_verdict(
         1,
         sprintf(
-            'Quota: %d/%d instances used, %dMB memory and %d cores free',
-            $have->{guests}, $self->max_guests, $have->{memory_free}, $have->{cpus_free}
+            'Quota: %s/%s instances used, %s of memory and %s cores free',
+            $have->{guests}, $self->max_guests || 'unlimited',
+            defined $have->{memory_free} ? $have->{memory_free} . 'MB' : 'unlimited memory',
+            $have->{cpus_free} // 'unlimited'
         ),
         q{}
     );

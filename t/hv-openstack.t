@@ -213,7 +213,8 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
                 totalInstancesUsed => 4,
             }
         },
-        volume_limits => { absolute => { maxTotalVolumeGigabytes => 1000, totalGigabytesUsed => 790 } },
+        volume_limits  => { absolute => { maxTotalVolumeGigabytes => 1000, totalGigabytesUsed => 790 } },
+        flavors_detail => [ { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 } ],
     );
 
     my $have = $hv->capacity;
@@ -225,8 +226,12 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     is $have->{cpus},             40,                                  'cores';
     is $have->{cpus_allocatable}, 40,                                  'and no overcommit applied to them';
     is $have->{cpus_free},        40 - 20 - $hv->reserve_cpus,         'less the reserve';
-    is $have->{disk_free}, ( 1000 - 790 ) * $GB - $hv->reserve_disk, 'disk comes from cinder';
-    is $have->{guests},                                              4, 'and the instance count';
+
+    # Not from Cinder: a guest boots from an image onto the disk of its flavor,
+    # and takes nothing out of the volume quota.  A project with none of that
+    # quota could build nothing at all while this came from there.
+    is $have->{disk_free}, undef, 'no disk limit, because a guest here spends none of the one the project has';
+    is $have->{guests},    4,     'and the instance count';
 
     is $hv->cpu_overcommit, 1,
       'overcommit is 1: a quota is already what we may run, so multiplying it invents headroom';
@@ -239,13 +244,56 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     my @none      = $hv->shortfalls( %names_one, memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB );
     is scalar @none, 0, 'a guest that fits has no shortfalls';
 
+    # What the guest gets is the flavor, so that is what it is measured
+    # against -- and the quota pays for the flavor, not for what was asked.
     my @reasons = $hv->shortfalls( %names_one, memory_mb => 999999, cpus => 999, disk_bytes => 9999 * $GB );
-    ok scalar @reasons >= 3, 'and one that does not is told why, by the shared arithmetic';
+    like $reasons[0], qr/wants[ ]999999MB[ ]of[ ]memory/,                               'a guest larger than the flavor it named is told so';
+    like $reasons[0], qr/m1[.]medium[ ]has[ ]4096MB/,                                   'with what the flavor has';
+    like $reasons[1], qr/wants[ ]999[ ]vCPUs,[ ]and[ ]m1[.]medium[ ]has[ ]2/,           'in every way it is larger';
+    like $reasons[2], qr/wants[ ]9999GB[ ]of[ ]disk,[ ]and[ ]m1[.]medium[ ]has[ ]40GB/, 'disk included';
+
+    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.nonesuch', memory_mb => 1, cpus => 1, disk_bytes => 1 ) ],
+      ["names the flavor 'm1.nonesuch', which this cloud has not got"],
+      'and a flavor the cloud has not got is said, rather than measured against nothing';
 
     # Which is how a guest is kept off a cloud: it says nothing about one.
     is_deeply [ $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB ) ],
       ['names no openstack_flavor, so it is not built on this cloud'],
       'and a guest that names no flavor is not built here at all';
+};
+
+subtest 'an unlimited quota has room for anything, rather than for nothing' => sub {
+    my $hv = cloud();
+
+    # Nova says -1 for unlimited.  Subtracting usage and a reserve from that
+    # gives a negative amount free, and every guest was refused for want of
+    # room in a quota that had no limit in it at all.
+    $FAKE = Test::FakeCloud->new(
+        limits => {
+            absolute => {
+                maxTotalRAMSize    => -1,
+                totalRAMUsed       => 32768,
+                maxTotalCores      => -1,
+                totalCoresUsed     =>  20,
+                maxTotalInstances  => -1,
+                totalInstancesUsed =>  4,
+            }
+        },
+        flavors_detail => [ { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 } ],
+    );
+
+    my $have = $hv->capacity;
+    is $have->{memory_mb},   undef, 'an unlimited memory quota is no number at all';
+    is $have->{memory_free}, undef, 'so there is no amount of it free';
+    is $have->{cpus_free},   undef, 'nor of cores';
+    is $hv->max_guests,      0,     'and an unlimited instance quota caps nothing';
+
+    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.medium', memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3 ) ], [],
+      'a guest its flavor holds fits, where before nothing did';
+
+    my $ok = $hv->check_cloud_quota;
+    ok $ok->{ok}, 'and preflight calls the quota fine';
+    like $ok->{what}, qr/unlimited/, 'saying it is unlimited rather than printing -1 at somebody';
 };
 
 subtest 'cheapest_for' => sub {
