@@ -11,6 +11,7 @@ use re '/aasx';
 use parent 'Trog::Machine';
 
 use Trog::Config();
+use Trog::Local();
 use Trog::Credentials();
 use Trog::Secrets();
 use Provisioner::Cookbook();
@@ -824,6 +825,95 @@ ask until the guest exists.
 
 sub check_reachable   ( $self, @ ) { return $self->_abstract('check_reachable') }
 sub check_transfer_ip ( $self, @ ) { return $self->_abstract('check_transfer_ip') }
+
+=head2 $result = $hv->check_transfer_route()
+
+Works out where a guest built here fetches its payload from, and says whether
+that address can be one this machine answers on.
+
+A guest on a machine of ours reaches us across a network we share, and the
+routing table settles it when the configuration is generated.  A guest that the
+hypervisor addresses itself -- one on a cloud -- reaches us from outside, at the
+C<transfer_ip> and C<transfer_port> of its block, or of C<_global>.  Three
+things can be wrong with that, and each has its own answer:
+
+=over 4
+
+=item * The address is a private one.  Nothing on the internet routes to it, so
+a guest there can never fetch.
+
+=item * The address is not one of ours.  Then something in front of us answers
+for it, and it has to forward C<transfer_port> to the sshd of this machine.
+This says so, and says whether anything answered when it tried, which a gateway
+that does not answer its own public address from inside will get wrong.
+
+=item * Nothing names an address at all, which the check_transfer_ip of each
+backend covers as well.
+
+=back
+
+=cut
+
+sub check_transfer_route {
+    my ($self) = @_;
+
+    my $here   = Trog::Local->new();
+    my $global = eval { Provisioner::Cookbook->globals(undef) } // {};
+    my $ip     = $self->configured_transfer_ip                  // $global->{transfer_ip};
+    my $port   = $self->configured_transfer_port                // $global->{transfer_port} // $here->sshd_port;
+
+    return $self->_verdict( 1, 'Guests here reach us across our own network, which the routing table settles', q{} )
+      unless $self->manages_addresses;
+
+    return $self->_verdict( 0, 'Nothing says where guests on ' . $self->describe . ' fetch from', <<"FIX" ) unless $ip;
+A guest there is not on a network of ours, so the routing table cannot answer
+for it.  Name the address it reaches us at, and the port, in the block of this
+hypervisor in hypervisors.conf:
+
+    transfer_ip   = 192.0.2.10
+    transfer_port = 2222
+FIX
+
+    return $self->_verdict( 0, "Guests on " . $self->describe . " are told to fetch from $ip, which is a private address", <<"FIX" ) if _is_private($ip);
+Nothing outside our network routes to $ip, so a guest there can never fetch its
+payload.  Put the address that reaches this machine from the internet in the
+block of this hypervisor in hypervisors.conf, with the port forwarded to the
+sshd here:
+
+    transfer_ip   = <the address of your gateway>
+    transfer_port = <the port it forwards to this machine>
+FIX
+
+    return $self->_verdict( 1, "Guests here fetch from $ip:$port, which is an address of this machine", q{} )
+      if $here->holds_address($ip);
+
+    my $answered = $here->answers_on( $ip, $port );
+    return $self->_verdict( 1, "Guests here fetch from $ip:$port, which answers, so something forwards it here", q{} ) if $answered;
+
+    return $self->_verdict( 0, "Guests here fetch from $ip:$port, which is not ours and did not answer", <<"FIX" );
+$ip is not an address of this machine, so something in front of us answers for
+it, and it has to forward $port to the sshd here.  Nothing answered when this
+tried, which means one of two things:
+
+    * the forward is not there, and a guest on @{[ $self->describe ]} cannot fetch;
+    * the forward is there, and the gateway does not answer its own public
+      address from inside the network, which many do not.
+
+Try it from outside -- from a guest you already have there, or any host on the
+internet:
+
+    nc -vz $ip $port
+FIX
+}
+
+# The blocks nothing on the internet routes to.
+sub _is_private {
+    my ($address) = @_;
+    return 1 if $address =~ m/\A(?:10|127)[.]/;
+    return 1 if $address =~ m/\A(?:169[.]254|192[.]168)[.]/;
+    return 1 if $address =~ m/\A172[.](?:1[6-9]|2\d|3[01])[.]/;
+    return 0;
+}
 
 =head2 $result = $hv->check_rsync()
 
