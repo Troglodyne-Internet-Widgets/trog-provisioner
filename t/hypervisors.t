@@ -330,6 +330,120 @@ subtest 'a pin to a hypervisor that cannot take it is an error' => sub {
 };
 
 # --- find ---------------------------------------------------------------------
+subtest 'when nothing has room, what a hypervisor would sell is offered' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[linode1]
+linode_token=secret:linode/api/password
+region=us-east
+CONF
+
+    # The machine is full, and Linode would sell something that holds it.
+    my $room   = with_capacity( hv1 => capacity( memory_free => 512 ) );
+    my $linode = Test::MockModule->new('Trog::HV::Linode');
+
+    # As the real one does: a guest that names no type is not built there, and
+    # one that names it is measured against it.
+    $linode->redefine( shortfalls   => sub { my ( undef, %needs ) = @_; return $needs{linode_type} ? () : 'names no linode_type, so it is not built on Linode' } );
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    my ( $asked, $answer );
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( prompt => sub { $asked = shift; return $answer } );
+
+    my $written;
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( record_global => sub { my ( undef, @args ) = @_; $written = \@args; return '/bogus/recipes.d/vm.test.test.yaml' } );
+
+    # Nobody to answer: the offer is the error, so a cron or a button gets it.
+    $local->redefine( interactive => sub { 0 } );
+    my $config = { memory => 8192, cpus => 2, size => 40 * $GB };
+    my $err    = exception { $fleet->select_for( 'vm.test.test', $config ) };
+    like $err, qr/Nothing[ ]in[ ]\N*has[ ]room[ ]for[ ]vm[.]test[.]test/, 'it says nothing had room';
+    like $err, qr/linode1[ ]would[ ]build[ ]it[ ]as[ ]a[ ]g6-standard-2/, 'what it would be';
+    like $err, qr/at[ ]24[.]00[ ]a[ ]month/,                              'and what that costs';
+    like $err, qr/linode_type:[ ]g6-standard-2/,                          'and the line to write to accept it';
+    like $err, qr/hv1:[ ]needs/,                                          'with what each hypervisor lacked still in there';
+    is $written, undef, 'nothing was written, and nothing was built';
+
+    # A type billed by the hour has no monthly price to be capped at, so the
+    # figure is hours of the rate and the offer says as much.
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g1-gpu-rtx6000-1', monthly_cost => 1095, hourly => 1.5 } } );
+    $err = exception { $fleet->select_for( 'vm.test.test', $config ) };
+    like $err, qr/at[ ]1095[.]00[ ]a[ ]month/,           'the month it works out to';
+    like $err, qr/billed[ ]at[ ]1[.]5[ ]an[ ]hour/,      'and the hourly rate it comes from';
+    like $err, qr/no[ ]monthly[ ]price[ ]to[ ]cap[ ]it/, 'and that nothing caps it';
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
+
+    # Somebody to answer, who says no.
+    $local->redefine( interactive => sub { 1 } );
+    $answer = 'n';
+    $err    = exception {
+        quietly( sub { $fleet->select_for( 'vm.test.test', $config ) } )
+    };
+    like $asked, qr/Build[ ]vm\.test\.test[ ]there/, 'it asks';
+    like $err,   qr/Declined/,                       'and a no is a no';
+    is $written, undef, 'with nothing written';
+
+    # And who says yes.
+    $answer = 'y';
+    my $chosen = quietly( sub { $fleet->select_for( 'vm.test.test', $config ) } );
+    is $chosen->name, 'linode1', 'a yes places the guest where the offer was';
+    is_deeply $written, [qw{vm.test.test linode_type g6-standard-2}], 'the size is written into the file of the domain, so the next run does not ask';
+    is $config->{linode_type}, 'g6-standard-2', 'and into what this run is generating from, which was read before that';
+};
+
+subtest 'an offer that would then be refused is not taken' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[linode1]
+linode_token=secret:linode/api/password
+region=us-east
+CONF
+
+    my $room   = with_capacity( hv1 => capacity( memory_free => 512 ) );
+    my $linode = Test::MockModule->new('Trog::HV::Linode');
+
+    # A backend that offers something its own limits refuse would be built on,
+    # and the refusal would come from the API after somebody agreed to pay.
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
+    $linode->redefine( shortfalls   => sub { return 'a g6-standard-2 costs more than the account has left' } );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( interactive => sub { 1 } );
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( prompt => sub { return 'y' } );
+
+    my $written;
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( record_global => sub { $written = 1; return '/bogus' } );
+
+    my $err = exception {
+        quietly( sub { $fleet->select_for( 'vm.test.test', { memory => 8192, cpus => 2, size => 40 * $GB } ) } )
+    };
+    like $err, qr/offered[ ]a[ ]g6-standard-2/,                      'the offer is checked against the hypervisor that made it';
+    like $err, qr/then[ ]would[ ]not[ ]take[ ]it/,                   'which is what the second look is for';
+    like $err, qr/costs[ ]more[ ]than[ ]the[ ]account[ ]has[ ]left/, 'saying what it said the second time';
+    is $written, undef, 'and nothing was written for a size that does not fit';
+};
+
+subtest 'an offer nobody can make is the shortfall, not an offer' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_file() );
+    my $room  = with_capacity( hv1 => capacity( memory_free => 512 ), hv2 => capacity( memory_free => 512 ) );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( interactive => sub { 1 } );
+
+    my $err = exception { $fleet->select_for( 'vm.test.test', { memory => 8192, cpus => 2, size => 40 * $GB } ) };
+    like $err,   qr/Nowhere[ ]to[ ]put[ ]vm\.test\.test/, 'a fleet of machines alone says what it always said';
+    unlike $err, qr/would[ ]build/,                       'and offers nothing, because nothing there sells anything';
+};
+
 subtest 'find' => sub {
     my $path = fleet_file();
 
@@ -535,7 +649,6 @@ libvirt_uri=qemu+ssh://root@hv1.example.net/system
 
 [cloud1]
 cloud=openstack
-flavor=m1.medium
 network=internal
 floating_network=public
 reserve_memory=8192
@@ -549,7 +662,6 @@ CONF
     is ref $os,               'Trog::HV::OpenStack', 'and the one with a cloud is not';
     is $os->name,             'cloud1',              'named as the file names it';
     is $os->cloud,            'openstack',           'pointed at the clouds.yaml entry';
-    is $os->flavor,           'm1.medium',           'with the flavor';
     is $os->network,          'internal',            'the network';
     is $os->floating_network, 'public',              'and where floating IPs come from';
 
@@ -562,7 +674,6 @@ subtest 'a block naming a linode_token is a Linode hypervisor' => sub {
 [linode1]
 linode_token=secret:linode/api/password
 region=us-east
-type=g6-standard-2
 monthly_budget=200
 max_guests=10
 CONF
@@ -571,7 +682,6 @@ CONF
     is ref $linode,             'Trog::HV::Linode', 'the one with a token is Linode';
     is $linode->name,           'linode1',          'named as the file names it';
     is $linode->region,         'us-east',          'in its region';
-    is $linode->type,           'g6-standard-2',    'of its type';
     is $linode->monthly_budget, 200,                'within its budget';
     is $linode->max_guests,     10,                 'and the limits are read as for any kind';
 };

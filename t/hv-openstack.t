@@ -113,7 +113,8 @@ use Trog::HV::OpenStack();
         return $full;
     }
 
-    sub networks ($self) { return @{ $self->{networks} // [] } }
+    sub networks       ($self) { return @{ $self->{networks}       // [] } }
+    sub flavors_detail ($self) { return @{ $self->{flavors_detail} // [] } }
 
     sub create_vm {
         my ( $self, %opts ) = @_;
@@ -182,22 +183,21 @@ subtest 'is_local is true, and why that is not a lie' => sub {
 
 subtest 'what hypervisors.conf configures' => sub {
     my $hv = cloud(
-        flavor           => 'm1.medium',
         network          => 'internal',
         floating_network => 'public',
         keypair          => 'buildkey',
     );
 
-    is $hv->flavor,           'm1.medium', 'flavor';
-    is $hv->network,          'internal',  'network';
-    is $hv->floating_network, 'public',    'floating_network';
-    is $hv->keypair,          'buildkey',  'keypair';
-    is $hv->security_group,   'default',   'the security group defaults to the one every project has';
+    is $hv->network,          'internal', 'network';
+    is $hv->floating_network, 'public',   'floating_network';
+    is $hv->keypair,          'buildkey', 'keypair';
+    is $hv->security_group,   'default',  'the security group defaults to the one every project has';
 
     my %keys = Trog::HV::OpenStack->config_keys;
-    is $keys{cloud},  'cloud',  'cloud is read under its own name';
-    is $keys{flavor}, 'flavor', 'and so is everything else';
-    ok !exists $keys{uri}, 'and a cloud has no libvirt_uri';
+    is $keys{cloud},   'cloud',   'cloud is read under its own name';
+    is $keys{network}, 'network', 'and so is everything else';
+    ok !exists $keys{flavor}, 'and what size a guest is is the guest\'s to name, not the block\'s';
+    ok !exists $keys{uri},    'and a cloud has no libvirt_uri';
 };
 
 subtest 'capacity is a quota, which is what makes it capacity' => sub {
@@ -213,7 +213,8 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
                 totalInstancesUsed => 4,
             }
         },
-        volume_limits => { absolute => { maxTotalVolumeGigabytes => 1000, totalGigabytesUsed => 790 } },
+        volume_limits  => { absolute => { maxTotalVolumeGigabytes => 1000, totalGigabytesUsed => 790 } },
+        flavors_detail => [ { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 } ],
     );
 
     my $have = $hv->capacity;
@@ -225,8 +226,12 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     is $have->{cpus},             40,                                  'cores';
     is $have->{cpus_allocatable}, 40,                                  'and no overcommit applied to them';
     is $have->{cpus_free},        40 - 20 - $hv->reserve_cpus,         'less the reserve';
-    is $have->{disk_free}, ( 1000 - 790 ) * $GB - $hv->reserve_disk, 'disk comes from cinder';
-    is $have->{guests},                                              4, 'and the instance count';
+
+    # Not from Cinder: a guest boots from an image onto the disk of its flavor,
+    # and takes nothing out of the volume quota.  A project with none of that
+    # quota could build nothing at all while this came from there.
+    is $have->{disk_free}, undef, 'no disk limit, because a guest here spends none of the one the project has';
+    is $have->{guests},    4,     'and the instance count';
 
     is $hv->cpu_overcommit, 1,
       'overcommit is 1: a quota is already what we may run, so multiplying it invents headroom';
@@ -235,11 +240,122 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     is cloud( max_guests => 3 )->max_guests, 3,  'unless the configuration is stricter';
 
     # Trog::HV's arithmetic, over the numbers this backend supplied.
-    my @none = $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB );
+    my %names_one = ( openstack_flavor => 'm1.medium' );
+    my @none      = $hv->shortfalls( %names_one, memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB );
     is scalar @none, 0, 'a guest that fits has no shortfalls';
 
-    my @reasons = $hv->shortfalls( memory_mb => 999999, cpus => 999, disk_bytes => 9999 * $GB );
-    ok scalar @reasons >= 3, 'and one that does not is told why, by the shared arithmetic';
+    # What the guest gets is the flavor, so that is what it is measured
+    # against -- and the quota pays for the flavor, not for what was asked.
+    my @reasons = $hv->shortfalls( %names_one, memory_mb => 999999, cpus => 999, disk_bytes => 9999 * $GB );
+    like $reasons[0], qr/wants[ ]999999MB[ ]of[ ]memory/,                               'a guest larger than the flavor it named is told so';
+    like $reasons[0], qr/m1[.]medium[ ]has[ ]4096MB/,                                   'with what the flavor has';
+    like $reasons[1], qr/wants[ ]999[ ]vCPUs,[ ]and[ ]m1[.]medium[ ]has[ ]2/,           'in every way it is larger';
+    like $reasons[2], qr/wants[ ]9999GB[ ]of[ ]disk,[ ]and[ ]m1[.]medium[ ]has[ ]40GB/, 'disk included';
+
+    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.nonesuch', memory_mb => 1, cpus => 1, disk_bytes => 1 ) ],
+      ["names the flavor 'm1.nonesuch', which this cloud has not got"],
+      'and a flavor the cloud has not got is said, rather than measured against nothing';
+
+    # Which is how a guest is kept off a cloud: it says nothing about one.
+    is_deeply [ $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB ) ],
+      ['names no openstack_flavor, so it is not built on this cloud'],
+      'and a guest that names no flavor is not built here at all';
+};
+
+subtest 'an unlimited quota has room for anything, rather than for nothing' => sub {
+    my $hv = cloud();
+
+    # Nova says -1 for unlimited.  Subtracting usage and a reserve from that
+    # gives a negative amount free, and every guest was refused for want of
+    # room in a quota that had no limit in it at all.
+    $FAKE = Test::FakeCloud->new(
+        limits => {
+            absolute => {
+                maxTotalRAMSize    => -1,
+                totalRAMUsed       => 32768,
+                maxTotalCores      => -1,
+                totalCoresUsed     =>  20,
+                maxTotalInstances  => -1,
+                totalInstancesUsed =>  4,
+            }
+        },
+        flavors_detail => [ { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 } ],
+    );
+
+    my $have = $hv->capacity;
+    is $have->{memory_mb},   undef, 'an unlimited memory quota is no number at all';
+    is $have->{memory_free}, undef, 'so there is no amount of it free';
+    is $have->{cpus_free},   undef, 'nor of cores';
+    is $hv->max_guests,      0,     'and an unlimited instance quota caps nothing';
+
+    is_deeply [ $hv->shortfalls( openstack_flavor => 'm1.medium', memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3 ) ], [],
+      'a guest its flavor holds fits, where before nothing did';
+
+    my $ok = $hv->check_cloud_quota;
+    ok $ok->{ok}, 'and preflight calls the quota fine';
+    like $ok->{what}, qr/unlimited/, 'saying it is unlimited rather than printing -1 at somebody';
+};
+
+subtest 'cheapest_for' => sub {
+    my $hv = cloud();
+
+    my @flavors = (
+        { name => 'm1.tiny',   ram => 512,   vcpus => 1, disk => 5 },
+        { name => 'm1.small',  ram => 2048,  vcpus => 1, disk => 20 },
+        { name => 'm1.medium', ram => 4096,  vcpus => 2, disk => 40 },
+        { name => 'm1.large',  ram => 16384, vcpus => 8, disk => 80 },
+    );
+    my $roomy = { absolute => { maxTotalRAMSize => 51200, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } };
+
+    $FAKE = Test::FakeCloud->new( flavors_detail => \@flavors, limits => $roomy );
+
+    # Smallest rather than cheapest: Nova gives a flavor no price at all.
+    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 10 * 1024**3 ),
+      { key => 'openstack_flavor', value => 'm1.small', monthly_cost => 0 },
+      'the smallest flavor that holds the guest, costing nothing that Nova will say';
+
+    is_deeply $hv->cheapest_for( memory_mb => 4096, cpus => 2, disk_bytes => 30 * 1024**3 ),
+      { key => 'openstack_flavor', value => 'm1.medium', monthly_cost => 0 },
+      'a bigger guest gets a bigger one';
+
+    is $hv->cheapest_for( memory_mb => 999999, cpus => 1, disk_bytes => 1 ), undef,
+      'and a guest no flavor holds is offered nothing';
+
+    # An offer the project's own quota would refuse is one nobody can accept:
+    # Nova turns the build down after somebody has agreed to pay for it.
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => \@flavors,
+        limits         => { absolute => { maxTotalRAMSize => 12288, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } },
+    );
+    $hv->{capacity} = undef;
+    is $hv->cheapest_for( memory_mb => 16384, cpus => 8, disk_bytes => 1 ), undef,
+      'a flavor the quota has no room for is not offered, however well it holds the guest';
+
+    # And Nova refuses a flavor under what the image says it needs: "Flavor's
+    # disk is smaller than the minimum size specified in image metadata".
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => \@flavors,
+        limits         => $roomy,
+        images         => [ { id => 'img-big', os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z', min_disk => 40, min_ram => 0 } ],
+    );
+    $hv->{capacity} = undef;
+    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 1, distro => 'ubuntu' ),
+      { key => 'openstack_flavor', value => 'm1.medium', monthly_cost => 0 },
+      'a guest is offered the smallest flavor its image will boot on, not the smallest that holds the guest';
+};
+
+subtest 'what the image asks of the flavor' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => [ { name => 'm1.small', ram => 2048, vcpus => 1, disk => 20 } ],
+        limits         => { absolute => { maxTotalRAMSize => 51200, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } },
+        images         => [ { id => 'img-big', os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z', min_disk => 40, min_ram => 4096 } ],
+    );
+
+    my @reasons = $hv->shortfalls( openstack_flavor => 'm1.small', memory_mb => 1024, cpus => 1, disk_bytes => 1, distro => 'ubuntu' );
+    like $reasons[0], qr/image[ ]that[ ]needs[ ]40GB[ ]of[ ]disk/,     'a flavor under the image min_disk is refused here, not by Nova twenty minutes in';
+    like $reasons[0], qr/m1[.]small[ ]has[ ]20GB/,                     'saying what the flavor has instead';
+    like $reasons[1], qr/image[ ]that[ ]needs[ ]4096MB[ ]of[ ]memory/, 'and one under its min_ram';
 };
 
 subtest 'a guest is a server with the domain for a name' => sub {
@@ -477,7 +593,7 @@ subtest 'building a guest the configuration cannot describe' => sub {
     like $err, qr/needs[ ]an[ ]image/,              'says which one is missing';
     like $err, qr/the[ ]distro[ ]recipe[ ]decides/, 'and what decides it';
 
-    $err = exception { $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04' ) };
+    $err = exception { $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04', size => 'm1.medium' ) };
     like $err, qr/needs[ ]'network'/, 'says which of the block\'s is missing';
     like $err, qr/hypervisors\.conf/, 'and where to put it';
     is scalar $FAKE->calls_to('create_vm'), 0, 'and nothing was built';

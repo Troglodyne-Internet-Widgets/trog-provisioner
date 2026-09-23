@@ -91,7 +91,7 @@ sub cloud_hv {
     );
 
     Trog::HV->forget();
-    my $hv = Trog::HV->new( cloud => 'testcloud', flavor => 'm1.medium', network => 'internal', %{ $opts{hv} // {} } );
+    my $hv = Trog::HV->new( cloud => 'testcloud', network => 'internal', %{ $opts{hv} // {} } );
 
     my $mock = Test::MockModule->new('Trog::HV::OpenStack');
     $mock->redefine( api => sub { $api } );
@@ -106,15 +106,17 @@ subtest 'a cloud is checked for what a cloud can be wrong about' => sub {
     ok $ok->{ok}, 'a credential that authenticates and a catalog with the three services';
 
     ($ok) = quietly( sub { $hv->check_cloud_resources } );
-    ok $ok->{ok}, 'a flavor and network the cloud has, and an image for the distro in use';
+    ok $ok->{ok}, 'a network the cloud has, the flavors the guests name, and an image for the distro in use';
     like $ok->{what}, qr/from[ ]img-noble/, 'naming the image the distro recipe gets';
 
     # Getting one of these wrong otherwise fails a provision minutes in, with an
     # error from the API rather than from us.
-    my ( $bad, $bad_mock ) = cloud_hv( hv => { flavor => 'm1.nope' } );
-    my ($failed) = quietly( sub { $bad->check_cloud_resources } );
-    ok !$failed->{ok}, 'and it notices when they are not';
+    my $in_config = Test::MockModule->new('Trog::HV');
+    $in_config->redefine( globals_in_use => sub { return ('m1.nope') } );
+    my ($failed) = quietly( sub { $hv->check_cloud_resources } );
+    ok !$failed->{ok}, 'and it notices a flavor a guest names that the cloud has not got';
     like $failed->{what}, qr/flavor[ ]'m1\.nope'/, 'naming the flavor';
+    $in_config->unmock('globals_in_use');
 
     my ( $bare, $bare_mock ) = cloud_hv( api => { images => [] } );
     ($failed) = quietly( sub { $bare->check_cloud_resources } );

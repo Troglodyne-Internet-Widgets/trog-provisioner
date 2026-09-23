@@ -77,6 +77,9 @@ our $BUSY_TIMEOUT   = 300;
 our $DELETE_TIMEOUT = 300;
 our $POLL           = 5;
 
+# What Linode's own monthly prices are a month of.
+our $HOURS_A_MONTH = 730;
+
 # What Linode reports in megabytes.
 my $MB = 1024 * 1024;
 
@@ -93,9 +96,10 @@ L<Trog::HV/backend_for(%opts)>.
 =cut
 
 sub config_keys {
-    return ( map { $_ => $_ } qw{linode_token region type firewall_id private_ip monthly_budget domain_dir} );
+    return ( map { $_ => $_ } qw{linode_token region firewall_id private_ip monthly_budget domain_dir} );
 }
-sub marker { return 'linode_token' }
+sub marker   { return 'linode_token' }
+sub size_key { return 'linode_type' }
 
 =head2 build(%opts)
 
@@ -136,20 +140,22 @@ has a correct value to show.
 sub describe ($self) { return 'Linode' . ( $self->{region} ? " in $self->{region}" : q{} ) }
 sub uri              { return $API_URL }
 
-=head2 region, type, firewall_id, private_ip, monthly_budget
+=head2 region, firewall_id, private_ip, monthly_budget
 
-Return the values that F<hypervisors.conf> set.  C<region> and C<type> have no
-default, because there is no safe guess at where a guest runs or what it costs.
-C<firewall_id> names a Cloud Firewall to put a new guest behind, and
-C<private_ip> gives it an address on Linode's private network.
-C<monthly_budget> is in the currency Linode bills in.
+Return the values that F<hypervisors.conf> set.  C<region> has no default,
+because there is no safe guess at where a guest runs.  C<firewall_id> names a
+Cloud Firewall to put a new guest behind, and C<private_ip> gives it an address
+on Linode's private network.  C<monthly_budget> is in the currency Linode bills
+in.
 
 What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
+Neither is what size it is.  A guest names that in its C<_global>, as
+C<linode_type>, and one that names none is not built here at all: see
+L</shortfalls(%needs)>.
 
 =cut
 
 sub region         ($self) { return $self->setting('region') }
-sub type           ($self) { return $self->setting('type') }
 sub firewall_id    ($self) { return $self->setting('firewall_id') }
 sub private_ip     ($self) { return $self->setting('private_ip') }
 sub monthly_budget ($self) { return $self->setting('monthly_budget') }
@@ -219,21 +225,26 @@ sub _filter ($query) { return Cpanel::JSON::XS::encode_json($query) }
 
 =head2 monthly_cost(%needs)
 
-The monthly price of the type this block builds, in its region.  Linode prices
-a type differently in some regions, and the region's price is the one that it
-bills.  C<%needs> does not change it, because every guest here is that type.
+The monthly price, in this block's region, of the type the guest names in
+C<linode_type>.  Linode prices a type differently in some regions, and the
+region's price is the one that it bills.
 
-Dies when C<type> or C<region> is not set, or Linode has no such type.
+Dies when the guest names no type, when C<region> is not set, or when Linode
+has no such type.  L</shortfalls(%needs)> answers for a guest that names none
+before anything asks its price.
 
 =cut
 
 sub monthly_cost {
-    my ($self) = @_;
+    my ( $self, %needs ) = @_;
 
-    die 'Say which type and region to build in, in the block for ' . $self->describe . " in hypervisors.conf\n"
-      unless $self->type && $self->region;
+    my $type = $needs{ $self->size_key };
+    die 'A guest is built on ' . $self->describe . " as the type it names in linode_type, and this one names none
+" unless $type;
+    die 'Say which region to build in, in the block for ' . $self->describe . " in hypervisors.conf
+" unless $self->region;
 
-    return $self->_price( $self->type, $self->region );
+    return $self->_price( $type, $self->region );
 }
 
 =head2 monthly_spend
@@ -254,7 +265,10 @@ sub monthly_spend {
     } $self->_linodes;
 }
 
-# The monthly price of a type in a region, or of its backup service.
+# The monthly price of a type in a region, or of its backup service.  Linode
+# gives 30 of its 75 types an hourly price and no monthly one -- the GPU and
+# accelerated ones -- so a month of one of those is $HOURS_A_MONTH hours of it,
+# which is the most it can cost rather than what it will.
 sub _price {
     my ( $self, $type_id, $region, $addon ) = @_;
 
@@ -262,12 +276,24 @@ sub _price {
     my $item = $addon ? $type->{addons}{$addon} : $type;
 
     my ($local) = grep { $_->{id} eq $region } @{ $item->{region_prices} // [] };
-    my $monthly = ( $local // $item->{price} // {} )->{monthly};
+    my $price = $local // $item->{price} // {};
 
-    die "Linode reports no monthly price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n"
-      unless defined $monthly;
+    return $price->{monthly}                 if defined $price->{monthly};
+    return $price->{hourly} * $HOURS_A_MONTH if defined $price->{hourly};
 
-    return $monthly;
+    die "Linode reports no price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n";
+}
+
+# Whether Linode prices this type by the month, which is what it bills for one
+# that runs all month.  A type it prices by the hour alone is not offered: an
+# offer says what a guest costs, and for those there is only a ceiling.
+sub _priced_monthly {
+    my ( $self, $type_id, $region ) = @_;
+
+    my $type = $self->_type($type_id);
+    my ($local) = grep { $_->{id} eq $region } @{ $type->{region_prices} // [] };
+
+    return defined( ( $local // $type->{price} // {} )->{monthly} ) ? 1 : 0;
 }
 
 # Every type Linode sells, which does not change within a run.
@@ -288,14 +314,61 @@ it reads cloud-init, is C<check_linode_resources>'s to find out before a build.
 
 sub image_for_distro ( $, $distro ) { return 'linode/' . $distro->distribution . $distro->release_version }
 
+=head2 cheapest_for(%needs)
+
+The cheapest type Linode sells that holds a guest wanting C<memory_mb>,
+C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one.
+
+A type that would take the account over C<monthly_budget> is not offered: an
+offer that cannot be accepted is noise.
+
+Linode prices 30 of its 75 types by the hour alone, its GPU and accelerated
+ones.  Those are offered too, priced at C<$HOURS_A_MONTH> hours of the hourly
+rate, and the offer comes back with C<hourly> as well, so that what is said
+about it can say that it is billed by the hour and has no monthly price to be
+capped at.  Undef when no type holds the guest,
+when the budget leaves room for none, or when Linode cannot be asked.
+
+=cut
+
+sub cheapest_for {
+    my ( $self, %needs ) = @_;
+
+    my @fit = eval {
+        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $MB >= ( $needs{disk_bytes} // 0 ) } $self->_all('get-linode-types');
+    };
+    return undef unless @fit;
+
+    my $room = $self->monthly_budget ? $self->monthly_budget - $self->monthly_spend : undef;
+
+    my @priced =
+      sort { $a->{monthly_cost} <=> $b->{monthly_cost} || $a->{memory} <=> $b->{memory} }
+      grep { !defined $room                            || $_->{monthly_cost} <= $room }
+      map {
+        my $type = $_;
+        +{ %$type, monthly_cost => eval { $self->_price( $type->{id}, $self->region ) } // 0 }
+      } @fit;
+
+    return undef unless @priced;
+    return {
+        key          => $self->size_key,
+        value        => $priced[0]{id},
+        monthly_cost => $priced[0]{monthly_cost},
+        $self->_priced_monthly( $priced[0]{id}, $self->region ) ? () : ( hourly => $priced[0]{price}{hourly} ),
+    };
+}
+
 =head1 CAPACITY
 
-=head2 capacity
+=head2 capacity(%needs)
 
-As L<Trog::HV/capacity>, for one guest of this block's type: its memory, its
-vCPUs and its disk, with nothing committed against them, because every guest
-gets a Linode of its own.  C<guests> is the number of Linodes on the account.
-It is kept for the life of the object.
+As L<Trog::HV/capacity(%needs)>, for one guest of the type it names in
+C<linode_type>: that type's memory, vCPUs and disk, with nothing committed
+against them, because every guest gets a Linode of its own.  C<guests> is the
+number of Linodes on the account.
+
+Dies when the guest names no type, which L</shortfalls(%needs)> answers for
+first.
 
 =head2 reserve_memory, reserve_cpus, reserve_disk
 
@@ -305,13 +378,15 @@ keep it for.
 =cut
 
 sub capacity {
-    my ($self) = @_;
-    return $self->{capacity} if $self->{capacity};
+    my ( $self, %needs ) = @_;
 
-    die 'Say which type to build, in the block for ' . $self->describe . " in hypervisors.conf\n" unless $self->type;
-    my $type = $self->_type( $self->type );
+    my $named = $needs{ $self->size_key };
+    die 'A guest is built on ' . $self->describe . " as the type it names in linode_type, and this one names none
+" unless $named;
 
-    return $self->{capacity} = {
+    my $type = $self->_type($named);
+
+    return {
         memory_mb        => $type->{memory},
         memory_committed => 0,
         memory_free      => $type->{memory},
@@ -330,13 +405,17 @@ sub reserve_disk   { return 0 }
 
 =head2 shortfalls(%needs)
 
-As L<Trog::HV/shortfalls(%needs)>, and one more: a guest that would take what
-the account costs a month over C<monthly_budget> does not fit.
+As L<Trog::HV/shortfalls(%needs)>, and two more.  A guest that names no
+C<linode_type> is not built here at all, which is how a guest is kept off
+Linode on purpose.  And a guest that would take what the account costs a month
+over C<monthly_budget> does not fit.
 
 =cut
 
 sub shortfalls {
     my ( $self, %needs ) = @_;
+
+    return 'names no linode_type, so it is not built on Linode' unless $needs{ $self->size_key };
 
     my @reasons = $self->SUPER::shortfalls(%needs);
     return @reasons unless $self->monthly_budget;
@@ -344,7 +423,7 @@ sub shortfalls {
     my $spend = $self->monthly_spend;
     my $cost  = $self->monthly_cost(%needs);
 
-    push @reasons, sprintf( 'a %s costs %.2f a month, and the account already costs %.2f of its monthly_budget of %.2f', $self->type, $cost, $spend, $self->monthly_budget )
+    push @reasons, sprintf( 'a %s costs %.2f a month, and the account already costs %.2f of its monthly_budget of %.2f', $needs{ $self->size_key }, $cost, $spend, $self->monthly_budget )
       if $spend + $cost > $self->monthly_budget;
 
     return @reasons;
@@ -423,7 +502,8 @@ sub _is_private ($address) { return $address =~ m/\A(?:10[.]|192[.]168[.]|172[.]
 
 Builds a guest, and waits until Linode reports it C<running>.
 
-C<name> is required, and is the label.  So is C<image>, which
+C<name> is required, and is the label.  So is C<size>, the type the guest
+names in C<linode_type>, and C<image>, which
 L</image_for_distro($distro)> answered when F<bin/new_config> wrote the guest's
 F<provision.conf>.  C<region> and C<type> default to the values in
 F<hypervisors.conf>.  C<user_data> is the cloud-init payload, which Linode's
@@ -445,17 +525,20 @@ sub create_guest {
     die "create_guest needs a name\n" unless $name;
     die "Linode labels are 64 characters at most, and '$name' is longer\n" if length $name > 64;
 
-    die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
-    foreach my $needed (qw{region type}) {
-        $spec{$needed} //= $self->setting($needed);
-        die "Building '$name' on " . $self->describe . " needs '$needed'.\nSet it in the block in hypervisors.conf.\n"
-          unless $spec{$needed};
-    }
+    die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides
+" unless $spec{image};
+    die "Building '$name' on " . $self->describe . " needs a size, which the guest names in linode_type
+" unless $spec{size};
+
+    $spec{region} //= $self->region;
+    die "Building '$name' on " . $self->describe . " needs 'region'.
+Set it in the block in hypervisors.conf.
+" unless $spec{region};
 
     my %body = (
         label     => $name,
         region    => $spec{region},
-        type      => $spec{type},
+        type      => $spec{size},
         image     => $spec{image},
         root_pass => _root_pass(),
         tags      => [$MANAGED_BY],
@@ -494,7 +577,7 @@ sub rebuild_guest {
     die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
     my %body = ( image => $image, root_pass => _root_pass(), booted => Cpanel::JSON::XS::true(), _metadata( $spec{user_data} ) );
-    $body{type} = $self->type if $self->type && $self->type ne $linode->{type};
+    $body{type} = $spec{size} if $spec{size} && $spec{size} ne $linode->{type};
 
     $self->_call( 'post-rebuild-linode-instance', { linodeId => $linode->{id} }, json => \%body );
 
@@ -750,8 +833,8 @@ FIX
 
 =head2 $result = $hv->check_linode_resources()
 
-Makes sure that the region and the type in F<hypervisors.conf> exist, that the
-region runs the metadata service, and that Linode has an image for each distro
+Makes sure that the region in F<hypervisors.conf> exists and runs the metadata
+service, that Linode sells every type the guests name in C<linode_type>, and that Linode has an image for each distro
 the configuration uses, which reads its cloud-init payload from that service.
 Without either of the last two a guest boots with no payload, and nothing says
 why until the wait for it runs out.
@@ -761,14 +844,11 @@ why until the wait for it runs out.
 sub check_linode_resources {
     my ($self) = @_;
 
-    my @unset = grep { !$self->$_ } qw{region type};
-    return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
-The block in hypervisors.conf has to say where to build and what.  What exists
-is Linode's to say:
+    return $self->_verdict( 0, 'Not configured: region', <<'FIX' ) unless $self->region;
+The block in hypervisors.conf has to say where to build.  What exists is
+Linode's to say:
 
     linode-cli regions list
-    linode-cli linodes types
-    linode-cli images list
 FIX
 
     # A list that could not be had says so, rather than reading as a list
@@ -781,13 +861,15 @@ FIX
     };
     return $self->_verdict( 0, 'Could not ask ' . $self->describe . ' what it has', "$@" ) unless $asked;
 
-    my $type = eval { $self->_type( $self->type ) };
+    my @types = $self->globals_in_use( $self->size_key );
 
     my @images = map { $self->image_for_distro($_) } $self->distros_in_use;
 
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };
-    push @wrong, "no type '" . $self->type . "'"     unless $type;
+    push @wrong, "no type '$_'" for grep {
+        !eval { $self->_type($_) }
+    } @types;
     push @wrong, 'no metadata service in ' . $self->region
       if $regions{ $self->region } && !any { $_ eq 'Metadata' } @{ $regions{ $self->region }{capabilities} // [] };
     foreach my $image (@images) {
@@ -796,7 +878,7 @@ FIX
           if $images{$image} && !any { $_ eq 'cloud-init' } @{ $images{$image}{capabilities} // [] };
     }
 
-    return $self->_verdict( 1, 'Builds a ' . $self->type . ' in ' . $self->region . ' from ' . join( ', ', @images ), q{} ) unless @wrong;
+    return $self->_verdict( 1, 'Builds in ' . $self->region . ' from ' . join( ', ', @images ) . ( @types ? ', as ' . join( ', ', @types ) : ', and no guest names a linode_type yet' ), q{} ) unless @wrong;
 
     return $self->_verdict( 0, 'Linode has ' . join( ', ', @wrong ), <<'FIX' );
 A guest gets its cloud-init payload from Linode's metadata service, so it has
@@ -810,24 +892,30 @@ FIX
 
 =head2 $result = $hv->check_linode_budget()
 
-Makes sure that one more guest fits in C<monthly_budget>.  Without a budget,
-it passes, and says that nothing caps what builds here cost.
+Makes sure the account is inside C<monthly_budget>, and says what a guest of
+each type the configuration names would add to it.  Without a budget, it
+passes, and says that nothing caps what builds here cost.
 
 =cut
 
 sub check_linode_budget {
     my ($self) = @_;
 
-    my ( $spend, $cost ) = eval { ( $self->monthly_spend, $self->monthly_cost ) };
-    return $self->_verdict( 0, 'Could not work out what the account costs', "$@" ) unless defined $cost;
+    my $spend = eval { $self->monthly_spend };
+    return $self->_verdict( 0, 'Could not work out what the account costs', "$@" ) unless defined $spend;
 
-    my $now = sprintf( 'The account costs %.2f a month, and a guest here %.2f more', $spend, $cost );
+    # Per type rather than per guest: what a guest costs is the type it names,
+    # and the configuration names as many as its guests do.
+    my @each = map { "$_ at " . sprintf( '%.2f', $self->monthly_cost( $self->size_key => $_ ) ) } grep {
+        eval { $self->monthly_cost( $self->size_key => $_ ); 1 }
+    } $self->globals_in_use( $self->size_key );
+    my $now = sprintf( 'The account costs %.2f a month', $spend ) . ( @each ? ', and a guest more: ' . join( ', ', @each ) : q{} );
 
     return $self->_verdict( 1, "$now; no monthly_budget caps it",                                             q{} ) unless $self->monthly_budget;
     return $self->_verdict( 1, sprintf( '%s, within a monthly_budget of %.2f', $now, $self->monthly_budget ), q{} )
-      if $spend + $cost <= $self->monthly_budget;
+      if $spend < $self->monthly_budget;
 
-    return $self->_verdict( 0, sprintf( '%s, over a monthly_budget of %.2f', $now, $self->monthly_budget ), <<'FIX' );
+    return $self->_verdict( 0, sprintf( '%s, at or over a monthly_budget of %.2f', $now, $self->monthly_budget ), <<'FIX' );
 Destroy a guest you have finished with, or raise monthly_budget in the block in
 hypervisors.conf.  A guest placed without a pin goes to a machine with room
 first, so this only stops the guests that nothing else could take.

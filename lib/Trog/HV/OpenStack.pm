@@ -14,6 +14,8 @@ use List::Util qw{first};
 use MIME::Base64();
 use OpenStack::MetaAPI();
 
+use Provisioner::Cookbook();
+
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
 
@@ -25,7 +27,7 @@ Cinder disks
 =head1 SYNOPSIS
 
     # You do not build one directly.  A hypervisors.conf block that names a cloud makes one.
-    my $hv = Trog::HV->new(cloud => 'openstack', flavor => 'm1.medium');
+    my $hv = Trog::HV->new(cloud => 'openstack');
 
     $hv->create_guest(name => 'vm.example.test', user_data => $cloud_config);
     print $hv->guest_ssh_ip($config), "\n";
@@ -42,7 +44,8 @@ backend can do:
 =over 4
 
 =item * A guest has a B<flavor>, not a disk size and a memory size.  The cloud
-sets which flavors exist, and F<hypervisors.conf> names one.
+sets which flavors exist, and a guest names the one it is in its C<_global>, as
+C<openstack_flavor>.
 
 =item * There is no B<storage pool>, and no disk image file on a filesystem.  A
 root disk comes from a Glance image.  Every other disk is a Cinder volume.
@@ -195,10 +198,11 @@ Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
 
 =cut
 
-sub marker { return 'cloud' }
+sub marker   { return 'cloud' }
+sub size_key { return 'openstack_flavor' }
 
 sub config_keys {
-    return ( map { $_ => $_ } qw{cloud flavor network floating_network availability_zone security_group keypair domain_dir} );
+    return ( map { $_ => $_ } qw{cloud network floating_network availability_zone security_group keypair domain_dir} );
 }
 
 =head2 build(%opts)
@@ -256,12 +260,15 @@ sub uri {
     return $self->{_uri} //= Trog::OpenStack::Config->load( $self->cloud )->{auth_url};
 }
 
-=head2 flavor, network, floating_network, availability_zone, security_group, keypair
+=head2 network, floating_network, availability_zone, security_group, keypair
 
 Return the values that F<hypervisors.conf> set for new guests.
 C<security_group> defaults to C<default>, which is the group that every project
-has.  The others have no default, because there is no safe guess for a flavor
-or a network.
+has.  The others have no default, because there is no safe guess for a network.
+
+What size a guest is is not the block's to say: a guest names its flavor in its
+C<_global>, as C<openstack_flavor>, and one that names none is not built here.
+See L<Trog::HV/size_key> and L</shortfalls(%needs)>.
 
 What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
 
@@ -277,7 +284,6 @@ Dies when the cloud has no such image, naming the two properties to set on one.
 
 =cut
 
-sub flavor            ($self) { return $self->setting('flavor') }
 sub network           ($self) { return $self->setting('network') }
 sub floating_network  ($self) { return $self->setting('floating_network') }
 sub availability_zone ($self) { return $self->setting('availability_zone') }
@@ -319,6 +325,55 @@ sub api {
     return $self->{_api} = OpenStack::MetaAPI->new( { auth => $auth } );
 }
 
+=head2 cheapest_for(%needs)
+
+The smallest flavor this cloud has that holds a guest wanting C<memory_mb>,
+C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one,
+with a cost of 0.
+
+Smallest rather than cheapest, because Nova gives a flavor no price: what a
+project pays for one is between it and whoever runs the cloud, and
+L<Trog::HV/monthly_cost(%needs)> answers 0 for the same reason.
+
+A flavor is only offered when the project's quota has room for it, and when it
+is at least the C<min_disk> and C<min_ram> of the image the guest boots.  Nova
+refuses both, and an offer nobody can accept is worse than none.  Undef when
+nothing left holds the guest, or when the cloud cannot be asked.
+
+=cut
+
+sub cheapest_for {
+    my ( $self, %needs ) = @_;
+
+    my $image = eval { $self->image_for(%needs) } // {};
+    my $have  = eval { $self->capacity };
+    return undef unless $have;
+
+    my @fit = eval {
+        grep {
+                 ref $_
+              && ( $_->{ram}   // 0 ) >= ( $needs{memory_mb} // 0 )
+              && ( $_->{vcpus} // 0 ) >= ( $needs{cpus}      // 0 )
+              && ( $_->{disk}  // 0 ) * $GB >=
+              ( $needs{disk_bytes} // 0 )
+
+              # What the image asks of what it is booted on.
+              && ( $_->{disk} // 0 ) >= ( $image->{min_disk} // 0 )
+              && ( $_->{ram} // 0 ) >=
+              ( $image->{min_ram} // 0 )
+
+              # And what the project has left, since an offer the quota would
+              # refuse is one nobody can accept.
+              && ( !defined $have->{memory_free} || $_->{ram} <= $have->{memory_free} )
+              && ( !defined $have->{cpus_free}   || $_->{vcpus} <= $have->{cpus_free} )
+        } $self->api->flavors_detail;
+    };
+    return undef unless @fit;
+
+    my ($smallest) = sort { $a->{ram} <=> $b->{ram} || $a->{vcpus} <=> $b->{vcpus} || $a->{disk} <=> $b->{disk} } @fit;
+    return { key => $self->size_key, value => $smallest->{name} // $smallest->{id}, monthly_cost => 0 };
+}
+
 =head1 CAPACITY
 
 A quota is what the project is allowed and what it already uses.  L<Trog::HV>
@@ -337,17 +392,66 @@ The cloud enforces its instance quota, whatever this tool decides.
 sub max_guests {
     my ($self) = @_;
     return $self->{max_guests} if $self->{max_guests};
-    return $self->capacity->{guests_allowed};
+    return $self->capacity->{guests_allowed} // 0;
+}
+
+=head2 shortfalls(%needs)
+
+As L<Trog::HV/shortfalls(%needs)>, and one more: a guest that names no
+C<openstack_flavor> is not built here at all, which is how a guest is kept off
+this cloud on purpose.
+
+=cut
+
+sub shortfalls {
+    my ( $self, %needs ) = @_;
+
+    my $named = $needs{ $self->size_key };
+    return 'names no openstack_flavor, so it is not built on this cloud' unless $named;
+
+    my $flavor = eval { $self->flavor_for(%needs) };
+    return "names the flavor '$named', which this cloud has not got" unless $flavor;
+
+    # What the guest gets is the flavor, so that is what its memory, vCPUs and
+    # disk are measured against -- and what the project's quota pays for.
+    my @reasons;
+    push @reasons, sprintf( 'wants %dMB of memory, and %s has %dMB', $needs{memory_mb}, $named, $flavor->{ram} )
+      if ( $needs{memory_mb} // 0 ) > ( $flavor->{ram} // 0 );
+    push @reasons, sprintf( 'wants %d vCPUs, and %s has %d', $needs{cpus}, $named, $flavor->{vcpus} )
+      if ( $needs{cpus} // 0 ) > ( $flavor->{vcpus} // 0 );
+    push @reasons, sprintf( 'wants %dGB of disk, and %s has %dGB', ( $needs{disk_bytes} // 0 ) / $GB, $named, $flavor->{disk} // 0 )
+      if ( $needs{disk_bytes} // 0 ) > ( $flavor->{disk} // 0 ) * $GB;
+
+    # And what the image asks of whatever it is booted on, which Nova refuses
+    # a flavor under: "Flavor's disk is smaller than the minimum size specified
+    # in image metadata".
+    my $image = eval { $self->image_for(%needs) };
+    if ($image) {
+        push @reasons, sprintf( 'boots an image that needs %dGB of disk, and %s has %dGB', $image->{min_disk}, $named, $flavor->{disk} // 0 )
+          if ( $image->{min_disk} // 0 ) > ( $flavor->{disk} // 0 );
+        push @reasons, sprintf( 'boots an image that needs %dMB of memory, and %s has %dMB', $image->{min_ram}, $named, $flavor->{ram} // 0 )
+          if ( $image->{min_ram} // 0 ) > ( $flavor->{ram} // 0 );
+    }
+
+    return ( @reasons, $self->SUPER::shortfalls( %needs, memory_mb => $flavor->{ram}, cpus => $flavor->{vcpus}, disk_bytes => 0 ) );
 }
 
 =head2 capacity
 
-As L<Trog::HV/capacity>.  Memory, cores and instances come from the Nova limits.
-Disk comes from the Cinder limits, because block storage has its own quota.
+As L<Trog::HV/capacity(%needs)>.  Memory, cores and instances are the project's
+Nova quota, and what it has already spent of it.  A quota that is unlimited
+comes back undef rather than as the C<-1> Nova reports it as, which is not an
+amount to subtract from: a project with an unlimited quota has room for
+anything, and arithmetic on C<-1> says it has room for nothing.
 
-C<memory_mb> and C<cpus> are the quota, not a physical count.  The quota is the
-only number that limits the project.  The result is kept for the life of the
-object, as in the libvirt backend.
+C<disk_free> is undef.  A guest here boots from an image onto the disk of its
+flavor, so nothing it needs comes out of the Cinder quota, and refusing a guest
+for want of block storage it never asks for is how a project with no volume
+quota came to be unable to build anything.  L</create_volume($domain, $purpose,
+size_gb =E<gt> $n)> is what spends that quota, and nothing in a provision calls
+it.
+
+The result is kept for the life of the object, as in the libvirt backend.
 
 =cut
 
@@ -355,31 +459,69 @@ sub capacity {
     my ($self) = @_;
     return $self->{capacity} if $self->{capacity};
 
-    my $nova = $self->api->limits->{absolute}        // {};
-    my $disk = $self->api->volume_limits->{absolute} // {};
+    my $nova = $self->api->limits->{absolute} // {};
 
-    my $memory_mb   = $nova->{maxTotalRAMSize} // 0;
-    my $memory_used = $nova->{totalRAMUsed}    // 0;
-    my $cpus        = $nova->{maxTotalCores}   // 0;
-    my $cpus_used   = $nova->{totalCoresUsed}  // 0;
-
-    my $disk_total = ( $disk->{maxTotalVolumeGigabytes} // 0 ) * $GB;
-    my $disk_used  = ( $disk->{totalGigabytesUsed}      // 0 ) * $GB;
+    my $memory_mb   = _limit( $nova->{maxTotalRAMSize} );
+    my $memory_used = $nova->{totalRAMUsed} // 0;
+    my $cpus        = _limit( $nova->{maxTotalCores} );
+    my $cpus_used   = $nova->{totalCoresUsed} // 0;
 
     return $self->{capacity} = {
         memory_mb        => $memory_mb,
         memory_committed => $memory_used,
-        memory_free      => $memory_mb - $memory_used - $self->reserve_memory,
+        memory_free      => defined $memory_mb ? $memory_mb - $memory_used - $self->reserve_memory : undef,
         cpus             => $cpus,
         cpus_allocatable => $cpus,
         cpus_committed   => $cpus_used,
-        cpus_free        => $cpus - $cpus_used - $self->reserve_cpus,
-        disk_free        => $disk_total - $disk_used - $self->reserve_disk,
+        cpus_free        => defined $cpus ? $cpus - $cpus_used - $self->reserve_cpus : undef,
+        disk_free        => undef,
         guests           => $nova->{totalInstancesUsed} // 0,
 
         # Not part of what Trog::HV reads.  max_guests uses it.
-        guests_allowed => $nova->{maxTotalInstances} // 0,
+        guests_allowed => _limit( $nova->{maxTotalInstances} ),
     };
+}
+
+# A quota Nova reports as -1 is unlimited, and undef is how that is said here.
+sub _limit {
+    my ($value) = @_;
+    return undef if !defined $value || $value < 0;
+    return $value;
+}
+
+=head2 image_for(%needs)
+
+The image a guest of this C<distro> boots, as the cloud describes it, or undef
+when there is none.  L</image_for_distro($distro)> answers which it is; this
+answers what it is, because an image says the least it can be booted on in its
+C<min_disk> and C<min_ram>, and Nova refuses a flavor under either.
+
+=cut
+
+sub image_for {
+    my ( $self, %needs ) = @_;
+
+    my $distro  = eval { Provisioner::Cookbook->load( $needs{distro} // 'ubuntu' ) } or return undef;
+    my $id      = eval { $self->image_for_distro($distro) }                          or return undef;
+    my ($image) = grep { ref $_ && ( $_->{id} // q{} ) eq $id } $self->api->list_images( os_distro => $distro->distribution, os_version => $distro->release_version );
+
+    return $image;
+}
+
+=head2 flavor_for(%needs)
+
+The flavor the guest named in C<openstack_flavor>, as the cloud describes it,
+or undef when the cloud has no such flavor.
+
+=cut
+
+sub flavor_for {
+    my ( $self, %needs ) = @_;
+
+    my $named = $needs{ $self->size_key } or return undef;
+    my ($flavor) = grep { ref $_ && ( ( $_->{name} // q{} ) eq $named || ( $_->{id} // q{} ) eq $named ) } $self->api->flavors_detail;
+
+    return $flavor;
 }
 
 =head1 GUESTS
@@ -608,7 +750,9 @@ Builds a guest, and waits until Nova reports it C<ACTIVE>.  If there is a
 C<floating_network>, it also attaches a floating IP from that network.
 
 C<name> is required, and so is C<image>, which L</image_for_distro($distro)>
-answered when F<bin/new_config> wrote the guest's F<provision.conf>.  C<flavor>,
+answered when F<bin/new_config> wrote the guest's F<provision.conf>, and
+C<size>, the flavor it names in C<openstack_flavor>.  C<flavor> is that same
+value under Nova's name for it.  C<network>,
 C<network>, C<floating_network>, C<availability_zone>, C<security_group> and
 C<keypair> each default to the value in F<hypervisors.conf>.
 
@@ -621,7 +765,7 @@ C<metadata> that the caller passes.
 Returns the server.  It includes C<floating_ip_address> when a floating IP was
 attached.
 
-Dies when C<name>, C<flavor>, C<image> or C<network> has no value.  Dies when
+Dies when C<name>, C<size>, C<image> or C<network> has no value.  Dies when
 the server does not become C<ACTIVE>.
 
 =cut
@@ -635,6 +779,7 @@ sub create_guest {
     # floating_network is not required.  A cloud whose only network is external
     # needs no floating IP, and guest_ssh_ip reports a guest it cannot reach.
     die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
+    $spec{flavor} //= $spec{size};
     foreach my $needed (qw{flavor network}) {
         $spec{$needed} //= $self->setting($needed);
         die "Building '$name' on " . $self->describe . " needs '$needed'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
@@ -912,9 +1057,9 @@ FIX
 
 =head2 $result = $hv->check_cloud_resources()
 
-Makes sure that the flavor and network in F<hypervisors.conf>, and the floating
-network if one is set, exist on this cloud, and that it has an image for each
-distro the configuration uses.  A wrong name otherwise fails a provision
+Makes sure that the network in F<hypervisors.conf>, and the floating network if
+one is set, exist on this cloud, that it has every flavor the guests name in
+C<openstack_flavor>, and an image for each distro the configuration uses.  A wrong name otherwise fails a provision
 minutes later, with an error from the API.
 
 =cut
@@ -922,10 +1067,7 @@ minutes later, with an error from the API.
 sub check_cloud_resources {
     my ($self) = @_;
 
-    my %wanted = (
-        flavor  => $self->flavor,
-        network => $self->network,
-    );
+    my %wanted = ( network => $self->network );
     $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
 
     my @unset = grep { !$wanted{$_} } sort keys %wanted;
@@ -939,7 +1081,6 @@ exists is the cloud's to say, so ask it rather than guessing:
 FIX
 
     my %found;
-    $found{flavor}           = eval { scalar $self->api->look_by_id_or_name( flavors  => $wanted{flavor} ) };
     $found{network}          = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{network} ) };
     $found{floating_network} = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{floating_network} ) }
       if exists $wanted{floating_network};
@@ -960,13 +1101,20 @@ FIX
     }
     return $self->_verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
 
-    return $self->_verdict( 1, "Builds as $wanted{flavor} from " . join( ', ', @images ) . " on $wanted{network}", q{} );
+    my @flavors = $self->globals_in_use( $self->size_key );
+    my @missing = grep {
+        !eval { scalar $self->api->look_by_id_or_name( flavors => $_ ) }
+    } @flavors;
+    return $self->_verdict( 0, 'The cloud has no flavor ' . join( ', ', map { "'$_'" } @missing ), "Ask the cloud what it has:\n\n    openstack flavor list\n" ) if @missing;
+
+    return $self->_verdict( 1, 'Builds from ' . join( ', ', @images ) . " on $wanted{network}" . ( @flavors ? ', as ' . join( ', ', @flavors ) : ', and no guest names an openstack_flavor yet' ), q{} );
 }
 
 =head2 $result = $hv->check_cloud_quota()
 
-Makes sure that the quota has room for one more guest: an instance, memory,
-cores and disk.  On a cloud, the quota takes the place of hardware limits.
+Makes sure that the quota has room for one more guest: an instance, memory and
+cores.  On a cloud, the quota takes the place of hardware limits.  A quota that
+is unlimited is never full, and says so rather than reading as empty.
 
 =cut
 
@@ -976,16 +1124,16 @@ sub check_cloud_quota {
     my $have = eval { $self->capacity };
     return $self->_verdict( 0, 'Could not read the quota for ' . $self->describe, "$@" ) unless $have;
 
+    # An undefined free is a quota with no limit in it, which is never full.
     my @full;
-    push @full, 'instances' if $self->max_guests && $have->{guests} >= $self->max_guests;
-    push @full, 'memory'    if $have->{memory_free} <= 0;
-    push @full, 'cpus'      if $have->{cpus_free} <= 0;
-    push @full, 'disk'      if $have->{disk_free} <= 0;
+    push @full, 'instances' if $self->max_guests            && $have->{guests} >= $self->max_guests;
+    push @full, 'memory'    if defined $have->{memory_free} && $have->{memory_free} <= 0;
+    push @full, 'cpus'      if defined $have->{cpus_free}   && $have->{cpus_free} <= 0;
 
     return $self->_verdict( 0, 'No quota left for: ' . join( ', ', @full ), <<"FIX" ) if @full;
-The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests ]} instances,
-@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} ]}MB of memory and
-@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} ]} cores.
+The project holds @{[ $have->{guests} ]} of @{[ $self->max_guests || 'unlimited' ]} instances,
+@{[ $have->{memory_committed} ]}MB of @{[ $have->{memory_mb} // 'unlimited' ]}MB of memory and
+@{[ $have->{cpus_committed} ]} of @{[ $have->{cpus} // 'unlimited' ]} cores.
 
 Destroy a guest you have finished with, or ask for more quota.  Note that the
 reserves in hypervisors.conf are held back out of the quota, so a project that
@@ -995,8 +1143,10 @@ FIX
     return $self->_verdict(
         1,
         sprintf(
-            'Quota: %d/%d instances used, %dMB memory and %d cores free',
-            $have->{guests}, $self->max_guests, $have->{memory_free}, $have->{cpus_free}
+            'Quota: %s/%s instances used, %s of memory and %s cores free',
+            $have->{guests}, $self->max_guests || 'unlimited',
+            defined $have->{memory_free} ? $have->{memory_free} . 'MB' : 'unlimited memory',
+            $have->{cpus_free} // 'unlimited'
         ),
         q{}
     );

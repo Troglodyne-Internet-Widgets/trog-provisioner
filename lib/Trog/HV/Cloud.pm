@@ -45,8 +45,9 @@ $seed, %opts)> uses three of them:
 
 =over 4
 
-=item * C<create_guest(name =E<gt> $domain, image =E<gt> $image, user_data =E<gt>
-$payload)>, which makes a new guest and returns once it runs.
+=item * C<create_guest(name =E<gt> $domain, image =E<gt> $image, size =E<gt>
+$size, user_data =E<gt> $payload)>, which makes a new guest and returns once it
+runs.  C<size> is what the guest named in this backend's C<size_key>.
 
 =item * C<rebuild_guest($domain, image =E<gt> $image, user_data =E<gt> $payload)>,
 which puts a new root disk under a guest that exists, keeps its addresses, and
@@ -195,8 +196,12 @@ do.
 sub provision_guest {
     my ( $self, $config, $seed, %opts ) = @_;
 
-    my $domain   = $config->param('domain');
-    my $image    = $config->param('image');
+    my $domain = $config->param('domain');
+    my $image  = $config->param('image');
+
+    # What the guest is here, by this backend's name for a size: the value of
+    # its size_key, which bin/new_config wrote into provision.conf.
+    my %size     = $self->size_key ? ( size => scalar $config->param( $self->size_key ) ) : ();
     my $existing = $self->domain_exists($domain);
 
     if ( $existing && $opts{reuse} ) {
@@ -204,11 +209,11 @@ sub provision_guest {
     }
     elsif ($existing) {
         print 'Asking ' . $self->describe . " to rebuild $domain...\n";
-        $self->rebuild_guest( $domain, image => $image, user_data => $seed->{'user-data'} );
+        $self->rebuild_guest( $domain, image => $image, %size, user_data => $seed->{'user-data'} );
     }
     else {
         print 'Asking ' . $self->describe . " for $domain...\n";
-        $self->create_guest( name => $domain, image => $image, user_data => $seed->{'user-data'} );
+        $self->create_guest( name => $domain, image => $image, %size, user_data => $seed->{'user-data'} );
     }
 
     my $ip = $self->guest_ssh_ip($config);
