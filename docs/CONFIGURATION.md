@@ -198,7 +198,15 @@ The same reference works in two other files, for the same reason. Any value in a
 resolved when something reads that value, so a run that touches no hypervisor
 whose block holds one is never asked for the passphrase. In `clouds.yaml`, the
 `application_credential_secret` can be one, and `Trog::OpenStack::Auth` resolves
-it only when it has to ask Keystone for a token.
+it only when it has to ask Keystone for a token. A reference in any other value
+of that file is refused when it is read, because nothing resolves those.
+
+Nothing else that reads `clouds.yaml` understands a reference: the OpenStack
+tools read the file as it is written, so they send the reference itself to
+Keystone and get a 401 that explains nothing. `bin/openstack-env` resolves the
+credential and prints the environment they do read, so
+`eval "$(bin/openstack-env)"` gives you a shell that `openstack` works in. It
+refuses to print to a terminal, where the secret would stay in the scrollback.
 
 The group is part of the address. `secret:koan/somebox-github-ssh/password` and
 `secret:github/somebox-github-ssh/password` are two different secrets, and an

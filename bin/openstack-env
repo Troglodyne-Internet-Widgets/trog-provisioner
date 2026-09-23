@@ -1,0 +1,169 @@
+#!/usr/bin/env perl
+package Trog::Bin::OpenStackEnv;
+
+#ABSTRACT: Hand a cloud's credential to the tools that read clouds.yaml.
+
+use 5.041;
+
+use strict;
+use warnings FATAL => 'all';
+
+use re '/aasx';
+
+use Getopt::Long qw{GetOptionsFromArray};
+use Pod::Usage;
+
+use FindBin::libs;
+
+use Trog::Credentials();
+use Trog::OpenStack::Auth();
+use Trog::OpenStack::Config();
+
+=head1 NAME
+
+openstack-env - print the environment that the OpenStack tools need, with the
+credential resolved
+
+=head1 USAGE
+
+    eval "$(bin/openstack-env)"
+    openstack server list
+
+    bin/openstack-env --cloud othercloud
+    bin/openstack-env --show          # to a terminal, on purpose
+
+=head1 DESCRIPTION
+
+A F<clouds.yaml> of ours can hold its application credential as
+C<secret:GROUP/ENTRY/FIELD>, which keeps it out of a file that lives in a
+repository.  This toolkit resolves that reference.  Nothing else does:
+C<python-openstackclient>, Terraform and everything else built on openstacksdk
+read F<clouds.yaml> as it is written, so they send the reference itself to
+Keystone and get a 401 that explains nothing.
+
+There is no way to teach them, because F<clouds.yaml> has no indirection for
+secrets at all -- what it offers is F<secure.yaml>, which is the same plaintext
+in a second file.  So resolve the credential here and hand it over in the
+environment, which every one of them does read:
+
+    eval "$(bin/openstack-env)"
+
+The output is C<export> lines for C<OS_AUTH_TYPE>, C<OS_AUTH_URL>,
+C<OS_APPLICATION_CREDENTIAL_ID>, C<OS_APPLICATION_CREDENTIAL_SECRET>,
+C<OS_INTERFACE>, C<OS_IDENTITY_API_VERSION> and C<OS_REGION_NAME> where the
+cloud sets one.  It does not export C<OS_CLOUD>: that would send the client
+back to the file this is working around.
+
+=head2 It prints a secret
+
+So it refuses to print to a terminal, where the secret would sit in the
+scrollback of a session somebody else may read over.  C<--show> says to do it
+anyway.  Piped or captured, as in the C<eval> above, it prints without asking.
+
+The shell it is evaluated in holds the secret in its environment, and every
+child of that shell inherits it.  That is the trade for using tools that
+cannot read the store; close the shell when you have finished with it.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--cloud> NAME
+
+Which cloud in F<clouds.yaml>.  The default is C<$OS_CLOUD>, or the only cloud
+when the file has one.
+
+=item B<--credentials>
+
+Reads the passwords the run needs from standard input before it starts, and
+does not ask for them.  Resolving the credential opens the secret store.  See
+L<Trog::Credentials> for the format.
+
+=item B<--show>
+
+Print to a terminal, which is refused by default.
+
+=back
+
+=cut
+
+sub main {
+    my @args = @_;
+
+    my ( $name, $credentials, $show, $help );
+    GetOptionsFromArray(
+        \@args,
+        'cloud=s'     => \$name,
+        'credentials' => \$credentials,
+        'show'        => \$show,
+        'help'        => \$help,
+    ) or pod2usage( -exitval => 2, -verbose => 1, -input => __FILE__ );
+    pod2usage( -exitval => 0, -verbose => 2, -input => __FILE__ ) if $help;
+
+    # Before anything asks for a password, and only with --credentials.
+    Trog::Credentials->load() if $credentials;
+
+    die "This prints the credential, so it refuses a terminal: pipe it, or --show.\n" . qq{    eval "\$(bin/openstack-env)"\n}
+      if _is_terminal() && !$show;
+
+    my $cloud  = Trog::OpenStack::Config->load($name);
+    my $secret = Trog::OpenStack::Auth->secret_for($cloud);
+    $secret = $secret->() if ref $secret eq 'CODE';
+
+    die "Cloud '$cloud->{name}' in $cloud->{source} has no application credential secret.\n"
+      unless length $secret;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
+
+    print exports(
+        $cloud,
+        OS_APPLICATION_CREDENTIAL_SECRET => $secret,
+    );
+
+    return 0;
+}
+
+=head2 $lines = exports($cloud, %override)
+
+Returns the C<export> lines for C<$cloud>, one per line.  A pair in
+C<%override> is written as it is given, which is how the resolved secret gets
+in.  A value the cloud does not set is left out rather than exported empty,
+because an empty C<OS_> variable is not the same as an unset one to every
+client that reads it.
+
+=cut
+
+sub exports {
+    my ( $cloud, %override ) = @_;
+
+    my %from = (
+        OS_AUTH_TYPE                 => $cloud->{auth_type},
+        OS_AUTH_URL                  => $cloud->{auth_url},
+        OS_APPLICATION_CREDENTIAL_ID => $cloud->{application_credential_id},
+        OS_INTERFACE                 => $cloud->{interface},
+        OS_IDENTITY_API_VERSION      => $cloud->{identity_api_version},
+        OS_REGION_NAME               => $cloud->{region_name},
+        %override,
+    );
+
+    return join( q{}, map { "export $_=" . _quote( $from{$_} ) . "\n" } grep { defined $from{$_} && length $from{$_} } sort keys %from );    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a value of "0" is still a value
+}
+
+# Single quotes, because a secret can hold anything a shell would read: a
+# quote inside one closes it, escapes it, and opens another.
+sub _quote {
+    my ($value) = @_;
+    return q{'} . ( $value =~ s/'/'\\''/gr ) . q{'};
+}
+
+sub _is_terminal { return -t *STDOUT ? 1 : 0 }    ## no critic (InputOutput::ProhibitInteractiveTest) -- whether the secret would land in somebody's scrollback is exactly the question
+
+=head1 SEE ALSO
+
+L<Trog::OpenStack::Config>, which reads F<clouds.yaml>.
+
+L<Trog::OpenStack::Auth>, which resolves the credential to ask Keystone with.
+
+=cut
+
+main(@ARGV) unless caller;
+
+1;

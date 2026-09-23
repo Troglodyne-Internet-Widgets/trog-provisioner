@@ -122,8 +122,7 @@ sub from_cloud {
     die "Cloud '$cloud->{name}' in $cloud->{source} authenticates with '$cloud->{auth_type}'.\n" . "This only speaks v3applicationcredential.\n"
       unless $cloud->{auth_type} eq 'v3applicationcredential';
 
-    my $secret = $cloud->{application_credential_secret};
-    $secret = _from_keepass($secret) if defined $secret && index( $secret, 'secret:' ) == 0;
+    my $secret = $class->secret_for($cloud);
 
     return $class->new(
         $cloud->{auth_url},
@@ -206,6 +205,27 @@ sub new {
     $self->_store;
 
     return $self;
+}
+
+=head2 secret_for($cloud)
+
+Returns the application credential secret of C<$cloud>, which is a cloud as
+L<Trog::OpenStack::Config/load> returns one.  A secret written out is itself.
+A C<secret:> reference comes back as a code reference that fetches it from
+F<secrets.kdbx> when it is called, so a run that never asks Keystone for a
+token never opens the store.  Dies at once when the reference is malformed.
+
+F<bin/openstack-env> calls it and then the code reference, to hand the secret
+to the tools that read F<clouds.yaml> and have no idea what a reference is.
+
+=cut
+
+sub secret_for {
+    my ( $class, $cloud ) = @_;
+
+    my $secret = $cloud->{application_credential_secret};
+    return $secret unless defined $secret && index( $secret, 'secret:' ) == 0;
+    return _from_keepass($secret);
 }
 
 =head2 _from_keepass($reference)

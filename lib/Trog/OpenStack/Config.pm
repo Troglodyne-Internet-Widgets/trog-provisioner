@@ -168,7 +168,7 @@ sub load {
     die "$path has no cloud named '$name'.  It has: " . join( ', ', @names ) . "\n"
       unless ref $cloud eq 'HASH';
 
-    return $class->_flatten( $cloud, $name, $path );
+    return $class->_refuse_unresolved( $class->_flatten( $cloud, $name, $path ), $path );
 }
 
 =head2 _flatten($cloud, $name, $path)
@@ -176,6 +176,30 @@ sub load {
 Returns C<$cloud> as the hash that C<load> describes.
 
 =cut
+
+=head2 _refuse_unresolved($cloud, $path)
+
+Returns the cloud, or dies when a value other than the application credential
+secret is a C<secret:> reference.
+
+Nothing resolves those.  L<Trog::OpenStack::Auth> resolves the credential when
+it asks Keystone for a token, and every other value is used as it is written --
+by this toolkit, and by every other reader of a F<clouds.yaml>, none of which
+has ever heard of a reference.  A region called C<secret:...> would go to
+Keystone as that string, so say so here rather than there.
+
+=cut
+
+sub _refuse_unresolved {
+    my ( $class, $cloud, $path ) = @_;
+
+    my @refs = grep { defined $cloud->{$_} && !ref $cloud->{$_} && index( $cloud->{$_}, 'secret:' ) == 0 && $_ ne 'application_credential_secret' } sort keys %$cloud;
+
+    die "In $path, " . join( ' and ', @refs ) . " is a secret: reference, and nothing resolves it.\n" . "Only application_credential_secret may be one, which Trog::OpenStack::Auth\n" . "resolves when it asks Keystone for a token.  Write the value out, or give it\n" . "in the environment.\n"
+      if @refs;
+
+    return $cloud;
+}
 
 sub _flatten {
     my ( $class, $cloud, $name, $path ) = @_;

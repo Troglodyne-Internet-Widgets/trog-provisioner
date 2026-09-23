@@ -178,6 +178,26 @@ subtest 'an empty environment variable is not an override' => sub {
       'the file still wins';
 };
 
+subtest 'a reference nothing resolves is said, rather than sent to Keystone' => sub {
+    clean_env();
+
+    # The credential is the one value something resolves: Trog::OpenStack::Auth
+    # does it when it asks for a token.  Anything else is used as written, here
+    # and by every other reader of a clouds.yaml, none of which has heard of a
+    # reference.
+    my $referenced = $ONE_CLOUD =~ s/"shhh"/"secret:openstack\/credential\/password"/r;
+    write_clouds( "$ENV{HOME}/clouds.yaml", $referenced );
+    is Trog::OpenStack::Config->load()->{application_credential_secret}, 'secret:openstack/credential/password',
+      'the credential comes back as the reference, for Auth to resolve when it needs to';
+
+    clean_env();
+    write_clouds( "$ENV{HOME}/clouds.yaml", $ONE_CLOUD =~ s/"RegionOne"/"secret:openstack\/region\/password"/r );
+    my $err = exception { Trog::OpenStack::Config->load() };
+    like $err, qr/region_name[ ]is[ ]a[ ]secret:[ ]reference/, 'a reference anywhere else is refused, naming the key';
+    like $err, qr/nothing[ ]resolves[ ]it/,                    'saying nothing will resolve it';
+    like $err, qr/clouds\.yaml/,                               'and which file it is in';
+};
+
 subtest 'what the errors say' => sub {
     clean_env();
     like exception { Trog::OpenStack::Config->load() }, qr/Could[ ]not[ ]read[ ]clouds\.yaml/,
