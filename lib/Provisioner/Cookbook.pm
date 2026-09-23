@@ -1229,9 +1229,6 @@ sub global_schema {
                 description => 'The nameservers a guest asks, in order.  A loopback address belongs to a guest that runs its own, and nostubresolver puts that one in front.',
             },
 
-            dhcp_devname   => { type => 'string', description => 'What the guest calls the interface on the NAT of the hypervisor.  Unset takes the name from the hypervisor, which pins the slot that names it.' },
-            bridge_devname => { type => 'string', description => 'What the guest calls the interface on the bridge that carries its real address.' },
-
             linode_type      => { type => 'string', description => 'What this guest is on Linode: a type, such as g6-standard-2.  A guest that names none is not built on Linode.  `linode-cli linodes types` lists them.' },
             openstack_flavor => { type => 'string', description => 'What this guest is on an OpenStack cloud: a flavor, by name or id.  A guest that names none is not built on one.  `openstack flavor list` lists them.' },
 

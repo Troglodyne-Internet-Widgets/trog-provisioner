@@ -19,8 +19,6 @@ _base:
         admin_gecos: Testy McTester    # Who to blame
         gateway: 1.1.1.1               # The gateway of the guests
         resolvers: [1.1.1.1, 8.8.8.8]  # What the guests resolve with
-        bridge_devname: ens4           # The device that gets the static address
-        dhcp_devname: ens3             # The device that gets a DHCP address
         ip_pool:
             cidr: 192.0.2.0/26         # The static addresses a guest can get
         nameservers:
