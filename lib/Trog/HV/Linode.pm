@@ -31,7 +31,6 @@ Trog::HV::Linode - the Linode backend: a guest is a Linode, bought by the month
     linode_token   = secret:linode/api/password
     region         = us-east
     type           = g6-standard-2
-    image          = linode/ubuntu24.04
     monthly_budget = 200
 
 =head1 DESCRIPTION
@@ -98,7 +97,7 @@ L<Trog::HV/backend_for(%opts)>.
 =cut
 
 sub config_keys {
-    return ( map { $_ => $_ } qw{linode_token region type image firewall_id private_ip monthly_budget domain_dir} );
+    return ( map { $_ => $_ } qw{linode_token region type firewall_id private_ip monthly_budget domain_dir} );
 }
 sub marker { return 'linode_token' }
 
@@ -139,19 +138,20 @@ has a correct value to show.
 sub describe ($self) { return 'Linode' . ( $self->{region} ? " in $self->{region}" : q{} ) }
 sub uri              { return $API_URL }
 
-=head2 region, type, image, firewall_id, private_ip, monthly_budget
+=head2 region, type, firewall_id, private_ip, monthly_budget
 
-Return the values that F<hypervisors.conf> set.  C<region>, C<type> and
-C<image> have no default, because there is no safe guess at where a guest runs,
-what it costs, or what it boots.  C<firewall_id> names a Cloud Firewall to put
-a new guest behind, and C<private_ip> gives it an address on Linode's private
-network.  C<monthly_budget> is in the currency Linode bills in.
+Return the values that F<hypervisors.conf> set.  C<region> and C<type> have no
+default, because there is no safe guess at where a guest runs or what it costs.
+C<firewall_id> names a Cloud Firewall to put a new guest behind, and
+C<private_ip> gives it an address on Linode's private network.
+C<monthly_budget> is in the currency Linode bills in.
+
+What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
 
 =cut
 
 sub region         ($self) { return $self->{region} }
 sub type           ($self) { return $self->{type} }
-sub image          ($self) { return $self->{image} }
 sub firewall_id    ($self) { return $self->{firewall_id} }
 sub private_ip     ($self) { return $self->{private_ip} }
 sub monthly_budget ($self) { return $self->{monthly_budget} }
@@ -289,6 +289,16 @@ sub _type {
     return $self->{_types}{$id} // die "Linode has no type '$id'\n";
 }
 
+=head2 image_for_distro($distro)
+
+The Linode image for the distro's distribution and release, which Linode names
+by both run together: C<linode/ubuntu24.04>.  Whether Linode has it, and whether
+it reads cloud-init, is C<check_linode_resources>'s to find out before a build.
+
+=cut
+
+sub image_for_distro ( $, $distro ) { return 'linode/' . $distro->distribution . $distro->release_version }
+
 =head1 CAPACITY
 
 =head2 capacity
@@ -424,9 +434,11 @@ sub _is_private ($address) { return $address =~ m/\A(?:10[.]|192[.]168[.]|172[.]
 
 Builds a guest, and waits until Linode reports it C<running>.
 
-C<name> is required, and is the label.  C<region>, C<type> and C<image> default
-to the values in F<hypervisors.conf>.  C<user_data> is the cloud-init payload,
-which Linode's metadata service gives to the guest.
+C<name> is required, and is the label.  So is C<image>, which
+L</image_for_distro($distro)> answered when F<bin/new_config> wrote the guest's
+F<provision.conf>.  C<region> and C<type> default to the values in
+F<hypervisors.conf>.  C<user_data> is the cloud-init payload, which Linode's
+metadata service gives to the guest.
 
 The root password is random and kept nowhere.  Every login is by ssh key, and
 Linode can reset the password if the console is ever needed.
@@ -444,7 +456,8 @@ sub create_guest {
     die "create_guest needs a name\n" unless $name;
     die "Linode labels are 64 characters at most, and '$name' is longer\n" if length $name > 64;
 
-    foreach my $needed (qw{region type image}) {
+    die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
+    foreach my $needed (qw{region type}) {
         $spec{$needed} //= $self->{$needed};
         die "Building '$name' on " . $self->describe . " needs '$needed'.\nSet it in the block in hypervisors.conf.\n"
           unless $spec{$needed};
@@ -470,8 +483,8 @@ sub create_guest {
 =head2 rebuild_guest($name, user_data => $seed, image => $image)
 
 Deploys the image again over a guest that exists, with a new cloud-init
-payload, and waits until it is C<running> again.  C<image> defaults to the one
-in F<hypervisors.conf>.
+payload, and waits until it is C<running> again.  C<image> is required: the
+guest's own, from its F<provision.conf>, or a snapshot's.
 
 Linode keeps the Linode and its addresses, and deletes its disks.  When the
 guest is not the type in F<hypervisors.conf>, the rebuild resizes it to that
@@ -488,9 +501,8 @@ sub rebuild_guest {
     my $linode = $self->linode($name)
       or die "There is no guest called '$name' to rebuild\n";
 
-    my $image = $spec{image} // $self->image;
-    die "Rebuilding '$name' on " . $self->describe . " needs 'image'.\nSet it in the block in hypervisors.conf.\n"
-      unless $image;
+    my $image = $spec{image};
+    die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
     my %body = ( image => $image, root_pass => _root_pass(), booted => Cpanel::JSON::XS::true(), _metadata( $spec{user_data} ) );
     $body{type} = $self->type if $self->type && $self->type ne $linode->{type};
@@ -752,20 +764,21 @@ FIX
 
 =head2 $result = $hv->check_linode_resources()
 
-Makes sure that the region, the type and the image in F<hypervisors.conf> exist,
-that the region runs the metadata service, and that the image reads its
-cloud-init payload from it.  Without either of the last two a guest boots with
-no payload, and nothing says why until the wait for it runs out.
+Makes sure that the region and the type in F<hypervisors.conf> exist, that the
+region runs the metadata service, and that Linode has an image for each distro
+the configuration uses, which reads its cloud-init payload from that service.
+Without either of the last two a guest boots with no payload, and nothing says
+why until the wait for it runs out.
 
 =cut
 
 sub check_linode_resources {
     my ($self) = @_;
 
-    my @unset = grep { !$self->$_ } qw{region type image};
+    my @unset = grep { !$self->$_ } qw{region type};
     return $self->_verdict( 0, 'Not configured: ' . join( ', ', @unset ), <<'FIX' ) if @unset;
-The block in hypervisors.conf has to say where to build, what, and from which
-image.  What exists is Linode's to say:
+The block in hypervisors.conf has to say where to build and what.  What exists
+is Linode's to say:
 
     linode-cli regions list
     linode-cli linodes types
@@ -784,16 +797,20 @@ FIX
 
     my $type = eval { $self->_type( $self->type ) };
 
+    my @images = map { $self->image_for_distro($_) } $self->distros_in_use;
+
     my @wrong;
     push @wrong, "no region '" . $self->region . "'" unless $regions{ $self->region };
     push @wrong, "no type '" . $self->type . "'"     unless $type;
-    push @wrong, "no image '" . $self->image . "'"   unless $images{ $self->image };
     push @wrong, 'no metadata service in ' . $self->region
       if $regions{ $self->region } && !any { $_ eq 'Metadata' } @{ $regions{ $self->region }{capabilities} // [] };
-    push @wrong, $self->image . ' does not read cloud-init from the metadata service'
-      if $images{ $self->image } && !any { $_ eq 'cloud-init' } @{ $images{ $self->image }{capabilities} // [] };
+    foreach my $image (@images) {
+        push @wrong, "no image '$image'" unless $images{$image};
+        push @wrong, "$image does not read cloud-init from the metadata service"
+          if $images{$image} && !any { $_ eq 'cloud-init' } @{ $images{$image}{capabilities} // [] };
+    }
 
-    return $self->_verdict( 1, 'Builds a ' . $self->type . ' from ' . $self->image . ' in ' . $self->region, q{} ) unless @wrong;
+    return $self->_verdict( 1, 'Builds a ' . $self->type . ' in ' . $self->region . ' from ' . join( ', ', @images ), q{} ) unless @wrong;
 
     return $self->_verdict( 0, 'Linode has ' . join( ', ', @wrong ), <<'FIX' );
 A guest gets its cloud-init payload from Linode's metadata service, so it has

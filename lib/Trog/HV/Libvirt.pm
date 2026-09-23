@@ -1890,6 +1890,15 @@ sub guest_ssh_ip {
     return $ip;
 }
 
+=head2 image_for_distro($distro)
+
+The distro's C<base_image>: a URL, which C<base_image> here downloads into the
+pool.
+
+=cut
+
+sub image_for_distro ( $, $distro ) { return $distro->base_image }
+
 =head2 inspection_address($domain)
 
 The NAT lease of the guest's first interface, or undef when it holds none.  The

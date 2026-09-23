@@ -53,13 +53,17 @@ sub silent {
 subtest 'a distribution that has answered nothing says so, per question' => sub {
     my $distro = silent();
 
-    foreach my $question (qw{packager base_image packager_invocation packager_up_invocation packager_remove_invocation}) {
+    foreach my $question (qw{packager base_image release_version packager_invocation packager_up_invocation packager_remove_invocation}) {
         like(
             exception { $distro->$question() },
             qr/\bsilentdistro\b\N*\bdoes[ ]not[ ]say[ ]what[ ]its[ ]$question[ ]is/,    ## no critic (RegularExpressions::ProhibitComplexRegexes)
             "$question dies naming itself and the question"
         );
     }
+};
+
+subtest 'a distribution is named for the image catalogs by its recipe name' => sub {
+    is( silent()->distribution, 'silentdistro', 'the recipe name, unless the distribution says otherwise' );
 };
 
 subtest 'every distro recipe depends on the vm recipe' => sub {

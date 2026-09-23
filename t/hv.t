@@ -1419,6 +1419,11 @@ subtest 'what a guest will call its interfaces is the hypervisor to say' => sub 
     );
 };
 
+subtest 'image_for_distro: libvirt builds from the distro\'s cloud image' => sub {
+    my $ubuntu = Provisioner::Cookbook->load('ubuntu');
+    is( fresh()->image_for_distro($ubuntu), $ubuntu->base_image, 'the URL the distro recipe names, which base_image downloads' );
+};
+
 subtest 'leases are looked up by MAC, not by name' => sub {
     my $hv = fresh( uri => 'qemu+ssh://hv/system' );
 

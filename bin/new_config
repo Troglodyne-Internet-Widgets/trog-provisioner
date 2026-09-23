@@ -962,13 +962,16 @@ sub handle_domain {
     # on a dry run: see DRY RUNS.
     Trog::Guest->seal_key( $fqdn, "$cfg_dir/key.rsa" ) unless $dryrun;
 
+    # The hypervisor's, for the distro's release: a cloud names its images in a
+    # catalog of its own, and a URL means nothing to it.
+    my $image = $hv->image_for_distro($distro);
+
     # The size of the guest defaults from the schema of the vm recipe, which
     # `bin/recipes vm` prints.
-    my $image = $distro->base_image;
-    my %vm    = Provisioner::Cookbook->defaults('vm');
-    my $size  = $global_config->{size}   // $vm{size};
-    my $cpus  = $global_config->{cpus}   // $vm{cpus};
-    my $mem   = $global_config->{memory} // $vm{memory};
+    my %vm   = Provisioner::Cookbook->defaults('vm');
+    my $size = $global_config->{size}   // $vm{size};
+    my $cpus = $global_config->{cpus}   // $vm{cpus};
+    my $mem  = $global_config->{memory} // $vm{memory};
 
     my $pconf = qq(
         distro=$distro_name

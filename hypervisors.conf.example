@@ -87,10 +87,14 @@ reserve_memory = 8192
 ; See Trog::OpenStack::Config for where clouds.yaml is looked for.
 cloud             = openstack
 
-; What to build guests as.  Each can be a name or an id.  Every guest built on
-; this block gets them; a guest that needs another flavor needs another block.
+; What to build guests as, by name or id.  Every guest built on this block
+; gets it; a guest that needs another flavor needs another block.
 flavor            = m1.medium
-image             = ubuntu-24.04
+
+; No image: a guest's distro recipe decides what it boots, on every kind of
+; hypervisor.  Here that is the newest active image whose os_distro and
+; os_version properties name the distro's release -- ubuntu and 24.04 -- which
+; bin/preflight checks the cloud has.
 
 ; The tenant network the guest gets an address on, and the external network a
 ; floating IP is taken from.  Without floating_network a guest comes up with
@@ -126,14 +130,16 @@ reserve_cpus      = 2
 ; read_write on linodes and images.
 linode_token   = secret:linode/api/password
 
-; Where to build, what, and from which image.  Every guest built on this block
-; is this type, and a guest asking for more than the type has does not fit.
-; The region has to run the metadata service and the image has to read
-; cloud-init from it, which bin/preflight checks.  Ask Linode what exists:
-; `linode-cli regions list`, `linode-cli linodes types`, `linode-cli images list`.
+; Where to build, and what.  Every guest built on this block is this type, and
+; a guest asking for more than the type has does not fit.  Ask Linode what
+; exists: `linode-cli regions list`, `linode-cli linodes types`.
+;
+; No image: a guest's distro recipe decides what it boots, and here that is the
+; Linode image named for the distro's release, such as linode/ubuntu24.04.  The
+; region has to run the metadata service and the image has to read cloud-init
+; from it, which bin/preflight checks.
 region         = us-east
 type           = g6-standard-2
-image          = linode/ubuntu24.04
 
 ; What the whole account may cost a month, every Linode on it counted, whatever
 ; built it.  A guest that would take it over does not fit.  Unset, nothing caps

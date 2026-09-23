@@ -198,7 +198,7 @@ Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
 sub marker { return 'cloud' }
 
 sub config_keys {
-    return ( map { $_ => $_ } qw{cloud flavor image network floating_network availability_zone security_group keypair domain_dir} );
+    return ( map { $_ => $_ } qw{cloud flavor network floating_network availability_zone security_group keypair domain_dir} );
 }
 
 =head2 build(%opts)
@@ -253,22 +253,45 @@ sub uri {
     return $self->{_uri} //= Trog::OpenStack::Config->load( $self->{cloud} )->{auth_url};
 }
 
-=head2 flavor, image, network, floating_network, availability_zone, security_group, keypair
+=head2 flavor, network, floating_network, availability_zone, security_group, keypair
 
 Return the values that F<hypervisors.conf> set for new guests.
 C<security_group> defaults to C<default>, which is the group that every project
-has.  The others have no default, because there is no safe guess for an image or
-a flavor.
+has.  The others have no default, because there is no safe guess for a flavor
+or a network.
+
+What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
+
+=head2 image_for_distro($distro)
+
+The id of the newest active Glance image whose C<os_distro> and C<os_version>
+properties are the distro's C<distribution> and C<release_version>.  Those are
+the properties Glance defines for saying what an image is, and the images a
+cloud offers set them.  A snapshot is never the answer, though it inherits them
+from the image it was taken of.
+
+Dies when the cloud has no such image, naming the two properties to set on one.
 
 =cut
 
 sub flavor            ($self) { return $self->{flavor} }
-sub image             ($self) { return $self->{image} }
 sub network           ($self) { return $self->{network} }
 sub floating_network  ($self) { return $self->{floating_network} }
 sub availability_zone ($self) { return $self->{availability_zone} }
 sub keypair           ($self) { return $self->{keypair} }
 sub security_group    ($self) { return $self->{security_group} // 'default' }
+
+sub image_for_distro {
+    my ( $self, $distro ) = @_;
+
+    my %wanted = ( os_distro => $distro->distribution, os_version => $distro->release_version );
+    my ($image) =
+      reverse sort { ( $a->{created_at} // q{} ) cmp ( $b->{created_at} // q{} ) }
+      grep { ref $_ && ( $_->{status} // q{} ) eq 'active' && ( $_->{image_type} // q{} ) ne 'snapshot' } $self->api->list_images(%wanted);
+
+    return $image->{id} if $image;
+    die $self->describe . " has no active image with os_distro=$wanted{os_distro} and os_version=$wanted{os_version}.\n" . "Set those properties on the image guests should boot from:\n" . "    openstack image set --property os_distro=$wanted{os_distro} --property os_version=$wanted{os_version} IMAGE\n";
+}
 
 =head1 THE API
 
@@ -581,10 +604,10 @@ sub revert_snapshot {
 Builds a guest, and waits until Nova reports it C<ACTIVE>.  If there is a
 C<floating_network>, it also attaches a floating IP from that network.
 
-C<name> is required.  C<flavor>, C<image>, C<network>, C<floating_network>,
-C<availability_zone>, C<security_group> and C<keypair> each default to the value
-in F<hypervisors.conf>.  So a caller usually passes only the name and the
-payload.
+C<name> is required, and so is C<image>, which L</image_for_distro($distro)>
+answered when F<bin/new_config> wrote the guest's F<provision.conf>.  C<flavor>,
+C<network>, C<floating_network>, C<availability_zone>, C<security_group> and
+C<keypair> each default to the value in F<hypervisors.conf>.
 
 C<user_data> is the cloud-init payload.  Nova takes it as a field on the server,
 in place of the C<cidata> ISO.
@@ -608,7 +631,8 @@ sub create_guest {
 
     # floating_network is not required.  A cloud whose only network is external
     # needs no floating IP, and guest_ssh_ip reports a guest it cannot reach.
-    foreach my $needed (qw{flavor image network}) {
+    die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
+    foreach my $needed (qw{flavor network}) {
         $spec{$needed} //= $self->{$needed};
         die "Building '$name' on " . $self->describe . " needs '$needed'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
           unless $spec{$needed};
@@ -637,15 +661,15 @@ sub create_guest {
     );
 }
 
-=head2 rebuild_guest($name, user_data => $seed)
+=head2 rebuild_guest($name, image => $image, user_data => $seed)
 
 Puts a new root disk from the image under a guest that exists, with a new
 cloud-init payload.  Then waits until Nova reports it C<ACTIVE> again.
 
 A rebuild keeps the server, its ports, its floating IP and its attached volumes.
 It replaces the root disk, as a libvirt rebuild makes the overlay again from the
-base image.  C<image> defaults to the value in F<hypervisors.conf>, as in
-L</create_guest(%spec)>.
+base image.  C<image> is required: the guest's own, from its F<provision.conf>,
+as in L</create_guest(%spec)>.
 
 The payload holds the key that F<bin/provision> just added.  Without it, the
 guest starts with a payload that does not let us in.  So this asks Nova for the
@@ -665,9 +689,8 @@ sub rebuild_guest {
     my $server = $self->server($name)
       or die "There is no guest called '$name' to rebuild\n";
 
-    my $image = $spec{image} // $self->image;
-    die "Rebuilding '$name' on " . $self->describe . " needs 'image'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
-      unless $image;
+    my $image = $spec{image};
+    die "Rebuilding '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $image;
 
     my %rebuild = ( imageRef => $self->_image_id($image) );
     $rebuild{user_data} = MIME::Base64::encode_base64( $spec{user_data}, '' )
@@ -678,7 +701,8 @@ sub rebuild_guest {
     return $self->_wait_for_active( $server->{id}, $name );
 }
 
-# The Nova rebuild takes an image id, and hypervisors.conf can name the image.
+# The Nova rebuild takes an image id, and a provision.conf written before
+# image_for_distro answered with one can name the image.
 sub _image_id {
     my ( $self, $image ) = @_;
 
@@ -885,9 +909,10 @@ FIX
 
 =head2 $result = $hv->check_cloud_resources()
 
-Makes sure that the flavor, image and network in F<hypervisors.conf>, and the
-floating network if one is set, exist on this cloud.  A wrong name otherwise
-fails a provision minutes later, with an error from the API.
+Makes sure that the flavor and network in F<hypervisors.conf>, and the floating
+network if one is set, exist on this cloud, and that it has an image for each
+distro the configuration uses.  A wrong name otherwise fails a provision
+minutes later, with an error from the API.
 
 =cut
 
@@ -896,7 +921,6 @@ sub check_cloud_resources {
 
     my %wanted = (
         flavor  => $self->flavor,
-        image   => $self->image,
         network => $self->network,
     );
     $wanted{floating_network} = $self->floating_network if defined $self->floating_network;
@@ -914,7 +938,6 @@ FIX
     my %found;
     $found{flavor}           = eval { scalar $self->api->look_by_id_or_name( flavors  => $wanted{flavor} ) };
     $found{network}          = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{network} ) };
-    $found{image}            = eval { $self->api->image_from_name( $wanted{image} ) };
     $found{floating_network} = eval { scalar $self->api->look_by_id_or_name( networks => $wanted{floating_network} ) }
       if exists $wanted{floating_network};
 
@@ -927,7 +950,14 @@ Ask the cloud what it has:
     openstack network list
 FIX
 
-    return $self->_verdict( 1, "Builds as $wanted{flavor} from $wanted{image} on $wanted{network}", q{} );
+    my ( @images, @no_image );
+    foreach my $distro ( $self->distros_in_use ) {
+        my $image = eval { $self->image_for_distro($distro) };
+        $image ? push( @images, $image ) : push( @no_image, $@ );
+    }
+    return $self->_verdict( 0, 'The cloud has no image for ' . scalar(@no_image) . ' distro(s) in use', join( "\n", @no_image ) ) if @no_image;
+
+    return $self->_verdict( 1, "Builds as $wanted{flavor} from " . join( ', ', @images ) . " on $wanted{network}", q{} );
 }
 
 =head2 $result = $hv->check_cloud_quota()

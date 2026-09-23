@@ -45,12 +45,12 @@ $seed, %opts)> uses three of them:
 
 =over 4
 
-=item * C<create_guest(name =E<gt> $domain, user_data =E<gt> $payload)>, which
-makes a new guest and returns once it runs.
+=item * C<create_guest(name =E<gt> $domain, image =E<gt> $image, user_data =E<gt>
+$payload)>, which makes a new guest and returns once it runs.
 
-=item * C<rebuild_guest($domain, user_data =E<gt> $payload)>, which puts a new
-root disk under a guest that exists, keeps its addresses, and returns once it
-runs again.
+=item * C<rebuild_guest($domain, image =E<gt> $image, user_data =E<gt> $payload)>,
+which puts a new root disk under a guest that exists, keeps its addresses, and
+returns once it runs again.
 
 =item * C<guest_ssh_ip($config)>, the address at which we reach the guest.
 
@@ -180,8 +180,10 @@ sub snapshot_current_name {
 Gets the guest from the service, and returns its address.  If the guest exists,
 this rebuilds it.  If not, this creates it.
 
-C<$seed> holds the C<user-data> that C<bin/provision> already wrote.  There is
-no XML to render and no lease to wait for.  The service takes the seed
+C<$seed> holds the C<user-data> that C<bin/provision> already wrote, and the
+C<image> in C<$config> is what C<image_for_distro> answered when
+F<bin/new_config> wrote it.  There is no XML to render and no lease to wait
+for.  The service takes the seed
 directly, and the address comes back with the guest.  If C<reuse> is true and
 the guest exists, this provisions onto it without a rebuild.
 
@@ -194,6 +196,7 @@ sub provision_guest {
     my ( $self, $config, $seed, %opts ) = @_;
 
     my $domain   = $config->param('domain');
+    my $image    = $config->param('image');
     my $existing = $self->domain_exists($domain);
 
     if ( $existing && $opts{reuse} ) {
@@ -201,11 +204,11 @@ sub provision_guest {
     }
     elsif ($existing) {
         print 'Asking ' . $self->describe . " to rebuild $domain...\n";
-        $self->rebuild_guest( $domain, user_data => $seed->{'user-data'} );
+        $self->rebuild_guest( $domain, image => $image, user_data => $seed->{'user-data'} );
     }
     else {
         print 'Asking ' . $self->describe . " for $domain...\n";
-        $self->create_guest( name => $domain, user_data => $seed->{'user-data'} );
+        $self->create_guest( name => $domain, image => $image, user_data => $seed->{'user-data'} );
     }
 
     my $ip = $self->guest_ssh_ip($config);

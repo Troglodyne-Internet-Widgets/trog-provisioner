@@ -19,6 +19,7 @@ use Test::MockModule qw{strict};
 use File::Temp();
 use Config::Simple();
 use MIME::Base64();
+use List::Util();
 
 ## no critic (CompileTime) -- it has to be set before anything reads it.
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- the whole file reads it after BEGIN returns, which local would undo
@@ -27,6 +28,15 @@ use FindBin::libs;
 
 use Trog::HV();
 use Trog::HV::OpenStack();
+
+# What image_for_distro asks of a distro recipe, and nothing else.
+{
+
+    package Test::Distro;
+    sub new             ( $class, $distribution, $version ) { return bless { distribution => $distribution, version => $version }, $class }
+    sub distribution    ($self)                             { return $self->{distribution} }
+    sub release_version ($self)                             { return $self->{version} }
+}
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -63,7 +73,13 @@ use Trog::HV::OpenStack();
     sub list_images {
         my ( $self, %query ) = @_;
         $self->_record( list_images => \%query );
-        return @{ $self->{images} };
+
+        # Glance filters on the os_ properties image_for_distro asks by.
+        my @os = grep { m/\Aos_/ } keys %query;
+        return grep {
+            my $image = $_;
+            List::Util::all { ( $image->{$_} // q{} ) eq $query{$_} } @os
+        } @{ $self->{images} };
     }
 
     sub image_from_name {
@@ -167,18 +183,16 @@ subtest 'is_local is true, and why that is not a lie' => sub {
 subtest 'what hypervisors.conf configures' => sub {
     my $hv = cloud(
         flavor           => 'm1.medium',
-        image            => 'ubuntu-24.04',
         network          => 'internal',
         floating_network => 'public',
         keypair          => 'buildkey',
     );
 
-    is $hv->flavor,           'm1.medium',    'flavor';
-    is $hv->image,            'ubuntu-24.04', 'image';
-    is $hv->network,          'internal',     'network';
-    is $hv->floating_network, 'public',       'floating_network';
-    is $hv->keypair,          'buildkey',     'keypair';
-    is $hv->security_group,   'default',      'the security group defaults to the one every project has';
+    is $hv->flavor,           'm1.medium', 'flavor';
+    is $hv->network,          'internal',  'network';
+    is $hv->floating_network, 'public',    'floating_network';
+    is $hv->keypair,          'buildkey',  'keypair';
+    is $hv->security_group,   'default',   'the security group defaults to the one every project has';
 
     my %keys = Trog::HV::OpenStack->config_keys;
     is $keys{cloud},  'cloud',  'cloud is read under its own name';
@@ -405,17 +419,35 @@ subtest 'a cloud takes its rollback point without stopping the guest' => sub {
       'and a guest that is not there has nothing to go back to';
 };
 
+subtest 'image_for_distro' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new(
+        images => [
+            { id => 'old',    os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z' },
+            { id => 'new',    os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-06-01T00:00:00Z' },
+            { id => 'queued', os_distro => 'ubuntu', os_version => '24.04', status => 'queued', created_at => '2026-07-01T00:00:00Z' },
+            { id => 'snap',   os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-08-01T00:00:00Z', image_type => 'snapshot' },
+            { id => 'jammy',  os_distro => 'ubuntu', os_version => '22.04', status => 'active', created_at => '2026-09-01T00:00:00Z' },
+        ]
+    );
+
+    is $hv->image_for_distro( Test::Distro->new( ubuntu => '24.04' ) ), 'new', 'the newest active image of that distribution and version, and never a snapshot of one';
+
+    my $err = exception { $hv->image_for_distro( Test::Distro->new( debian => '12' ) ) };
+    like $err, qr/os_distro=debian[ ]and[ ]os_version=12/, 'one the cloud has none of is said';
+    like $err, qr/openstack[ ]image[ ]set[ ]--property/,   'with how to mark one';
+};
+
 subtest 'building a guest' => sub {
     my $hv = cloud(
         flavor           => 'm1.medium',
-        image            => 'ubuntu-24.04',
         network          => 'internal',
         floating_network => 'public',
         keypair          => 'buildkey',
     );
     $FAKE = Test::FakeCloud->new();
 
-    my $server = $hv->create_guest( name => 'vm.example.com', user_data => "#cloud-config\n" );
+    my $server = $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04', user_data => "#cloud-config\n" );
 
     is $server->{floating_ip_address}, '203.0.113.9', 'we get back something with an address on it';
 
@@ -424,7 +456,7 @@ subtest 'building a guest' => sub {
 
     is $sent->{name},                    'vm.example.com',   'the name';
     is $sent->{flavor},                  'm1.medium',        'the configured flavor';
-    is $sent->{image},                   'ubuntu-24.04',     'and image';
+    is $sent->{image},                   'ubuntu-24.04',     'and the image it was given';
     is $sent->{network},                 'internal',         'and network';
     is $sent->{network_for_floating_ip}, 'public',           'and where the floating IP comes from';
     is $sent->{key_name},                'buildkey',         'and the keypair';
@@ -432,7 +464,7 @@ subtest 'building a guest' => sub {
     is $sent->{metadata}{managed_by},    'trog-provisioner', 'and the guest is stamped as ours';
     is $sent->{metadata}{domain},        'vm.example.com',   'with the domain it is';
 
-    is $hv->create_guest( name => 'x', flavor => 'other' )->{name}, 'x', 'a per-guest override works';
+    is $hv->create_guest( name => 'x', image => 'ubuntu-24.04', flavor => 'other' )->{name}, 'x', 'a per-guest override works';
 
     like exception { $hv->create_guest() }, qr/needs[ ]a[ ]name/, 'a guest needs a name';
 };
@@ -442,7 +474,11 @@ subtest 'building a guest the configuration cannot describe' => sub {
     $FAKE = Test::FakeCloud->new();
 
     my $err = exception { $hv->create_guest( name => 'vm.example.com' ) };
-    like $err, qr/needs[ ]'image'/,   'says which one is missing';
+    like $err, qr/needs[ ]an[ ]image/,              'says which one is missing';
+    like $err, qr/the[ ]distro[ ]recipe[ ]decides/, 'and what decides it';
+
+    $err = exception { $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04' ) };
+    like $err, qr/needs[ ]'network'/, 'says which of the block\'s is missing';
     like $err, qr/hypervisors\.conf/, 'and where to put it';
     is scalar $FAKE->calls_to('create_vm'), 0, 'and nothing was built';
 };
@@ -494,13 +530,13 @@ subtest 'a guest that is there already is rebuilt, not replaced' => sub {
     my @asked;
     $mock->redefine( _nova => sub { my ( $self, @args ) = @_; push @asked, \@args; return {} } );
 
-    my $hv = cloud( image => 'noble' );
+    my $hv = cloud();
     $FAKE = Test::FakeCloud->new(
         servers => [ { id => 's1',    name => 'vm.example.com', status => 'ACTIVE' } ],
         images  => [ { id => 'img-1', name => 'noble' } ],
     );
 
-    my $server = $hv->rebuild_guest( 'vm.example.com', user_data => "#cloud-config\n" );
+    my $server = $hv->rebuild_guest( 'vm.example.com', image => 'noble', user_data => "#cloud-config\n" );
 
     is_deeply $asked[0],
       [ POST => '/servers/s1/action', { rebuild => { imageRef => 'img-1', user_data => MIME::Base64::encode_base64( "#cloud-config\n", '' ) } }, '2.57' ],
@@ -520,7 +556,7 @@ subtest 'a guest that is there already is rebuilt, not replaced' => sub {
     # ERROR does not change on its own, so it is not something to wait out.
     $FAKE->{servers}[0]{status} = 'ERROR';
     $FAKE->{servers}[0]{fault}  = { message => 'No valid host was found' };
-    like exception { $hv->rebuild_guest('vm.example.com') }, qr/left[ ]it[ ]in[ ]ERROR:[ ]No[ ]valid[ ]host[ ]was[ ]found/,
+    like exception { $hv->rebuild_guest( 'vm.example.com', image => 'noble' ) }, qr/left[ ]it[ ]in[ ]ERROR:[ ]No[ ]valid[ ]host[ ]was[ ]found/,
       'a rebuild that failed says so at once, with what Nova said';
 
     $mock->unmock('_nova');
