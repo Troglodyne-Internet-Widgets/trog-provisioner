@@ -14,7 +14,7 @@ use List::Util qw{any sum0};
 use MIME::Base64();
 use Cpanel::JSON::XS();
 use Crypt::PRNG();
-use Linode::API();
+use Linode::API 0.002 ();
 
 use Trog::Config();
 use Trog::Credentials();
@@ -675,10 +675,7 @@ sub _wait_for_image {
 
     my $deadline = time + $IMAGE_TIMEOUT;
     while ( time < $deadline ) {
-
-        # Listed rather than asked for by id, which has a slash in it that the
-        # client would send as %2F.
-        return 1 if any { $_->{id} eq $id && ( $_->{status} // q{} ) eq 'available' } $self->_all('get-images');
+        return 1 if ( $self->_call( 'get-image', { imageId => $id } )->{status} // q{} ) eq 'available';
         sleep $POLL;
     }
 
