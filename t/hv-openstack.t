@@ -182,22 +182,21 @@ subtest 'is_local is true, and why that is not a lie' => sub {
 
 subtest 'what hypervisors.conf configures' => sub {
     my $hv = cloud(
-        flavor           => 'm1.medium',
         network          => 'internal',
         floating_network => 'public',
         keypair          => 'buildkey',
     );
 
-    is $hv->flavor,           'm1.medium', 'flavor';
-    is $hv->network,          'internal',  'network';
-    is $hv->floating_network, 'public',    'floating_network';
-    is $hv->keypair,          'buildkey',  'keypair';
-    is $hv->security_group,   'default',   'the security group defaults to the one every project has';
+    is $hv->network,          'internal', 'network';
+    is $hv->floating_network, 'public',   'floating_network';
+    is $hv->keypair,          'buildkey', 'keypair';
+    is $hv->security_group,   'default',  'the security group defaults to the one every project has';
 
     my %keys = Trog::HV::OpenStack->config_keys;
-    is $keys{cloud},  'cloud',  'cloud is read under its own name';
-    is $keys{flavor}, 'flavor', 'and so is everything else';
-    ok !exists $keys{uri}, 'and a cloud has no libvirt_uri';
+    is $keys{cloud},   'cloud',   'cloud is read under its own name';
+    is $keys{network}, 'network', 'and so is everything else';
+    ok !exists $keys{flavor}, 'and what size a guest is is the guest\'s to name, not the block\'s';
+    ok !exists $keys{uri},    'and a cloud has no libvirt_uri';
 };
 
 subtest 'capacity is a quota, which is what makes it capacity' => sub {
@@ -235,11 +234,17 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     is cloud( max_guests => 3 )->max_guests, 3,  'unless the configuration is stricter';
 
     # Trog::HV's arithmetic, over the numbers this backend supplied.
-    my @none = $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB );
+    my %names_one = ( openstack_flavor => 'm1.medium' );
+    my @none      = $hv->shortfalls( %names_one, memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB );
     is scalar @none, 0, 'a guest that fits has no shortfalls';
 
-    my @reasons = $hv->shortfalls( memory_mb => 999999, cpus => 999, disk_bytes => 9999 * $GB );
+    my @reasons = $hv->shortfalls( %names_one, memory_mb => 999999, cpus => 999, disk_bytes => 9999 * $GB );
     ok scalar @reasons >= 3, 'and one that does not is told why, by the shared arithmetic';
+
+    # Which is how a guest is kept off a cloud: it says nothing about one.
+    is_deeply [ $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB ) ],
+      ['names no openstack_flavor, so it is not built on this cloud'],
+      'and a guest that names no flavor is not built here at all';
 };
 
 subtest 'a guest is a server with the domain for a name' => sub {
@@ -477,7 +482,7 @@ subtest 'building a guest the configuration cannot describe' => sub {
     like $err, qr/needs[ ]an[ ]image/,              'says which one is missing';
     like $err, qr/the[ ]distro[ ]recipe[ ]decides/, 'and what decides it';
 
-    $err = exception { $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04' ) };
+    $err = exception { $hv->create_guest( name => 'vm.example.com', image => 'ubuntu-24.04', size => 'm1.medium' ) };
     like $err, qr/needs[ ]'network'/, 'says which of the block\'s is missing';
     like $err, qr/hypervisors\.conf/, 'and where to put it';
     is scalar $FAKE->calls_to('create_vm'), 0, 'and nothing was built';

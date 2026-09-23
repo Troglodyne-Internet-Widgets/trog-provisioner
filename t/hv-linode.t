@@ -235,7 +235,7 @@ $mock->redefine( api => sub ($self) { return $self->{_api} //= Linode::API->new(
 
 sub linode_hv (%opts) {
     reset_linode() unless %STATE;
-    return Trog::HV::Linode->build( linode_token => 'secret:linode/api/password', region => 'us-east', type => 'g6-standard-2', %opts );
+    return Trog::HV::Linode->build( linode_token => 'secret:linode/api/password', region => 'us-east', %opts );
 }
 
 # What a call warned, which Test::NoWarnings would otherwise take as a failure,
@@ -253,8 +253,9 @@ sub asked_to ( $method, $path ) {
 
 sub config_for ($domain) {
     my $config = Config::Simple->new( syntax => 'simple' );
-    $config->param( domain => $domain );
-    $config->param( image  => 'linode/ubuntu24.04' );
+    $config->param( domain      => $domain );
+    $config->param( image       => 'linode/ubuntu24.04' );
+    $config->param( linode_type => 'g6-standard-2' );
     return $config;
 }
 
@@ -290,10 +291,16 @@ subtest '_token' => sub {
 
 subtest 'monthly_cost and monthly_spend' => sub {
     reset_linode();
-    is( linode_hv()->monthly_cost( memory_mb => 1 ),   24,   'the type\'s price, whatever the guest asks for' );
-    is( linode_hv( region => 'br-gru' )->monthly_cost, 28.8, 'in the region, where the region prices it differently' );
-    like( exception { linode_hv( type => undef )->monthly_cost },      qr/Say[ ]which[ ]type[ ]and[ ]region/, 'and no price without a type' );
-    like( exception { linode_hv( type => 'g1-bogus' )->monthly_cost }, qr/no[ ]type[ ]'g1-bogus'/,            'nor for a type Linode does not sell' );
+
+    # The type is the guest's, not the block's: what a guest costs is what it
+    # asked to be.
+    is( linode_hv()->monthly_cost( linode_type => 'g6-standard-2' ), 24, 'the price of the type the guest names' );
+    is( linode_hv()->monthly_cost( linode_type => 'g6-nanode-1' ),   5,  'whichever type that is' );
+    is( linode_hv( region => 'br-gru' )->monthly_cost( linode_type => 'g6-standard-2' ), 28.8, 'in the region, where the region prices it differently' );
+
+    like( exception { linode_hv()->monthly_cost },                                                    qr/names[ ]none/,           'a guest that names no type has no price here' );
+    like( exception { linode_hv( region => undef )->monthly_cost( linode_type => 'g6-standard-2' ) }, qr/Say[ ]which[ ]region/,   'and no price without a region' );
+    like( exception { linode_hv()->monthly_cost( linode_type => 'g1-bogus' ) },                       qr/no[ ]type[ ]'g1-bogus'/, 'nor for a type Linode does not sell' );
 
     add_linode( label => 'a.test.test' );
     add_linode( label => 'b.test.test', type   => 'g6-nanode-1', backups => { enabled => Cpanel::JSON::XS::true() } );
@@ -304,32 +311,39 @@ subtest 'monthly_cost and monthly_spend' => sub {
 subtest 'capacity and shortfalls' => sub {
     reset_linode();
     add_linode( label => 'a.test.test' );
-    my $hv = linode_hv( monthly_budget => 60 );
+    my $hv   = linode_hv( monthly_budget => 60 );
+    my %big  = ( memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3, linode_type => 'g6-standard-2' );
+    my %tiny = ( memory_mb => 1024, cpus => 1, disk_bytes => 1, linode_type => 'g6-nanode-1' );
 
     is_deeply(
-        $hv->capacity,
+        $hv->capacity(%big),
         {
             memory_mb => 4096, memory_committed => 0, memory_free    => 4096,
             cpus      => 2,    cpus_allocatable => 2, cpus_committed => 0, cpus_free => 2,
             disk_free => 81920 * 1024 * 1024,
             guests    => 1,
         },
-        'one guest of the type, nothing committed against it, and the Linodes on the account',
+        'one guest of the type it named, nothing committed against it, and the Linodes on the account',
     );
+    is( $hv->capacity(%tiny)->{memory_mb}, 1024, 'and another guest gets the type it named' );
 
-    is_deeply( [ $hv->shortfalls( memory_mb => 4096, cpus => 2, disk_bytes => 40 * 1024**3 ) ], [], 'a guest the type holds, inside the budget, fits' );
+    is_deeply( [ $hv->shortfalls(%big) ], [], 'a guest the type it named holds, inside the budget, fits' );
 
-    my @short = $hv->shortfalls( memory_mb => 8192, cpus => 2, disk_bytes => 40 * 1024**3 );
-    like( $short[0], qr/needs[ ]8192MB[ ]of[ ]memory,[ ]4096MB[ ]free/, 'a guest bigger than the type does not' );
+    my @short = $hv->shortfalls( %big, memory_mb => 8192 );
+    like( $short[0], qr/needs[ ]8192MB[ ]of[ ]memory,[ ]4096MB[ ]free/, 'a guest bigger than the type it named does not' );
+
+    # Which is how a guest is kept off Linode: it says nothing about Linode.
+    @short = $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 );
+    is_deeply( \@short, ['names no linode_type, so it is not built on Linode'], 'and a guest that names no type is not built here at all' );
 
     $hv    = linode_hv( monthly_budget => 40 );
-    @short = $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 );
+    @short = $hv->shortfalls(%big);
     is( scalar @short, 1, 'nor does one that would go over the budget' );
     like( $short[0], qr/g6-standard-2[ ]costs[ ]24[.]00[ ]a[ ]month/, 'saying what the guest costs' );
     like( $short[0], qr/already[ ]costs[ ]24[.]00/,                   'and what the account does' );
     like( $short[0], qr/monthly_budget[ ]of[ ]40[.]00/,               'against its budget' );
 
-    is( linode_hv( monthly_budget => 48 )->shortfalls( memory_mb => 1024 ),                  0, 'and exactly the budget is inside it' );
+    is( scalar linode_hv( monthly_budget => 48 )->shortfalls(%big),                          0, 'and exactly the budget is inside it' );
     is( linode_hv()->reserve_memory + linode_hv()->reserve_cpus + linode_hv()->reserve_disk, 0, 'no reserve, because there is no host to keep one for' );
 };
 
@@ -356,14 +370,14 @@ subtest 'create_guest' => sub {
     reset_linode();
     my $hv = linode_hv( firewall_id => 42, private_ip => 1 );
 
-    my $linode = $hv->create_guest( image => 'linode/ubuntu24.04', name => 'new.test.test', user_data => "#cloud-config\n" );
+    my $linode = $hv->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'new.test.test', user_data => "#cloud-config\n" );
     is( $linode->{status}, 'running', 'it waits until Linode says the guest is running' );
 
     my ($created) = asked_to( POST => '/v4/linode/instances' );
     my $body = $created->[2];
     is( $body->{label},       'new.test.test',      'labeled with the domain' );
     is( $body->{region},      'us-east',            'in the region of the block' );
-    is( $body->{type},        'g6-standard-2',      'of its type' );
+    is( $body->{type},        'g6-standard-2',      'of the type the guest named' );
     is( $body->{image},       'linode/ubuntu24.04', 'from its image' );
     is( $body->{firewall_id}, 42,                   'behind its firewall' );
     ok( $body->{private_ip}, 'with a private address, as asked' );
@@ -372,15 +386,15 @@ subtest 'create_guest' => sub {
     like( $body->{root_pass}, qr/\A\S{48}\z/, 'and a long random root password, which Linode requires' );
 
     reset_linode();
-    linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'again.test.test' );
+    linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'again.test.test' );
     isnt( ( asked_to( POST => '/v4/linode/instances' ) )[0][2]{root_pass}, $body->{root_pass}, 'a different one each time' );
 
-    like( exception { linode_hv()->create_guest( name => 'x.test.test' ) },                                                            qr/needs[ ]an[ ]image/, 'no image is said, not sent' );
-    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'big.test.test', user_data => 'x' x 65536 ) }, qr/65536[ ]bytes/,      'nor a payload over what the metadata service takes' );
-    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'x' x 65 ) },                                  qr/64[ ]characters/,    'nor a label Linode would refuse' );
+    like( exception { linode_hv()->create_guest( name => 'x.test.test' ) },                                                                                     qr/needs[ ]an[ ]image/, 'no image is said, not sent' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'big.test.test', user_data => 'x' x 65536 ) }, qr/65536[ ]bytes/,      'nor a payload over what the metadata service takes' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'x' x 65 ) },                                  qr/64[ ]characters/,    'nor a label Linode would refuse' );
 
     reset_linode();
-    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
+    like( exception { linode_hv()->create_guest( image => 'linode/ubuntu24.04', size => 'g6-standard-2', name => 'ab' ) }, qr/Linode[ ]refused[ ]post-linode-instance:[ ]400[ ]\/body/, 'a body the specification refuses is refused before it is sent' );
     is( scalar asked_to( POST => '/v4/linode/instances' ), 0, 'and nothing was sent' ) or diag explain \@ASKED;
 };
 
@@ -389,30 +403,30 @@ subtest 'rebuild_guest' => sub {
     add_linode( label => 'vm.test.test', type => 'g6-nanode-1' );
     my $hv = linode_hv();
 
-    my $linode = $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', user_data => "#cloud-config\n" );
+    my $linode = $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2', user_data => "#cloud-config\n" );
     is( $linode->{status},                   'running', 'it waits until the rebuilt guest is running' );
     is( linode_of('vm.test.test')->{status}, 'running', 'running after the rebuild, not the running Linode reported before it began' );
 
     my ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
     is( $rebuilt->{image},                                              'linode/ubuntu24.04', 'onto the image it was given' );
     is( MIME::Base64::decode_base64( $rebuilt->{metadata}{user_data} ), "#cloud-config\n",    'with the new seed' );
-    is( $rebuilt->{type},                                               'g6-standard-2',      'and resized to the type of the block, which it was not' );
+    is( $rebuilt->{type},                                               'g6-standard-2',      'and resized to the type the guest named, which it was not' );
     is( scalar asked_to( POST => '/v4/linode/instances' ),              0,                    'without a new Linode' );
 
     @ASKED = ();
-    $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' );
+    $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' );
     ($rebuilt) = map { $_->[2] } grep { $_->[1] =~ m{/rebuild\z} } @ASKED;
-    ok( !exists $rebuilt->{type}, 'a guest of the right type is not resized' );
+    ok( !exists $rebuilt->{type}, 'a guest already of the type it names is not resized' );
 
     like( exception { $hv->rebuild_guest( 'nope.test.test', image => 'linode/ubuntu24.04' ) }, qr/no[ ]guest[ ]called[ ]'nope\.test\.test'/, 'and one that is not there is said' );
 
     @ASKED = ();
     $STATE{busy} = 2;
-    is( $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' )->{status}, 'running', 'a Linode still busy with the last thing is asked again until it is not' );
-    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ),                            3,         'twice refused, and the third time taken' );
+    is( $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' )->{status}, 'running', 'a Linode still busy with the last thing is asked again until it is not' );
+    is( scalar( grep { $_->[1] =~ m{/rebuild\z} } @ASKED ),                                                     3,         'twice refused, and the third time taken' );
 
     $STATE{busy} = 1_000_000;
-    like( exception { $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04' ) }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );
+    like( exception { $hv->rebuild_guest( 'vm.test.test', image => 'linode/ubuntu24.04', size => 'g6-standard-2' ) }, qr/400[ ]Linode[ ]busy/, 'and one still busy after BUSY_TIMEOUT is said' );
     $STATE{busy} = 0;
 };
 
@@ -511,8 +525,11 @@ subtest 'check_linode_resources' => sub {
     like( linode_hv()->check_linode_resources->{what}, qr/no[ ]image[ ]'linode\/debian99'/, 'and a release Linode has no image of' );
 
     @distros = ( Test::Distro->new( ubuntu => '24.04' ) );
-    $result  = linode_hv( type => 'g1-bogus', region => 'mars-1' )->check_linode_resources;
-    like( $result->{what}, qr/no[ ]region[ ]'mars-1',[ ]no[ ]type[ ]'g1-bogus'/, 'as are a region and a type Linode does not have' );
+    my $in_config = Test::MockModule->new('Trog::HV');
+    $in_config->redefine( globals_in_use => sub { return ('g1-bogus') } );
+    $result = linode_hv( region => 'mars-1' )->check_linode_resources;
+    like( $result->{what}, qr/no[ ]region[ ]'mars-1'/, 'as is a region Linode does not have' );
+    like( $result->{what}, qr/no[ ]type[ ]'g1-bogus'/, 'and a type a guest names that Linode does not sell' );
 
     $STATE{refuse_token} = 1;
     $result = linode_hv()->check_linode_resources;
@@ -524,14 +541,25 @@ subtest 'check_linode_budget' => sub {
     reset_linode();
     add_linode( label => 'a.test.test' );
 
-    my $what = linode_hv()->check_linode_budget->{what};
-    like( $what, qr/a[ ]guest[ ]here[ ]24[.]00[ ]more/, 'without a budget, what a guest costs' );
-    like( $what, qr/no[ ]monthly_budget[ ]caps[ ]it/,   'and that nothing caps it' );
-    ok( linode_hv( monthly_budget => 48 )->check_linode_budget->{ok}, 'a guest that fits the budget' );
+    # What a guest costs is the type it names, so the check says what each type
+    # the configuration names would add.
+    my $in_config = Test::MockModule->new('Trog::HV');
+    $in_config->redefine( globals_in_use => sub { return qw{g6-standard-2 g6-nanode-1} } );
 
-    my $result = linode_hv( monthly_budget => 47 )->check_linode_budget;
-    ok( !$result->{ok}, 'and one that does not' );
+    my $what = linode_hv()->check_linode_budget->{what};
+    like( $what, qr/account[ ]costs[ ]24[.]00[ ]a[ ]month/, 'what the account costs' );
+    like( $what, qr/g6-standard-2[ ]at[ ]24[.]00/,          'what a guest of each type the guests name costs' );
+    like( $what, qr/g6-nanode-1[ ]at[ ]5[.]00/,             'each of them' );
+    like( $what, qr/no[ ]monthly_budget[ ]caps[ ]it/,       'and that nothing caps it' );
+
+    ok( linode_hv( monthly_budget => 48 )->check_linode_budget->{ok}, 'an account inside its budget' );
+
+    my $result = linode_hv( monthly_budget => 24 )->check_linode_budget;
+    ok( !$result->{ok}, 'and one that has reached it' );
     like( $result->{fix}, qr/raise[ ]monthly_budget/, 'with what to do about it' );
+
+    $in_config->redefine( globals_in_use => sub { return () } );
+    like( linode_hv()->check_linode_budget->{what}, qr/\Athe[ ]account[ ]costs[ ]24[.]00[ ]a[ ]month;/i, 'and a configuration naming no type says only what the account costs' );
 };
 
 subtest 'check_reachable' => sub {

@@ -178,6 +178,13 @@ optionally `machine`, `cpu_mode` and the `disk_*` keys. Those belong to the `vm`
 copied into the guest's `provision.conf`, which is where `bin/provision` reads
 them.
 
+Those three describe a guest on a machine of ours. A hypervisor that sells sizes
+by name asks instead for the one you want, and each has a key of its own:
+`linode_type` for Linode, `openstack_flavor` for OpenStack. A guest that names
+none is not built on that kind of hypervisor at all, which is how a guest is
+kept off a cloud, and off the bill. `memory`, `cpus` and `size` still say what
+the guest needs, and placement refuses a type too small to hold it.
+
 `machine` is the libvirt machine type, and it is `q35` by default: a guest gets
 a PCIe topology, which is what an assigned PCIe device needs.  `pc` asks for the
 older i440fx instead.  It decides the PCI topology the guest knows, so changing

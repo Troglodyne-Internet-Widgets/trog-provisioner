@@ -460,18 +460,29 @@ sub select_for {
 
 =head2 _needs($config)
 
-Returns what a guest asks for, as C<memory_mb>, C<cpus> and C<disk_bytes>
-pairs.  C<$config> is as for C<select_for>.
+Returns what a guest asks for: C<memory_mb>, C<cpus> and C<disk_bytes>, and
+the C<size_key> of each backend that has one, such as C<linode_type>.
+C<$config> is as for C<select_for>.
 
 =cut
 
 sub _needs {
     my ($config) = @_;
-    return (
+
+    my %needs = (
         memory_mb  => Trog::HV->config_value( $config, 'memory' ),
         cpus       => Trog::HV->config_value( $config, 'cpus' ),
         disk_bytes => Trog::HV->config_value( $config, 'size' ),
     );
+
+    # And what the guest is on each kind of hypervisor that sells sizes by
+    # name, which is how it says which of them it may be built on at all.
+    foreach my $backend ( Trog::HV->backends ) {
+        my $key = $backend->size_key or next;
+        $needs{$key} = Trog::HV->config_value( $config, $key );
+    }
+
+    return %needs;
 }
 
 sub _oneline {

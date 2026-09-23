@@ -79,6 +79,10 @@ C<cpus_free>, C<disk_free> and C<guests>.
 =item * C<monthly_cost>, if a guest costs money there.  See
 L</monthly_cost(%needs)>.
 
+=item * C<size_key>, the C<_global> key that says what a guest is on this kind
+of hypervisor, such as C<linode_type>, or undef for a hypervisor that sizes a
+guest from its C<memory>, C<cpus> and C<size>.  See L</PLACEMENT>.
+
 =item * The guest lifecycle, C<domain_exists> and C<annihilate_domain>.  Also
 the four snapshot methods: C<snapshot_names>, C<snapshot_current_name>,
 C<create_snapshot> and C<revert_snapshot>.
@@ -676,14 +680,31 @@ sub reserve_disk   ($self) { return $self->{reserve_disk}   // 10 * 1024 * 1024 
 sub max_guests     ($self) { return $self->{max_guests}     // 0 }
 sub cpu_overcommit ($self) { return $self->{cpu_overcommit} // 4 }
 
-=head2 capacity
+=head2 capacity(%needs)
 
 Returns what the hypervisor has, and what it already promised.  The backend
 provides it.  L</WHAT A BACKEND HAS TO PROVIDE> lists the keys of the hash.
 
+C<%needs> is what the guest asks for, as L</shortfalls(%needs)> takes it.  A
+machine has what it has whatever the guest wants, and ignores it.  A hypervisor
+that sells a guest a size answers for the size this guest names in its
+C<size_key>.
+
 =cut
 
 sub capacity ( $self, @ ) { return $self->_abstract('capacity') }
+
+=head2 size_key
+
+The C<_global> key that says what a guest is on this kind of hypervisor.  Undef
+here, which is what a hypervisor that sizes a guest from its C<memory>, C<cpus>
+and C<size> answers.  A hypervisor that sells sizes by name returns its key,
+and a guest whose C<_global> does not name one is not built there: see
+L</shortfalls(%needs)>.
+
+=cut
+
+sub size_key { return undef }
 
 =head2 monthly_cost(%needs)
 
@@ -712,7 +733,7 @@ act on.  An empty list means that the guest fits.
 sub shortfalls {
     my ( $self, %needs ) = @_;
 
-    my $have = $self->capacity;
+    my $have = $self->capacity(%needs);
     my @reasons;
 
     push @reasons, sprintf(
@@ -752,7 +773,7 @@ its disk while the fleet still has plenty of RAM.
 sub headroom {
     my ( $self, %needs ) = @_;
 
-    my $have = $self->capacity;
+    my $have = $self->capacity(%needs);
     my @fractions;
 
     push @fractions, _fraction( $have->{memory_free} - ( $needs{memory_mb} // 0 ), $have->{memory_mb} );
@@ -990,6 +1011,29 @@ sub distros_in_use {
     %named = ( ubuntu => 1 ) unless %named;
 
     return map { Provisioner::Cookbook->load($_) } sort keys %named;
+}
+
+=head2 @values = $hv->globals_in_use($key)
+
+Every value that C<$key> takes in the C<_global> of a domain, sorted, without
+repeats.  A preflight check that asks whether a hypervisor can build what the
+guests ask for asks it for C<size_key>: the types the configuration names, and
+nothing about a type nobody uses.
+
+=cut
+
+sub globals_in_use {
+    my ( $class, $key ) = @_;
+
+    my $conf = eval { Provisioner::Cookbook->configuration() } // {};
+    my %named;
+    foreach my $domain ( grep { !m/\A_/ } keys %$conf ) {
+        my $value = ( eval { Provisioner::Cookbook->global_config( $domain, $conf ) } // {} )->{$key};
+        $named{$value} = 1 if defined $value && length $value;    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- what somebody wrote, whatever it is
+    }
+
+    my @named = sort keys %named;
+    return @named;
 }
 
 =head2 $result = $hv->note_stale_image()

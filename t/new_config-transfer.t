@@ -31,7 +31,8 @@ require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@"
     sub configured_transfer_ip   ($self)        { return $self->{ip} }
     sub configured_transfer_port ($self)        { return $self->{port} }
     sub describe ($) { return 'the test cloud' }
-    sub name ($self) { return $self->{name} }
+    sub name     ($self) { return $self->{name} }
+    sub size_key ($self) { return $self->{size_key} }
 
     package Test::ThisMachine;
     sub new ( $class, %o ) { return bless {%o}, $class }
@@ -87,10 +88,26 @@ subtest 'transfer_to' => sub {
     );
 };
 
-subtest 'placement_line' => sub {
-    my $placed = Test::Hypervisor->new( name => 'linode1' );
-    is( Trog::Provisioner::Config::Generator::placement_line($placed),                 "\nhypervisor=linode1\n", 'a guest placed on a hypervisor of the fleet is pinned to it, so bin/provision builds it there' );
-    is( Trog::Provisioner::Config::Generator::placement_line( Test::Hypervisor->new ), q{},                      'and one with no fleet is left to whatever bin/provision is given' );
+subtest 'placement_lines' => sub {
+    my $placed = Test::Hypervisor->new( name => 'linode1', size_key => 'linode_type' );
+
+    is(
+        Trog::Provisioner::Config::Generator::placement_lines( $placed, { linode_type => 'g6-standard-2' } ),
+        "\nhypervisor=linode1\nlinode_type=g6-standard-2\n",
+        'a guest placed on a hypervisor of the fleet is pinned to it, and told what it is there, so bin/provision builds the same guest in the same place'
+    );
+
+    is(
+        Trog::Provisioner::Config::Generator::placement_lines( $placed, {} ),
+        "\nhypervisor=linode1\n",
+        'a guest that names no size for that kind of hypervisor writes none'
+    );
+
+    is(
+        Trog::Provisioner::Config::Generator::placement_lines( Test::Hypervisor->new, { linode_type => 'g6-standard-2' } ),
+        q{},
+        'and one with no fleet is left to whatever bin/provision is given'
+    );
 };
 
 Test::NoWarnings::had_no_warnings();

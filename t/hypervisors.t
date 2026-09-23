@@ -535,7 +535,6 @@ libvirt_uri=qemu+ssh://root@hv1.example.net/system
 
 [cloud1]
 cloud=openstack
-flavor=m1.medium
 network=internal
 floating_network=public
 reserve_memory=8192
@@ -549,7 +548,6 @@ CONF
     is ref $os,               'Trog::HV::OpenStack', 'and the one with a cloud is not';
     is $os->name,             'cloud1',              'named as the file names it';
     is $os->cloud,            'openstack',           'pointed at the clouds.yaml entry';
-    is $os->flavor,           'm1.medium',           'with the flavor';
     is $os->network,          'internal',            'the network';
     is $os->floating_network, 'public',              'and where floating IPs come from';
 
@@ -562,7 +560,6 @@ subtest 'a block naming a linode_token is a Linode hypervisor' => sub {
 [linode1]
 linode_token=secret:linode/api/password
 region=us-east
-type=g6-standard-2
 monthly_budget=200
 max_guests=10
 CONF
@@ -571,7 +568,6 @@ CONF
     is ref $linode,             'Trog::HV::Linode', 'the one with a token is Linode';
     is $linode->name,           'linode1',          'named as the file names it';
     is $linode->region,         'us-east',          'in its region';
-    is $linode->type,           'g6-standard-2',    'of its type';
     is $linode->monthly_budget, 200,                'within its budget';
     is $linode->max_guests,     10,                 'and the limits are read as for any kind';
 };
