@@ -11,6 +11,9 @@ use File::Slurper();
 use List::Util qw{any reduce};
 use Trog::Config();
 use Trog::HV();
+use Trog::Local();
+use Trog::Utils();
+use Provisioner::Cookbook();
 
 =head1 NAME
 
@@ -455,7 +458,65 @@ sub select_for {
         return $hv->activate();
     }
 
-    return $self->place( $domain, _needs($config) )->activate();
+    my %needs  = _needs($config);
+    my $placed = eval { $self->place( $domain, %needs ) };
+    return $placed->activate() if $placed;
+
+    # Nowhere has room, which is not the end of it: a hypervisor that sells
+    # sizes will sell one that holds this guest, and somebody may say yes.
+    return $self->offer( $domain, $config, $@, %needs )->activate();
+}
+
+=head2 offer($domain, $config, $why, %needs)
+
+Returns the hypervisor to build C<$domain> on after an operator accepts what it
+would sell, having recorded the size in the domain's own file so that the next
+run needs no answer.  C<$why> is what C<place> said when nothing fitted.
+
+Every hypervisor that sells sizes is asked for the cheapest that holds the
+guest, and the cheapest of those is offered.  With nothing to offer, this dies
+with C<$why>, which says what each hypervisor lacked.
+
+A run with nobody to answer does not wait for one.  It dies with the offer
+written out: what it would build, what that costs a month, and the line to put
+in the guest's C<_global> to accept it.  That covers the reprovision button,
+cron and CI, which drive this with no terminal.
+
+=cut
+
+sub offer {
+    my ( $self, $domain, $config, $why, %needs ) = @_;
+
+    my @offers =
+      sort { $a->{monthly_cost} <=> $b->{monthly_cost} }
+      grep { $_ }
+      map {
+        my $hv    = $_;
+        my $offer = eval { $hv->cheapest_for(%needs) };
+        $offer ? { %$offer, hv => $hv } : undef
+      } $self->hypervisors;
+
+    die $why unless @offers;
+
+    my $best = $offers[0];
+    my $line = "$best->{key}: $best->{value}";
+    my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month.\n", $self->{path}, $domain, $best->{hv}->name, $best->{value}, $best->{monthly_cost} );
+
+    die $why . "\n" . $what . "To build it there, put this in the _global of $domain:\n\n    $line\n"
+      unless Trog::Local->interactive;
+
+    print $what;
+    my $answer = Trog::Utils::prompt("Build $domain there? [y/N]:");
+    die $why . "\nDeclined, so $domain is not built.\n" unless ( $answer // q{} ) =~ m/\Ay/i;
+
+    my $path = Provisioner::Cookbook->record_global( $domain, $best->{key}, $best->{value} );
+    print "Wrote $line to $path, so the next run does not ask.\n";
+
+    # And into what this run is generating from, which was read before the file
+    # was written.
+    $config->{ $best->{key} } = $best->{value} if ref $config eq 'HASH';
+
+    return $best->{hv};
 }
 
 =head2 _needs($config)

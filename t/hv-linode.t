@@ -347,6 +347,21 @@ subtest 'capacity and shortfalls' => sub {
     is( linode_hv()->reserve_memory + linode_hv()->reserve_cpus + linode_hv()->reserve_disk, 0, 'no reserve, because there is no host to keep one for' );
 };
 
+subtest 'cheapest_for' => sub {
+    reset_linode();
+    my %needs = ( memory_mb => 2048, cpus => 1, disk_bytes => 30 * 1024**3 );
+
+    # g6-nanode-1 is cheaper and too small; the standard holds it.
+    is_deeply( linode_hv()->cheapest_for(%needs),                                         { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 }, 'the cheapest type that holds the guest, and what it costs' );
+    is_deeply( linode_hv()->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 1 ), { key => 'linode_type', value => 'g6-nanode-1',   monthly_cost => 5 },  'a smaller guest is offered a smaller one' );
+    is( linode_hv()->cheapest_for( memory_mb => 999_999, cpus => 1, disk_bytes => 1 ), undef, 'and a guest Linode sells nothing big enough for is offered nothing' );
+
+    # An offer that cannot be accepted is noise, so the budget rules it out.
+    add_linode( label => 'a.test.test' );
+    is( linode_hv( monthly_budget => 30 )->cheapest_for(%needs), undef, 'a type the budget leaves no room for is not offered' );
+    is_deeply( linode_hv( monthly_budget => 30 )->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 1 ), { key => 'linode_type', value => 'g6-nanode-1', monthly_cost => 5 }, 'while one it does leave room for still is' );
+};
+
 subtest 'guests' => sub {
     reset_linode();
     add_linode( label => 'vm.test.test', ipv4 => [ '192.168.139.4', '203.0.113.30' ] );

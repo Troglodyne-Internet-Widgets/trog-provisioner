@@ -722,6 +722,23 @@ a price is the one answer that spends money.
 
 sub monthly_cost { return 0 }
 
+=head2 cheapest_for(%needs)
+
+What this hypervisor would sell to hold a guest that wants C<memory_mb>,
+C<cpus> and C<disk_bytes>: a hashref of C<key>, the C<size_key> to write in the
+guest's C<_global>, C<value>, the size to write there, and C<monthly_cost>,
+what that would cost a month.  Undef when it has nothing that would hold the
+guest, or nothing it may sell inside its budget.
+
+Undef here.  A machine sells nothing: it has the room it has, which
+L</shortfalls(%needs)> already answered for.  L<Trog::Hypervisors/select_for>
+asks the ones that do when no machine has room, so an operator is offered
+something rather than only told no.
+
+=cut
+
+sub cheapest_for { return undef }
+
 =head2 shortfalls(%needs)
 
 Returns every reason why this hypervisor cannot take a guest that wants

@@ -296,6 +296,39 @@ it reads cloud-init, is C<check_linode_resources>'s to find out before a build.
 
 sub image_for_distro ( $, $distro ) { return 'linode/' . $distro->distribution . $distro->release_version }
 
+=head2 cheapest_for(%needs)
+
+The cheapest type Linode sells that holds a guest wanting C<memory_mb>,
+C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one.
+
+A type that would take the account over C<monthly_budget> is not offered: an
+offer that cannot be accepted is noise.  Undef when no type holds the guest,
+when the budget leaves room for none, or when Linode cannot be asked.
+
+=cut
+
+sub cheapest_for {
+    my ( $self, %needs ) = @_;
+
+    my @fit = eval {
+        grep { $_->{memory} >= ( $needs{memory_mb} // 0 ) && $_->{vcpus} >= ( $needs{cpus} // 0 ) && $_->{disk} * $MB >= ( $needs{disk_bytes} // 0 ) } $self->_all('get-linode-types');
+    };
+    return undef unless @fit;
+
+    my $room = $self->monthly_budget ? $self->monthly_budget - $self->monthly_spend : undef;
+
+    my @priced =
+      sort { $a->{monthly_cost} <=> $b->{monthly_cost} || $a->{memory} <=> $b->{memory} }
+      grep { !defined $room                            || $_->{monthly_cost} <= $room }
+      map {
+        my $type = $_;
+        +{ %$type, monthly_cost => eval { $self->_price( $type->{id}, $self->region ) } // 0 }
+      } @fit;
+
+    return undef unless @priced;
+    return { key => $self->size_key, value => $priced[0]{id}, monthly_cost => $priced[0]{monthly_cost} };
+}
+
 =head1 CAPACITY
 
 =head2 capacity(%needs)

@@ -323,6 +323,31 @@ sub api {
     return $self->{_api} = OpenStack::MetaAPI->new( { auth => $auth } );
 }
 
+=head2 cheapest_for(%needs)
+
+The smallest flavor this cloud has that holds a guest wanting C<memory_mb>,
+C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one,
+with a cost of 0.
+
+Smallest rather than cheapest, because Nova gives a flavor no price: what a
+project pays for one is between it and whoever runs the cloud, and
+L<Trog::HV/monthly_cost(%needs)> answers 0 for the same reason.  Undef when no flavor
+holds the guest, or when the cloud cannot be asked.
+
+=cut
+
+sub cheapest_for {
+    my ( $self, %needs ) = @_;
+
+    my @fit = eval {
+        grep { ref $_ && ( $_->{ram} // 0 ) >= ( $needs{memory_mb} // 0 ) && ( $_->{vcpus} // 0 ) >= ( $needs{cpus} // 0 ) && ( $_->{disk} // 0 ) * $GB >= ( $needs{disk_bytes} // 0 ) } $self->api->flavors_detail;
+    };
+    return undef unless @fit;
+
+    my ($smallest) = sort { $a->{ram} <=> $b->{ram} || $a->{vcpus} <=> $b->{vcpus} || $a->{disk} <=> $b->{disk} } @fit;
+    return { key => $self->size_key, value => $smallest->{name} // $smallest->{id}, monthly_cost => 0 };
+}
+
 =head1 CAPACITY
 
 A quota is what the project is allowed and what it already uses.  L<Trog::HV>

@@ -15,6 +15,7 @@ use File::Find();
 use List::Util qw{any uniq};
 use Provisioner::Utils();
 use File::Slurper();
+use File::Slurper::Temp();
 use File::Temp();
 use Hash::Merge();
 use JSON::Validator::Schema::Troglodyne;
@@ -1153,6 +1154,42 @@ sub global_config {
     my $own  = clone( ( defined $domain ? $conf->{$domain}{_global} : undef ) // {} );
 
     return { %$base, %$own };
+}
+
+=head2 record_global($domain, $key, $value)
+
+Writes one C<_global> setting of a domain into its own file,
+F<recipes.d/$domain.yaml>, making the file when there is none, and leaving
+everything else in it as it was.  Returns the path it wrote.
+
+It is for a setting that a person agreed to rather than typed: the size an
+operator accepted for a guest that fitted nowhere else.  See
+L<Trog::Hypervisors/select_for($domain, $config)>.
+
+A file of a domain adds to F<recipes.yaml> and does not override it, so a value
+in F<recipes.yaml> would win over what this writes.  It refuses rather than
+writing something that would not take effect, and says which file to edit.
+
+=cut
+
+sub record_global {
+    my ( $class, $domain, $key, $value ) = @_;
+
+    my $main = Trog::Config->path('recipes.yaml');
+    my $held = eval { YAML::XS::Load( File::Slurper::read_binary($main) ) } // {};
+    die "$main already sets $key for $domain, and a domain's own file does not override it.\n" . "Change it there.\n"
+      if defined $held->{$domain}{_global}{$key};
+
+    my $path = Trog::Config->path("recipes.d/$domain.yaml");
+    my $conf = eval { YAML::XS::Load( File::Slurper::read_binary($path) ) } // {};
+
+    $conf->{$domain}{_global}{$key} = $value;
+    File::Slurper::Temp::write_binary( $path, YAML::XS::Dump($conf) );
+
+    # What is on disk has changed under the copy this process read.
+    $class->forget();
+
+    return $path;
 }
 
 =head2 global_schema()

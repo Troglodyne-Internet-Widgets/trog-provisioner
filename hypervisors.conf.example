@@ -151,7 +151,9 @@ linode_token   = secret:linode/api/password
 ;         _global:
 ;             linode_type: g6-standard-2
 ;
-; `linode-cli linodes types` lists them, with what each costs.
+; `linode-cli linodes types` lists them, with what each costs -- or let the
+; provisioner tell you: a guest that fits nowhere else is offered the cheapest
+; type that holds it, and accepting one writes it into the guest's own file.
 ;
 ; No image: a guest's distro recipe decides what it boots, and here that is the
 ; Linode image named for the distro's release, such as linode/ubuntu24.04.  The

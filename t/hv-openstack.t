@@ -113,7 +113,8 @@ use Trog::HV::OpenStack();
         return $full;
     }
 
-    sub networks ($self) { return @{ $self->{networks} // [] } }
+    sub networks       ($self) { return @{ $self->{networks}       // [] } }
+    sub flavors_detail ($self) { return @{ $self->{flavors_detail} // [] } }
 
     sub create_vm {
         my ( $self, %opts ) = @_;
@@ -245,6 +246,29 @@ subtest 'capacity is a quota, which is what makes it capacity' => sub {
     is_deeply [ $hv->shortfalls( memory_mb => 1024, cpus => 1, disk_bytes => 1 * $GB ) ],
       ['names no openstack_flavor, so it is not built on this cloud'],
       'and a guest that names no flavor is not built here at all';
+};
+
+subtest 'cheapest_for' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => [
+            { name => 'm1.tiny',   ram => 512,  vcpus => 1, disk => 5 },
+            { name => 'm1.small',  ram => 2048, vcpus => 1, disk => 20 },
+            { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 },
+        ]
+    );
+
+    # Smallest rather than cheapest: Nova gives a flavor no price at all.
+    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 10 * 1024**3 ),
+      { key => 'openstack_flavor', value => 'm1.small', monthly_cost => 0 },
+      'the smallest flavor that holds the guest, costing nothing that Nova will say';
+
+    is_deeply $hv->cheapest_for( memory_mb => 4096, cpus => 2, disk_bytes => 30 * 1024**3 ),
+      { key => 'openstack_flavor', value => 'm1.medium', monthly_cost => 0 },
+      'a bigger guest gets a bigger one';
+
+    is $hv->cheapest_for( memory_mb => 999999, cpus => 1, disk_bytes => 1 ), undef,
+      'and a guest no flavor holds is offered nothing';
 };
 
 subtest 'a guest is a server with the domain for a name' => sub {
