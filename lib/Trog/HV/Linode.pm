@@ -77,6 +77,9 @@ our $BUSY_TIMEOUT   = 300;
 our $DELETE_TIMEOUT = 300;
 our $POLL           = 5;
 
+# What Linode's own monthly prices are a month of.
+our $HOURS_A_MONTH = 730;
+
 # What Linode reports in megabytes.
 my $MB = 1024 * 1024;
 
@@ -262,7 +265,10 @@ sub monthly_spend {
     } $self->_linodes;
 }
 
-# The monthly price of a type in a region, or of its backup service.
+# The monthly price of a type in a region, or of its backup service.  Linode
+# gives 30 of its 75 types an hourly price and no monthly one -- the GPU and
+# accelerated ones -- so a month of one of those is $HOURS_A_MONTH hours of it,
+# which is the most it can cost rather than what it will.
 sub _price {
     my ( $self, $type_id, $region, $addon ) = @_;
 
@@ -270,12 +276,24 @@ sub _price {
     my $item = $addon ? $type->{addons}{$addon} : $type;
 
     my ($local) = grep { $_->{id} eq $region } @{ $item->{region_prices} // [] };
-    my $monthly = ( $local // $item->{price} // {} )->{monthly};
+    my $price = $local // $item->{price} // {};
 
-    die "Linode reports no monthly price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n"
-      unless defined $monthly;
+    return $price->{monthly}                 if defined $price->{monthly};
+    return $price->{hourly} * $HOURS_A_MONTH if defined $price->{hourly};
 
-    return $monthly;
+    die "Linode reports no price for $type_id" . ( $addon ? " $addon" : q{} ) . " in $region\n";
+}
+
+# Whether Linode prices this type by the month, which is what it bills for one
+# that runs all month.  A type it prices by the hour alone is not offered: an
+# offer says what a guest costs, and for those there is only a ceiling.
+sub _priced_monthly {
+    my ( $self, $type_id, $region ) = @_;
+
+    my $type = $self->_type($type_id);
+    my ($local) = grep { $_->{id} eq $region } @{ $type->{region_prices} // [] };
+
+    return defined( ( $local // $type->{price} // {} )->{monthly} ) ? 1 : 0;
 }
 
 # Every type Linode sells, which does not change within a run.
@@ -302,7 +320,13 @@ The cheapest type Linode sells that holds a guest wanting C<memory_mb>,
 C<cpus> and C<disk_bytes>, as L<Trog::HV/cheapest_for(%needs)> returns one.
 
 A type that would take the account over C<monthly_budget> is not offered: an
-offer that cannot be accepted is noise.  Undef when no type holds the guest,
+offer that cannot be accepted is noise.
+
+Linode prices 30 of its 75 types by the hour alone, its GPU and accelerated
+ones.  Those are offered too, priced at C<$HOURS_A_MONTH> hours of the hourly
+rate, and the offer comes back with C<hourly> as well, so that what is said
+about it can say that it is billed by the hour and has no monthly price to be
+capped at.  Undef when no type holds the guest,
 when the budget leaves room for none, or when Linode cannot be asked.
 
 =cut
@@ -326,7 +350,12 @@ sub cheapest_for {
       } @fit;
 
     return undef unless @priced;
-    return { key => $self->size_key, value => $priced[0]{id}, monthly_cost => $priced[0]{monthly_cost} };
+    return {
+        key          => $self->size_key,
+        value        => $priced[0]{id},
+        monthly_cost => $priced[0]{monthly_cost},
+        $self->_priced_monthly( $priced[0]{id}, $self->region ) ? () : ( hourly => $priced[0]{price}{hourly} ),
+    };
 }
 
 =head1 CAPACITY

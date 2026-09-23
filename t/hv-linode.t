@@ -64,6 +64,15 @@ sub reset_linode {
                 region_prices => [],
                 addons        => { backups => { price => { monthly => 2, hourly => 0.003 }, region_prices => [] } },
             },
+            {
+                id            => 'g1-gpu-rtx6000-1',
+                memory        => 32768,
+                vcpus         => 8,
+                disk          => 655360,
+                price         => { monthly => undef, hourly => 1.5 },
+                region_prices => [],
+                addons        => { backups => { price => { monthly => undef, hourly => 0.1 }, region_prices => [] } },
+            },
         ],
         regions => [
             { id => 'us-east', capabilities => [qw{Linodes Metadata}] },
@@ -355,6 +364,16 @@ subtest 'cheapest_for' => sub {
     is_deeply( linode_hv()->cheapest_for(%needs),                                         { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 }, 'the cheapest type that holds the guest, and what it costs' );
     is_deeply( linode_hv()->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 1 ), { key => 'linode_type', value => 'g6-nanode-1',   monthly_cost => 5 },  'a smaller guest is offered a smaller one' );
     is( linode_hv()->cheapest_for( memory_mb => 999_999, cpus => 1, disk_bytes => 1 ), undef, 'and a guest Linode sells nothing big enough for is offered nothing' );
+
+    # Linode prices its GPU and accelerated types by the hour alone.  Read as
+    # free, one of those is the cheapest thing it sells, and it is not.
+    is_deeply(
+        linode_hv()->cheapest_for( memory_mb => 8192, cpus => 4, disk_bytes => 1 ),
+        { key => 'linode_type', value => 'g1-gpu-rtx6000-1', monthly_cost => 1.5 * 730, hourly => 1.5 },
+        'a type Linode prices by the hour alone is offered at a month of that rate, and says it is hourly'
+    );
+    is( linode_hv()->monthly_cost( linode_type => 'g1-gpu-rtx6000-1' ), 1.5 * 730, 'which is what it costs for a month, since Linode publishes no price to cap it' );
+    ok( !exists linode_hv()->cheapest_for( memory_mb => 512, cpus => 1, disk_bytes => 1 )->{hourly}, 'while a type it does price by the month says nothing about hours' );
 
     # An offer that cannot be accepted is noise, so the budget rules it out.
     add_linode( label => 'a.test.test' );

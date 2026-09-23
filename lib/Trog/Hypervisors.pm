@@ -479,7 +479,9 @@ with C<$why>, which says what each hypervisor lacked.
 
 A run with nobody to answer does not wait for one.  It dies with the offer
 written out: what it would build, what that costs a month, and the line to put
-in the guest's C<_global> to accept it.  That covers the reprovision button,
+in the guest's C<_global> to accept it.  A hypervisor that bills by the hour
+says so, and what the rate is, because the monthly figure for one of those is
+hours of it rather than a price that caps anything.  That covers the reprovision button,
 cron and CI, which drive this with no terminal.
 
 =cut
@@ -500,7 +502,8 @@ sub offer {
 
     my $best = $offers[0];
     my $line = "$best->{key}: $best->{value}";
-    my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month.\n", $self->{path}, $domain, $best->{hv}->name, $best->{value}, $best->{monthly_cost} );
+    my $rate = $best->{hourly} ? sprintf( ', billed at %s an hour, with no monthly price to cap it', $best->{hourly} ) : q{};
+    my $what = sprintf( "Nothing in %s has room for %s.\n%s would build it as a %s, at %.2f a month%s.\n", $self->{path}, $domain, $best->{hv}->name, $best->{value}, $best->{monthly_cost}, $rate );
 
     die $why . "\n" . $what . "To build it there, put this in the _global of $domain:\n\n    $line\n"
       unless Trog::Local->interactive;

@@ -366,6 +366,15 @@ CONF
     like $err, qr/hv1:[ ]needs/,                                          'with what each hypervisor lacked still in there';
     is $written, undef, 'nothing was written, and nothing was built';
 
+    # A type billed by the hour has no monthly price to be capped at, so the
+    # figure is hours of the rate and the offer says as much.
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g1-gpu-rtx6000-1', monthly_cost => 1095, hourly => 1.5 } } );
+    $err = exception { $fleet->select_for( 'vm.test.test', $config ) };
+    like $err, qr/at[ ]1095[.]00[ ]a[ ]month/,           'the month it works out to';
+    like $err, qr/billed[ ]at[ ]1[.]5[ ]an[ ]hour/,      'and the hourly rate it comes from';
+    like $err, qr/no[ ]monthly[ ]price[ ]to[ ]cap[ ]it/, 'and that nothing caps it';
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
+
     # Somebody to answer, who says no.
     $local->redefine( interactive => sub { 1 } );
     $answer = 'n';
