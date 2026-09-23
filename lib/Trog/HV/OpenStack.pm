@@ -14,6 +14,8 @@ use List::Util qw{first};
 use MIME::Base64();
 use OpenStack::MetaAPI();
 
+use Provisioner::Cookbook();
+
 use Trog::OpenStack::Auth();
 use Trog::OpenStack::Config();
 
@@ -331,16 +333,40 @@ with a cost of 0.
 
 Smallest rather than cheapest, because Nova gives a flavor no price: what a
 project pays for one is between it and whoever runs the cloud, and
-L<Trog::HV/monthly_cost(%needs)> answers 0 for the same reason.  Undef when no flavor
-holds the guest, or when the cloud cannot be asked.
+L<Trog::HV/monthly_cost(%needs)> answers 0 for the same reason.
+
+A flavor is only offered when the project's quota has room for it, and when it
+is at least the C<min_disk> and C<min_ram> of the image the guest boots.  Nova
+refuses both, and an offer nobody can accept is worse than none.  Undef when
+nothing left holds the guest, or when the cloud cannot be asked.
 
 =cut
 
 sub cheapest_for {
     my ( $self, %needs ) = @_;
 
+    my $image = eval { $self->image_for(%needs) } // {};
+    my $have  = eval { $self->capacity };
+    return undef unless $have;
+
     my @fit = eval {
-        grep { ref $_ && ( $_->{ram} // 0 ) >= ( $needs{memory_mb} // 0 ) && ( $_->{vcpus} // 0 ) >= ( $needs{cpus} // 0 ) && ( $_->{disk} // 0 ) * $GB >= ( $needs{disk_bytes} // 0 ) } $self->api->flavors_detail;
+        grep {
+                 ref $_
+              && ( $_->{ram}   // 0 ) >= ( $needs{memory_mb} // 0 )
+              && ( $_->{vcpus} // 0 ) >= ( $needs{cpus}      // 0 )
+              && ( $_->{disk}  // 0 ) * $GB >=
+              ( $needs{disk_bytes} // 0 )
+
+              # What the image asks of what it is booted on.
+              && ( $_->{disk} // 0 ) >= ( $image->{min_disk} // 0 )
+              && ( $_->{ram} // 0 ) >=
+              ( $image->{min_ram} // 0 )
+
+              # And what the project has left, since an offer the quota would
+              # refuse is one nobody can accept.
+              && ( !defined $have->{memory_free} || $_->{ram} <= $have->{memory_free} )
+              && ( !defined $have->{cpus_free}   || $_->{vcpus} <= $have->{cpus_free} )
+        } $self->api->flavors_detail;
     };
     return undef unless @fit;
 
@@ -396,6 +422,17 @@ sub shortfalls {
     push @reasons, sprintf( 'wants %dGB of disk, and %s has %dGB', ( $needs{disk_bytes} // 0 ) / $GB, $named, $flavor->{disk} // 0 )
       if ( $needs{disk_bytes} // 0 ) > ( $flavor->{disk} // 0 ) * $GB;
 
+    # And what the image asks of whatever it is booted on, which Nova refuses
+    # a flavor under: "Flavor's disk is smaller than the minimum size specified
+    # in image metadata".
+    my $image = eval { $self->image_for(%needs) };
+    if ($image) {
+        push @reasons, sprintf( 'boots an image that needs %dGB of disk, and %s has %dGB', $image->{min_disk}, $named, $flavor->{disk} // 0 )
+          if ( $image->{min_disk} // 0 ) > ( $flavor->{disk} // 0 );
+        push @reasons, sprintf( 'boots an image that needs %dMB of memory, and %s has %dMB', $image->{min_ram}, $named, $flavor->{ram} // 0 )
+          if ( $image->{min_ram} // 0 ) > ( $flavor->{ram} // 0 );
+    }
+
     return ( @reasons, $self->SUPER::shortfalls( %needs, memory_mb => $flavor->{ram}, cpus => $flavor->{vcpus}, disk_bytes => 0 ) );
 }
 
@@ -450,6 +487,25 @@ sub _limit {
     my ($value) = @_;
     return undef if !defined $value || $value < 0;
     return $value;
+}
+
+=head2 image_for(%needs)
+
+The image a guest of this C<distro> boots, as the cloud describes it, or undef
+when there is none.  L</image_for_distro($distro)> answers which it is; this
+answers what it is, because an image says the least it can be booted on in its
+C<min_disk> and C<min_ram>, and Nova refuses a flavor under either.
+
+=cut
+
+sub image_for {
+    my ( $self, %needs ) = @_;
+
+    my $distro  = eval { Provisioner::Cookbook->load( $needs{distro} // 'ubuntu' ) } or return undef;
+    my $id      = eval { $self->image_for_distro($distro) }                          or return undef;
+    my ($image) = grep { ref $_ && ( $_->{id} // q{} ) eq $id } $self->api->list_images( os_distro => $distro->distribution, os_version => $distro->release_version );
+
+    return $image;
 }
 
 =head2 flavor_for(%needs)

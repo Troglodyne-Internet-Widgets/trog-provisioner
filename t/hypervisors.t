@@ -343,7 +343,10 @@ CONF
     # The machine is full, and Linode would sell something that holds it.
     my $room   = with_capacity( hv1 => capacity( memory_free => 512 ) );
     my $linode = Test::MockModule->new('Trog::HV::Linode');
-    $linode->redefine( shortfalls   => sub { return 'names no linode_type, so it is not built on Linode' } );
+
+    # As the real one does: a guest that names no type is not built there, and
+    # one that names it is measured against it.
+    $linode->redefine( shortfalls   => sub { my ( undef, %needs ) = @_; return $needs{linode_type} ? () : 'names no linode_type, so it is not built on Linode' } );
     $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
 
     my $local = Test::MockModule->new('Trog::Local');
@@ -391,6 +394,42 @@ CONF
     is $chosen->name, 'linode1', 'a yes places the guest where the offer was';
     is_deeply $written, [qw{vm.test.test linode_type g6-standard-2}], 'the size is written into the file of the domain, so the next run does not ask';
     is $config->{linode_type}, 'g6-standard-2', 'and into what this run is generating from, which was read before that';
+};
+
+subtest 'an offer that would then be refused is not taken' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[hv1]
+libvirt_uri=qemu+ssh://root@hv1.example.net/system
+
+[linode1]
+linode_token=secret:linode/api/password
+region=us-east
+CONF
+
+    my $room   = with_capacity( hv1 => capacity( memory_free => 512 ) );
+    my $linode = Test::MockModule->new('Trog::HV::Linode');
+
+    # A backend that offers something its own limits refuse would be built on,
+    # and the refusal would come from the API after somebody agreed to pay.
+    $linode->redefine( cheapest_for => sub { return { key => 'linode_type', value => 'g6-standard-2', monthly_cost => 24 } } );
+    $linode->redefine( shortfalls   => sub { return 'a g6-standard-2 costs more than the account has left' } );
+
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( interactive => sub { 1 } );
+    my $utils = Test::MockModule->new('Trog::Utils');
+    $utils->redefine( prompt => sub { return 'y' } );
+
+    my $written;
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( record_global => sub { $written = 1; return '/bogus' } );
+
+    my $err = exception {
+        quietly( sub { $fleet->select_for( 'vm.test.test', { memory => 8192, cpus => 2, size => 40 * $GB } ) } )
+    };
+    like $err, qr/offered[ ]a[ ]g6-standard-2/,                      'the offer is checked against the hypervisor that made it';
+    like $err, qr/then[ ]would[ ]not[ ]take[ ]it/,                   'which is what the second look is for';
+    like $err, qr/costs[ ]more[ ]than[ ]the[ ]account[ ]has[ ]left/, 'saying what it said the second time';
+    is $written, undef, 'and nothing was written for a size that does not fit';
 };
 
 subtest 'an offer nobody can make is the shortfall, not an offer' => sub {

@@ -512,6 +512,12 @@ sub offer {
     my $answer = Trog::Utils::prompt("Build $domain there? [y/N]:");
     die $why . "\nDeclined, so $domain is not built.\n" unless ( $answer // q{} ) =~ m/\Ay/i;
 
+    # What was offered has to be what fits: a backend that offered something
+    # its own limits refuse would otherwise be built on, and refuse at the API.
+    my @still = $best->{hv}->shortfalls( %needs, $best->{key} => $best->{value} );
+    die $why . "\n" . $best->{hv}->name . " offered a $best->{value}, and then would not take it:\n" . join( q{}, map { "  $_\n" } @still )
+      if @still;
+
     my $path = Provisioner::Cookbook->record_global( $domain, $best->{key}, $best->{value} );
     print "Wrote $line to $path, so the next run does not ask.\n";
 
@@ -524,8 +530,9 @@ sub offer {
 
 =head2 _needs($config)
 
-Returns what a guest asks for: C<memory_mb>, C<cpus> and C<disk_bytes>, and
-the C<size_key> of each backend that has one, such as C<linode_type>.
+Returns what a guest asks for: C<memory_mb>, C<cpus> and C<disk_bytes>, the
+C<distro> it boots, and the C<size_key> of each backend that has one, such as
+C<linode_type>.
 C<$config> is as for C<select_for>.
 
 =cut
@@ -537,6 +544,10 @@ sub _needs {
         memory_mb  => Trog::HV->config_value( $config, 'memory' ),
         cpus       => Trog::HV->config_value( $config, 'cpus' ),
         disk_bytes => Trog::HV->config_value( $config, 'size' ),
+
+        # What it boots, because what a hypervisor has to hold is the image of
+        # that distribution rather than the guest's own figures alone.
+        distro => Trog::HV->config_value( $config, 'distro' ) // 'ubuntu',
     );
 
     # And what the guest is on each kind of hypervisor that sells sizes by

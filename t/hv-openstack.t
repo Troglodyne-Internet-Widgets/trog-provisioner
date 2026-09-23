@@ -298,13 +298,16 @@ subtest 'an unlimited quota has room for anything, rather than for nothing' => s
 
 subtest 'cheapest_for' => sub {
     my $hv = cloud();
-    $FAKE = Test::FakeCloud->new(
-        flavors_detail => [
-            { name => 'm1.tiny',   ram => 512,  vcpus => 1, disk => 5 },
-            { name => 'm1.small',  ram => 2048, vcpus => 1, disk => 20 },
-            { name => 'm1.medium', ram => 4096, vcpus => 2, disk => 40 },
-        ]
+
+    my @flavors = (
+        { name => 'm1.tiny',   ram => 512,   vcpus => 1, disk => 5 },
+        { name => 'm1.small',  ram => 2048,  vcpus => 1, disk => 20 },
+        { name => 'm1.medium', ram => 4096,  vcpus => 2, disk => 40 },
+        { name => 'm1.large',  ram => 16384, vcpus => 8, disk => 80 },
     );
+    my $roomy = { absolute => { maxTotalRAMSize => 51200, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } };
+
+    $FAKE = Test::FakeCloud->new( flavors_detail => \@flavors, limits => $roomy );
 
     # Smallest rather than cheapest: Nova gives a flavor no price at all.
     is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 10 * 1024**3 ),
@@ -317,6 +320,42 @@ subtest 'cheapest_for' => sub {
 
     is $hv->cheapest_for( memory_mb => 999999, cpus => 1, disk_bytes => 1 ), undef,
       'and a guest no flavor holds is offered nothing';
+
+    # An offer the project's own quota would refuse is one nobody can accept:
+    # Nova turns the build down after somebody has agreed to pay for it.
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => \@flavors,
+        limits         => { absolute => { maxTotalRAMSize => 12288, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } },
+    );
+    $hv->{capacity} = undef;
+    is $hv->cheapest_for( memory_mb => 16384, cpus => 8, disk_bytes => 1 ), undef,
+      'a flavor the quota has no room for is not offered, however well it holds the guest';
+
+    # And Nova refuses a flavor under what the image says it needs: "Flavor's
+    # disk is smaller than the minimum size specified in image metadata".
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => \@flavors,
+        limits         => $roomy,
+        images         => [ { id => 'img-big', os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z', min_disk => 40, min_ram => 0 } ],
+    );
+    $hv->{capacity} = undef;
+    is_deeply $hv->cheapest_for( memory_mb => 1024, cpus => 1, disk_bytes => 1, distro => 'ubuntu' ),
+      { key => 'openstack_flavor', value => 'm1.medium', monthly_cost => 0 },
+      'a guest is offered the smallest flavor its image will boot on, not the smallest that holds the guest';
+};
+
+subtest 'what the image asks of the flavor' => sub {
+    my $hv = cloud();
+    $FAKE = Test::FakeCloud->new(
+        flavors_detail => [ { name => 'm1.small', ram => 2048, vcpus => 1, disk => 20 } ],
+        limits         => { absolute => { maxTotalRAMSize => 51200, totalRAMUsed => 0, maxTotalCores => 40, totalCoresUsed => 0, maxTotalInstances => 10, totalInstancesUsed => 0 } },
+        images         => [ { id => 'img-big', os_distro => 'ubuntu', os_version => '24.04', status => 'active', created_at => '2026-01-01T00:00:00Z', min_disk => 40, min_ram => 4096 } ],
+    );
+
+    my @reasons = $hv->shortfalls( openstack_flavor => 'm1.small', memory_mb => 1024, cpus => 1, disk_bytes => 1, distro => 'ubuntu' );
+    like $reasons[0], qr/image[ ]that[ ]needs[ ]40GB[ ]of[ ]disk/,     'a flavor under the image min_disk is refused here, not by Nova twenty minutes in';
+    like $reasons[0], qr/m1[.]small[ ]has[ ]20GB/,                     'saying what the flavor has instead';
+    like $reasons[1], qr/image[ ]that[ ]needs[ ]4096MB[ ]of[ ]memory/, 'and one under its min_ram';
 };
 
 subtest 'a guest is a server with the domain for a name' => sub {
