@@ -57,7 +57,10 @@ each block any name you like:
     [hv2]
     libvirt_uri    = qemu+ssh://root@hv2.example.test/system
 
-Each block needs C<libvirt_uri> or C<cloud>, and not both.  Every other key is
+Each block names exactly one kind of hypervisor: C<libvirt_uri>, C<cloud> or
+C<linode_token>.  Two of them cannot both be satisfied, and none of them would
+fall through to libvirt's default connection, which is this machine -- so a
+block with two, or with none, is refused and named.  Every other key is
 optional.  L<Trog::HV> says what each key means and what its default is.
 
 Know two keys before you need them.  C<pool_name> beside C<pool_path> gives a
@@ -292,11 +295,36 @@ sub names      ($self) { return @{ $self->{order} } }
 Returns one hypervisor by name, built but not made current.  Dies if the file
 does not name it, because a typo in C<hypervisor=> must not put a guest
 somewhere else.  Also dies if its block has the key of more than one kind of
-hypervisor, C<libvirt_uri>, C<cloud> or C<linode_token>, or of none.
+hypervisor, C<libvirt_uri>, C<cloud> or C<linode_token>, or of none, which
+L</$class = $fleet-E<gt>backend_of($name)> is where it finds out.
 
 =cut
 
 sub hypervisor {
+    my ( $self, $name ) = @_;
+
+    $self->backend_of($name);
+
+    return $self->{built}{$name} //= Trog::HV->candidate(
+        name => $name,
+        Trog::HV->options_from_block( $self->{blocks}{$name} ),
+    );
+}
+
+=head2 $class = $fleet->backend_of($name)
+
+Returns the backend class that a block describes, without building it.  Dies if
+the file does not name the block, if the block has the key of more than one kind
+of hypervisor, or if it has none of them.
+
+F<bin/preflight> asks this of every block, so a file that cannot be built on is
+reported before a run rather than when something reaches that block.  Which is
+also why it does not build: a block answers what kind it is without a cloud
+being contacted, or its client being installed.
+
+=cut
+
+sub backend_of {
     my ( $self, $name ) = @_;
 
     my $block = $self->{blocks}{$name}
@@ -312,10 +340,7 @@ sub hypervisor {
     die "[$name] in " . $self->{path} . ' has none of ' . join( ', ', @markers ) . ", so there is nothing to build on.\n"
       unless @has;
 
-    return $self->{built}{$name} //= Trog::HV->candidate(
-        name => $name,
-        Trog::HV->options_from_block($block),
-    );
+    return Trog::HV->backend_for( Trog::HV->options_from_block($block) );
 }
 
 =head2 hypervisors

@@ -14,7 +14,6 @@ use List::Util qw{any sum0};
 use MIME::Base64();
 use Cpanel::JSON::XS();
 use Crypt::PRNG();
-use Linode::API 0.002 ();
 
 =head1 NAME
 
@@ -93,13 +92,22 @@ marks a block as one for this backend.
 Returns C<linode_token>, the option that makes a block a Linode one.  See
 L<Trog::HV/backend_for(%opts)>.
 
+=head2 client_module
+
+Returns L<Linode::API> and the version of it that this backend needs, which
+L<Trog::HV/$module = $hv-E<gt>require_client> loads when a client is first
+built.  0.002 is the first release that reads a path Linode writes a slash into as a
+path rather than as one escaped segment, without which every call about a type
+is a 404.
+
 =cut
 
 sub config_keys {
     return ( map { $_ => $_ } qw{linode_token region firewall_id private_ip monthly_budget domain_dir} );
 }
-sub marker   { return 'linode_token' }
-sub size_key { return 'linode_type' }
+sub marker        { return 'linode_token' }
+sub size_key      { return 'linode_type' }
+sub client_module { return ( 'Linode::API', '0.002' ) }
 
 =head2 build(%opts)
 
@@ -172,7 +180,7 @@ store.
 
 sub api {
     my ($self) = @_;
-    return $self->{_api} //= Linode::API->new( token => $self->_token );
+    return $self->{_api} //= do { $self->require_client; Linode::API->new( token => $self->_token ) };
 }
 
 sub _token { my ($self) = @_; return $self->setting('linode_token') }
@@ -807,7 +815,7 @@ backend, in order.  See L<Trog::HV/PREFLIGHT>.
 
 =cut
 
-sub preflight_checks { return qw{check_reachable check_linode_resources check_linode_budget check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config} }
+sub preflight_checks { return qw{check_client check_reachable check_linode_resources check_linode_budget check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()

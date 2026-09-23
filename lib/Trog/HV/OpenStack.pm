@@ -12,7 +12,6 @@ use parent 'Trog::HV::Cloud';
 
 use List::Util qw{first};
 use MIME::Base64();
-use OpenStack::MetaAPI();
 
 use Provisioner::Cookbook();
 
@@ -196,10 +195,16 @@ block as one for this backend.  It names an entry in F<clouds.yaml>.
 
 Returns C<cloud>.  See L<Trog::HV/backend_for(%opts)>.
 
+=head2 client_module
+
+Returns L<OpenStack::MetaAPI>, which L<Trog::HV/$module = $hv-E<gt>require_client>
+loads when a client is first built.
+
 =cut
 
-sub marker   { return 'cloud' }
-sub size_key { return 'openstack_flavor' }
+sub marker        { return 'cloud' }
+sub size_key      { return 'openstack_flavor' }
+sub client_module { return 'OpenStack::MetaAPI' }
 
 sub config_keys {
     return ( map { $_ => $_ } qw{cloud network floating_network availability_zone security_group keypair domain_dir} );
@@ -318,6 +323,7 @@ sub api {
     my ($self) = @_;
     return $self->{_api} if $self->{_api};
 
+    $self->require_client;
     my $auth = Trog::OpenStack::Auth->from_cloud( $self->cloud );
 
     # Without an auth object, MetaAPI builds its own, and that one cannot use
@@ -1022,7 +1028,7 @@ backend, in order.  See L<Trog::HV/PREFLIGHT>.
 
 =cut
 
-sub preflight_checks { return qw{check_reachable check_cloud_resources check_cloud_quota check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config} }
+sub preflight_checks { return qw{check_client check_reachable check_cloud_resources check_cloud_quota check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()

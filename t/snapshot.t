@@ -27,6 +27,11 @@ use FindBin::libs;
 # backend lazily, and it is named only as a string below.
 use Trog::HV::Libvirt();    ## no critic (ProhibitUnusedImports)
 
+# The backend loads its client when it opens a connection, and these subtests
+# hand it a connection it did not open.  So the flag constants below come from
+# here rather than from Trog::HV::Libvirt.
+use Sys::Virt();    ## no critic (ProhibitUnusedImports)
+
 # Never the installation's real /etc/trog-provisioner: what these assert on
 # should not depend on which machine they run on, or on what is deployed there.
 ## no critic (CompileTime) -- setting it at compile time is the point:

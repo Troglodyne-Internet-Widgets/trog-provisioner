@@ -84,6 +84,13 @@ reserve_memory = 8192
 ; fall through to libvirt's default connection, which is this machine, and that
 ; is the one placement nobody writing this file meant.
 ;
+; Each kind is talked to through its own client, and each client is installed
+; where a fleet has that kind of hypervisor in it: Sys::Virt for libvirt,
+; OpenStack::MetaAPI for a cloud, Linode::API for Linode.  A fleet of clouds
+; needs no Sys::Virt, which cannot be built without a libvirt-dev to build it
+; against.  `bin/preflight` reads this file and says which block wants which,
+; and what installs it.
+;
 ; Nothing here is a path or a device, because there is no filesystem to reach
 ; and no bridge to detect.  A guest gets a flavor rather than a memory figure
 ; and a disk size, and what flavors exist is the cloud's to say -- ask it, with

@@ -32,6 +32,7 @@ use Trog::HV();
 # backend lazily, and it is named only as a string below.
 use Trog::HV::Libvirt();
 use Trog::HV::OpenStack();
+use Trog::HV::Linode();    ## no critic (ProhibitUnusedImports)
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -710,6 +711,76 @@ subtest 'a configuration that keeps its secrets in the store says nothing' => su
 
     File::Slurper::Temp::write_text( "$dir/recipes.yaml", "---\nweb.test.test:\n    pdns:\n        api_key: secret:t/pdns/password\n" );
     is_deeply( Trog::HV->new()->note_plaintext_secrets, { ok => 1 }, 'nothing to say' );
+};
+
+subtest 'every other block in the file is judged too, without building one' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $conf = "$dir/hypervisors.conf";
+    File::Slurper::Temp::write_text( $conf, <<'CONF' );
+[hv1]
+libvirt_uri=qemu:///system
+
+[account]
+linode_token=secret:linode/api/password
+
+[cloud]
+cloud=openstack
+
+[muddle]
+libvirt_uri=qemu:///system
+cloud=openstack
+CONF
+
+    my $fleet = Trog::Hypervisors->load($conf);
+
+    # The client of a kind of hypervisor this installation does not have is
+    # exactly what is not installed, so stand one in.
+    my $linode = Test::MockModule->new('Trog::HV::Linode');
+    $linode->redefine( client_module => sub { return 'Trog::No::Such::Client' } );
+
+    my ( $failed, $said ) = do {
+        my @f;
+        my $out = capture_stdout( sub { @f = Trog::Bin::Preflight::rest_of_fleet( $fleet, Trog::HV->candidate( uri => 'qemu:///system', name => 'hv1' ) ) } );
+        ( \@f, $out );
+    };
+
+    unlike( $said, qr/\[hv1\]/, 'the hypervisor checked in full is not reported twice' );
+    like( $said, qr/ok[ ]+\[cloud\][ ]OpenStack::MetaAPI/,                     'a block whose client is installed passes' );
+    like( $said, qr/\[cloud\][ ]OpenStack::MetaAPI[ ][\d.]+[ ]is[ ]installed/, 'naming the client it would use, and its version' );
+    like( $said, qr/FAILED[ ]\[account\][ ]Trog::No::Such::Client/,            'one whose client is missing fails, named' );
+    like( $said, qr/Trog::No::Such::Client[ ]will[ ]not[ ]load[ ]here/,        'saying that client will not load' );
+    like( $said, qr/FAILED[ ]\[muddle\][ ]does[ ]not[ ]say[ ]what/,            'and so does one that names two kinds of hypervisor' );
+
+    is( scalar @$failed, 2, 'both are returned as failures, so the run exits non-zero' );
+    like( $failed->[0]{fix}, qr/cpanm[ ]Trog::No::Such::Client/,          'the missing client says what installs it' );
+    like( $failed->[1]{fix}, qr/it[ ]can[ ]only[ ]be[ ]one[ ]hypervisor/, 'and the muddled block says what is wrong with it' );
+
+    # Judging a block must not authenticate to a cloud, ask Linode anything, or
+    # open the secret store to read a token.
+    ok( !$fleet->{built}{cloud} && !$fleet->{built}{account}, 'nothing was built to answer' );
+
+    # And a run says all of it, so one preflight covers the whole file.
+    my $libvirt = Test::MockModule->new('Trog::HV::Libvirt');
+    $libvirt->redefine( is_local => sub { 1 } );
+    $libvirt->redefine( run_cmd  => sub { 0 } );
+    $libvirt->redefine( vmm      => sub { die "no\n" } );
+
+    my ( $rc, $whole ) = quietly( sub { Trog::Bin::Preflight::main( '--hvconf', $conf, '--hypervisor', 'hv1' ) } );
+    is( $rc, 1, 'a fleet with a block nothing can build on fails the run' );
+    like( $whole, qr/The[ ]rest[ ]of[ ]the[ ]fleet/,  'the section is printed by a run' );
+    like( $whole, qr/cpanm[ ]Trog::No::Such::Client/, 'and the fixes from it are in the list at the end' );
+};
+
+subtest 'the client of the hypervisor being checked is the first thing checked' => sub {
+    my $hv = Trog::HV->candidate( uri => 'qemu:///system' );
+    is( ( $hv->preflight_checks )[0], 'check_client', 'because every check after it fails for a reason that is not theirs' );
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( client_module => sub { return 'Trog::No::Such::Client' } );
+
+    my $result = $hv->check_client;
+    is( $result->{ok}, 0, 'a hypervisor whose client is not here fails it' );
+    like( $result->{fix}, qr/cpanm[ ]Trog::No::Such::Client/, 'saying what to install' );
 };
 
 done_testing();

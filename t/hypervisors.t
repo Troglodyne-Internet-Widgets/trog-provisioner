@@ -752,4 +752,39 @@ CONF
     unlike $err, qr/qemu/, 'rather than quietly placing the guest here';
 };
 
+subtest 'a block says what kind of hypervisor it is, before anything builds one' => sub {
+    my $fleet = Trog::Hypervisors->load( fleet_of(<<'CONF') );
+[machine]
+libvirt_uri=qemu+ssh://root@hv1.example.test/system
+
+[cloud]
+cloud=openstack
+
+[account]
+linode_token=secret:linode/api/password
+
+[both]
+libvirt_uri=qemu:///system
+cloud=openstack
+
+[neither]
+reserve_memory=4096
+CONF
+
+    is( $fleet->backend_of('machine'), 'Trog::HV::Libvirt',   'a libvirt_uri is a machine' );
+    is( $fleet->backend_of('cloud'),   'Trog::HV::OpenStack', 'a cloud is a cloud' );
+    is( $fleet->backend_of('account'), 'Trog::HV::Linode',    'and a token is a Linode account' );
+
+    # Two kinds cannot both be satisfied, and one kind is what the guests of
+    # that block get built on.  Neither is this machine by default, which is
+    # the one placement nobody writing the file meant.
+    like( exception { $fleet->backend_of('both') },    qr/\[both\][ ]in[ ].*[ ]has[ ]libvirt_uri[ ]and[ ]cloud;[ ]it[ ]can[ ]only[ ]be[ ]one/, 'a block of two kinds is refused, named' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( exception { $fleet->backend_of('neither') }, qr/\[neither\][ ]in[ ].*[ ]has[ ]none[ ]of[ ].*nothing[ ]to[ ]build[ ]on/,              'and so is a block of none' );                 ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( exception { $fleet->backend_of('nosuch') },  qr/No[ ]hypervisor[ ]named[ ]'nosuch'/,                                                 'a name the file has not got is said' );
+
+    # It answers without building, so a block whose cloud cannot be reached,
+    # or whose client is not installed, still says what it is.
+    ok( !$fleet->{built}{cloud}, 'and nothing was built to answer' );
+};
+
 done_testing;
