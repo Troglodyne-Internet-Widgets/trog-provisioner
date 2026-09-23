@@ -93,7 +93,9 @@ destinations.
 =head2 %required = $recipe->required_recipes(%opts)
 
 Returns C<grafana> for the stack, and C<logcollector> for the stream.  It
-configures C<logcollector> with the forward that points to this recipe.
+configures C<logcollector> with the forward that points to this recipe.  It
+makes the syslog dashboard the C<home_dashboard> of C<grafana>, so that the
+dashboard is what an operator sees after a login.
 
 =cut
 
@@ -104,9 +106,10 @@ sub required_recipes {
     # anything is validated.
     my $port = $opts{port} // 6514;
 
+    # syslog.json is the name that the global fragment installs the dashboard as.
     return (
-        grafana      => sub { () },
-        logcollector => sub { ( forward => ["127.0.0.1:$port"] ) },
+        grafana      => sub { ( home_dashboard => 'syslog.json' ) },
+        logcollector => sub { ( forward        => ["127.0.0.1:$port"] ) },
     );
 }
 

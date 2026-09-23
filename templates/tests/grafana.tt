@@ -2,6 +2,7 @@ use strict;
 use warnings;
 
 use Test::More;
+use JSON::PP;
 
 my $port      = '[% port %]';
 my $database  = '[% influx_database %]';
@@ -88,5 +89,33 @@ subtest 'grafana loaded the datasource it was provisioned with' => sub {
     like( $out, qr/"name":"\Q$ds_name\E"/,     "the $ds_name datasource is there" ) or diag $out;
     like( $out, qr/"database":"\Q$database\E"/, "pointed at $database" )            or diag $out;
 };
+[% IF home_dashboard -%]
+
+subtest 'a login lands on the home dashboard' => sub {
+
+    # Without default_home_dashboard_path, the home page lists only starred and
+    # recent dashboards.  On a new guest that is none, so a provisioned
+    # dashboard is loaded and still out of sight.
+    my $file = '/var/lib/grafana/dashboards/[% home_dashboard %]';
+    ok( -f $file, "$file is there" ) or return;
+    my $want = eval { JSON::PP->new->decode( do { open( my $fh, '<', $file ) or die $!; local $/; <$fh> } ) };
+    ok( $want,          'and is JSON' ) or do { diag $@; return };
+    ok( $want->{title}, 'with a title to tell it from the stock home page' ) or return;
+
+    my $api  = "http://127.0.0.1:$port/api/dashboards";
+    my $auth = q{[% grafana_admin %]:[% admin_password %]};
+    my $out  = `curl -fsS -u '$auth' $api/home 2>&1`;
+    my $home = eval { JSON::PP->new->decode($out) };
+    ok( $home, 'grafana answers for its home page' ) or do { diag $out; return };
+
+    # Grafana 13 answers with a redirect to a copy of the file under a uid of
+    # its own, so the title is what the two have in common.
+    if ( my ($uid) = ( $home->{redirectUri} // q{} ) =~ m{^/d/([^/]+)} ) {
+        $out  = `curl -fsS -u '$auth' $api/uid/$uid 2>&1`;
+        $home = eval { JSON::PP->new->decode($out) };
+    }
+    is( $home && $home->{dashboard}{title}, $want->{title}, "and the home page is $want->{title}" ) or diag $out;
+};
+[% END -%]
 
 done_testing();

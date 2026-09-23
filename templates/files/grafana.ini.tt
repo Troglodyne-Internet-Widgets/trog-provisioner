@@ -31,3 +31,8 @@ allow_sign_up = false
 [analytics]
 reporting_enabled = false
 check_for_updates = false
+[% IF home_dashboard -%]
+
+[dashboards]
+default_home_dashboard_path = /var/lib/grafana/dashboards/[% home_dashboard %]
+[% END -%]

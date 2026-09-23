@@ -154,6 +154,17 @@ duration.  The setup script creates the database with this retention.  Telegraf
 creates a missing database with no expiry, and a syslog firehose with no expiry
 fills the disk.
 
+=item * C<home_dashboard> -- the file in F</var/lib/grafana/dashboards> that
+grafana shows after a login.  No default.  Without it, the home page lists only
+starred and recently viewed dashboards.  A provisioned dashboard is neither on a
+new guest, so the page is empty and the dashboard is one menu away.  Grafana 13
+serves the home page from a copy of the file, under the identifier
+C<default-home-dashboard>, and reads the file again for each visit.  So the
+address differs from the one the file provider gives the same dashboard, but the
+contents do not.  L<Provisioner::Recipe::grafanasyslog> sets this to its own
+dashboard.  If two recipes name different files, the build stops, because only
+one dashboard can be the home page.
+
 =back
 
 =cut
@@ -194,6 +205,11 @@ sub args {
                 pattern     => '^[0-9]+[smhdw]$',
                 default     => '90d',
                 description => 'How long measurements are kept, as an InfluxDB duration such as 90d.',
+            },
+            home_dashboard => {
+                type        => 'string',
+                pattern     => '^[^/]+[.]json$',
+                description => 'File name, in /var/lib/grafana/dashboards, of the dashboard grafana opens on after a login.  Unset leaves the stock home page.',
             },
             ipv6 => {
                 type        => 'boolean',
