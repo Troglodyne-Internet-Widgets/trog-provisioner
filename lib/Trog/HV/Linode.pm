@@ -724,7 +724,7 @@ backend, in order.  See L<Trog::HV/PREFLIGHT>.
 
 =cut
 
-sub preflight_checks { return qw{check_reachable check_linode_resources check_linode_budget check_rsync check_transfer_ip check_fetch_sources check_config} }
+sub preflight_checks { return qw{check_reachable check_linode_resources check_linode_budget check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_config} }
 sub preflight_notes  { return qw{note_stale_image note_apt_mirror note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()

@@ -31,7 +31,7 @@ use Trog::HV();
 # Loaded so Test::MockModule has a package to attach to: Trog::HV requires its
 # backend lazily, and it is named only as a string below.
 use Trog::HV::Libvirt();
-use Trog::HV::OpenStack();    ## no critic (ProhibitUnusedImports)
+use Trog::HV::OpenStack();
 
 # These patterns quotemeta a literal on purpose: a fixture string this test
 # wrote itself, full of dots and slashes that would otherwise need escaping one
@@ -496,6 +496,53 @@ subtest '--credentials reads the passwords before any check asks for one' => sub
 
     quietly( sub { Trog::Bin::Preflight::main('--credentials') } );
     is( $loaded, 1, 'with it, the passwords are read, once' );
+};
+
+subtest 'which hypervisors need a port forwarded to us, and which do not' => sub {
+    my $local = Test::MockModule->new('Trog::Local');
+    $local->redefine( sshd_port     => sub { 22 } );
+    $local->redefine( holds_address => sub { my ( undef, $address ) = @_; return $address eq '192.0.2.10' ? 1 : 0 } );
+    my $answered = 0;
+    $local->redefine( answers_on => sub { return $answered } );
+
+    my $cookbook = Test::MockModule->new('Provisioner::Cookbook');
+    $cookbook->redefine( globals => sub { return {} } );
+
+    # A guest on a machine of ours shares a network with us, and the routing
+    # table answers when the configuration is generated.
+    my $libvirt = Trog::HV::Libvirt->build( uri => 'qemu:///system' );
+    my $result  = $libvirt->check_transfer_route;
+    ok $result->{ok}, 'a machine of ours needs nothing forwarded';
+    like $result->{what}, qr/across[ ]our[ ]own[ ]network/, 'because its guests are on a network we share';
+
+    # A guest a service addresses is not, so it reaches us from outside.
+    my $cloud = Trog::HV::OpenStack->build( cloud => 'testcloud' );
+    $result = $cloud->check_transfer_route;
+    ok !$result->{ok}, 'a cloud with nothing named cannot be reached at all';
+    like $result->{fix}, qr/transfer_ip\s+=/, 'and is told which settings to write';
+
+    $cloud->{transfer_ip} = '10.0.0.5';
+    $result = $cloud->check_transfer_route;
+    ok !$result->{ok}, 'nor one told to use an address nothing on the internet routes to';
+    like $result->{what}, qr/private[ ]address/, 'which it says';
+
+    $cloud->{transfer_ip} = '192.0.2.10';
+    $result = $cloud->check_transfer_route;
+    ok $result->{ok}, 'an address of this machine is reachable as it is';
+    like $result->{what}, qr/192[.]0[.]2[.]10:22/, 'at the port this machine listens on';
+
+    $cloud->{transfer_ip}   = '198.51.100.7';
+    $cloud->{transfer_port} = 2222;
+    $result                 = $cloud->check_transfer_route;
+    ok !$result->{ok}, 'an address that is not ours and does not answer is a failure';
+    like $result->{fix}, qr/forward[ ]2222[ ]to[ ]the[ ]sshd[ ]here/,  'saying what has to forward what';
+    like $result->{fix}, qr/does[ ]not[ ]answer[ ]its[ ]own[ ]public/, 'and that a gateway may be hiding a forward that works';
+
+    # The same address, once something answers on it.
+    $answered = 1;
+    $result   = $cloud->check_transfer_route;
+    ok $result->{ok}, 'and one that answers is taken as forwarded here';
+    like $result->{what}, qr/something[ ]forwards[ ]it[ ]here/, 'which is what answering means';
 };
 
 subtest 'a distro pinned to an image that has moved on is worth saying so about' => sub {

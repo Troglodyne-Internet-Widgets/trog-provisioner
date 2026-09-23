@@ -183,6 +183,66 @@ sub transfer_ip {
     return $first;
 }
 
+=head2 holds_address($address)
+
+Whether C<$address> is an address of this machine.
+
+It asks the kernel by binding a socket to it, which succeeds only for an
+address this machine holds, rather than by reading a list of interfaces.  An
+address behind a gateway is not one of ours however much it looks like it.
+
+=cut
+
+sub holds_address {
+    my ( $class, $address ) = @_;
+
+    my $packed = Socket::inet_aton($address)                          or return 0;
+    socket( my $socket, Socket::PF_INET(), Socket::SOCK_STREAM(), 0 ) or return 0;
+
+    my $ours = bind( $socket, Socket::pack_sockaddr_in( 0, $packed ) ) ? 1 : 0;
+
+    # Nothing was written to it, so a failed close has nothing to lose.
+    close($socket) or undef;
+
+    return $ours;
+}
+
+=head2 answers_on($address, $port)
+
+Whether something accepts a connection to C<$address> on C<$port>, within
+C<$CONNECT_TIMEOUT> seconds.
+
+A false answer is not proof that nothing is there.  A gateway that forwards a
+port often does not answer its own public address from inside the network it
+forwards into, so this says no for a forward that works perfectly from
+outside.  Callers say that rather than reporting a broken forward.
+
+=cut
+
+our $CONNECT_TIMEOUT = 5;
+
+sub answers_on {
+    my ( $class, $address, $port ) = @_;
+
+    my $packed = Socket::inet_aton($address)                          or return 0;
+    socket( my $socket, Socket::PF_INET(), Socket::SOCK_STREAM(), 0 ) or return 0;
+
+    # Non-blocking, so a filtered port costs the timeout rather than the
+    # kernel's own, which is a couple of minutes.
+    my $answered = eval {
+        local $SIG{ALRM} = sub { die "timeout\n" };
+        alarm $CONNECT_TIMEOUT;
+        my $ok = connect( $socket, Socket::pack_sockaddr_in( $port, $packed ) );
+        alarm 0;
+        $ok ? 1 : 0;
+    } // 0;
+
+    alarm 0;
+    close($socket) or undef;
+
+    return $answered;
+}
+
 =head1 SEE ALSO
 
 L<Trog::Machine>, L<Trog::HV>, L<Trog::Guest>
