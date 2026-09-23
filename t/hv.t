@@ -1419,6 +1419,33 @@ subtest 'what a guest will call its interfaces is the hypervisor to say' => sub 
     );
 };
 
+subtest 'setting: a block may hold a secret: reference, as recipes.yaml may' => sub {
+    my @opened;
+    my $secrets = Test::MockModule->new('Trog::Secrets');
+    $secrets->redefine(
+        lookup => sub ( $class, $file, $password, %needed ) {
+            push @opened, \%needed;
+            return map { $_ => "resolved($needed{$_})" } keys %needed;
+        }
+    );
+    my $credentials = Test::MockModule->new('Trog::Credentials');
+    $credentials->redefine( prompt => sub { return 'the passphrase' } );
+
+    my $hv = fresh( uri => 'qemu:///system', pool_name => 'secret:pool/name/password', partition => '/machine/somebody' );
+
+    is( $hv->pool_name, 'resolved(secret:pool/name/password)', 'a value that is a reference is what the store holds' );
+    is( $hv->partition, '/machine/somebody',                   'and one that is not is itself' );
+    is( $hv->uri,       'qemu:///system',                      'as is a value that only looks like a URL' );
+    is( scalar @opened, 1,                                     'the store was opened once' );
+    is_deeply( $opened[0], { pool_name => 'secret:pool/name/password' }, 'for the one value that needed it' );
+
+    $hv->pool_name for 1 .. 3;
+    is( scalar @opened, 1, 'and not again for a value already resolved' );
+
+    fresh( uri => 'qemu:///system' )->pool_name;
+    is( scalar @opened, 1, 'a hypervisor with no reference in its block never opens it at all' );
+};
+
 subtest 'image_for_distro: libvirt builds from the distro\'s cloud image' => sub {
     my $ubuntu = Provisioner::Cookbook->load('ubuntu');
     is( fresh()->image_for_distro($ubuntu), $ubuntu->base_image, 'the URL the distro recipe names, which base_image downloads' );

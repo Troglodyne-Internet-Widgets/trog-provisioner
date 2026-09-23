@@ -279,13 +279,13 @@ subtest 'backend_for' => sub {
 subtest '_token' => sub {
     my %asked;
     my $secrets = Test::MockModule->new('Trog::Secrets');
-    $secrets->redefine( lookup => sub ( $class, $file, $password, %needed ) { %asked = ( file => $file, password => $password, %needed ); return ( token => 'the-token' ) } );
+    $secrets->redefine( lookup => sub ( $class, $file, $password, %needed ) { %asked = ( file => $file, password => $password, %needed ); return ( linode_token => 'the-token' ) } );
     my $credentials = Test::MockModule->new('Trog::Credentials');
     $credentials->redefine( prompt => sub ( $class, $message, $name, @ ) { return "passphrase for $name" } );
 
-    is( linode_hv()->_token, 'the-token',                  'the token comes out of the secret store' );
-    is( $asked{token},       'secret:linode/api/password', 'by the reference the block names' );
-    is( $asked{password},    'passphrase for keepass',     'unlocked with the passphrase this run has for it' );
+    is( linode_hv()->_token,  'the-token',                  'the token comes out of the secret store' );
+    is( $asked{linode_token}, 'secret:linode/api/password', 'by the reference the block names' );
+    is( $asked{password},     'passphrase for keepass',     'unlocked with the passphrase this run has for it' );
 };
 
 subtest 'monthly_cost and monthly_spend' => sub {

@@ -170,7 +170,7 @@ True when the hypervisor is the machine that runs this code.
 
 =cut
 
-sub uri ($self) { return $self->{uri} }
+sub uri ($self) { return $self->setting('uri') }
 
 sub is_local {
     my ($self) = @_;
@@ -230,8 +230,8 @@ one systemd slice, where an operator can limit CPU and I/O for all of them.
 
 =cut
 
-sub pool_name ($self) { return $self->{pool_name} // 'tf_disks' }
-sub partition ($self) { return $self->{partition} }
+sub pool_name ($self) { return $self->setting('pool_name') // 'tf_disks' }
+sub partition ($self) { return $self->setting('partition') }
 
 sub pool_path {
     my ($self) = @_;
