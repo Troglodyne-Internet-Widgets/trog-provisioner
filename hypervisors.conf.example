@@ -11,6 +11,13 @@
 ; Nothing here is per-guest.  A guest's provision.conf says how much memory and
 ; disk it wants; this file says which machines have any to give.
 
+; No value here has to be written out.  Any of them can be
+; secret:GROUP/ENTRY/FIELD, which names an entry in secrets.kdbx, as a value in
+; recipes.yaml can -- so a credential such as a Linode token lives in the store
+; rather than in this file.  A reference is resolved when something reads that
+; value, so a run that never touches this hypervisor is never asked for the
+; store's passphrase.
+
 [hv1]
 ; The only required key.  A remote hypervisor has to use an ssh transport,
 ; because we need its filesystem as well as its libvirt.

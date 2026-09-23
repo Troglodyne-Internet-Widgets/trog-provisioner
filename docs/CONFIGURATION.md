@@ -193,6 +193,13 @@ A password is never written here. `secret:GROUP/ENTRY/FIELD` names an entry in
 `secrets.kdbx` and is resolved when the configuration is read -- see
 `Trog::Secrets`.
 
+The same reference works in two other files, for the same reason. Any value in a
+`hypervisors.conf` block can be one, which is where a Linode token belongs; it is
+resolved when something reads that value, so a run that touches no hypervisor
+whose block holds one is never asked for the passphrase. In `clouds.yaml`, the
+`application_credential_secret` can be one, and `Trog::OpenStack::Auth` resolves
+it only when it has to ask Keystone for a token.
+
 The group is part of the address. `secret:koan/somebox-github-ssh/password` and
 `secret:github/somebox-github-ssh/password` are two different secrets, and an
 entry is only found in the group its reference names. Two entries of one name

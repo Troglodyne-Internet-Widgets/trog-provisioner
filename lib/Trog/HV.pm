@@ -11,6 +11,8 @@ use re '/aasx';
 use parent 'Trog::Machine';
 
 use Trog::Config();
+use Trog::Credentials();
+use Trog::Secrets();
 use Provisioner::Cookbook();
 use File::Slurper();
 use YAML::XS();
@@ -363,6 +365,39 @@ sub forget {
     return 1;
 }
 
+=head2 setting($name)
+
+One value from the block of this hypervisor in F<hypervisors.conf>, with a
+C<secret:> reference resolved.
+
+Any value in a block may be a reference, as a value in F<recipes.yaml> may:
+C<secret:GROUP/ENTRY/FIELD>, resolved against the secret store.  A Linode
+token is one, and so is anything else a backend would otherwise read in the
+clear from a file that lives in a repository.
+
+The store is opened at the first value that needs it, and not before, so a run
+that touches no hypervisor whose block holds one is never asked for the
+passphrase.  The answer is kept for the rest of the run.  Every backend reads
+its configuration through this, so none of them resolves a reference itself.
+
+=cut
+
+sub setting {
+    my ( $self, $name ) = @_;
+
+    my $value = $self->{$name};
+    return $value                   if ref $value || !defined $value || index( $value, 'secret:' ) != 0;
+    return $self->{_secrets}{$name} if exists $self->{_secrets}{$name};
+
+    my %found = Trog::Secrets->lookup(
+        Trog::Config->path('secrets.kdbx'),
+        Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
+        $name => $value,
+    );
+
+    return $self->{_secrets}{$name} = $found{$name};
+}
+
 =head1 IDENTITY
 
 =head2 name
@@ -398,10 +433,10 @@ Dies when C<transfer_port> is not a port number.
 
 =cut
 
-sub configured_transfer_ip ($self) { return $self->{transfer_ip} }
+sub configured_transfer_ip ($self) { return $self->setting('transfer_ip') }
 
 sub configured_transfer_port ($self) {
-    my $port = $self->{transfer_port};
+    my $port = $self->setting('transfer_port');
     return $port if !defined $port || $port =~ m/\A\d{1,5}\z/ && $port > 0 && $port < 65536;
     die "transfer_port for " . ( $self->name // $self->describe ) . " is '$port', which is not a port\n";
 }

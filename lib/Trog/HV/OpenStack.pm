@@ -238,7 +238,10 @@ Returns a name for the cloud, for a diagnostic message.
 
 =cut
 
-sub cloud    ($self) { return $self->{cloud} }
+sub cloud ($self) { return $self->setting('cloud') }
+
+# The block's value rather than setting's, so that a message never prints what
+# a secret: reference resolved to.
 sub describe ($self) { return 'the OpenStack cloud ' . $self->{cloud} }
 
 =head2 uri
@@ -250,7 +253,7 @@ has a correct value to show.
 
 sub uri {
     my ($self) = @_;
-    return $self->{_uri} //= Trog::OpenStack::Config->load( $self->{cloud} )->{auth_url};
+    return $self->{_uri} //= Trog::OpenStack::Config->load( $self->cloud )->{auth_url};
 }
 
 =head2 flavor, network, floating_network, availability_zone, security_group, keypair
@@ -274,12 +277,12 @@ Dies when the cloud has no such image, naming the two properties to set on one.
 
 =cut
 
-sub flavor            ($self) { return $self->{flavor} }
-sub network           ($self) { return $self->{network} }
-sub floating_network  ($self) { return $self->{floating_network} }
-sub availability_zone ($self) { return $self->{availability_zone} }
-sub keypair           ($self) { return $self->{keypair} }
-sub security_group    ($self) { return $self->{security_group} // 'default' }
+sub flavor            ($self) { return $self->setting('flavor') }
+sub network           ($self) { return $self->setting('network') }
+sub floating_network  ($self) { return $self->setting('floating_network') }
+sub availability_zone ($self) { return $self->setting('availability_zone') }
+sub keypair           ($self) { return $self->setting('keypair') }
+sub security_group    ($self) { return $self->setting('security_group') // 'default' }
 
 sub image_for_distro {
     my ( $self, $distro ) = @_;
@@ -309,7 +312,7 @@ sub api {
     my ($self) = @_;
     return $self->{_api} if $self->{_api};
 
-    my $auth = Trog::OpenStack::Auth->from_cloud( $self->{cloud} );
+    my $auth = Trog::OpenStack::Auth->from_cloud( $self->cloud );
 
     # Without an auth object, MetaAPI builds its own, and that one cannot use
     # application credentials.
@@ -633,7 +636,7 @@ sub create_guest {
     # needs no floating IP, and guest_ssh_ip reports a guest it cannot reach.
     die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
     foreach my $needed (qw{flavor network}) {
-        $spec{$needed} //= $self->{$needed};
+        $spec{$needed} //= $self->setting($needed);
         die "Building '$name' on " . $self->describe . " needs '$needed'.\n" . "Set it in the cloud's block in hypervisors.conf, or pass it here.\n"
           unless $spec{$needed};
     }

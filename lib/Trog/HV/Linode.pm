@@ -16,10 +16,6 @@ use Cpanel::JSON::XS();
 use Crypt::PRNG();
 use Linode::API 0.002 ();
 
-use Trog::Config();
-use Trog::Credentials();
-use Trog::Secrets();
-
 =head1 NAME
 
 Trog::HV::Linode - the Linode backend: a guest is a Linode, bought by the month
@@ -135,6 +131,8 @@ has a correct value to show.
 
 =cut
 
+# The block's value rather than setting's, so that a message never prints what
+# a secret: reference resolved to.
 sub describe ($self) { return 'Linode' . ( $self->{region} ? " in $self->{region}" : q{} ) }
 sub uri              { return $API_URL }
 
@@ -150,11 +148,11 @@ What a guest boots is not the block's to say: see L</image_for_distro($distro)>.
 
 =cut
 
-sub region         ($self) { return $self->{region} }
-sub type           ($self) { return $self->{type} }
-sub firewall_id    ($self) { return $self->{firewall_id} }
-sub private_ip     ($self) { return $self->{private_ip} }
-sub monthly_budget ($self) { return $self->{monthly_budget} }
+sub region         ($self) { return $self->setting('region') }
+sub type           ($self) { return $self->setting('type') }
+sub firewall_id    ($self) { return $self->setting('firewall_id') }
+sub private_ip     ($self) { return $self->setting('private_ip') }
+sub monthly_budget ($self) { return $self->setting('monthly_budget') }
 
 =head1 THE API
 
@@ -171,16 +169,7 @@ sub api {
     return $self->{_api} //= Linode::API->new( token => $self->_token );
 }
 
-sub _token {
-    my ($self) = @_;
-
-    my %found = Trog::Secrets->lookup(
-        Trog::Config->path('secrets.kdbx'),
-        Trog::Credentials->prompt( 'Enter password:', 'keepass' ),
-        token => $self->{linode_token},
-    );
-    return $found{token};
-}
+sub _token { my ($self) = @_; return $self->setting('linode_token') }
 
 # One call, answered with Linode's JSON.  Dies with what Linode said, or with
 # what the specification said was wrong before anything was sent.
@@ -458,7 +447,7 @@ sub create_guest {
 
     die "Building '$name' on " . $self->describe . " needs an image, which the distro recipe decides\n" unless $spec{image};
     foreach my $needed (qw{region type}) {
-        $spec{$needed} //= $self->{$needed};
+        $spec{$needed} //= $self->setting($needed);
         die "Building '$name' on " . $self->describe . " needs '$needed'.\nSet it in the block in hypervisors.conf.\n"
           unless $spec{$needed};
     }
