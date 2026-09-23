@@ -44,6 +44,12 @@ minutes into a run and look like a different problem.  Two examples are a sudo
 prompt that stops the run and does not fail it, and a Sys::Virt of a different
 release that does not have a constant.
 
+It checks one hypervisor in full, and every other block in F<hypervisors.conf>
+for the two faults a block can have on its own: naming no kind of hypervisor, or
+naming a kind whose API client is not installed here.  Each backend loads its
+client only when a hypervisor of that kind is built, so an installation installs
+the clients of the kinds it has.
+
 Exits 0 when a run is worth starting and 1 when it is not.
 
 =head1 OPTIONS
@@ -89,7 +95,8 @@ sub main {
     # Trog::Credentials for why it has to be asked for.
     Trog::Credentials->load() if $credentials;
 
-    my $hv = hypervisor( $hv_name, $hvconf );
+    my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
+    my $hv    = hypervisor( $fleet, $hv_name );
     return 1 unless $hv;
 
     print "Hypervisor: " . $hv->uri . "\n\n";
@@ -97,6 +104,8 @@ sub main {
     # Every check runs, also after one fails, so one run reports all the fixes.
     # The backend lists the checks.  See the PREFLIGHT section of Trog::HV.
     my @failed = grep { !$_->{ok} } map { report( %{ $hv->$_ } ) } $hv->preflight_checks;
+
+    push( @failed, rest_of_fleet( $fleet, $hv ) );
 
     my @notes = grep { !$_->{ok} } map { $hv->$_ } $hv->preflight_notes;
 
@@ -155,10 +164,9 @@ sub seed_admin_keys {
 }
 
 sub hypervisor {
-    my ( $hv_name, $hvconf ) = @_;
+    my ( $fleet, $hv_name ) = @_;
 
     my $hv = eval {
-        my $fleet = Trog::Hypervisors->load( $hvconf // Trog::Hypervisors->default_path() );
 
         # A name is answered from the fleet, and the lack of one is this
         # machine.  A name with no fleet to look it up in is neither.
@@ -171,6 +179,50 @@ sub hypervisor {
 
     print "Could not work out which hypervisor to use: $@" unless $hv;
     return $hv;
+}
+
+=head2 @failed = rest_of_fleet($fleet, $checked)
+
+Reports every other block in F<hypervisors.conf>: what it builds through, and
+whether that client is installed.  Prints each answer as it arrives and returns
+the failures, as the checks above do.
+
+Those checks are of one hypervisor, because a run builds on one.  This is about
+the file.  A block that names two kinds of hypervisor, a block that names none,
+and a block whose client nobody installed are all faults that otherwise show
+when something reaches that block, which is a run that has already started.
+
+=cut
+
+sub rest_of_fleet {
+    my ( $fleet, $checked ) = @_;
+
+    my @others = grep { $_ ne ( $checked->{name} // q{} ) } $fleet->names;
+    return () unless @others;
+
+    print "\nThe rest of the fleet:\n\n";
+    return grep { !$_->{ok} } map { report( %{ block_verdict( $fleet, $_ ) } ) } @others;
+}
+
+=head2 \%verdict = block_verdict($fleet, $name)
+
+Returns the verdict for one block: which backend it describes, and whether that
+backend's client will load, as C<[name] what>.  It builds nothing, so a cloud is
+not contacted, no secret store is opened for a token, and a block of a kind this
+installation has no client for is still reported.
+
+=cut
+
+sub block_verdict {
+    my ( $fleet, $name ) = @_;
+
+    my $backend = eval { $fleet->backend_of($name) }
+      or return { ok => 0, what => "[$name] does not say what to build on", fix => $@ };
+
+    # The same check the hypervisor above answered, asked of the class, because
+    # a block is judged without one being built.
+    my $verdict = $backend->check_client;
+    return { %$verdict, what => "[$name] $verdict->{what}" };
 }
 
 =head2 \%verdict = report(%verdict)

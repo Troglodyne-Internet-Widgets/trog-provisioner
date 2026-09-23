@@ -10,7 +10,6 @@ use warnings FATAL => 'all';
 use re '/aasx';
 use parent 'Trog::HV';
 
-use Sys::Virt();
 use Digest::SHA();
 use URI();
 use URI::Split();
@@ -73,6 +72,13 @@ Returns C<uri>, the option that makes a block a libvirt one, from
 C<libvirt_uri>.  A block with no backend's marker is one too, because this
 backend can talk to the machine it runs on.
 
+=head2 client_module
+
+Returns L<Sys::Virt>, which L<Trog::HV/$module = $hv-E<gt>require_client> loads
+when the connection is first opened.  It is not installed on an installation
+whose fleet is all clouds, and L<< /$result = $hv->check_sys_virt_in_step() >> is where a
+fleet with a libvirt hypervisor finds out that it has the wrong one.
+
 =head2 config_keys
 
 Returns the pairs of constructor option and F<hypervisors.conf> key that this
@@ -80,7 +86,8 @@ backend reads.  A block with C<libvirt_uri> in it is a block for this backend.
 
 =cut
 
-sub marker { return 'uri' }
+sub marker        { return 'uri' }
+sub client_module { return 'Sys::Virt' }
 
 sub config_keys {
     return (
@@ -277,6 +284,8 @@ same one.  Dies if libvirt does not accept the connection.
 sub vmm {
     my ($self) = @_;
     return $self->{vmm} if $self->{vmm};
+
+    $self->require_client;
 
     # An empty URI lets libvirt select its default, as virsh does with no -c.
     my $uri = $self->explicit ? $self->uri : '';
@@ -1919,7 +1928,7 @@ order.  L<Trog::HV/PREFLIGHT> describes what each one returns.
 
 =cut
 
-sub preflight_checks { return qw{check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_pool_writable check_config} }
+sub preflight_checks { return qw{check_client check_reachable check_passwordless_sudo check_iso_builder check_rsync check_transfer_ip check_transfer_route check_fetch_sources check_libvirt check_sys_virt_in_step check_pool_writable check_config} }
 sub preflight_notes  { return qw{note_libguestfs note_swtpm note_stale_image note_apt_mirror note_log_destination note_pool_quota note_plaintext_secrets} }
 
 =head2 $result = $hv->check_reachable()

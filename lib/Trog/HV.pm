@@ -72,6 +72,9 @@ is this kind: see L</backend_for(%opts)>.
 =item * C<is_local> and C<describe>, which every diagnostic prints.
 L<Trog::Machine> gives a default for both.
 
+=item * C<client_module>, the API client this backend talks to its hypervisor
+through, and the version of it that matters.  See L</$module = $hv-E<gt>require_client>.
+
 =item * C<capacity>, in the form that L</shortfalls(%needs)> and
 L</headroom(%needs)> read: a hash with C<memory_mb>, C<memory_free>,
 C<memory_committed>, C<cpus>, C<cpus_allocatable>, C<cpus_committed>,
@@ -152,7 +155,7 @@ object method" from somewhere in F<bin/provision>.
 If a method means nothing to a backend, the backend must die and say so.  It
 must not return an undef that the caller carries somewhere else before it fails.
 
-=for Pod::Coverage config_keys marker annihilate_domain revert_snapshot inspection_address image_for_distro
+=for Pod::Coverage config_keys marker client_module annihilate_domain revert_snapshot inspection_address image_for_distro
 
 =head1 CLASS METHODS
 
@@ -281,6 +284,48 @@ sub marker_key {
 
     my %in_file = $class->config_keys;
     return $in_file{ $class->marker };
+}
+
+=head2 $module = $hv->require_client
+
+Loads the API client of this backend and returns its name.
+
+Each backend reaches its hypervisor through one client: L<Sys::Virt>,
+L<OpenStack::MetaAPI>, L<Linode::API>.  Each of those is an optional dependency,
+installed where an installation has that kind of hypervisor configured, so the
+load is here rather than at the top of the backend.  A fleet of clouds runs
+without libvirt's client, and a fleet of machines runs without either cloud's.
+
+Call it from whatever builds the client, so a missing one is reported before any
+work is attempted.  Dies naming the hypervisor, the client, why it would not
+load, and the command that installs it.
+
+A backend class answers it too, for a caller that wants to know whether a client
+is there without building a hypervisor to ask.  F<bin/preflight> does that for
+every block in F<hypervisors.conf>, before a run.
+
+=cut
+
+sub require_client {
+    my ($self) = @_;
+
+    my ( $module, $want ) = $self->client_module;
+    my $path = ( $module =~ s{::}{/}gr ) . '.pm';
+
+    my $loaded = eval {
+        require $path;
+        $module->VERSION($want) if defined $want;
+        1;
+    };
+    return $module if $loaded;
+
+    # The list of every directory perl looked in is the bulk of that message
+    # and none of the answer, which is on the line above it.
+    my $why = $@ =~ s/\s* [(] \@INC [ ] entries [ ] checked: .* /\n/srx;
+
+    my $spec = defined $want ? "$module~$want" : $module;
+    my $who  = ref $self     ? $self->describe : $self;
+    die "$who talks to its hypervisor through $module, which will not load here:\n" . "  $why" . "    cpanm $spec\n";
 }
 
 =head2 options_from_block($block)
@@ -574,6 +619,7 @@ sub _abstract {
 sub build                 ( $self, @ ) { return $self->_abstract('build') }
 sub config_keys           ( $self, @ ) { return $self->_abstract('config_keys') }
 sub marker                ( $self, @ ) { return $self->_abstract('marker') }
+sub client_module         ( $self, @ ) { return $self->_abstract('client_module') }
 sub domain_exists         ( $self, @ ) { return $self->_abstract('domain_exists') }
 sub annihilate_domain     ( $self, @ ) { return $self->_abstract('annihilate_domain') }
 sub guest_names           ( $self, @ ) { return $self->_abstract('guest_names') }
@@ -853,6 +899,27 @@ Returns the answer of one check, in the form that C<bin/preflight> prints.
 sub _verdict {
     my ( $self, $ok, $what, $fix ) = @_;
     return { ok => $ok, what => $what, fix => $fix };
+}
+
+=head2 $result = $hv->check_client()
+
+Checks that the API client of this backend is installed, which every other
+check of a hypervisor needs and none of them says.  This class answers it for
+every backend, and each backend lists it first, because a missing client makes
+the checks after it fail for a reason that is not theirs.
+
+A backend class answers it as well as a hypervisor, which is how F<bin/preflight>
+judges a block it has not built.
+
+=cut
+
+sub check_client {
+    my ($self) = @_;
+
+    my ($module) = $self->client_module;
+    return $self->_verdict( 0, "$module will not load here", $@ ) unless eval { $self->require_client; 1 };
+
+    return $self->_verdict( 1, "$module " . $module->VERSION . ' is installed', q{} );
 }
 
 =head2 $hv->check_reachable(), $hv->check_transfer_ip()

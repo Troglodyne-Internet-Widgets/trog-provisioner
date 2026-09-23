@@ -26,6 +26,8 @@ use File::Slurper();
 use File::Slurper::Temp();
 use Test::MockModule qw{strict};
 use Config::Simple();
+use IPC::Run3();
+use FindBin;
 
 use FindBin::libs;
 
@@ -126,7 +128,7 @@ subtest 'pool and domain paths default the way they always did' => sub {
 
 subtest 'a backend that leaves something out is told what' => sub {
     my @owed = qw{
-      build config_keys capacity
+      build config_keys capacity client_module
       domain_exists annihilate_domain guest_names guest_ssh_ip
       snapshot_names snapshot_current_name create_snapshot revert_snapshot
       prepare_host release_seed guest_volumes
@@ -1729,6 +1731,66 @@ subtest 'the vnc access of a libvirt guest is a port and the tunnel to it' => su
 
     $mock->redefine( _domain => sub { undef } );
     like( exception { bless( {}, 'Trog::HV::Libvirt' )->vnc_access('gone.test') }, qr/No[ ]domain[ ]called[ ]gone[.]test/, 'a guest that is not there is named' );
+};
+
+subtest 'each backend names the client it talks through' => sub {
+    my %client = (
+        'Trog::HV::Libvirt'   => ['Sys::Virt'],
+        'Trog::HV::OpenStack' => ['OpenStack::MetaAPI'],
+        'Trog::HV::Linode'    => [ 'Linode::API', '0.002' ],
+    );
+
+    foreach my $backend ( sort Trog::HV->backends ) {
+        is_deeply( [ $backend->client_module ], $client{$backend}, "$backend says which module reaches its hypervisor" );
+    }
+};
+
+subtest 'a backend loads where its client is not installed' => sub {
+
+    # The whole point: an installation of libvirt machines runs every script
+    # without either cloud's client, and a fleet of clouds without Sys::Virt.
+    my $hide = <<'PERL';
+unshift( @INC, sub { my ( undef, $file ) = @_; die "not installed here\n" if $file =~ m{\A(?:Sys/Virt|OpenStack/MetaAPI|Linode/API)[.]pm\z}; return } );
+require Trog::HV;
+my @backends = Trog::HV->backends;
+my @pulled = grep { $INC{$_} } qw{Sys/Virt.pm OpenStack/MetaAPI.pm Linode/API.pm};
+print scalar(@backends) . " backends, clients loaded: " . ( join( q{,}, @pulled ) || 'none' ) . "\n";
+PERL
+
+    IPC::Run3::run3( [ $^X, "-I$FindBin::Bin/../lib", '-e', $hide ], \undef, \my $out, \my $err );
+    is( $?,   0,                                    'every backend compiles with all three clients hidden' ) or diag($err);
+    is( $out, "3 backends, clients loaded: none\n", 'and loading them pulls in none of the three' );
+};
+
+subtest 'a client that will not load says which, and how to install it' => sub {
+    my $hv   = fresh( uri => 'qemu+ssh://root@hv.test/system' );
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+
+    # File::Which rather than Sys::Virt, because the client of a backend is
+    # exactly the thing this machine is allowed not to have.
+    $mock->redefine( client_module => sub { return 'File::Which' } );
+    is( $hv->require_client,               'File::Which', 'a client that is there is loaded and named' );
+    is( Trog::HV::Libvirt->require_client, 'File::Which', 'and a class answers it too, for a caller with no hypervisor built' );
+
+    my $ok = $hv->check_client;
+    is( $ok->{ok}, 1, 'the check passes' );
+    like( $ok->{what}, qr/\AFile::Which[ ]\d/, 'saying the version it found' );
+
+    $mock->redefine( client_module => sub { return 'Trog::No::Such::Client' } );
+    my $err = exception { $hv->require_client };
+    like( $err, qr/the[ ]hypervisor[ ]at[ ]qemu[+]ssh:.*[ ]talks[ ]to[ ]its[ ]hypervisor[ ]through[ ]Trog::No::Such::Client/, 'a missing one names the hypervisor and the module' );    ## no critic (RegularExpressions::ProhibitComplexRegexes)
+    like( $err, qr/cpanm[ ]Trog::No::Such::Client\n\z/,                                                                       'and ends with the command that installs it' );
+    unlike( $err, qr/[@]INC[ ]entries[ ]checked/, 'without the list of every directory perl looked in' );
+
+    my $bad = $hv->check_client;
+    is( $bad->{ok}, 0, 'and the check fails' );
+    like( $bad->{what}, qr/Trog::No::Such::Client[ ]will[ ]not[ ]load/, 'naming the module' );
+    like( $bad->{fix},  qr/cpanm[ ]Trog::No::Such::Client/,             'with the fix to print' );
+
+    # A client too old is as unusable as one that is absent, and says so
+    # differently: 0.002 of Linode::API is what a Linode type needs.
+    $mock->redefine( client_module => sub { return ( 'File::Which', '999.0' ) } );
+    like( exception { $hv->require_client }, qr/cpanm[ ]File::Which~999[.]0/, 'a version too old asks for the version that is wanted' );
 };
 
 done_testing;
