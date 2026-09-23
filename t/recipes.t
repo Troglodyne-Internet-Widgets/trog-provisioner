@@ -2285,6 +2285,20 @@ subtest 'the two halves of the dashboard agree about the datasource' => sub {
     is( $syslog{datasource}, $stack{datasource_name}, 'grafanasyslog reads the datasource grafana provisions' );
 };
 
+subtest 'the home dashboard grafanasyslog names is the one it installs' => sub {
+
+    # One file name, written in the recipe and in its fragment.  Where they
+    # disagree, grafana is pointed at a file that is not there, and the home
+    # page stays empty with the dashboard one menu away.
+    my %required = Provisioner::Cookbook->load( 'grafanasyslog', distro => $DISTRO )->new(%PROV)->required_recipes(%G);
+    my %grafana  = $required{grafana}->();
+    my $home     = $grafana{home_dashboard};
+    ok( $home, 'grafanasyslog makes a dashboard the home page' ) or return;
+
+    my $fragment = File::Slurper::read_text( fragment_for( 'grafanasyslog', 'global.tt' ) );
+    like( $fragment, qr{\s/var/lib/grafana/dashboards/\Q$home\E$}m, "and its fragment installs $home where grafana looks" );
+};
+
 subtest 'every host a template fetches from is declared in fetch_hosts' => sub {
 
     # The heuristic that found nine undeclared hosts: a URL on the same line as
