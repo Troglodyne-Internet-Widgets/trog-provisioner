@@ -1,38 +1,39 @@
 # CLAUDE.md
 
-How to work in this repository.  What the code *is* and how it is written are
-written down elsewhere and pointed at below; this is the procedure.
+This file is the procedure for work in this repository.  Other documents say
+what the code is and how it is written.  This file points at them below.
 
-`bin/new_config` turns the recipes named for a domain into a makefile,
-`bin/provision` builds a guest and runs it, and `bin/destroy` takes one away.
-Everything else is a recipe, a template one renders, or a library those three
-share.
+`bin/new_config` turns the recipes named for a domain into a makefile.
+`bin/provision` builds a guest and runs it.  `bin/destroy` takes a guest away.
+Everything else is a recipe, a template that a recipe renders, or a library
+that those three share.
 
 ## Which skills, and when
 
-The perl-slop plugin's hooks hold you to the procedure.  They refuse an edit
-to Perl until `perl-slop:reading-perl` is loaded, and a commit of Perl until
-`data-perl`, `testing-perl` and `reviewing-perl` are, each since the last
-commit.  `.perl-slop.json` adds this repository's own: `writing-recipes`
-before an edit under `lib/Provisioner/Recipe/`, and `provisioning-recipes`
-before a commit that touches a recipe or a template.  A refusal names what is
-missing.  The sections below say why each one is there.
+The hooks of the perl-slop plugin hold you to the procedure.  They refuse an
+edit to Perl until `perl-slop:reading-perl` is loaded.  They refuse a commit of
+Perl until `data-perl`, `testing-perl` and `reviewing-perl` are loaded, each
+one after the last commit.  `.perl-slop.json` adds the skills of this
+repository.  It asks for `writing-recipes` before an edit under
+`lib/Provisioner/Recipe/`.  It asks for `provisioning-recipes` before a commit
+that changes a recipe or a template.  A refusal names the skills that are
+missing.  The sections below say why each skill is there.
 
-One the hooks cannot see: load `perl-slop:reading-perl` before you answer a
-question about the code or track something down in it, not only before you
-edit it.
+The hooks cannot see one case.  Before you answer a question about the code,
+or look for something in it, load `perl-slop:reading-perl`.  Load it for that
+as well as before an edit.
 
 ## Read the code before you change it
 
-Most of what you will touch is older than the conversation about it, and the
-line that looks pointless is usually the scar left by something that went wrong
-once.  The reason is in the commit, not the file.  This is a reading pass, done
-before the first edit rather than after the tests fail.
+Most of the code here is older than the conversation about it.  A line that
+looks pointless is usually the scar of something that went wrong once.  The
+reason is in the commit, not in the file.  So read before the first edit, not
+after the tests fail.
 
 ## Where it is written down
 
-`README.md` opens with a table of every document here and what it answers.  The
-ones you want in hand:
+`README.md` starts with a table of every document here and the question that
+each one answers.  These are the documents to keep at hand:
 
 | | |
 |---|---|
@@ -42,117 +43,132 @@ ones you want in hand:
 | `docs/APPROACH.md` | the choices a recipe is expected to make |
 | `perldoc Provisioner::Recipe` | fragments, generated files, tests, and the three ways a makefile fragment is not a shell script |
 
-Configuration questions have one answer: `Provisioner::Cookbook`.  What recipes
-exist, what one takes, what a domain is configured with, where its data lives.
-Do not read `recipes.yaml` or merge `_base` yourself -- that is how the copy in
-the skill's teardown came to disagree with `bin/new_config` about which
-directory a domain's data was in.
+`Provisioner::Cookbook` answers every question about configuration.  It says
+which recipes exist, what each one takes, how a domain is configured, and
+where the data of a domain is.  Do not read `recipes.yaml` or merge `_base`
+yourself.  A copy of that logic in the teardown of a skill once disagreed with
+`bin/new_config` about the directory that held the data of a domain.
 
 ## What a recipe takes belongs in its schema
 
-`args()` validates, defaults, coerces and documents, all of it for free, and the
-recurring mistake here is to do one of those jobs in perl instead -- where
-`bin/recipes` cannot show it and a reader cannot find it.  The skill is mostly
-about resisting that, and about the construct that decides whether a default
-lands where you meant it to: ufw's ssh rate limit was defaulted one level too
-high, so it never applied on any guest that ran a recipe which listens.
+`args()` validates, sets defaults, coerces and documents, with no extra code.
+The mistake that recurs here is to do one of those jobs in perl instead.  Then
+`bin/recipes` cannot show it, and a reader cannot find it.  The
+`writing-recipes` skill is mostly about how to avoid that.  It also explains
+the construct that decides where a default lands.  The ssh rate limit of ufw
+once had its default one level too high.  So the limit did not apply on any
+guest that ran a recipe that listens.
 
-## A recipe is verified on a guest
+## A recipe is tested on a guest
 
-`t/recipes.t` proves a template renders.  It says nothing about whether the
-package exists, the service starts, or the makefile target succeeds.  So a
-change under `lib/Provisioner/Recipe/` or `templates/` is built on a guest
-before it is committed, as the `provisioning-recipes` skill says.
+`t/recipes.t` proves that a template renders.  It does not prove that the
+package exists, that the service starts, or that the makefile target succeeds.
+So build a change under `lib/Provisioner/Recipe/` or `templates/` on a guest
+before you commit it.  The `provisioning-recipes` skill says how.
 
-Tear it down when you are finished, always, including after a failure.  If a run
-ended without one, this finds what it left:
+After every run, tear the guest down, also after a failure.  If a run ended
+without a teardown, this command finds what it left:
 
     bin/destroy --orphans --dryrun
 
-A guest is not the only thing a run leaves behind.  An agent given its own
-worktree gets a full checkout under `.claude/worktrees/`, and the harness only
-reaps one it finds unchanged -- so every fan-out that did any work leaves its
-checkouts there, ignored by git and under a dot directory nobody lists.  When
-both of these are true:
+A run can also leave git worktrees.  An agent with its own worktree gets a full
+copy of the repository under `.claude/worktrees/`.  If nothing in a worktree
+changed, Claude Code removes it.  Otherwise the worktree stays, so every
+fan-out that did work leaves its copies there.  Git ignores them, and nobody
+lists a dot directory.  When both of these are true, invoke the
+`agent-worktrees` skill:
 
-    du -hs .claude/worktrees          # over 1G
-    df -h  .claude/worktrees          # 80% or worse
+```
+du -hs .claude/worktrees          # over 1G
+df -h  .claude/worktrees          # 80% or worse
+```
 
-invoke the `agent-worktrees` skill, which says what is safe to remove and what
-the lock file does and does not mean.  Do not sweep them by hand: an unpushed
-branch lives in one of those directories and nowhere else, and `git worktree
-remove --force` is exactly the flag for throwing it away.
+The skill says what is safe to remove, and what the lock file means.  Do not
+remove them by hand.  An unpushed branch can exist in one of those directories
+and nowhere else.  `git worktree remove --force` deletes such a branch with no
+warning.
 
 ## Finishing a changeset
 
-Apply the three skills that the commit gate asks for in this order: data-perl,
-testing-perl, then reviewing-perl against the whole diff.  Loading a skill is
-not applying it.  The hook sees the first, and the review is still yours.
+The commit gate asks for three skills.  Apply them in this order: data-perl,
+testing-perl, then reviewing-perl against the whole diff.  To load a skill is
+not to apply it.  The hook sees the load, and the review is still your job.
 
-Then run `podchecker` over each changed file.
+Then run `podchecker` on each changed file.
 
-Do not run `perltidy`, `perlcritic`, `perl -c` or the tests yourself.  The
-pre-commit hook tidies the Perl you staged, runs perlcritic over it
-with the right profile for its path, and compiles it.  Then it runs the tests
-that the commit can break, which `tests-covering` chooses.  If any step fails,
-the commit does not happen, and the hook prints why.  Install both hooks once
-in each checkout that you commit from:
+Do not run `perltidy`, `perlcritic` or `perl -c` yourself.  Do not run the
+tests to decide whether a change is ready to commit.  The pre-commit hook
+tidies the Perl that you staged, runs perlcritic on it with the right profile
+for its path, and compiles it.  Then it runs the tests that the commit can
+break, which `tests-covering` chooses.  If a step fails, the hook stops the
+commit and prints the reason.
+
+The hook names each test that failed.  Its output does not say why.  If a test
+fails, run that file yourself with `-v`, and read the output:
+
+    prove -v t/<file>.t
+
+Do the same to see a new test fail before you fix what it tests.
+
+In each working tree that you commit from, install both hooks once:
 
     cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
-The post-commit hook brings the records of `tests-covering` up to date in the
+The post-commit hook updates the records of `tests-covering` in the
 background.
 
-A file that no test loads, such as a template, reaches its tests through
+A file that no test loads, such as a template, gets its tests from
 `.tests-covering-map.pl`.  A path that the map cannot place runs every test.
-So if a commit runs the whole suite and does not plainly touch everything, the
-map is probably missing a rule.  Add the rule to `.tests-covering-map.pl` in
-the same change, and add the case to `t/tests-covering-map.t`.
+If a commit runs the whole suite but does not touch everything, the map
+probably needs a rule.  In the same change, add the rule to
+`.tests-covering-map.pl`, and add the case to `t/tests-covering-map.t`.
 
-`git-hooks/pre-commit` says which profile judges which path, and why `scripts/`
-has a profile of its own.
+`git-hooks/pre-commit` says which profile judges which path.  It also says why
+`scripts/` has a profile of its own.
 
 ## When something is slow
 
-**`perl-slop:profiling-perl`.**  Measure before you conclude, and measure again
-after you change something.  "It is just slow" is not a finding; a line number
-and a percentage is.
+Use `perl-slop:profiling-perl`.  Measure before you conclude anything, and
+measure again after a change.  "It is just slow" is not a finding.  A line
+number and a percentage is a finding.
 
-That goes double for anything that looks like a timeout on a provision.  There
-are layers of them in play on a remote one, and a failure at a suspiciously
-round interval that does not move when you raise the setting is a failure fired
-by a different timeout than the one you are configuring -- so establish which
-one before concluding anything about the guest.  The `provisioning-recipes`
-skill has the ones that have caught us.
+This is most important for a failure that looks like a timeout on a provision.
+A remote provision has several layers of timeouts.  Sometimes a failure comes
+at a round interval.  If it does not move when you raise the setting, a
+different timeout fired, not the one that you set.  Find out which timeout
+fired before you conclude anything about the guest.  The
+`provisioning-recipes` skill lists the timeouts that caused trouble here.
 
 ## Commits and pull requests
 
-Branch, never commit to `master`.
+Make a branch.  Do not commit to `master`.
 
-A commit message here says what was wrong and why this is the fix -- in prose,
-in the imperative, naming the behavior rather than the diff ("Ask the pool
-whether it takes O_DIRECT, rather than guessing from its name").  That is not
-decoration: `perl-slop:reading-perl` is somebody arriving at your line in two
-years with `git blame`, and the message is the only thing that will still be
-able to tell them why.  Which is also why the *why* goes there rather than in a
-comment.
+A commit message here says what was wrong and why the change fixes it.  Write
+it in prose and in the imperative mood.  Name the behavior, not the diff, for
+example "Ask the pool whether it takes O_DIRECT, rather than guessing from its
+name".  The message has a job.  `perl-slop:reading-perl` describes a person who
+finds your line with `git blame` two years from now.  The message is the only
+thing that can still tell that person why.  For the same reason, the why goes
+in the message and not in a comment.
 
-When you have verified something, say what you ran and what it said.  A claim
-that a guest came up is worth the log line that shows it.  So is a claim about
-work you did: the URL `gh pr create` gave back, the sha `git push` reported.  A
-PR number nobody can open is worse than no number.
+After you make sure that something works, say what you ran and what it
+said.  A claim that a guest came up needs the log line that shows it.  A claim
+about your own work needs its evidence too, such as the URL from `gh pr
+create` or the sha from `git push`.  A PR number that nobody can open is worse
+than no number.
 
-Quote that line with the names taken out.  `ok 3 - $domain trusts the host keys
-of $forge` proves what the line naming the guest proved, because what made it
-evidence is that the assertion ran and passed, not which installation ran it.
-This repository is public and the fleet it is developed on is not: a commit
-message, a PR description and an issue are read by people who have no business
-knowing the hostnames, the accounts, the addresses or the customers.
-`perl-slop:information-security` is the whole of it.
+Quote that line with the names taken out.  The line `ok 3 - $domain trusts the
+host keys of $forge` proves the same thing as the line with the real names.
+The evidence is that the assertion ran and passed, not which installation ran
+it.  This repository is public, and the fleet that it runs on is not.  People
+who read a commit message, a PR description or an issue must not learn the
+hostnames, the accounts, the addresses or the customers.
+`perl-slop:information-security` has the full rule.
 
-Stack a branch on another only when the *code* depends on it, never when only
-the verification does.  The tcms checkout needed the postrun fix before a guest
-would go green, so its PR was opened against that branch -- while touching none
-of the same files.  It merged into a branch that had already delivered its own
-payload to `master`, and sat there.  Open against `master` and say in the
-description what has to land first.
+If the code of a branch depends on another branch, stack it on that branch.
+If only a test of it depends on the other branch, do not stack it.  The tcms
+branch once needed the postrun fix before a guest went green.  So its PR went
+against the postrun branch, although it changed none of the same files.  That
+branch had already delivered its changes to `master`, so the PR merged into it
+and stayed there.  Open every PR against `master`, and say in the description
+what must merge first.

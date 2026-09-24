@@ -250,7 +250,8 @@ if ! command -v tests-covering >/dev/null 2>&1
 then
     echo "Running every test, because tests-covering is not on PATH; install Perl::Tests::Covering..."
     prove -m -j8 t/ || {
-        echo "pre-commit: the tests above failed."
+        echo "pre-commit: the tests above failed.  To see why, run each failing file"
+        echo "on its own:  prove -v t/<file>.t"
         exit 1
     }
     exit 0
@@ -269,6 +270,7 @@ echo "Running the tests that ran what this commit changes..."
 # No -l: each test finds lib/ itself, through FindBin::libs, and -l would hide
 # a test that loads from lib/ before it does.
 prove -m -j8 $tests || {
-    echo "pre-commit: the tests above failed."
+    echo "pre-commit: the tests above failed.  To see why, run each failing file"
+    echo "on its own:  prove -v t/<file>.t"
     exit 1
 }
