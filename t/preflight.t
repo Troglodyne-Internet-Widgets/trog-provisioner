@@ -855,6 +855,70 @@ subtest 'each block of the fleet is reported before the next is checked' => sub 
     is_deeply( \@happened, \@expected, 'and each is reported before the next is checked' ) or diag explain \@happened;
 };
 
+# The space free at the pool and at what encloses it, as a scratch guest reported
+# them for a 200M quota of each kind on a 2G filesystem.
+subtest 'a pool is unlimited only when it has as much room as what encloses it' => sub {
+    my %xfs_project = ( path => '/mnt/x/pool', mount => '/mnt/x', avail => 209_715_200, mount_avail => 2_006_650_880 );
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( \%xfs_project,                           'xfs' ), 'an XFS project quota is a limit' );
+    ok( Trog::HV::Libvirt::pool_is_unlimited( { %xfs_project, avail => 2_006_650_880 }, 'xfs' ), 'and a directory with none is not' );
+
+    my %ext4_project = ( path => '/mnt/e/pool', mount => '/mnt/e', avail => 209_711_104, mount_avail => 1_916_170_240 );
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( \%ext4_project,                                              'ext2/ext3' ), 'an ext4 project quota is a limit' );
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( { %ext4_project, path => '/mnt/e', avail => 1_916_170_240 }, 'ext2/ext3' ), 'and so is a filesystem of its own' );
+
+    my %zfs_quota = ( path => '/tp/limited', mount => '/tp/limited', avail => 209_584_128, zpool_avail => 1_878_851_584 );
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( \%zfs_quota, 'zfs' ), 'a ZFS dataset with a quota is a limit' );
+    ok(
+        Trog::HV::Libvirt::pool_is_unlimited( { %zfs_quota, path => '/tp/open', mount => '/tp/open', avail => 1_878_786_048 }, 'zfs' ),
+        'and a dataset without one is not, though it is a mount point of its own'
+    );
+
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( undef,                                'xfs' ), 'nothing is said about a pool that could not be measured' );
+    ok( !Trog::HV::Libvirt::pool_is_unlimited( { %zfs_quota, zpool_avail => undef }, 'zfs' ), 'or about a zpool that did not answer' );
+};
+
+subtest 'the pool quota note asks the hypervisor, and advises for its filesystem' => sub {
+    my ( $fstype, $said, @asked );
+    my $pools = bless {}, 'Trog::Test::Pools';
+    no warnings 'once';
+    local *Trog::Test::Pools::get_storage_pool_by_name = sub { return 1 };
+
+    my $mock = Test::MockModule->new('Trog::HV::Libvirt');
+    $mock->redefine( vmm         => sub { return $pools } );
+    $mock->redefine( pool_name   => sub { return 'bogus' } );
+    $mock->redefine( pool_path   => sub { return q{/bogus/it's here} } );
+    $mock->redefine( pool_fstype => sub { return $fstype } );
+    $mock->redefine( capture_cmd => sub { push( @asked, $_[1] ); return $said } );
+    my $note = sub { ( $fstype, $said ) = @_; @asked = (); return Trog::HV->candidate( uri => 'qemu:///system' )->note_pool_quota };
+
+    my $result = $note->( 'zfs', "/bogus/pool\n 1878786048 tp/open /bogus/pool\n1878786048\n1878851584\n" );
+    ok( !$result->{ok}, 'a ZFS dataset with as much room as its zpool is worth a note' ) or diag explain $result;
+    like( $result->{what}, qr/the[ ]zpool[ ]tp[ ]has[ ]free/,                        'naming the zpool' );
+    like( $result->{fix},  qr/zfs[ ]create[ ]-o[ ]quota=500G[ ]tp\/vm-disks\/bogus/, 'and a dataset in it' );
+    is( scalar @asked, 1, 'from one command' );
+    like( $asked[0], qr/'\/bogus\/it'\\''s[ ]here'/, 'with the path quoted for the shell' );
+
+    ok( $note->( 'zfs', "/bogus/pool\n 209584128 tp/limited /bogus/pool\n209584128\n1878851584\n" )->{ok}, 'a dataset with a quota is not' );
+
+    $result = $note->( 'xfs', "/srv/pool\n 2006650880 /dev/sda2 /srv\n2006650880\n" );
+    my $project = q{xfs_quota -x -c 'project -s -p /srv/pool 42' /srv};
+    like( $result->{fix}, qr/\Q$project\E/,       'XFS gets a project quota on the pool as it is' );
+    like( $result->{fix}, qr/rootflags=prjquota/, 'and is told that a remount does not turn it on' );
+    unlike( $result->{fix}, qr/pool_path/, 'and the pool does not move' );
+
+    $result = $note->( 'ext2/ext3', "/srv/pool\n 1916170240 /dev/sda2 /srv\n1916170240\n" );
+    like( $result->{fix}, qr/tune2fs[ ]-O[ ]project,quota[ ]\/dev\/sda2/, 'ext4 gets its features added' );
+    like( $result->{fix}, qr/linux-modules-extra/,                        'and is told where quota_v2 is' );
+
+    like( $note->( 'btrfs', "/srv/pool\n 1916170240 /dev/sda2 /srv\n1916170240\n" )->{fix}, qr/pool_path[ ]=/, 'anything else gets a filesystem of its own, and moves' );
+
+    ok( $note->( 'xfs', q{} )->{ok}, 'a pool directory that is not there says nothing' );
+
+    local *Trog::Test::Pools::get_storage_pool_by_name = sub { die "no pool\n" };
+    ok( $note->( 'xfs', "/srv/pool\n 1 /dev/sda2 /srv\n1\n" )->{ok}, 'and neither does a pool that libvirt does not have yet' );
+    is( scalar @asked, 0, 'without asking the hypervisor anything' );
+};
+
 subtest 'the client of the hypervisor being checked is the first thing checked' => sub {
     my $hv = Trog::HV->candidate( uri => 'qemu:///system' );
     is( ( $hv->preflight_checks )[0], 'check_client', 'because every check after it fails for a reason that is not theirs' );
