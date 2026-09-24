@@ -340,8 +340,9 @@ out because L<Provisioner::DistroRecipe/args> declares them.
 
 C<libdir> travels in the same hash and is not declared here either.  It lists
 the extra library directories that an operator names in C<_global>, so that
-recipes outside this checkout are found.  C<bin/new_config> uses it before any
-recipe exists.  It pushes it onto C<@INC> and gives it to
+recipes outside this checkout are found.  L<Provisioner::Cookbook> uses it
+when it reads the configuration, before any recipe exists.  See
+L<Provisioner::Cookbook/use_libdirs>.  C<bin/new_config> also gives it to
 L<Provisioner::Cookbook/template_dirs>.
 
 No recipe receives a setting that it does not declare.  C<takes> gives each

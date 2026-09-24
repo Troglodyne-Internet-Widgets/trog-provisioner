@@ -64,6 +64,64 @@ this file, so a checkout and an installed dist give the same answer.
 
 sub recipe_dir { return File::Basename::dirname(__FILE__) . '/Recipe' }
 
+=head2 use_libdirs(@libdirs)
+
+Makes the recipes of each vendor F<libdir> available: its F<lib/> goes onto
+C<@INC>, and C<has>, C<names> and C<load> search its recipe directory.  A
+directory already in use is skipped, so this is safe to call again.  Returns
+every F<libdir> in use, in order.
+
+C<configuration> and C<remember> call this for each C<libdir> that a
+C<_global> names, in C<_base> or in a domain.  So every tool that reads the
+configuration sees the vendor recipes before it asks about a recipe.
+
+The vendor directories come after this checkout, both on C<@INC> and in the
+search.  A vendor recipe with the name of a recipe here is never loaded.  This
+is process-wide, as C<@INC> is, and C<forget> does not undo it.
+
+=cut
+
+my @LIBDIRS;
+
+sub use_libdirs {
+    my ( $class, @libdirs ) = @_;
+
+    my %using = map { $_ => 1 } @LIBDIRS;
+    foreach my $libdir ( grep { $_ && !$using{$_}++ } @libdirs ) {
+        push( @LIBDIRS, $libdir );
+        push( @INC,     "$libdir/lib" );
+    }
+
+    return @LIBDIRS;
+}
+
+=head2 recipe_dirs
+
+Returns the directories that hold recipe modules, in the order they are
+searched: C<recipe_dir>, then the recipe directory of each F<libdir> from
+C<use_libdirs> that has one.
+
+=cut
+
+sub recipe_dirs {
+    my ($class) = @_;
+    return ( $class->recipe_dir, grep { -d } map { "$_/lib/Provisioner/Recipe" } @LIBDIRS );
+}
+
+=head2 recipe_file($relative)
+
+Returns the path of the first file named C<$relative> in C<recipe_dirs>, such
+as C<nginx.pm> or C<Ubuntu/nginx.pm>, or undef when none has it.
+
+=cut
+
+sub recipe_file {
+    my ( $class, $relative ) = @_;
+
+    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one is the whole question
+    return List::Util::first { -f } map { "$_/$relative" } $class->recipe_dirs;
+}
+
 =head2 template_dir
 
 Returns the template directory.  It is found relative to this file, for the
@@ -104,8 +162,8 @@ sub template_dirs {
 
 =head2 names
 
-Returns, sorted, the name of every recipe that a domain can be built with.
-Dies if the recipe directory does not exist.
+Returns, sorted, the name of every recipe that a domain can be built with,
+from each of C<recipe_dirs>.  Dies if C<recipe_dir> does not exist.
 
 This leaves out the recipes that direct a build and do not take part in it,
 because nobody writes one under a domain.  See C<directors>.
@@ -119,8 +177,8 @@ sub names {
     die "Could not read $dir\n" unless -d $dir;
 
     my %director = map { $_ => 1 } $class->directors();
-    return grep { !$director{$_} }
-      map { m/\A(\w+)\.pm\z/ ? $1 : () } Provisioner::Utils::files_in($dir);
+    my @names    = sort( uniq( grep { !$director{$_} } map { m/\A(\w+)\.pm\z/ ? $1 : () } map { Provisioner::Utils::files_in($_) } $class->recipe_dirs ) );
+    return @names;
 }
 
 =head2 fetch_hosts
@@ -128,16 +186,17 @@ sub names {
 Returns every host that any recipe names in C<fetch_hosts>, sorted and without
 duplicates.  L<Provisioner::Recipe::fetchcache> uses these hosts by default.
 
-This loads every recipe, which C<names> does not.  It asks once per process,
-because the answer is a fact about the code.
+This loads every recipe, which C<names> does not.  It asks once for each set of
+C<use_libdirs>, because the answer is a fact about the code.
 
 =cut
 
 sub fetch_hosts {
     my ($class) = @_;
 
-    state @hosts = List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names );
-    return @hosts;
+    state %hosts;
+    my $hosts = $hosts{ join( "\0", @LIBDIRS ) } //= [ List::Util::uniq( sort map { $class->load($_)->fetch_hosts } $class->names ) ];
+    return @$hosts;
 }
 
 =head2 @refs = secret_references()
@@ -250,15 +309,16 @@ Returns every cache class that any recipe declares, as a list of C<{ class
 them to decide how long it keeps a file.
 
 This asks every recipe, not only the recipes of one domain, because the cache
-serves the whole fleet.  It asks once per process.
+serves the whole fleet.  It asks once for each set of C<use_libdirs>.
 
 =cut
 
 sub cache_classes {
     my ($class) = @_;
 
-    state @classes = map { $class->load($_)->cache_classes } $class->names;
-    return @classes;
+    state %classes;
+    my $classes = $classes{ join( "\0", @LIBDIRS ) } //= [ map { $class->load($_)->cache_classes } $class->names ];
+    return @$classes;
 }
 
 =head2 implementations($interface)
@@ -331,8 +391,8 @@ sub distros {
 
 =head2 has($name)
 
-Returns true if there is a recipe named C<$name>.  A name that is not a single
-word is never a recipe.
+Returns true if there is a recipe named C<$name> in C<recipe_dirs>.  A name
+that is not a single word is never a recipe.
 
 =cut
 
@@ -340,8 +400,7 @@ sub has {
     my ( $class, $name ) = @_;
     return 0 unless defined $name && $name =~ m/\A\w+\z/;
 
-    my $path = $class->recipe_dir . "/$name.pm";
-    return -f $path;    ## no critic (ValuesAndExpressions::ProhibitFiletest_f) -- whether there is one is the whole question; load() opens it for itself
+    return defined $class->recipe_file("$name.pm");
 }
 
 =head2 load($name, %opts)
@@ -382,8 +441,7 @@ sub load {
     return $module unless defined $opts{distro} && $opts{distro} =~ m/\A\w+\z/;
 
     my $namespace = ucfirst lc $opts{distro};
-    ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
-    return $module unless -f $class->recipe_dir . "/$namespace/$name.pm";
+    return $module unless defined $class->recipe_file("$namespace/$name.pm");
 
     my $specific = "Provisioner::Recipe::${namespace}::$name";
     require "Provisioner/Recipe/$namespace/$name.pm";    ## no critic (Modules::RequireBarewordIncludes)
@@ -407,7 +465,7 @@ costs one open for each recipe and no module loads.
 sub abstract {
     my ( $class, $name ) = @_;
 
-    my $path = $class->recipe_dir . "/$name.pm";
+    my $path = $class->recipe_file("$name.pm") // return undef;
     open( my $fh, '<', $path ) or return undef;
     while ( my $line = <$fh> ) {
         next unless $line =~ m/\A\s*[#]\s*ABSTRACT:\s*(\N+?)\s*\z/;
@@ -1030,7 +1088,18 @@ sub configuration {
         $extra
     ) if -d $extra;
 
+    $class->use_libdirs( _libdirs_in($conf) );
     return $CONFIGURATION{$key} = $conf;
+}
+
+# Every libdir that a _global names: _base first, then each domain by name, so
+# that the order of the search is the same on every run.
+sub _libdirs_in {
+    my ($conf) = @_;
+    return () unless ref $conf eq 'HASH';
+
+    my @globals = grep { ref eq 'HASH' } map { ref $conf->{$_} eq 'HASH' ? $conf->{$_}{_global} : () } ( '_base', sort grep { $_ ne '_base' } keys %$conf );
+    return map { @{ Provisioner::Utils::coerce_arrayref( $_->{libdir} ) } } @globals;
 }
 
 =head2 remember($path, $conf)
@@ -1054,6 +1123,8 @@ sub remember {
     my ( $class, $path, $conf ) = @_;
 
     my $key = Cwd::abs_path( $path // Trog::Config->path('recipes.yaml') );
+
+    $class->use_libdirs( _libdirs_in($conf) );
 
     # A copy, because the caller keeps using its own.  bin/new_config deletes
     # _base from its copy, and every other domain still needs _base.
@@ -1274,8 +1345,9 @@ than leaving a recipe to interpolate an undef into a path.  That is one refusal
 in one place: before this, F<bin/new_config> hand-wrote six of them and nothing
 else checked at all.
 
-A key that C<declared_globals> does not list is wrong too.  Nothing reads it,
-and the operator who wrote it believes that something does.
+A key that C<declared_globals> does not list is wrong too.  Either nothing
+reads it, or the build works it out and would disagree with it.  The refusal
+says which.
 
 =cut
 
@@ -1295,8 +1367,10 @@ sub globals {
 
     my @errors = $validator->validate( $said, \%schema );
 
-    my %declared = map { $_ => 1 } $class->declared_globals;
-    push( @errors, map { "/$_: Nothing declares this setting, so nothing reads it." } grep { !$declared{$_} } sort keys %$said );
+    my ( $settable, $computed ) = $class->_global_keys;
+    foreach my $key ( grep { !$settable->{$_} } sort keys %$said ) {
+        push( @errors, $computed->{$key} ? "/$key: The build works this out, so _global cannot set it." : "/$key: Nothing declares this setting, so nothing reads it." );
+    }
 
     die "The settings of this installation are not valid" . ( defined $domain ? " for $domain" : q{} ) . ":\n" . join( "\n", map { "  $_" } @errors ) . "\nThey are the _global of _base in recipes.yaml, and a domain overrides one in its own _global.\n"
       if @errors;
@@ -1308,9 +1382,13 @@ sub globals {
 
 Returns, sorted, every key that a C<_global> can hold.  That is each key that
 C<global_schema> declares, and each key that the C<schema> of a recipe
-declares, the C<directors> included.  A recipe receives only the keys of
-C<_global> that its schema names, so a key that is not in this list reaches
-nothing.
+declares, the C<directors> and the recipes of each F<libdir> included.  A
+recipe receives only the keys of C<_global> that its schema names, so a key
+that is not in this list reaches nothing.
+
+A C<readOnly> field is left out.  The build fills it in, as C<vm> does the MAC
+of each interface, so a value in C<_global> can only disagree with what the
+build uses.
 
 It loads every recipe, and so dies as C<load> does.
 
@@ -1319,16 +1397,30 @@ It loads every recipe, and so dies as C<load> does.
 sub declared_globals {
     my ($class) = @_;
 
+    my ($settable) = $class->_global_keys;
+    my @declared = sort keys %$settable;
+    return @declared;
+}
+
+# The keys a _global may set, and the readOnly keys that nothing lets it set,
+# each as a set.
+sub _global_keys {
+    my ($class) = @_;
+
     my %global = $class->global_schema;
-    my @keys   = keys %{ $global{properties} };
+    my ( %settable, %computed );
+    $settable{$_} = 1 foreach keys %{ $global{properties} };
 
     foreach my $name ( $class->names, $class->directors ) {
         my %schema = $class->load($name)->schema;
-        push( @keys, keys %{ $schema{properties} // {} } );
+        my $props  = $schema{properties} // {};
+        foreach my $key ( keys %$props ) {
+            ( $props->{$key}{readOnly} ? \%computed : \%settable )->{$key} = 1;
+        }
     }
+    delete @computed{ keys %settable };
 
-    my @declared = sort( uniq(@keys) );
-    return @declared;
+    return ( \%settable, \%computed );
 }
 
 =head2 \%aliases = alias_map($conf)
