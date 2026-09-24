@@ -1,0 +1,84 @@
+[%# /etc/profile.d/sshagentshare.sh sources this in every interactive login
+    bash.  tmux starts each pane as a login shell, so a pane gets it too.
+    perldoc Provisioner::Recipe::sshagentshare says what it does and why.
+
+    Nothing here is interpolated.  No apostrophes in an Xslate comment. -%]
+# The ssh agents of every login of this user, shared by all of their shells.
+# Written by the sshagentshare recipe of trog-provisioner.
+
+_sshagentshare_dir="$HOME/.ssh/agents"
+_sshagentshare_link="$HOME/.ssh/agent.sock"
+
+# Whether an agent answers on the socket in $1.  ssh-add -l exits 2 when it
+# reaches no agent, and 1 when the agent holds no keys.
+_sshagentshare_live() {
+    [[ -S $1 ]] || return 1
+    SSH_AUTH_SOCK=$1 ssh-add -l >/dev/null 2>&1
+    (($? != 2))
+}
+
+# Point the link at the socket in $1.  mv replaces the link in one step, so no
+# other shell finds it missing.
+_sshagentshare_point() {
+    local tmp="$_sshagentshare_link.$$"
+    ln -sfn "$1" "$tmp" && mv -Tf "$tmp" "$_sshagentshare_link"
+}
+
+# Remember the socket in $1, and point the link at it.
+_sshagentshare_add() {
+    mkdir -p -m 0700 "$HOME/.ssh" "$_sshagentshare_dir" || return
+    ln -sfn "$1" "$_sshagentshare_dir/${1//\//%}"
+    _sshagentshare_point "$1"
+}
+
+# Point the link at the newest live agent that is not $1, and forget the dead.
+_sshagentshare_pick() {
+    local entry best
+    for entry in "$_sshagentshare_dir"/*; do
+        [[ -L $entry ]] || continue
+        [[ $(readlink "$entry") == "$1" ]] && continue
+        if ! _sshagentshare_live "$entry"; then
+            rm -f "$entry"
+            continue
+        fi
+        [[ -z $best || $entry -nt $best ]] && best=$entry
+    done
+    [[ -n $best ]] && _sshagentshare_point "$(readlink "$best")"
+}
+
+# At each prompt.  Only a test and a comparison when nothing changed.
+_sshagentshare_prompt() {
+    if [[ -n $SSH_AUTH_SOCK && $SSH_AUTH_SOCK != "$_sshagentshare_link" ]]; then
+        _sshagentshare_live "$SSH_AUTH_SOCK" && _sshagentshare_add "$SSH_AUTH_SOCK"
+    fi
+    [[ -S $_sshagentshare_link ]] || _sshagentshare_pick
+    [[ -S $_sshagentshare_link ]] && export SSH_AUTH_SOCK="$_sshagentshare_link"
+    return 0
+}
+
+# /etc/bash.bash_logout calls this.  Bash runs that file only on exit or
+# logout, not when a hangup or a kill ends the shell.  The prompt of any other
+# shell then finds the link dead and picks again.
+_sshagentshare_logout() {
+    [[ -n $_sshagentshare_own ]] || return 0
+    rm -f "$_sshagentshare_dir/${_sshagentshare_own//\//%}"
+    [[ $(readlink "$_sshagentshare_link") == "$_sshagentshare_own" ]] &&
+        _sshagentshare_pick "$_sshagentshare_own"
+    return 0
+}
+
+# The socket that sshd made for this login, which goes away with it.  A tmux
+# pane has the same SSH_AUTH_SOCK, but its parent is tmux, and its exit must not
+# drop a socket that the login still holds.
+_sshagentshare_own=
+if [[ -n $SSH_AUTH_SOCK && $SSH_AUTH_SOCK != "$_sshagentshare_link" ]]; then
+    read -r _sshagentshare_parent </proc/$PPID/comm 2>/dev/null
+    [[ $_sshagentshare_parent == sshd* ]] && _sshagentshare_own=$SSH_AUTH_SOCK
+    unset _sshagentshare_parent
+fi
+
+# Before ~/.bashrc, so that a dotfile that starts an agent when none answers
+# finds the shared one.
+_sshagentshare_prompt
+[[ $PROMPT_COMMAND == *_sshagentshare_prompt* ]] ||
+    PROMPT_COMMAND="_sshagentshare_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"

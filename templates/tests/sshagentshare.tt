@@ -1,0 +1,71 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More;
+use File::Temp qw{tempdir};
+
+ok( -r '/etc/sshagentshare.bash',          'the functions are in place' );
+ok( -r '/etc/profile.d/sshagentshare.sh',  'and a login shell loads them' );
+
+my $logout = do { local ( @ARGV, $/ ) = '/etc/bash.bash_logout'; <> } // '';
+my @calls  = $logout =~ m/_sshagentshare_logout\s*$/mg;
+is( scalar @calls, 1, 'bash.bash_logout calls the logout hook once' ) or diag $logout;
+
+# Under /tmp, and short: the path of a unix socket has room for 107 bytes.
+my $dir  = tempdir( '/tmp/sas.XXXXXX', CLEANUP => 1 );
+my $home = "$dir/home";
+mkdir $home or die "mkdir $home: $!";
+my $link = "$home/.ssh/agent.sock";
+
+# Each agent under a socket of its own.  ssh-agent prints the pid it forked.
+my %pid;
+foreach my $name (qw{a b}) {
+    my $out = `ssh-agent -a '$dir/$name.sock'`;
+    ($pid{$name}) = $out =~ m/SSH_AGENT_PID=(\d+)/;
+    ok( $pid{$name}, "agent $name started" ) or diag $out;
+
+    # The newest live agent wins, and its socket is what -nt compares.
+    sleep 1;
+}
+
+# A real interactive login bash, so the test goes through /etc/profile.  Only
+# the home and the agent come from the test.
+sub shell {
+    my ( $sock, $command ) = @_;
+    my $env = "HOME='$home' PATH=/usr/bin:/bin TERM=dumb";
+    $env .= " SSH_AUTH_SOCK='$sock'" if defined $sock;
+    my $out = `env -i $env bash -lic '$command' </dev/null 2>/dev/null`;
+    chomp $out;
+    return $out;
+}
+
+is( shell( "$dir/a.sock", 'echo $SSH_AUTH_SOCK' ), $link, 'a login with an agent gets the stable socket' );
+is( readlink $link, "$dir/a.sock", 'which leads to that agent' );
+
+shell( "$dir/b.sock", 'true' );
+is( readlink $link, "$dir/b.sock", 'a newer login takes the link' );
+ok( -l "$home/.ssh/agents/" . ( "$dir/a.sock" =~ tr{/}{%}r ), 'and the older agent is still known' );
+
+like( shell( undef, 'echo $SSH_AUTH_SOCK' ), qr/\Q$link\E$/, 'a shell with no agent of its own gets the shared one' );
+
+kill 'TERM', $pid{b};
+sleep 1;
+is( shell( $link, 'true' ), '', 'when the agent behind the link dies, the next shell starts' );
+is( readlink $link, "$dir/a.sock", 'and moves the link to the agent that is left' );
+ok( !-e "$home/.ssh/agents/" . ( "$dir/b.sock" =~ tr{/}{%}r ), 'and forgets the dead one' );
+
+# A pane that was open when its agent died finds out at its next prompt.
+my $third = `ssh-agent -a '$dir/c.sock'`;
+($pid{c}) = $third =~ m/SSH_AGENT_PID=(\d+)/;
+shell( "$dir/c.sock", 'true' );
+is( readlink $link, "$dir/c.sock", 'a third login takes the link' );
+is( shell( $link, "kill $pid{c}; sleep 1; _sshagentshare_prompt; readlink ~/.ssh/agent.sock" ),
+    "$dir/a.sock", 'a shell whose agent dies moves the link at its next prompt' );
+
+# The shells above were login shells, and each ran bash.bash_logout as it
+# exited.  None was a child of sshd, so none owned its agent, and each left it.
+ok( -l "$home/.ssh/agents/" . ( "$dir/a.sock" =~ tr{/}{%}r ), 'a login shell that sshd did not start keeps the agent at exit' );
+
+kill 'TERM', grep { defined } values %pid;
+
+done_testing();
