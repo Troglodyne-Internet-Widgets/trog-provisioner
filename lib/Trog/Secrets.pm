@@ -8,8 +8,13 @@ use strict;
 use warnings FATAL => 'all';
 use re '/aasx';
 
+use Fcntl qw{LOCK_EX LOCK_NB};
 use File::KeePass::KDBX();
 use Scalar::Util qw{looks_like_number};
+use Time::HiRes  qw{time sleep};
+
+# How many seconds a writer waits for another writer to finish with the store.
+our $LOCK_WAIT = 120;
 
 =head1 NAME
 
@@ -226,42 +231,47 @@ sub remember {
 
     return () unless %generator_by_ref;
 
-    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
-      or die "Could not open $file\n";
-    $kdbx->unlock() or die "Could not unlock $file\n";
+    return $class->locked(
+        $file,
+        sub {
+            my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+              or die "Could not open $file\n";
+            $kdbx->unlock() or die "Could not unlock $file\n";
 
-    my ( %values, %made );
-    foreach my $ref ( sort keys %generator_by_ref ) {
-        my ( $group, $title, $field ) = $class->parse($ref);
+            my ( %values, %made );
+            foreach my $ref ( sort keys %generator_by_ref ) {
+                my ( $group, $title, $field ) = $class->parse($ref);
 
-        my $g     = $class->_group_named( $kdbx, $group );
-        my $entry = $g && $class->_entry_named( $g, $title );
+                my $g     = $class->_group_named( $kdbx, $group );
+                my $entry = $g && $class->_entry_named( $g, $title );
 
-        if ( $entry && length $entry->{$field} ) {    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
-            $values{$ref} = $entry->{$field};
-            next;
+                if ( $entry && length $entry->{$field} ) {    ## no critic (ValuesAndExpressions::ProhibitDefinedBeforeLength) -- a secret of "0" is still a secret
+                    $values{$ref} = $entry->{$field};
+                    next;
+                }
+
+                my $made = $generator_by_ref{$ref}->()
+                  or die "The generator for $ref produced nothing\n";
+
+                $g     //= $kdbx->add_group( { title => $group } );
+                $entry //= $kdbx->add_entry( { group => $g, title => $title } );
+                $entry->{$field} = $made;
+
+                $values{$ref} = $made;
+                $made{$ref}   = 1;
+            }
+
+            # Save only when there is something new, because a save rewrites the store
+            # that every other domain also uses.
+            return %values unless %made;
+
+            $kdbx->save_db( $file, $password );
+            $kdbx->lock();
+            $class->_confirm_kept( $file, $password, \%values, \%made );
+
+            return %values;
         }
-
-        my $made = $generator_by_ref{$ref}->()
-          or die "The generator for $ref produced nothing\n";
-
-        $g     //= $kdbx->add_group( { title => $group } );
-        $entry //= $kdbx->add_entry( { group => $g, title => $title } );
-        $entry->{$field} = $made;
-
-        $values{$ref} = $made;
-        $made{$ref}   = 1;
-    }
-
-    # Save only when there is something new, because a save rewrites the store
-    # that every other domain also uses.
-    return %values unless %made;
-
-    $kdbx->save_db( $file, $password );
-    $kdbx->lock();
-    $class->_confirm_kept( $file, $password, \%values, \%made );
-
-    return %values;
+    );
 }
 
 =head2 _confirm_kept($file, $password, \%values, \%made)
@@ -321,22 +331,27 @@ sub replace {
 
     return 0 unless %value_by_ref;
 
-    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
-      or die "Could not open $file\n";
-    $kdbx->unlock() or die "Could not unlock $file\n";
+    return $class->locked(
+        $file,
+        sub {
+            my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+              or die "Could not open $file\n";
+            $kdbx->unlock() or die "Could not unlock $file\n";
 
-    foreach my $ref ( sort keys %value_by_ref ) {
-        my ( $group, $title, $field ) = $class->parse($ref);
+            foreach my $ref ( sort keys %value_by_ref ) {
+                my ( $group, $title, $field ) = $class->parse($ref);
 
-        my $g     = $class->_group_named( $kdbx, $group ) // $kdbx->add_group( { title => $group } );
-        my $entry = $class->_entry_named( $g, $title )    // $kdbx->add_entry( { group => $g, title => $title } );
+                my $g     = $class->_group_named( $kdbx, $group ) // $kdbx->add_group( { title => $group } );
+                my $entry = $class->_entry_named( $g, $title )    // $kdbx->add_entry( { group => $g, title => $title } );
 
-        $entry->{$field} = $value_by_ref{$ref};
-    }
+                $entry->{$field} = $value_by_ref{$ref};
+            }
 
-    $kdbx->save_db( $file, $password );
-    $kdbx->lock();
-    return 1;
+            $kdbx->save_db( $file, $password );
+            $kdbx->lock();
+            return 1;
+        }
+    );
 }
 
 =head2 forget($file, $password, @refs)
@@ -362,30 +377,81 @@ sub forget {
 
     return () unless @refs;
 
-    my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
-      or die "Could not open $file\n";
-    $kdbx->unlock() or die "Could not unlock $file\n";
+    return $class->locked(
+        $file,
+        sub {
+            my $kdbx = File::KeePass::KDBX->load_db( $file, $password )
+              or die "Could not open $file\n";
+            $kdbx->unlock() or die "Could not unlock $file\n";
 
-    my @gone;
-    foreach my $ref (@refs) {
-        my ( $group, $title ) = $class->parse($ref);
+            my @gone;
+            foreach my $ref (@refs) {
+                my ( $group, $title ) = $class->parse($ref);
 
-        my $g     = $class->_group_named( $kdbx, $group ) or next;
-        my $entry = $class->_entry_named( $g, $title )    or next;
+                my $g     = $class->_group_named( $kdbx, $group ) or next;
+                my $entry = $class->_entry_named( $g, $title )    or next;
 
-        $kdbx->delete_entry( { id => $entry->{id} } );
-        push( @gone, $ref );
+                $kdbx->delete_entry( { id => $entry->{id} } );
+                push( @gone, $ref );
+            }
+
+            unless (@gone) {
+                $kdbx->lock();
+                return ();
+            }
+
+            $kdbx->save_db( $file, $password );
+            $kdbx->lock();
+
+            return @gone;
+        }
+    );
+}
+
+=head2 locked($file, $work)
+
+Runs the coderef C<$work> while this process holds the store in C<$file> for
+writing, and returns what C<$work> returns, in the context of the call.  Every
+sub here that saves the store calls it, around everything from its load to its
+save.
+
+A save writes the whole store, from what the writer loaded.  So two writers
+that load before either saves each save what the other did not see, and the
+second save throws away the change of the first.  Code outside this module that
+loads and saves the store, as C<bin/regroup_secrets> does, must call this too.
+
+The lock is an C<flock> on C<$file.lock>, beside the store, which this sub
+makes if it is not there.  It is not on the store itself, because a save
+replaces the store with a new file, and a lock on the old file does not stop a
+writer that opens the new one.  A reader needs no lock, because a save
+replaces the file whole.
+
+Waits up to C<$Trog::Secrets::LOCK_WAIT> seconds for another writer.  Dies if
+the lock file cannot be opened, or if the wait runs out.  The lock is released
+when C<$work> returns or dies.
+
+C<$work> must not call a sub here that saves the store.  That sub opens the
+lock file again, and C<flock> makes it wait for the lock that its own process
+holds, until the wait runs out.
+
+=cut
+
+sub locked {
+    my ( $class, $file, $work ) = @_;
+
+    my $path = "$file.lock";
+
+    # Open for as long as the lock is held, because closing it releases the lock.
+    open( my $lock, '>>', $path ) or die "Could not open $path: $!\n";    ## no critic (InputOutput::RequireBriefOpen)
+
+    my $until = time() + $LOCK_WAIT;
+    while ( !flock( $lock, LOCK_EX | LOCK_NB ) ) {
+        die "Another process has been writing $file for $LOCK_WAIT seconds, and still holds $path.\n"
+          if time() >= $until;
+        sleep(0.1);
     }
 
-    unless (@gone) {
-        $kdbx->lock();
-        return ();
-    }
-
-    $kdbx->save_db( $file, $password );
-    $kdbx->lock();
-
-    return @gone;
+    return $work->();
 }
 
 =head2 $group = _group_named($kdbx, $title)
