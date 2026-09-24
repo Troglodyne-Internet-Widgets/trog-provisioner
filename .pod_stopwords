@@ -233,6 +233,7 @@ distros
 dns
 dnsmasq
 domaindir
+dotfile
 dotfiles
 dryrun
 dzil
@@ -446,6 +447,7 @@ testdeps
 tld
 tldextract
 tmpfs
+tmux
 toolchain
 touchfile
 tpsgi

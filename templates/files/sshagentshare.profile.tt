@@ -1,0 +1,5 @@
+[%# /etc/profile sources this in every login shell, and sh reads it too.  So
+    this part stays POSIX, and loads the bash part only in interactive bash. -%]
+if [ -n "$BASH_VERSION" ] && [ -n "$PS1" ] && [ -r /etc/sshagentshare.bash ]; then
+    . /etc/sshagentshare.bash
+fi

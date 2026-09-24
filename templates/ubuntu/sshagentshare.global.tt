@@ -1,0 +1,6 @@
+install -o root -g root -m 0644 sshagentshare.bash /etc/sshagentshare.bash
+install -o root -g root -m 0644 sshagentshare.profile /etc/profile.d/sshagentshare.sh
+# No package owns /etc/bash.bash_logout, so a line added here survives an
+# upgrade of bash.  Bash reads it when a login shell exits.
+touch /etc/bash.bash_logout
+grep -qF '_sshagentshare_logout' /etc/bash.bash_logout || printf '%s\n' 'declare -F _sshagentshare_logout >/dev/null && _sshagentshare_logout' >> /etc/bash.bash_logout
