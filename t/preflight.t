@@ -835,6 +835,26 @@ CONF
     like( $whole, qr/cpanm[ ]Trog::No::Such::Client/, 'and the fixes from it are in the list at the end' );
 };
 
+# The POD of rest_of_fleet says each answer is printed as it arrives, so one
+# block is reported before the next is asked anything.
+subtest 'each block of the fleet is reported before the next is checked' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $conf = "$dir/hypervisors.conf";
+    File::Slurper::Temp::write_text( $conf, "[hv1]\nlibvirt_uri=qemu:///system\n\n[two]\nlibvirt_uri=qemu:///system\n\n[three]\nlibvirt_uri=qemu:///system\n" );
+    my $fleet = Trog::Hypervisors->load($conf);
+
+    my @happened;
+    my $preflight = Test::MockModule->new( 'Trog::Bin::Preflight', no_auto => 1 );
+    $preflight->redefine( block_verdicts => sub { my ( undef, $name ) = @_; push( @happened, "check $name" ); return { ok => 1, what => $name } } );
+    $preflight->redefine( report => sub { my (%v) = @_; push( @happened, "report $v{what}" ); return \%v } );
+
+    quietly( sub { Trog::Bin::Preflight::rest_of_fleet( $fleet, Trog::HV->candidate( uri => 'qemu:///system', name => 'hv1' ) ) } );
+
+    my @expected = map { ( "check $_", "report $_" ) } grep { $_ ne 'hv1' } $fleet->names;
+    is( scalar @expected, 4, 'two other blocks to judge' );
+    is_deeply( \@happened, \@expected, 'and each is reported before the next is checked' ) or diag explain \@happened;
+};
+
 subtest 'the client of the hypervisor being checked is the first thing checked' => sub {
     my $hv = Trog::HV->candidate( uri => 'qemu:///system' );
     is( ( $hv->preflight_checks )[0], 'check_client', 'because every check after it fails for a reason that is not theirs' );

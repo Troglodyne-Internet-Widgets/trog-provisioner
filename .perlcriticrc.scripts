@@ -109,6 +109,8 @@ formats = #!/usr/bin/perl
 # Performance
 [ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
+[RegularExpressions::ProhibitRegexToStripAffix]
+[BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [RequireQwForLiteralLists]
 [ProhibitNoWarningsRedefine]

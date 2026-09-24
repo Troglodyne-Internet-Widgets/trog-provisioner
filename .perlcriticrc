@@ -56,6 +56,8 @@ formats = #!/usr/bin/env perl
 [logicLAB::ProhibitShellDispatch]
 [ProhibitPipeOpen]
 [ProhibitRegexForSimpleSubstring]
+[RegularExpressions::ProhibitRegexToStripAffix]
+[BuiltinFunctions::ProhibitChainingSameListSub]
 [ProhibitUseLib]
 [ProhibitUsageSubs]
 [RequireQwForLiteralLists]

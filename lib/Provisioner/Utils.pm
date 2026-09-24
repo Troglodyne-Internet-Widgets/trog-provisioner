@@ -175,7 +175,10 @@ sub subdomain_aliases {
 
     my %seen;
 
-    return grep { !$seen{$_}++ } sort map { "$_.$domain" } map { $_->subdomains } @recipes;
+    return grep { !$seen{$_}++ } sort map {
+        my $recipe = $_;
+        map { "$_.$domain" } $recipe->subdomains
+    } @recipes;
 }
 
 =head3 qualify_address($value, $domain)
