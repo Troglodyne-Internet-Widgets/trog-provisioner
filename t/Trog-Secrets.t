@@ -14,6 +14,8 @@ t/Trog-Secrets.t - finding the notes a config leaves, and putting the answers ba
 use Test::More;
 use Test::Fatal qw{exception};
 use File::Temp  qw{tempdir};
+use Fcntl       qw{LOCK_EX};
+use POSIX();
 
 use FindBin::libs;
 
@@ -330,5 +332,63 @@ sub entries_by_group {
 
     return %by_group;
 }
+
+subtest 'a writer waits for the lock on the store' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $file = Trog::Secrets->create( "$dir/secrets.kdbx", 'pw', 'secret:g/first/password' => 'one' );
+
+    my %writers = (
+        remember => sub {
+            Trog::Secrets->remember( $file, 'pw', 'secret:g/second/password' => sub { 'two' } );
+        },
+        replace => sub { Trog::Secrets->replace( $file, 'pw', 'secret:g/first/password' => 'uno' ) },
+        forget  => sub { Trog::Secrets->forget( $file, 'pw', 'secret:g/first/password' ) },
+    );
+
+    {
+        # A second open file is a second holder to flock, even in this process.
+        open( my $held, '>>', "$file.lock" ) or die "Could not open $file.lock: $!";    ## no critic (InputOutput::RequireBriefOpen) -- held open to the end of the block, which is the lock
+        flock( $held, LOCK_EX )              or die "Could not lock $file.lock: $!";
+        local $Trog::Secrets::LOCK_WAIT = 0.3;
+
+        foreach my $name ( sort keys %writers ) {
+            like( exception { $writers{$name}->() }, qr{still[ ]holds[ ]\Q$file\E[.]lock}, "$name gives up on a store that another writer holds, naming the lock" );
+        }
+        is_deeply( { Trog::Secrets->lookup( $file, 'pw', first => 'secret:g/first/password' ) }, { first => 'one' }, 'and none of them wrote' );
+    }
+
+    is( exception { $writers{replace}->() }, undef, 'a writer goes ahead once the lock is let go' );
+    like(
+        exception {
+            Trog::Secrets->locked( $file, sub { die "inside\n" } )
+        },
+        qr{\Ainside},
+        'the work dies with its own error'
+    );
+    is( exception { $writers{remember}->() }, undef, 'and the lock is let go when it does' );
+};
+
+subtest 'writers at once lose nothing to each other' => sub {
+    my $dir  = tempdir( CLEANUP => 1 );
+    my $file = Trog::Secrets->create( "$dir/secrets.kdbx", 'pw', 'secret:guests/seed/password' => 'seed' );
+
+    # As provisions that run at once each seal the key of their guest.
+    my @names = map { "guest$_" } 1 .. 4;
+    my @pids;
+    foreach my $name (@names) {
+        my $pid = fork() // die "Could not fork: $!";
+        if ( !$pid ) {
+            my $ok = eval { Trog::Secrets->replace( $file, 'pw', "secret:guests/$name/password" => "key of $name" ); 1 };
+            POSIX::_exit( $ok ? 0 : 1 );
+        }
+        push( @pids, $pid );
+    }
+    my @failed = grep { waitpid( $_, 0 ) && $? } @pids;
+    is( scalar(@failed), 0, 'every writer finished' );
+
+    my %wanted = map { $_ => "secret:guests/$_/password" } @names;
+    my %held   = eval { Trog::Secrets->lookup( $file, 'pw', %wanted ) };
+    is_deeply( \%held, { map { $_ => "key of $_" } @names }, 'and the store holds what each of them wrote' ) or diag $@;
+};
 
 done_testing();
