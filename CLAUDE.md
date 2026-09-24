@@ -91,12 +91,21 @@ not applying it.  The hook sees the first, and the review is still yours.
 
 Then run `podchecker` over each changed file.
 
-Do not run `perltidy`, `perlcritic`, `perl -c` or the tests yourself.  The
-pre-commit hook tidies the Perl you staged, runs perlcritic over it
-with the right profile for its path, and compiles it.  Then it runs the tests
-that the commit can break, which `tests-covering` chooses.  If any step fails,
-the commit does not happen, and the hook prints why.  Install both hooks once
-in each checkout that you commit from:
+Do not run `perltidy`, `perlcritic` or `perl -c` yourself.  Do not run the
+tests to decide whether a change is ready to commit.  The pre-commit hook
+tidies the Perl you staged, runs perlcritic over it with the right profile for
+its path, and compiles it.  Then it runs the tests that the commit can break,
+which `tests-covering` chooses.  If any step fails, the commit does not happen,
+and the hook prints why.
+
+The hook names each test that failed.  Its output does not say why.  If a test
+fails, run that file yourself with `-v`, and read the output:
+
+    prove -v t/<file>.t
+
+Do the same to see a new test fail before you fix what it tests.
+
+Install both hooks once in each checkout that you commit from:
 
     cp git-hooks/pre-commit git-hooks/post-commit .git/hooks/
 
