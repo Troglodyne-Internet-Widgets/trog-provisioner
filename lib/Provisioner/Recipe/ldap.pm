@@ -70,9 +70,9 @@ A rebuild can lose at most the changes of the last hour.
 
 =cut
 
-=head2 @ports = $recipe->listens(%opts)
+=head2 @claims = $recipe->listens(%opts)
 
-slapd: LDAP on 389, and LDAP over TLS on C<port>.
+slapd: LDAP on 389, and LDAP over TLS on C<port>, both on every address.
 
 =cut
 

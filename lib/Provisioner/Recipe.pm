@@ -13,6 +13,7 @@ use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
 use Clone qw{clone};
 use Scalar::Util();
+use Socket();
 use File::Copy();
 use File::Slurper::Temp();
 
@@ -705,11 +706,10 @@ sub required_recipes {
 
     # A recipe that names limits listens, and something must apply them.
     # Declaring the dependency here means that ufw does not have to know every
-    # recipe that listens.  Each port it binds is claimed under its name, and
-    # ufw's schema allows one name to a port.  A bare port and /tcp are one port.
+    # recipe that listens.  Each address it binds on each port is claimed under
+    # its name, and ufw's schema allows one name to an address.
     my %limits    = $self->rate_limits(%opts);
-    my $name      = $self->recipe_name();
-    my %listeners = map { s{/tcp\z}{}r => { $name => 1 } } keys(%limits), $self->listens(%opts);
+    my %listeners = $self->claims(%opts);
     push( @required, ufw => sub { return ( rate_limits => \%limits, listeners => \%listeners ) } ) if %listeners;
 
     # Likewise for the jails of fail2ban.
@@ -830,7 +830,9 @@ that the schema declares.
 If two recipes name a limit for the same port, the higher one applies.  See
 C<resolve_conflict> in L<Provisioner::Recipe::ufw>.  The port and the protocol
 together are the key.  C<53> and C<53/udp> are two limits, and neither merges
-into the other.
+into the other.  A key has no address, because a limit applies to the port on
+every address.  The recipe claims the port on every address, unless C<listens>
+names the port with an address.  See C<listens>.
 
 =cut
 
@@ -838,24 +840,38 @@ sub rate_limits {
     return ();
 }
 
-=head3 @ports = $recipe->listens(%opts)
+=head3 @claims = $recipe->listens(%opts)
 
-The ports that the services of this recipe bind and that C<rate_limits> does
-not name, such as a port on loopback that nothing outside the guest reaches.
-A port is written as in C<rate_limits>: C<3000> for TCP, C<1194/udp> for UDP.
-A range is each of its ports.
+The sockets that the services of this recipe bind.  Each claim is a port with
+an optional address before it, and an optional protocol after it:
 
-Empty by default.  The ports that this returns and the keys of C<rate_limits>
-are together the claims of the recipe.  C<required_recipes> hands them to
-C<ufw> as C<listeners>, each port with the name of the recipe, and ufw refuses
-a configuration in which two recipes claim one port.  A claim with no rate
-limit therefore still reaches ufw, and pulls it in.
+    3000                  every address, TCP
+    127.0.0.1:3000        one IPv4 address
+    [::1]:8008            one IPv6 address, in brackets
+    [::1]:323/udp         UDP
 
-A claim is a port and a protocol, not an address.  So two recipes on one port
-are refused even where the kernel would let both bind, as one on 127.0.0.1 and
-one on an external address of the guest.  By default, every recipe here binds
-loopback or every address, and each of those pairs does collide.  See issue
-#250 for claims that carry the address.
+A claim with no address is on every address.  So is a claim on C<0.0.0.0> or
+C<[::]>.  A range is each of its ports.
+
+Empty by default.  The claims that this returns and the keys of C<rate_limits>
+are together the claims of the recipe.  A port that C<rate_limits> names is on
+every address, unless this method names that port with an address.  So a
+service with a rate limit on one address, such as redis on C<bind>, names its
+address here.
+
+C<required_recipes> hands the claims to C<ufw> as C<listeners>, keyed on the
+port, then the address, then the name of the recipe.  ufw refuses a
+configuration in which two recipes claim one address on one port, or in which
+one recipe claims every address on a port and another recipe claims any
+address on it.  A claim with no rate limit therefore still reaches ufw, and
+pulls it in.
+
+This refuses what the kernel refuses, and in one case more.  C<[::]> covers
+IPv4 as well unless the socket sets C<IPV6_V6ONLY>, and a claim cannot say
+which.  So every address is one claim, C<::>, which collides with any address
+of either family.  That includes C<0.0.0.0> beside C<::1>, which the kernel
+allows.  Loopback is two addresses, C<127.0.0.1> and C<::1>, and a service that
+binds both claims both.
 
 A service that another recipe runs is that recipe's to claim.  An application
 behind C<nginxproxy> binds nothing of its own on 80 or 443, which C<nginx>
@@ -866,6 +882,55 @@ defaults that the schema declares.
 
 sub listens {
     return ();
+}
+
+=head3 %listeners = $recipe->claims(%opts)
+
+The claims of C<listens> and the keys of C<rate_limits>, in the form of ufw's
+C<listeners>: port, address, and the name of this recipe.  Every address is
+C<::>.  If this recipe claims every address on a port, that is its only claim
+on the port.
+
+Dies on a claim that is not a port, an address and a port, or either of them
+with a protocol, and on an address that is not an IP address.
+
+=cut
+
+sub claims {
+    my ( $self, %opts ) = @_;
+
+    my $name   = $self->recipe_name();
+    my %limits = $self->rate_limits(%opts);
+
+    my %on;
+    foreach my $claim ( $self->listens(%opts) ) {
+        my ( $address, $port, $udp ) = $claim =~ m{\A (?: ( [\d.]+ | \[ [^\]]+ \] ) : )? (\d+) (?: /tcp | (/udp) )? \z}
+          or die "The $name recipe claims '$claim' in listens, which is not a port, an address and a port, or either of them with /tcp or /udp.\n";
+        $on{ $port . ( $udp // q{} ) }{ _address( $name, $address ) } = 1;
+    }
+    $on{s{/tcp\z}{}r} //= { q{::} => 1 } foreach keys %limits;
+
+    my %listeners;
+    foreach my $port ( keys %on ) {
+        my @addresses = keys %{ $on{$port} };
+        @addresses = (q{::}) if any { $_ eq q{::} || $_ eq '0.0.0.0' } @addresses;
+        $listeners{$port}{$_} = { $name => 1 } foreach @addresses;
+    }
+
+    return %listeners;
+}
+
+# The address of a claim in the form that inet_ntop writes, so that one address
+# is one key however a recipe spelled it.  An absent address is every address.
+sub _address {
+    my ( $name, $address ) = @_;
+
+    return q{::} unless defined $address;
+
+    my $family = ( $address =~ s{\A\[(.*)\]\z}{$1} ) ? Socket::AF_INET6() : Socket::AF_INET();
+    my $packed = Socket::inet_pton( $family, $address ) // die "The $name recipe claims a port on '$address', which is not an IP address.\n";
+
+    return Socket::inet_ntop( $family, $packed );
 }
 
 =head3 %jails = $recipe->jails(%opts)
@@ -1470,7 +1535,11 @@ sub validate {
 
 The text of a schema error.  An error that counts the properties of an object,
 such as C<Too many properties: 2/1>, names none of them, so the keys of that
-object follow it.  Only the keys: a value can be a password.
+object follow it.  Only the keys: a value can be a password.  A key whose value
+is an object has the keys of that object after it, in braces.  So ufw's
+refusal of two recipes on one port names each address and the recipe on it:
+
+    /listeners/3000: /anyOf/0 Too many properties: 2/1. (127.0.0.1 {gogs}, :: {grafana})
 
 =cut
 
@@ -1482,7 +1551,9 @@ sub _explain {
 
     my $at = Mojo::JSON::Pointer->new($opts)->get( $error->path );
     return "$error" unless ref $at eq 'HASH';
-    return "$error (" . join( ', ', sort keys %$at ) . ')';
+
+    my @keys = map { ref $at->{$_} eq 'HASH' ? "$_ {" . join( ', ', sort keys %{ $at->{$_} } ) . '}' : $_ } sort keys %$at;
+    return "$error (" . join( ', ', @keys ) . ')';
 }
 
 =head3 %vars = $recipe->validated(%opts)

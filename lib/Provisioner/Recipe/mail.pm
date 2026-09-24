@@ -226,17 +226,21 @@ sub args {
     );
 }
 
-=head2 @ports = $recipe->listens()
+=head2 @claims = $recipe->listens()
 
-The ports of postfix: SMTP on 25, SMTP over TLS on 465, submission on 587,
-and the return from amavis on 10025.  The ports of dovecot: POP3 on 110 and
-995, IMAP on 143 and 993.  amavis on 10024, C<postgrey> on 10023 and C<spamd>
-on 783, all on loopback.
+The ports of postfix: SMTP on 25, SMTP over TLS on 465 and submission on 587,
+on every address, and the return from amavis on 10025, on 127.0.0.1.  The
+ports of dovecot, on every address: POP3 on 110 and 995, IMAP on 143 and 993.
+C<postgrey> on 10023, on 127.0.0.1.  amavis on 10024 and C<spamd> on 783, both
+on 127.0.0.1 and on ::1.
 
 =cut
 
 sub listens {
-    return qw{25 465 587 10025 110 995 143 993 10024 10023 783};
+    return (
+        qw{25 465 587 110 995 143 993 127.0.0.1:10025 127.0.0.1:10023},
+        map { ( "127.0.0.1:$_", "[::1]:$_" ) } 10024, 783
+    );
 }
 
 =head2 %jails = $recipe->jails()

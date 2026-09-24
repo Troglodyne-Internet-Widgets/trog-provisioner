@@ -70,14 +70,14 @@ sub required_recipes {
     );
 }
 
-=head2 @ports = $recipe->listens()
+=head2 @claims = $recipe->listens()
 
-3000 on loopback, where nginx sends the requests for gogs.
+3000 on 127.0.0.1, where nginx sends the requests for gogs.
 
 =cut
 
 sub listens {
-    return qw{3000};
+    return qw{127.0.0.1:3000};
 }
 
 =head2 $bool = $recipe->is_multi_tenant()

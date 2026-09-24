@@ -91,10 +91,10 @@ sub required_recipes {
     );
 }
 
-=head2 @ports = $recipe->listens(%opts)
+=head2 @claims = $recipe->listens(%opts)
 
 deluge-web on C<web_port>, on every address, and the daemon on 58846, on
-loopback.  The torrent port is not claimed, because deluged picks it at
+127.0.0.1.  The torrent port is not claimed, because deluged picks it at
 random.  Nor are 1900/udp and 6771/udp, which it binds for C<UPnP> and for local
 peer discovery.  It binds 1900 on each address of the guest, not on the
 wildcard, and a claim here would refuse any other recipe that uses C<UPnP>.
@@ -105,7 +105,7 @@ sub listens {
     my ( $self, %opts ) = @_;
 
     # Defaulted here as well as in args, as required_recipes does.
-    return ( $opts{web_port} // 8112, 58846 );
+    return ( $opts{web_port} // 8112, "127.0.0.1:58846" );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()

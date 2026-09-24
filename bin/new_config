@@ -20,6 +20,7 @@ use File::Slurper::Temp;
 use Cwd();
 use File::Basename();
 use Clone qw{clone};
+use Hash::Merge();
 
 use Text::Xslate;
 use Text::Xslate::Bridge::TT2;
@@ -742,18 +743,16 @@ sub handle_domain {
           if @cannot;
     }
 
-    # One guest has one of each port.  Each domain resolves its recipes alone,
-    # so hand the claims that the guest already has to this domain's ufw, whose
-    # schema refuses a port that two recipes claim.  The host comes first, and
-    # starts the guest's claims afresh.
+    # One guest has one of each address on each port.  Each domain resolves its
+    # recipes alone, so hand the claims that the guest already has to this
+    # domain's ufw, whose schema refuses an address that two recipes claim.
+    # The host comes first, and starts the guest's claims afresh.  Every leaf
+    # is 1, so which side of the merge takes precedence does not matter.
     my $machine = $depends_on // $domain;
     $MACHINE_LISTENERS{$machine} = {} unless $depends_on;
     if ( my $ufw = $rconf->{$domain}{ufw} ) {
-        my $prior = $MACHINE_LISTENERS{$machine} // {};
-        foreach my $port ( keys %$prior ) {
-            $ufw->{listeners}{$port}{$_} = 1 for keys %{ $prior->{$port} };
-        }
-        $MACHINE_LISTENERS{$machine} = clone( $ufw->{listeners} // {} );
+        $ufw->{listeners} = Hash::Merge->new('STORAGE_PRECEDENT')->merge( $ufw->{listeners} // {}, $MACHINE_LISTENERS{$machine} // {} );
+        $MACHINE_LISTENERS{$machine} = clone( $ufw->{listeners} );
     }
 
     my %guest_secrets;

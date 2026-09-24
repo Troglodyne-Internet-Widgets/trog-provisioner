@@ -113,9 +113,9 @@ sub required_recipes {
     );
 }
 
-=head2 @ports = $recipe->listens(%opts)
+=head2 @claims = $recipe->listens(%opts)
 
-The syslog input of telegraf on C<port>, on loopback.
+The syslog input of telegraf on C<port>, on 127.0.0.1.
 
 =cut
 
@@ -123,7 +123,7 @@ sub listens {
     my ( $self, %opts ) = @_;
 
     # Defaulted here as well as in args, as required_recipes does.
-    return ( $opts{port} // 6514 );
+    return ( "127.0.0.1:" . ( $opts{port} // 6514 ) );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()

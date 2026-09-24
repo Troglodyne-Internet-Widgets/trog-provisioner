@@ -122,9 +122,9 @@ our $DEFAULT_PORT = 9000;
 our $INTERMEDIATE_DAYS = 1825;
 my $DAY = 86_400;
 
-=head2 @ports = $recipe->listens(%opts)
+=head2 @claims = $recipe->listens(%opts)
 
-step-ca on C<port>, on loopback.
+step-ca on C<port>, on 127.0.0.1.
 
 =cut
 
@@ -133,7 +133,7 @@ sub listens {
 
     # Defaulted here as well as in args, because required_recipes calls this
     # before validation.
-    return ( $opts{port} // $DEFAULT_PORT );
+    return ( "127.0.0.1:" . ( $opts{port} // $DEFAULT_PORT ) );
 }
 
 =head2 %schema = $recipe->args()

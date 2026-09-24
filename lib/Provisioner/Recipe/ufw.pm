@@ -33,13 +33,15 @@ listens on.  The networks in C<admin_networks> are exempt from these limits.
 
 Forwards the ports in C<port_forwards>, if you give any.
 
-Refuses a configuration in which two recipes bind one port, before any target
-runs.  Each recipe claims its ports in C<listeners>, from its C<rate_limits>
-and its C<listens>.  See L<Provisioner::Recipe/listens>.  C<bin/new_config>
-adds the claims of the other domains on the same guest, so the check covers
-the guest and not only the domain.  The error names the port and the recipes
-that claim it.  A claim has no address, so a port is refused to a second
-recipe even on another address.  See L<Provisioner::Recipe/listens>.
+Refuses a configuration in which two recipes bind one address on one port,
+before any target runs.  It also refuses a second recipe on a port that one
+recipe binds on every address.  Each recipe claims its ports in C<listeners>,
+from its C<rate_limits> and its C<listens>.  See
+L<Provisioner::Recipe/listens>.  C<bin/new_config> adds the claims of the
+other domains on the same guest, so the check covers the guest and not only
+the domain.  The error names the port, the addresses and the recipes that
+claim them.  One recipe on 127.0.0.1 and another on an external address of
+the guest can share a port, as the kernel lets them.
 
 =cut
 
@@ -119,14 +121,23 @@ sub args {
                 },
             },
 
-            # Which recipe binds each port, from Provisioner::Recipe/listens.
-            # Two recipes on one port is a service that cannot start.
+            # Which recipe binds each address of each port, from
+            # Provisioner::Recipe/listens.  Two recipes on one address is a
+            # service that cannot start, and so is a second recipe on a port
+            # that one binds on every address.  Every address is ::, and the
+            # anyOf lets it stand only alone.  `dependencies` would say it more
+            # plainly, but this validator is OpenAPI v3 and ignores it.
             listeners => {
                 type                 => 'object',
                 default              => {},
-                description          => 'The recipe that binds each port.  A port that two recipes claim is refused.',
+                description          => 'The recipe that binds each address of each port, where :: is every address.  Two recipes on one address are refused, and so is a second recipe on a port that one binds on every address.',
                 propertyNames        => { pattern => '^\d+(?:/udp)?$' },
-                additionalProperties => { type    => 'object', maxProperties => 1 },
+                additionalProperties => {
+                    type                 => 'object',
+                    propertyNames        => { anyOf => [ { type => 'string', format => 'ipv4' }, { type => 'string', format => 'ipv6' } ] },
+                    anyOf                => [ { maxProperties => 1 }, { not => { anyOf => [ { required => [q{::}] }, { required => ['0.0.0.0'] } ] } } ],
+                    additionalProperties => { type => 'object', maxProperties => 1 },
+                },
             },
 
             # Networks that are exempt from rate_limits.  enrich adds every
