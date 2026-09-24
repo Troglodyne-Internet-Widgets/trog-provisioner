@@ -237,7 +237,7 @@ Returns the class name of every backend, and loads each one.
 sub backends {
     my ($class) = @_;
 
-    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack Linode};
+    my @backends = map { __PACKAGE__ . "::$_" } qw{Libvirt OpenStack Linode SolusVM};
 
     # Loaded with require here, not with use at the top: each backend is a
     # subclass of this class, so a load at compile time makes a cycle.
@@ -1448,6 +1448,8 @@ L<Trog::HV::Libvirt>, the backend that builds guests with libvirt.
 L<Trog::HV::OpenStack>, the one that asks a cloud.
 
 L<Trog::HV::Linode>, the one that buys a Linode for each guest.
+
+L<Trog::HV::SolusVM>, the one that asks a SolusVM management node.
 
 L<Trog::HV::Cloud>, what every backend that builds by API has in common.
 

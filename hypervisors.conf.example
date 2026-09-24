@@ -79,14 +79,16 @@ reserve_memory = 8192
 ; A cloud, rather than a machine.
 ;
 ; A block is one kind of hypervisor, and which one is decided by what is in it:
-; libvirt_uri above, cloud here, or linode_token below.  A block naming two, or
+; libvirt_uri above, cloud here, or linode_token or solusvm below.  A block
+; naming two, or
 ; none, is an error naming the block -- a block naming none would otherwise
 ; fall through to libvirt's default connection, which is this machine, and that
 ; is the one placement nobody writing this file meant.
 ;
 ; Each kind is talked to through its own client, and each client is installed
 ; where a fleet has that kind of hypervisor in it: Sys::Virt for libvirt,
-; OpenStack::MetaAPI for a cloud, Linode::API for Linode.  A fleet of clouds
+; OpenStack::MetaAPI for a cloud, Linode::API for Linode, SolusVM::Client for a
+; SolusVM node.  A fleet of clouds
 ; needs no Sys::Virt, which cannot be built without a libvirt-dev to build it
 ; against.  `bin/preflight` reads this file and says which block wants which,
 ; and what installs it.
@@ -185,3 +187,45 @@ monthly_budget = 200
 ; the _global of recipes.yaml for the guests built on it.
 transfer_ip    = 192.0.2.10
 transfer_port  = 2222
+
+; ---------------------------------------------------------------------------
+; A SolusVM management node.
+;
+; The node owns the hypervisors and decides which of them a guest lands on, so
+; what is named here is a project and a location -- never a host.  Half its API
+; answers only for an account that administers the node, and this talks to the
+; half that answers for one that merely uses it.
+
+[solus1]
+; The management node's hostname.  The only required key besides the token.
+solusvm          = solus.example.test
+
+; The API token, as a reference into the secret store and never written out.
+; Put it there with `bin/add_secret --group solusvm --title api`.  Make the
+; token in the panel under Account; it does not expire, and a node with an
+; identity provider in front of it has no password to offer instead, so this is
+; the whole credential.
+solusvm_token    = secret:solusvm/api/password
+
+; Where to build.  A name or an id; the node lists them.
+solusvm_location = qa
+
+; Which project to build in.  Only needed where the account has more than one;
+; where it has exactly one, that is the one.
+;solusvm_project  = 34
+
+; No plan: what size a guest is is the guest's to say.  It names one in its
+; _global, as solusvm_plan, and a guest that names none is not built here at
+; all -- which is how a guest is kept off this node.
+;
+;     somedomain:
+;         _global:
+;             solusvm_plan: c2.d40.r4096 - Shared LVM
+;
+; A plan may be named or given by id.  A guest that fits nowhere else is
+; offered the cheapest plan that holds it, and accepting one writes it into the
+; guest's own file.
+;
+; No image: a guest's distro recipe decides what it boots, and here that is an
+; OS image *version* -- Debian is an image, Debian 13 is the version, and only
+; the version has the id the API takes.  The backend asks the node for it.

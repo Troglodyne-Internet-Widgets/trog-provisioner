@@ -1737,7 +1737,8 @@ subtest 'each backend names the client it talks through' => sub {
     my %client = (
         'Trog::HV::Libvirt'   => ['Sys::Virt'],
         'Trog::HV::OpenStack' => ['OpenStack::MetaAPI'],
-        'Trog::HV::Linode'    => [ 'Linode::API', '0.002' ],
+        'Trog::HV::Linode'    => [ 'Linode::API',     '0.002' ],
+        'Trog::HV::SolusVM'   => [ 'SolusVM::Client', '0.001' ],
     );
 
     foreach my $backend ( sort Trog::HV->backends ) {
@@ -1748,18 +1749,18 @@ subtest 'each backend names the client it talks through' => sub {
 subtest 'a backend loads where its client is not installed' => sub {
 
     # The whole point: an installation of libvirt machines runs every script
-    # without either cloud's client, and a fleet of clouds without Sys::Virt.
+    # without any cloud's client, and a fleet of clouds without Sys::Virt.
     my $hide = <<'PERL';
-unshift( @INC, sub { my ( undef, $file ) = @_; die "not installed here\n" if $file =~ m{\A(?:Sys/Virt|OpenStack/MetaAPI|Linode/API)[.]pm\z}; return } );
+unshift( @INC, sub { my ( undef, $file ) = @_; die "not installed here\n" if $file =~ m{\A(?:Sys/Virt|OpenStack/MetaAPI|Linode/API|SolusVM/Client)[.]pm\z}; return } );
 require Trog::HV;
 my @backends = Trog::HV->backends;
-my @pulled = grep { $INC{$_} } qw{Sys/Virt.pm OpenStack/MetaAPI.pm Linode/API.pm};
+my @pulled = grep { $INC{$_} } qw{Sys/Virt.pm OpenStack/MetaAPI.pm Linode/API.pm SolusVM/Client.pm};
 print scalar(@backends) . " backends, clients loaded: " . ( join( q{,}, @pulled ) || 'none' ) . "\n";
 PERL
 
     IPC::Run3::run3( [ $^X, "-I$FindBin::Bin/../lib", '-e', $hide ], \undef, \my $out, \my $err );
-    is( $?,   0,                                    'every backend compiles with all three clients hidden' ) or diag($err);
-    is( $out, "3 backends, clients loaded: none\n", 'and loading them pulls in none of the three' );
+    is( $?,   0,                                    'every backend compiles with every client hidden' ) or diag($err);
+    is( $out, "4 backends, clients loaded: none\n", 'and loading them pulls in none of them' );
 };
 
 subtest 'a client that will not load says which, and how to install it' => sub {
