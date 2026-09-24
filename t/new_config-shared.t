@@ -162,7 +162,7 @@ subtest 'two recipes on one guest cannot claim one port, from two domains either
 
     my ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
     ok( $err, 'the generation stops' ) or return;
-    like( $err, qr{/listeners/3000:.*\(nosnap,[ ]tmpfs\)}, 'at the port, naming both recipes' );
+    like( $err, qr{/listeners/3000/:::.*\(nosnap,[ ]tmpfs\)}, 'at the port and the address, naming both recipes' );
     ok( !-f "$domains/$TENANT/Makefile", 'and nothing is generated for the domain that came second' );
 
     ( $err, $domains ) = generate();
@@ -171,6 +171,20 @@ subtest 'two recipes on one guest cannot claim one port, from two domains either
     $mock{tmpfs}->redefine( listens => sub { return 3001 } );
     ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
     is( $err, undef, 'and two recipes on two ports are two claims' ) or diag $err;
+
+    # The kernel lets loopback and a specific external address share a port.
+    $mock{nosnap}->redefine( listens => sub { return '127.0.0.1:3000' } );
+    $mock{tmpfs}->redefine( listens => sub { return '203.0.113.8:3000' } );
+    ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    is( $err, undef, 'two recipes on two addresses of one port are two claims' ) or diag $err;
+
+    # It does not let every address share a port with anything.
+    $mock{tmpfs}->redefine( listens => sub { return 3000 } );
+    ( $err, $domains ) = generate( host => { nosnap => undef }, tenant => { tmpfs => undef } );
+    ok( $err, 'and a tenant on every address of a port that the host binds on loopback is refused' ) or return;
+    like( $err, qr{/listeners/3000:}, 'at the port' );
+    my $named = quotemeta q{(127.0.0.1 {nosnap}, :: {tmpfs})};
+    like( $err, qr{$named}, 'naming each address and the recipe on it' );
 };
 
 done_testing;

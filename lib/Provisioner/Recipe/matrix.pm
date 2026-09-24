@@ -70,14 +70,14 @@ sub required_recipes {
     );
 }
 
-=head2 @ports = $recipe->listens()
+=head2 @claims = $recipe->listens()
 
-synapse on 8008, on loopback, for clients and for federation both.
+synapse on 8008, on 127.0.0.1 and on ::1, for clients and for federation both.
 
 =cut
 
 sub listens {
-    return qw{8008};
+    return qw{127.0.0.1:8008 [::1]:8008};
 }
 
 =head2 $bool = $recipe->is_multi_tenant()

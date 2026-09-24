@@ -20,7 +20,8 @@ use FindBin::libs;
 BEGIN { require File::Temp; $ENV{TROG_PROVISIONER_CONFIG} = File::Temp::tempdir( CLEANUP => 1 ) }    ## no critic (Variables::RequireLocalizedPunctuationVars) -- read after BEGIN returns, so it cannot be local to it
 use File::Temp qw{tempdir};
 use Test::More;
-use Test::Fatal qw{exception};
+use Test::Fatal      qw{exception};
+use Test::MockModule qw{strict};
 
 use_ok('Provisioner::Recipe');
 use Provisioner::Cookbook();
@@ -507,20 +508,51 @@ subtest 'each port a recipe binds is claimed for it, from ufw' => sub {
 
     my %req = Provisioner::Recipe::required_recipes('Provisioner::Recipe::claimant');
     ok( $req{ufw}, 'a recipe that binds ports requires ufw' ) or return;
-    my %ufw = $req{ufw}->();
+    my %ufw   = $req{ufw}->();
+    my %every = ( q{::} => { claimant => 1 } );
     is_deeply(
         $ufw{listeners},
-        { 80 => { claimant => 1 }, '53/udp' => { claimant => 1 }, 3000 => { claimant => 1 }, 8086 => { claimant => 1 } },
-        'claiming what it rate limits and what it only binds, each under its own name, with tcp written bare'
+        { 80 => {%every}, '53/udp' => {%every}, 3000 => {%every}, 8086 => {%every} },
+        'claiming what it rate limits and what it only binds, on every address, under its own name, with tcp written bare'
     );
     is_deeply( $ufw{rate_limits}, { 80 => 1024, '53/udp' => 64 }, 'and the limits go along unchanged' );
 
     my %quiet = Provisioner::Recipe::required_recipes('Provisioner::Recipe::quiet');
     ok( $quiet{ufw}, 'a port with no limit still requires ufw' ) or return;
-    is_deeply( { $quiet{ufw}->() }, { rate_limits => {}, listeners => { 5432 => { quiet => 1 } } }, 'with the claim and no limits' );
+    is_deeply( { $quiet{ufw}->() }, { rate_limits => {}, listeners => { 5432 => { q{::} => { quiet => 1 } } } }, 'with the claim and no limits' );
 
     my %none = Provisioner::Recipe::required_recipes('Provisioner::Recipe::nametest');
     ok( !$none{ufw}, 'and a recipe that binds nothing does not' );
+};
+
+subtest 'a claim carries the address it binds' => sub {
+    my $mock   = Test::MockModule->new( 'Provisioner::Recipe::quiet', no_auto => 1 );
+    my $claims = sub {
+        my ( $limits, @listens ) = @_;
+        $mock->redefine( rate_limits => sub { return %$limits } );
+        $mock->redefine( listens     => sub { return @listens } );
+        return { Provisioner::Recipe::claims('Provisioner::Recipe::quiet') };
+    };
+
+    is_deeply(
+        $claims->( {}, qw{127.0.0.1:5432 [::1]:5432 [0:0:0:0:0:0:0:1]:5432 [::1]:323/udp} ),
+        { 5432 => { '127.0.0.1' => { quiet => 1 }, '::1' => { quiet => 1 } }, '323/udp' => { '::1' => { quiet => 1 } } },
+        'each address under its port, IPv6 without its brackets, and one address however it is spelled'
+    );
+    is_deeply(
+        $claims->( {}, qw{127.0.0.1:80 0.0.0.0:80 [::]:443 [::1]:443} ),
+        { 80 => { q{::} => { quiet => 1 } }, 443 => { q{::} => { quiet => 1 } } },
+        'every address of either family is ::, and is the only claim on its port'
+    );
+    is_deeply(
+        $claims->( { 6379 => 512, 53 => 64 }, '127.0.0.1:6379' ),
+        { 6379 => { '127.0.0.1' => { quiet => 1 } }, 53 => { q{::} => { quiet => 1 } } },
+        'a rate limit claims every address, unless listens names its port with an address'
+    );
+
+    foreach my $bad ( qw{::1:5432 [127.0.0.1]:5432 999.0.0.1:5432 localhost:5432 127.0.0.1:5432/sctp}, q{} ) {
+        like( exception { $claims->( {}, $bad ) }, qr{quiet[ ]recipe[ ]claims}, "'$bad' is refused, naming the recipe" );
+    }
 };
 
 done_testing();

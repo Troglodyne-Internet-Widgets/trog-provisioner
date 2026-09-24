@@ -240,7 +240,18 @@ subtest 'a recipe that names rate limits depends on ufw for them' => sub {
     my $redis = 'Provisioner::Recipe::redis'->new(%prov);
     my %req   = $redis->required_recipes( domain => 'd.test' );
     ok( $req{ufw}, 'redis requires ufw' );
-    is_deeply( { $req{ufw}->() }, { rate_limits => { 6379 => 512 }, listeners => { 6379 => { redis => 1 } } }, 'and hands it the port it listens on, with its claim to it' );
+    is_deeply(
+        { $req{ufw}->() },
+        { rate_limits => { 6379 => 512 }, listeners => { 6379 => { '127.0.0.1' => { redis => 1 } } } },
+        'and hands it the port it listens on, with its claim to it on the address it binds'
+    );
+
+    # redis's own spelling of bind: a list, - for an address it may start
+    # without, and * and ::* for every address.
+    my %bound = $redis->claims( bind => '10.9.8.7 -::1', port => 6380 );
+    is_deeply( \%bound, { 6380 => { '10.9.8.7' => { redis => 1 }, '::1' => { redis => 1 } } }, 'redis claims each address in bind, on its port' );
+    %bound = $redis->claims( bind => '* -::*' );
+    is_deeply( \%bound, { 6379 => { q{::} => { redis => 1 } } }, 'and * is every address' );
 
     # Most recipes listen on nothing, or reach the network through nginx.
     my $tmpfs = 'Provisioner::Recipe::tmpfs'->new(%prov);

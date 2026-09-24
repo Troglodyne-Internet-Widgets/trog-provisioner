@@ -53,14 +53,15 @@ is whole, C<touch> its C<complete> file.
 
 =cut
 
-=head2 @ports = $recipe->listens()
+=head2 @claims = $recipe->listens()
 
-5432, where the packaged configuration listens, on loopback.
+5432, where the packaged configuration listens, on 127.0.0.1.  It listens on
+C<localhost>, and on Ubuntu that name is only 127.0.0.1.
 
 =cut
 
 sub listens {
-    return qw{5432};
+    return qw{127.0.0.1:5432};
 }
 
 sub args {

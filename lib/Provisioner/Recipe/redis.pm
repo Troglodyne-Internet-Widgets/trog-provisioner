@@ -34,7 +34,7 @@ All parameters are optional:
 
 =item C<bind>
 
-The IP address to listen on.  The default is 127.0.0.1.
+The IP addresses to listen on, separated by spaces.  The default is 127.0.0.1.
 
 =item C<port>
 
@@ -105,6 +105,30 @@ sub rate_limits {
     # Clients keep connections open and do not open one per operation.  So even
     # a busy application opens few connections each second.
     return ( ( $opts{port} // 6379 ) => 512 );
+}
+
+=head2 @claims = $recipe->listens(%opts)
+
+C<port> on each address in C<bind>, which is what C<rate_limits> would
+otherwise claim on every address.  redis reads C<bind> as a list of addresses.
+A C<-> before one means that redis starts without it, and C<*> and C<::*> are
+every address.
+
+=cut
+
+sub listens {
+    my ( $self, %opts ) = @_;
+
+    # Defaulted here as well as in args, because required_recipes calls this
+    # before validation.
+    my $port = $opts{port} // 6379;
+
+    my @claims;
+    foreach my $address ( map { s{\A-}{}r } split( q{ }, $opts{bind} // '127.0.0.1' ) ) {
+        push( @claims, $address =~ m{\A(?:::)?\*\z} ? $port : $address =~ m{:} ? "[$address]:$port" : "$address:$port" );
+    }
+
+    return @claims;
 }
 
 sub args {

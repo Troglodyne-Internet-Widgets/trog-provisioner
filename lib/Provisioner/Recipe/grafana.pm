@@ -103,10 +103,10 @@ sub required_recipes {
     );
 }
 
-=head2 @ports = $recipe->listens(%opts)
+=head2 @claims = $recipe->listens(%opts)
 
 grafana on C<port>, and influxd on 8086 for queries and on 8088 for backups,
-all three on loopback.
+all three on 127.0.0.1.
 
 =cut
 
@@ -114,7 +114,7 @@ sub listens {
     my ( $self, %opts ) = @_;
 
     # Defaulted here as well as in args, as required_recipes does.
-    return ( $opts{port} // 3000, 8086, 8088 );
+    return ( "127.0.0.1:" . ( $opts{port} // 3000 ), "127.0.0.1:8086", "127.0.0.1:8088" );
 }
 
 =head2 $bool = $recipe->is_multi_tenant()
