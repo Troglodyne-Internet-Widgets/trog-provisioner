@@ -294,7 +294,9 @@ sub source_globals {
     my $said   = $conf->{_base}{_global} // {};
     my %schema = Provisioner::Cookbook->global_schema;
 
-    return map { $_ => $said->{$_} } grep { defined $said->{$_} } ( keys %{ $schema{properties} }, 'mirror' );
+    # Not libdir: a vendor's recipes are theirs, and can want credentials that
+    # this harness cannot hold.
+    return map { $_ => $said->{$_} } grep { defined $said->{$_} && $_ ne 'libdir' } ( keys %{ $schema{properties} }, 'mirror' );
 }
 
 sub remove {

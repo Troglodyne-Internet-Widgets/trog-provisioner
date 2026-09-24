@@ -201,7 +201,10 @@ sub rest_of_fleet {
     return () unless @others;
 
     print "\nThe rest of the fleet:\n\n";
-    return grep { !$_->{ok} } map { report(%$_) } map { block_verdicts( $fleet, $_ ) } @others;
+    return grep { !$_->{ok} } map {
+        my $block = $_;
+        map { report(%$_) } block_verdicts( $fleet, $block )
+    } @others;
 }
 
 =head2 @verdicts = block_verdicts($fleet, $name)

@@ -989,10 +989,13 @@ backend covers as well.
 sub check_transfer_route {
     my ($self) = @_;
 
-    my $here   = Trog::Local->new();
-    my $global = eval { Provisioner::Cookbook->globals(undef) } // {};
-    my $ip     = $self->configured_transfer_ip                  // $global->{transfer_ip};
-    my $port   = $self->configured_transfer_port                // $global->{transfer_port} // $here->sshd_port;
+    my $here = Trog::Local->new();
+
+    # Unvalidated, so that a _global that check_config refuses still says
+    # where guests fetch from.
+    my $global = eval { Provisioner::Cookbook->global_config(undef) } // {};
+    my $ip     = $self->configured_transfer_ip                        // $global->{transfer_ip};
+    my $port   = $self->configured_transfer_port                      // $global->{transfer_port} // $here->sshd_port;
 
     return $self->_verdict( 1, 'Guests here reach us across our own network, which the routing table settles', q{} )
       unless $self->manages_addresses;
@@ -1144,8 +1147,9 @@ FIX
 
 Checks that the configuration directory from L<Trog::Config> has a readable
 F<recipes.yaml>, an F<admin_authorized_keys> that is not empty, and a
-F<recipes.yaml> that says what its guests are built with.  See
-L<Provisioner::Cookbook/global_schema>.
+F<recipes.yaml> that says what its guests are built with.  It validates the
+C<_global> of C<_base> and of each domain, as F<bin/new_config> does.  See
+L<Provisioner::Cookbook/globals>.
 
 =cut
 
@@ -1162,13 +1166,17 @@ sub check_config {
       if !@missing && !-s "$dir/admin_authorized_keys";
 
     if ( !@missing ) {
-        my $said = eval { Provisioner::Cookbook->globals(undef) };
+        my $said = eval {
+            my $conf = Provisioner::Cookbook->configuration();
+            Provisioner::Cookbook->globals( $_, $conf ) foreach ( undef, grep { !m/\A_/ } sort keys %$conf );
+            1;
+        };
         return $self->_verdict( 1, "Configuration to copy from: $dir", q{} ) if $said;
 
         # Ten minutes into a build otherwise: bin/new_config reads these for
         # the first domain it generates, and every recipe that owns a file on
         # the guest wants one of them.
-        return $self->_verdict( 0, 'The settings every guest is built with are not there', "$@" . <<"FIX" );
+        return $self->_verdict( 0, 'The settings every guest is built with are missing or wrong', "$@" . <<"FIX" );
 An installation that still has an ipmap.cfg in $dir has them
 in that file, and moves them across with:
 

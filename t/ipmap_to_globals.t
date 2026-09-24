@@ -42,6 +42,7 @@ admin_gecos=Some Admin
 admin_email=someadmin@test.test
 gateway=192.0.2.254
 resolvers=192.0.2.254, 8.8.8.8
+dhcp_devname=ens3
 [ip_pool]
 addresses=192.0.2.100 192.0.2.101
 cidr=192.0.2.0/24
@@ -86,7 +87,12 @@ subtest 'every block lands where the reader of it now looks' => sub {
     is_deeply( $conf->{'two.test.test'}{_global}{aliases}, [ 'first.test.test', 'second.test.test' ], 'and one with two keeps both' );
 
     ok( !exists $global->{ips}, 'the addresses are not moved, ips.db having owned them for years' );
-    like( $said, qr/\[global\][ ]basedir/, 'the report says what moved' );
+
+    # globals refuses a key that nothing declares, so moving one would write a
+    # configuration that the next command refuses.
+    ok( !exists $global->{dhcp_devname}, 'a setting that nothing reads stays behind' );
+    like( $said, qr/nothing[ ]reads[ ]it:\s+\[global\][ ]dhcp_devname/, 'and the report names it' );
+    like( $said, qr/\[global\][ ]basedir/,                              'the report says what moved' );
 };
 
 subtest 'what recipes.yaml already says is left alone, and said so' => sub {

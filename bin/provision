@@ -891,7 +891,7 @@ sub merge_guest_addresses (%args) {
     my $existing_nc = $guest->capture_cmd('sudo cat /etc/netplan/50-cloud-init.yaml');
     my $parsed      = YAML::XS::Load($existing_nc);
 
-    my $adapter   = primary_adapter( $parsed, $config, $hv->guest_mac( $built_for, 1 ) );
+    my $adapter   = primary_adapter( $parsed, $hv->guest_mac( $built_for, 1 ) );
     my $addresses = ( $parsed->{network}{ethernets}{$adapter}{addresses} //= [] );
 
     my $num_ips = scalar @$addresses;
@@ -912,7 +912,7 @@ sub merge_guest_addresses (%args) {
     return 1;
 }
 
-=head2 $name = primary_adapter($netplan, $config, $mac)
+=head2 $name = primary_adapter($netplan, $mac)
 
 Returns the name of the outbound interface in $netplan, the parsed netplan of
 the guest.  It finds the entry whose C<match> stanza has the MAC address $mac.
@@ -921,8 +921,8 @@ We choose the MAC, and the guest cannot change it.  cloud-init writes the MAC
 that it matched into netplan, so the entry identifies itself.  The name of the
 interface is only a result of the match.
 
-For a guest whose netplan has no C<match> stanza, it uses the name.  That is
-C<bridge_devname> from $config, or the bridge name from the hypervisor.
+For a guest whose netplan has no C<match> stanza, it uses the bridge name from
+the hypervisor.
 
 It dies if netplan has no C<ethernets> section, or if no entry has the MAC or
 the name.
@@ -930,7 +930,7 @@ the name.
 =cut
 
 sub primary_adapter {
-    my ( $netplan, $config, $mac ) = @_;
+    my ( $netplan, $mac ) = @_;
 
     my $ethernets = $netplan->{network}{ethernets};
     die "No ethernets at all in the guest's netplan config!\n" unless ref $ethernets eq 'HASH';
@@ -941,8 +941,7 @@ sub primary_adapter {
         return $name if lc $match->{macaddress} eq lc $mac;
     }
 
-    my ( undef, $bridge_name ) = Trog::HV->new()->nic_names;
-    my $named = $config->param('bridge_devname') // $bridge_name;
+    my ( undef, $named ) = Trog::HV->new()->nic_names;
     return $named if ref $ethernets->{$named} eq 'HASH';
 
     die "Could not find the outbound adapter in the guest's netplan: nothing matches\n" . "$mac, and there is no $named either.  It has: " . join( ', ', sort keys %$ethernets ) . "\n";

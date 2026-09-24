@@ -27,6 +27,10 @@ They are the `_global` of `_base` in `recipes.yaml`, and a domain overrides one
 in its own `_global`. `Provisioner::Cookbook->global_schema` declares them, and
 `bin/new_config` refuses to build a guest while one that is required is missing.
 
+`_global` also holds settings that a recipe declares, such as `cpus` for `vm`.
+A key that neither `global_schema` nor a recipe declares reaches nothing, so
+`bin/new_config` and `bin/preflight` refuse it and name it. Delete the key.
+
 ```yaml
 _base:
   _global:

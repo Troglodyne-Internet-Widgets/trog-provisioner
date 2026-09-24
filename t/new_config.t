@@ -57,6 +57,21 @@ use Test::MockFile();
 
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
+# Provisioner::Cookbook reads the recipes, which are the program rather than its
+# data: has stats a .pm, and globals lists the directory to learn which _global
+# keys a recipe declares.  Strict mode has to be told which real trees the SUT
+# needs, as it is for $salvage_root below.
+#
+# By suffix rather than by path, because the stat is against the canonical path
+# perl resolved the require to while FindBin gives $Bin/../lib -- and
+# normalising that would mean statting it.
+Test::MockFile::add_strict_rule_for_filename( [qr{/lib/Provisioner/Recipe(?:/|\z)}] => 1 );
+
+# The fetchcache schema asks the installation's own recipes.yaml which hosts
+# its domains reach, and every subtest here names its file with --recipes, so
+# the installation has none.
+my $no_installation = Test::MockFile->file("$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml");
+
 my $basedir = '/bogus';
 
 subtest "new_config dies when passed a domain with no configuration" => sub {
@@ -250,15 +265,6 @@ subtest 'apply_global_defaults: every recipe sees the distribution defaults' => 
     Trog::Provisioner::Config::Generator::apply_global_defaults( 'Provisioner::Recipe::ubuntu', \%said );
     is( $said{mirror}, 'http://m.test.test/ubuntu', 'what _global said wins over the default' );
 };
-
-# Provisioner::Cookbook::has stats a recipe's .pm to answer whether there is one,
-# and the subtest below asks it about vm.  Allowed the way $salvage_root is
-# below: strict mode has to be told which real trees an assertion needs.
-#
-# By suffix rather than by path, because the stat is against the canonical path
-# perl resolved the require to while FindBin gives $Bin/../lib -- and
-# normalising that would mean statting it.
-Test::MockFile::add_strict_rule_for_filename( [qr{/lib/Provisioner/Recipe/}] => 1 );
 
 # Which of the vm recipe's fields _global may pass through into provision.conf.
 # Read off the schema rather than listed here, so a computed field added to that

@@ -68,18 +68,16 @@ sub testdeps_target {
     # wrote provision.conf -- so generating from this is what catches it coming
     # back.
     my %global = (
-        data_source    => "$tmpdir/data",
-        basedir        => "$tmpdir/domains",
-        transfer_user  => 'someadmin',
-        admin_user     => 'someadmin',
-        admin_email    => 'bogus@test.test',
-        admin_gecos    => 'Test Test',
-        gateway        => '192.0.2.254',
-        resolvers      => '192.0.2.254',
-        bridge_devname => 'ens4',
-        dhcp_devname   => 'ens3',
-        ip_pool        => { addresses => $pool },
-        nameservers    => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
+        data_source   => "$tmpdir/data",
+        basedir       => "$tmpdir/domains",
+        transfer_user => 'someadmin',
+        admin_user    => 'someadmin',
+        admin_email   => 'bogus@test.test',
+        admin_gecos   => 'Test Test',
+        gateway       => '192.0.2.254',
+        resolvers     => '192.0.2.254',
+        ip_pool       => { addresses => $pool },
+        nameservers   => { ns1       => 'ns1.test.test', ns2 => 'ns2.test.test' },
     );
 
     my $recipe_file = "$ENV{TROG_PROVISIONER_CONFIG}/recipes.yaml";

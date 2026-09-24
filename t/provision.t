@@ -643,8 +643,7 @@ subtest 'a domain directory with no recipes is built as it stands' => sub {
     is( $out, 0, 'nothing to generate from, so nothing was generated' );
 };
 subtest 'the outbound adapter is found by MAC, not by name' => sub {
-    my $config = Config::Simple->new( _conf( domain => 'vm.example.test' ) );
-    my $mac    = '52:54:00:AA:BB:CC';
+    my $mac = '52:54:00:AA:BB:CC';
 
     # cloud-init writes the MAC it matched on, so the entry identifies itself
     # whatever the guest ended up calling it.
@@ -657,12 +656,12 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
         }
     };
     is(
-        Trog::Bin::Provisioner::primary_adapter( $renamed, $config, $mac ), 'wibble',
+        Trog::Bin::Provisioner::primary_adapter( $renamed, $mac ), 'wibble',
         'found by MAC even under a name nothing would have guessed'
     );
 
     is(
-        Trog::Bin::Provisioner::primary_adapter( $renamed, $config, uc $mac ), 'wibble',
+        Trog::Bin::Provisioner::primary_adapter( $renamed, uc $mac ), 'wibble',
         'and case does not matter'
     );
 
@@ -676,24 +675,17 @@ subtest 'the outbound adapter is found by MAC, not by name' => sub {
         }
     };
     is(
-        Trog::Bin::Provisioner::primary_adapter( $old, $config, $mac ), 'ens4',
+        Trog::Bin::Provisioner::primary_adapter( $old, $mac ), 'ens4',
         'an older guest falls back to the derived name'
-    );
-
-    # And an explicit override still wins that fallback.
-    my $named = Config::Simple->new( _conf( domain => 'vm.example.test', bridge_devname => 'ens3' ) );
-    is(
-        Trog::Bin::Provisioner::primary_adapter( $old, $named, $mac ), 'ens3',
-        'bridge_devname is still honoured'
     );
 
     # Nothing matching at all is an error that says what it looked for.
     my $neither = { network => { ethernets => { enp0s9 => { addresses => [] } } } };
-    my $err     = exception { Trog::Bin::Provisioner::primary_adapter( $neither, $config, $mac ) };
+    my $err     = exception { Trog::Bin::Provisioner::primary_adapter( $neither, $mac ) };
     like( $err, qr/Could[ ]not[ ]find[ ]the[ ]outbound[ ]adapter/, 'otherwise it says so' );
     like( $err, qr/enp0s9/,                                        'listing what the guest does have' );
 
-    like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $config, $mac ) }, qr/No[ ]ethernets[ ]at[ ]all/, 'and a netplan with no ethernets is its own error' );
+    like( exception { Trog::Bin::Provisioner::primary_adapter( {}, $mac ) }, qr/No[ ]ethernets[ ]at[ ]all/, 'and a netplan with no ethernets is its own error' );
 };
 
 # Reusing a guest means provisioning onto one that is already up, which is how a
