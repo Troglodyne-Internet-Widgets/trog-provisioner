@@ -81,13 +81,14 @@ is process-wide, as C<@INC> is, and C<forget> does not undo it.
 
 =cut
 
+# The vendor libdirs whose lib/ this has appended to @INC, in order.
 my @LIBDIRS;
 
 sub use_libdirs {
-    my ( $class, @libdirs ) = @_;
+    my ( $class, @to_include ) = @_;
 
-    my %using = map { $_ => 1 } @LIBDIRS;
-    foreach my $libdir ( grep { $_ && !$using{$_}++ } @libdirs ) {
+    foreach my $libdir ( grep { $_ } @to_include ) {
+        next if any { $_ eq $libdir } @LIBDIRS;
         push( @LIBDIRS, $libdir );
         push( @INC,     "$libdir/lib" );
     }
@@ -177,8 +178,17 @@ sub names {
     die "Could not read $dir\n" unless -d $dir;
 
     my %director = map { $_ => 1 } $class->directors();
-    my @names    = sort( uniq( grep { !$director{$_} } map { m/\A(\w+)\.pm\z/ ? $1 : () } map { Provisioner::Utils::files_in($_) } $class->recipe_dirs ) );
-    return @names;
+    my @names;
+    foreach my $recipes ( $class->recipe_dirs ) {
+        foreach my $file ( Provisioner::Utils::files_in($recipes) ) {
+            next unless substr( $file, -3 ) eq '.pm';
+            my $name = substr( $file, 0, -3 );
+            push( @names, $name ) unless $director{$name};
+        }
+    }
+
+    my @sorted = sort( uniq(@names) );
+    return @sorted;
 }
 
 =head2 fetch_hosts

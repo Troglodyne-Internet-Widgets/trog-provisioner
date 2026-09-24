@@ -558,7 +558,7 @@ sub handle_domain {
     # Provisioner::Cookbook put these on @INC when it read the configuration,
     # before anything asked about a recipe.
     my $libdirs = $global_config->{libdir} // [];
-    print "Including vendor libs from $_/lib\n" foreach @$libdirs;
+    print "Included vendor libs from $_/lib\n" foreach @$libdirs;
 
     # The directory of the distribution comes first, so that
     # templates/ubuntu/nginx.tt is used before templates/nginx.tt.

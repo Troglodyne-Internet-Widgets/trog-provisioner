@@ -151,6 +151,9 @@ subtest 'the cookbook finds a vendor recipe once a configuration names its libdi
     ok( $declared{vendor_global}, 'a _global setting only it declares is allowed' );
 
     is_deeply( [ Provisioner::Cookbook->use_libdirs($VENDOR) ], [$VENDOR], 'and naming the libdir again adds nothing' );
+
+    my $other = tempdir( CLEANUP => 1 );
+    is_deeply( [ Provisioner::Cookbook->use_libdirs( $other, $other ) ], [ $VENDOR, $other ], 'nor does naming one twice in the same call' );
 };
 
 subtest 'a domain that runs a vendor recipe generates' => sub {
