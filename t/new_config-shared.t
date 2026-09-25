@@ -63,7 +63,7 @@ my $TENANT = 'tenant.test.test';
 # first.
 sub generate {
     my (%on) = @_;
-    my $tmpdir = tempdir( CLEANUP => 1 );
+    my $tmpdir = $on{tmpdir} // tempdir( CLEANUP => 1 );
     mkdir "$tmpdir/domains";
 
     # Where each domain's data comes from.  The generator refuses a domain that
@@ -115,6 +115,22 @@ sub generate {
 
     return ( $err, "$tmpdir/domains" );
 }
+
+# Every file in t/ goes to the guest and runs there, so a test left over from a
+# recipe taken off the domain fails the build on a guest that has no such thing.
+subtest 'a generation replaces the guest tests of the last one' => sub {
+    my $tmpdir = tempdir( CLEANUP => 1 );
+    my ( $err, $domains ) = generate( tmpdir => $tmpdir );
+    is( $err, undef, 'the first generation runs' ) or diag $err;
+
+    my $stale = "$domains/$HOST/t/gone.t";
+    File::Slurper::Temp::write_text( $stale, "print qq{not ok 1\\n};\n" );
+    ( $err, $domains ) = generate( tmpdir => $tmpdir );
+    is( $err, undef, 'and the second' ) or diag $err;
+
+    ok( !-e $stale,                     'the test of a recipe no longer on the domain is gone' );
+    ok( -f "$domains/$HOST/t/nosnap.t", 'and the test of one still on it is there' );
+};
 
 subtest 'two domains on one guest generate when the recipe can be shared' => sub {
     my ( $err, $domains ) = generate();

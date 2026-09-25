@@ -673,7 +673,11 @@ sub handle_domain {
     $global_config->{cache_ip}  = $distro->cache_address(%$global_config);
     $global_config->{resolvers} = $resolvers;
 
-    mkdir "$cfg_dir/t";
+    # Emptied, not only made, because every file in it goes to the guest and
+    # runs there.  A recipe taken off the domain would otherwise leave its test,
+    # which fails the build on a guest that no longer has it.
+    remove_tree("$cfg_dir/t");
+    make_path("$cfg_dir/t");
 
     $global_config->{script_dir} = $root_scripts;
 
