@@ -444,15 +444,14 @@ sub handle_domain {
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;
 
-    # The values, until the fragments are rendered, so that a command that holds
-    # one starts with @ and make does not print it into the setup log.
+    # The values, so that a command that holds one starts with @ and make does
+    # not print it into the setup log.
     my @secret_values;
     if (%to_replace) {
         $keepass = Trog::Credentials->prompt( 'Enter password:', 'keepass' );
         my %secrets = Trog::Secrets->lookup( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
         @secret_values = values %secrets;
-        %secrets       = ();
 
         # Give Cookbook the resolved copy, because a recipe that reads the
         # credential of another recipe asks Cookbook for it.
@@ -873,8 +872,7 @@ sub handle_domain {
 
         push( @testdeps, ( $builder->testdeps(@modules) ) );
     }
-    @secret_values = ();
-    @testdeps      = uniq @testdeps;
+    @testdeps = uniq @testdeps;
     push( @pkgs, 'cpanminus' ) if @testdeps;
 
     @pkgs      = sort { $a cmp $b } uniq @pkgs;

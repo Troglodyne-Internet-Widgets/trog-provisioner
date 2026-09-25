@@ -1428,14 +1428,12 @@ fragment.
 =cut
 
 sub fragment_commands ( $, $fragment ) {
-    my ( @commands, $open );
+    my ( @commands, $continued );
     foreach my $line ( split m/(?<=\n)/, $fragment ) {
-        $open .= $line;
-        next if $line =~ m/\\\n?\z/;
-        push( @commands, $open );
-        undef $open;
+        if ($continued) { $commands[-1] .= $line }
+        else            { push( @commands, $line ) }
+        $continued = $line =~ m/\\\n\z/;
     }
-    push( @commands, $open ) if defined $open;
     return @commands;
 }
 
@@ -1444,8 +1442,10 @@ sub fragment_commands ( $, $fragment ) {
 Returns the rendered C<$fragment> with an C<@> at the start of each command that
 holds one of C<@secrets>, so that make does not print it into the setup log.
 C<@secrets> are the values that the C<secret:> references of the configuration
-resolved to.  A secret of several lines, such as a key, matches on any one of
-its lines.  A command that already starts with C<@> is left as it is.
+resolved to, each of which C<< Trog::Secrets->lookup >> has already refused to
+be empty.  A command matches when it holds a whole value, which is also how a
+secret of several lines would appear in one.  A command that already starts
+with C<@> is left as it is.
 
 C<bin/new_config> calls this on every fragment it renders.  See L</The fragment
 is a makefile, not a shell script>.
@@ -1453,13 +1453,12 @@ is a makefile, not a shell script>.
 =cut
 
 sub quiet_secrets ( $class, $fragment, @secrets ) {
-    my @needles = grep { $_ ne q{} } map { split m/\n/ } grep { defined } @secrets;
-    return $fragment if !@needles;
+    return $fragment if !@secrets;
 
     my @commands = $class->fragment_commands($fragment);
     foreach my $command (@commands) {
         next if $command =~ m/\A\s*@/;
-        next if !any { index( $command, $_ ) >= 0 } @needles;
+        next if !any { index( $command, $_ ) >= 0 } @secrets;
         $command =~ s/\A(\s*)/$1@/;
     }
     return join( q{}, @commands );

@@ -565,16 +565,15 @@ subtest 'fragment_commands splits a fragment where make does' => sub {
 subtest 'quiet_secrets puts an @ on each command that holds a secret' => sub {
     my $quiet = sub { return Provisioner::Recipe->quiet_secrets(@_) };
 
-    is( $quiet->( "echo 'SeCrEt' > file\nls\n", 'SeCrEt' ),                                                 "\@echo 'SeCrEt' > file\nls\n", 'a command with the secret, and not the one without it' );
-    is( $quiet->( "a \\\n    'SeCrEt'\nb\n",    'SeCrEt' ),                                                 "\@a \\\n    'SeCrEt'\nb\n",    'on the first line of a continued command, where make reads it' );
-    is( $quiet->( "\@echo 'SeCrEt'\n",          'SeCrEt' ),                                                 "\@echo 'SeCrEt'\n",            'and only once' );
-    is( $quiet->( "    echo SeCrEt\n",          'SeCrEt' ),                                                 "    \@echo SeCrEt\n",          'after the indentation, which tabinate turns into the tab' );
-    is( $quiet->( "cat line-two-of-it\n",       "-----BEGIN KEY-----\nline-two-of-it\n-----END KEY-----" ), "\@cat line-two-of-it\n",       'a secret of several lines matches on any one of them' );
+    is( $quiet->( "echo 'SeCrEt' > file\nls\n", 'SeCrEt' ), "\@echo 'SeCrEt' > file\nls\n", 'a command with the secret, and not the one without it' );
+    is( $quiet->( "a \\\n    'SeCrEt'\nb\n",    'SeCrEt' ), "\@a \\\n    'SeCrEt'\nb\n",    'on the first line of a continued command, where make reads it' );
+    is( $quiet->( "\@echo 'SeCrEt'\n",          'SeCrEt' ), "\@echo 'SeCrEt'\n",            'and only once' );
+    is( $quiet->( "    echo SeCrEt\n",          'SeCrEt' ), "    \@echo SeCrEt\n",          'after the indentation, which tabinate turns into the tab' );
+    is( $quiet->( "echo SeCr\n",                'SeCrEt' ), "echo SeCr\n",                  'a command matches a whole secret, and not a piece of one' );
 
     my $plain = "echo nothing\n";
-    is( $quiet->( $plain, 'SeCrEt' ),   $plain, 'a fragment with no secret in it is left as it is' );
-    is( $quiet->($plain),               $plain, 'and so is any fragment, when there are no secrets' );
-    is( $quiet->( $plain, q{}, undef ), $plain, 'and an empty secret matches nothing' );
+    is( $quiet->( $plain, 'SeCrEt' ), $plain, 'a fragment with no secret in it is left as it is' );
+    is( $quiet->($plain),             $plain, 'and so is any fragment, when there are no secrets' );
 };
 
 done_testing();
