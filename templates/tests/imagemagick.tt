@@ -12,7 +12,7 @@ my ($perl) = glob('/opt/perl5/*/bin/perl');
 ok( $perl && -x $perl, 'there is a perl under /opt/perl5 to build against' );
 
 SKIP: {
-    skip 'no perl under /opt/perl5', 1 unless $perl && -x $perl;
+    skip 'no perl under /opt/perl5', 2 unless $perl && -x $perl;
 
     # Image::Magick is a subclass of the class for one quantum, such as
     # Image::Magick::Q16HDRI, and only that class has a $VERSION.  The library
@@ -20,6 +20,12 @@ SKIP: {
     my $bindings = `$perl -MImage::Magick -e 'print Image::Magick->new->Get(q{version})' 2>&1`;
     like( $bindings, qr/\Q$base\E/, "Image::Magick loads under $perl and reports $base" )
         or diag $bindings;
+
+    # Loading proves the link, not the work.  Draw an image through the XS and
+    # read a pixel of it back.
+    my $drawn = `$perl -MImage::Magick -e 'my \$i = Image::Magick->new(size => q{3x2}); my \$e = \$i->Read(q{xc:red}); die \$e if \$e; print join q{ }, \$i->Get(qw{width height}), \$i->GetPixel(x => 1, y => 1)' 2>&1`;
+    is( $drawn, '3 2 1 0 0', 'and it draws a 3x2 red image, and reads a red pixel back' )
+        or diag $drawn;
 }
 
 # The binaries that the build installed must be the version the recipe asked
