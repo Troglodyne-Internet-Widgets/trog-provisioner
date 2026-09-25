@@ -59,3 +59,11 @@ rm -f seed.ldif ldap.admin_password
 Start a command with `@` yourself if its text names a failure, such as `|| echo "could not ..."`.  When make prints that command, the log shows the failure text on a run that worked.  A real failure still shows its message, because the `echo` runs and writes to stderr.  Put the `@` on the first line of the command.  On a line that continues a command, bash reads the `@` as part of a word, and the command fails.  A template directive such as `[% END -%]` is not a line of the command, so look above it.
 
 `t/recipes.t` checks both.  It renders each recipe that takes a secret with a `secret:` reference, resolves the reference through `Trog::Secrets` and a fake store, and passes the fragment through `quiet_secrets` as `bin/new_config` does.  It fails if a printed command still holds a value from the store, or if an `@` is inside a command.  If a recipe takes a new secret, add its reference to `%WITH_SECRETS` in the test, and add its value to `%STORE`.
+
+## Where to build a scratch guest
+
+Build a scratch guest on a libvirt hypervisor.  A libvirt guest costs nothing and comes up in minutes, so it is the right place to develop and test a recipe.
+
+* A recipe does the same work on every hypervisor.  Its fragment runs in the makefile, and its files arrive in the payload.  A cloud guest gets the same makefile and the same payload as a libvirt guest.
+* If a change touches that delivery, build it on a cloud as well.  The delivery is the makefile template, the payload, `ubuntu.setup.sh.tt`, cloud-init, and the hypervisor backends under `lib/Trog/HV/`.
+* Name the libvirt hypervisor with `--hypervisor` on `bin/new_config` and `bin/provision`.  A cloud block in `hypervisors.conf` can hold its token as a `secret:` reference, and a scratch configuration has no value for it.  Without `--hypervisor`, the generator asks every hypervisor whether it has the domain, and it stops at that token.
