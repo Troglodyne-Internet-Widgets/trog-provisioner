@@ -81,6 +81,7 @@ allow_subs = inspection_address check_client check_transfer_route check_reachabl
 [ProhibitPrintSTDERR]
 [InputOutput::ProhibitRepeatedPrints]
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
+[Variables::ProhibitUselessVarClearing]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 ;

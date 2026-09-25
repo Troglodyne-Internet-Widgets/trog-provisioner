@@ -124,6 +124,7 @@ allow = IO::Prompter Text::Xslate::Bridge::TT2 re
 # handle a helper may write to, not that it may write to it in pieces.
 [InputOutput::ProhibitRepeatedPrints]
 [ValuesAndExpressions::ProhibitDefinedBeforeLength]
+[Variables::ProhibitUselessVarClearing]
 # Perl::Critic's own policies.  only = 1 loads nothing that is not named, so
 # each of these has to be.
 [BuiltinFunctions::ProhibitBooleanGrep]
