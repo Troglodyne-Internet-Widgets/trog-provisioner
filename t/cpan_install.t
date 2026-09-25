@@ -33,12 +33,16 @@ require_ok($script) or BAIL_OUT("$script does not load; there is nothing to test
 my $PERL_ROOT = tempdir( CLEANUP => 1 );
 my $PERL      = "$PERL_ROOT/perl5.44.0";
 make_path("$PERL/bin");
-for my $tool (qw{cpanm dzil}) {
+for my $tool (qw{cpanm cpm dzil}) {
     open( my $fh, '>', "$PERL/bin/$tool" ) or die $!;
     close($fh)                             or die "Could not close $PERL/bin/$tool: $!";
     chmod( 0755, "$PERL/bin/$tool" );
 }
 my $CPANM = "$PERL/bin/cpanm";
+
+# cpm, run by that perl, resolving from the index of the mirror alone, and
+# without the specs.  --test is added when the suites run.
+my @CPM = ( "$PERL/bin/perl", "$PERL/bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver}, '02packages,https://www.cpan.org', '--no-default-resolvers' );
 
 # One run of cpan_install, with every command it would have run written down
 # rather than run.  %capture says what a captured command prints and
@@ -53,7 +57,7 @@ sub install {
 
     # no_auto: it was loaded from its path above, so there is no module file to load.
     my $cpan_install = Test::MockModule->new( 'Trog::Script::CpanInstall', no_auto => 1 );
-    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; return $case{fails} && $cmd[0] =~ $case{fails} ? 1 : 0 } );
+    $cpan_install->redefine( run_in => sub { my ( $dir, @cmd ) = @_; push @ran, [ $dir, @cmd ]; return $case{fails} && "@cmd" =~ $case{fails} ? 1 : 0 } );
     $cpan_install->redefine(
         capture_in => sub {
             my ( $dir, @cmd ) = @_;
@@ -76,17 +80,21 @@ subtest 'install: into the newest perl the recipe built' => sub {
     my $r = install( args => [ qw{--notest install Moo Sys::Virt@10.0.0}, 'Moo~>= 2.004' ] );
 
     is( $r->{rc}, 0, 'it succeeds' );
-    is_deeply( $r->{ran}, [ [ undef, $CPANM, qw{--notest Moo Sys::Virt@10.0.0}, 'Moo~>= 2.004' ] ], 'that perl cpanm, with a pin and a version requirement each handed on as one word' );
+    is_deeply(
+        $r->{ran},
+        [ [ undef, $CPANM, qw{--notest Sys::Virt@10.0.0} ], [ undef, @CPM, 'Moo', 'Moo~>= 2.004' ] ],
+        'the pin with that perl cpanm first, then the rest with its cpm, each spec handed on as one word'
+    );
 };
 
 subtest 'the test suites run unless told not to' => sub {
-    my $r = install( args => [qw{install Moo}] );
-    ok( !( grep { defined && $_ eq '--notest' } @{ $r->{ran}[0] } ), 'no --notest unless asked for' );
+    my $r = install( args => [ qw{install Moo}, 'Sys::Virt@10.0.0' ] );
+    is_deeply( $r->{ran}, [ [ undef, $CPANM, 'Sys::Virt@10.0.0' ], [ undef, @CPM, '--test', 'Moo' ] ], 'cpanm has no --notest, and cpm is asked for the tests it skips by default' );
 };
 
 subtest 'installdeps and dzil' => sub {
     my $r = install( args => [qw{--notest installdeps /bogus/app}] );
-    is_deeply( $r->{ran}, [ [ undef, $CPANM, qw{--notest --mirror-only --installdeps /bogus/app} ] ], 'installdeps is what the distribution says it needs' );
+    is_deeply( $r->{ran}, [ [ '/bogus/app', @CPM, '--top-level-phase', 'configure,build,test,runtime' ] ], 'installdeps is what the distribution says it needs, read by cpm in its directory, without what only an author needs' );
 
     $r = install(
         args    => [qw{dzil /bogus/checkout}],
@@ -94,12 +102,12 @@ subtest 'installdeps and dzil' => sub {
     );
     is_deeply(
         $r->{ran},
-        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, $CPANM, '--mirror-only', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, $CPANM, '--mirror-only', 'Moo' ], ],
+        [ [ '/bogus/checkout', "$PERL/bin/dzil", qw{authordeps --missing} ], [ undef, @CPM, '--test', 'Dist::Zilla::Plugin::Git' ], [ '/bogus/checkout', "$PERL/bin/dzil", qw{listdeps --missing} ], [ undef, @CPM, '--test', 'Moo' ], ],
         'the plugins dist.ini names, then what they say the distribution needs, asked in the checkout'
     );
 
     $r = install( args => [qw{dzil /bogus/checkout}] );
-    is( scalar( grep { $_->[1] eq $CPANM } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
+    is( scalar( grep { $_->[1] ne "$PERL/bin/dzil" } @{ $r->{ran} } ), 0, 'and nothing missing is nothing to install' );
 };
 
 subtest 'dzil: a checkout root does not own, and a dzil that fails says so' => sub {
@@ -146,7 +154,7 @@ subtest 'test: the prove of that perl, in the checkout' => sub {
     is( $r->{rc}, 0, 'it succeeds' );
     is_deeply( $r->{ran}, [ [ '/bogus/checkout', "$PERL/bin/prove", qw{-lvm t} ] ], 'with lib/ on the path, so a checkout that is not built still finds itself' );
 
-    $r = install( args => [qw{test /bogus/checkout}], fails => qr{/prove\z} );
+    $r = install( args => [qw{test /bogus/checkout}], fails => qr{/prove\b} );
     is( $r->{rc}, 1, 'and a suite that fails is the exit code' );
 };
 
@@ -157,28 +165,60 @@ subtest 'exit_code: what a child exit status says, the way a shell says it' => s
     is( Trog::Script::CpanInstall::exit_code(9),        137, 'a command killed by a signal, rather than a success' );
 };
 
-subtest 'which release: the mirror index, unless only MetaCPAN can say' => sub {
-    my $mirror_only = sub {
-        my ($r) = @_;
-        return scalar grep { defined && $_ eq '--mirror-only' } @{ $r->{ran}[-1] };
-    };
+subtest 'which installer: cpm for what the mirror index names, cpanm for what it cannot' => sub {
+    my $r = install( args => [qw{--notest install Moo}] );
+    is_deeply( $r->{ran}, [ [ undef, @CPM, 'Moo' ] ], 'a module by name is whatever the mirror index names, through cpm' );
 
-    my $r = install( args => [qw{install Moo}] );
-    is_deeply( $r->{ran}, [ [ undef, $CPANM, '--mirror-only', 'Moo' ] ], 'a module by name is whatever the mirror index names' );
-    ok( $mirror_only->( install( args => [ 'install', 'Moo~>= 2.004' ] ) ), 'and so is one the newest release satisfies' );
+    $r = install( args => [ qw{--notest install}, 'Moo~>= 2.004' ] );
+    is_deeply( $r->{ran}, [ [ undef, @CPM, 'Moo~>= 2.004' ] ], 'and so is one the newest release satisfies' );
 
     foreach my $spec ( 'Sys::Virt@10.0.0', 'Moo~== 2.004', 'Moo~!= 2.004', 'Moo~< 3', 'Moo~>= 2, <= 3' ) {
-        ok( !$mirror_only->( install( args => [ 'install', $spec ] ) ), "but $spec can want a release the index does not list" );
+        $r = install( args => [ qw{--notest install}, $spec ] );
+        is_deeply( $r->{ran}, [ [ undef, $CPANM, '--notest', $spec ] ], "but $spec can want a release the index does not list, so cpanm resolves it" );
     }
-    ok( !$mirror_only->( install( args => [ qw{install Moo}, 'Sys::Virt@10.0.0' ] ) ), 'which takes the whole command line with it' );
 
-    $r = install( args => [qw{pin libvirt Sys::Virt}], capture => { 'pkg-config --modversion' => ["10.0.0\n"] } );
-    ok( !$mirror_only->($r), 'as a pin always does' );
+    $r = install( args => [qw{--notest pin libvirt Sys::Virt}], capture => { 'pkg-config --modversion' => ["10.0.0\n"] } );
+    is_deeply( $r->{ran}[-1], [ undef, $CPANM, qw{--notest Sys::Virt@10.0.0} ], 'as a pin always does' );
 };
 
 subtest 'a failed install is the exit code' => sub {
-    my $r = install( args => [qw{--notest install Dist::Zilla}], fails => qr/cpanm/ );
-    is( $r->{rc}, 1, 'what cpanm said' );
+    my $r = install( args => [qw{--notest install Dist::Zilla}], fails => qr/cpm|cpanm/ );
+    is( $r->{rc}, 1, 'what cpanm said, after cpm failed as well' );
+
+    $r = install( args => [ qw{--notest install Moo}, 'Sys::Virt@10.0.0' ], fails => qr/cpanm/ );
+    is( $r->{rc}, 1, 'and what cpanm said' );
+    is_deeply( [ map { $_->[1] } @{ $r->{ran} } ], [$CPANM], 'before cpm installs anything that could build against the wrong version' );
+};
+
+subtest 'where cpm fails, cpanm tries the same, and installs each distribution as it goes' => sub {
+    my $r = install( args => [qw{--notest install Dist::Zilla}], fails => qr{/cpm[ ]} );
+    is( $r->{rc}, 0, 'cpanm succeeding is success' );
+    is_deeply( $r->{ran}, [ [ undef, @CPM, 'Dist::Zilla' ], [ undef, $CPANM, qw{--notest --mirror-only Dist::Zilla} ] ], 'with the same specs, from the mirror index' );
+
+    $r = install( args => [qw{--notest installdeps /bogus/app}], fails => qr{/cpm[ ]} );
+    is_deeply(
+        $r->{ran}[-1],
+        [ '/bogus/app', $CPANM, qw{--notest --mirror-only --installdeps .} ],
+        'and installdeps asks cpanm in the same directory'
+    );
+
+    $r = install( args => [qw{--notest install Dist::Zilla}] );
+    is( scalar @{ $r->{ran} }, 1, 'and cpm succeeding needs no cpanm' );
+};
+
+subtest 'cpm is installed with cpanm, the first time it is needed' => sub {
+    unlink "$PERL/bin/cpm" or die "could not remove the fake cpm: $!";
+
+    my $r = install( args => [qw{--notest install Moo}] );
+    is_deeply( $r->{ran}, [ [ undef, $CPANM, qw{--notest --mirror-only App::cpm} ], [ undef, @CPM, 'Moo' ] ], 'cpanm installs App::cpm, and then cpm installs the rest' );
+
+    $r = install( args => [qw{--notest install Moo}], fails => qr/App::cpm/ );
+    is( $r->{rc},              1, 'and if cpm does not install, nothing else is tried' );
+    is( scalar @{ $r->{ran} }, 1, 'with no cpm run after it' );
+
+    open( my $fh, '>', "$PERL/bin/cpm" ) or die $!;
+    close($fh)                           or die "Could not close $PERL/bin/cpm: $!";
+    chmod( 0755, "$PERL/bin/cpm" );
 };
 
 subtest 'the perl that was built is the one installed into' => sub {
@@ -186,14 +226,15 @@ subtest 'the perl that was built is the one installed into' => sub {
 
     # With no link, the newest, which is the answer on a guest with one perl.
     my $r = install( args => [qw{--notest install Moo}] );
-    is( $r->{ran}[0][1], $CPANM, 'not whichever was built first' );
+    is( $r->{ran}[0][1], "$PERL/bin/perl", 'not whichever was built first' );
 
     # With one, what it points at, whichever of them that is.  A guest rebuilt
     # with another version has both, and only the configuration knows which one
     # the modules belong in.
     symlink 'perl5.40.0', "$PERL_ROOT/current" or die "could not link: $!";
     my $older = install( args => [qw{--notest install Moo}] );
-    is( $older->{ran}[0][1],            "$PERL_ROOT/current/bin/cpanm", 'the cpanm of the perl that /opt/perl5/current names' );
+    is( $older->{ran}[0][1],            "$PERL_ROOT/current/bin/cpanm", 'the cpanm of the perl that /opt/perl5/current names, which installs its cpm' );
+    is( $older->{ran}[-1][1],           "$PERL_ROOT/current/bin/perl",  'and then that perl runs it' );
     is( readlink("$PERL_ROOT/current"), 'perl5.40.0',                   'which here is the older of the two, and not the newest' );
     unlink "$PERL_ROOT/current";
 

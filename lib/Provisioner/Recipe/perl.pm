@@ -36,18 +36,20 @@ non-interactive sh from an atd job, and systemd and cron read no shell init
 either.  So everything that installs into this perl finds it under
 F</opt/perl5>.
 
-F<scripts/build_latest_perl.sh> always gives the perl three modules, whatever
+F<scripts/build_latest_perl.sh> always gives the perl four modules, whatever
 else a recipe asks for.  The C<cpan> of the new perl installs B<cpanm>, because
-nothing else can install it yet.  Then cpanm installs B<Module::Build> and
-B<Dist::Zilla>, because a distribution that needs either cannot install it for
-itself.  Everything else comes from C<cpan_deps>.
+nothing else can install it yet.  Then F<scripts/cpan_install> installs
+B<Module::Build> and B<Dist::Zilla>, because a distribution that needs either
+cannot install it for itself, and installs B<App::cpm> with cpanm first, the
+first time it runs.  Everything else comes from C<cpan_deps>.
 
 Those last two, and each step of C<cpan_deps>, go through
 F<scripts/cpan_install>.  That script is the one thing on a guest that gets
 modules from CPAN.  CPAN.pm installs cpanm and nothing else, and
-F<scripts/build_latest_perl.sh> says why.  cpan_install installs the release
-that the index of the mirror names, not the one that cpanmetadb names.  A
-version pin that needs an older release is the exception.
+F<scripts/build_latest_perl.sh> says why.  cpan_install installs with cpm, which
+builds several distributions at once, and installs a version pin with cpanm.
+It installs the release that the index of the mirror names, not the one that
+cpanmetadb names.  A version pin that needs an older release is the exception.
 
 =head2 What other recipes install into it
 
@@ -188,9 +190,10 @@ sub tests {
 =head2 @hosts = $recipe->fetch_hosts()
 
 CPAN.  This recipe reaches it three ways.  perlbrew gets the source of the perl
-that it builds.  The C<cpan> of that perl gets cpanm.  cpanm gets Module::Build,
-Dist::Zilla and each C<cpan_deps> step.  MetaCPAN says which release a version
-pin names, and the mirrors serve it.
+that it builds.  The C<cpan> of that perl gets cpanm, and cpanm gets cpm.  cpm
+gets Module::Build, Dist::Zilla and each C<cpan_deps> step, and cpanm gets a
+version pin.  MetaCPAN says which release a version pin names, and the mirrors
+serve it.
 
 =cut
 

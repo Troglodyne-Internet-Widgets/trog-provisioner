@@ -55,7 +55,7 @@ TODO: let the configuration name a commit to check out (#223).
 
 tCMS requires C<Sys::Virt>, so this recipe installs it before the other modules
 that the checkout needs.  It pins the version that pkg-config reports for the
-libvirt of the guest.  Without the pin, cpanm takes the newest, and its build
+libvirt of the guest.  Without the pin, cpm takes the newest, and its build
 wants a libvirt far newer than the distribution ships.
 L<Provisioner::Recipe::trogrunner> pins it for the same reason.
 

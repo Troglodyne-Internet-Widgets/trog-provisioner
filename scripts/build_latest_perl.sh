@@ -2,7 +2,7 @@
 
 # build_latest_perl.sh [VERSION]
 #
-# Build a perl into /opt/perl5 and give it cpanm, Module::Build and
+# Build a perl into /opt/perl5 and give it cpanm, cpm, Module::Build and
 # Dist::Zilla.  The target of the perl recipe installs its cpan_deps after this.
 #
 # VERSION is a release, such as 5.40.2.  Without one this builds the latest

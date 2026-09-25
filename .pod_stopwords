@@ -214,6 +214,7 @@ configs
 cpan
 cpanm
 cpanmetadb
+cpm
 cpuid
 cpus
 cron

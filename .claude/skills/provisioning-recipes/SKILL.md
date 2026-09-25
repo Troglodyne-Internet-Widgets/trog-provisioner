@@ -202,8 +202,8 @@ with its suites on, so give it more:
     echo "$TROG_SCRATCH_PASS" | TROG_SETUP_TIMEOUT=3h bin/provision "$DOMAIN"
 
 A failing suite stops the makefile in the `perl` recipe's target, and shows in
-`setup.log` as the `cpan_install` line it stopped on, with cpanm's build log path
-above it. Read which
+`setup.log` as the `cpan_install` line it stopped on. cpm prints the build log of
+the distribution that failed above it, and cpanm prints the path to its log. Read which
 distribution failed and why before deciding anything, and report it.
 
 ## Through a fetch cache
