@@ -704,12 +704,13 @@ subtest 'a secret written into the configuration in the clear is worth saying' =
     my $secret = 'hunter2-in-the-clear';
     File::Slurper::Temp::write_text(
         "$dir/recipes.yaml",
-        "---\nweb.test.test:\n" . "    mail:\n        names:\n            someuser:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:dns/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n"
+        "---\nweb.test.test:\n" . "    mail:\n        names:\n            someuser:\n                password: $secret\n                gecos: A\n" . "    pdns:\n        api_key: secret:dns/pdns/password\n" . "    backup:\n        key_file: backup.rsa\n" . "    mariadb:\n        root_pw: $secret\n"
     );
 
     my $note = Trog::HV->new()->note_plaintext_secrets;
     ok( !$note->{ok}, 'a literal password is reported' );
     like( $note->{at} // $note->{fix}, qr/mail\.names\.someuser\.password/, 'naming the field' );
+    like( $note->{fix},                qr/mariadb\.root_pw/,                'and a field whose name ends in _pw' );
 
     # Never the value.  A note that printed a password to say a password was
     # printed would be its own answer.

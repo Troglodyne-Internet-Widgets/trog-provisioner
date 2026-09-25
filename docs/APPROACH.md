@@ -58,4 +58,4 @@ rm -f seed.ldif ldap.admin_password
 
 Use `@` in the same way on a command whose text names a failure, such as `|| echo "could not ..."`.  When make prints that command, the log shows the failure text on a run that worked.  A real failure still shows its message, because the `echo` runs and writes to stderr.
 
-`t/recipes.t` enforces two of these rules.  It fails in two cases: a printed command holds the value of a field that names a secret, or an `@` is inside a command.  `Trog::Secrets->names_a_secret` decides which fields name a secret: a password, a secret, a token, a credential, a key, or a name that ends in `_pw`.  Give a new secret field a name like that, or the test cannot find it.
+`t/recipes.t` enforces two of these rules.  It fails in two cases: a printed command holds a value from the secret store, or an `@` is inside a command.  The test knows a secret in the same way as `bin/new_config`, by its `secret:` reference.  If a recipe takes a new secret, add its reference to `%WITH_SECRETS` in the test, and add its value to `%STORE`.

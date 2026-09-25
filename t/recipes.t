@@ -35,6 +35,7 @@ use List::Util       qw{any};
 use File::Find();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
+use Trog::Secrets();
 use Trog::Test::RecipeConfig();
 use IPC::Run3();
 use File::Find();
@@ -298,14 +299,6 @@ foreach my $recipe (@available) {
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
 
-# The value of every field under $node that names a secret.
-sub secret_values {
-    my ( $node, $field ) = @_;
-    return map { secret_values( $_,          $field ) } @$node       if ref $node eq 'ARRAY';
-    return map { secret_values( $node->{$_}, $_ ) } sort keys %$node if ref $node eq 'HASH';
-    return ( !ref $node && ( $node // q{} ) ne q{} && Trog::Secrets->names_a_secret($field) ) ? ($node) : ();
-}
-
 # The commands of a fragment, one to each element, with each continued line
 # joined to the line before it.
 sub fragment_commands {
@@ -321,24 +314,59 @@ sub fragment_commands {
     return @commands;
 }
 
+# What the secret store holds for this test, by reference.  A secret is a value
+# that the store holds, and nothing else is worth keeping out of the log.
+my %STORE = (
+    'secret:test/admincode/token'  => 'SeCrEt-admincode-token',
+    'secret:test/github/token'     => 'SeCrEt-github-token',
+    'secret:test/gogs/password'    => 'SeCrEt-gogs-password',
+    'secret:test/grafana/password' => 'SeCrEt-grafana-password',
+    'secret:test/koan/github'      => 'SeCrEt-koan-github',
+    'secret:test/koan/matrix'      => 'SeCrEt-koan-matrix',
+    'secret:test/koan/pickle'      => 'SeCrEt-koan-pickle',
+    'secret:test/ldap/password'    => 'SeCrEt-ldap-password',
+    'secret:test/mariadb/password' => 'SeCrEt-mariadb-password',
+    'secret:test/matrix/password'  => 'SeCrEt-matrix-password',
+    'secret:test/matrix/smtp'      => 'SeCrEt-matrix-smtp',
+    'secret:test/pdns/key'         => 'SeCrEt-pdns-key',
+    'secret:test/plex/claim'       => 'claim-SeCrEt-plex',
+);
+
+# The configuration of each recipe that takes a secret, with a reference where
+# an operator would write one.
+my %WITH_SECRETS = (
+    admincode => { repos_from     => [ { api_url => 'https://git.test.test/api', token => 'secret:test/admincode/token', repos_for => ['someone'] } ] },
+    github    => { github_token   => 'secret:test/github/token' },
+    gogs      => { admin_password => 'secret:test/gogs/password' },
+    grafana   => { admin_password => 'secret:test/grafana/password' },
+    koan      => {
+        github_token       => 'secret:test/koan/github',
+        messaging_provider => 'matrix',
+        matrix_homeserver  => 'https://matrix.test.test',
+        matrix_user_id     => '@bot:test.test',
+        matrix_room_id     => '!room:test.test',
+        matrix_password    => 'secret:test/koan/matrix',
+        matrix_pickle_key  => 'secret:test/koan/pickle',
+    },
+    ldap            => { admin_password => 'secret:test/ldap/password' },
+    mariadb         => { root_pw        => 'secret:test/mariadb/password' },
+    matrix          => { admin_password => 'secret:test/matrix/password', smtp_pass => 'secret:test/matrix/smtp' },
+    pdns            => { api_key        => 'secret:test/pdns/key' },
+    plexmediaserver => { claim_token    => 'secret:test/plex/claim' },
+);
+
 # make prints each command of the makefile before it runs it, unless the
 # command starts with @, and setup.sh keeps what it printed in the setup log of
-# the guest.  So a command that carries a secret must start with @.
+# the guest.  So a command that carries a secret must start with @.  The
+# references resolve the way bin/new_config resolves them, through
+# Trog::Secrets, with %STORE in place of the database.
 subtest 'no command that make prints carries a secret' => sub {
-
-    # The secrets that the minimum input leaves out, because the recipe works
-    # without them.
-    my %with_secrets = (
-        admincode       => { repos_from         => [ { api_url => 'https://git.test.test/api', token => 'SeCrEt-admincode-token', repos_for => ['someone'] } ] },
-        koan            => { messaging_provider => 'matrix', matrix_homeserver => 'https://matrix.test.test', matrix_user_id => '@bot:test.test', matrix_room_id => '!room:test.test', matrix_password => 'SeCrEt-koan-password', matrix_pickle_key => 'SeCrEt-koan-pickle' },
-        plexmediaserver => { claim_token        => 'claim-SeCrEt-plex' },
-    );
-
-    my $checked = 0;
-    foreach my $recipe (@available) {
-        my %input   = ( %{ $required_config{$recipe} // {} }, %{ $with_secrets{$recipe} // {} } );
-        my @secrets = secret_values( \%input );
-        next if !@secrets;
+    my %resolved;
+    foreach my $recipe ( sort keys %WITH_SECRETS ) {
+        my %input  = ( %{ $required_config{$recipe} // {} }, %{ $WITH_SECRETS{$recipe} } );
+        my %needed = Trog::Secrets->needed( \%input );
+        my %values = map { $_ => $STORE{ $needed{$_} } // die "The test store has no $needed{$_}\n" } keys %needed;
+        Trog::Secrets->apply( \%input, %values );
 
         my $r = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
         my @printed;
@@ -349,13 +377,13 @@ subtest 'no command that make prints carries a secret' => sub {
         is( $err, undef, "$recipe renders with its secrets" ) or next;
         @printed = grep { !m/\A\s*@/ } @printed;
 
-        foreach my $secret (@secrets) {
-            my @carry = grep { index( $_, $secret ) >= 0 } @printed;
-            ok( !@carry, "$recipe prints no command that carries its $secret" ) or diag join( "\n---\n", @carry );
-            $checked++;
+        foreach my $ref ( sort values %needed ) {
+            my @carry = grep { index( $_, $STORE{$ref} ) >= 0 } @printed;
+            ok( !@carry, "$recipe prints no command that carries $ref" ) or diag join( "\n---\n", @carry );
+            $resolved{$ref}++;
         }
     }
-    cmp_ok( $checked, '>=', 5, 'with a secret in each of the recipes that take one' );
+    is_deeply( [ sort keys %resolved ], [ sort keys %STORE ], 'and every secret in the store was looked for' );
 };
 
 # An @ quiets a command only at its start.  On a continued line, the shell gets
