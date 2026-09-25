@@ -120,6 +120,10 @@ subtest 'the order of all is stated as edges, so make -j keeps it' => sub {
     # apt-get update fails at once on the lock of another apt, so make -j runs
     # every apt through scripts/serial_apt, first on its PATH.
     like( $plain, qr{^export[ ]PATH[ ]:=[ ]/root/bin/serial-apt:\$\(PATH\)$}m, 'the serial apt comes first on the PATH' );
+
+    # A fragment runs make, cargo and rustc, and none of them can open the
+    # jobserver that MAKEFLAGS names under -j.
+    like( $plain, qr{^unexport[ ]MAKEFLAGS$}m, 'the fragments do not inherit the jobserver' );
     is_deeply( [ $plain =~ m{^\tln[ ]-sf[ ]/root/bin/serial_apt[ ](\S+)$}mg ], [qw{/root/bin/serial-apt/apt-get /root/bin/serial-apt/apt}], 'as apt-get and as apt' );
     is_deeply( [ $plain =~ m{^(\S+/perl):[ ][|][ ](\S+)$}m ],                  [ "$STATE/perl", "$STATE/testdeps" ],                        'without a cache, recipes wait for the last global target' );
 };

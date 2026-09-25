@@ -5,6 +5,11 @@ SHELL := /bin/bash
 # make -j.  The scripts target makes this directory.  scripts/serial_apt says why.
 export PATH := [% script_dir %]/serial-apt:$(PATH)
 
+# Under make -j, MAKEFLAGS names a jobserver whose descriptors only a recursive
+# $(MAKE) inherits.  A make, cargo or rustc in a fragment would see a jobserver
+# that it cannot open, and warn, or run one job at a time.
+unexport MAKEFLAGS
+
 [% FOR var IN vars.keys().sort() %]
 [% var %] := [% vars.$var | mark_raw %]
 [% END -%]

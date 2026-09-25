@@ -140,6 +140,9 @@ as C<POSTRUN_SLOT>, and F<scripts/post_install> runs the tasks by that slot.
 apt waits for its lock rather than failing, because two targets can call it at
 once.
 
+A fragment does not see C<MAKEFLAGS>.  A C<make>, C<cargo> or C<rustc> that it
+runs takes its own C<-j>, if it wants one, as it did under a serial C<make>.
+
 =head3 Global and per-domain parts
 
 A guest can host several domains.  Some of what a recipe does is per domain,
