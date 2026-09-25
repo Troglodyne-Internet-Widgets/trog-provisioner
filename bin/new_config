@@ -41,6 +41,7 @@ use File::Find();
 use Provisioner::IPPool;
 use Provisioner::Utils;
 use Provisioner::Cookbook();
+use Provisioner::Recipe();
 
 # Better stack traces
 use Carp::Always;
@@ -442,11 +443,15 @@ sub handle_domain {
     # Only prompt if we have to
     my %to_replace = Trog::Secrets->needed($rconf);
     my $keepass;
+
+    # The values, so that a command that holds one starts with @ and make does
+    # not print it into the setup log.
+    my @secret_values;
     if (%to_replace) {
         $keepass = Trog::Credentials->prompt( 'Enter password:', 'keepass' );
         my %secrets = Trog::Secrets->lookup( $sfile, $keepass, %to_replace );
         Trog::Secrets->apply( $rconf, %secrets );
-        %secrets = ();
+        @secret_values = values %secrets;
 
         # Give Cookbook the resolved copy, because a recipe that reads the
         # credential of another recipe asks Cookbook for it.
@@ -764,20 +769,26 @@ sub handle_domain {
         my $aliases      = $alias_conf->{$domain} // [];
         my $full_aliases = [@$aliases];
         if ( $builder->has_global_template() ) {
-            $global_fragments{$module} = $builder->render_global(
-                $builder->takes(%$global_config),
-                %$pconf,
-                full_aliases => $full_aliases,
-                modules      => \@modules,
+            $global_fragments{$module} = Provisioner::Recipe->quiet_secrets(
+                $builder->render_global(
+                    $builder->takes(%$global_config),
+                    %$pconf,
+                    full_aliases => $full_aliases,
+                    modules      => \@modules,
+                ),
+                @secret_values
             );
             push( @modules_ordered, "/etc/provisioner/state/global_$module" );
         }
         if ( $builder->has_template() ) {
-            $fragments{$module} = $builder->render(
-                $builder->takes(%$global_config),
-                %$pconf,
-                full_aliases => $full_aliases,
-                modules      => \@modules,
+            $fragments{$module} = Provisioner::Recipe->quiet_secrets(
+                $builder->render(
+                    $builder->takes(%$global_config),
+                    %$pconf,
+                    full_aliases => $full_aliases,
+                    modules      => \@modules,
+                ),
+                @secret_values
             );
             push( @modules_ordered, "/etc/provisioner/state/$fqdn/$module" );
         }

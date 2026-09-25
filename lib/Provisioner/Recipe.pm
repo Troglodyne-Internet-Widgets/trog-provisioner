@@ -96,6 +96,17 @@ queued task stays POSIX: dash has no brace expansion, and in dash C<&E<gt>>
 starts a background job and then redirects rather than redirecting both
 streams.
 
+=item * Make prints each command before it runs it, and F<ubuntu.setup.sh.tt>
+keeps what make prints in F</var/log/E<lt>domainE<gt>.setup.log> on the guest.
+C<bin/new_config> starts each command that holds a resolved secret with C<@>,
+through C<quiet_secrets>, so a fragment does not do that itself.  Start a
+command with C<@> yourself when its text names a failure, such as C<|| echo
+"could not ...">.  In the log, that text reads as a failure even on a run that
+worked.  Put the C<@> on the first line of the command.  Keep a secret out of
+argv as well, because C<ps> shows argv to every user on the guest: write it to
+a file with C<printf>, which is a shell builtin.  F<docs/APPROACH.md> has the
+whole of it.
+
 =back
 
 Fragments must be re-entrant.  A target's last line stamps it, so a target that
@@ -1405,6 +1416,52 @@ C<%template_vars>, after C<validated> checks them.  Dies if they are not valid.
 
 sub render_file ( $self, $file, %template_vars ) {
     return $self->render_raw( $file, $self->validated( $self->vars(), %template_vars ) );
+}
+
+=head3 @commands = Provisioner::Recipe->fragment_commands($fragment)
+
+The commands of a rendered fragment, one to each element.  A command that
+continues onto the next line, with a C<\> at the end, is one element with the
+lines joined, newlines included.  Joined back together, the elements are the
+fragment.
+
+=cut
+
+sub fragment_commands ( $, $fragment ) {
+    my ( @commands, $continued );
+    foreach my $line ( split m/(?<=\n)/, $fragment ) {
+        if ($continued) { $commands[-1] .= $line }
+        else            { push( @commands, $line ) }
+        $continued = $line =~ m/\\\n\z/;
+    }
+    return @commands;
+}
+
+=head3 $fragment = Provisioner::Recipe->quiet_secrets($fragment, @secrets)
+
+Returns the rendered C<$fragment> with an C<@> at the start of each command that
+holds one of C<@secrets>, so that make does not print it into the setup log.
+C<@secrets> are the values that the C<secret:> references of the configuration
+resolved to, each of which C<< Trog::Secrets->lookup >> has already refused to
+be empty.  A command matches when it holds a whole value, which is also how a
+secret of several lines would appear in one.  A command that already starts
+with C<@> is left as it is.
+
+C<bin/new_config> calls this on every fragment it renders.  See L</The fragment
+is a makefile, not a shell script>.
+
+=cut
+
+sub quiet_secrets ( $class, $fragment, @secrets ) {
+    return $fragment if !@secrets;
+
+    my @commands = $class->fragment_commands($fragment);
+    foreach my $command (@commands) {
+        next if $command =~ m/\A\s*@/;
+        next if !any { index( $command, $_ ) >= 0 } @secrets;
+        $command =~ s/\A(\s*)/$1@/;
+    }
+    return join( q{}, @commands );
 }
 
 =head3 $output = $recipe->render_raw($file, %template_vars)

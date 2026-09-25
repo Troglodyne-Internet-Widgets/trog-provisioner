@@ -5,11 +5,11 @@ install -m 0644 -o root -g root io_uring.conf /etc/sysctl.d/60-io_uring.conf
 sysctl -p /etc/sysctl.d/60-io_uring.conf
 # The running kernel can refuse a less strict value, and keep its own.  The
 # file is correct either way, so this is a warning and not a failure.
-[ "$$(sysctl -n kernel.io_uring_disabled)" = "[% mode %]" ] || echo "iouring: the running kernel kept kernel.io_uring_disabled=$$(sysctl -n kernel.io_uring_disabled) rather than taking [% mode %]; the sysctl.d file is in place and the next boot will apply it"
+@[ "$$(sysctl -n kernel.io_uring_disabled)" = "[% mode %]" ] || echo "iouring: the running kernel kept kernel.io_uring_disabled=$$(sysctl -n kernel.io_uring_disabled) rather than taking [% mode %]; the sysctl.d file is in place and the next boot will apply it"
 [% FOR account IN members -%]
 # After the makefile, because [% account %] belongs to another recipe, which
 # can run after this one.
-[% script_dir %]/queue_postrun_task "id -u '[% account %]' >/dev/null 2>&1 && usermod -aG '[% group %]' '[% account %]' || echo 'iouring: no account [% account %] to put in [% group %]'"
+@[% script_dir %]/queue_postrun_task "id -u '[% account %]' >/dev/null 2>&1 && usermod -aG '[% group %]' '[% account %]' || echo 'iouring: no account [% account %] to put in [% group %]'"
 [% END -%]
 [% FOR unit IN restart_units -%]
 # Restart it, because a process reads its groups only when it starts.  Its own

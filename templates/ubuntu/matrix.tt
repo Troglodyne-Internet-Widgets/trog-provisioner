@@ -38,7 +38,7 @@ chmod 0644 /etc/matrix-synapse/log.yaml
     store before this makefile starts.  See guest_secrets in
     Provisioner::Recipe.  So a missing key means that the store was not
     reachable.  Stop, and say so. -%]
-test -s /etc/matrix-synapse/homeserver.signing.key \
+@test -s /etc/matrix-synapse/homeserver.signing.key \
     || { echo "matrix: no signing key at /etc/matrix-synapse/homeserver.signing.key" >&2; \
          echo "bin/provision places it from the secret store; synapse must not be started without it." >&2; \
          exit 1; }

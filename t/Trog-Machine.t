@@ -263,7 +263,7 @@ subtest 'list_dir takes a path with a space in it' => sub {
 
     my ( $machine, $mock ) = here();
     is_deeply( [ $machine->list_dir("$dir/two words") ], ['inside'], 'on this machine' );
-    undef $mock;
+    undef $mock;    ## no critic (ProhibitUselessVarClearing) -- restores the real is_local, so that remote() below is not taken for this machine
 
     # The command goes to a shell here rather than over ssh, which is what the
     # far side does with it too.

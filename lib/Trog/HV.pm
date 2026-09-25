@@ -1439,7 +1439,7 @@ sub _plaintext_in {
     # _file and _path name a location, not a secret: the key_file of backup
     # holds a filename such as "backup.rsa".
     return ()      if $field =~ m/_(?:file|path)\z/;
-    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)key\z/;
+    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/;
 
     return ();
 }

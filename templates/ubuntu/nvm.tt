@@ -5,7 +5,7 @@
 #   Profile not found. Tried ~/.bashrc ...
 # and continues without a loader.  useradd makes the home of a service user
 # with no skeleton, so that home has no .bashrc.
-NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
+@NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
 test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
 test -f "$$NVM_HOME/.bashrc" || { touch "$$NVM_HOME/.bashrc"; chown '[% user %]' "$$NVM_HOME/.bashrc"; }
 
@@ -23,7 +23,7 @@ su - [% user %] -s /bin/bash -c \
 #
 # This target also writes the nvm loader, and does not rely on the installer
 # for it.  The grep keeps out a second copy if the installer wrote one.
-NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
+@NVM_HOME=$$(getent passwd '[% user %]' | cut -d: -f6); \
 test -n "$$NVM_HOME" || { echo "no home directory for [% user %]" >&2; exit 1; }; \
 grep -qF 'NVM_DIR' "$$NVM_HOME/.bashrc" 2>/dev/null \
     || printf '%s\n' 'export NVM_DIR="$$HOME/.nvm"' '[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"' >> "$$NVM_HOME/.bashrc"; \

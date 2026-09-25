@@ -35,6 +35,7 @@ use List::Util       qw{any};
 use File::Find();
 use Provisioner::Cookbook();
 use Provisioner::Recipe();
+use Trog::Secrets();
 use Trog::Test::RecipeConfig();
 use IPC::Run3();
 use File::Find();
@@ -297,6 +298,95 @@ foreach my $recipe (@available) {
     $input = $required_config{$recipe} if exists $required_config{$recipe};
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
+
+# What the secret store holds for this test, by reference.  A secret is a value
+# that the store holds, and nothing else is worth keeping out of the log.
+my %STORE = (
+    'secret:test/admincode/token'  => 'SeCrEt-admincode-token',
+    'secret:test/github/token'     => 'SeCrEt-github-token',
+    'secret:test/gogs/password'    => 'SeCrEt-gogs-password',
+    'secret:test/grafana/password' => 'SeCrEt-grafana-password',
+    'secret:test/koan/github'      => 'SeCrEt-koan-github',
+    'secret:test/koan/matrix'      => 'SeCrEt-koan-matrix',
+    'secret:test/koan/pickle'      => 'SeCrEt-koan-pickle',
+    'secret:test/ldap/password'    => 'SeCrEt-ldap-password',
+    'secret:test/mariadb/password' => 'SeCrEt-mariadb-password',
+    'secret:test/matrix/password'  => 'SeCrEt-matrix-password',
+    'secret:test/matrix/smtp'      => 'SeCrEt-matrix-smtp',
+    'secret:test/pdns/key'         => 'SeCrEt-pdns-key',
+    'secret:test/plex/claim'       => 'claim-SeCrEt-plex',
+);
+
+# The configuration of each recipe that takes a secret, with a reference where
+# an operator would write one.
+my %WITH_SECRETS = (
+    admincode => { repos_from     => [ { api_url => 'https://git.test.test/api', token => 'secret:test/admincode/token', repos_for => ['someone'] } ] },
+    github    => { github_token   => 'secret:test/github/token' },
+    gogs      => { admin_password => 'secret:test/gogs/password' },
+    grafana   => { admin_password => 'secret:test/grafana/password' },
+    koan      => {
+        github_token       => 'secret:test/koan/github',
+        messaging_provider => 'matrix',
+        matrix_homeserver  => 'https://matrix.test.test',
+        matrix_user_id     => '@bot:test.test',
+        matrix_room_id     => '!room:test.test',
+        matrix_password    => 'secret:test/koan/matrix',
+        matrix_pickle_key  => 'secret:test/koan/pickle',
+    },
+    ldap            => { admin_password => 'secret:test/ldap/password' },
+    mariadb         => { root_pw        => 'secret:test/mariadb/password' },
+    matrix          => { admin_password => 'secret:test/matrix/password', smtp_pass => 'secret:test/matrix/smtp' },
+    pdns            => { api_key        => 'secret:test/pdns/key' },
+    plexmediaserver => { claim_token    => 'secret:test/plex/claim' },
+);
+
+# make prints each command of the makefile before it runs it, unless the
+# command starts with @, and setup.sh keeps what it printed in the setup log of
+# the guest.  So a command that carries a secret must start with @, and
+# quiet_secrets puts it there.  The references resolve the way bin/new_config
+# resolves them, through Trog::Secrets, with %STORE in place of the database.
+subtest 'no command that make prints carries a secret' => sub {
+    my %resolved;
+    foreach my $recipe ( sort keys %WITH_SECRETS ) {
+        my %input  = ( %{ $required_config{$recipe} // {} }, %{ $WITH_SECRETS{$recipe} } );
+        my %needed = Trog::Secrets->needed( \%input );
+        my %values = map { $_ => $STORE{ $needed{$_} } // die "The test store has no $needed{$_}\n" } keys %needed;
+        Trog::Secrets->apply( \%input, %values );
+
+        # Through quiet_secrets, as bin/new_config renders every fragment.
+        my $r = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my @printed;
+        my $err = exception {
+            foreach my $fragment ( ( fragment_for($recipe) ? $r->render( %G, %input ) : () ), ( fragment_for( $recipe, 'global.tt' ) ? $r->render_global( %G, %input ) : () ) ) {
+                push( @printed, Provisioner::Recipe->fragment_commands( Provisioner::Recipe->quiet_secrets( $fragment, values %values ) ) );
+            }
+        };
+        is( $err, undef, "$recipe renders with its secrets" ) or next;
+        @printed = grep { !m/\A\s*@/ } @printed;
+
+        foreach my $ref ( sort values %needed ) {
+            my @carry = grep { index( $_, $STORE{$ref} ) >= 0 } @printed;
+            ok( !@carry, "$recipe prints no command that carries $ref" ) or diag join( "\n---\n", @carry );
+            $resolved{$ref}++;
+        }
+    }
+    is_deeply( [ sort keys %resolved ], [ sort keys %STORE ], 'and every secret in the store was looked for' );
+};
+
+# An @ quiets a command only at its start.  On a continued line, the shell gets
+# it as part of a word, and @test is a command that bash cannot find.
+subtest 'an @ starts a command, and never a line that continues one' => sub {
+    foreach my $recipe (@available) {
+        my $r     = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my %input = %{ $required_config{$recipe} // {} };
+        my @commands;
+        push( @commands, Provisioner::Recipe->fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
+        push( @commands, Provisioner::Recipe->fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
+
+        my @misplaced = grep { m/\n\s*@/ } @commands;
+        ok( !@misplaced, "$recipe has no @ inside a command" ) or diag join( "\n---\n", @misplaced );
+    }
+};
 
 # The guest rsyncs its payload off whoever is holding it -- this machine -- so
 # every one of these has to name it.  When the host came out empty the recipe

@@ -14,7 +14,7 @@ chmod 0644 /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
 [%# Update this archive alone first, so that a failure names the archive.
     Otherwise it shows as apt noise and a bare error from the install. -%]
-DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/github-cli.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
   || { echo "github: cli.github.com would not serve its repository, so there is no gh to install" >&2; exit 1; }
