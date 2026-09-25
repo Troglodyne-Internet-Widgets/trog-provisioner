@@ -128,8 +128,9 @@ What works is set in the hypervisor blocks above, and the kernel enforces it:
 =over 4
 
 =item * C<pool_path> and C<pool_name> together give the runner its own storage
-pool.  Put that path on a filesystem with a limit, for example C<zfs create -o
-quota=500G tank/vm-disks/runner>, and the limit is real.  Name both.  libvirt
+pool.  Put a limit under that path, and the limit is real: a ZFS dataset with a
+quota, a project quota on XFS or ext4, or a filesystem of its own.
+C<bin/preflight> says which one the hypervisor can use.  Name both.  libvirt
 finds a pool by name.  If the name is of a pool that already exists elsewhere,
 libvirt ignores the path, and every volume goes into the existing pool.
 

@@ -2240,14 +2240,20 @@ FIX
 
 =head2 $result = $hv->note_pool_quota()
 
-Fails when the storage pool is as large as its filesystem, which means that no
-quota limits it.  Passes when there is no pool yet.
+Fails when nothing limits the storage pool to less than the storage under it.
+Passes when there is no pool yet, and when the hypervisor does not say enough
+to tell.
 
 libvirt does not count what anyone allocates.  On the system URI, every guest
-runs as libvirt-qemu, so a disk quota has no UID to apply to.  Only a filesystem
-with a limit under the pool limits the guests.  Without one, the pool can fill
-the root filesystem of the hypervisor.  This is a note and not a check, because
-most hypervisors have no such limit.
+runs as libvirt-qemu, so a disk quota has no UID to apply to.  Only a limit on
+the storage under the pool limits the guests.  Without one, the pool can fill
+the filesystem, or the zpool, that it shares with everything else.  This is a
+note and not a check, because most hypervisors have no such limit.
+
+The answer comes from the space available, not from libvirt.  libvirt sizes a
+directory pool from C<statvfs> on its path, which is the same call that C<df>
+makes, so the two always agree.  See C<pool_is_unlimited> for what is compared
+instead.
 
 =cut
 
@@ -2257,40 +2263,172 @@ sub note_pool_quota {
     # Not through pool(), which defines and starts a pool it cannot find.  A
     # check must not build anything.
     my $name = $self->pool_name;
-    my $info = eval { $self->vmm->get_storage_pool_by_name($name)->get_info() } or return { ok => 1 };
+    eval { $self->vmm->get_storage_pool_by_name($name) } or return { ok => 1 };
 
-    # The last line is the mount, and with -B1 its second field is the size in
-    # bytes.
-    my $path    = $self->pool_path;
-    my $said    = eval { $self->capture_cmd("df -B1 '$path' 2>/dev/null | tail -n1") } // q{};
-    my ($bytes) = $said =~ m/\A\S+\s+(\d+)\s/;
+    my $fstype = $self->pool_fstype;
+    my $space  = $self->pool_space($fstype);
+    return { ok => 1 } if !pool_is_unlimited( $space, $fstype );
 
-    # The pool is a directory, and libvirt reports the statvfs size of its
-    # filesystem.  A size within a gigabyte of the filesystem is no limit.
-    return { ok => 1 }
-      if !defined $bytes || abs( $bytes - ( $info->{capacity} // 0 ) ) >= 1_073_741_824;
-
+    my $under = $fstype eq 'zfs' ? 'the zpool ' . zpool_of( $space->{source} ) : "the filesystem at $space->{mount}";
     return {
         ok   => 0,
-        what => sprintf( 'The %s pool has no quota: its %.1fGB is all of %s', $name, ( $info->{capacity} // 0 ) / 1_073_741_824, $path ),
-        fix  => <<"FIX" };
-Guests built here are limited by nothing but the filesystem, and by
-reserve_disk in hypervisors.conf -- which is this tool asking itself for
-permission, and says nothing to anybody driving virsh directly.
+        what => sprintf( 'The %s pool has no quota: %s has all %.1fGB that %s has free', $name, $space->{path}, $space->{avail} / 1_073_741_824, $under ),
+        fix  => pool_quota_advice( $fstype, $name, $space ),
+    };
+}
 
-To make it real, give the pool a filesystem of its own with a limit on it:
+=head2 \%space = $hv->pool_space($fstype)
 
-    zfs create -o quota=500G tank/vm-disks/$name
+The space at the storage pool's directory, from one command on the hypervisor.
+The keys are C<path>, the directory with its links resolved; C<avail>, the
+bytes free there; C<source> and C<mount>, the filesystem that holds it; and
+C<mount_avail>, the bytes free at that mount point.  On ZFS, C<$fstype> adds
+C<zpool_avail>, the bytes free in the whole zpool.  Undef when the directory
+does not exist or C<df> does not answer.
 
-then name both halves in hypervisors.conf, because libvirt looks a pool up by
-name and a pool_path beside an existing pool's name is silently ignored:
+=cut
 
-    pool_path = /tank/vm-disks/$name
+sub pool_space {
+    my ( $self, $fstype ) = @_;
+
+    # Quoted by hand, because capture_cmd takes a shell string and the pool path
+    # can come from a configuration file.
+    ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
+
+    my @steps = (
+        "p=\$(realpath -e '$quoted') || exit 0",
+        'echo "$p"',
+        'df -B1 --output=avail,source,target "$p" | tail -n1',
+        'df -B1 --output=avail "$(df --output=target "$p" | tail -n1)" | tail -n1',
+    );
+    push @steps, 's=$(df --output=source "$p" | tail -n1); zfs get -Hp -o value available "${s%%/*}"' if $fstype eq 'zfs';
+
+    my $said = eval { $self->capture_cmd( '{ ' . join( '; ', @steps ) . '; } 2>/dev/null' ) } // q{};
+    my ( $path, $here, $mount_avail, $zpool_avail ) = map { s/\A\s+|\s+\z//gr } split m/\n/, $said;
+    return if !defined $here;
+
+    # The mount point is last, so a space in it stays in it.
+    my ( $avail, $source, $mount ) = split q{ }, $here, 3;
+    return if !defined $mount || $avail !~ m/\A\d+\z/;
+
+    return { path => $path, avail => $avail, source => $source, mount => $mount, mount_avail => $mount_avail, zpool_avail => $zpool_avail };
+}
+
+=head2 $bool = pool_is_unlimited(\%space, $fstype)
+
+Whether the space at the pool, as C<pool_space> reports it, shows that nothing
+limits it.  A quota shows up as less space free at the pool than at what
+encloses it: a project quota on XFS or ext4 against its mount point, and a
+dataset quota on ZFS against its zpool.  C<statfs> reports each of those limits
+inside it.  A pool that is a mount point of its own, on anything but ZFS, is a
+filesystem of its own, and that is its limit.
+
+Returns false when C<%space> is undef or lacks the number to compare with,
+because the note says nothing that it cannot show.  Free space within 1% of
+what encloses it counts as the same, because the two are read a moment apart.
+
+=cut
+
+sub pool_is_unlimited {
+    my ( $space, $fstype ) = @_;
+    return if !$space;
+    return if $fstype ne 'zfs' && $space->{path} eq $space->{mount};
+
+    my $enclosing = $fstype eq 'zfs' ? $space->{zpool_avail} : $space->{mount_avail};
+    return if !defined $enclosing || $enclosing !~ m/\A\d+\z/;
+    return $space->{avail} * 100 >= $enclosing * 99;
+}
+
+=head2 $zpool = zpool_of($dataset)
+
+The zpool that the ZFS dataset C<$dataset> belongs to, which is its name up to
+the first slash.
+
+=cut
+
+sub zpool_of {
+    my ($dataset) = @_;
+    return ( split m{/}, $dataset )[0];
+}
+
+=head2 $text = pool_quota_advice($fstype, $name, \%space)
+
+How to put a limit under the pool C<$name> on a filesystem of type C<$fstype>,
+as C<stat -f> names it.  ZFS gets a dataset with a quota.  XFS and ext4 get a
+project quota on the directory that the pool already has.  Anything else gets a
+filesystem of its own.
+
+=cut
+
+sub pool_quota_advice {
+    my ( $fstype, $name,  $space )  = @_;
+    my ( $path,   $mount, $source ) = @{$space}{qw{path mount source}};
+
+    my $why = <<'WHY';
+Guests built here are limited by nothing but the storage under the pool, and
+by reserve_disk in hypervisors.conf.  reserve_disk is this tool asking itself
+for permission, and says nothing to anybody who drives virsh directly.
+WHY
+
+    # A project quota keeps the pool where it is.  Each other answer moves it,
+    # and then hypervisors.conf must name both halves.
+    my $move = <<"MOVE";
+Then name both halves in hypervisors.conf.  libvirt finds a pool by its name,
+and it ignores a pool_path beside the name of a pool that already exists:
+
+    pool_path = <the new directory>
     pool_name = $name
+MOVE
 
-This matters most for a hypervisor an unattended runner can build on.  See
-QUOTAS in Provisioner::Recipe::trogrunner.
-FIX
+    my $how;
+    if ( $fstype eq 'zfs' ) {
+        my $zpool = zpool_of($source);
+        $how = <<"ZFS" . "\n$move";
+Give the pool a dataset of its own, with a quota:
+
+    zfs create -o quota=500G $zpool/vm-disks/$name
+
+`zfs get mountpoint $zpool/vm-disks/$name` names the new directory.
+ZFS
+    }
+    elsif ( $fstype eq 'xfs' ) {
+        $how = <<"XFS";
+Put a project quota on the directory of the pool.  Pick a project ID that
+nothing on $mount uses, such as 42.
+
+XFS reads the prjquota option only when it mounts a filesystem.  A remount
+succeeds, and it leaves quotas off.  So add prjquota to the options of $mount
+in /etc/fstab, and unmount and mount it.  For the root filesystem, that means
+rootflags=prjquota on the kernel command line and a reboot.  Then:
+
+    xfs_quota -x -c 'project -s -p $path 42' $mount
+    xfs_quota -x -c 'limit -p bhard=500g 42' $mount
+XFS
+    }
+    elsif ( $fstype =~ m/\Aext/ ) {
+        $how = <<"EXT";
+Put a project quota on the directory of the pool.  Pick a project ID that
+nothing on $mount uses, such as 42.
+
+tune2fs adds the project and quota features only to a filesystem that is not
+mounted.  For the root filesystem, that means a rescue boot.  Then mount it
+with prjquota in its options in /etc/fstab.  If that mount fails with "No such
+process", the kernel has no quota_v2 module, which Ubuntu ships in
+linux-modules-extra-\$(uname -r).  Then:
+
+    tune2fs -O project,quota $source
+    chattr +P -p 42 $path
+    setquota -P 42 0 524288000 0 0 $mount
+EXT
+    }
+    else {
+        $how = <<"OTHER" . "\n$move";
+Give the pool a filesystem of its own, of a fixed size, such as a logical
+volume, and mount it where the new directory of the pool will be.
+OTHER
+    }
+
+    return "$why\n$how\nThis matters most on a hypervisor where an unattended runner can build.\nSee QUOTAS in Provisioner::Recipe::trogrunner.\n";
 }
 
 =head2 $result = $hv->note_log_destination()
