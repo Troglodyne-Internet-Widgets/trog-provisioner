@@ -196,4 +196,12 @@ SKIP: {
     like($status, qr/^\s*slapd\b/m, 'and the ufw target turned it into a rule') or diag $status;
 }
 
+# make prints each command into the setup log unless it starts with @, and the
+# seed step carries the admin password.  The seeded entries above show that the
+# password worked.
+my $log = do { local (@ARGV, $/) = '/var/log/[% domain %].setup.log'; <> } // '';
+ok(length $log, 'the setup log is there to read');
+ok(index($log, '[% admin_password %]') < 0, 'and it does not hold the admin password');
+ok(!-e 'ldap.admin_password', 'and the file that carried the password to ldapadd is gone');
+
 done_testing();

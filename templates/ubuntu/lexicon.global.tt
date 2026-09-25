@@ -8,5 +8,5 @@
     the build.  The guest test asks lexicon if it can reach the socket, and that
     is what matters. -%]
 [% FOR patch IN ['lexicon-pdns-af-unix', 'lexicon-arbitrary-record-types'] -%]
-cd / && { git apply --reverse --check /var/tmp/domainsetup_[% domain %]/[% patch %].patch >/dev/null 2>&1 && echo "[% patch %]: already applied"; } || git apply /var/tmp/domainsetup_[% domain %]/[% patch %].patch || echo "[% patch %]: WOULD NOT APPLY -- lexicon may be missing it; see templates/files/patches" >&2
+@cd / && { git apply --reverse --check /var/tmp/domainsetup_[% domain %]/[% patch %].patch >/dev/null 2>&1 && echo "[% patch %]: already applied"; } || git apply /var/tmp/domainsetup_[% domain %]/[% patch %].patch || echo "[% patch %]: WOULD NOT APPLY -- lexicon may be missing it; see templates/files/patches" >&2
 [% END -%]

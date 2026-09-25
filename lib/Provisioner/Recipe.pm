@@ -96,6 +96,15 @@ queued task stays POSIX: dash has no brace expansion, and in dash C<&E<gt>>
 starts a background job and then redirects rather than redirecting both
 streams.
 
+=item * Make prints each command before it runs it, and F<ubuntu.setup.sh.tt>
+keeps what make prints in F</var/log/E<lt>domainE<gt>.setup.log> on the guest.
+Start a command with C<@> when it carries a secret, or when its text names a
+failure, such as C<|| echo "could not ...">.  In the log, that text reads as a
+failure even on a run that worked.  F<t/recipes.t> fails on any printed command
+that carries a secret.  Keep a secret out of argv as well, because C<ps> shows
+argv to every user on the guest: write it to a file with C<printf>, which is a
+shell builtin.
+
 =back
 
 Fragments must be re-entrant.  A target's last line stamps it, so a target that

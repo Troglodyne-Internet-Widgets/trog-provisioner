@@ -21,11 +21,11 @@ echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/infl
 [%# Update each archive on its own before the general update.  Then an archive
     that refuses us fails here and names itself, not as apt noise and a bare
     error from the install. -%]
-DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/grafana.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
   || { echo "grafana: apt.grafana.com would not serve its repository, so there is no grafana to install" >&2; exit 1; }
-DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/influxdata.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
   || { echo "grafana: repos.influxdata.com would not serve its repository, so there is no telegraf to install" >&2; exit 1; }

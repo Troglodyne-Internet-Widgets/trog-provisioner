@@ -137,8 +137,8 @@ subtest 'the restore asks for a database whose name has a quote in it' => sub {
 };
 
 subtest 'a pinned major version' => sub {
-    like( recipe()->render_global( %BASE, version => 16 ), qr/^PG_VERSION='16';/m, 'is the one installed' );
-    unlike( recipe()->render_global(%BASE), qr/^PG_VERSION='/m, 'and without one the newest is looked up' );
+    like( recipe()->render_global( %BASE, version => 16 ), qr/^\@PG_VERSION='16';/m, 'is the one installed' );
+    unlike( recipe()->render_global(%BASE), qr/^\@?PG_VERSION='/m, 'and without one the newest is looked up' );
     like( exception { recipe()->validate( %BASE, version => 'latest' ) }, qr{/version}, 'and a version that is not a number is refused' );
 };
 

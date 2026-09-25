@@ -539,6 +539,21 @@ sub parse {
     return ( $group, $title, $field );
 }
 
+=head2 names_a_secret($field)
+
+Whether a configuration field called C<$field> holds a secret, by its name: a
+password, a secret, a token, a credential, a key, or a name that ends in
+C<_pw>.  A name that ends in C<_file> or C<_path> is a location, not a secret,
+as the C<key_file> of backup holds a filename such as F<backup.rsa>.
+
+=cut
+
+sub names_a_secret {
+    my ( $class, $field ) = @_;
+    return 0 if !defined $field || $field =~ m/_(?:file|path)\z/;
+    return $field =~ m/pass|secret|token|credential|(?:\A|_)(?:key|pw)\z/ ? 1 : 0;
+}
+
 =head1 SEE ALSO
 
 L<File::KeePass::KDBX>

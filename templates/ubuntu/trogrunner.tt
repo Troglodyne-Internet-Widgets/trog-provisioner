@@ -60,7 +60,7 @@ h="$$(getent passwd '[% user %]' | cut -d: -f6)"; if [ -z "$$h" ]; then echo 'tr
 # does not install it.  The data target changes the modes in this tree, and ssh
 # refuses a key wider than 0600, so this sets the mode again.
 install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/.ssh'
-test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2
+@test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chown '[% user %]:[% user %]' '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || echo 'trogrunner: no hypervisor key was placed; bin/provision is what puts it here' >&2
 test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519' || true
 [% script_dir %]/queue_postrun_task "test -f '[% install_dir %]/[% domain %]/.ssh/id_ed25519' && chmod 0600 '[% install_dir %]/[% domain %]/.ssh/id_ed25519'"
 

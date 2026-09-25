@@ -298,6 +298,81 @@ foreach my $recipe (@available) {
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
 
+# The value of every field under $node that names a secret.
+sub secret_values {
+    my ( $node, $field ) = @_;
+    return map { secret_values( $_,          $field ) } @$node       if ref $node eq 'ARRAY';
+    return map { secret_values( $node->{$_}, $_ ) } sort keys %$node if ref $node eq 'HASH';
+    return ( !ref $node && ( $node // q{} ) ne q{} && Trog::Secrets->names_a_secret($field) ) ? ($node) : ();
+}
+
+# The commands of a fragment, one to each element, with each continued line
+# joined to the line before it.
+sub fragment_commands {
+    my ($text) = @_;
+    my ( @commands, $open );
+    foreach my $line ( split m/\n/, $text ) {
+        if ( defined $open ) { $open .= "\n$line" }
+        else                 { $open = $line }
+        next if $line =~ m/\\\z/;
+        push( @commands, $open );
+        undef $open;
+    }
+    return @commands;
+}
+
+# make prints each command of the makefile before it runs it, unless the
+# command starts with @, and setup.sh keeps what it printed in the setup log of
+# the guest.  So a command that carries a secret must start with @.
+subtest 'no command that make prints carries a secret' => sub {
+
+    # The secrets that the minimum input leaves out, because the recipe works
+    # without them.
+    my %with_secrets = (
+        admincode       => { repos_from         => [ { api_url => 'https://git.test.test/api', token => 'SeCrEt-admincode-token', repos_for => ['someone'] } ] },
+        koan            => { messaging_provider => 'matrix', matrix_homeserver => 'https://matrix.test.test', matrix_user_id => '@bot:test.test', matrix_room_id => '!room:test.test', matrix_password => 'SeCrEt-koan-password', matrix_pickle_key => 'SeCrEt-koan-pickle' },
+        plexmediaserver => { claim_token        => 'claim-SeCrEt-plex' },
+    );
+
+    my $checked = 0;
+    foreach my $recipe (@available) {
+        my %input   = ( %{ $required_config{$recipe} // {} }, %{ $with_secrets{$recipe} // {} } );
+        my @secrets = secret_values( \%input );
+        next if !@secrets;
+
+        my $r = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my @printed;
+        my $err = exception {
+            push( @printed, fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
+            push( @printed, fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
+        };
+        is( $err, undef, "$recipe renders with its secrets" ) or next;
+        @printed = grep { !m/\A\s*@/ } @printed;
+
+        foreach my $secret (@secrets) {
+            my @carry = grep { index( $_, $secret ) >= 0 } @printed;
+            ok( !@carry, "$recipe prints no command that carries its $secret" ) or diag join( "\n---\n", @carry );
+            $checked++;
+        }
+    }
+    cmp_ok( $checked, '>=', 5, 'with a secret in each of the recipes that take one' );
+};
+
+# An @ quiets a command only at its start.  On a continued line, the shell gets
+# it as part of a word, and @test is a command that bash cannot find.
+subtest 'an @ starts a command, and never a line that continues one' => sub {
+    foreach my $recipe (@available) {
+        my $r     = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
+        my %input = %{ $required_config{$recipe} // {} };
+        my @commands;
+        push( @commands, fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
+        push( @commands, fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
+
+        my @misplaced = grep { m/\n\s*@/ } @commands;
+        ok( !@misplaced, "$recipe has no @ inside a command" ) or diag join( "\n---\n", @misplaced );
+    }
+};
+
 # The guest rsyncs its payload off whoever is holding it -- this machine -- so
 # every one of these has to name it.  When the host came out empty the recipe
 # still rendered, and still looked plausible -- 'someadmin@:/opt/data/...' -- and only

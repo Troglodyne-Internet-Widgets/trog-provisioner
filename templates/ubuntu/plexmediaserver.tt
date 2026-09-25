@@ -7,7 +7,7 @@ echo "deb [signed-by=/usr/share/keyrings/plex.gpg] https://repo.plex.tv/deb/ pub
 [%# Update from the Plex repository alone, before the general update.  If the
     repository refuses us, the failure then names it.  Inside the general update,
     the only sign is an "Error 100" from the install. -%]
-DEBIAN_FRONTEND="noninteractive" apt-get update -q \
+@DEBIAN_FRONTEND="noninteractive" apt-get update -q \
     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/plexmediaserver.list \
     -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 \
   || { echo "plexmediaserver: repo.plex.tv would not serve its repository, so there is nothing to install from" >&2; exit 1; }
@@ -41,9 +41,11 @@ chown -R plex:plex /var/lib/plexmediaserver
 chmod -R 0750 /var/lib/plexmediaserver
 [% IF claim_token %]
 # Write the claim token that links the server the first time.  Plex uses it on first start.
-grep -q '^PLEX_CLAIM=' /etc/default/plexmediaserver \
-    && sed -i 's|^PLEX_CLAIM=.*|PLEX_CLAIM=[% claim_token %]|' /etc/default/plexmediaserver \
-    || echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
+[%# sed takes out the old line, and echo adds the new one.  echo is a shell
+    builtin, so the token never reaches argv, where ps shows it to every user.
+    The @ keeps make from printing the token into the setup log. -%]
+test ! -f /etc/default/plexmediaserver || sed -i '/^PLEX_CLAIM=/d' /etc/default/plexmediaserver
+@echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
 [% END %]
 [% FOR dir IN media_dirs %]
 # Set up media directory [% dir %]

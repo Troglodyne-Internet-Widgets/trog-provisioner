@@ -1434,14 +1434,7 @@ sub _plaintext_in {
     return ()      if $node eq Provisioner::Cookbook->PLACEHOLDER;
 
     my ($field) = $path =~ m/([^.\[\]]+)\z/;
-    return () unless defined $field;
-
-    # _file and _path name a location, not a secret: the key_file of backup
-    # holds a filename such as "backup.rsa".
-    return ()      if $field =~ m/_(?:file|path)\z/;
-    return ($path) if $field =~ m/pass|secret|token|credential|(?:\A|_)key\z/;
-
-    return ();
+    return Trog::Secrets->names_a_secret($field) ? ($path) : ();
 }
 
 sub _readable {

@@ -56,7 +56,9 @@ fi
 # device_id breaks Megolm with no error.  It writes the access token and the
 # device to instance/matrix/credentials.env.  The systemd units load that file
 # with a second EnvironmentFile=.  A later provision skips this while the file exists.
-if [ ! -f '[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env' ]; then \
+[%# The @ keeps make from printing the password and the pickle key into the
+    setup log.  ps does not show the environment of another user. -%]
+@if [ ! -f '[% install_dir %]/[% domain %]/koan/instance/matrix/credentials.env' ]; then \
     install -d -o '[% user %]' -g '[% user %]' -m 0700 '[% install_dir %]/[% domain %]/koan/instance/matrix'; \
     KOAN_ROOT='[% install_dir %]/[% domain %]/koan' \
     KOAN_MATRIX_HOMESERVER='[% matrix_homeserver %]' \
