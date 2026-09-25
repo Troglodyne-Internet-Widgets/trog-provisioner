@@ -13,10 +13,9 @@ cp [% script_dir %]/repos_for /home/[% admin_user %]/bin/repos_for
 [%# The token goes on stdin, because ps shows argv to every user on the guest.
     install -m 0600 makes the file before the token goes in, so the token is
     never world-readable.  The root shell opens the redirect before sudo changes
-    to the admin, so only root needs to read the file.  The @ keeps make from
-    printing the token into the setup log. -%]
+    to the admin, so only root needs to read the file. -%]
 install -m 0600 /dev/null [% install_dir %]/[% domain %]/.repos_for.token
-@printf '%s' '[% repo.token %]' > [% install_dir %]/[% domain %]/.repos_for.token
+printf '%s' '[% repo.token %]' > [% install_dir %]/[% domain %]/.repos_for.token
 [% FOR entity in repo.repos_for %]
 cd [% install_dir %]/[% domain %]/[% basedir %] && sudo -u [% admin_user %] /home/[% admin_user %]/bin/repos_for [% repo.api_url %] [% entity %] < [% install_dir %]/[% domain %]/.repos_for.token
 [% END -%]

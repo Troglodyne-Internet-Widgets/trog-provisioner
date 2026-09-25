@@ -54,10 +54,9 @@ install -m 0750 -o root -g root ldap-reload.sh /usr/local/sbin/ldap-reload.sh
 
     -y and not -w, because ps shows argv to every user on the guest.  printf is
     a shell builtin, so the password never reaches argv.  The @ keeps make from
-    printing the password, and a failure message that did not happen, into the
-    setup log. -%]
+    printing a failure message that did not happen into the setup log. -%]
 install -m 0600 /dev/null ldap.admin_password
-@printf '%s' '[% admin_password %]' > ldap.admin_password
+printf '%s' '[% admin_password %]' > ldap.admin_password
 @ldapadd -c -x -D "cn=admin,[% base_dn %]" -y ldap.admin_password -f seed.ldif || { ldapsearch -x -b '[% base_dn %]' -s base >/dev/null 2>&1 || { echo "ldap: could not seed [% base_dn %]; the directory is empty" >&2; exit 1; }; }
 rm -f seed.ldif ldap.admin_password
 

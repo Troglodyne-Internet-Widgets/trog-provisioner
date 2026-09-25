@@ -42,10 +42,9 @@ chmod -R 0750 /var/lib/plexmediaserver
 [% IF claim_token %]
 # Write the claim token that links the server the first time.  Plex uses it on first start.
 [%# sed takes out the old line, and echo adds the new one.  echo is a shell
-    builtin, so the token never reaches argv, where ps shows it to every user.
-    The @ keeps make from printing the token into the setup log. -%]
+    builtin, so the token never reaches argv, where ps shows it to every user. -%]
 test ! -f /etc/default/plexmediaserver || sed -i '/^PLEX_CLAIM=/d' /etc/default/plexmediaserver
-@echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
+echo 'PLEX_CLAIM=[% claim_token %]' >> /etc/default/plexmediaserver
 [% END %]
 [% FOR dir IN media_dirs %]
 # Set up media directory [% dir %]

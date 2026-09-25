@@ -41,21 +41,21 @@ Several recipes write into `[% install_dir %]/[% domain %]`, and the last `chown
 
 make prints each command before it runs it.  `ubuntu.setup.sh.tt` keeps that output in `/var/log/<domain>.setup.log` on the guest, and that log stays after the build.  The provisioning skill also copies it back to this machine.  So a secret on a command line is a secret in a log that more people and machines can read.
 
-* If a command carries a secret, start it with `@`.  make does not print a command that starts with `@`.
-* Put the `@` on the first line of the command.  On a line that continues a command, bash reads the `@` as part of a word, and the command fails.  A template directive such as `[% END -%]` is not a line of the command, so look above it.
-* Keep the secret out of argv too, because `ps` shows argv to every user on the guest.  Write the secret with `printf` or `echo`, which are shell builtins, and give the program a file or stdin.
+* `bin/new_config` keeps secrets out of that log for you.  It knows each value that a `secret:` reference resolved to.  In every fragment it renders, `Provisioner::Recipe->quiet_secrets` starts each command that holds one of those values with `@`, and make does not print a command that starts with `@`.
+* So give a recipe its secret through a `secret:` reference in the configuration.  A value that is not in the store is not a secret to `bin/new_config`, and it gets no `@`.
+* Keep the secret out of argv as well, because `ps` shows argv to every user on the guest.  Write the secret with `printf` or `echo`, which are shell builtins, and give the program a file or stdin.
 * Make the file with `install -m 0600 /dev/null <file>` before the secret goes into it, so that the file is never readable by other users.  After the command, remove the file.
 * A secret that a service reads each time it starts goes in a file from `template_files` or `guest_secrets`, not in a command.  `templates/ubuntu/github.tt` writes its token that way.
 
-The LDAP seed is the example:
+The LDAP seed is the example.  `bin/new_config` adds the `@` to the `printf`.  The `@` on `ldapadd` is there for the failure text, as the next paragraph says.
 
 ```
 install -m 0600 /dev/null ldap.admin_password
-@printf '%s' '[% admin_password %]' > ldap.admin_password
+printf '%s' '[% admin_password %]' > ldap.admin_password
 @ldapadd -c -x -D "cn=admin,[% base_dn %]" -y ldap.admin_password -f seed.ldif || ...
 rm -f seed.ldif ldap.admin_password
 ```
 
-Use `@` in the same way on a command whose text names a failure, such as `|| echo "could not ..."`.  When make prints that command, the log shows the failure text on a run that worked.  A real failure still shows its message, because the `echo` runs and writes to stderr.
+Start a command with `@` yourself if its text names a failure, such as `|| echo "could not ..."`.  When make prints that command, the log shows the failure text on a run that worked.  A real failure still shows its message, because the `echo` runs and writes to stderr.  Put the `@` on the first line of the command.  On a line that continues a command, bash reads the `@` as part of a word, and the command fails.  A template directive such as `[% END -%]` is not a line of the command, so look above it.
 
-`t/recipes.t` enforces two of these rules.  It fails in two cases: a printed command holds a value from the secret store, or an `@` is inside a command.  The test knows a secret in the same way as `bin/new_config`, by its `secret:` reference.  If a recipe takes a new secret, add its reference to `%WITH_SECRETS` in the test, and add its value to `%STORE`.
+`t/recipes.t` checks both.  It renders each recipe that takes a secret with a `secret:` reference, resolves the reference through `Trog::Secrets` and a fake store, and passes the fragment through `quiet_secrets` as `bin/new_config` does.  It fails if a printed command still holds a value from the store, or if an `@` is inside a command.  If a recipe takes a new secret, add its reference to `%WITH_SECRETS` in the test, and add its value to `%STORE`.

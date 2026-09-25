@@ -299,21 +299,6 @@ foreach my $recipe (@available) {
     renders_ok( $recipe, $input, "$recipe with minimum viable input" );
 }
 
-# The commands of a fragment, one to each element, with each continued line
-# joined to the line before it.
-sub fragment_commands {
-    my ($text) = @_;
-    my ( @commands, $open );
-    foreach my $line ( split m/\n/, $text ) {
-        if ( defined $open ) { $open .= "\n$line" }
-        else                 { $open = $line }
-        next if $line =~ m/\\\z/;
-        push( @commands, $open );
-        undef $open;
-    }
-    return @commands;
-}
-
 # What the secret store holds for this test, by reference.  A secret is a value
 # that the store holds, and nothing else is worth keeping out of the log.
 my %STORE = (
@@ -357,9 +342,9 @@ my %WITH_SECRETS = (
 
 # make prints each command of the makefile before it runs it, unless the
 # command starts with @, and setup.sh keeps what it printed in the setup log of
-# the guest.  So a command that carries a secret must start with @.  The
-# references resolve the way bin/new_config resolves them, through
-# Trog::Secrets, with %STORE in place of the database.
+# the guest.  So a command that carries a secret must start with @, and
+# quiet_secrets puts it there.  The references resolve the way bin/new_config
+# resolves them, through Trog::Secrets, with %STORE in place of the database.
 subtest 'no command that make prints carries a secret' => sub {
     my %resolved;
     foreach my $recipe ( sort keys %WITH_SECRETS ) {
@@ -368,11 +353,13 @@ subtest 'no command that make prints carries a secret' => sub {
         my %values = map { $_ => $STORE{ $needed{$_} } // die "The test store has no $needed{$_}\n" } keys %needed;
         Trog::Secrets->apply( \%input, %values );
 
+        # Through quiet_secrets, as bin/new_config renders every fragment.
         my $r = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
         my @printed;
         my $err = exception {
-            push( @printed, fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
-            push( @printed, fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
+            foreach my $fragment ( ( fragment_for($recipe) ? $r->render( %G, %input ) : () ), ( fragment_for( $recipe, 'global.tt' ) ? $r->render_global( %G, %input ) : () ) ) {
+                push( @printed, Provisioner::Recipe->fragment_commands( Provisioner::Recipe->quiet_secrets( $fragment, values %values ) ) );
+            }
         };
         is( $err, undef, "$recipe renders with its secrets" ) or next;
         @printed = grep { !m/\A\s*@/ } @printed;
@@ -393,8 +380,8 @@ subtest 'an @ starts a command, and never a line that continues one' => sub {
         my $r     = Provisioner::Cookbook->load( $recipe, distro => $DISTRO )->new(%PROV);
         my %input = %{ $required_config{$recipe} // {} };
         my @commands;
-        push( @commands, fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
-        push( @commands, fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
+        push( @commands, Provisioner::Recipe->fragment_commands( $r->render( %G, %input ) ) )        if fragment_for($recipe);
+        push( @commands, Provisioner::Recipe->fragment_commands( $r->render_global( %G, %input ) ) ) if fragment_for( $recipe, 'global.tt' );
 
         my @misplaced = grep { m/\n\s*@/ } @commands;
         ok( !@misplaced, "$recipe has no @ inside a command" ) or diag join( "\n---\n", @misplaced );
