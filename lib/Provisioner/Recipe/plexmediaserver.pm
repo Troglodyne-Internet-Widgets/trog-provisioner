@@ -147,13 +147,14 @@ sub tests {
 
 =head2 @hosts = $recipe->fetch_hosts()
 
-C<downloads.plex.tv>, which serves the package signing key, and C<repo.plex.tv>,
-the apt repository that the package comes from.
+C<repo.plex.tv>, the apt repository that the package comes from.  The signing
+key comes from C<downloads.plex.tv>, which F<bin/new_config> fetches, and the
+guest does not.
 
 =cut
 
 sub fetch_hosts {
-    return qw{downloads.plex.tv repo.plex.tv};
+    return qw{repo.plex.tv};
 }
 
 =head2 @classes = $recipe->cache_classes()

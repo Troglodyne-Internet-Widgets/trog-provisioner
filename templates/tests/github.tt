@@ -9,10 +9,10 @@ use Test::More;
 # command is a shell builtin, so it needs a shell.
 ok(qx{sh -c 'command -v gh'}, 'gh is installed');
 
-my $ghlist = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/github-cli.list'; <> } // '';
-like($ghlist, qr{https://cli\.github\.com/packages\s+stable\s+main}, 'the gh repository is cli.github.com')
+my $ghlist = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/github-cli.sources'; <> } // '';
+like($ghlist, qr{^URIs:[ ]https://cli\.github\.com/packages$}mx, 'the gh repository is cli.github.com')
     or diag $ghlist;
-ok(-s '/usr/share/keyrings/githubcli-archive-keyring.gpg', 'the gh signing key is installed');
+ok(-s '/etc/apt/keyrings/github-cli.gpg', 'the gh signing key is installed');
 
 my $ghpolicy = qx{apt-cache policy gh 2>/dev/null};
 like($ghpolicy, qr{cli\.github\.com}, 'and gh came from that archive, not the distro')

@@ -17,6 +17,13 @@ package_update: true
 package_upgrade: true
 packages:
 [% packages | yaml %]
+[% IF bootcmd.size() %]
+
+[%# Only with a fetch cache.  See _fetch_cache_bootcmd in
+    Provisioner::Recipe::ubuntu. -%]
+bootcmd:
+[% bootcmd | yaml %]
+[% END -%]
 
 [%# A configured mirror comes first and the archive after it, so a guest still
     builds when the mirror is behind, incomplete or down.  The mirrorlist below
@@ -61,12 +68,21 @@ apt:
             Timeout "600";
         }
     }
+[% IF debconf_selections.size() -%]
+  debconf_selections:
+    provisioner: |
+[% FOR line IN debconf_selections -%]
+      [% line | mark_raw %]
+[% END -%]
+[% END -%]
 
 users:
 [% users | yaml %]
 
-[%# Everything here is deferred except the mirrorlist.  apt needs it before it
-    installs the packages above.  It is only written when a mirror is configured. -%]
+[%# Everything here is deferred except the mirrorlist and the apt_files.  apt
+    needs them before it installs the packages above.  The mirrorlist is only
+    written when a mirror is configured.  Provisioner::AptSources makes the
+    apt_files. -%]
 write_files:
   - path: /root/.ssh/id_rsa
     owner: root:root
@@ -96,6 +112,17 @@ write_files:
       [% mirror_uri | mark_raw %]	priority:1
       http://archive.ubuntu.com/ubuntu	priority:2
       http://security.ubuntu.com/ubuntu	priority:3
+[% END -%]
+[% FOR file IN apt_files -%]
+  - path: [% file.path | yaml %]
+    owner: root:root
+    permissions: [% file.permissions | yaml %]
+    defer: false
+[% IF file.encoding -%]
+    encoding: [% file.encoding | yaml %]
+[% END -%]
+    content: |
+[% file.content | indent %]
 [% END -%]
 
 [%# Last, and in this order.  Root mail must have a destination before the setup

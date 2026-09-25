@@ -49,6 +49,10 @@ my $hv_mock = Test::MockModule->new('Trog::HV::Libvirt');
 $hv_mock->redefine( virbr_ip  => sub { '192.168.122.1' } );
 $hv_mock->redefine( sshd_port => sub { 22 } );
 
+# pdns names a vendor archive, whose key and suite the generator asks for.
+my $apt_mock = Test::MockModule->new('Provisioner::AptSources');
+$apt_mock->redefine( fetch => sub { { success => 1, status => 200, content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n-----END PGP PUBLIC KEY BLOCK-----\n" } } );
+
 require_ok("$FindBin::Bin/../bin/new_config") or die "could not require SUT: $@";
 
 # Reserved, so the guest holds its own zone; public, so somebody else does.

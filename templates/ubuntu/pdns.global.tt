@@ -1,12 +1,5 @@
-# Add the PowerDNS repository.  Key servers fail often, so each call retries.
-retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys CBC8B383
-retry -t 10 -d 10 apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys FD380FBB
-retry -t 10 -d 10 apt-key adv --refresh-keys --keyserver hkp://keyserver.ubuntu.com:80
-# A release train, not auth-master, which is the development branch.  See
-# repo_branch in Provisioner::Recipe::pdns.
-apt-add-repository http://repo.powerdns.com/ubuntu -p [% repo_branch %]
-apt-get update
-apt-get install -y pdns-server
+[%# cloud-init installs pdns-server at first boot, from the release train that
+    Provisioner::Recipe::Ubuntu::pdns names. -%]
 # Run on port 2500, because the recursor uses port 53
 mv pdns-global.conf /etc/powerdns/pdns.d/00-global.conf
 [%# forward-zones-file is how the recursor takes a list of zones from many

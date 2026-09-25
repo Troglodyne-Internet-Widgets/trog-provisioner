@@ -18,12 +18,12 @@ like($xml, qr/customCertificatePath="[^"]+"/, 'the certificate path was written'
 like($xml, qr/PlexOnlineUsername="\Q[% plex_login_name %]\E"/, 'and the account name');
 
 # The repository that Plex came from.  Plex retired downloads.plex.tv/repos/deb.
-my $list = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/plexmediaserver.list'; <> } // '';
-like($list, qr{https://repo\.plex\.tv/deb/?\s+public\s+main}, 'the repository is repo.plex.tv')
+my $list = do { local (@ARGV, $/) = '/etc/apt/sources.list.d/plexmediaserver.sources'; <> } // '';
+like($list, qr{^URIs:[ ]https://repo\.plex\.tv/deb/?$}mx, 'the repository is repo.plex.tv')
     or diag $list;
 unlike($list, qr{downloads\.plex\.tv/repos}, 'and not the retired one') or diag $list;
 
-ok(-s '/usr/share/keyrings/plex.gpg', 'the signing key is installed');
+ok(-s '/etc/apt/keyrings/plexmediaserver.asc', 'the signing key is installed');
 
 # Installed from that repository, not only present.
 my $policy = `apt-cache policy plexmediaserver 2>/dev/null`;

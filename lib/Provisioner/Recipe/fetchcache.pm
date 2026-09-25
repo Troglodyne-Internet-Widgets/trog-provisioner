@@ -44,7 +44,9 @@ fetches from the real hosts for a guest, and it keeps what it fetched.
 A guest reaches the cache by those host names.  While a guest provisions, its
 F</etc/hosts> points each host in the C<fetch_hosts> of its recipes at the cache.
 Its trust store also holds the authority that signs the certificate of the cache.
-Both come out again when the deferred work of the guest is done.
+Both come out again when the deferred work of the guest is done.  cloud-init
+sets both at first boot, before it installs the packages, so a package from a
+vendor archive comes through the cache as well.  The makefile sets them again.
 
 Thus nothing that downloads has to know about the cache.  A URL in a template,
 cpanm, git and pip all fetch C<https://github.com/...> as written, and the cache

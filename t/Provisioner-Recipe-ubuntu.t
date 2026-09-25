@@ -552,6 +552,49 @@ subtest 'a mirror whose indices are signed can be verified' => sub {
     unlike( loaded( $dir, 'user-data' )->{apt}{conf}, qr/AllowInsecureRepositories/, 'so the allowance can be turned off' );
 };
 
+# cloud-init writes the archives before it installs, and answers the questions
+# the packages ask.  A file that is deferred, or an answer that arrives after
+# the install, is a package that does not install or a prompt that nobody sees.
+subtest 'the vendor archives and their answers are there before the packages' => sub {
+    my @apt_files = (
+        { path => '/etc/apt/keyrings/vendor.asc',           permissions => '0644', content => "-----BEGIN PGP PUBLIC KEY BLOCK-----\nbogus\n" },
+        { path => '/etc/apt/keyrings/binary.gpg',           permissions => '0644', content => "mQ==\n", encoding => 'b64' },
+        { path => '/etc/apt/sources.list.d/vendor.sources', permissions => '0644', content => "Types: deb\nURIs: https://apt.vendor.test\n" },
+    );
+    my @answers = ( 'vendor-pkg vendor/name string it: is quoted', 'vendor-pkg vendor/stats boolean false' );
+
+    my ( $dir, undef ) = generated( apt_files => \@apt_files, debconf_selections => \@answers );
+    my $user_data = loaded( $dir, 'user-data' );
+    my %written   = map { $_->{path} => $_ } @{ $user_data->{write_files} };
+
+    foreach my $file (@apt_files) {
+        my $got = $written{ $file->{path} } // {};
+        is( $got->{content}, $file->{content}, "$file->{path} is written as given" );
+        ok( !$got->{defer}, 'and before the install, not after it' );
+    }
+    is( $written{'/etc/apt/keyrings/binary.gpg'}{encoding}, 'b64', 'a binary key says it is base64, so cloud-init decodes it' );
+    ok( !exists $written{'/etc/apt/keyrings/vendor.asc'}{encoding}, 'and a text one says nothing' );
+
+    is( $user_data->{apt}{debconf_selections}{provisioner}, join( q{}, map { "$_\n" } @answers ), 'the answers go to apt, one per line, colon and all' );
+    ok( !exists $user_data->{bootcmd}, 'and with no cache, nothing runs at boot' );
+};
+
+subtest 'first boot installs through the fetch cache' => sub {
+    my $script = "#!/bin/bash\necho 'the script'\n";
+    my $cert   = "-----BEGIN CERTIFICATE-----\nbogus\n-----END CERTIFICATE-----";
+    my ( $dir, undef ) = generated( fetch_cache => { address => '192.0.2.50', authority => $cert, hosts => [qw{apt.one.test apt.two.test}], script => $script } );
+    my $user_data = loaded( $dir, 'user-data' );
+
+    is( scalar @{ $user_data->{bootcmd} // [] }, 1, 'one command at boot, which runs before the packages install' );
+    my $cmd = $user_data->{bootcmd}[0] // q{};
+
+    my @lines = split m/\n/, $cmd;
+    is( $lines[0], "if [ ! -e /etc/provisioner/state/$DOMAIN/state ]; then", 'only until the makefile of the domain has begun, so a reboot leaves the hosts alone' );
+    like( $cmd, qr{<<'TROG_FETCH_VIA_CACHE'\n\Q$script\ETROG_FETCH_VIA_CACHE\n}, 'the script, whole, in a heredoc that the shell does not expand' );
+    like( $cmd, qr{<<'TROG_FETCHCACHE_CA'\n\Q$cert\E\nTROG_FETCHCACHE_CA\n},     'the authority, with the newline that a heredoc needs' );
+    is( $lines[-2], 'bash /run/trog-fetch_via_cache on 192.0.2.50 /run/trog-fetchcache-ca.crt apt.one.test apt.two.test', 'and it runs, for every host' );
+};
+
 Test::NoWarnings::had_no_warnings();
 
 done_testing;

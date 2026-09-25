@@ -40,9 +40,8 @@ of the three that comes from the distribution.
 
 No Ubuntu component has C<telegraf> or C<grafana>, and C<apt-cache policy>
 reports no candidate for either.  So each comes from the archive of its vendor,
-added the way C<matrix>, C<plexmediaserver> and C<admincode> add theirs.  Only
-C<influxdb> can be a C<deps> entry.  Cloud-init installs C<deps> at first boot,
-before this recipe configures an archive.
+which L<Provisioner::Recipe::Ubuntu::grafana> names.  cloud-init adds both
+archives and installs all three packages at first boot.
 
 =head2 It answers on loopback rather than on a socket
 

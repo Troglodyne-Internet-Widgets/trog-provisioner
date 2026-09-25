@@ -12,21 +12,51 @@ use parent qw{Provisioner::Recipe::grafana};
 
 =head1 NAME
 
-Provisioner::Recipe::Ubuntu::grafana - Ubuntu's C<deps> for L<Provisioner::Recipe::grafana>.
+Provisioner::Recipe::Ubuntu::grafana - Ubuntu's C<deps> and archives for L<Provisioner::Recipe::grafana>.
 
 =head1 DESCRIPTION
 
-This list holds one of the three services, C<influxdb>, and C<curl>.  No Ubuntu
-component has C<grafana> or C<telegraf>.  Cloud-init installs C<deps> at first
-boot, before the fragment adds either vendor archive, so the fragment installs
-both.  A request for them here installs nothing and says nothing about it.
-L<Provisioner::Recipe::grafana/Two archives, because neither package exists here>
-describes that failure.
+C<influxdb> comes from Ubuntu, and C<grafana> and C<telegraf> from the archives
+of their vendors, which C<apt_sources> below names.
+L<Provisioner::Recipe::grafana/InfluxDB 1.x, and why that is not an accident>
+says why C<influxdb> does not come from its vendor.
 
 =cut
 
 sub deps {
-    return qw{influxdb curl};
+    return qw{influxdb grafana telegraf curl};
+}
+
+=head2 @sources = $recipe->apt_sources()
+
+The archives of Grafana and InfluxData.  InfluxData also publishes
+C<influxdb>, at a version above the one in Ubuntu.  So its archive pins that
+package below every other, and apt keeps the one from Ubuntu.
+
+=cut
+
+sub apt_sources {
+    return (
+        {
+            name       => 'grafana',
+            uri        => 'https://apt.grafana.com',
+            suites     => ['stable'],
+            components => ['main'],
+            key        => 'https://apt.grafana.com/gpg.key',
+        },
+        {
+            name => 'influxdata',
+            uri  => 'https://repos.influxdata.com/debian',
+
+            # influxdata-archive.key, not influxdata-archive_compat.key.  Much of
+            # the published guidance still names the compat key, which expired
+            # in January 2026.
+            key        => 'https://repos.influxdata.com/influxdata-archive.key',
+            suites     => ['stable'],
+            components => ['main'],
+            pin        => { packages => 'influxdb', priority => -1 },
+        },
+    );
 }
 
 1;

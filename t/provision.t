@@ -1042,4 +1042,20 @@ subtest 'the generator is handed the fleet that --hvconf names' => sub {
     is( $given{'--domaindir'},  $dir,  'and so is a --domaindir from the command line' );
 };
 
+# A domain added to a guest that is up gets its packages from these reruns, and
+# cloud-init runs a module as it is told, whatever it needs.  The archives, the
+# cache and the answers must be there before the package install asks for them.
+subtest 'refresh_cloud_init gives the package install what first boot had' => sub {
+    my @ran;
+    my $guest = Test::MockModule->new('Trog::Guest');
+    $guest->redefine( put_file    => sub { 1 } );
+    $guest->redefine( capture_cmd => sub { push( @ran, $_[1] ); q{} } );
+
+    quietly( sub { Trog::Bin::Provisioner::refresh_cloud_init( bless( {}, 'Trog::Guest' ), '/bogus/domains', 'layered.test' ) } );
+    my @modules = map { m/--name[ ](\S+)/ ? $1 : () } @ran;
+
+    is_deeply( \@modules, [qw{cc_bootcmd cc_write_files cc_apt_configure cc_package_update_upgrade_install cc_users_groups}], 'the cache, the archives and the answers, then the packages' );
+    is( scalar( grep { m/-f[ ]cloud-config[.]txt/ } @ran ), scalar @ran, 'each from the user-data of the domain' );
+};
+
 done_testing;

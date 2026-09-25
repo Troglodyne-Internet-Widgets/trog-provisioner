@@ -38,6 +38,7 @@ use Trog::Local();
 use File::Copy qw{copy};
 use File::Find();
 
+use Provisioner::AptSources();
 use Provisioner::IPPool;
 use Provisioner::Utils;
 use Provisioner::Cookbook();
@@ -757,7 +758,7 @@ sub handle_domain {
 
     $global_config->{script_dir} = $root_scripts;
 
-    my ( @pkgs, @generated );
+    my ( @pkgs, @generated, @apt_sources, @debconf );
 
     # Always, because the guest can be a system that exists already.
     push( @pkgs, $distro->deps() );
@@ -877,8 +878,10 @@ sub handle_domain {
             push( @modules_ordered,          "/etc/provisioner/state/$fqdn/$module" );
             push( @{ $targets_of{$module} }, "/etc/provisioner/state/$fqdn/$module" );
         }
-        push( @pkgs,      ( $builder->deps(%$pconf) ) );
-        push( @conflicts, ( $builder->dep_conflicts(%$pconf) ) );
+        push( @pkgs,        ( $builder->deps(%$pconf) ) );
+        push( @conflicts,   ( $builder->dep_conflicts(%$pconf) ) );
+        push( @apt_sources, ( $builder->apt_sources(%$pconf) ) );
+        push( @debconf,     ( $builder->debconf_selections(%$pconf) ) );
 
         my %t_vars = $builder->makefile_vars();
         %mf_vars = ( %mf_vars, %t_vars ) if %t_vars;
@@ -1054,6 +1057,27 @@ sub handle_domain {
         chmod 0600, "$cfg_dir/key.rsa";
     }
 
+    # From the checkout, not the working directory, so that this program runs
+    # from any directory.
+    my $checkout = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/..' );
+
+    # The vendor archives, which cloud-init writes before it installs @pkgs.
+    # See Provisioner::Recipe/apt_sources.
+    my @apt_files = Provisioner::AptSources->files( Provisioner::AptSources->merge(@apt_sources) );
+
+    # First boot installs through the cache as the makefile does, so the
+    # packages of a vendor archive come from the cache too.
+    my %fetch_cache = @fetch_hosts
+      ? (
+        fetch_cache => {
+            address   => $global_config->{cache_ip},
+            authority => File::Slurper::read_text("$cfg_dir/fetchcache-ca.crt"),
+            hosts     => \@fetch_hosts,
+            script    => File::Slurper::read_text("$checkout/scripts/fetch_via_cache"),
+        }
+      )
+      : ();
+
     # The files that the guest first boots from: network configuration,
     # cloud-init, setup.sh and the destination of its logs.  After the loop,
     # because the user-data lists @pkgs, which is final only now.  And outside
@@ -1066,7 +1090,10 @@ sub handle_domain {
         $cfg_dir,
         $builders{$distro_name}->takes(%$global_config),
         %{ $rconf->{$domain}{$distro_name} // {} },
-        packages      => \@pkgs,
+        packages           => \@pkgs,
+        apt_files          => \@apt_files,
+        debconf_selections => [ uniq @debconf ],
+        %fetch_cache,
         ips           => [ grep { defined } $static_ip ],
         gateway       => $gateway,
         contact_email => $admin_email,
@@ -1115,10 +1142,6 @@ sub handle_domain {
     $pconf .= hv_lines( $global_config, \%written );
 
     File::Slurper::Temp::write_binary( "$cfg_dir/provision.conf", $pconf );
-
-    # From the checkout, not the working directory, so that this program runs
-    # from any directory.
-    my $checkout = Cwd::abs_path( File::Basename::dirname(__FILE__) . '/..' );
 
     # For the self-signed certificate.
     print "Copying openssl.conf to $cfg_dir/openssl.conf\n";

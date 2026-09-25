@@ -133,6 +133,11 @@ nothing at all.  `t/recipes.t` asserts every recipe that needs packages has them
 for every distribution there is, which is what turns that into a test failure
 rather than a service that will not start twenty minutes into a build.
 
+A vendor archive is a fact about a distribution too.  Name it in
+`apt_sources()` in the same subclass, and put its packages in `deps()`.
+cloud-init adds the archive and installs from it at first boot.  A fragment
+that adds an archive itself fails `t/recipes.t`.
+
 ## The rest of writing a recipe
 
 Not repeated here, because it is written down:

@@ -260,11 +260,25 @@ sub args {
             # bin/new_config computes these for the first boot of the guest, and
             # this recipe writes them into the seed.  They are readOnly because
             # no operator sets them.
-            packages      => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Every package the domain recipes asked for, installed before the makefile runs.' },
-            ips           => { type => 'array', items => { type => 'string' }, readOnly => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
-            contact_email => { type => 'string', nullable => 1, readOnly => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
-            payload_dir   => { type => 'string',  readOnly => 1, description => 'Where on this machine the payload the guest fetches was built.' },
-            dryrun        => { type => 'boolean', readOnly => 1, description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
+            packages           => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Every package the domain recipes asked for, installed before the makefile runs.' },
+            apt_files          => { type => 'array', items => { type => 'object' }, readOnly => 1, description => 'The keys, sources and pins of the vendor archives that the domain recipes name, out of Provisioner::AptSources, written before the packages install.' },
+            debconf_selections => { type => 'array', items => { type => 'string' }, readOnly => 1, description => 'Answers for the questions the packages ask as they install, set before they do.' },
+            fetch_cache        => {
+                type        => 'object',
+                readOnly    => 1,
+                description => 'The fetch cache that first boot installs through: its address, the certificate of its authority, the hosts to point at it, and scripts/fetch_via_cache.  Absent when there is no cache.',
+                required    => [qw{address authority hosts script}],
+                properties  => {
+                    address   => { type => 'string' },
+                    authority => { type => 'string' },
+                    hosts     => { type => 'array', items => { type => 'string' } },
+                    script    => { type => 'string' },
+                },
+            },
+            ips           => { type => 'array',   items    => { type => 'string' }, readOnly    => 1, description => "The guest's addresses, out of the ip pool, written into its network configuration." },
+            contact_email => { type => 'string',  nullable => 1,                    readOnly    => 1, description => "Who to mail about this guest, out of the installation admin_email, or nothing.  The seed refuses to be written without one rather than leaving root's mail undeliverable." },
+            payload_dir   => { type => 'string',  readOnly => 1,                    description => 'Where on this machine the payload the guest fetches was built.' },
+            dryrun        => { type => 'boolean', readOnly => 1,                    description => 'Whether this run is only writing configuration, so the seed names nothing it would have to create.' },
 
             # The network configuration of the guest matches its interfaces by MAC,
             # because the kernel can choose any device name.  The hypervisor

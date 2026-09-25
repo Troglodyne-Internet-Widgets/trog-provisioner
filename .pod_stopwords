@@ -501,3 +501,6 @@ openstack
 openstacksdk
 scrollback
 zpool
+debconf
+keyring
+InfluxData

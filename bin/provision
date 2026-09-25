@@ -843,8 +843,12 @@ sub reprovision_guest (%args) {
 =head2 refresh_cloud_init($guest, $domain_dir, $domain)
 
 Ships the F<user-data> of $domain to the guest, and runs the cloud-init modules
-C<cc_package_update_upgrade_install> and C<cc_users_groups> again.  It returns
-1, and dies if it cannot ship the file.
+C<cc_bootcmd>, C<cc_write_files>, C<cc_apt_configure>,
+C<cc_package_update_upgrade_install> and C<cc_users_groups> again, in that
+order.  It returns 1, and dies if it cannot ship the file.
+
+The three before the package install give it what first boot had: the fetch
+cache, the vendor archives with their keys, and the debconf answers.
 
 cloud-init runs once and remembers that it ran.  A module that you name runs
 again anyway.  That applies the new configuration to a guest that booted from
@@ -859,7 +863,7 @@ sub refresh_cloud_init {
     my $init = "$domain_dir/$domain/user-data";
     $guest->put_file( $init, 'cloud-config.txt' ) or die "Could not ship the cloud-init config to $domain";
 
-    foreach my $module (qw{cc_package_update_upgrade_install cc_users_groups}) {
+    foreach my $module (qw{cc_bootcmd cc_write_files cc_apt_configure cc_package_update_upgrade_install cc_users_groups}) {
         print $guest->capture_cmd("sudo cloud-init single --name $module -f cloud-config.txt") . "\n";
     }
 

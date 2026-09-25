@@ -43,11 +43,9 @@ rather than this.  L<Provisioner::Recipe::git> does that, and this recipe
 requires it for the host keys of C<github.com>.  A bot asks for both, and gets
 a key from the one that owns keys.
 
-The CLI comes from GitHub's own archive at C<cli.github.com>, and that half is
-the global fragment: one guest has one C<gh>, however many domains it holds.
-Ubuntu's C<gh> is not used.  Noble ships 2.45.0, which predates the removal of
-the Projects-classic GraphQL field, so C<gh pr edit> there fails with a
-deprecation notice about C<projectCards> and edits nothing.
+The CLI comes from GitHub's own archive at C<cli.github.com>, which
+L<Provisioner::Recipe::Ubuntu::github> names, and cloud-init installs it at
+first boot.  Ubuntu's C<gh> is not used, and that module says why.
 
 The per-domain fragment is about one account, C<account>:
 
@@ -65,9 +63,9 @@ CLI and no login, which is what a machine whose operator logs in by hand wants.
 
 =head2 WHAT RUNS WHEN
 
-The CLI is installed by the global fragment, which the makefile runs before
-every per-domain target.  So a recipe that requires this one can run C<gh> in
-its own fragment whatever order the depsolver put them in.
+The CLI is installed at first boot, before the makefile runs.  So a recipe that
+requires this one can run C<gh> in its own fragment whatever order the
+depsolver put them in.
 
 The login is per domain, and a dependency's target runs B<after> the recipe
 that required it.  A recipe that needs the login state rather than the binary
