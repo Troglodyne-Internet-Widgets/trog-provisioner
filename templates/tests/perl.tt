@@ -40,10 +40,10 @@ SKIP: {
 # The tools that this perl always gets, which scripts/cpan_install uses.  Each
 # one must run, because a build that half-worked leaves the file in place.
 SKIP: {
-    skip 'nothing built under /opt/perl5', 3 unless $built && -x $built;
+    skip 'nothing built under /opt/perl5', 4 unless $built && -x $built;
 
     my $bin = $built =~ s{/perl\z}{}r;
-    foreach my $tool (qw{cpanm dzil}) {
+    foreach my $tool (qw{cpanm cpm dzil}) {
         my $said = `$bin/$tool --version 2>&1`;
         ok($? == 0 && length $said, "$bin/$tool runs, as the perl recipe installs it")
             or diag "$tool said: $said";

@@ -29,7 +29,8 @@ L<Provisioner::Recipe::perl> documents them.
 
 =over 4
 
-=item * C<install> installs anything that cpanm takes in place of a module name.
+=item * C<install> installs anything that cpm or cpanm takes in place of a
+module name.  See L</Which installer>.
 
 =item * C<installdeps> installs what the distribution in C<DIR> says it needs.
 
@@ -59,27 +60,43 @@ builds beside the first, because the path of a perl contains its version.
 Without that link the script takes the newest perl under F</opt/perl5>, which
 is what it always did, and is the same perl on a guest that has only one.
 
-F<build_latest_perl.sh> installs cpanm, Module::Build and Dist::Zilla into the
-perl it built before anything calls this script.
+F<build_latest_perl.sh> installs cpanm into the perl it built, and then calls
+this script for Module::Build and Dist::Zilla.
 
 The system perl runs this script, so the script is written for it.
+
+=head3 Which installer
+
+cpm installs everything it can, because it builds several distributions at
+once.  cpanm builds one at a time, and a perl with the dependencies of a web
+application under it spent most of its build waiting on cpanm.
+
+cpm cannot resolve a spec that excludes the newest release of a module, such as
+C<< Moo~< 3 >>.  So cpanm installs each spec that can exclude it:
+C<Module@version>, which is what C<pin> asks for, or a requirement that
+contains C<==>, C<!=> or C<< < >>.  Those go first, in one run of cpanm, and
+then cpm installs the rest.  If cpm fails, cpanm tries the same install again.
+See C<cpm_then_cpanm>.  A pin such as the one for C<Sys::Virt> then comes
+before anything that resolves dependencies, as it did when cpanm installed
+everything.
+
+The first time the script needs cpm, it installs C<App::cpm> with cpanm.  So
+this script stays the one thing on a guest that gets modules from CPAN.
 
 =head3 Which release
 
 The script installs the release that the F<02packages.details.txt.gz> of the
-mirror names.  It runs cpanm with C<--mirror-only>, so cpanm looks up a module
-in the index of the same mirror it downloads from.  Without that flag, cpanm
-asks cpanmetadb, which is a separate service.  cpanmetadb can name a release
-that the mirror no longer has.  cpanm then reports that download as C<OK> and
-fails when it unpacks the empty file.  The index of a mirror can be out of
-date, but it does not name a file that the mirror does not have.
+mirror names.  cpm resolves through that index alone, with C<--resolver
+02packages> and C<--no-default-resolvers>, and cpanm through it with
+C<--mirror-only>.  Otherwise both ask cpanmetadb, which is a separate service.
+cpanmetadb can name a release that the mirror no longer has.  cpanm then
+reports that download as C<OK> and fails when it unpacks the empty file.  The
+index of a mirror can be out of date, but it does not name a file that the
+mirror does not have.
 
-One kind of request is an exception.  The index names only the newest release
-of each module.  Some specs exclude the newest release: C<Module@version>, which
-is what C<pin> asks for, or a requirement that contains C<==>, C<!=> or
-C<< < >>.  cpanm resolves such a spec through MetaCPAN, without
-C<--mirror-only>.  All the other specs on that cpanm command line then resolve
-the same way.
+The specs that go to cpanm are the exception.  The index names only the newest
+release of each module, so cpanm resolves those through MetaCPAN, without
+C<--mirror-only>.
 
 =head3 Whose checkout
 
@@ -96,6 +113,9 @@ C<GIT_CONFIG_COUNT> and its pairs.  It does not write to any F<.gitconfig>.
 # tree.
 our $PERL_ROOT = '/opt/perl5';
 
+# The mirror whose index says which release to install.
+our $MIRROR = 'https://www.cpan.org';
+
 my $USAGE = "usage: cpan_install [--notest] install|installdeps|dzil|pin|test ARGS\n";
 
 sub main {
@@ -108,15 +128,22 @@ sub main {
     my ( $verb, @rest ) = @args;
     return usage() unless defined $verb;
 
-    my $bin   = perl_bin();
-    my @cpanm = ( "$bin/cpanm", ( $opt{notest} ? '--notest' : () ) );
+    my $bin = perl_bin();
 
     my $rc = 0;
     if ( $verb eq 'install' && @rest ) {
-        $rc = run_in( undef, @cpanm, mirror_only(@rest), @rest );
+        $rc = install_specs( $bin, \%opt, @rest );
     }
     elsif ( $verb eq 'installdeps' && @rest == 1 ) {
-        $rc = run_in( undef, @cpanm, mirror_only(), '--installdeps', $rest[0] );
+
+        # With no module named, cpm reads what the distribution in the
+        # directory needs.  Its default also reads the develop phase, which
+        # cpanm --installdeps leaves out, and which only an author needs.
+        $rc = ensure_cpm($bin) || cpm_then_cpanm(
+            $rest[0],
+            [ cpm( $bin, \%opt ),   '--top-level-phase', 'configure,build,test,runtime' ],
+            [ cpanm( $bin, \%opt ), qw{--mirror-only --installdeps .} ],
+        );
     }
     elsif ( $verb eq 'dzil' && @rest == 1 ) {
         my ($dir) = @rest;
@@ -131,7 +158,7 @@ sub main {
             }
             my @missing = grep { $_ } map { s/\s+\z//r } @said;
             next unless @missing;
-            $rc = run_in( undef, @cpanm, mirror_only(@missing), @missing ) and last;
+            $rc = install_specs( $bin, \%opt, @missing ) and last;
         }
     }
     elsif ( $verb eq 'pin' && @rest == 2 ) {
@@ -142,8 +169,7 @@ sub main {
             print {*STDERR} "cpan_install: pkg-config knows no $package, so there is no $module version to pin\n";
             return 1;
         }
-        my $spec = "$module\@$version";
-        $rc = run_in( undef, @cpanm, mirror_only($spec), $spec );
+        $rc = install_specs( $bin, \%opt, "$module\@$version" );
     }
     elsif ( $verb eq 'test' && @rest == 1 ) {
         $rc = run_in( $rest[0], "$bin/prove", '-lvm', 't' );
@@ -154,16 +180,118 @@ sub main {
     return $rc;
 }
 
+=head2 $rc = install_specs($bin, \%opt, @specs)
+
+Installs C<@specs> into the perl in C<$bin>: with cpanm, each spec that can
+exclude the newest release, and then with cpm, the others.  Returns the exit
+code of the first install that fails, or 0.  See L</Which installer>.
+
+=cut
+
+sub install_specs {
+    my ( $bin, $opt, @specs ) = @_;
+
+    my @older  = grep { excludes_newest($_) } @specs;
+    my @newest = grep { !excludes_newest($_) } @specs;
+
+    if (@older) {
+        my $rc = run_in( undef, cpanm( $bin, $opt ), @older );
+        return $rc if $rc;
+    }
+    return 0 if !@newest;
+    return ensure_cpm($bin) || cpm_then_cpanm( undef, [ cpm( $bin, $opt ), @newest ], [ cpanm( $bin, $opt ), '--mirror-only', @newest ] );
+}
+
+=head2 $rc = cpm_then_cpanm($dir, \@cpm, \@cpanm)
+
+Runs C<@cpm> in C<$dir>, and C<@cpanm> there only if cpm fails.  Returns the
+exit code of the last command that ran.
+
+cpm builds every distribution before it installs any.  While it builds, a
+distribution can load only what the distributions it depends on say they need.
+Some distributions load a module that they do not declare, for example
+C<Encode::Base2N> needs C<Alien::cmake3> through C<XS::libpanda>, and cpm fails
+there.  cpanm installs each distribution as soon as it builds it, so the
+undeclared module is installed by then.  C<--final-install all> has already
+installed everything that cpm built, so cpanm has only the rest to do.
+
+=cut
+
+sub cpm_then_cpanm {
+    my ( $dir, $cpm, $cpanm ) = @_;
+    my $rc = run_in( $dir, @$cpm ) or return 0;
+    print "cpan_install: cpm exited $rc, so cpanm tries the same, installing each distribution as it builds it\n";
+    return run_in( $dir, @$cpanm );
+}
+
+=head2 @cmd = cpanm($bin, \%opt)
+
+The cpanm of the perl in C<$bin>, without the specs, with C<--notest> when
+C<$opt{notest}>.
+
+=cut
+
+sub cpanm {
+    my ( $bin, $opt ) = @_;
+    return ( "$bin/cpanm", ( $opt->{notest} ? '--notest' : () ) );
+}
+
+=head2 $bool = excludes_newest($spec)
+
+Whether C<$spec> can ask for a release other than the newest: a C<Module@version>,
+or a requirement with C<==>, C<!=> or C<< < >> in it.  The index of a mirror
+names only the newest release.
+
+=cut
+
+sub excludes_newest {
+    my ($spec) = @_;
+    return $spec =~ m{\@|~.*(?:<|!=|==)}aa ? 1 : 0;
+}
+
 =head2 @flags = mirror_only(@specs)
 
 Returns C<--mirror-only>, or an empty list if one of C<@specs> excludes the
-newest release.  See L</Which release>.
+newest release.  cpanm takes the flags, where F<bin/new_config> writes the line
+of the makefile that installs C<testdeps> with the cpanm of the system.  See
+L</Which release>.
 
 =cut
 
 sub mirror_only {
     my @specs = @_;
-    return ( grep { m{\@|~.*(?:<|!=|==)}aa } @specs ) ? () : ('--mirror-only');
+    return ( grep { excludes_newest($_) } @specs ) ? () : ('--mirror-only');
+}
+
+=head2 @cmd = cpm($bin, \%opt)
+
+The cpm command that installs into the perl in C<$bin>, without the specs.
+Tests run unless C<$opt{notest}>, because cpm skips them unless asked.  The log
+of a build that fails goes to the output, where the setup log keeps it.  cpm
+installs every distribution that it built, not only the runtime dependencies of
+what was asked for, so that a fallback to cpanm finds them installed.
+
+=cut
+
+sub cpm {
+    my ( $bin, $opt ) = @_;
+    return (
+        "$bin/perl",          "$bin/cpm", qw{install --global --final-install all --no-color --progress plain --show-build-log-on-failure --resolver},
+        "02packages,$MIRROR", '--no-default-resolvers', ( $opt->{notest} ? () : '--test' ),
+    );
+}
+
+=head2 $rc = ensure_cpm($bin)
+
+Installs C<App::cpm> into the perl in C<$bin> with cpanm, unless that perl has
+cpm already.  Returns the exit code of cpanm, or 0.
+
+=cut
+
+sub ensure_cpm {
+    my ($bin) = @_;
+    return 0 if -e "$bin/cpm";
+    return run_in( undef, "$bin/cpanm", qw{--notest --mirror-only App::cpm} );
 }
 
 sub usage {

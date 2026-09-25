@@ -167,8 +167,8 @@ order is important:
 =over 4
 
 =item * B<Sys::Virt, pinned>, before anything resolves dependencies.  From a
-dependency list, cpanm takes the newest release.  Its Makefile.PL wants a
-libvirt-dev that is much newer than this guest has.  cpanm reports this forty
+dependency list, cpan_install takes the newest release.  Its Makefile.PL wants
+a libvirt-dev that is much newer than this guest has.  The build reports this forty
 minutes into the build, in a message about pkg-config, not about the order.
 The pin is to C<libvirt_version> if you set one.  If not, it is to the libvirt
 version that pkg-config reports on the guest when the step runs.  That is
@@ -189,8 +189,8 @@ recipe validates what it gets.
 sub required_recipes {
     my ($self) = @_;
 
-    # The perl recipe builds /opt/perl5/$version with cpanm, Module::Build and
-    # Dist::Zilla.  Everything else here is CPAN or configuration.
+    # The perl recipe builds /opt/perl5/$version with cpanm, cpm, Module::Build
+    # and Dist::Zilla.  Everything else here is CPAN or configuration.
     return (
         perl => sub {
             my %opts = ( Provisioner::Cookbook->defaults('trogrunner'), @_ );
