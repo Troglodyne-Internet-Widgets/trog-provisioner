@@ -273,7 +273,8 @@ subtest 'two entries of one name in one group are refused by name' => sub {
     my $file = tempdir( CLEANUP => 1 ) . '/secrets.kdbx';
     Trog::Secrets->create( $file, 'pw', 'secret:koan/a-key/password' => 'first' );
 
-    # By hand, because nothing in this module will write the second one.
+    # Through File::KeePass::KDBX, because nothing in this module will write the
+    # second one.
     my $kdbx = File::KeePass::KDBX->load_db( $file, 'pw' );
     $kdbx->unlock;
     my ($group) = grep { $_->{title} eq 'koan' } @{ $kdbx->groups };

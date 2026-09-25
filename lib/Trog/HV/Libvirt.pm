@@ -1332,8 +1332,8 @@ sub pool_fstype {
     my ($self) = @_;
     return $self->{pool_fstype} if defined $self->{pool_fstype};
 
-    # Quoted by hand, because capture_cmd takes a shell string and the pool path
-    # can come from a configuration file.
+    # capture_cmd takes a shell string, and the pool path can come from a
+    # configuration file.
     ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
 
     my $type = $self->capture_cmd("stat -f -c %T '$quoted' 2>/dev/null") // '';
@@ -2291,8 +2291,8 @@ does not exist or C<df> does not answer.
 sub pool_space {
     my ( $self, $fstype ) = @_;
 
-    # Quoted by hand, because capture_cmd takes a shell string and the pool path
-    # can come from a configuration file.
+    # capture_cmd takes a shell string, and the pool path can come from a
+    # configuration file.
     ( my $quoted = $self->pool_path ) =~ s/'/'\\''/g;
 
     my @steps = (
