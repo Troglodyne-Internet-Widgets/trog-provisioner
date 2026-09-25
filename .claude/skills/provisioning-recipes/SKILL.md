@@ -249,6 +249,10 @@ the answer is in there. "not there" means the file genuinely is not there: the
 collector proves the connection before it reads anything, and dies rather than
 reporting a guest it could not reach as a guest with no logs.
 
+Each line of `post_install.sh` is the slot of the target that queued it, a tab,
+and the task. `post_install` runs the tasks in slot order, which is the serial
+order of the targets, because under `make -j` they finish in any order.
+
 `post_install.sh` is the one to read backwards. It is absent on a build that got
 through its deferred work, and present when something stopped before that —
 holding exactly what did not happen.

@@ -384,6 +384,39 @@ sub placement_lines {
     return @lines ? "\n" . join( "\n", @lines ) . "\n" : q{};
 }
 
+=head2 %order_only = order_only(\@modules, \%targets_of, \%required_by, \@ordered)
+
+The order-only prerequisites of each recipe target in C<@ordered>, as a hash of
+target to an array reference of the targets that must finish before it.  A
+recipe's global target comes before its per-domain one.  A dependency comes
+after each recipe that required it, as C<resolve_dependencies> in
+L<Provisioner::Cookbook> orders them.  C<%required_by> is what that method
+returns third, and C<%targets_of> holds each recipe's targets in the order they
+run.
+
+A target outside C<@ordered>, such as that of C<data> or C<ufw>, has its place
+set in F<templates/makefile.tt>, and is left out here.  Under C<make -j> these
+edges are the order.  Without them only the position in C<all> was.
+
+=cut
+
+sub order_only {
+    my ( $modules, $targets_of, $required_by, $ordered ) = @_;
+
+    my %in_order = map { $_ => 1 } @$ordered;
+    my %edges;
+    foreach my $module (@$modules) {
+        my @mine = grep { $in_order{$_} } @{ $targets_of->{$module} // [] };
+        next if !@mine;
+
+        push( @{ $edges{ $mine[1] } }, $mine[0] ) if @mine == 2;
+
+        my @after = grep { $in_order{$_} } map { @{ $targets_of->{$_} // [] } } @{ $required_by->{$module} // [] };
+        push( @{ $edges{ $mine[0] } }, @after ) if @after;
+    }
+    return %edges;
+}
+
 =head2 ($ips, $port, $user) = transfer_to($hv, $this_machine, $global_config, $fqdn, @towards)
 
 Returns where a guest of C<$hv> fetches its payload from: every address of this
@@ -709,10 +742,13 @@ sub handle_domain {
     my @conflicts;
     my @modules_ordered;
 
+    # The targets of each recipe, in the order they run: global, then per domain.
+    my %targets_of;
+
     my %builders;
 
     # In Provisioner::Cookbook, so that bin/new_guest gets the same answer.
-    my ( $solved, $built ) = Provisioner::Cookbook->resolve_dependencies(
+    my ( $solved, $built, $required_by ) = Provisioner::Cookbook->resolve_dependencies(
         modules       => \@modules,
         domain_conf   => $rconf->{$domain},
         global_config => $global_config,
@@ -782,7 +818,8 @@ sub handle_domain {
                 ),
                 @secret_values
             );
-            push( @modules_ordered, "/etc/provisioner/state/global_$module" );
+            push( @modules_ordered,          "/etc/provisioner/state/global_$module" );
+            push( @{ $targets_of{$module} }, "/etc/provisioner/state/global_$module" );
         }
         if ( $builder->has_template() ) {
             $fragments{$module} = Provisioner::Recipe->quiet_secrets(
@@ -794,7 +831,8 @@ sub handle_domain {
                 ),
                 @secret_values
             );
-            push( @modules_ordered, "/etc/provisioner/state/$fqdn/$module" );
+            push( @modules_ordered,          "/etc/provisioner/state/$fqdn/$module" );
+            push( @{ $targets_of{$module} }, "/etc/provisioner/state/$fqdn/$module" );
         }
         push( @pkgs,      ( $builder->deps(%$pconf) ) );
         push( @conflicts, ( $builder->dep_conflicts(%$pconf) ) );
@@ -906,6 +944,8 @@ sub handle_domain {
     my $ufw_fragment = delete $fragments{ufw};
     @modules_ordered = grep { $_ ne "/etc/provisioner/state/$fqdn/ufw" } @modules_ordered;
 
+    my %order_only = order_only( \@modules, \%targets_of, $required_by, \@modules_ordered );
+
     # The hosts that the guest downloads from through the fetch cache, and the
     # certificate of the authority that the guest trusts meanwhile.  See
     # Provisioner::Recipe/fetch_hosts and scripts/fetch_via_cache.
@@ -933,6 +973,7 @@ sub handle_domain {
             fragments        => \%fragments,
             global_fragments => \%global_fragments,
             modules_ordered  => \@modules_ordered,
+            order_only       => \%order_only,
 
             # The ssl target puts each of these names in its certificate.
             full_aliases     => $alias_conf->{$fqdn} // [],

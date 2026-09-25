@@ -79,6 +79,51 @@ sub position {
     return $at;
 }
 
+# Under make -j, the prerequisites of all no longer run in their order.  The
+# order-only prerequisites are what hold it, so each target must name what has
+# to finish before it, and none may contradict the order of all.
+subtest 'the order of all is stated as edges, so make -j keeps it' => sub {
+    my $G  = '/etc/provisioner/state';
+    my $mf = makefile(
+        modules_ordered  => [ "$G/global_nginx", "$STATE/tcms", "$STATE/perl" ],
+        order_only       => { "$STATE/perl" => ["$STATE/tcms"] },
+        fragments        => { tcms          => "echo tcms\n", perl => "echo perl\n" },
+        global_fragments => { nginx         => "echo nginx\n" },
+        ufw_fragment     => "echo ufw\n",
+        fetch_hosts      => ['cpan.test.test'],
+        cache_ip         => '192.0.2.1',
+    );
+
+    my %before;
+    while ( $mf =~ m/^(\S+):[ ][|]((?:[ ]\S+)+)$/mg ) {
+        $before{$1} = [ split q{ }, $2 ];
+    }
+    my ($all) = $mf =~ m/^all:([^\n]*)$/m;
+    my @all   = split q{ }, $all;
+
+    ok( !exists $before{"$STATE/state"}, 'the first target waits for nothing' );
+    is_deeply( $before{"$STATE/sysctl"},          ["$STATE/service_user"],                                                       'each global target waits for the one before it' );
+    is_deeply( $before{"$STATE/fetch_via_cache"}, ["$STATE/testdeps"],                                                           'the cache after the last of them' );
+    is_deeply( $before{"$STATE/tcms"},            ["$STATE/fetch_via_cache"],                                                    'every recipe after the cache' );
+    is_deeply( $before{"$STATE/perl"},            [ "$STATE/fetch_via_cache", "$STATE/tcms" ],                                   'and after the recipes that required it' );
+    is_deeply( $before{"$STATE/ufw"},             [ "$STATE/fetch_via_cache", "$G/global_nginx", "$STATE/tcms", "$STATE/perl" ], 'and ufw after every recipe' );
+
+    is( scalar( grep { !exists $before{$_} } @all ), 1, 'every target of all but the first has its order stated' );
+    foreach my $target ( sort keys %before ) {
+        foreach my $earlier ( @{ $before{$target} } ) {
+            cmp_ok( position( \@all, $earlier ), '<', position( \@all, $target ), "$earlier comes before $target in all as well" );
+        }
+    }
+
+    my $plain = makefile();
+
+    # apt-get update fails at once on the lock of another apt, so make -j runs
+    # every apt through scripts/serial_apt, first on its PATH.
+    like( $plain, qr{^export[ ]PATH[ ]:=[ ]/root/bin/serial-apt:\$\(PATH\)$}m, 'the serial apt comes first on the PATH' );
+    is_deeply( [ $plain =~ m{^\tln[ ]-sf[ ]/root/bin/serial_apt[ ](\S+)$}mg ], [qw{/root/bin/serial-apt/apt-get /root/bin/serial-apt/apt}], 'as apt-get and as apt' );
+    is_deeply( [ $plain =~ m{^(\S+/perl):[ ][|][ ](\S+)$}m ],                  [ "$STATE/perl", "$STATE/testdeps" ],                        'without a cache, recipes wait for the last global target' );
+};
+
 subtest 'with hosts to fetch through a cache, it points them there and gives them back' => sub {
     my $mf = makefile( cache_ip => '192.0.2.9', fetch_hosts => [qw{codeload.github.com www.cpan.org}] );
 

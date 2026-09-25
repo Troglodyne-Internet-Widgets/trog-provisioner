@@ -1,6 +1,10 @@
 # Recipe lines run under bash and not under /bin/sh, the default of make.
 SHELL := /bin/bash
 
+# apt-get and apt, one at a time, because two targets can run them at once under
+# make -j.  The scripts target makes this directory.  scripts/serial_apt says why.
+export PATH := [% script_dir %]/serial-apt:$(PATH)
+
 [% FOR var IN vars.keys().sort() %]
 [% var %] := [% vars.$var | mark_raw %]
 [% END -%]
@@ -40,6 +44,41 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 	$(MAKE) --no-print-directory [% state_dir %]/test
 	test ! -f /root/.postrun_failed || { echo "post_install: some deferred work failed; see above" >&2; exit 1; }
 	touch /root/install_complete
+
+[%# The order, as order-only prerequisites.  The prerequisites of all run in
+    their order only when make runs one target at a time.  These say the same
+    order under make -j: each global target after the one before it, every
+    recipe after the global targets, each dependency after the recipes that
+    required it, as bin/new_config works out, and ufw after every recipe.
+    Order-only, because a target that ran must not make the next one run again.
+
+    Each target also exports its place in that order as POSTRUN_SLOT, and
+    scripts/queue_postrun_task tags each task it queues with it.  So the
+    deferred work runs in this order too, whichever target finished first. -%]
+[% SET anchor = '' -%]
+[% SET slot = 0 -%]
+[% FOR target IN global_targets -%]
+[% SET slot = slot + 1 -%]
+[% state_dir %]/[% target %]: export POSTRUN_SLOT := [% slot %]
+[% IF anchor %][% state_dir %]/[% target %]: | [% state_dir %]/[% anchor %]
+[% END %][% SET anchor = target -%]
+[% END -%]
+[% IF fetch_hosts -%]
+[% SET slot = slot + 1 -%]
+[% state_dir %]/fetch_via_cache: export POSTRUN_SLOT := [% slot %]
+[% state_dir %]/fetch_via_cache: | [% state_dir %]/[% anchor %]
+[% SET anchor = 'fetch_via_cache' -%]
+[% END -%]
+[% FOR module IN modules_ordered -%]
+[% SET slot = slot + 1 -%]
+[% module %]: export POSTRUN_SLOT := [% slot %]
+[% module %]: | [% state_dir %]/[% anchor %][% FOR before IN order_only.$module %] [% before %][% END %]
+[% END -%]
+[% IF ufw_fragment -%]
+[% SET slot = slot + 1 -%]
+[% state_dir %]/ufw: export POSTRUN_SLOT := [% slot %]
+[% state_dir %]/ufw: | [% state_dir %]/[% anchor %][% FOR module IN modules_ordered %] [% module %][% END %]
+[% END -%]
 
 [% state_dir %]/state:
 	mkdir -p [% state_dir %]
@@ -126,6 +165,9 @@ all:[% FOR target IN global_targets %] [% state_dir %]/[% target %][% END %][% I
 [% state_dir %]/scripts:
 	mkdir -p [% script_dir %]
 	mv scripts/* [% script_dir %]/
+	mkdir -p [% script_dir %]/serial-apt
+	ln -sf [% script_dir %]/serial_apt [% script_dir %]/serial-apt/apt-get
+	ln -sf [% script_dir %]/serial_apt [% script_dir %]/serial-apt/apt
 	touch $@
 
 # A self-signed certificate, only so that a service with TLS can start before

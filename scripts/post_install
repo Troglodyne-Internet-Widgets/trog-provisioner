@@ -8,6 +8,13 @@ QUEUE=${POST_INSTALL_QUEUE:-/root/post_install.sh}
 
 [ -s "$QUEUE" ] || exit 0
 
+# Each line is the slot of the target that queued it, a tab, and the task.
+# Run the tasks by slot, and in the order they were queued within one slot.  A
+# line with no slot runs after all of them.  queue_postrun_task says why.
+ORDERED=$(mktemp)
+awk -F'\t' '{ if ($0 ~ /^[0-9]+\t/) { slot = $1; sub(/^[0-9]+\t/, "") } else { slot = 999999 } printf "%d\t%d\t%s\n", slot, NR, $0 }' "$QUEUE" \
+    | sort -t "$(printf '\t')" -k1,1n -k2,2n | cut -f3- > "$ORDERED"
+
 rc=0
 while IFS= read -r task; do
     [ -n "$task" ] || continue
@@ -19,15 +26,13 @@ while IFS= read -r task; do
         echo "postrun FAILED: $task" >&2
         rc=1
     fi
-done < "$QUEUE"
+done < "$ORDERED"
+rm -f -- "$ORDERED"
 
 [ "$rc" -eq 0 ] || echo "postrun: some deferred work failed; see above" >&2
 
 # Move the queue aside, because queue_postrun_task appends to it.  If the queue
 # stays, the next makefile run does these tasks again on top of its own.
-#
-# Do this after the loop, never before.  The loop reads the queue through
-# `done < "$QUEUE"`, and that descriptor stays open across the rename.
 #
 # Do this whatever the tasks did.  If the queue stays after a failure, the next
 # run replays all of it and does not retry only the failed part.  The failed

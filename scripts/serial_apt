@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# apt-get and apt, one at a time, for the length of a build under make -j.
+#
+# The makefile puts a directory of links to this script first on its PATH, one
+# named apt-get and one named apt, so every apt that a fragment or a script runs
+# comes here.  This runs the real one under a lock of its own.  apt waits for
+# the lock of dpkg, as DPkg::Lock::Timeout in the apt configuration of the
+# guest tells it to, but apt-get update fails at once on the lock of
+# /var/lib/apt/lists while another apt holds it: "E: Could not get lock
+# /var/lib/apt/lists/lock".
+#
+# The wait is long, because an apt install can take minutes, and bounded, so
+# that an apt which calls apt again under its own lock fails rather than hangs.
+exec flock -w 1800 "${SERIAL_APT_LOCK:-/run/trog-provisioner-apt.lock}" "/usr/bin/$(basename "$0")" "$@"

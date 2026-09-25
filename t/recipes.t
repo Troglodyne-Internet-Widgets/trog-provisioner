@@ -1584,7 +1584,7 @@ subtest 'the build payload is not somewhere tmpfs will cover it over' => sub {
     # `make | tee` exits with tee's status, which is always 0, so the guest
     # records make's own and bin/provision reads that rather than guessing.
     like( $setup, qr{^rm[ ]-f[ ]/var/log/vm[.]example[.]test[.]setup[.]status$}m, 'a result from a previous build is cleared first' );
-    my $records = '{ make 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
+    my $records = '{ make -j"$(nproc)" -Otarget 2>&1; echo $? > /var/log/vm.example.test.setup.status; } | tee';
     like( $setup, qr/\Q$records\E/, "and make's own exit code is what gets recorded" );
 
     # at(1) runs this script, and at(1) runs jobs under /bin/sh -- dash on

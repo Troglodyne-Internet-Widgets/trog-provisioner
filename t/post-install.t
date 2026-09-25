@@ -71,6 +71,36 @@ subtest 'a task that reads stdin does not eat the queue' => sub {
 # guest replayed every earlier run's deferred work.  Moving it aside is what
 # ends that, and it has to happen after the loop: the loop reads the file it is
 # renaming.
+# Under make -j, targets finish in any order, so queue_postrun_task tags each
+# task with the slot of its target, and post_install runs them by slot.
+subtest 'the queue runs by slot, and in queued order within one' => sub {
+    my $r = run_queue( "30\techo c >> %RAN%", "10\techo a >> %RAN%", "30\techo d >> %RAN%", 'echo e >> %RAN%', "20\techo b >> %RAN%" );
+    is_deeply( $r->{ran}, [qw{a b c d e}], 'by slot, ties in the order queued, and a task with no slot last' );
+};
+
+subtest 'queue_postrun_task tags a task with the slot of its target' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    local $ENV{POST_INSTALL_QUEUE} = "$dir/queue";
+    my $queue = "$FindBin::Bin/../scripts/queue_postrun_task";
+
+    {
+        local $ENV{POSTRUN_SLOT} = 7;
+        IPC::Run3::run3( [ $queue, qw{systemctl restart nginx} ], \undef, \undef, \undef );
+        is( $? >> 8, 0, 'queue_postrun_task ran clean' );
+    }
+    delete local $ENV{POSTRUN_SLOT};
+    IPC::Run3::run3( [ $queue, 'echo by hand' ], \undef, \undef, \undef );
+
+    # Many writers at once, as make -j gives.  Each line must come out whole.
+    my $writers = 'for n in $(seq 1 20); do POSTRUN_SLOT=$((100 + n)) "$0" "echo writer $n $1" & done; wait';
+    IPC::Run3::run3( [ 'bash', '-c', $writers, $queue, 'x' x 200 ], \undef, \undef, \undef );
+
+    my @lines = split m/\n/, File::Slurper::read_text("$dir/queue");
+    is( $lines[0],                                                             "7\tsystemctl restart nginx", 'the task after the slot the makefile exported, one line, words kept together' );
+    is( $lines[1],                                                             "999999\techo by hand",       'and a task queued outside the makefile after every slot' );
+    is( scalar( grep { m/\A1\d{2}\techo[ ]writer[ ]\d+[ ]x{200}\z/ } @lines ), 20,                           'twenty writers at once leave twenty whole lines' );
+};
+
 subtest 'the queue is moved aside once it has run' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     my $ran = "$dir/ran";

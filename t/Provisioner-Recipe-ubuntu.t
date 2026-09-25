@@ -263,8 +263,13 @@ APT {
         Fix-Broken "true";
     }
 }
+DPkg {
+    Lock {
+        Timeout "600";
+    }
+}
 CONF
-        'the apt configuration, which apt reads whitespace-insensitively'
+        'the apt configuration, which apt reads whitespace-insensitively, with the wait for the dpkg lock that make -j needs'
     );
 
     # With no mirror there is nothing to redirect apt at, so the whole apt key

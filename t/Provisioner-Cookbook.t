@@ -567,7 +567,7 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     $mock->redefine( load => sub { my ( undef, $name ) = @_; return "Provisioner::Recipe::$name" } );
 
     my %conf = ( t_requirer => {} );
-    my ( $modules, $builders ) = Provisioner::Cookbook->resolve_dependencies(
+    my ( $modules, $builders, $required_by ) = Provisioner::Cookbook->resolve_dependencies(
         modules     => ['t_requirer'],
         domain_conf => \%conf,
         distro      => 'ubuntu',
@@ -603,6 +603,16 @@ subtest 'resolve_dependencies closes the list over what its recipes require' => 
     cmp_ok( $at{t_dep},      '<', $at{t_deep}, 'and one reached through it comes after that' );
 
     is( scalar @$modules, scalar keys %at, 'and the list comes back deduplicated, so callers need not' );
+
+    # bin/new_config makes these the order-only edges of the makefile, which
+    # are the order under make -j.  Each must agree with the list, or make
+    # would be told two orders at once.
+    is_deeply( $required_by->{t_dep},  ['t_requirer'], 'what requires what comes back too' );
+    is_deeply( $required_by->{t_deep}, ['t_dep'],      'one level at a time' );
+    ok( !exists $required_by->{t_requirer}, 'and a recipe nothing required has no entry' );
+    foreach my $dep ( sort keys %$required_by ) {
+        cmp_ok( $at{$_}, '<', $at{$dep}, "$_ comes before $dep in the list as well" ) for @{ $required_by->{$dep} };
+    }
 };
 
 subtest 'the same configuration comes back in the same order every run' => sub {
